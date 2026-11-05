@@ -13,14 +13,15 @@
 //! folder moved away after its check refuses the walk (`Changed`). So does a root that is a
 //! junction now, and in a strict walk a child whose open met a reparse point (a plain walk skips
 //! it).
-//!
-//! Every walk records each `.git`, `.claude` and `.mcp.json` below its root by the file ID of
-//! the name itself, links included, for the set-aside (S15 `PR3b` round 2, N1).
 
+#[cfg(test)]
 use std::ffi::OsString;
 use std::io;
+#[cfg(test)]
 use std::os::windows::ffi::OsStringExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use windows::Win32::Security::{
     CreatePrivateObjectSecurityEx, DestroyPrivateObjectSecurity, GENERIC_MAPPING,
@@ -32,15 +33,14 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
 
-use super::object::{Child, Handle, Object, os_error, reparse_refused, words};
+use super::object::{Handle, Object, os_error, reparse_refused, words};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
     Write, bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label,
-    lacking, owner_bytes, owner_descriptor, protected_name, rebuild, without_broad,
-    without_inherited, writes,
+    lacking, owner_bytes, owner_descriptor, rebuild, without_broad, without_inherited, writes,
 };
-use crate::windows::writer::{ApplyFailure, Found, Reach, Walked};
+use crate::windows::writer::{ApplyFailure, Reach, Walked};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
@@ -50,12 +50,11 @@ const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
     GenericAll: FILE_ALL_ACCESS.0,
 };
 
-/// A folder the walk has checked and will list: its handle, its final path, its path in the
-/// form the root was given in, and its descriptor as its children inherit from it.
+/// A folder the walk has checked and will list: its handle, its final path, and its descriptor
+/// as its children inherit from it.
 struct Folder {
     object: Object,
     path: Vec<u16>,
-    given: PathBuf,
     descriptor: Vec<u8>,
 }
 
@@ -88,11 +87,9 @@ impl Mode<'_> {
 pub(super) type Refused = (ApplyFailure, Option<Vec<u16>>);
 
 /// The walk below `root` with `token`; see
-/// [`AclWriter::propagate`](super::AclWriter::propagate). Each protected name met below the
-/// root goes into `found` as it is met, so a walk that fails partway keeps what it found.
+/// [`AclWriter::propagate`](super::AclWriter::propagate).
 pub(super) fn walk(
     token: &Handle,
-    found: &mut Vec<Found>,
     root: &Path,
     reach: Reach,
     mode: Mode<'_>,
@@ -112,7 +109,6 @@ pub(super) fn walk(
     let strict = matches!(mode, Mode::Strict { .. });
     let mut stack = vec![Folder {
         path: top.normalized().map_err(io)?,
-        given: root.to_path_buf(),
         descriptor: top.security(READ_ALL).map_err(io)?,
         object: top,
     }];
@@ -124,12 +120,7 @@ pub(super) fn walk(
         let children = folder.object.children().map_err(io)?;
         race::point(race::Stage::Listed, &folder.path);
         for child in children {
-            let protected = protected_name(&child.name);
-            let given = || folder.given.join(OsString::from_wide(&child.name));
             if reach == Reach::FilesOnly && child.folder {
-                if protected {
-                    note_unwalked(&folder.object, &child, given(), found);
-                }
                 continue;
             }
             let mut path = folder.path.clone();
@@ -152,15 +143,6 @@ pub(super) fn walk(
                 }
                 Err(e) => return Err(io(e)),
             };
-            // Recorded whatever it is, before any skip (N1).
-            if protected {
-                let (volume, id) = object.file_id().map_err(io)?;
-                found.push(Found {
-                    path: given(),
-                    volume,
-                    id,
-                });
-            }
             if object.name_surrogate() {
                 seen.skipped += 1;
                 continue;
@@ -198,7 +180,6 @@ pub(super) fn walk(
                 stack.push(Folder {
                     object,
                     path,
-                    given: given(),
                     descriptor: settled.written.unwrap_or(current),
                 });
             }
@@ -211,21 +192,6 @@ pub(super) fn walk(
         "tier B walked a tree"
     );
     Ok(seen)
-}
-
-/// Records a protected folder a files-only walk lists but never walks (N1). It was never part
-/// of that walk, so one that can't be opened or read is left out rather than fail the walk.
-fn note_unwalked(folder: &Object, child: &Child, given: PathBuf, found: &mut Vec<Found>) {
-    let Ok(object) = race::open(folder, child) else {
-        return;
-    };
-    if let Ok((volume, id)) = object.file_id() {
-        found.push(Found {
-            path: given,
-            volume,
-            id,
-        });
-    }
 }
 
 /// What [`settle`] did to one child.

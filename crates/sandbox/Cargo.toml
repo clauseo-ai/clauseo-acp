@@ -76,13 +76,16 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # sandbox user record and the build number (System_Registry), the token's user and
 # ConvertSidToStringSidW, and IsWow64Process2's machine type (System_SystemInformation);
 # DeviceIoControl for the tests' junctions (System_IO). The walk (src/windows/acl/object.rs):
-# NtCreateFile relative to a folder's handle (Wdk_Foundation, Wdk_Storage_FileSystem).
+# NtCreateFile relative to a folder's handle (Wdk_Foundation, Wdk_Storage_FileSystem). The
+# set-aside's scan (src/windows/set_aside/ntfs/scan.rs): CompareStringOrdinal, to compare names as
+# NTFS does (Win32_Globalization).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",

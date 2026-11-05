@@ -52,8 +52,7 @@ impl Refused {
 }
 
 /// Runs `walk` until it passes, setting aside each child the lawyer can't open inside one of
-/// `own`; see the module's docs. A failed try's protected names ([`AclWriter::found`]) are
-/// dropped, so the caller drains them only after the walk passes.
+/// `own`; see the module's docs.
 pub(super) fn clearing(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
@@ -67,7 +66,6 @@ pub(super) fn clearing(
             Ok(walked) => return Ok(walked),
             Err(ApplyFailure::ChildShut) => {
                 let shut = acl.refused_at();
-                drop(acl.found());
                 let refuse = |at| Refused {
                     kind,
                     failure: ApplyFailure::ChildShut,
@@ -103,16 +101,13 @@ pub(super) fn clearing(
 /// The launch's own matter, state and notes trees: `plan`'s `Modify` grants of those kinds for
 /// its own matter. Where a child the lawyer can't open may be set aside.
 pub(super) fn own_roots(plan: &AdmittedPlan) -> Vec<PathBuf> {
-    roots_of(plan, &OWN_KINDS)
-}
-
-/// The launch's own trees of `kinds`, as [`own_roots`].
-pub(super) fn roots_of(plan: &AdmittedPlan, kinds: &[PathKind]) -> Vec<PathBuf> {
     plan.grants()
         .iter()
         .zip(plan.owners())
         .filter(|(g, owner)| {
-            **owner == plan.matter() && g.rights() == Rights::Modify && kinds.contains(&g.kind())
+            **owner == plan.matter()
+                && g.rights() == Rights::Modify
+                && OWN_KINDS.contains(&g.kind())
         })
         .map(|(g, _)| g.path().to_owned())
         .collect::<BTreeSet<_>>()

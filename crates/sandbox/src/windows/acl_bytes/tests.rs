@@ -338,26 +338,6 @@ fn a_descriptor_is_built_and_read_back() {
     assert!(Acl::parse(&dacl[..dacl.len() - 1]).is_err());
 }
 
-/// N1: the protected names are matched without ASCII case, and only whole.
-#[test]
-fn protected_names_match_without_ascii_case_and_only_whole() {
-    let wide = |text: &str| text.encode_utf16().collect::<Vec<u16>>();
-    for name in [".git", ".GIT", ".Claude", ".mcp.json", ".MCP.Json"] {
-        assert!(protected_name(&wide(name)), "{name}");
-    }
-    for name in [
-        "git",
-        ".gitignore",
-        ".git ",
-        "x.git",
-        ".claudé",
-        ".mcp.jsonx",
-        "",
-    ] {
-        assert!(!protected_name(&wide(name)), "{name}");
-    }
-}
-
 /// N13: a hand-back writes the cleaned DACL before the owner, so a failure between them leaves
 /// a file a pool user still owns, which the next hand-back takes again.
 #[test]

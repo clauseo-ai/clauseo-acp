@@ -1,44 +1,7 @@
-//! Round 2 of the S15 `PR3b` review on a real NTFS volume: the protected names a walk records
-//! (N1), files with more than one link (N2), a repair the handle has no right for (N3), and the
-//! credential link's write (N8).
+//! Round 2 of the S15 `PR3b` review on a real NTFS volume: files with more than one link (N2), a
+//! repair the handle has no right for (N3), and the credential link's write (N8).
 
 use super::*;
-
-/// The path and file ID of `path` itself, never followed if a link.
-fn found_at(path: PathBuf) -> Found {
-    let (volume, id) = Object::open(&path).unwrap().file_id().unwrap();
-    Found { path, volume, id }
-}
-
-/// N1: a walk records each `.git`, `.claude` and `.mcp.json` below its root, at any depth and
-/// whatever it is, by the file ID of the name itself (a junction not followed); a second walk
-/// adds no copies, and taking them clears them.
-#[test]
-fn a_walk_records_every_protected_name_below_its_root_by_its_own_file_id() {
-    let place = Place::new("acl-found");
-    place.dir.dir("matter/sub/.git");
-    place.dir.file("matter/deep/x/.mcp.json", "{}");
-    place.dir.file("out/settings.json", "{}");
-    let matter = place.at("matter");
-    junction(&matter.join(".claude"), &place.at("out")).unwrap();
-    let mut want = vec![
-        found_at(matter.join("sub").join(".git")),
-        found_at(matter.join("deep").join("x").join(".mcp.json")),
-        found_at(matter.join(".claude")),
-    ];
-    want.sort();
-    let out = found_at(place.at("out"));
-    assert!(
-        want.iter().all(|f| f.id != out.id),
-        "the junction was followed"
-    );
-
-    let mut acl = NtfsAcl::new().unwrap();
-    acl.propagate(&matter, Reach::Tree, None).unwrap();
-    acl.propagate(&matter, Reach::Tree, None).unwrap();
-    assert_eq!(acl.found(), want);
-    assert_eq!(acl.found(), []);
-}
 
 /// N2: a file the agent owns (this process's user stands in for it), open to `Everyone` by its
 /// own entry and with a second hard link, is repaired by a strict walk and handed back by

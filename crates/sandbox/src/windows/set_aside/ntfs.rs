@@ -19,6 +19,11 @@
 //!   the same way.
 //! - The folders below a pass's folder that mirror the item's folders in the matter
 //!   (`<pass>\sub\.git`) are made the same way as the pass's folder, one handle at a time.
+//! - The scan's folders are opened and listed, and its names probed, through handles too
+//!   (`scan.rs`).
+//! - Final paths are compared with the planned ones part by part as NTFS compares names
+//!   (`CompareStringOrdinal`, case ignored), so an item a probe opened under another case, or
+//!   under any name NTFS matches, is still the planned one.
 //!
 //! A rename across volumes fails with `ERROR_NOT_SAME_DEVICE`: [`SetAsideFailure::OtherVolume`].
 #![expect(
@@ -26,7 +31,7 @@
     reason = "FFI to open the set-aside's folders and items by handle and rename them"
 )]
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
@@ -56,7 +61,12 @@ use windows::core::{PCWSTR, PWSTR};
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
 use super::run::Volume;
+use super::scan::Listed;
 use crate::windows::folder::verbatim_wide;
+
+mod scan;
+
+pub(super) use scan::same_name;
 
 /// `ERROR_REPARSE_POINT_ENCOUNTERED`: an open told not to follow a reparse point met one.
 const REPARSE_ENCOUNTERED: i32 = 4395;
@@ -81,27 +91,30 @@ const PARENT: u32 = FILE_TRAVERSE.0 | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
 pub(super) struct Ntfs;
 
 impl Volume for Ntfs {
+    type Folder = Handle;
+
+    fn open_root(&self, root: &Path) -> io::Result<Handle> {
+        scan::open_root(root)
+    }
+
+    fn open_folder(&self, folder: &Handle, name: &OsStr) -> io::Result<Handle> {
+        scan::open_folder(folder, name)
+    }
+
+    fn list(&self, folder: &Handle) -> io::Result<Vec<Listed>> {
+        scan::list(folder)
+    }
+
+    fn probe(&self, folder: &Handle, name: &OsStr) -> io::Result<Option<FileId>> {
+        scan::probe(folder, name)
+    }
+
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
-        let handle = match open_path(path, FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0) {
-            Ok(handle) => handle,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let mut info = FILE_ID_INFO::default();
-        // SAFETY: the handle is open and `info` is valid and writable for its size.
-        unsafe {
-            GetFileInformationByHandleEx(
-                handle.0,
-                FileIdInfo,
-                (&raw mut info).cast(),
-                u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
-            )
+        match open_path(path, FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0) {
+            Ok(handle) => id_of(&handle).map(Some),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
         }
-        .map_err(|e| os_error(&e))?;
-        Ok(Some(FileId {
-            volume: info.VolumeSerialNumber,
-            id: info.FileId.Identifier,
-        }))
     }
 
     fn owner(&self, path: &Path) -> io::Result<String> {
@@ -161,6 +174,25 @@ impl Volume for Ntfs {
         let leaf: Vec<u16> = leaf.encode_wide().collect();
         rename(&item, &parent, &leaf).map_err(|e| failure(&e))
     }
+}
+
+/// The file ID of the handle's file, folder or link.
+fn id_of(handle: &Handle) -> io::Result<FileId> {
+    let mut info = FILE_ID_INFO::default();
+    // SAFETY: the handle is open and `info` is valid and writable for its size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle.0,
+            FileIdInfo,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok(FileId {
+        volume: info.VolumeSerialNumber,
+        id: info.FileId.Identifier,
+    })
 }
 
 /// Opens the folder `path` in the matter by its path as itself, for `access`; refused when it is
@@ -320,6 +352,11 @@ fn open_at(
 
 /// Whether the handle's file or folder is a reparse point.
 fn reparse(handle: &Handle) -> io::Result<bool> {
+    Ok(tag(handle)?.is_some())
+}
+
+/// The handle's reparse tag, when it is a reparse point.
+fn tag(handle: &Handle) -> io::Result<Option<u32>> {
     let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
     // SAFETY: the handle is open and `tag` is valid and writable for its size.
     unsafe {
@@ -331,11 +368,11 @@ fn reparse(handle: &Handle) -> io::Result<bool> {
         )
     }
     .map_err(|e| os_error(&e))?;
-    Ok(tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0)
+    Ok((tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0).then_some(tag.ReparseTag))
 }
 
 /// Whether the handle's final path (normalized, with its drive letter) is `planned`, compared
-/// part by part without ASCII case, `\\?\` set aside.
+/// part by part as NTFS compares names ([`same_name`]), `\\?\` set aside.
 fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
     let found = PathBuf::from(OsString::from_wide(&final_path(handle)?));
     let found = dunce::simplified(&found);
@@ -345,7 +382,8 @@ fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
     loop {
         match (a.next(), b.next()) {
             (None, None) => return Ok(true),
-            (Some(x), Some(y)) if x.as_os_str().eq_ignore_ascii_case(y.as_os_str()) => {}
+            (Some(x), Some(y))
+                if scan::same_wide(&wide_os(x.as_os_str()), &wide_os(y.as_os_str())) => {}
             _ => return Ok(false),
         }
     }
@@ -374,6 +412,11 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()
 }
 
+/// `text` as UTF-16, without a NUL.
+fn wide_os(text: &OsStr) -> Vec<u16> {
+    text.encode_wide().collect()
+}
+
 /// An item's open failing: [`SetAsideFailure::Gone`] when it isn't there, else as [`failure`].
 fn gone_or(error: &io::Error) -> SetAsideFailure {
     if error.kind() == io::ErrorKind::NotFound {
@@ -399,7 +442,7 @@ fn failure(error: &io::Error) -> SetAsideFailure {
 }
 
 /// A handle, closed on drop.
-struct Handle(HANDLE);
+pub(super) struct Handle(HANDLE);
 
 impl Drop for Handle {
     fn drop(&mut self) {

@@ -6,17 +6,19 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::files::Place;
-use super::run::{self, Refused, Seen, Volume};
+use super::run::{self, Refused, Volume};
 use super::time::{rfc3339, timestamp};
-use super::{Entry, Reason, SetAsideFailure};
-use crate::windows::Found;
+use super::{Checked, Entry, Reason, SetAsideFailure};
 use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
 
 mod crash;
+mod links;
 mod nested;
 #[cfg(unix)]
 mod posix;
+#[cfg(unix)]
+mod scans;
 mod sessions;
 
 #[cfg(windows)]
@@ -47,56 +49,66 @@ fn world(test: &str) -> (World, PathBuf, PathBuf) {
     (w, root, data)
 }
 
-/// Session `session`'s launch through `volume`, with what the walk `found`.
+/// What moved, from a pass whose scan must have been complete.
+fn complete(checked: Checked) -> Vec<Entry> {
+    assert_eq!(checked.unscanned, Vec::<PathBuf>::new(), "a partial scan");
+    checked.moved
+}
+
+/// Session `session`'s launch through `volume`, with the sessions in `running` still running.
 fn launch_as(
     volume: &impl Volume,
     root: &Path,
     data: &Path,
     session: &str,
-    found: &[Found],
+    running: &[&str],
     now: SystemTime,
 ) -> Result<Vec<Entry>, Refused> {
-    let seen = Seen { root, found };
-    run::before_launch(volume, &seen, data, &matter_one(), session, now)
+    run::before_launch(volume, root, data, &matter_one(), session, running, now).map(complete)
 }
 
-/// Session `session`'s after-session pass through `volume`, with what the walk `found`.
+/// Session `session`'s after-session pass through `volume`.
 fn exit_as(
     volume: &impl Volume,
     root: &Path,
     data: &Path,
     session: &str,
-    found: &[Found],
     now: SystemTime,
 ) -> Result<Vec<Entry>, Refused> {
-    let seen = Seen { root, found };
-    run::after_session(volume, &seen, data, &matter_one(), session, now)
+    run::after_session(volume, root, data, &matter_one(), session, now).map(complete)
 }
 
-/// Session `s1`'s launch, the walk finding nothing below the root.
+/// `before_launch` over the tests' volume (NTFS on Windows, the stand-in elsewhere), for the
+/// apply tests' R1 case.
+pub(in crate::windows) fn launch_on_test_volume(
+    root: &Path,
+    data: &Path,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, SetAsideFailure> {
+    run::before_launch(&volume(), root, data, &matter_one(), session, &[], now)
+        .map_err(|refused| refused.failure)
+}
+
+/// `after_session` over the tests' volume, as [`launch_on_test_volume`].
+pub(in crate::windows) fn exit_on_test_volume(
+    root: &Path,
+    data: &Path,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, SetAsideFailure> {
+    run::after_session(&volume(), root, data, &matter_one(), session, now)
+        .map_err(|refused| refused.failure)
+}
+
+/// Session `s1`'s launch, no other session running.
 fn before(root: &Path, data: &Path, now: SystemTime) -> Result<Vec<Entry>, SetAsideFailure> {
     launch_as(&volume(), root, data, "s1", &[], now).map_err(|refused| refused.failure)
 }
 
-/// Session `s1`'s after-session pass, the walk finding nothing below the root.
+/// Session `s1`'s after-session pass.
 fn after(root: &Path, data: &Path, now: SystemTime) -> Result<Vec<Entry>, SetAsideFailure> {
-    exit_as(&volume(), root, data, "s1", &[], now).map_err(|refused| refused.failure)
-}
-
-/// What a walk of `root` reports for each of `paths` below it, with its file ID now.
-fn found(root: &Path, paths: &[&str]) -> Vec<Found> {
-    paths
-        .iter()
-        .map(|rel| {
-            let path = rel.split('/').fold(root.to_owned(), |p, part| p.join(part));
-            let id = volume().file_id(&path).unwrap().unwrap();
-            Found {
-                path,
-                volume: id.volume,
-                id: id.id,
-            }
-        })
-        .collect()
+    exit_as(&volume(), root, data, "s1", now).map_err(|refused| refused.failure)
 }
 
 /// The matter's record as saved.
@@ -166,15 +178,14 @@ fn names_unchanged_since_launch_stay() {
     w.dir.file("matter/CLAUDE.md", "# the lawyer's\n");
     w.dir.file("matter/.git/HEAD", "ref: refs/heads/main\n");
     w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
-    let walked = found(&root, &[".git", "sub/.git"]);
-    launch_as(&volume(), &root, &data, "s1", &walked, launch()).unwrap();
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
     w.dir
         .file("matter/.git/index", "written by the agent's git");
     w.dir
         .file("matter/sub/.git/index", "written by the agent's git");
     w.dir.file("matter/CLAUDE.md", "# edited in place\n");
 
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
     assert_eq!(moved, none());
     assert!(root.join("CLAUDE.md").is_file());
     assert!(root.join(".git/HEAD").is_file());

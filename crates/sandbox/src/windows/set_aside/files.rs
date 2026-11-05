@@ -9,8 +9,9 @@
 //!
 //! `record.json`: `{"version": 1, "matter": "<id>", "sessions": ["<session>", ...], "names":
 //! {".git": {"volume": 1234, "id": "<32 hex digits>"}, "CLAUDE.md": null, "sub/.git": {...},
-//! ...}}`: each name's path below the matter's root, its parts joined by `/`, and `null` for
-//! a name at the root that was absent.
+//! ...}, "links": {"Docs/Precedents": {...}, ...}}`: each name's path below the matter's root,
+//! its parts joined by `/`, and `null` for a name at the root that was absent; and each link
+//! (junction or symbolic link) in the matter tree by its own path and file ID (R2).
 //! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...], "intents": [<Entry>,
 //! ...]}`: `intents` holds the moves begun and not yet finished (N10), and is left out when
 //! empty.
@@ -60,19 +61,27 @@ pub(super) struct Record {
     /// Each protected name by its path below the matter's root (parts joined by `/`), and
     /// its file ID, or `None` for a name at the root that was absent.
     pub(super) names: BTreeMap<String, Option<FileId>>,
+    /// Each link (a junction or symbolic link, whatever its name) in the matter tree by its
+    /// path below the root, and the link's own file ID (R2).
+    #[serde(default)]
+    pub(super) links: BTreeMap<String, FileId>,
+}
+
+/// What a pass records of the matter: [`Record::names`] and [`Record::links`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Snapshot {
+    pub(super) names: BTreeMap<String, Option<FileId>>,
+    pub(super) links: BTreeMap<String, FileId>,
 }
 
 impl Record {
-    pub(super) fn new(
-        matter: MatterId,
-        sessions: BTreeSet<String>,
-        names: BTreeMap<String, Option<FileId>>,
-    ) -> Record {
+    pub(super) fn new(matter: MatterId, sessions: BTreeSet<String>, seen: Snapshot) -> Record {
         Record {
             version: VERSION,
             matter,
             sessions,
-            names,
+            names: seen.names,
+            links: seen.links,
         }
     }
 }

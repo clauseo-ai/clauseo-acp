@@ -8,7 +8,7 @@ use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
-use crate::windows::writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Strict, Walked};
+use crate::windows::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 
 pub(super) type Key = (PathBuf, String, Rights, Inherit);
 
@@ -42,10 +42,6 @@ pub(super) struct FakeAcl {
     pub(super) refused: Option<PathBuf>,
     /// The trees handed back, with the pool users named.
     pub(super) reclaimed: Vec<(PathBuf, Vec<Sid>)>,
-    /// What `found` hands out next.
-    pub(super) found: Vec<Found>,
-    /// Protected names a walk meets: each joins `found` when a walk over it passes.
-    pub(super) meets: Vec<Found>,
     /// `fail_walk` fails once only.
     pub(super) fail_once: bool,
     /// A walk of this root panics, as a crash would stop it.
@@ -85,17 +81,6 @@ impl FakeAcl {
             .iter()
             .position(|c| c.starts_with(root) && c != root)?;
         Some(self.shut.remove(at))
-    }
-
-    /// A walk over `root` passed: the protected names below it are met.
-    fn meet(&mut self, root: &Path) {
-        let met: Vec<Found> = self
-            .meets
-            .iter()
-            .filter(|f| f.path.starts_with(root))
-            .cloned()
-            .collect();
-        self.found.extend(met);
     }
 }
 
@@ -190,7 +175,6 @@ impl AclWriter for FakeAcl {
             self.refused = Some(child);
             return Err(ApplyFailure::ChildShut);
         }
-        self.meet(root);
         Ok(Walked {
             visited: 1,
             ..Walked::default()
@@ -212,7 +196,6 @@ impl AclWriter for FakeAcl {
             return Err(ApplyFailure::ChildShut);
         }
         self.reclaimed.push((root.to_owned(), pool.to_vec()));
-        self.meet(root);
         Ok(Walked::default())
     }
 
@@ -225,10 +208,6 @@ impl AclWriter for FakeAcl {
             return Err(ApplyFailure::Changed);
         }
         self.add(grant)
-    }
-
-    fn found(&mut self) -> Vec<Found> {
-        std::mem::take(&mut self.found)
     }
 
     /// The label on `path`'s file: ours when one of our label entries is there, else the
