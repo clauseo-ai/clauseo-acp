@@ -91,6 +91,18 @@ pub fn store_if_absent(agent: &AgentId, key: &str) -> Result<bool, KeyError> {
     Keychain::os().store_if_absent(agent, key)
 }
 
+/// Whether [`store`] would take `key` as `agent`'s: [`KeyError::Invalid`] with [`refusal`]'s
+/// reason, else `Ok`. No keychain call, so a caller checks a key before anything else it does.
+pub fn check(agent: &AgentId, key: &str) -> Result<(), KeyError> {
+    match refusal(key) {
+        Some(reason) => Err(KeyError::Invalid {
+            agent: agent.clone(),
+            reason,
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Removes `agent`'s API key from the OS keychain; `Ok` when there is none.
 pub fn clear(agent: &AgentId) -> Result<(), KeyError> {
     Keychain::os().clear(agent)
@@ -241,12 +253,7 @@ impl Keychain {
 
     /// [`Keychain::store`] with the write lock already held.
     fn store_unlocked(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
-        if let Some(reason) = refusal(key) {
-            return Err(KeyError::Invalid {
-                agent: agent.clone(),
-                reason,
-            });
-        }
+        check(agent, key)?;
         match &self.backend {
             Backend::None => Err(KeyError::NoKeychain {
                 agent: agent.clone(),
