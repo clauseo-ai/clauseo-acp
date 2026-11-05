@@ -128,6 +128,7 @@ mod folder_scan;
 mod fsync;
 mod history;
 mod locks;
+mod long_path;
 mod matter;
 mod no_download;
 mod papers;

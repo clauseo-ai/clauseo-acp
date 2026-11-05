@@ -154,6 +154,9 @@ mod login_check;
 #[path = "host/login_shared.rs"]
 mod login_shared;
 #[cfg(test)]
+#[path = "host/long_paths.rs"]
+mod long_paths;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
