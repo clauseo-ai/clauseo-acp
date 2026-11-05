@@ -343,8 +343,8 @@ fn jump(
 }
 
 /// A prompt sent now on an idle thread while an install holds new sends: it joins the head,
-/// sent now, so it starts first once the hold lifts, ahead of a held queue, as it would have
-/// started at once.
+/// sent now, so it starts first once the hold lifts, ahead of a held queue, which then moves
+/// on after it, as it would have had the send started at once.
 fn held_now(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -367,6 +367,8 @@ fn held_now(
         blocks,
         delivery,
         |turn, message, content, queue| {
+            // As `route` for a send now on an idle thread: the held queue moves on after it.
+            queue.held = false;
             queue.turns.push_front(Queued {
                 turn,
                 message,
