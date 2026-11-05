@@ -1,7 +1,8 @@
 //! The machine's record of the sandbox user, and this process's own user: what the set-up state
 //! and the desktop's start-up check read. The record is `HKLM\SOFTWARE\Clauseo\Sandbox`, value
-//! `UserSid`, which S15's elevated set-up writes (S15 PR4) and #317's check reads before settings
-//! or logging, so its place does not depend on the data folder.
+//! `UserSid` (and `OwnerSid`, the user who set it up), which S15's elevated set-up writes (S15
+//! PR4) and #317's check reads before settings or logging, so its place does not depend on the
+//! data folder.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry, token and SID calls")]
 
 use std::io;
@@ -45,6 +46,14 @@ pub enum RecordError {
 /// `ConvertStringSidToSidW` and compares with `EqualSid`. The only place that names the record.
 pub fn sandbox_user_sid() -> Result<Option<String>, RecordError> {
     read_string(w!("SOFTWARE\\Clauseo\\Sandbox"), w!("UserSid"))
+}
+
+/// The Windows user who set the sandbox up, as S15's set-up records it beside `UserSid`: value
+/// `OwnerSid` (`REG_SZ`, the SID string, 64-bit view). **S15 PR4's set-up must write it**, with
+/// the setting-up user's SID. `Ok(None)` when missing, as on a machine set up before it existed.
+/// Unchecked text, as [`sandbox_user_sid`].
+pub fn sandbox_owner_sid() -> Result<Option<String>, RecordError> {
+    read_string(w!("SOFTWARE\\Clauseo\\Sandbox"), w!("OwnerSid"))
 }
 
 /// The `REG_SZ` `value` of `HKLM\<subkey>`, read in the 64-bit view (`RRF_SUBKEY_WOW6464KEY`,

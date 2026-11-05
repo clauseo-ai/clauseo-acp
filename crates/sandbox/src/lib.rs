@@ -30,10 +30,11 @@
 //!   by the host for one launch, removed on drop, and swept at host start.
 //! - Windows: the folder check (`windows::folder_support`), which says whether a folder can
 //!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`. Tier B's
-//!   records (S15): matter SIDs in `<data_dir>\sandbox\matters.json` (`windows::sids`), the
-//!   set-up marker `setup.json` (`windows::marker`), the sandbox user record
-//!   (`windows::sandbox_user_sid`, which the desktop's start-up check reads), and the set-up
-//!   state they give (`windows::setup_state`).
+//!   records (S15), in `<data_dir>\sandbox\` under a protected DACL: matter SIDs in
+//!   `matters.json` (`windows::matters`), the set-up marker `setup.json` (`windows::marker`),
+//!   the machine's sandbox user and owner records (`windows::sandbox_user_sid`, which the
+//!   desktop's start-up check reads, and `windows::sandbox_owner_sid`), and the set-up state they
+//!   give (`windows::setup_state`).
 //!
 //! # Interface
 //!
@@ -56,8 +57,9 @@
 //!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
 //!   C with the state's reason otherwise ([`NoSandbox::NeedsSetUp`] with no `setup`); C with
 //!   [`NoSandbox::UnsupportedOs`] elsewhere.
-//! - Windows: `windows::sids::matter_sid``(data_dir, matter)` gives a matter's SID, made and saved
-//!   at its first call; `windows::marker::read`, `write` and `state_of`; `windows::setup_state`.
+//! - Windows: `windows::matters::matter_sid``(data_dir, matter)` gives a matter's SID, made and
+//!   saved at its first call (`windows::matters::MatterSids`, `windows::sids::Reserved`);
+//!   `windows::marker::read`, `write` and `state_of`; `windows::setup_state`.
 //! - [`DenialSink`]: `denied` for each denial, `upstream` for the proxy's reachability. `Arc` of
 //!   a sink is a sink. [`CappedSink::new`] wraps one on the real clock, [`CappedSink::with_clock`]
 //!   on any [`Clock`]; [`CappedSink::tick`] delivers a held count from the owner's timer.
@@ -162,6 +164,9 @@ pub mod windows;
 #[cfg(all(test, not(windows)))]
 #[path = "windows/marker.rs"]
 pub mod marker;
+#[cfg(all(test, not(windows)))]
+#[path = "windows/matters.rs"]
+pub mod matters;
 #[cfg(all(test, not(windows)))]
 #[path = "windows/sids.rs"]
 pub mod sids;
