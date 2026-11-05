@@ -145,8 +145,9 @@ export function Gate({
     <Button
       kind="quiet"
       size="small"
-      // the words wrap on a narrow well: utilities, as the button's own nowrap and height are
-      className={cn(WRAP, "min-h-control-small", quiet ? "fl-way fl-way-quiet" : "fl-way")}
+      // the words wrap on a narrow well: utilities, as the button's own nowrap and height are; and the inset is the
+      // message's own (px-s2), where the small button's px-s3 would stand 4 px right of the words above it
+      className={cn(WRAP, "min-h-control-small px-s2", quiet ? "fl-way fl-way-quiet" : "fl-way")}
       onClick={act(a)}
       data-testid={testId}
       data-opens={a.act === "key-panel" && a.open ? "key" : a.act === "paste" ? "paste" : undefined}
