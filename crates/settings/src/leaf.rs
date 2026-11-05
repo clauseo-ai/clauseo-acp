@@ -168,15 +168,23 @@ pub(crate) fn typed(
     warnings: &mut Vec<Warning>,
 ) -> Vec<Leaf> {
     let mut leaves = Vec::with_capacity(raws.len());
+    let mut plans_seen = 0;
     for raw in raws {
         let mut kinds = Vec::new();
+        plans_seen += usize::from(raw.key.starts_with("plans."));
         match Leaf::parse(&raw.key, raw.value, &mut kinds) {
             Ok(leaf) => leaves.push(leaf),
             Err(kind) => {
                 if kind_of(&raw.key).is_some() {
                     leaves.push(Leaf::Refused(raw.key.clone()));
                 }
-                kinds.push(kind);
+                // A `plans.` key that is no plan's can be pasted text: shown by its place.
+                kinds.push(match kind {
+                    WarningKind::UnknownKey { key } => WarningKind::UnknownKey {
+                        key: plans::shown_plan_key(&key, plans_seen),
+                    },
+                    other => other,
+                });
             }
         }
         warnings.extend(kinds.into_iter().map(|kind| Warning {

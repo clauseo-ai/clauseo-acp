@@ -312,3 +312,99 @@ fn a_name_that_is_no_variable_name_never_reaches_a_warning() {
         assert!(shown.contains("plans.claude-acp.env[0]"), "{shown}");
     }
 }
+
+/// A token-shaped key: mixed case, the length of a GitHub token; built at run time.
+fn token() -> String {
+    format!("ghp_{}", "AbCdEf0123456789abcdefABCDEF0123456789")
+}
+
+/// Checks no warning of `effective`, in `Display` or `Debug`, holds any of `hidden`.
+fn quotes_none_of(effective: &Effective, hidden: &[&str], layer: &str) {
+    assert!(!effective.warnings().is_empty(), "{layer}");
+    for warning in effective.warnings() {
+        let shown = format!("{warning} {warning:?}");
+        for text in hidden {
+            assert!(!shown.contains(text), "{layer}: {shown}");
+        }
+    }
+}
+
+#[test]
+fn an_unknown_plan_field_or_id_that_is_no_plain_word_is_given_by_its_place() {
+    let pasted = format!("ANTHROPIC_API_KEY={}", secret());
+    let text = serde_json::json!({"plans": {
+        "claude-acp": {pasted.clone(): "", token(): "", "endpoit": "x"},
+        pasted.clone(): {},
+        token(): {},
+    }})
+    .to_string();
+    let effective = Effective::load(&locations(), &user(&text), &[]);
+    quotes_none_of(&effective, &["sk-ant", &pasted, &token()], "settings.json");
+    let keys: Vec<String> = effective
+        .warnings()
+        .iter()
+        .filter_map(|warning| match &warning.kind {
+            WarningKind::UnknownKey { key } => Some(key.clone()),
+            _ => None,
+        })
+        .collect();
+    // A plain typo still reads as itself; the rest go by place.
+    assert!(
+        keys.iter().any(|key| key == "plans.claude-acp.endpoit"),
+        "{keys:?}"
+    );
+    assert!(
+        keys.iter()
+            .any(|key| key.starts_with("plans.claude-acp.<field ")),
+        "{keys:?}"
+    );
+    assert!(
+        keys.iter().any(|key| key.starts_with("plans.<id ")),
+        "{keys:?}"
+    );
+    // A policy.json and the registry, which also lock every plan for the bad id.
+    let firm = policy(
+        "firm",
+        serde_json::json!({"plans": {token(): {}}}).to_string(),
+    );
+    let effective = Effective::load(&locations(), &user("{}"), &[&firm]);
+    quotes_none_of(&effective, &[&token()], "policy.json");
+    let top = policy(
+        "firm",
+        serde_json::json!({ format!("plans.{}", token()): {} }).to_string(),
+    );
+    let effective = Effective::load(&locations(), &user("{}"), &[&top]);
+    quotes_none_of(&effective, &[&token()], "policy.json top level");
+    let values = registry::parse(vec![(
+        format!("plans.{pasted}"),
+        registry::RegValue::Sz("{}".to_owned()),
+    )]);
+    let reg = FakeSource {
+        name: registry::SOURCE,
+        read: move || PolicyRead::Read(values.clone()),
+    };
+    let effective = Effective::load(&locations(), &user("{}"), &[&reg]);
+    quotes_none_of(&effective, &["sk-ant", &pasted], "registry");
+    assert!(effective.is_locked("plans.claude-acp"));
+}
+
+#[test]
+fn a_managed_plan_under_a_bad_id_locks_every_plan_whatever_its_value() {
+    for value in [
+        managed_prefs::PlistValue::Other("date"),
+        managed_prefs::PlistValue::Other("data"),
+        managed_prefs::PlistValue::String("https://gateway.firm.example".to_owned()),
+    ] {
+        let dict = managed_prefs::PlistValue::Dict(vec![("Claude-ACP".to_owned(), value.clone())]);
+        let PolicyRead::Read(values) = managed_prefs::parse(vec![("plans".to_owned(), dict, true)])
+        else {
+            panic!("managed preferences read nothing");
+        };
+        let prefs = FakeSource {
+            name: managed_prefs::SOURCE,
+            read: move || PolicyRead::Read(values.clone()),
+        };
+        let effective = Effective::load(&locations(), &user(&lawyers_choices()), &[&prefs]);
+        every_plan_locked(&effective, &format!("{value:?}"));
+    }
+}
