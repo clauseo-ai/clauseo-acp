@@ -92,53 +92,82 @@ build 26100):
     the inherited deny. Adding explicit denies there instead was not chosen.
 - **Applying the plan (PR3b, `windows::apply`).**
   - Order: grants on missing names are left out; the credential link must still be the
-    credentials file the launcher names (one file ID), or the launch is refused; every grant is
-    recorded `pending`; a new Low label entry first records the explicit label its path has (the
-    lawyer's own, put back when ours goes); the entries are written; the walks run; only then is
-    every entry marked `applied`. An entry still `pending` (a launch, rollback or forget that
-    stopped partway) gets its tree walked at the next launch, and `reconcile` walks each pending
-    entry's tree at start before it marks or drops it.
+    credentials file the launcher names (one file ID, compared again on the handle the write goes
+    through), and that file may not sit in the state folder or be the link itself, or the launch
+    is refused; every grant is recorded `pending`; a new Low label entry first records the
+    explicit label its path has, unless it is our own Low label or another entry's on the same
+    file (the lawyer's own label, put back when ours goes); the entries are written; the walks
+    run; only then is every entry marked `applied`. An entry still `pending` (a launch, rollback
+    or forget that stopped partway) gets its tree walked at the next launch of its matter.
+    `reconcile` walks each pending entry's tree at start, plainly: an allow or label entry is then
+    marked or dropped, but a deny entry stays `pending`, so its matter's next launch walks it
+    strictly.
   - A tree that carries a deny (the matter's own folders, each sibling, each fence) is walked
-    strictly. A child an agent made (a pool user owns it) that would beat the inherited deny,
-    with an explicit allow for a broad group, another pool user or the pool group, or a
-    protected DACL, is repaired: those allows are stripped, the protection cleared and its
-    inherited entries worked out again. The repair runs at each launch and again when the agent
-    exits (`repair_after_session`, which PR6 calls beside the set-aside's `after_session`). A child the lawyer owns that would beat it refuses the
-    launch, naming the child for the running page. A child the lawyer can't open at all (a
-    DACL an agent made) is set aside through its folder's `FILE_DELETE_CHILD`, or refuses the
-    launch, naming it.
+    strictly. A child an agent made (a pool user owns it, whatever its number of links) that
+    would beat the inherited deny, with an explicit allow for a broad group, another pool user
+    or the pool group, or a protected DACL, is repaired: those allows are stripped, the
+    protection cleared and its inherited entries worked out again. The repair runs at each launch
+    and again when the agent exits (`repair_after_session`). A child the lawyer owns that would
+    beat it refuses the launch, naming the child for the running page.
+  - A child the lawyer can't open, or can open but not re-permission (no `WRITE_DAC`, or no
+    `WRITE_OWNER` for an owner or label change), is set aside through its folder's
+    `FILE_DELETE_CHILD` when it sits in this launch's own matter, state or notes tree; every such
+    child is, and the walk runs again after each. Anywhere else (a sibling, another matter's
+    fence), or when the set-aside fails (another volume, or no `FILE_DELETE_CHILD`), the launch is
+    refused, naming the child, and nothing moves.
   - The matter, state and notes trees are walked at every launch, so a file moved in since picks
     up the inherited entries; other trees when their entry was just written or is still pending.
+    Every write keeps a DACL's auto-inherited mark (`SE_DACL_AUTO_INHERIT_REQ`), so a walk with
+    nothing changed writes nothing and the lawyer's folders keep their `AI`.
   - Any failure takes back this launch's new entries: under the ledger's lock they are set
     `pending` on disk, then each permission entry this launch wrote is removed unless another
-    entry, as read under that lock, names it; the trees are walked again, and only entries whose
-    permission entry is gone are dropped. `forget_matter` takes entries back the same way.
+    entry, as read under that lock, names it (a Low label counts as named when another entry's
+    label is on the same file); the trees are walked again, and only entries whose permission
+    entry is gone are dropped. `forget_matter` takes entries back the same way.
   - **A folder that is now a registered matter loses its fix 2 deny once its first launch
     succeeds**, for every matter whose entry names it, and its tree is walked again. A refused
     launch leaves every deny. A deny on a folder that holds the new matter is first replaced, for
     the matter that wrote it, by the gate's walk-down set below that folder: a deny on each
-    folder beside the path at every level, and a files-only deny at each level.
+    folder beside the path at every level, and a files-only deny at each level. A matter whose
+    replacement failed keeps its own deny.
   - `forget_matter` removes a matter's entries and labels without admin, puts back the lawyer's
     own labels, and hands what the matter's pool user made in its matter, state and notes folders
-    back to the desktop user: the owner set to the desktop user (through the lawyer's
-    `WRITE_OWNER`), the agent's explicit labels and broad allows removed, the entries worked out
-    again. `fence_registered` fences every registered matter against a grown pool (PR4 calls
-    it).
+    back to the desktop user: the agent's explicit labels and broad allows removed and the
+    protection cleared first, then the owner set to the desktop user (through the lawyer's
+    `WRITE_OWNER`), then the entries worked out again; a file it can't hand back is set aside as
+    at launch. The ledger records the hand-back as owed before anything is removed and clears it
+    only once every hand-back has succeeded; until then `reconcile` keeps that matter's entries,
+    a retried `forget_matter` finishes the job, and `Ledger::handback_owed` tells PR4's reuse
+    check not to hand that pool user to another matter. `fence_registered` fences every
+    registered matter against a grown pool (PR4 calls it).
+  - **Under the `C:\m` layout** (a matter in a folder that inherits `C:\`'s entries), an agent's
+    file can shut the lawyer out while the lawyer has no `FILE_DELETE_CHILD` to set it aside, so
+    forget's hand-back fails (`PermissionDenied`, naming the file) and stays owed. PR4 must
+    provide the elevated clean-up for this: take ownership with admin rights, then hand back.
   - The credential link's allow is read and write of the file's data only (`0x12008f`, no
     `DELETE`); it lands on the lawyer's real credentials file.
-  - **Set-aside.** At launch each protected name at the matter's root (`PROTECTED_NAMES` and
-    `.git`) is recorded with its file ID (`before_launch`). When the agent exits, PR6's launcher
-    calls `after_session`: every protected name that is new or whose file ID changed is set
-    aside, whoever owns it, so a lawyer folder the agent renamed to `.git` or a lawyer file it
-    hard-linked as `CLAUDE.md` is caught. A session that didn't end cleanly is checked the same
-    way at the next launch, before anything else. A protected name the lawyer changes during a
-    session is set aside too (accepted). Items go to `<data_dir>\sandbox\set-aside\<matter>\`,
+  - **Set-aside.** `apply`'s launch walk, and `repair_after_session`'s walk when the agent exits,
+    report every `.git`, `.claude` and `.mcp.json` they meet at any depth in the matter, links
+    included and not followed, with its file ID. PR6's launcher passes them on: after `apply`, to
+    `before_launch`, which records them with each protected name at the matter's root
+    (`PROTECTED_NAMES` and `.git`); after `repair_after_session`, to `after_session`. Every one
+    that is new or whose file ID changed is set aside, whoever owns it, so a lawyer folder the
+    agent renamed to `.git` or `sub\.git`, or a lawyer file it hard-linked as `CLAUDE.md`, is
+    caught. Matters' agents run in parallel, and so may two sessions of one matter: the record
+    holds the set of open sessions, every `after_session` checks, and `before_launch` checks
+    whenever a session is open, so a session that didn't end cleanly is checked at the next
+    launch (its id stays, and every later pass keeps checking). A protected name a live session
+    makes may be set aside when another session of its matter starts, and one the lawyer changes
+    during a session is set aside too (both accepted). Items go to
+    `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\`, under the item's path below the matter,
     the protected folder the agent can't write, opened part by part by handle without following a
-    link, each with a manifest entry (the original and new paths, the reason, the owner, the time
-    and the matter). The running page shows them (`list_set_aside`), and `restore_set_aside`
-    moves one back only if its name is free. An item on another volume than the data folder can't
-    be moved there by a rename: the set-aside fails (`OtherVolume`), the item stays, and a
-    launch whose pre-launch check meets it is refused; no copy is made.
+    link and renamed with `NtSetInformationFile`, never over an existing name. A manifest entry
+    is written as an intent before each move and finished after it, under the set-aside's lock,
+    and an intent a crash left is settled on the next load, so every item set aside is listed
+    (the original and new paths, the reason, the owner, the time and the matter). The running page
+    shows them (`list_set_aside`), and `restore_set_aside` moves one back only if its name is
+    free. An item on another volume than the data folder can't be moved there by a rename: the
+    pass is refused naming the item (`OtherVolume`), the item stays, and no copy is made.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
     desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
@@ -220,7 +249,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Lifting a sibling's deny happens only after the new matter's first launch succeeds.** Until
   then the folder keeps its fix 2 deny, so its new matter's agent reads it only through its own
   entries, which are nearer and come first.
-- **A nested `CLAUDE.md`** the agent makes below the matter's root is not set aside.
+- **A nested `CLAUDE.md` or `AGENTS.md`** the agent makes below the matter's root is not set
+  aside.
+- **The repair undoes a lawyer's own lock-down of an agent's file**: clearing the protection of a
+  file a pool user owns puts the inherited entries back, the pool user's `Modify` among them,
+  even where the lawyer protected it on purpose; the lawyer's own explicit entries are kept
+  (accepted).
 - **An item set aside keeps its own permissions**, so an agent they grant could still open it by
   its full path under the data folder.
 
