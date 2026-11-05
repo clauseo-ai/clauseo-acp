@@ -2,41 +2,45 @@
 //! marker and (S15 PR4) the sandbox user's sealed password, so only the desktop user, `SYSTEM`
 //! and `Administrators` may open it, with nothing inherited from the data folder.
 //!
-//! A new folder is made with the DACL in place ([`create`]), so it is never open, even briefly.
-//! A folder already there ([`secure_existing`]) must not be a link, must be owned by the user,
-//! `SYSTEM` or `Administrators` (taken back when another account owns it and the user may, else
-//! refused), gets the DACL again ([`protect`]), and each entry in it loses its explicit entries,
-//! keeping only what it inherits from the folder ([`reset_to_inherited`]).
+//! A new folder is made with the DACL in place ([`create`]). A folder already there
+//! ([`secure_existing`]) and each record file the crate uses in it ([`check_file`]) are opened
+//! once, without following a link, and everything after happens through that handle: what
+//! [`repair_plan`] decides from the handle's facts, then the owner and the DACL.
 #![expect(
     unsafe_code,
-    reason = "FFI to the security calls that set the folder's DACL"
+    reason = "FFI to the file and security calls on the sandbox folder"
 )]
 
 use std::io;
 use std::iter::once;
 use std::os::windows::ffi::OsStrExt as _;
-use std::os::windows::fs::MetadataExt as _;
 use std::path::Path;
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HLOCAL, LocalFree, WIN32_ERROR,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    SetNamedSecurityInfoW,
+    ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
 };
 use windows::Win32::Security::{
     ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, InitializeAcl,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
-use windows::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT};
+use windows::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle,
+    OPEN_EXISTING, ReOpenFile,
+};
+use windows::Win32::System::SystemServices::MAXIMUM_ALLOWED;
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 
 use super::record::current_user_sid;
 use super::sids::Sid;
+use super::write::{Found, repair_plan};
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -49,14 +53,14 @@ pub(crate) fn sddl(user: &str) -> String {
     format!("D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
 }
 
-/// Whether `owner` may own the sandbox folder of the desktop user `user`.
+/// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`.
 pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
     owner == user || owner.as_str() == SYSTEM || owner.as_str() == ADMINISTRATORS
 }
 
 /// Makes the folder `path` (its parent must exist) with [`sddl`]'s protected DACL for this
 /// process's user in place from the start (`CreateDirectoryW` with the descriptor). `Ok(false)`
-/// when something is there already, which this leaves to [`secure_existing`].
+/// when something is there already, which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
     let user = current_user_sid()?;
     let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
@@ -71,143 +75,108 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
     match unsafe { CreateDirectoryW(PCWSTR(target.as_ptr()), Some(&raw const attributes)) } {
         Ok(()) => Ok(true),
         Err(error) if error.code() == ERROR_ALREADY_EXISTS.to_hresult() => Ok(false),
-        Err(error) => Err(error.into()),
+        Err(error) => Err(os_error(&error)),
     }
 }
 
-/// Makes the folder already at `path` safe to keep records in: refuses a link or a file; when
-/// its owner is not the user, `SYSTEM` or `Administrators`, takes ownership for the user (the
-/// user owns the data folder) or refuses, naming the owner; sets the protected DACL again; and
-/// resets every entry in it, links skipped, to its inherited entries only.
-pub(crate) fn secure_existing(path: &Path) -> io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 || !metadata.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("{} is a link or not a folder", path.display()),
-        ));
-    }
+/// Secures the folder already at `path` through one handle: refused if it is a link or not a
+/// folder; taken back for the user when another account owns it, or refused naming the owner;
+/// then given the protected DACL again.
+fn secure_existing(path: &Path) -> io::Result<()> {
     let user = current_user_sid()?;
-    let found = owner(path)?;
-    if !owner_allowed(&found, &user) {
-        set_owner(path, &user).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "{} is owned by {found}, not this user, and can't be taken back: {error}",
-                    path.display()
-                ),
-            )
-        })?;
-    }
-    protect(path)?;
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let attributes = entry.metadata()?.file_attributes();
-        if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0 {
-            reset_to_inherited(&entry.path())?;
-        }
-    }
-    Ok(())
-}
-
-/// Gives the folder `path` the protected DACL of [`sddl`] for this process's user. Set every
-/// time, which also puts it back if it was changed.
-pub(crate) fn protect(path: &Path) -> io::Result<()> {
-    let user = current_user_sid()?;
+    let handle = Handle::open(path)?;
+    let handle = repair(path, handle, &user, true)?;
     let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
     let dacl = descriptor.dacl()?;
-    set(
-        path,
-        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-        None,
-        Some(dacl),
-    )
+    handle
+        .set(
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            Some(dacl),
+        )
+        .map_err(|error| named(path, "its DACL can't be set", &error))
 }
 
-/// Drops every explicit entry of the file or folder `path` and unprotects its DACL, so it holds
-/// only what it inherits from its folder.
-pub(crate) fn reset_to_inherited(path: &Path) -> io::Result<()> {
+/// Gives the folder `path` the protected DACL of [`sddl`], through a handle opened without
+/// following a link; the same checks as [`secure_existing`].
+pub(crate) fn protect(path: &Path) -> io::Result<()> {
+    secure_existing(path)
+}
+
+/// Checks the record file `path` through one handle: missing is fine; refused if it is a link,
+/// not a file, or has another hard link; taken back for the user when another account owns it,
+/// or refused naming the owner; then reset to only the entries it inherits from the folder.
+pub(crate) fn check_file(path: &Path) -> io::Result<()> {
+    let user = current_user_sid()?;
+    let handle = match Handle::open(path) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let handle = repair(path, handle, &user, false)?;
     let mut empty = ACL::default();
     let size = u32::try_from(size_of::<ACL>()).map_err(io::Error::other)?;
     // SAFETY: `empty` is live, writable and `size` bytes long.
-    unsafe { InitializeAcl(&raw mut empty, size, ACL_REVISION) }?;
-    set(
-        path,
-        DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
-        None,
-        Some(&raw const empty),
-    )
-}
-
-/// The owner of `path`.
-pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
-    let target = wide(path);
-    let mut owner = PSID::default();
-    let mut descriptor = PSECURITY_DESCRIPTOR::default();
-    // SAFETY: `target` is NUL-terminated; both out-pointers are live; the descriptor is freed by
-    // `Descriptor` below, and `owner` points into it.
-    let status = unsafe {
-        GetNamedSecurityInfoW(
-            PCWSTR(target.as_ptr()),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION,
-            Some(&raw mut owner),
+    unsafe { InitializeAcl(&raw mut empty, size, ACL_REVISION) }.map_err(|e| os_error(&e))?;
+    handle
+        .set(
+            DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
             None,
-            None,
-            None,
-            &raw mut descriptor,
+            Some(&raw const empty),
         )
-    };
-    let descriptor = Descriptor(descriptor);
-    check(status)?;
-    let mut text = PWSTR::null();
-    // SAFETY: `owner` is a valid SID inside the live descriptor; `text` is a live out-pointer,
-    // freed with LocalFree below.
-    unsafe { ConvertSidToStringSidW(owner, &raw mut text) }?;
-    // SAFETY: ConvertSidToStringSidW wrote a NUL-terminated string.
-    let sid = unsafe { text.to_string() }.map_err(io::Error::other);
-    // SAFETY: allocated by ConvertSidToStringSidW with LocalAlloc, freed once.
-    unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
-    drop(descriptor);
-    Sid::parse(&sid?).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        .map_err(|error| named(path, "its entries can't be reset", &error))
 }
 
-/// Makes `sid` the owner of `path`. Needs `WRITE_OWNER` on it, and `sid` must be one the token
-/// may set as owner (its user, or a group it holds as owner), unless it holds the restore
+#[cfg(test)]
+/// The owner of `path`, read through a handle opened without following a link.
+pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
+    Handle::open(path)?.owner()
+}
+
+#[cfg(test)]
+/// Makes `sid` the owner of `path`, through a handle opened without following a link. Needs
+/// `WRITE_OWNER`, and `sid` must be one the token may set as owner, unless it holds the restore
 /// privilege.
 pub(crate) fn set_owner(path: &Path, sid: &Sid) -> io::Result<()> {
-    let mut parsed = PSID::default();
-    // SAFETY: the HSTRING is NUL-terminated and lives for the call; `parsed` is a live
-    // out-pointer, freed with LocalFree below.
-    unsafe { ConvertStringSidToSidW(&HSTRING::from(sid.as_str()), &raw mut parsed) }?;
-    let result = set(path, OWNER_SECURITY_INFORMATION, Some(parsed), None);
-    // SAFETY: ConvertStringSidToSidW allocated the SID with LocalAlloc; freed once.
-    unsafe { LocalFree(Some(HLOCAL(parsed.0))) };
-    result
+    Handle::open(path)?.set_owner(sid)
 }
 
-/// `SetNamedSecurityInfoW` on `path` with `info`, an owner and a DACL.
-fn set(
-    path: &Path,
-    info: windows::Win32::Security::OBJECT_SECURITY_INFORMATION,
-    owner: Option<PSID>,
-    dacl: Option<*const ACL>,
-) -> io::Result<()> {
-    let target = wide(path);
-    // SAFETY: `target` is NUL-terminated and outlives the call; the owner and DACL, when given,
-    // are valid for the call (the callers keep them alive).
-    check(unsafe {
-        SetNamedSecurityInfoW(
-            PCWSTR(target.as_ptr()),
-            SE_FILE_OBJECT,
-            info,
-            owner,
-            None,
-            dacl,
-            None,
+/// Reads [`Found`] from `handle`, refuses what [`repair_plan`] refuses, and takes ownership back
+/// for `user` when it says so. Returns a handle with the rights the owner now has.
+fn repair(path: &Path, handle: Handle, user: &Sid, folder: bool) -> io::Result<Handle> {
+    let info = handle.information()?;
+    let owner = handle.owner()?;
+    let found = Found {
+        reparse: info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0,
+        right_kind: (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0) == folder,
+        links: info.nNumberOfLinks,
+        owner_allowed: owner_allowed(&owner, user),
+    };
+    let reown = repair_plan(found).map_err(|why| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} {why}", path.display()),
         )
-    })
+    })?;
+    if !reown {
+        return Ok(handle);
+    }
+    handle.set_owner(user).map_err(|error| {
+        let why = format!("is owned by {owner}, not this user, and can't be taken back");
+        named(path, &why, &error)
+    })?;
+    // The rights were granted at the open, before the user owned it; open again for an owner's.
+    handle.reopen()
+}
+
+/// `error` with what failed on `path`.
+fn named(path: &Path, what: &str, error: &io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{} {what}: {error}", path.display()))
+}
+
+/// A Win32 error as an `io::Error` whose kind follows its code (`NotFound` included).
+fn os_error(error: &windows::core::Error) -> io::Error {
+    io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
 }
 
 /// A Win32 status as a result.
@@ -224,6 +193,125 @@ fn check(status: WIN32_ERROR) -> io::Result<()> {
 /// `path` as a NUL-terminated wide string.
 fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain(once(0)).collect()
+}
+
+/// The sharing every open here allows, so no other reader or writer is shut out.
+fn share() -> windows::Win32::Storage::FileSystem::FILE_SHARE_MODE {
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+}
+
+/// An open file or folder; closed on drop.
+struct Handle(HANDLE);
+
+impl Handle {
+    /// Opens `path` itself, never what a link at it names (`FILE_FLAG_OPEN_REPARSE_POINT`), a
+    /// folder too (`FILE_FLAG_BACKUP_SEMANTICS`), with the rights the caller is granted.
+    fn open(path: &Path) -> io::Result<Handle> {
+        let target = wide(path);
+        // SAFETY: `target` is NUL-terminated and outlives the call; no security attributes or
+        // template are passed, and the handle is owned by `Handle` from here.
+        unsafe {
+            CreateFileW(
+                PCWSTR(target.as_ptr()),
+                MAXIMUM_ALLOWED,
+                share(),
+                None,
+                OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                None,
+            )
+        }
+        .map(Handle)
+        .map_err(|error| os_error(&error))
+    }
+
+    /// The same file opened again through this handle, with the rights granted now.
+    fn reopen(&self) -> io::Result<Handle> {
+        // SAFETY: the handle is open; the new one is owned by `Handle` from here.
+        unsafe {
+            ReOpenFile(
+                self.0,
+                MAXIMUM_ALLOWED,
+                share(),
+                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            )
+        }
+        .map(Handle)
+        .map_err(|error| os_error(&error))
+    }
+
+    /// Its attributes and link count.
+    fn information(&self) -> io::Result<BY_HANDLE_FILE_INFORMATION> {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the handle is open and `info` is a valid, writable struct for the call.
+        unsafe { GetFileInformationByHandle(self.0, &raw mut info) }
+            .map_err(|error| os_error(&error))?;
+        Ok(info)
+    }
+
+    /// Its owner.
+    fn owner(&self) -> io::Result<Sid> {
+        let mut owner = PSID::default();
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: the handle is open; both out-pointers are live; `owner` points into the
+        // descriptor, which `Descriptor` frees after the owner is read.
+        let status = unsafe {
+            GetSecurityInfo(
+                self.0,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                Some(&raw mut owner),
+                None,
+                None,
+                None,
+                Some(&raw mut descriptor),
+            )
+        };
+        let descriptor = Descriptor(descriptor);
+        check(status)?;
+        let mut text = PWSTR::null();
+        // SAFETY: `owner` is a valid SID inside the live descriptor; `text` is a live
+        // out-pointer, freed with LocalFree below.
+        unsafe { ConvertSidToStringSidW(owner, &raw mut text) }.map_err(|e| os_error(&e))?;
+        // SAFETY: ConvertSidToStringSidW wrote a NUL-terminated string.
+        let sid = unsafe { text.to_string() }.map_err(io::Error::other);
+        // SAFETY: allocated by ConvertSidToStringSidW with LocalAlloc, freed once.
+        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+        drop(descriptor);
+        Sid::parse(&sid?).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+
+    /// Makes `sid` its owner.
+    fn set_owner(&self, sid: &Sid) -> io::Result<()> {
+        let mut parsed = PSID::default();
+        // SAFETY: the HSTRING is NUL-terminated and lives for the call; `parsed` is a live
+        // out-pointer, freed with LocalFree below.
+        unsafe { ConvertStringSidToSidW(&HSTRING::from(sid.as_str()), &raw mut parsed) }
+            .map_err(|error| os_error(&error))?;
+        let result = self.set(OWNER_SECURITY_INFORMATION, Some(parsed), None);
+        // SAFETY: ConvertStringSidToSidW allocated the SID with LocalAlloc; freed once.
+        unsafe { LocalFree(Some(HLOCAL(parsed.0))) };
+        result
+    }
+
+    /// `SetSecurityInfo` with `info`, an owner and a DACL, which the caller keeps alive.
+    fn set(
+        &self,
+        info: OBJECT_SECURITY_INFORMATION,
+        owner: Option<PSID>,
+        dacl: Option<*const ACL>,
+    ) -> io::Result<()> {
+        // SAFETY: the handle is open; the owner and DACL, when given, are valid for the call.
+        check(unsafe { SetSecurityInfo(self.0, SE_FILE_OBJECT, info, owner, None, dacl, None) })
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateFileW or ReOpenFile and is closed once, here. A
+        // failed close leaves nothing to do.
+        drop(unsafe { CloseHandle(self.0) });
+    }
 }
 
 /// A security descriptor allocated with `LocalAlloc`, freed on drop.

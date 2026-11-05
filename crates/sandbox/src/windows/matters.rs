@@ -144,10 +144,11 @@ impl MatterSids {
     }
 
     /// The SID of `matter`. Makes the sandbox folder if missing (`write::make_sandbox_dir`),
-    /// then holds `matters.lock` (an exclusive OS file lock, so no other process or instance
-    /// changes the file meanwhile; waiting at most 10 s, or [`MatterSids::with_lock_wait`], then
-    /// an error naming the lock) and reads the file again inside it, so a matter another
-    /// instance added since this one loaded is kept. A matter without a SID gets a new random one
+    /// checks `matters.lock` (`write::check_owned_file`) and holds it (an exclusive OS file
+    /// lock, so no other process or instance changes the file meanwhile; waiting at most 10 s,
+    /// or [`MatterSids::with_lock_wait`], then an error naming the lock), and checks and reads
+    /// the file again inside it, so a matter another instance added since this one loaded is
+    /// kept. A matter without a SID gets a new random one
     /// that no matter holds and [`Reserved`] admits, and the file is saved with it before it is
     /// returned; if the save fails, the matter has no SID.
     pub fn sid_for(&mut self, matter: &MatterId) -> Result<Sid, SetupError> {
@@ -155,12 +156,14 @@ impl MatterSids {
             |why: io::Error| SetupError::Failed(format!("{}: {why}", self.folder.display()));
         write::make_sandbox_dir(&self.folder).map_err(failed)?;
         let lock = self.folder.join(MATTERS_LOCK);
+        write::check_owned_file(&lock).map_err(failed)?;
         let _held = match self.lock_wait {
             None => write::lock_exclusive(&lock),
             Some(wait) => write::lock_exclusive_for(&lock, wait),
         }
         .map_err(|error| SetupError::Failed(format!("matter SIDs: {error}")))?;
         let file = self.folder.join(MATTERS_FILE);
+        write::check_owned_file(&file).map_err(failed)?;
         self.sids = read(&file, &self.reserved)?;
         if let Some(sid) = self.sids.get(matter) {
             return Ok(sid.clone());
