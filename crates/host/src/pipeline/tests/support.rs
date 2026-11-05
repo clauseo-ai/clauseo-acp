@@ -19,9 +19,14 @@ use crate::write;
 pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
-    /// A fresh, empty folder named for `test` and this process.
+    /// A fresh, empty folder named for `test`, this process and a per-process count, so two
+    /// tests (or two calls in one test) sharing a name never share the folder under
+    /// `cargo test`'s threads.
     pub(crate) fn new(test: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("clauseo-host-{test}-{}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("clauseo-host-{test}-{}-{n}", std::process::id()));
         write::remove_dir_all(&path).unwrap();
         write::create_dir_all(&path).unwrap();
         Self(path)
