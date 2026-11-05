@@ -187,6 +187,8 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   `plan_update`, which shows nothing until markdown plans get a protocol type.
 - Stage C moves Codex to its `agent` mode inside the sandbox; the mode rule changes then. On
   Windows, S15 also settles the `windows.sandbox` key.
+- Security note: under Windows tier B, Codex's token keeps `Everyone`, so a pipe it makes with
+  no security set is readable by another matter's agent; see 0049's accepted risk (D11).
 
 ## Status
 
