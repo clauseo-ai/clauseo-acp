@@ -539,3 +539,38 @@ fn a_url_with_a_space_a_control_or_a_bidi_control_is_unsafe() {
         assert!(!is_safe_url_text(url), "{url:?}");
     }
 }
+
+/// The query is cleaned the way a title is: control and bidi characters go, and it is trimmed.
+#[test]
+fn a_query_is_cleaned_like_a_title() {
+    assert_eq!(
+        query_of(&json!({"query": "abc\u{202E}def\u{7}"})),
+        Some("abcdef".to_owned())
+    );
+    assert_eq!(
+        query_of(&json!({"query": "  lease\u{202A}  "})),
+        Some("lease".to_owned())
+    );
+    // A query that is only control characters is no query.
+    assert_eq!(query_of(&json!({"query": "\u{7}\u{202E}"})), None);
+}
+
+/// The 2,000-character cap is on the URL the log keeps: the URL rule runs first, so a URL that the
+/// rule lengthens (a secret value redacted to `REDACTED`) can go over, and one it shortens can
+/// come under.
+#[test]
+fn the_url_cap_is_on_the_logged_url() {
+    use super::record_url;
+    // "https://a.example/" is 18 characters.
+    let plain = |len: usize| format!("https://a.example/{}", "q".repeat(len - 18));
+    assert_eq!(plain(2_000).chars().count(), 2_000);
+    assert_eq!(
+        record_url(&plain(2_000)).as_deref(),
+        Some(plain(2_000).as_str())
+    );
+    assert_eq!(record_url(&plain(2_001)), None);
+    // `?key=abc` is 8 characters, 2,000 in all; logged it is `?key=REDACTED`, 5 more: 2,005.
+    let lengthened = format!("https://a.example/{}?key=abc", "q".repeat(2_000 - 26));
+    assert_eq!(lengthened.chars().count(), 2_000);
+    assert_eq!(record_url(&lengthened), None);
+}
