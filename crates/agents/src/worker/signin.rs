@@ -226,6 +226,15 @@ impl SigninHub {
         }
     }
 
+    /// Whether `agent`'s job is one [`Self::cancel`] would end.
+    pub(super) fn going(&self, agent: &AgentId) -> bool {
+        let inner = self.lock();
+        inner
+            .jobs
+            .get(agent)
+            .is_some_and(|slot| slot.task.signs_in())
+    }
+
     /// Hands `code` to `agent`'s sign-in run, which writes it to the login's stdin. Codex's
     /// logins read no code (the paste route is Claude's `claude.ai` and console logins), so a
     /// code for Codex is refused with `WrongMethod`, never taken and dropped.

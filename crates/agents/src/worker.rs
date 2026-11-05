@@ -287,6 +287,14 @@ impl Agents {
         self.start_signin(start)
     }
 
+    /// Whether `agent`'s job is a sign-in, going or queued, from the call that reserves it: the
+    /// job [`Agents::cancel_sign_in`] would end, and one `stop_using_login` would replace. R20's
+    /// automatic leave asks before it calls `stop_using_login`, since `signin_state` cannot
+    /// tell a reserved sign-in from none until its first state.
+    pub fn sign_in_going(&self, agent: &AgentId) -> bool {
+        self.shared.signin.going(agent)
+    }
+
     /// `agent`'s last sign-in state, or `None` before any.
     pub fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.shared.signin.state(agent)

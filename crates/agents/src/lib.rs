@@ -50,7 +50,7 @@
 //!   Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
-//!   `Result<(), SigninError>`) and `signin_state`.
+//!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
