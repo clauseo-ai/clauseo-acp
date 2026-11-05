@@ -54,6 +54,9 @@ export type ErrorCode =
   | "settings.refused"
   | "settings.key_stored"
   | "signin.login_shared"
+  | "signin.firm_managed"
+  | "signin.key_in_use"
+  | "signin.endpoint_in_use"
   | "agent.install_offline"
   | "agent.install_blocked"
   | "agent.install_disk_full"
@@ -126,6 +129,12 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "A key is already kept on this computer. To change it, open Settings, then Plans.",
   "signin.login_shared":
     "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.",
+  "signin.firm_managed":
+    "Questions go through your firm's own account, so there's nothing to sign in to here.",
+  "signin.key_in_use":
+    "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+  "signin.endpoint_in_use":
+    "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
   "agent.install_offline": "You're offline. Setting up waits for the connection.",
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",

@@ -20,6 +20,18 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninLoginShared,
             "the Codex home shares the ChatGPT login file",
         ),
+        failed(
+            ErrorCode::SigninFirmManaged,
+            "claude-acp's sign-in is refused: a firm endpoint is set by policy",
+        ),
+        failed(
+            ErrorCode::SigninKeyInUse,
+            "claude-acp's sign-in is refused: an API key is stored",
+        ),
+        failed(
+            ErrorCode::SigninEndpointInUse,
+            "claude-acp's sign-in is refused: an endpoint is set in Settings",
+        ),
     ]
 }
 

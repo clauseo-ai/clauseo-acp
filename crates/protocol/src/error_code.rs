@@ -203,6 +203,12 @@ error_codes! {
     SigninLoginShared = "signin.login_shared", retryable: false, meaning: "A Codex login, logout \
         or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login \
         file; the remedy is in the app, \"Stop using it here\".";
+    SigninFirmManaged = "signin.firm_managed", retryable: false, meaning: "Sign-in is \
+        refused: a firm endpoint is set by policy.";
+    SigninKeyInUse = "signin.key_in_use", retryable: false, meaning: "Sign-in is refused: an \
+        API key is stored.";
+    SigninEndpointInUse = "signin.endpoint_in_use", retryable: false, meaning: "Sign-in is \
+        refused: an endpoint is set in Settings.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

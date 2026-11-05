@@ -275,4 +275,25 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (362, 0xe6e5_121b_bfde_671f),
         (264, 0x0aee_bfe1_9aae_0cf1),
     ),
+    (
+        "added/turn_failed-SigninFirmManaged",
+        include_bytes!("added/turn_failed-SigninFirmManaged.jsonl"),
+        include_bytes!("added/turn_failed-SigninFirmManaged.msgpack"),
+        (383, 0x0867_9833_5862_5351),
+        (285, 0xf2bc_e84f_ee73_14b2),
+    ),
+    (
+        "added/turn_failed-SigninKeyInUse",
+        include_bytes!("added/turn_failed-SigninKeyInUse.jsonl"),
+        include_bytes!("added/turn_failed-SigninKeyInUse.msgpack"),
+        (369, 0x05b5_5230_f235_4d30),
+        (271, 0x129d_61bf_9f63_fe59),
+    ),
+    (
+        "added/turn_failed-SigninEndpointInUse",
+        include_bytes!("added/turn_failed-SigninEndpointInUse.jsonl"),
+        include_bytes!("added/turn_failed-SigninEndpointInUse.msgpack"),
+        (384, 0xa23c_e7b7_e1c6_7ee7),
+        (286, 0xab84_c352_e8ec_cf83),
+    ),
 ];

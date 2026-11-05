@@ -1497,7 +1497,10 @@ expression: counts_schema()
         "update.failed",
         "settings.refused",
         "settings.key_stored",
-        "signin.login_shared"
+        "signin.login_shared",
+        "signin.firm_managed",
+        "signin.key_in_use",
+        "signin.endpoint_in_use"
       ],
       "type": "string"
     },

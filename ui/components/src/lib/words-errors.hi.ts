@@ -83,6 +83,14 @@ export const HI = {
   "A key is already kept on this computer. To change it, open Settings, then Plans.": null,
   "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.":
     null,
+  // hi: later
+  "Questions go through your firm's own account, so there's nothing to sign in to here.": null,
+  // hi: later
+  "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.":
+    null,
+  // hi: later
+  "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.":
+    null,
   "You're offline. Setting up waits for the connection.": null,
   "Your network is blocking the download.": null,
   "There isn't enough free space on this computer for the download.": null,
