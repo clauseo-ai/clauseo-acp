@@ -5,10 +5,19 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::run::{self, rfc3339, timestamp};
+use super::files::Place;
+use super::run::{self, Refused, Seen, Volume};
+use super::time::{rfc3339, timestamp};
 use super::{Entry, Reason, SetAsideFailure};
+use crate::windows::Found;
 use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
+
+mod crash;
+mod nested;
+#[cfg(unix)]
+mod posix;
+mod sessions;
 
 #[cfg(windows)]
 fn volume() -> super::ntfs::Ntfs {
@@ -38,12 +47,69 @@ fn world(test: &str) -> (World, PathBuf, PathBuf) {
     (w, root, data)
 }
 
-fn before(root: &Path, data: &Path, now: SystemTime) -> Result<Vec<Entry>, SetAsideFailure> {
-    run::before_launch(&volume(), root, data, &matter_one(), now)
+/// Session `session`'s launch through `volume`, with what the walk `found`.
+fn launch_as(
+    volume: &impl Volume,
+    root: &Path,
+    data: &Path,
+    session: &str,
+    found: &[Found],
+    now: SystemTime,
+) -> Result<Vec<Entry>, Refused> {
+    let seen = Seen { root, found };
+    run::before_launch(volume, &seen, data, &matter_one(), session, now)
 }
 
+/// Session `session`'s after-session pass through `volume`, with what the walk `found`.
+fn exit_as(
+    volume: &impl Volume,
+    root: &Path,
+    data: &Path,
+    session: &str,
+    found: &[Found],
+    now: SystemTime,
+) -> Result<Vec<Entry>, Refused> {
+    let seen = Seen { root, found };
+    run::after_session(volume, &seen, data, &matter_one(), session, now)
+}
+
+/// Session `s1`'s launch, the walk finding nothing below the root.
+fn before(root: &Path, data: &Path, now: SystemTime) -> Result<Vec<Entry>, SetAsideFailure> {
+    launch_as(&volume(), root, data, "s1", &[], now).map_err(|refused| refused.failure)
+}
+
+/// Session `s1`'s after-session pass, the walk finding nothing below the root.
 fn after(root: &Path, data: &Path, now: SystemTime) -> Result<Vec<Entry>, SetAsideFailure> {
-    run::after_session(&volume(), root, data, &matter_one(), now)
+    exit_as(&volume(), root, data, "s1", &[], now).map_err(|refused| refused.failure)
+}
+
+/// What a walk of `root` reports for each of `paths` below it, with its file ID now.
+fn found(root: &Path, paths: &[&str]) -> Vec<Found> {
+    paths
+        .iter()
+        .map(|rel| {
+            let path = rel.split('/').fold(root.to_owned(), |p, part| p.join(part));
+            let id = volume().file_id(&path).unwrap().unwrap();
+            Found {
+                path,
+                volume: id.volume,
+                id: id.id,
+            }
+        })
+        .collect()
+}
+
+/// The matter's record as saved.
+fn record(data: &Path) -> super::files::Record {
+    Place::new(data, &matter_one())
+        .read_record()
+        .unwrap()
+        .unwrap()
+}
+
+/// Every item listed, settled.
+fn list(data: &Path) -> Vec<Entry> {
+    run::list(&volume(), data, &matter_one()).unwrap()
 }
 
 /// No entries, for the comparisons.
@@ -51,12 +117,14 @@ fn none() -> Vec<Entry> {
     Vec::new()
 }
 
-/// Where a pass at `now` puts `name`.
+/// Where a pass at `now` puts `name` (a path below the pass's folder, parts joined by `/`).
 fn aside(data: &Path, now: SystemTime, name: &str) -> PathBuf {
-    data.join("sandbox/set-aside")
-        .join(matter_one().to_string())
-        .join(timestamp(now))
-        .join(name)
+    name.split('/').fold(
+        data.join("sandbox/set-aside")
+            .join(matter_one().to_string())
+            .join(timestamp(now)),
+        |path, part| path.join(part),
+    )
 }
 
 #[test]
@@ -97,15 +165,21 @@ fn names_unchanged_since_launch_stay() {
     let (w, root, data) = world("aside-unchanged");
     w.dir.file("matter/CLAUDE.md", "# the lawyer's\n");
     w.dir.file("matter/.git/HEAD", "ref: refs/heads/main\n");
-    before(&root, &data, launch()).unwrap();
+    w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
+    let walked = found(&root, &[".git", "sub/.git"]);
+    launch_as(&volume(), &root, &data, "s1", &walked, launch()).unwrap();
     w.dir
         .file("matter/.git/index", "written by the agent's git");
+    w.dir
+        .file("matter/sub/.git/index", "written by the agent's git");
     w.dir.file("matter/CLAUDE.md", "# edited in place\n");
 
-    assert_eq!(after(&root, &data, exit()).unwrap(), none());
+    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    assert_eq!(moved, none());
     assert!(root.join("CLAUDE.md").is_file());
     assert!(root.join(".git/HEAD").is_file());
-    assert_eq!(run::list(&data, &matter_one()).unwrap(), none());
+    assert!(root.join("sub/.git/HEAD").is_file());
+    assert_eq!(list(&data), none());
 }
 
 #[test]
@@ -142,16 +216,6 @@ fn a_session_with_no_after_pass_is_checked_at_the_next_launch_first() {
     w.dir
         .file("matter/CLAUDE.md", "# the lawyer's, between sessions\n");
     assert_eq!(before(&root, &data, later).unwrap(), none());
-    assert!(root.join("CLAUDE.md").is_file());
-}
-
-#[test]
-fn a_second_after_pass_moves_nothing() {
-    let (w, root, data) = world("aside-twice");
-    before(&root, &data, launch()).unwrap();
-    after(&root, &data, exit()).unwrap();
-    w.dir.file("matter/CLAUDE.md", "# the lawyer's\n");
-    assert_eq!(after(&root, &data, exit()).unwrap(), none());
     assert!(root.join("CLAUDE.md").is_file());
 }
 
@@ -198,7 +262,7 @@ fn restore_refuses_a_taken_name_and_restores_to_a_free_one() {
     w.dir.file("matter/CLAUDE.md", "# the lawyer's new one\n");
     assert_eq!(
         run::restore(&volume(), &data, &entry),
-        Err(SetAsideFailure::NameTaken)
+        Err(SetAsideFailure::NameTaken.into())
     );
     assert_eq!(
         std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
@@ -206,10 +270,7 @@ fn restore_refuses_a_taken_name_and_restores_to_a_free_one() {
         "never overwritten"
     );
     assert!(entry.to.is_file());
-    assert_eq!(
-        run::list(&data, &matter_one()).unwrap(),
-        std::slice::from_ref(&entry)
-    );
+    assert_eq!(list(&data), std::slice::from_ref(&entry));
 
     rename_new(&root.join("CLAUDE.md"), &root.join("lawyer.md")).unwrap();
     run::restore(&volume(), &data, &entry).unwrap();
@@ -217,10 +278,10 @@ fn restore_refuses_a_taken_name_and_restores_to_a_free_one() {
         std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
         "# the agent's\n"
     );
-    assert_eq!(run::list(&data, &matter_one()).unwrap(), none());
+    assert_eq!(list(&data), none());
     assert_eq!(
         run::restore(&volume(), &data, &entry),
-        Err(SetAsideFailure::Gone)
+        Err(SetAsideFailure::Gone.into())
     );
 }
 
@@ -246,7 +307,7 @@ fn the_manifest_lists_each_entry_with_its_reason() {
     )
     .unwrap();
 
-    let listed = run::list(&data, &matter_one()).unwrap();
+    let listed = list(&data);
     let seen: Vec<_> = listed
         .iter()
         .map(|e| (e.id, e.name.as_str(), e.reason))
@@ -295,81 +356,4 @@ fn timestamps_are_utc() {
     let leap = UNIX_EPOCH + Duration::from_secs(leap_day_2000);
     assert_eq!(timestamp(leap), "20000229T000000-000Z");
     assert_eq!(rfc3339(launch()), "2025-11-05T10:15:00.123Z");
-}
-
-/// The tests' stand-in for NTFS on other OSes: inode numbers for file IDs, the owner's uid,
-/// and renames that refuse a taken name and a symbolic link on the way.
-#[cfg(unix)]
-mod posix {
-    use std::io;
-    use std::os::unix::fs::MetadataExt as _;
-    use std::path::Path;
-
-    use super::super::SetAsideFailure;
-    use super::super::files::FileId;
-    use super::super::run::Volume;
-    use crate::windows::write::{make_sandbox_dir, rename_new};
-
-    pub(super) struct Posix;
-
-    impl Volume for Posix {
-        fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
-            match std::fs::symlink_metadata(path) {
-                Ok(meta) => Ok(Some(FileId {
-                    volume: meta.dev(),
-                    id: u128::from(meta.ino()).to_le_bytes(),
-                })),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-                Err(error) => Err(error),
-            }
-        }
-
-        fn owner(&self, path: &Path) -> io::Result<String> {
-            Ok(format!("uid {}", std::fs::symlink_metadata(path)?.uid()))
-        }
-
-        fn move_into(
-            &self,
-            from: &Path,
-            sandbox: &Path,
-            parts: &[String],
-            name: &str,
-        ) -> Result<(), SetAsideFailure> {
-            let mut folder = sandbox.to_owned();
-            for part in parts {
-                folder.push(part);
-                if std::fs::symlink_metadata(&folder).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(SetAsideFailure::Changed);
-                }
-                make_sandbox_dir(&folder).map_err(|e| SetAsideFailure::Io(e.kind()))?;
-            }
-            moved(from, &folder.join(name))
-        }
-
-        fn move_back(
-            &self,
-            sandbox: &Path,
-            parts: &[String],
-            name: &str,
-            to: &Path,
-        ) -> Result<(), SetAsideFailure> {
-            let from = parts
-                .iter()
-                .fold(sandbox.to_owned(), |p, part| p.join(part));
-            moved(&from.join(name), to)
-        }
-    }
-
-    fn moved(from: &Path, to: &Path) -> Result<(), SetAsideFailure> {
-        if std::fs::symlink_metadata(from).is_err() {
-            return Err(SetAsideFailure::Gone);
-        }
-        rename_new(from, to).map_err(|e| {
-            if e.kind() == io::ErrorKind::AlreadyExists {
-                SetAsideFailure::NameTaken
-            } else {
-                SetAsideFailure::Io(e.kind())
-            }
-        })
-    }
 }

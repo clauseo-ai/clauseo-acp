@@ -64,11 +64,19 @@ pub enum Error {
         /// lawyer (a protected child, a broad allow, one the lawyer can't open). Never logged.
         at: Option<std::path::PathBuf>,
     },
-    /// Windows tier B couldn't set aside a protected name that changed in a session, or couldn't
-    /// read or write the record it checks against (`windows::set_aside`). The launch is refused,
-    /// and the record stays open, so the next launch checks again. Names no path.
-    #[error("the sandbox couldn't set aside a changed protected name: {0}")]
-    SetAside(crate::windows::SetAsideFailure),
+    /// Windows tier B couldn't set aside a protected name that changed in a session, or the
+    /// item the strict walk found the lawyer can't open, or couldn't read or write the record it
+    /// checks against (`windows::set_aside`). The launch is refused, and the record stays as it
+    /// was, so the next launch checks again. Its message names no path.
+    #[error("the sandbox couldn't set aside a changed protected name: {failure}")]
+    SetAside {
+        /// What failed.
+        failure: crate::windows::SetAsideFailure,
+        /// The item that couldn't be read or moved, when it was one: for the running page to
+        /// show the lawyer (one on another drive, one whose folder the lawyer can't delete
+        /// from). Never logged.
+        at: Option<std::path::PathBuf>,
+    },
 }
 
 impl Error {
@@ -84,7 +92,7 @@ impl Error {
             | Error::FolderUnsupported { .. }
             | Error::NeighbourUnfenceable { .. }
             | Error::AclApply { .. }
-            | Error::SetAside(_) => ErrorCode::AgentLaunchFailed,
+            | Error::SetAside { .. } => ErrorCode::AgentLaunchFailed,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }

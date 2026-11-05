@@ -1,15 +1,21 @@
 //! The set-aside's files in `<data_dir>\sandbox\set-aside\<matter>\`: the record of the
 //! protected names at launch (`record.json`), the manifest of what was set aside
-//! (`manifest.json`), and the lock every change holds (`set-aside.lock`). Each folder on the way
+//! (`manifest.json`), and the lock every read and write of either holds (`set-aside.lock`,
+//! taken as the ledger takes `acl-ledger.lock`: the file checked, then `write::lock_exclusive`
+//! with its bounded wait). Each folder on the way
 //! is made, or checked when there, as the sandbox folder is (`write::make_sandbox_dir`: refused
 //! if a link, the protected DACL set again); each file is checked before it is read and after
 //! it is written (`write::check_owned_file`), and replaced in one step (`write::write_atomic`).
 //!
-//! `record.json`: `{"version": 1, "matter": "<id>", "open": true, "names": {".git": {"volume":
-//! 1234, "id": "<32 hex digits>"}, "CLAUDE.md": null, ...}}`, `null` for a name absent.
-//! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...]}`.
+//! `record.json`: `{"version": 1, "matter": "<id>", "sessions": ["<session>", ...], "names":
+//! {".git": {"volume": 1234, "id": "<32 hex digits>"}, "CLAUDE.md": null, "sub/.git": {...},
+//! ...}}`: each name's path below the matter's root, its parts joined by `/`, and `null` for
+//! a name at the root that was absent.
+//! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...], "intents": [<Entry>,
+//! ...]}`: `intents` holds the moves begun and not yet finished (N10), and is left out when
+//! empty.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -41,29 +47,31 @@ pub(super) struct FileId {
     pub(super) id: [u8; 16],
 }
 
-/// What a launch recorded: each protected name at the matter's root and its file ID, and
-/// whether the session is still open (no after-session pass yet).
+/// What the last pass recorded: each protected name in the matter and its file ID, and the
+/// sessions launched whose after-session pass hasn't run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Record {
     version: u32,
     matter: MatterId,
-    /// No after-session pass has run since the launch that wrote it.
-    pub(super) open: bool,
-    /// Each protected name, and its file ID at launch, or `None` when it was absent.
+    /// The sessions launched with no after-session pass yet: running, or ended without one.
+    /// The record is clean only when this is empty.
+    pub(super) sessions: BTreeSet<String>,
+    /// Each protected name by its path below the matter's root (parts joined by `/`), and
+    /// its file ID, or `None` for a name at the root that was absent.
     pub(super) names: BTreeMap<String, Option<FileId>>,
 }
 
 impl Record {
     pub(super) fn new(
         matter: MatterId,
-        open: bool,
+        sessions: BTreeSet<String>,
         names: BTreeMap<String, Option<FileId>>,
     ) -> Record {
         Record {
             version: VERSION,
             matter,
-            open,
+            sessions,
             names,
         }
     }
@@ -76,7 +84,12 @@ pub(super) struct Manifest {
     version: u32,
     /// The next entry's number.
     pub(super) next: u64,
+    /// The items set aside, each move finished.
     pub(super) entries: Vec<Entry>,
+    /// The moves begun: each written before its move and dropped after it, so a crash in
+    /// between leaves it here for the next load to settle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) intents: Vec<Entry>,
 }
 
 impl Default for Manifest {
@@ -85,6 +98,7 @@ impl Default for Manifest {
             version: VERSION,
             next: 1,
             entries: Vec::new(),
+            intents: Vec::new(),
         }
     }
 }
@@ -115,18 +129,25 @@ impl Place {
         self.matter
     }
 
-    /// The parts below the sandbox folder of the pass's folder `folder`.
-    pub(super) fn parts(&self, folder: &str) -> [String; 3] {
+    /// The parts below the sandbox folder of the folder `within` in the pass's folder
+    /// `folder`.
+    pub(super) fn parts(&self, folder: &str, within: &[String]) -> Vec<String> {
         [
             SET_ASIDE_DIR.to_owned(),
             self.matter.to_string(),
             folder.to_owned(),
         ]
+        .into_iter()
+        .chain(within.iter().cloned())
+        .collect()
     }
 
-    /// Where `name` in the pass's folder `folder` is.
-    pub(super) fn to(&self, folder: &str, name: &str) -> PathBuf {
-        self.base.join(folder).join(name)
+    /// Where `name` in the folder `within` in the pass's folder `folder` is.
+    pub(super) fn to(&self, folder: &str, within: &[String], name: &str) -> PathBuf {
+        within
+            .iter()
+            .fold(self.base.join(folder), |path, part| path.join(part))
+            .join(name)
     }
 
     /// Makes (or checks) the sandbox folder, `set-aside` and the matter's folder in turn, then
