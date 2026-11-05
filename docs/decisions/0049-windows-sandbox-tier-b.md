@@ -375,13 +375,23 @@ and refuses nothing. The NTFS change journal says whether any did (`clean_close.
   the repair or anyone else changes while it runs is replayed at the next launch;
 - every name below the roots: its file reference, its folder's, and whether it is a folder,
   read through each folder's handle after the repair, never through a link;
+- each volume's first journal record at the cursor (its USN, time and file), or none yet;
 - a format version.
+
+The same pass that reads the names writes a close record (`FSCTL_WRITE_USN_CLOSE_RECORD`) for each
+root and every item below it, after the repair and the set-aside's pass. NTFS logs a reason once
+per open period: while another program holds an item open (Explorer holds the folder it shows),
+a second change of a kind already logged gets no record until the last handle closes (Microsoft,
+"Change Journal Records"). A close record ends the period, so a change after it is logged afresh.
+An item it can't do this for means no record is written. If the VM shows the close record doesn't
+reset the logging at the lawyer's token, an edit to an item held open since the session end is a
+residual here.
 
 A session end is clean only when the repair passed, `after_session` passed with a complete scan,
 no session of the matter is open (checked under the set-aside lock the record is written under),
 no ledger entry on, in or above an own root is `pending` or `removing`, no hand-back is owed for
 the matter, each root is still the folder the cursor was taken for, and every folder could be
-listed. Otherwise no record is written.
+listed and closed. Otherwise no record is written.
 
 **Spent at every launch.** `check_launch` reads the record and removes it under the matter's
 set-aside lock before it decides anything. A removal that fails refuses the launch
@@ -402,7 +412,10 @@ launch's agent runs.
 9. the journal ID differs (the journal was deleted and made again);
 10. the cursor is below the journal's lowest readable USN (it wrapped), or records past it are
     lost during the read;
-11. the cursor is past the journal's next USN (a reset, a restored or rolled-back volume);
+11. the cursor is past the journal's next USN (a reset, a restored or rolled-back volume), or the
+    first record at the cursor isn't the one the record saw there (another USN, time or file, or
+    none now; with none seen then, the first record read must start at the cursor): a volume
+    restored to an earlier image that has written past the cursor since;
 12. a record touches an own root itself (its descriptor or its name);
 13. more changed items than 2,000, or 5% of the trees' names if fewer: past that, walking the
     changed folders one by one costs about what the full walk does, since each changed item's
@@ -418,7 +431,9 @@ With none left the launch skips the own-tree walks and the set-aside scan; grant
 are still written and walked. With some, it walks each changed item's folder's children
 (`Reach::Children`), and the whole subtree of a changed folder that isn't a link (one moved in
 brings its contents with no records of their own), strictly, setting aside and refusing as any
-walk does. The set-aside re-probes those folders in the matter and keeps the rest of its record.
+walk does. The set-aside re-probes those folders in the matter and keeps the rest of its record;
+a re-probe of a folder's own names also drops what the record holds under a folder in it that is
+no longer there, so a name moved back later is new again.
 A file whose DACL changed through a hard link outside the trees has its record's folder outside,
 so every folder the record holds it in is walked. A folder swapped in for a root has the root's
 parent as its parent, outside the trees, which is why each root's file ID is checked by path.
@@ -430,8 +445,9 @@ parent as its parent, outside the trees, which is why each root's file ID is che
   resizing it needs admin, and a read with a journal ID checks it is the same journal;
 - what an agent can do to the journal is fill it so it wraps, which means the full walk;
 - the ledger and the plan come from the protected folder and the launcher;
-- no agent runs between a clean close and the next launch: the record is written once PR5's job
-  object is empty and spent before the next agent starts;
+- no agent runs between a clean close and the next launch. **PR6 must call `write_clean_close`
+  only after the session's job object (PR5's, kill-on-close) is empty**: the code can't check
+  that itself. The record is spent before the next agent starts;
 - the root facts come from opening each root by path with `FILE_FLAG_OPEN_REPARSE_POINT`, and the
   drive type and bus from the OS.
 
@@ -442,21 +458,22 @@ between visiting a folder and the agent's start.
 **Accepted risk: changes made by another OS while the volume was offline.** The journal sees only
 what Windows mounted. A fixed disk changed under another OS (dual boot, Linux `ntfs-3g`) can carry
 a descriptor change no record shows, so the next launch may skip a walk it needed. Removable
-drives always walk in full. The session-end repair still walks everything at each session end.
+drives and volumes on a USB, SD, 1394 or MMC bus always walk in full. Virtual disks (a mounted VHD),
+iSCSI disks and Storage Spaces read as fixed disks, so one changed while detached from this Windows
+is the same accepted limit. The session-end repair still walks everything at each session end.
 
 **The unprivileged read.** `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL` reads the journal through a
 folder handle without admin rights, and gives records without names, including those of files the
-caller can't open. Microsoft Learn has no page for it. The Windows SDK's `winioctl.h` defines it
-from SDK 10.0.14393.0 under `#if (_WIN32_WINNT >= _WIN32_WINNT_WIN10_RS1)`, which is Windows 10
-1607, build 14393; SDK 10.0.10240.0 lacks it
-(<https://raw.githubusercontent.com/tpn/winsdk-10/master/Include/10.0.14393.0/um/winioctl.h>, a
-mirror of the SDK headers, not a Microsoft page). This is the header's guard, not a Microsoft
-statement of support, and it was measured only on Windows Server 2025 (build 26100). Where the
-call fails, the launch walks in full.
+caller can't open. Microsoft Learn has no page for it. Microsoft's Windows SDK defines it in
+`Windows Kits\10\Include\10.0.14393.0\um\winioctl.h` inside the `NTDDI_WIN10_RS1` block
+(`#if (_WIN32_WINNT >= _WIN32_WINNT_WIN10_RS1)`), which is Windows 10 1607, build 14393; the
+10.0.10240.0 SDK's header lacks it. That is the header's guard, not a statement of support, and the
+call was measured only on Windows Server 2025 (build 26100); Windows 11 is a required VM row.
+Where the call fails, the launch walks in full.
 
-**For PR4's set-up.** The elevated set-up enlarges the journal on each volume that holds a matter
-(`FSCTL_CREATE_USN_JOURNAL`) to at most 256 MB (`MaximumSize` 256 MB, `AllocationDelta` 32 MB), and
-never shrinks a journal already larger. The default 32 MB held about 400,000 records in S15's
+**For PR4's set-up.** PR4 enlarges the journal on each volume that holds a matter to 256 MB unless
+it's already larger (`FSCTL_CREATE_USN_JOURNAL`, `MaximumSize` 256 MB, `AllocationDelta` 32 MB):
+capped there, never shrinking one. The default 32 MB held about 400,000 records in S15's
 measurements; a wrap only costs a full walk, so a larger journal makes them rarer.
 
 ## Consequences
