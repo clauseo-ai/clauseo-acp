@@ -16,8 +16,9 @@ use clauseo_host::Updater;
 use tauri::{AppHandle, Runtime};
 use url::Url;
 
-/// The throwaway test key's public half (`release/updater-test.pub`), which signs test releases
-/// (0035's `test` mode). Only the `e2e` build has it: a release build never trusts it.
+/// The throwaway test key's public half (the `.pub` file in desktop's `release` folder), which
+/// signs test releases (0035's `test` mode). Only the `e2e` build has it: a release build never
+/// trusts it.
 #[cfg(feature = "e2e")]
 pub(super) const TEST_KEY: Option<&str> = Some(include_str!("../../release/updater-test.pub"));
 /// The throwaway test key's public half: none outside the `e2e` build.
