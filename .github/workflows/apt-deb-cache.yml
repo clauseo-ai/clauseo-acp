@@ -1,0 +1,49 @@
+# Fills main's cache of the .deb files install-tauri-linux-deps installs, one entry per runner image
+# and package list that ci.yml uses, so pull requests and merge groups (which can read main's caches
+# but not each other's) install them with dpkg instead of waiting on the Ubuntu archive. ci.yml's
+# nightly run fills the same entries as it goes; this one runs when the runner images may have moved
+# (daily, before the nightly) and on demand, right after a change to the action or when a slow
+# archive makes a miss expensive (2026-11-05, #469).
+#
+# Each leg is a fresh runner, so its cache entry holds every package that image lacks. The legs
+# match ci.yml: fast-lane, mutants and quarantine on ubuntu-24.04 with WebKitGTK alone, the build
+# job's Linux legs on ubuntu-22.04 with xvfb, and quarantine on ubuntu-22.04 with WebKitGTK alone.
+
+name: apt-deb-cache
+
+on:
+  schedule:
+    - cron: "41 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-deb-cache
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    name: fill (${{ matrix.runner }}${{ matrix.extra && format(', {0}', matrix.extra) || '' }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            extra: ""
+          - runner: ubuntu-22.04
+            extra: xvfb
+          - runner: ubuntu-22.04
+            extra: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Linux system packages Tauri needs
+        uses: ./.github/actions/install-tauri-linux-deps
+        with:
+          extra-packages: ${{ matrix.extra }}

@@ -7,9 +7,21 @@
 # - A job must check out the repo before it uses this action, since `uses: ./...` reads the action
 #   from the checkout.
 # - `--no-install-recommends` installs only the packages named, so a job lists what it needs.
+# - The .deb files apt downloads are cached, keyed by the runner image (ImageOS and ImageVersion,
+#   which the hosted runners set) and the package list. On a hit they install with `dpkg -i` and no
+#   network: on 2026-11-05 azure.archive.ubuntu.com took 15 to 30 minutes over these ~160 packages
+#   instead of under one, and timed out fast-lane in a merge group (#469). A hit counts only if every
+#   package asked for is then installed; otherwise, and on a miss, apt-get runs as before, downloading
+#   into the cache folder, and the cache is saved right after the install (not at the job's end, so a
+#   job that fails later still leaves it). The files are what this fresh runner lacked, so one key is
+#   one image and one package list.
+# - Where a cache is visible: one saved on main (the nightly run, or apt-deb-cache.yml) to every run;
+#   one saved by a pull request only to that pull request; one saved by a merge group to no one.
+# - The release workflow passes `cache: "false"`: a release build installs from the Ubuntu archive,
+#   never from a cache entry.
 
 name: Install the Linux system packages Tauri needs
-description: Runs apt-get update, then installs WebKitGTK 4.1 and any extra packages.
+description: Installs WebKitGTK 4.1 and any extra packages, from a cache of the .deb files when it has them.
 
 inputs:
   extra-packages:
@@ -18,19 +30,80 @@ inputs:
       WebKitGTK alone.
     required: false
     default: ""
+  cache:
+    description: >-
+      "true" installs from (and saves) the cache of .deb files; "false" always uses apt-get and the
+      Ubuntu archive, as the release builds do.
+    required: false
+    default: "true"
 
 runs:
   using: composite
   steps:
-    - name: apt-get update, then install WebKitGTK and the extra packages
+    - name: The cache key for this runner image and package list
+      id: key
       shell: bash
       env:
         EXTRA_PACKAGES: ${{ inputs.extra-packages }}
       run: |
         set -euo pipefail
-        sudo apt-get update -q
+        # ImageOS and ImageVersion name the hosted runner image; a new image gets a new key.
+        list=$(printf '%s' "libwebkit2gtk-4.1-dev $EXTRA_PACKAGES" | tr -s ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' '+')
+        echo "key=tauri-linux-debs-${RUNNER_ARCH}-${ImageOS:-unknown}-${ImageVersion:-unknown}-${list%+}" >> "$GITHUB_OUTPUT"
+        echo "dir=$RUNNER_TEMP/tauri-linux-debs" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the cached .deb files
+      id: restore
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Install WebKitGTK and the extra packages
+      id: install
+      shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+        DEBS: ${{ steps.key.outputs.dir }}
+        HIT: ${{ steps.restore.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
         # EXTRA_PACKAGES is a space-separated list. read splits it without globbing, so a `*` in it
         # stays a literal name for apt to reject. The ${extra[@]+...} form expands an empty array
         # to nothing under set -u, on bash 3.2 as on the runners' bash 5.
         read -ra extra <<< "$EXTRA_PACKAGES"
-        sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev ${extra[@]+"${extra[@]}"}
+        packages=(libwebkit2gtk-4.1-dev ${extra[@]+"${extra[@]}"})
+        # Whether every package asked for is installed.
+        all_installed() {
+          local p
+          for p in "${packages[@]}"; do
+            [ "$(dpkg-query -W -f='${Status}' "$p" 2> /dev/null)" = "install ok installed" ] || return 1
+          done
+        }
+        if [ "$HIT" = true ] && compgen -G "$DEBS/*.deb" > /dev/null; then
+          echo "Installing $(find "$DEBS" -maxdepth 1 -name '*.deb' | wc -l) cached .deb files with dpkg, no network"
+          if sudo dpkg -i "$DEBS"/*.deb && all_installed; then
+            exit 0
+          fi
+          echo "::warning::the cached .deb files did not install every package; installing with apt-get instead"
+          sudo apt-get update -q
+          sudo apt-get install -f -y -q
+        else
+          sudo apt-get update -q
+        fi
+        mkdir -p "$DEBS/partial"
+        sudo apt-get install -y -q --no-install-recommends -o Dir::Cache::archives="$DEBS" "${packages[@]}"
+        sudo rm -rf "$DEBS/partial" "$DEBS/lock"
+        sudo chown -R "$(id -u):$(id -g)" "$DEBS"
+        echo "Downloaded $(find "$DEBS" -maxdepth 1 -name '*.deb' | wc -l) .deb files into the cache folder"
+        if [ "$HIT" != true ] && compgen -G "$DEBS/*.deb" > /dev/null; then
+          echo "save=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Save the downloaded .deb files
+      if: inputs.cache == 'true' && steps.install.outputs.save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.dir }}
+        key: ${{ steps.key.outputs.key }}
