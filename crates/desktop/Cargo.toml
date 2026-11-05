@@ -52,6 +52,10 @@ clauseo-profile = { path = "../profile" }
 clauseo-agents = { path = "../agents" }
 zeroize = { workspace = true }
 clauseo-limits = { path = "../limits" }
+# The sandbox: on Windows, the sandbox user record (src/jailed/windows.rs); on every OS, its
+# folder's name, which the uninstaller's deletion keeps (src/delete_app_data/walk.rs). The host
+# already builds it everywhere.
+clauseo-sandbox = { path = "../sandbox" }
 # The profile's start-up warnings (a skill left out, no profile).
 tracing = { workspace = true }
 # Polling host subscriptions on Tauri's runtime; the bridge's watchdog timer.
@@ -84,11 +88,10 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # machine's total memory (src/machine_memory.rs).
 # The agent sandbox check (src/jailed/windows.rs): Foundation for HANDLE, CloseHandle and LocalFree,
 # Security for GetTokenInformation and EqualSid, Security_Authorization for ConvertStringSidToSidW,
-# Threading for OpenProcessToken; clauseo-sandbox reads the sandbox user record. Its
+# Threading for OpenProcessToken; clauseo-sandbox (above) reads the sandbox user record. Its
 # CI test (tests/jailed_windows.rs) also uses Security's CreateRestrictedToken and Threading's
 # CreateProcessAsUserW.
 [target.'cfg(windows)'.dependencies]
-clauseo-sandbox = { path = "../sandbox" }
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security",

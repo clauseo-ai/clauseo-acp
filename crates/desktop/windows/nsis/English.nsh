@@ -9,11 +9,13 @@
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
 LangString deleteAppData ${LANG_ENGLISH} "Also delete conversations, saved versions and settings"
-; deleteAppDataFailed: something in the data folder could not be deleted (or the app was missing);
-; $R9 is the local data folder. deleteAppDataKept: the app kept the sandbox folder (S15's removal
-; failed) or the files tier B set aside; $R8 is that folder. Both in a message box, skipped by /S.
-LangString deleteAppDataFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. You can delete this folder yourself: $R9"
-LangString deleteAppDataKept ${LANG_ENGLISH} "Clauseo kept this folder because it may hold files you still need: $R8"
+; deleteAppDataFailed: something in the data folder could not be deleted (or the app was missing)
+; and no kept folder is left in it; $R9 is the local data folder. deleteAppDataKept: a folder that
+; stays, the sandbox's (S15's records) or the files tier B set aside; $R8 is that folder. Each path
+; stands alone after a blank line. Both in a message box, skipped by /S. Provisional (app thread,
+; 2026-11-05).
+LangString deleteAppDataFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. You can delete this folder yourself.$\n$\n$R9"
+LangString deleteAppDataKept ${LANG_ENGLISH} "Clauseo kept this folder because it may hold files you still need. Look through it before you delete it.$\n$\n$R8"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

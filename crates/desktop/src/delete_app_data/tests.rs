@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use clauseo_settings::{KnownFolder, PlatformDirs};
 
 use super::walk::{self, check};
-use super::{DELETED, FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, run};
+use super::{DELETED, FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, run};
 use crate::test_support::Scratch;
 
 const DATA: &str = "ai.clauseo.desktop";
@@ -92,10 +92,11 @@ impl World {
         self.at("outside/canary")
     }
 
-    /// Runs the deletion; answers its exit code and stderr.
-    fn delete(&self, keep_sandbox: bool) -> (i32, String) {
+    /// Runs the deletion, with `--sandbox-removed` when `sandbox_removed`; answers its exit
+    /// code and stderr.
+    fn delete(&self, sandbox_removed: bool) -> (i32, String) {
         let mut stderr = Vec::new();
-        let code = walk::delete(&self.dirs(), Mode { keep_sandbox }, &mut stderr);
+        let code = walk::delete(&self.dirs(), Mode { sandbox_removed }, &mut stderr);
         (code, String::from_utf8(stderr).unwrap())
     }
 
@@ -134,26 +135,28 @@ fn args(list: &[&str]) -> Vec<OsString> {
 }
 
 #[test]
-fn only_nothing_or_keep_sandbox_is_accepted() {
+fn only_nothing_or_sandbox_removed_is_accepted() {
     assert_eq!(
         Mode::parse(&[]),
         Some(Mode {
-            keep_sandbox: false
+            sandbox_removed: false
         })
     );
     assert_eq!(
-        Mode::parse(&args(&["--keep-sandbox"])),
-        Some(Mode { keep_sandbox: true })
+        Mode::parse(&args(&["--sandbox-removed"])),
+        Some(Mode {
+            sandbox_removed: true
+        })
     );
     for refused in [
         &[r"C:\Users\a\AppData\Local\ai.clauseo.desktop"][..],
         &["/home/a/.local/share/ai.clauseo.desktop"][..],
         &["ai.clauseo.desktop"][..],
-        &["--keep-sandbox", "--keep-sandbox"][..],
-        &["--keep-sandbox", r"C:\elsewhere"][..],
-        &[r"C:\elsewhere", "--keep-sandbox"][..],
-        &["--keep-sandbox=1"][..],
-        &["--Keep-Sandbox"][..],
+        &["--sandbox-removed", "--sandbox-removed"][..],
+        &["--sandbox-removed", r"C:\elsewhere"][..],
+        &[r"C:\elsewhere", "--sandbox-removed"][..],
+        &["--sandbox-removed=1"][..],
+        &["--Sandbox-Removed"][..],
         &[""][..],
     ] {
         assert_eq!(Mode::parse(&args(refused)), None, "{refused:?}");
@@ -164,12 +167,12 @@ fn only_nothing_or_keep_sandbox_is_accepted() {
 fn extra_arguments_are_refused_before_any_folder_is_looked_at() {
     // `run` is the real entry point: with a valid argument list it would reach the real known
     // folders, so only refused lists are run here.
-    for refused in [&[r"C:\elsewhere"][..], &["--keep-sandbox", "x"][..]] {
+    for refused in [&[r"C:\elsewhere"][..], &["--sandbox-removed", "x"][..]] {
         let mut stderr = Vec::new();
         assert_eq!(run(&args(refused), &mut stderr), FAILED, "{refused:?}");
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            "--delete-app-data takes no path; its only option is --keep-sandbox. Nothing \
+            "--delete-app-data takes no path; its only option is --sandbox-removed. Nothing \
              deleted.\n"
         );
     }
@@ -192,7 +195,8 @@ fn a_folder_link_in_the_data_folder_goes_as_a_link_and_its_target_survives() {
     world.data_dir("sandbox");
     world.data_file("store.sqlite");
     make::folder_link(&world.canary(), &world.data("sandbox/agent-tools"));
-    let (code, stderr) = world.delete(false);
+    // S15's removal ran, so `sandbox` goes too, its link as a link.
+    let (code, stderr) = world.delete(true);
     assert_eq!((code, stderr.as_str()), (DELETED, ""));
     world.assert_both_gone();
     world.assert_canary_whole();
@@ -286,7 +290,7 @@ fn a_known_folder_windows_cannot_give_refuses_and_nothing_is_deleted() {
     let code = walk::delete(
         &dirs,
         Mode {
-            keep_sandbox: false,
+            sandbox_removed: false,
         },
         &mut stderr,
     );
@@ -304,14 +308,15 @@ fn folders_never_made_are_already_deleted() {
 }
 
 #[test]
-fn keep_sandbox_keeps_the_sandbox_folder_whole_and_deletes_the_rest() {
+fn without_sandbox_removed_the_sandbox_folder_stays_whole_and_the_rest_goes() {
+    // S15's removal did not run or failed (or its tool is not there): its records stay.
     let world = World::new("dad-keep-sandbox");
     world.data_dir("sandbox/set-aside");
     world.data_file("sandbox/acl-ledger.json");
     world.data_file("store.sqlite");
     // A link inside the kept folder is not even looked at.
     make::folder_link(&world.canary(), &world.data("sandbox/agent-link"));
-    let (code, stderr) = world.delete(true);
+    let (code, stderr) = world.delete(false);
     assert_eq!((code, stderr.as_str()), (KEPT_SANDBOX, ""));
     assert!(exists(&world.data("sandbox/acl-ledger.json")));
     assert!(exists(&world.data("sandbox/set-aside")));
@@ -322,22 +327,48 @@ fn keep_sandbox_keeps_the_sandbox_folder_whole_and_deletes_the_rest() {
 }
 
 #[test]
+fn with_sandbox_removed_the_sandbox_folder_goes() {
+    let world = World::new("dad-sandbox-removed");
+    world.data_dir("sandbox/set-aside");
+    world.data_file("sandbox/acl-ledger.json");
+    world.data_file("store.sqlite");
+    assert_eq!(world.delete(true), (DELETED, String::new()));
+    world.assert_both_gone();
+}
+
+#[test]
+fn the_kept_folders_are_found_whatever_their_case() {
+    let world = World::new("dad-case");
+    world.data_dir("Sandbox/Set-Aside/20261105T101500");
+    world.data_file("Sandbox/Set-Aside/20261105T101500/brief.docx");
+    world.data_file("Sandbox/acl-ledger.json");
+    assert_eq!(world.delete(true), (KEPT_SET_ASIDE, String::new()));
+    assert!(exists(
+        &world.data("Sandbox/Set-Aside/20261105T101500/brief.docx")
+    ));
+    assert!(!exists(&world.data("Sandbox/acl-ledger.json")));
+    world.data_file("Sandbox/acl-ledger.json");
+    assert_eq!(world.delete(false), (KEPT_SANDBOX, String::new()));
+    assert!(exists(&world.data("Sandbox/acl-ledger.json")));
+}
+
+#[test]
 fn a_set_aside_holding_files_is_kept_and_everything_else_goes() {
     let world = World::new("dad-set-aside-full");
     world.data_dir("sandbox/set-aside/20261105T101500/.git");
     world.data_file("sandbox/set-aside/20261105T101500/.git/HEAD");
     world.data_file("sandbox/acl-ledger.json");
     world.data_file("store.sqlite");
-    let (code, stderr) = world.delete(false);
+    let (code, stderr) = world.delete(true);
     assert_eq!((code, stderr.as_str()), (KEPT_SET_ASIDE, ""));
     assert!(exists(
         &world.data("sandbox/set-aside/20261105T101500/.git/HEAD")
     ));
     assert!(!exists(&world.data("sandbox/acl-ledger.json")));
     assert!(!exists(&world.data("store.sqlite")));
-    // With --keep-sandbox the whole sandbox folder stays, the set-aside with it.
+    // Without --sandbox-removed the whole sandbox folder stays, the set-aside with it.
     world.data_file("sandbox/acl-ledger.json");
-    assert_eq!(world.delete(true), (KEPT_SANDBOX, String::new()));
+    assert_eq!(world.delete(false), (KEPT_SANDBOX, String::new()));
     assert!(exists(&world.data("sandbox/acl-ledger.json")));
 }
 
@@ -346,7 +377,7 @@ fn an_empty_set_aside_goes_with_the_rest() {
     let world = World::new("dad-set-aside-empty");
     world.data_dir("sandbox/set-aside");
     world.data_file("sandbox/acl-ledger.json");
-    assert_eq!(world.delete(false), (DELETED, String::new()));
+    assert_eq!(world.delete(true), (DELETED, String::new()));
     world.assert_both_gone();
 }
 
@@ -359,7 +390,7 @@ fn a_set_aside_reached_through_a_linked_sandbox_is_not_kept() {
         .scratch
         .file("outside/canary/set-aside/kept.txt", b"x");
     make::folder_link(&world.canary(), &world.data("sandbox"));
-    assert_eq!(world.delete(false), (DELETED, String::new()));
+    assert_eq!(world.delete(true), (DELETED, String::new()));
     world.assert_both_gone();
     world.assert_canary_whole();
     assert!(exists(&world.at("outside/canary/set-aside/kept.txt")));
@@ -383,14 +414,54 @@ fn what_cannot_be_deleted_is_reported_and_the_rest_still_goes() {
     let (code, stderr) = world.delete(false);
     make::set_mode(&locked, 0o755);
     assert_eq!(code, FAILED);
-    assert!(
-        stderr.contains("credentials-copy: could not delete it"),
-        "{stderr}"
-    );
+    // `agents` went to std's `remove_dir_all`, which stopped there: reported, not walked.
+    assert!(stderr.contains("agents: could not delete it"), "{stderr}");
     assert!(exists(
         &world.data("agents/claude/.claude/credentials-copy")
     ));
     assert!(!exists(&world.data("store.sqlite")));
     assert!(!exists(&world.data("logs")));
     assert!(!exists(&world.at(&format!("Roaming/{DATA}"))));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn a_kept_folder_is_the_answer_even_when_something_else_failed() {
+    // The uninstaller then names the kept folder, never the whole one with its records.
+    let world = World::new("dad-partial-kept");
+    let locked = world.data_dir("agents/claude/.claude");
+    world.data_file("agents/claude/.claude/credentials-copy");
+    world.data_dir("sandbox");
+    world.data_file("sandbox/acl-ledger.json");
+    make::set_mode(&locked, 0o555);
+    if make::can_write_in(&locked) {
+        make::set_mode(&locked, 0o755);
+        eprintln!("skipped: running as root, a mode cannot refuse the deletion");
+        return;
+    }
+    let (code, stderr) = world.delete(false);
+    make::set_mode(&locked, 0o755);
+    assert_eq!(code, KEPT_SANDBOX);
+    assert!(stderr.contains("could not delete it"), "{stderr}");
+    assert!(exists(&world.data("sandbox/acl-ledger.json")));
+}
+
+#[test]
+fn a_folder_is_pinned_only_when_it_is_a_real_folder() {
+    let world = World::new("dad-pin");
+    let real = world.data_dir("real");
+    let link = world.data("link");
+    make::folder_link(&world.canary(), &link);
+    let file = world.data_file("file");
+    assert!(ops::pin_folder(&real).is_ok());
+    let refused = ops::pin_folder(&link).err().unwrap();
+    assert!(refused.to_string().contains("reparse point"), "{refused}");
+    assert!(ops::pin_folder(&file).is_err());
+}
+
+#[test]
+fn the_folder_names_are_the_sandboxs() {
+    assert_eq!(walk::SANDBOX_DIR, "sandbox");
+    // TODO(#465): compare with clauseo_sandbox::windows::SET_ASIDE_DIR once it is exported.
+    assert_eq!(walk::SET_ASIDE_DIR, "set-aside");
 }

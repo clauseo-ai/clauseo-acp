@@ -1,9 +1,9 @@
 //! Windows only (CI's Windows job runs them; boxbox cannot): directory and file symbolic links
-//! beside the junctions the shared tests make, the read-only attribute, a locked file, and the
-//! sandbox folder's name held to S15's.
+//! beside the junctions the shared tests make, the read-only attribute, a locked file, and what a
+//! pinned folder holds still.
 
 use super::{DATA, World, exists, make};
-use crate::delete_app_data::{DELETED, FAILED};
+use crate::delete_app_data::{DELETED, FAILED, ops};
 
 #[test]
 fn a_directory_symbolic_link_goes_as_a_link_and_its_target_survives() {
@@ -62,18 +62,25 @@ fn a_locked_file_is_reported_and_the_rest_still_goes() {
     let (code, stderr) = world.delete(false);
     drop(lock);
     assert_eq!(code, FAILED);
-    assert!(stderr.contains("held.log: could not delete it"), "{stderr}");
+    // `agents` went to std's `remove_dir_all`, which stopped there: reported, not walked.
+    assert!(stderr.contains("agents: could not delete it"), "{stderr}");
     assert!(exists(&held));
-    assert!(!exists(&world.data("agents/claude/other.json")));
     assert!(!exists(&world.data("store.sqlite")));
     assert!(!exists(&world.data("logs")));
     assert!(!exists(&world.at(&format!("Roaming/{DATA}"))));
 }
 
 #[test]
-fn the_sandbox_folder_is_s15s() {
-    assert_eq!(
-        crate::delete_app_data::walk::SANDBOX_DIR,
-        clauseo_sandbox::windows::matters::SANDBOX_DIR
-    );
+fn a_pinned_folder_cannot_be_renamed_nor_can_the_folder_above_it() {
+    // What `ops::pin_folder` relies on: while the handle is held, neither the folder nor its
+    // parent can be moved away and replaced by a junction.
+    let world = World::new("dad-pinned");
+    let sandbox = world.data_dir("sandbox");
+    world.data_file("sandbox/acl-ledger.json");
+    let pinned = ops::pin_folder(&sandbox).unwrap();
+    assert!(make::rename(&sandbox, &world.data("moved")).is_err());
+    let root = world.at(&format!("Local/{DATA}"));
+    assert!(make::rename(&root, &world.at("Local/moved")).is_err());
+    drop(pinned);
+    make::rename(&sandbox, &world.data("moved")).unwrap();
 }

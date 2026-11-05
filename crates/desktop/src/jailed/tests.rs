@@ -135,10 +135,10 @@ fn the_guard_flag_anywhere_but_first_is_refused_when_sandboxed() {
 #[test]
 fn the_uninstallers_deletion_runs_with_its_arguments_outside_the_sandbox_only() {
     let probe = Probe::new(|| Ok(false));
-    let (launched, stderr, stages) = start(&["--delete-app-data", "--keep-sandbox"], &probe);
+    let (launched, stderr, stages) = start(&["--delete-app-data", "--sandbox-removed"], &probe);
     assert!(matches!(launched, Launched::Exit(3)), "{launched:?}");
     assert_eq!(stderr, "");
-    assert_eq!(stages.deletes, [vec![OsString::from("--keep-sandbox")]]);
+    assert_eq!(stages.deletes, [vec![OsString::from("--sandbox-removed")]]);
     assert_eq!((stages.apps, stages.guards.len()), (0, 0));
     assert_eq!(probe.asked.get(), 1);
 

@@ -58,6 +58,12 @@ pub(super) fn lock(file: &Path) -> std::fs::File {
         .unwrap()
 }
 
+/// Renames `from` to `to`.
+#[cfg(windows)]
+pub(super) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// Sets the read-only attribute of `path`.
 #[cfg(windows)]
 pub(super) fn set_read_only(path: &Path) {

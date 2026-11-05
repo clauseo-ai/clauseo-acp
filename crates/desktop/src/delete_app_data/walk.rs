@@ -1,5 +1,6 @@
-//! The deletion itself: the two folders checked, then each walked without following a link
-//! (pass 1) and removed (pass 2). See the contract in `delete_app_data.rs`.
+//! The deletion itself: the two folders checked, then each emptied a level at a time, every
+//! entry removed by std (a link as a link, a folder with `remove_dir_all`), descending by hand
+//! only toward the folder that stays. See the contract in `delete_app_data.rs`.
 
 use std::ffi::OsStr;
 use std::fs::Metadata;
@@ -10,10 +11,11 @@ use clauseo_settings::{IDENTIFIER, KnownFolder, PlatformDirs};
 
 use super::{DELETED, FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
 
-/// The sandbox's folder under the local data folder (`clauseo_sandbox::SANDBOX_DIR`, which the
-/// desktop crate has only on Windows; a test holds the two equal there).
-pub(super) const SANDBOX_DIR: &str = "sandbox";
+/// The sandbox's folder under the local data folder: S15's records (its ledger, the matter
+/// SIDs), which its `--remove` needs.
+pub(super) const SANDBOX_DIR: &str = clauseo_sandbox::windows::matters::SANDBOX_DIR;
 /// Where tier B moves the lawyer's protected names aside, under [`SANDBOX_DIR`].
+// TODO(#465): use clauseo_sandbox::windows::SET_ASIDE_DIR
 pub(super) const SET_ASIDE_DIR: &str = "set-aside";
 
 /// Deletes both data folders as `mode` says, the known folders from `dirs`; answers the exit
@@ -51,24 +53,27 @@ pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write
     let mut report = Report::new(stderr);
     let mut kept = None;
     for (local, root) in present {
-        let keep = if local {
-            kept_folder(&root, mode)
-        } else {
-            None
+        // The way down to the folder that stays, in the local folder only: `sandbox` whole
+        // unless S15's removal ran, else a `set-aside` that holds anything.
+        let toward: &[&str] = match (local, mode.sandbox_removed) {
+            (false, _) => &[],
+            (true, false) => &[SANDBOX_DIR],
+            (true, true) => &[SANDBOX_DIR, SET_ASIDE_DIR],
         };
-        unlink_links(&root, keep.as_deref(), &mut report);
-        remove_rest(&root, keep.as_deref(), &mut report);
-        if local {
-            kept = keep.filter(|keep| std::fs::symlink_metadata(keep).is_ok());
+        if let Ok(stays) = empty_folder(&root, toward, &mut report) {
+            if stays.is_none() {
+                remove_emptied(&root, &mut report);
+            }
+            if local {
+                kept = stays;
+            }
         }
     }
-    if report.failures > 0 {
-        return FAILED;
-    }
     match kept {
-        None => DELETED,
-        Some(keep) if keep.ends_with(SET_ASIDE_DIR) => KEPT_SET_ASIDE,
+        Some(stays) if named(&stays, SET_ASIDE_DIR) => KEPT_SET_ASIDE,
         Some(_) => KEPT_SANDBOX,
+        None if report.failures > 0 => FAILED,
+        None => DELETED,
     }
 }
 
@@ -107,82 +112,91 @@ pub(super) fn check(known: &Path, root: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-/// The folder under the local data folder `root` that stays: `sandbox` with `--keep-sandbox`
-/// when it exists, else `sandbox\set-aside` when it holds anything (or is anything but a real,
-/// empty folder: what it is is not looked into).
-fn kept_folder(root: &Path, mode: Mode) -> Option<PathBuf> {
-    let sandbox = root.join(SANDBOX_DIR);
-    let sandbox_meta = std::fs::symlink_metadata(&sandbox).ok()?;
-    if mode.keep_sandbox {
-        return Some(sandbox);
-    }
-    // A `sandbox` that is a link goes as a link, and nothing through it is looked at.
-    if is_link(&sandbox_meta) || !sandbox_meta.is_dir() {
-        return None;
-    }
-    let set_aside = sandbox.join(SET_ASIDE_DIR);
-    let meta = std::fs::symlink_metadata(&set_aside).ok()?;
-    let empty = !is_link(&meta)
-        && meta.is_dir()
-        && std::fs::read_dir(&set_aside).is_ok_and(|mut entries| entries.next().is_none());
-    (!empty).then_some(set_aside)
-}
-
-/// Pass 1: every reparse point under `root` (but `keep`) removed as a link and never entered;
-/// read-only entries made writable. Iterative, so no depth overflows the stack.
-fn unlink_links(root: &Path, keep: Option<&Path>, report: &mut Report<'_>) {
-    ops::clear_read_only(root, report);
-    let mut folders = vec![root.to_owned()];
-    while let Some(folder) = folders.pop() {
-        for (path, meta) in entries(&folder, report) {
-            if Some(path.as_path()) == keep {
+/// Removes everything in `folder` but the folder that stays, which `toward` names below it
+/// (`[]` for none). `folder` is first held open by handle, which also says it is no reparse
+/// point (`ops::pin_folder`); while it is held it cannot be renamed, deleted or replaced. Each
+/// entry not on the way down is removed by std, never entered here: a reparse point as a link,
+/// a folder with `remove_dir_all` (which opens nothing through a link), a file with
+/// `remove_file`. Only the folder on the way down is entered, the same way. Answers the folder
+/// that stays, if one does; `Err` when `folder` was not entered (reported).
+fn empty_folder(
+    folder: &Path,
+    toward: &[&str],
+    report: &mut Report<'_>,
+) -> Result<Option<PathBuf>, ()> {
+    // Held until the folder's entries are done, then closed.
+    let _pinned = match ops::pin_folder(folder) {
+        Ok(pinned) => pinned,
+        Err(error) => {
+            report.fail(folder, &error);
+            return Err(());
+        }
+    };
+    let mut stays = None;
+    for (path, meta) in entries(folder, report) {
+        // Windows file names ignore case: `Sandbox` is `sandbox`. What stays is the entry as
+        // listed.
+        let next = toward.split_first().filter(|(name, _)| named(&path, name));
+        if let Some((name, rest)) = next {
+            if rest.is_empty() && stays_whole(&path, &meta, name) {
+                stays = Some(path);
                 continue;
             }
-            if is_link(&meta) {
-                report.check(&path, ops::remove_link(&path, &meta));
-            } else {
-                ops::clear_read_only_meta(&path, &meta, report);
-                if meta.is_dir() {
-                    folders.push(path);
+            if !rest.is_empty() && !is_link(&meta) && meta.is_dir() {
+                if let Ok(below) = empty_folder(&path, rest, report) {
+                    if below.is_none() {
+                        remove_emptied(&path, report);
+                    }
+                    stays = below.or(stays);
                 }
-            }
-        }
-    }
-}
-
-/// Pass 2: `root` removed with std's `remove_dir_all`. When `keep` is under it, or something
-/// will not go, its folders are taken a level at a time: each child that is no folder removed
-/// alone, each folder by `remove_dir_all` again, a link as a link; then the emptied folders,
-/// deepest first, but never `keep` or a folder above it.
-fn remove_rest(root: &Path, keep: Option<&Path>, report: &mut Report<'_>) {
-    if keep.is_none() && ops::remove_dir_all(root).is_ok() {
-        return;
-    }
-    let above_keep = |path: &Path| keep.is_some_and(|keep| keep.starts_with(path));
-    let mut opened = Vec::new();
-    let mut folders = vec![root.to_owned()];
-    while let Some(folder) = folders.pop() {
-        for (path, meta) in entries(&folder, report) {
-            if Some(path.as_path()) == keep {
                 continue;
             }
-            if is_link(&meta) {
-                report.check(&path, ops::remove_link(&path, &meta));
-            } else if !meta.is_dir() {
-                report.check(&path, ops::remove_file(&path));
-            } else if above_keep(&path) || ops::remove_dir_all(&path).is_err() {
-                folders.push(path);
-            }
+            // A link, a file, or an empty `set-aside`: removed like any other entry.
         }
-        opened.push(folder);
+        remove_entry(&path, &meta, report);
     }
-    for folder in opened.iter().rev().filter(|folder| !above_keep(folder)) {
-        if let Err(error) = ops::remove_dir(folder) {
-            // A folder still holding something that failed is already reported.
-            let empty = std::fs::read_dir(folder).is_ok_and(|mut left| left.next().is_none());
-            if empty {
-                report.fail(folder, &error);
-            }
+    Ok(stays)
+}
+
+/// Whether `path`'s last name is `name`, ignoring case as Windows does.
+fn named(path: &Path, name: &str) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|listed| listed.eq_ignore_ascii_case(name))
+}
+
+/// Whether the entry at the end of the way down stays as it is: `sandbox` always (whatever it
+/// is, it is not looked into), `set-aside` unless it is a real, empty folder.
+fn stays_whole(path: &Path, meta: &Metadata, name: &str) -> bool {
+    if !name.eq_ignore_ascii_case(SET_ASIDE_DIR) {
+        return true;
+    }
+    let empty = !is_link(meta)
+        && meta.is_dir()
+        && std::fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none());
+    !empty
+}
+
+/// Removes one entry by std: a reparse point as a link, a folder with `remove_dir_all`, a file
+/// with `remove_file`. Whatever fails is reported, and nothing below it is tried by path.
+fn remove_entry(path: &Path, meta: &Metadata, report: &mut Report<'_>) {
+    let removed = if is_link(meta) {
+        ops::remove_link(path, meta)
+    } else if meta.is_dir() {
+        ops::remove_dir_all(path)
+    } else {
+        ops::remove_file(path)
+    };
+    report.check(path, removed);
+}
+
+/// Removes the folder `folder`, emptied by [`empty_folder`], with std's `remove_dir_all` (by
+/// handle, read-only included). When something is left in it, that was already reported.
+fn remove_emptied(folder: &Path, report: &mut Report<'_>) {
+    if let Err(error) = ops::remove_dir_all(folder) {
+        let empty = std::fs::read_dir(folder).is_ok_and(|mut left| left.next().is_none());
+        if empty {
+            report.fail(folder, &error);
         }
     }
 }
@@ -217,7 +231,7 @@ fn entries(folder: &Path, report: &mut Report<'_>) -> Vec<(PathBuf, Metadata)> {
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 #[cfg(windows)]
-const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+pub(super) const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 /// Whether `meta` (from `symlink_metadata`) is a reparse point of any kind: a junction, a
 /// symbolic link to a folder or a file, a mount point.
@@ -262,11 +276,5 @@ impl<'a> Report<'a> {
             Err(error) if error.kind() != io::ErrorKind::NotFound => self.fail(path, &error),
             _ => {}
         }
-    }
-
-    /// Writes a line that is not a failure.
-    #[cfg(windows)]
-    pub(super) fn note(&mut self, line: &str) {
-        say(self.stderr, line);
     }
 }
