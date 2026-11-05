@@ -141,6 +141,7 @@
 mod approval;
 mod browser_install;
 mod command;
+mod connectors;
 mod content;
 mod details;
 mod envelope;
@@ -199,8 +200,12 @@ wire_types! {
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
     command::{
-        CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
-        RefreshWhy, RestoreRequest,
+        CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
+        HostCommand, MatterSource, RefreshWhy, RestoreRequest,
+    },
+    connectors::{
+        Balance, ConnectorStatus, ConnectorView, ConnectorsState, DaySpendView, PackView,
+        RecentSpend, RedactedString,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     details::{ClientName, Date, MatterStatus, PackId, PackList},
@@ -265,7 +270,7 @@ wire_types! {
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
     title::{Title},
-    tool::{PageVia, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
+    tool::{PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
@@ -284,6 +289,7 @@ wire_types! {
 // Re-exports that are not wire types: constants, functions, and types that never cross the
 // boundary.
 pub use command::{
+    MAX_CONNECTOR_ID_BYTES,
     MAX_DAY_START_SKEW_MS,
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
@@ -297,6 +303,8 @@ pub use command::{
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
+// The text a `RedactedString` encodes and prints as.
+pub use connectors::REDACTED_TEXT;
 // How `UpdateMatter` changes an optional detail; its fields export as the value's type or null.
 pub use details::FieldChange;
 // The most ids a matter's skill packs hold: a constant, so outside `wire_types!`.
@@ -319,8 +327,8 @@ pub use setup::{MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BY
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 pub use web::{
-    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, REDACTED,
-    logged_url,
+    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_SEARCH_TOOL_CHARS, MAX_URL_CHARS,
+    MAX_WEB_TITLE_CHARS, REDACTED, logged_url,
 };
 #[cfg(feature = "specta")]
 pub use wire::{WireFormat, known_kinds_typescript};

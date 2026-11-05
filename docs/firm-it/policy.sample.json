@@ -29,7 +29,8 @@
   },
   "tools": {
     "web_search": true,
-    "browser": false
+    "browser": false,
+    "connectors": false
   },
   "privacy": {
     "counts": false,

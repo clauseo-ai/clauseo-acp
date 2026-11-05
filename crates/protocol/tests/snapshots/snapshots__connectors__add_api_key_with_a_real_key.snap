@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: command
+---
+{
+  "connector": {
+    "add_api_key": {
+      "id": "case-law",
+      "key": "[redacted]"
+    }
+  }
+}

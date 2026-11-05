@@ -172,7 +172,7 @@ pub struct McpServerLaunch {
     pub enabled: bool,
 }
 
-/// The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that
+/// The `tools` section: Clauseo's own tools. Every key is a security key: a policy source that
 /// cannot be read, or a policy value that does not type, locks each `false`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -182,6 +182,9 @@ pub struct ToolsSettings {
     /// Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on
     /// Windows until G17 passes.
     pub browser: bool,
+    /// Whether data connectors (R24's paid case-law connector) may run. On by default, but
+    /// nothing runs until the lawyer adds a connector. A firm turns every connector off here.
+    pub connectors: bool,
 }
 
 impl Default for ToolsSettings {
@@ -189,6 +192,7 @@ impl Default for ToolsSettings {
         ToolsSettings {
             web_search: true,
             browser: cfg!(target_os = "macos"),
+            connectors: true,
         }
     }
 }

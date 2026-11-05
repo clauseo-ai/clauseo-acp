@@ -347,17 +347,31 @@ fn the_corpus_holds_every_variant_of_every_open_enum() {
 }
 
 /// The variants written as a missing field, never as a value, so no value in the corpus holds
-/// them: `Delivery::Queue` (a `user_message` without `delivery`).
+/// them: `Delivery::Queue` (a `user_message` without `delivery`) and `SearchSource::Web` (a
+/// `web_search_recorded` without `source`, R24).
 /// [`a_variant_written_as_absent_decodes_from_an_entry_without_its_field`] checks each instead.
-const WRITTEN_AS_ABSENT: [(&str, &str); 1] = [("Delivery", "Queue")];
+const WRITTEN_AS_ABSENT: [(&str, &str); 2] = [("Delivery", "Queue"), ("SearchSource", "Web")];
 
 /// `Delivery::Queue` is written as no `delivery` field, and the corpus holds a `user_message`
-/// without one that decodes to it.
+/// without one that decodes to it. `SearchSource::Web` likewise: a `web_search_recorded` frozen
+/// before R24 has no `source` or `tool` and decodes as a web search with no tool.
 #[test]
 fn a_variant_written_as_absent_decodes_from_an_entry_without_its_field() {
     let mut queued = 0;
+    let mut web = 0;
     for corpus in every_corpus() {
         for entry in json_entries(&corpus) {
+            if let DomainEvent::WebSearchRecorded(search) = &entry.event {
+                let written = serde_json::to_value(&entry.event).unwrap();
+                let has_field = written["web_search_recorded"].get("source").is_some();
+                assert_eq!(
+                    has_field,
+                    search.source != p::SearchSource::Web,
+                    "{written}"
+                );
+                assert_eq!(search.tool.is_some(), has_field, "{written}");
+                web += usize::from(!has_field);
+            }
             if let DomainEvent::UserMessage(message) = &entry.event {
                 let written = serde_json::to_value(&entry.event).unwrap();
                 let has_field = written["user_message"].get("delivery").is_some();
@@ -373,6 +387,10 @@ fn a_variant_written_as_absent_decodes_from_an_entry_without_its_field() {
     assert!(
         queued > 0,
         "the corpus holds no user_message without delivery"
+    );
+    assert!(
+        web > 0,
+        "the corpus holds no web_search_recorded without source"
     );
 }
 

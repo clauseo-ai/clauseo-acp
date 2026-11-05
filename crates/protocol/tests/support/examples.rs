@@ -219,7 +219,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
         .into(),
     ]
     .into_iter()
-    .chain(later::failures())
+    .chain(later::failures_then_case_law())
     .chain(setup::turns())
     .chain(later::notices())
     .collect()

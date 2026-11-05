@@ -14,9 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, BrowserInstallState, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry,
-    LimitsView, MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId,
-    ThreadsChanged, UpdateView, ViewEntry, ViewEpoch,
+    AccountLimits, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope, FolderScanned,
+    HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId, Seq,
+    SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -164,6 +164,22 @@ pub enum HostEvent {
     /// The updater's state changed: the whole view after the change (decision record 0037).
     /// App-wide, never part of a stream: it reaches app subscribers only.
     UpdateChanged(UpdateView),
+    /// The connectors' state changed: the whole state after the change (R24). App-wide, never
+    /// logged and in no stream: it reaches app subscribers only, and every app catch-up carries
+    /// the latest one, as for `SettingsChanged`.
+    ConnectorsChanged(ConnectorsState),
+    /// A turn's web searches looked like Indian case law and the case-law connector is live but
+    /// not added (R24): the app offers it under the answer. Once per matter, never after the
+    /// lawyer dismissed it. App-wide and never logged: an offer, not part of the record, so a
+    /// reopened thread does not show it again.
+    CaseLawHint {
+        /// The matter.
+        matter: MatterId,
+        /// The thread.
+        thread: ThreadId,
+        /// The turn whose searches fired it.
+        turn: TurnId,
+    },
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

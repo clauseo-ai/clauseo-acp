@@ -505,7 +505,8 @@ fn whole(event: &HostEvent) -> bool {
         // The update view is whole too (0037), though nothing publishes it yet.
         HostEvent::SettingsChanged(_)
         | HostEvent::FolderScanned(_)
-        | HostEvent::UpdateChanged(_) => true,
+        | HostEvent::UpdateChanged(_)
+        | HostEvent::ConnectorsChanged(_) => true,
         HostEvent::MattersChanged(changed) => changed.all,
         HostEvent::ThreadsChanged(changed) => changed.all,
         HostEvent::Patches(_)
@@ -513,7 +514,8 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::CaughtUp { .. }
         | HostEvent::AccountLimitsChanged(_)
         | HostEvent::LimitsViewChanged(_)
-        | HostEvent::BrowserInstall { .. } => false,
+        | HostEvent::BrowserInstall { .. }
+        | HostEvent::CaseLawHint { .. } => false,
     }
 }
 

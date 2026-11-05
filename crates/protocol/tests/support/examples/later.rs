@@ -1,10 +1,13 @@
 //! `TurnFailed` examples for codes added after the 0048 install and sign-in set, which
-//! `later_variants` in the parent module chains on before them, and the host notices with a
-//! kind, which it chains on last.
+//! `later_variants` in the parent module chains on before them, R24's case-law records, and the
+//! host notices with a kind, which it chains on last.
 
-use clauseo_protocol::{DomainEvent, ErrorCode, Notice, NoticeKind, NoticeLevel, TurnFailed};
+use clauseo_protocol::{
+    AgentId, DomainEvent, ErrorCode, Notice, NoticeKind, NoticeLevel, PageVia, PageVisited,
+    SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+};
 
-use crate::fixtures::turn_id;
+use crate::fixtures::{tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -54,6 +57,37 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
             kind: Some(NoticeKind::ContextNotRestored),
         }
+        .into(),
+    ]
+}
+
+/// [`failures`], then [`case_law`], as the corpus first saw them.
+pub(super) fn failures_then_case_law() -> Vec<DomainEvent> {
+    failures().into_iter().chain(case_law()).collect()
+}
+
+/// R24: a document read through the case-law connector, and the connector's search.
+fn case_law() -> Vec<DomainEvent> {
+    let link = "https://indiankanoon.org/doc/1234567/";
+    vec![
+        PageVisited::new(
+            turn_id(3),
+            tool_call_id(4),
+            link,
+            Some("A v. B".to_owned()),
+            PageVia::CaseLaw,
+        )
+        .into(),
+        Box::new(
+            WebSearchRecorded::new(
+                turn_id(3),
+                tool_call_id(4),
+                AgentId::new("claude-acp").unwrap(),
+                "section 138 NI Act; dishonour of cheque",
+                vec![WebResult::new("A v. B", link)],
+            )
+            .with_source(SearchSource::CaseLaw, Some("search_law")),
+        )
         .into(),
     ]
 }

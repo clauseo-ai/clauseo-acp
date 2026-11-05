@@ -1,5 +1,5 @@
-//! `tools.web_search` and `tools.browser`: the lawyer's switches, the firm's lock on each, and
-//! the fail-closed rule for both security keys (R21).
+//! `tools.web_search`, `tools.browser` and `tools.connectors` (R24): the lawyer's switches, the
+//! firm's lock on each, and the fail-closed rule for every one of these security keys (R21).
 
 use super::Effective;
 use crate::error::Error;
@@ -8,7 +8,7 @@ use crate::schema::ToolsSettings;
 use crate::testing::{FakeSource, MemFiles, abs, abs_json, locations, policy, user};
 use crate::warning::{Origin, WarningKind};
 
-const TOOLS: [&str; 2] = ["tools.web_search", "tools.browser"];
+const TOOLS: [&str; 3] = ["tools.web_search", "tools.browser", "tools.connectors"];
 
 /// The value of the tools key `key`.
 fn tool(effective: &Effective, key: &str) -> bool {
@@ -16,6 +16,7 @@ fn tool(effective: &Effective, key: &str) -> bool {
     match key {
         "tools.web_search" => tools.web_search,
         "tools.browser" => tools.browser,
+        "tools.connectors" => tools.connectors,
         other => panic!("{other}"),
     }
 }
@@ -23,7 +24,7 @@ fn tool(effective: &Effective, key: &str) -> bool {
 /// `settings.json` with both tools on and one MCP server on.
 fn all_on() -> MemFiles {
     user(&format!(
-        r#"{{"tools": {{"web_search": true, "browser": true}},
+        r#"{{"tools": {{"web_search": true, "browser": true, "connectors": true}},
             "mcp": {{"servers": {{"mine": {{"command": "{}", "enabled": true}}}}}}}}"#,
         abs_json("bin/mine")
     ))
@@ -104,6 +105,7 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "skills.curated",
             "skills.extra",
             "tools.browser",
+            "tools.connectors",
             "tools.web_search",
             "update.mode"
         ]
@@ -133,6 +135,7 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "mcp.servers",
             "tools.web_search",
             "tools.browser",
+            "tools.connectors",
             "privacy.counts",
             "privacy.crash_reports",
             "update.mode",
@@ -182,7 +185,7 @@ fn a_policy_value_of_the_wrong_type_locks_the_browser_off() {
 }
 
 #[test]
-fn a_tools_section_policy_cannot_read_locks_both_off() {
+fn a_tools_section_policy_cannot_read_locks_every_tool_off() {
     for text in [
         r#"{"tools": "off"}"#,
         r#"{"tools": {"brwser": true}}"#,
@@ -204,51 +207,47 @@ fn a_tools_section_policy_cannot_read_locks_both_off() {
 /// either spares a sibling the policy sets validly by its exact name, which keeps its value.
 #[test]
 fn a_misnamed_tools_key_refuses_only_what_it_could_stand_for() {
-    // (policy, web_search's value, browser's value, the locked keys)
-    let cases: [(&str, bool, bool, &[&str]); 6] = [
+    const WEB: &str = "tools.web_search";
+    const BROWSER: &str = "tools.browser";
+    const CONNECTORS: &str = "tools.connectors";
+    // (policy, web_search's, browser's and connectors' values, the locked keys)
+    let cases: [(&str, [bool; 3], &[&str]); 6] = [
         (
             r#"{"tools": {"websearch": true}}"#,
-            false,
-            true,
-            &["tools.web_search"],
+            [false, true, true],
+            &[WEB],
         ),
         (
             r#"{"tools": {"Browser": true}}"#,
-            true,
-            false,
-            &["tools.browser"],
+            [true, false, true],
+            &[BROWSER],
         ),
         (
             r#"{"tools": {"Web-Search": 1}}"#,
-            false,
-            true,
-            &["tools.web_search"],
+            [false, true, true],
+            &[WEB],
         ),
         (
             r#"{"tools": {"web_search": true, "brwser": true}}"#,
-            true,
-            false,
-            &["tools.web_search", "tools.browser"],
+            [true, false, false],
+            &[WEB, BROWSER, CONNECTORS],
         ),
         (
             r#"{"tools": {"browser": true, "brwser": false}}"#,
-            false,
-            true,
-            &["tools.web_search", "tools.browser"],
+            [false, true, false],
+            &[WEB, BROWSER, CONNECTORS],
         ),
         (
             r#"{"tools": {"web_search": true, "websearch": false}}"#,
-            false,
-            true,
-            &["tools.web_search"],
+            [false, true, true],
+            &[WEB],
         ),
     ];
-    for (text, web_search, browser, locked) in cases {
+    for (text, values, locked) in cases {
         let firm = policy("firm", text);
         let effective = Effective::load(&locations(), &all_on(), &[&firm]);
-        assert_eq!(tool(&effective, "tools.web_search"), web_search, "{text}");
-        assert_eq!(tool(&effective, "tools.browser"), browser, "{text}");
-        for key in TOOLS {
+        for (key, value) in TOOLS.into_iter().zip(values) {
+            assert_eq!(tool(&effective, key), value, "{text}: {key}");
             assert_eq!(
                 effective.is_locked(key),
                 locked.contains(&key),
@@ -264,7 +263,8 @@ fn each_tools_key_set_in_policy_locks_it_alone() {
         let name = key.strip_prefix("tools.").unwrap();
         for value in [true, false] {
             let firm = policy("firm", format!(r#"{{"tools": {{"{name}": {value}}}}}"#));
-            let files = user(r#"{"tools": {"web_search": false, "browser": false}}"#);
+            let files =
+                user(r#"{"tools": {"web_search": false, "browser": false, "connectors": false}}"#);
             let flipped = Effective::load(&locations(), &files, &[&firm]);
             let effective = Effective::load(&locations(), &all_on(), &[&firm]);
             for effective in [&flipped, &effective] {
@@ -277,6 +277,68 @@ fn each_tools_key_set_in_policy_locks_it_alone() {
             }
             assert_eq!(effective.warnings(), []);
         }
+    }
+}
+
+// R24's switch: on by default, a policy `false` locks it off, and an unreadable policy source or a
+// policy value of the wrong type locks it `false`, like `tools.web_search`.
+#[test]
+fn the_connectors_switch_is_on_by_default_and_unlocked() {
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[]);
+    assert!(effective.settings().tools.connectors);
+    assert!(!effective.is_locked("tools.connectors"));
+}
+
+#[test]
+fn a_policy_false_locks_the_connectors_off() {
+    let firm = policy("firm", r#"{"tools": {"connectors": false}}"#);
+    let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+    assert!(!effective.settings().tools.connectors);
+    assert!(effective.is_locked("tools.connectors"));
+    assert!(effective.settings().tools.web_search && effective.settings().tools.browser);
+    assert_eq!(effective.warnings(), []);
+}
+
+#[test]
+fn an_unreadable_policy_source_locks_the_connectors_off() {
+    let effective = Effective::load(&locations(), &all_on(), &[&unreadable()]);
+    assert!(!effective.settings().tools.connectors);
+    assert!(effective.is_locked("tools.connectors"));
+}
+
+#[test]
+fn a_policy_value_of_the_wrong_type_locks_the_connectors_off() {
+    for value in [r#""yes""#, "1", "null", "{}", "[]"] {
+        let firm = policy("firm", format!(r#"{{"tools": {{"connectors": {value}}}}}"#));
+        let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+        assert!(!effective.settings().tools.connectors, "{value}");
+        assert!(effective.is_locked("tools.connectors"), "{value}");
+        assert!(effective.settings().tools.web_search, "{value}");
+        assert!(!effective.is_locked("tools.web_search"), "{value}");
+        assert!(
+            matches!(
+                effective.warnings(),
+                [w] if matches!(&w.kind, WarningKind::InvalidValue { key, .. } if key == "tools.connectors")
+            ),
+            "{value}"
+        );
+    }
+}
+
+/// A misnamed policy key that could stand for `tools.connectors` locks it off, as the rule derived
+/// from `SECURITY_KEYS` does for every security key.
+#[test]
+fn a_misnamed_connectors_key_locks_the_connectors_off() {
+    for text in [
+        r#"{"tools": {"Connectors": true}}"#,
+        r#"{"tools": {"connector": true}}"#,
+        r#"{"tool": {"connectors": true}}"#,
+        r#"{"tools.connector": true}"#,
+    ] {
+        let firm = policy("firm", text);
+        let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+        assert!(!effective.settings().tools.connectors, "{text}");
+        assert!(effective.is_locked("tools.connectors"), "{text}");
     }
 }
 
@@ -328,5 +390,90 @@ fn the_reserved_mcp_server_name_is_dropped_from_policy_and_the_list_still_locks(
     assert!(matches!(
         effective.warnings(),
         [w] if matches!(&w.kind, WarningKind::InvalidValue { key, .. } if key == "mcp.servers.browser")
+    ));
+}
+
+/// R24 (decision D7): `case-law` is Clauseo's case-law connector's server. A lawyer's entry of that
+/// name in `settings.json` is dropped with a warning, so it is never launched in its place.
+#[test]
+fn a_case_law_server_in_settings_json_is_dropped_with_a_warning() {
+    let text = format!(
+        r#"{{"mcp": {{"servers": {{
+            "case-law": {{"command": "{b}", "enabled": true}},
+            "clauseo": {{"command": "{c}", "enabled": true}}
+        }}}}}}"#,
+        b = abs_json("bin/case-law"),
+        c = abs_json("bin/clauseo"),
+    );
+    let effective = Effective::load(&locations(), &user(&text), &[]);
+    assert_eq!(
+        effective.mcp_servers().keys().collect::<Vec<_>>(),
+        ["clauseo"]
+    );
+    assert!(matches!(
+        effective.warnings(),
+        [w] if matches!(&w.kind, WarningKind::InvalidValue { key, message }
+            if key == "mcp.servers.case-law" && message.contains("reserved"))
+    ));
+}
+
+/// A firm's policy entry named `case-law` (in any case) is dropped with a warning, so no launch
+/// ever carries a firm's server under the name Claude's case-law pre-allow names; the rest of the
+/// policy list stands and still locks.
+#[test]
+fn a_case_law_server_in_policy_is_dropped_with_a_warning_and_never_enabled() {
+    let text = format!(
+        r#"{{"mcp": {{"servers": {{
+            "Case-Law": {{"command": "{b}", "enabled": true}},
+            "clauseo": {{"command": "{c}", "enabled": true}}
+        }}}}}}"#,
+        b = abs_json("bin/case-law"),
+        c = abs_json("bin/clauseo"),
+    );
+    let firm = policy("firm", text);
+    let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+    let enabled: Vec<&str> = effective
+        .enabled_mcp_servers()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(enabled, ["clauseo"]);
+    assert!(
+        effective
+            .mcp_servers()
+            .keys()
+            .all(|name| !name.eq_ignore_ascii_case("case-law"))
+    );
+    assert!(effective.is_locked("mcp.servers"));
+    assert!(matches!(
+        effective.warnings(),
+        [w] if matches!(&w.kind, WarningKind::InvalidValue { key, message }
+            if key == "mcp.servers.Case-Law" && message.contains("case-law connector"))
+    ));
+}
+
+/// A policy entry whose name holds `__` (`case-law__x`, which Claude would split into the
+/// reserved `case-law`) is dropped with a warning, as from `settings.json`; the rest stands.
+#[test]
+fn a_double_underscore_server_in_policy_is_dropped_with_a_warning() {
+    let text = format!(
+        r#"{{"mcp": {{"servers": {{
+            "case-law__x": {{"command": "{b}", "enabled": true}},
+            "clauseo": {{"command": "{c}", "enabled": true}}
+        }}}}}}"#,
+        b = abs_json("bin/case-law"),
+        c = abs_json("bin/clauseo"),
+    );
+    let firm = policy("firm", text);
+    let effective = Effective::load(&locations(), &all_on(), &[&firm]);
+    assert_eq!(
+        effective.mcp_servers().keys().collect::<Vec<_>>(),
+        ["clauseo"]
+    );
+    assert!(effective.is_locked("mcp.servers"));
+    assert!(matches!(
+        effective.warnings(),
+        [w] if matches!(&w.kind, WarningKind::InvalidValue { key, message }
+            if key == "mcp.servers.case-law__x"
+                && message.ends_with("not allowed in server names (case-law__x)"))
     ));
 }

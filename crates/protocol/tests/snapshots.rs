@@ -259,6 +259,10 @@ mod host_command;
 #[path = "snapshots/update.rs"]
 mod update;
 
+#[cfg(test)]
+#[path = "snapshots/connectors.rs"]
+mod connectors;
+
 mod view_patch {
     use super::*;
 
@@ -410,6 +414,14 @@ mod host_event {
             },
         };
         UpdateChanged => update_changed: HostEvent::UpdateChanged(super::update::update_view());
+        ConnectorsChanged => connectors_changed: HostEvent::ConnectorsChanged(
+            super::connectors::connectors_state(),
+        );
+        CaseLawHint => case_law_hint: HostEvent::CaseLawHint {
+            matter: matter_id(1),
+            thread: thread_id(2),
+            turn: turn_id(3),
+        };
     } }
 }
 

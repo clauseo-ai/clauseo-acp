@@ -61,7 +61,7 @@ use reset::reset;
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 19] = [
+pub(crate) const KEYS: [(&str, Kind); 20] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -72,6 +72,7 @@ pub(crate) const KEYS: [(&str, Kind); 19] = [
     ("ui.motion", Kind::String),
     ("tools.web_search", Kind::Boolean),
     ("tools.browser", Kind::Boolean),
+    ("tools.connectors", Kind::Boolean),
     ("privacy.counts", Kind::Boolean),
     ("privacy.crash_reports", Kind::Boolean),
     ("update.mode", Kind::String),
@@ -86,15 +87,17 @@ pub(crate) const KEYS: [(&str, Kind); 19] = [
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
 /// fetches and runs. A policy source that cannot be read locks each off with [`refuse`] (ADR
 /// 0009, R21; the `privacy` keys, decision record 0036; `update.mode` at `none`, R23): its value
-/// there is unknown, and the user's must not stand in. Off is not always the default: both
+/// there is unknown, and the user's must not stand in. Off is not always the default: the
 /// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
-/// default would fail open. `plans.` stands for every `plans.<id>` (decision record 0048):
+/// default would fail open (`tools.connectors` lets a connector spend the lawyer's credits,
+/// R24). `plans.` stands for every `plans.<id>` (decision record 0048):
 /// locked, no plan stands, so no endpoint the lawyer chose does. The three `skills` keys lock
 /// at no extra pack, none from a list, and no script (decision record 0040).
-pub(crate) const SECURITY_KEYS: [&str; 12] = [
+pub(crate) const SECURITY_KEYS: [&str; 13] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
+    "tools.connectors",
     "privacy.counts",
     "privacy.crash_reports",
     "update.mode",
@@ -116,10 +119,24 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 /// `skills.curated` is empty and admits nothing.
 pub(crate) const POLICY_ONLY_KEYS: [&str; 1] = ["skills.curated"];
 
-/// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
-/// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
-/// own entry under it.
-pub const RESERVED_MCP_SERVER: &str = "browser";
+/// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
+/// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of
+/// these names, in any case, in `settings.json` or a policy, is left out with a warning; the host
+/// adds its own entry under it, so a firm's or the lawyer's server can never take its place or
+/// inherit what Clauseo grants its own (Claude's pre-allow). Since Claude splits a tool name
+/// `mcp__<server>__<tool>` at `__`, no server name may hold `__` at all ([`mcp_servers`]).
+pub const RESERVED_MCP_SERVERS: [(&str, &str); 2] = [
+    ("browser", "Clauseo's own browser"),
+    ("case-law", "Clauseo's case-law connector"),
+];
+
+/// The entry of [`RESERVED_MCP_SERVERS`] that `name` is, in any case: the reserved name and what
+/// it is kept for.
+pub fn reserved_mcp_server(name: &str) -> Option<(&'static str, &'static str)> {
+    RESERVED_MCP_SERVERS
+        .into_iter()
+        .find(|(reserved, _)| name.eq_ignore_ascii_case(reserved))
+}
 
 /// The fields an [`AgentLaunch`] reads; any other is an unknown key.
 const AGENT_FIELDS: [&str; 3] = ["command", "args", "env"];
@@ -153,6 +170,7 @@ pub(crate) enum Leaf {
     Motion(Motion),
     WebSearch(bool),
     Browser(bool),
+    Connectors(bool),
     Counts(bool),
     CrashReports(bool),
     UpdateMode(UpdateMode),
@@ -275,6 +293,7 @@ impl Leaf {
             "ui.motion" => typed_value(key, value).map(Leaf::Motion),
             "tools.web_search" => typed_value(key, value).map(Leaf::WebSearch),
             "tools.browser" => typed_value(key, value).map(Leaf::Browser),
+            "tools.connectors" => typed_value(key, value).map(Leaf::Connectors),
             "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
             "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
             "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
@@ -308,6 +327,7 @@ impl Leaf {
             Leaf::Motion(_) => "ui.motion".to_owned(),
             Leaf::WebSearch(_) => "tools.web_search".to_owned(),
             Leaf::Browser(_) => "tools.browser".to_owned(),
+            Leaf::Connectors(_) => "tools.connectors".to_owned(),
             Leaf::Counts(_) => "privacy.counts".to_owned(),
             Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
             Leaf::UpdateMode(_) => "update.mode".to_owned(),
@@ -352,6 +372,7 @@ impl Leaf {
             Leaf::Motion(motion) => settings.ui.motion = motion,
             Leaf::WebSearch(on) => settings.tools.web_search = on,
             Leaf::Browser(on) => settings.tools.browser = on,
+            Leaf::Connectors(on) => settings.tools.connectors = on,
             Leaf::Counts(on) => settings.privacy.counts = on,
             Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
             Leaf::UpdateMode(mode) => settings.update.mode = mode,
@@ -407,9 +428,9 @@ fn agent(
 }
 
 /// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
-/// list empty). Inside it, an entry with a bad name, the reserved name [`RESERVED_MCP_SERVER`], a
-/// value that does not type or a relative `command` is left out with a warning in `dropped`, and
-/// the other entries load.
+/// list empty). Inside it, an entry with a bad name, a name holding `__` or ending in `_`, a
+/// reserved name ([`RESERVED_MCP_SERVERS`]), a value that does not type or a relative `command`
+/// is left out with a warning in `dropped`, and the other entries load.
 fn mcp_servers(
     key: &str,
     value: Value,
@@ -431,12 +452,25 @@ fn mcp_servers(
             });
             continue;
         }
-        if name.eq_ignore_ascii_case(RESERVED_MCP_SERVER) {
+        // Claude names a tool `mcp__<server>__<tool>` and splits it at the first `__` after
+        // `mcp__`: the server is everything before it (`kr()` in claude-agent-sdk 0.3.318). So
+        // `case-law__x` and `case-law_` (tool `mcp__case-law___x`) both read as server
+        // `case-law` and would inherit its pre-allow. A leading `_` cannot split. The name passed
+        // [`mcp_name_ok`], so it is name-shaped and is quoted (#411's rule).
+        if name.contains("__") || name.ends_with('_') {
+            dropped.push(WarningKind::InvalidValue {
+                message: format!(
+                    "double underscores and a trailing underscore are not allowed in server \
+                     names ({name})"
+                ),
+                key: entry_key,
+            });
+            continue;
+        }
+        if let Some((reserved, what)) = reserved_mcp_server(&name) {
             dropped.push(WarningKind::InvalidValue {
                 key: entry_key,
-                message: format!(
-                    "the server name {RESERVED_MCP_SERVER} is reserved for Clauseo's own browser"
-                ),
+                message: format!("the server name {reserved} is reserved for {what}"),
             });
             continue;
         }

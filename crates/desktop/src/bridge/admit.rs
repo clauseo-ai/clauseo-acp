@@ -125,6 +125,9 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetSkillPack { .. } => Err(invalid(
             "skill packs are turned on and off from the settings window only",
         )),
+        // R24: the connector commands are not wired in the host yet; which window sends which
+        // (the setup card, Settings, the hint) is ruled on when they are.
+        HostCommand::Connector(_) => Err(invalid("the connector commands are not wired yet")),
     }
 }
 

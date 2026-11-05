@@ -25,8 +25,10 @@ use crate::{
 use crate::{FileChoice, RawPayload};
 use crate::{InstallWhen, UpdateMode};
 
+mod connectors;
 mod validate;
 
+pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
 pub use validate::{
     MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES, MAX_PATH_LIST_BYTES,
     MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, ValidatedCommand,
@@ -528,13 +530,18 @@ pub enum HostCommand {
         /// The new mode.
         mode: UpdateMode,
     },
+    /// The data connectors and the case-law hint (R24, `command/connectors.rs`). None stores a
+    /// receipt; each answers `Done`, and the state reaches app subscribers as
+    /// `HostEvent::ConnectorsChanged`. JSON: `{"connector": {"add": {"id": "case-law"}}}`.
+    Connector(ConnectorCommand),
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
 /// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
 /// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
-/// `InstallBrowser`, `CancelBrowserInstall` and the four update commands answer `Done`.
+/// `InstallBrowser`, `CancelBrowserInstall`, the four update commands and the connector commands
+/// answer `Done`; the last store no receipt, as the two browser commands do not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

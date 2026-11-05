@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "ConnectorCommand::SignOut { id: \"case-law\".to_owned() }"
+---
+{
+  "sign_out": {
+    "id": "case-law"
+  }
+}

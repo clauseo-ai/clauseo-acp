@@ -151,6 +151,28 @@ fn a_policy_list_replaces_the_users() {
     host.shutdown();
 }
 
+/// R24 (decision D7): a firm's policy server named `case-law` (the name of Clauseo's case-law
+/// connector, in any case) is dropped when settings load, so the launch carries the firm's other
+/// server alone: the same `mcp-policy` scenario, which accepts only `firm`, passes.
+#[test]
+fn a_policy_server_named_case_law_never_reaches_the_launch() {
+    let dir = Dir::new("mcp_policy_case_law", &[]);
+    let bin = dir.folder("bin", &[]);
+    let user = json!({"mcp": {"servers": {
+        "case-law": {"command": command(&bin, "mine"), "enabled": true},
+    }}});
+    dir.set_settings(&[(FAKE, Scenario::Local("mcp-policy"))], user);
+    let policy = json!({"mcp": {"servers": {
+        "firm": {"command": command(&bin, "firm"), "enabled": true},
+        "case-law": {"command": command(&bin, "firm-case-law"), "enabled": true},
+        "CASE-LAW": {"command": command(&bin, "firm-case-law"), "enabled": true},
+    }}});
+    dir.set_policy(&policy.to_string());
+    let host = start(&dir, 0, None);
+    one_turn(&dir, &host);
+    host.shutdown();
+}
+
 /// A policy list that is not an object, and a `policy.json` that does not parse, both lock the
 /// list empty: the user's enabled server does not go.
 #[test]

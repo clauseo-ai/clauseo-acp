@@ -43,15 +43,15 @@
 //!
 //! # Invariants
 //!
-//! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
-//!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
-//!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
-//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
+//! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be read
+//!   is a [`Warning`] (with path, line and column where there is one) and defaults stand in. A
+//!   policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and locks
+//!   each security key (`mcp.servers`, `tools.web_search`, `tools.browser`, `tools.connectors`,
 //!   `privacy.counts`, `privacy.crash_reports`, `update.mode`, `install.bundle`,
 //!   `install.registry`, every `plans.<id>`, `skills.extra`, `skills.allow_scripts` and
 //!   `skills.curated`) off: the list empty, each switch `false`, the update mode `none`, each
-//!   install key unset, no plan, so no endpoint the lawyer chose stands in for the firm's
-//!   (decision record 0048), no extra skill pack and none curated (decision record 0040).
+//!   install key unset, no plan, so no endpoint the lawyer chose stands in for the firm's (decision
+//!   record 0048), no extra skill pack and none curated (decision record 0040).
 //! - Only a policy sets `skills.curated`: a `settings.json` value is ignored with a warning.
 //!   A `skills.enabled` entry whose id is no pack id or whose value is not
 //!   `sha256:<64 lowercase hex>` is left out with a warning that quotes the id only when it is
@@ -72,8 +72,9 @@
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
 //!   warning and still locks the key, at its default (an agent: with no entry), or off for a
 //!   security key.
-//! - The MCP server name `browser` ([`RESERVED_MCP_SERVER`]) is Clauseo's own: an entry of that
-//!   name in `settings.json` or a policy is left out with a warning; the rest of the list loads.
+//! - The MCP server names `browser` and `case-law` ([`RESERVED_MCP_SERVERS`]) are Clauseo's own:
+//!   an entry of either name, in any case, in `settings.json` or a policy is left out with a
+//!   warning; the rest of the list loads.
 //! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
 //!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
@@ -91,8 +92,10 @@
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
-//!   relative `command` or a value that does not type is left out with a warning; `enabled`
-//!   is `false` unless set.
+//!   name holding `__` or ending in `_` (Claude splits `mcp__<server>__<tool>` at the first
+//!   `__` after `mcp__`), a reserved name (`browser`, `case-law`, in any case), a relative
+//!   `command` or a value that does not type is left out with a warning; `enabled` is `false`
+//!   unless set.
 //! - Tests read and write no real folder: every input is injected.
 //!
 //! # Depends on
@@ -131,7 +134,7 @@ pub use dirs::refused_folders;
 pub use effective::{Effective, EntryWrite};
 pub use error::Error;
 pub use files::{Files, SystemFiles};
-pub use leaf::RESERVED_MCP_SERVER;
+pub use leaf::{RESERVED_MCP_SERVERS, reserved_mcp_server};
 pub use locations::{
     DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
 };

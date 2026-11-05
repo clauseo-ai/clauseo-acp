@@ -273,7 +273,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
-        HostCommand::RestartAgent { .. } => not_built(actor, ctx),
+        // R24's connector commands: no receipt, ever (decision D2), since nothing here commits,
+        // so the API key never reaches the receipts table, not even as a hash. The connector
+        // state lands in a later PR; until then each is refused.
+        HostCommand::RestartAgent { .. } | HostCommand::Connector(_) => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
         HostCommand::CheckForUpdate {}
@@ -283,7 +286,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
     }
 }
 
-/// A command the host does not run yet (`RestartAgent`): `command.invalid`.
+/// A command the host does not run yet (`RestartAgent`, the connector commands):
+/// `command.invalid`, with no receipt.
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
     actor.finish_command(ctx.id, Err(refusal));

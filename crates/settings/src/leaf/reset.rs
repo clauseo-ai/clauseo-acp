@@ -28,6 +28,7 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "mcp.servers" => settings.mcp.servers.clear(),
             "tools.web_search" => settings.tools.web_search = false,
             "tools.browser" => settings.tools.browser = false,
+            "tools.connectors" => settings.tools.connectors = false,
             "privacy.counts" => settings.privacy.counts = false,
             "privacy.crash_reports" => settings.privacy.crash_reports = false,
             "update.mode" => settings.update.mode = UpdateMode::None,
@@ -57,6 +58,7 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "ui.motion" => settings.ui.motion = Motion::default(),
         "tools.web_search" => settings.tools.web_search = ToolsSettings::default().web_search,
         "tools.browser" => settings.tools.browser = ToolsSettings::default().browser,
+        "tools.connectors" => settings.tools.connectors = ToolsSettings::default().connectors,
         "privacy.counts" => settings.privacy.counts = PrivacySettings::default().counts,
         "privacy.crash_reports" => {
             settings.privacy.crash_reports = PrivacySettings::default().crash_reports;

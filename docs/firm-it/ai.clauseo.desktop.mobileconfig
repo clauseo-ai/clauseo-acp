@@ -61,6 +61,8 @@
       <true/>
       <key>tools.browser</key>
       <false/>
+      <key>tools.connectors</key>
+      <false/>
       <key>privacy.counts</key>
       <false/>
       <key>privacy.crash_reports</key>

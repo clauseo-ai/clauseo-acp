@@ -143,7 +143,7 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 const RESERVED: [&str; 4] = ["fragment", "stream_failed", "setup", "timed"];
 
 /// The number of `HostEvent` variants [`variant`] names.
-const VARIANTS: usize = 11;
+const VARIANTS: usize = 13;
 
 /// Each `HostEvent` variant's place. A new variant fails to compile here, so it gets a place, a
 /// sample in the test below, and its key checked against [`RESERVED`].
@@ -160,6 +160,8 @@ fn variant(event: &HostEvent) -> usize {
         HostEvent::FolderScanned(_) => 8,
         HostEvent::BrowserInstall { .. } => 9,
         HostEvent::UpdateChanged(_) => 10,
+        HostEvent::ConnectorsChanged(_) => 11,
+        HostEvent::CaseLawHint { .. } => 12,
     }
 }
 
@@ -240,6 +242,16 @@ fn no_host_event_kind_takes_a_reserved_key() {
             checked_at: None,
             updated_from: None,
         }),
+        HostEvent::ConnectorsChanged(clauseo_protocol::ConnectorsState {
+            available: true,
+            locked: false,
+            connectors: Vec::new(),
+        }),
+        HostEvent::CaseLawHint {
+            matter: clauseo_protocol::MatterId::new(v7()).unwrap(),
+            thread: ThreadId::new(v7()).unwrap(),
+            turn: clauseo_protocol::TurnId::new(v7()).unwrap(),
+        },
     ];
     let mut places: Vec<usize> = samples.iter().map(variant).collect();
     places.sort_unstable();
