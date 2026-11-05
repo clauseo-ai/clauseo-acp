@@ -201,6 +201,9 @@ pub(super) fn unlink_name_surrogate(path: &Path) -> io::Result<LinkVerdict> {
     };
     match marked {
         Ok(()) => {}
+        // `FileDispositionInfo` has no flag to ignore the read-only attribute, so this fallback
+        // cannot remove a read-only link: it fails, and the link is reported and kept (held; no
+        // attribute is changed).
         Err(error)
             if NO_EX
                 .iter()
