@@ -16,8 +16,9 @@ use serde_json::Value;
 
 use super::{claude, codex, json_of};
 
-/// The most unfinished web calls kept. Past it they are dropped, so calls an agent never
-/// finished cannot pile up for the host's life.
+/// The most unfinished web calls kept. Past it a new call is not tracked (and so records nothing),
+/// and the calls already open keep their records; the calls of earlier turns are dropped as their
+/// turn passes, so this bound is reached only by one turn's calls.
 const MAX_CALLS: usize = 64;
 
 /// The unfinished web calls of a thread, by the agent's tool call id.
@@ -61,6 +62,11 @@ impl Calls {
             ToolCallStatus::Completed => finished(turn, agent, &pending),
             ToolCallStatus::Failed | ToolCallStatus::Cancelled => None,
             ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
+                if self.0.len() >= MAX_CALLS {
+                    // The calls already open keep their records; this one is not tracked.
+                    tracing::warn!(acp_id = %call.acp_id, "too many unfinished web calls; not tracked");
+                    return None;
+                }
                 self.0.insert(call.acp_id.clone(), pending);
                 None
             }

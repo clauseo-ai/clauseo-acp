@@ -471,3 +471,49 @@ fn a_new_turn_drops_the_unfinished_calls_of_earlier_turns() {
     let record = sources.updated(id(9), "tc-2", &claude(), &completed(None, &[]));
     assert!(matches!(record, Some(DomainEvent::PageVisited(_))));
 }
+
+/// At the cap a new unfinished call is refused, and the calls already open keep their records:
+/// completing the last of the 64 still records (D4).
+#[test]
+fn the_unfinished_call_cap_refuses_a_new_call_and_keeps_the_open_ones() {
+    let mut sources = Sources::default();
+    let search = |n: usize| ToolCall {
+        acp_id: format!("tc-{n}").into(),
+        ..call(
+            "Web search",
+            ToolKind::Search,
+            None,
+            ToolCallStatus::InProgress,
+            Some(&json!({"query": "", "action": null})),
+        )
+    };
+    for n in 0..64 {
+        assert_eq!(
+            sources.started(turn(), id(100 + n as u64), &codex(), &search(n)),
+            None
+        );
+    }
+    // The 65th is refused: it is not tracked, so its completion records nothing.
+    assert_eq!(
+        sources.started(turn(), id(164), &codex(), &search(64)),
+        None
+    );
+    let refused = ToolCallPatch {
+        raw_input: Some(inline(&json!({"query": "late", "action": null}))),
+        ..status(ToolCallStatus::Completed)
+    };
+    assert_eq!(sources.updated(turn(), "tc-64", &codex(), &refused), None);
+    // The 64 open before it are kept: the last one still records.
+    let done = ToolCallPatch {
+        raw_input: Some(inline(&json!({"query": "live", "action": null}))),
+        ..status(ToolCallStatus::Completed)
+    };
+    let record = sources
+        .updated(turn(), "tc-63", &codex(), &done)
+        .expect("tc-63 records");
+    assert_eq!(search_of(&record), Some(("live".to_owned(), Vec::new())));
+}
+
+fn codex() -> AgentId {
+    AgentId::new("codex-acp").unwrap()
+}
