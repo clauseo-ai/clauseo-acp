@@ -33,15 +33,17 @@ use clauseo_acp::McpServer;
 use clauseo_settings::Effective;
 use serde_json::{Map, Value};
 
-/// Claude Code's `settingSources` for every Clauseo session: the user's own settings, so their
-/// login (an `apiKeyHelper`, a provider's variables) keeps working. Claude Code then reads none
+/// Claude Code's `settingSources` for every Clauseo session: the user settings only. For a
+/// Claude agent with a kind, `CLAUDE_CONFIG_DIR` is forced to Clauseo's own home for the agent
+/// (R20 P4a), so "user" settings are that home's `settings.json`, not the lawyer's
+/// `~/.claude`; an agent with no kind reads the user's own. Claude Code then reads none
 /// of the matter folder's project and local settings: not its `.mcp.json`, hooks or permission
 /// rules. claude-agent-acp reads those files itself, whatever `settingSources` says, and takes a
 /// starting mode from them: the SDK drops `acceptEdits` only from the project file, so a
 /// folder's `.claude/settings.local.json` can still start the session in accept-edits
 /// (clauseo-acp-private#218, older than this setting). A live run on the Mac mini showed `[]`
-/// breaking the login (2026-11-02). The user's plugins still load their skills, hooks and agents
-/// under `["user"]`; strict MCP config is what keeps their MCP servers out.
+/// breaking the login (2026-11-02). Plugins in that user settings folder still load their skills,
+/// hooks and agents under `["user"]`; strict MCP config is what keeps their MCP servers out.
 /// `tests/scenarios/mcp-defaults.jsonl` pins this value.
 pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 
