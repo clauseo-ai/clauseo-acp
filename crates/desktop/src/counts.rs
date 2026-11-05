@@ -45,6 +45,8 @@ use tauri::{AppHandle, Manager as _, Runtime, WindowEvent};
 use crate::host_start::HostCell;
 
 pub use about::about;
+#[cfg(windows)]
+pub(crate) use about::under_program_files;
 pub(crate) use ui::UiCount;
 pub(crate) use upload::HttpsUpload;
 

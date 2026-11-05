@@ -98,6 +98,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # The uninstaller's deletion (src/delete_app_data/ops.rs): Storage_FileSystem for a linked
 # `sandbox`'s reparse tag and its delete on one handle (GetFileInformationByHandleEx,
 # SetFileInformationByHandle). Other crates already build the feature.
+# The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
+# to see the per-machine installer's uninstall key.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
@@ -107,6 +109,7 @@ windows = { workspace = true, features = [
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
   "Win32_Storage_FileSystem",
+  "Win32_System_Registry",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_System_Time",
@@ -120,7 +123,8 @@ windows = { workspace = true, features = [
 # open_file's default app for a type on macOS (src/open/mac_app.rs): CFString and CFURL.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
-# The machine's total memory on macOS (src/machine_memory.rs): sysctlbyname("hw.memsize").
+# The machine's total memory on macOS (src/machine_memory.rs): sysctlbyname("hw.memsize"). The
+# updater's install kind (src/update/install_kind.rs): access(2) on the .app's folder.
 libc = { workspace = true }
 
 # The day cap's local day on Linux (src/connectors/local_day.rs): localtime_r; macOS takes libc
@@ -129,7 +133,8 @@ libc = { workspace = true }
 libc = { workspace = true }
 
 # The updater is left out of Linux: Linux always updates through its package manager (R23), so the
-# plugin is never registered there (lib.rs).
+# plugin is never registered there (lib.rs). Its adapter (src/update/plugin.rs) is built there in
+# tests only, through the dev-dependency below.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tauri-plugin-updater.workspace = true
 
@@ -156,6 +161,9 @@ semver = "1"
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 # The canary test (tests/canary.rs) unzips each counts body it captured to search it.
 flate2 = { workspace = true }
+# The updater's adapter and its latest.json fixtures (src/update/tests.rs) on every OS, Linux
+# included, where the app itself leaves the plugin out.
+tauri-plugin-updater.workspace = true
 
 # The deletion's Windows tests (src/delete_app_data/tests/make.rs) set a reparse point that is no
 # link with DeviceIoControl (System_IO), to see it kept.
