@@ -479,3 +479,4 @@ mod app;
 mod connectors;
 mod limits;
 mod permission;
+mod update;

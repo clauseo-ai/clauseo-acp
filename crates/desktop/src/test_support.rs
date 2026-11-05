@@ -288,6 +288,12 @@ impl Scratch {
         )
     }
 
+    /// Starts a host on the folder that checks for updates through `updater`.
+    #[track_caller]
+    pub(crate) fn start_updating(&self, updater: Arc<dyn clauseo_host::Updater>) -> Running {
+        Self::start_config(self.config(Vec::new()).with_updater(updater))
+    }
+
     /// Starts a host with `config`.
     #[track_caller]
     fn start_config(config: HostConfig) -> Running {

@@ -77,8 +77,9 @@ fn messages_event(text: &str) -> HostEvent {
 }
 
 /// A pause drops the app feed's host subscription with the streams'; the ack that ends it
-/// subscribes again, reads the settings and sends one `settings_changed` with them, so a change
-/// made while paused shows. Later changes follow on the new subscription.
+/// subscribes again, reads the settings and the updater's view and sends one `settings_changed`
+/// and one `update_changed` with them, so a change made while paused shows. Later changes
+/// follow on the new subscription.
 #[test]
 fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     let scratch = Scratch::new("app-restart", &[]);
@@ -108,6 +109,9 @@ fn a_pause_s_end_resubscribes_and_sends_the_settings_then() {
     block_on(bridge.ack(MAIN, Vec::new(), count)).unwrap();
     let current = settings(messages.next_event());
     assert_eq!(current.ui.theme, Theme::Light);
+    // The updater's view, which the host's first frames leave out (0037).
+    let update = messages.next_event();
+    assert!(matches!(update, HostEvent::UpdateChanged(_)), "{update:?}");
     // Then the new subscription's first frames.
     assert_eq!(first_frames(&messages).ui.theme, Theme::Light);
     block_on(bridge.dispatch(MAIN, set_theme(Theme::Dark))).unwrap();
@@ -154,8 +158,8 @@ fn a_reload_drops_the_app_feed() {
 }
 
 /// The watchdog, with bytes unacknowledged for 5 s, restarts the app feed through the driver's
-/// tick: it subscribes again and sends the settings, then follows changes on the new
-/// subscription.
+/// tick: it subscribes again and sends the settings and the updater's view, then follows changes
+/// on the new subscription.
 #[test]
 fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     let scratch = Scratch::new("app-watchdog", &[]);
@@ -173,6 +177,8 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     pump::tick_at(&window, window::WATCHDOG * 2);
     let resent = settings(messages.next_event());
     assert_eq!(resent.ui.theme, Theme::Dark);
+    let update = messages.next_event();
+    assert!(matches!(update, HostEvent::UpdateChanged(_)), "{update:?}");
     assert_eq!(first_frames(&messages).ui.theme, Theme::Dark);
     assert_ne!(lock(&window).state().feeds().restart_id(Feed::App), before);
     block_on(bridge.dispatch(MAIN, set_theme(Theme::Light))).unwrap();
@@ -284,14 +290,16 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
     assert_eq!(lock(&window).state().unacked_bytes(), 0);
 }
 
-/// What each label's channel carries (`AppEvents`, 0028, U12): `main` every app and limits
-/// event, the settings window `settings_changed`, `connectors_changed` and the limits, and any
+/// What each label's channel carries (`AppEvents`, 0028, U12, 0037): `main` every app and
+/// limits event, the settings window `settings_changed`, `connectors_changed`, `update_changed`
+/// and the limits, and any
 /// other label neither.
 /// So a window of another label that follows the app feed gets nothing of it, while the
 /// settings window gets each settings change.
 #[test]
 fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_none() {
     let settings_changed = r#"{"settings_changed":{}}"#;
+    let update_changed = r#"{"update_changed":{}}"#;
     let threads_changed = r#"{"threads_changed":{}}"#;
     // The folder scan's progress (R20a): the room in `main` is its only reader.
     let folder_scanned = r#"{"folder_scanned":{}}"#;
@@ -302,6 +310,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
+        (Feed::App, update_changed),
         (Feed::App, threads_changed),
         (Feed::App, folder_scanned),
         (Feed::App, connectors_changed),
@@ -314,6 +323,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     assert!(carries(SETTINGS, Feed::App, settings_changed));
     assert!(carries(SETTINGS, Feed::App, connectors_changed));
     assert!(!carries(SETTINGS, Feed::App, case_law_hint));
+    assert!(carries(SETTINGS, Feed::App, update_changed));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
     assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));
