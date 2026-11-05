@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::Surroundings;
 use crate::Error;
-use crate::windows::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder, plain};
+use crate::windows::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder, verbatim};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::Entry;
 use crate::windows::writer::{AclWriter, ApplyFailure, Reach, Strict, Walked};
@@ -75,13 +75,14 @@ pub(super) fn clearing(
                     return Err(refuse(None));
                 };
                 // The walk reports the child by its final path, verbatim (`\\?\C:\…`);
-                // the roots are the policy's plain paths. Both are compared plain, and the
-                // child must be strictly inside a root, never the root itself.
-                let shut = plain(&shut);
+                // the roots are the policy's plain paths. Both are compared verbatim, whatever
+                // their length (round 5), and the child must be strictly inside a root, never
+                // the root itself. It is set aside and named as the walk reported it.
                 let inside = own
                     .iter()
                     .any(|root| in_folder(&shut, root) && !in_folder(root, &shut));
-                if !inside || moved.contains(&shut) || moved.len() >= MOST_SET_ASIDE {
+                let again = moved.contains(&verbatim(&shut));
+                if !inside || again || moved.len() >= MOST_SET_ASIDE {
                     return Err(refuse(Some(shut)));
                 }
                 if let Err(error) = around.set_aside(&shut) {
@@ -89,7 +90,7 @@ pub(super) fn clearing(
                     tracing::warn!(%error, "a child the lawyer can't open couldn't be set aside");
                     return Err(refuse(Some(shut)));
                 }
-                moved.push(shut);
+                moved.push(verbatim(&shut));
             }
             Err(failure) => {
                 return Err(Refused {

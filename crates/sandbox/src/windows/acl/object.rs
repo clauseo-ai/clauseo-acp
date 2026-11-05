@@ -25,19 +25,22 @@ use windows::Win32::Security::{
     SetKernelObjectSecurity,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO, FILE_LIST_DIRECTORY,
+    CreateFileW, ExtendedFileIdType, FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_BOTH_DIR_INFO,
+    FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO, FILE_LIST_DIRECTORY,
     FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo,
     FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
-    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL,
-    SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC, WRITE_OWNER,
+    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumePathNameW, OPEN_EXISTING,
+    OpenFileById, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC,
+    WRITE_OWNER,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
 
 use crate::windows::folder::verbatim_wide;
+use crate::windows::writer::{ApplyFailure, FileId};
 
 /// `IsReparseTagNameSurrogate`: the tag's name-surrogate bit (junctions, symbolic links).
 const NAME_SURROGATE: u32 = 0x2000_0000;
@@ -85,6 +88,59 @@ impl Object {
     pub(in crate::windows) fn open_child(&self, name: &[u16], folder: bool) -> io::Result<Object> {
         let extra = SYNCHRONIZE.0 | if folder { LIST } else { 0 };
         ladder(extra, |access| open_at(&self.handle, name, access))
+    }
+
+    /// The file whose 128-bit ID `id` names, opened by that ID (`OpenFileById`,
+    /// `ExtendedFileIdType`) on the volume holding `path`, wherever its names are now: no path
+    /// is looked up, so no link is followed, and the file itself is opened, never what a
+    /// reparse point on it names. It asks for `READ_CONTROL | FILE_READ_ATTRIBUTES` and
+    /// `rights` alone. The volume is the root of `path` (`GetVolumePathNameW`, which needs no
+    /// file there), and its serial number must be `id`'s, else [`ApplyFailure::Changed`].
+    /// `None` when no file on it has that ID any more (S15 `PR3b` round 5).
+    pub(in crate::windows) fn open_by_id(
+        path: &Path,
+        id: FileId,
+        rights: u32,
+    ) -> io::Result<Option<Object>> {
+        let volume = volume_root(path)?;
+        if id_info(&volume)?.0 != id.volume {
+            return Err(ApplyFailure::Changed.into());
+        }
+        let descriptor = FILE_ID_DESCRIPTOR {
+            dwSize: u32::try_from(size_of::<FILE_ID_DESCRIPTOR>()).unwrap_or(0),
+            Type: ExtendedFileIdType,
+            Anonymous: FILE_ID_DESCRIPTOR_0 {
+                ExtendedFileId: FILE_ID_128 { Identifier: id.id },
+            },
+        };
+        let access = READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0 | rights;
+        let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+        let flags = FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS;
+        // SAFETY: the volume's handle is open and `descriptor` is a valid, live
+        // `FILE_ID_DESCRIPTOR`; no security attributes are passed, and the handle made is owned
+        // by `Handle` from here.
+        let opened =
+            unsafe { OpenFileById(volume.0, &raw const descriptor, access, share, None, flags) };
+        let handle = match opened {
+            Ok(handle) => Handle(handle),
+            Err(error) => {
+                let error = os_error(&error);
+                // An ID no file has is `ERROR_INVALID_PARAMETER` from NTFS, or not found.
+                if error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(87) {
+                    return Ok(None);
+                }
+                return Err(error);
+            }
+        };
+        let object = Object::describe(
+            handle,
+            rights & WRITE_DAC.0 != 0,
+            rights & WRITE_OWNER.0 != 0,
+        )?;
+        if object.file_id()? != (id.volume, id.id) {
+            return Err(ApplyFailure::Changed.into());
+        }
+        Ok(Some(object))
     }
 
     fn describe(handle: Handle, write_dac: bool, write_owner: bool) -> io::Result<Object> {
@@ -226,18 +282,7 @@ impl Object {
     /// Its volume's serial number and its 128-bit file ID (`FileIdInfo`): the same file under
     /// any of its names.
     pub(in crate::windows) fn file_id(&self) -> io::Result<(u64, [u8; 16])> {
-        let mut info = FILE_ID_INFO::default();
-        // SAFETY: the handle is open and `info` is valid and writable for its size.
-        unsafe {
-            GetFileInformationByHandleEx(
-                self.handle.0,
-                FileIdInfo,
-                (&raw mut info).cast(),
-                u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
-            )
-        }
-        .map_err(|e| os_error(&e))?;
-        Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+        id_info(&self.handle)
     }
 
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's
@@ -247,6 +292,54 @@ impl Object {
         Ok(path == [u16::from(b'\\')])
     }
 }
+
+/// The volume serial number and 128-bit file ID of what `handle` is open on (`FileIdInfo`).
+fn id_info(handle: &Handle) -> io::Result<(u64, [u8; 16])> {
+    let mut info = FILE_ID_INFO::default();
+    // SAFETY: the handle is open and `info` is valid and writable for its size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle.0,
+            FileIdInfo,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).unwrap_or(0),
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
+/// The root folder of the volume holding `path` (`GetVolumePathNameW`, which works whether or
+/// not anything is at `path`), opened for `FILE_READ_ATTRIBUTES` alone: the volume an open by
+/// file ID searches. A mounted folder's volume root is the volume it mounts, so this open
+/// goes through it; [`Object::open_by_id`] checks the serial number it finds.
+fn volume_root(path: &Path) -> io::Result<Handle> {
+    let wide = verbatim_wide(path)?;
+    let mut root = vec![0_u16; wide.len().max(MAX_PATH_WIDE)];
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `root` is writable for its length.
+    unsafe { GetVolumePathNameW(PCWSTR(wide.as_ptr()), &mut root) }.map_err(|e| os_error(&e))?;
+    let end = root.iter().position(|&c| c == 0).unwrap_or(root.len());
+    root.truncate(end);
+    root.push(0);
+    // SAFETY: `root` is NUL-terminated and outlives the call; no security attributes or
+    // template are passed, and the handle is owned by `Handle` from here.
+    unsafe {
+        CreateFileW(
+            PCWSTR(root.as_ptr()),
+            FILE_READ_ATTRIBUTES.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }
+    .map(Handle)
+    .map_err(|e| os_error(&e))
+}
+
+/// `MAX_PATH` and its NUL: the least room `GetVolumePathNameW` is given.
+const MAX_PATH_WIDE: usize = 261;
 
 /// Opens with `extra` and the base rights plus `WRITE_DAC | WRITE_OWNER`, then without
 /// `WRITE_OWNER`, then read only, through `open`.
