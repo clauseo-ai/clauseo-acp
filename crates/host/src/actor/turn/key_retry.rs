@@ -2,7 +2,8 @@
 //! agent launched with a key (the profile hook's launch env sets [`KEY_VAR`]) that still
 //! answers a session or prompt call with auth-required gets one `authenticate` with codex-acp's
 //! `api-key` method, which reads the key from its own environment, and the call goes again.
-//! Only when the launch's sign-in check answered [`LoginLink::Own`]: never while the login is
+//! Only when the launch's sign-in check answered [`LoginLink::Own`] and its `shared` answered
+//! no (the `authenticate` guard, P4d): never while the login is
 //! the lawyer's linked one (`Shared`, desktop says it is reused, a split, a gone file, or no
 //! answer; S18's guard). One try per agent process: a second auth-required, or an
 //! `authenticate` that fails, ends the call with the first auth-required, so the turn is held
@@ -22,7 +23,7 @@ use clauseo_protocol::ThreadId;
 
 use super::super::Actor;
 use super::state;
-use crate::agent::login_link::{LoginLink, Seen};
+use crate::agent::login_link::{Checked, LoginLink, Seen, treated_as_shared};
 
 /// codex-acp's sign-in method that takes the key from its environment (research 22 §2.4).
 const API_KEY_METHOD: &str = "api-key";
@@ -45,12 +46,15 @@ pub(super) type Stopped = Rc<Cell<bool>>;
 
 impl KeyRetry {
     /// A launch's retry: armed when the profile hook's env (`hook`) sets a key and the launch's
-    /// sign-in check (`login`) answered that the home's login is Clauseo's own.
-    pub(super) fn at_launch(hook: &BTreeMap<OsString, OsString>, login: Option<Seen>) -> Self {
+    /// sign-in check (`login`) answered that the home's login is Clauseo's own and is not the
+    /// lawyer's file (the guard's `shared`, `Unknown` counting as shared).
+    pub(super) fn at_launch(hook: &BTreeMap<OsString, OsString>, login: Option<Checked>) -> Self {
         let key = hook
             .get(OsStr::new(KEY_VAR))
             .is_some_and(|value| !value.is_empty());
-        let own = login == Some(Seen::Answered(LoginLink::Own));
+        let own = login.is_some_and(|checked| {
+            checked.link == Seen::Answered(LoginLink::Own) && !treated_as_shared(checked.shared)
+        });
         Self {
             left: (key && own).then(|| Rc::new(Cell::new(true))),
             stopped: None,

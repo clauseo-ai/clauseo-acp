@@ -235,7 +235,9 @@ mod window;
 mod write;
 
 pub use agent::loads::codex_hook_config;
-pub use agent::login_link::{AgentsStopped, LoginCheck, LoginLink, LoginSplit, SignInAgain};
+pub use agent::login_link::{
+    AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain,
+};
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
 pub use clauseo_acp::McpServer;

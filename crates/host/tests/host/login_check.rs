@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use clauseo_host::{LoginCheck, LoginLink, LoginSplit};
+use clauseo_host::{LoginCheck, LoginLink, LoginSplit, Shared};
 use clauseo_protocol::{AgentId, DomainEvent, ErrorCode, StopReason, StreamId};
 
 use crate::codex::{CODEX, Recording, codex_dir, run_turn};
@@ -18,9 +18,11 @@ use crate::queue::held;
 use crate::support::{Dir, matter_with_thread, send_prompt, wait};
 
 /// A hook that answers what the test set, records what it was asked, and may wait for a word
-/// from the test first.
+/// from the test first. Its `shared` follows the link (`Yes` for `Shared`, else `No`) unless
+/// the test set it.
 pub(crate) struct Fake {
     answer: Mutex<LoginLink>,
+    shared: Mutex<Option<Shared>>,
     asked: Mutex<Vec<(AgentId, PathBuf)>>,
     hold: Option<Mutex<mpsc::Receiver<()>>>,
 }
@@ -29,6 +31,7 @@ impl Fake {
     pub(crate) fn new(answer: LoginLink) -> Arc<Self> {
         Arc::new(Self {
             answer: Mutex::new(answer),
+            shared: Mutex::new(None),
             asked: Mutex::new(Vec::new()),
             hold: None,
         })
@@ -39,6 +42,7 @@ impl Fake {
         let (release, hold) = mpsc::channel();
         let fake = Arc::new(Self {
             answer: Mutex::new(answer),
+            shared: Mutex::new(None),
             asked: Mutex::new(Vec::new()),
             hold: Some(Mutex::new(hold)),
         });
@@ -47,6 +51,11 @@ impl Fake {
 
     fn set(&self, answer: LoginLink) {
         *self.answer.lock().unwrap() = answer;
+    }
+
+    /// Answers `shared` from now on, whatever the link.
+    pub(crate) fn set_shared(&self, shared: Shared) {
+        *self.shared.lock().unwrap() = Some(shared);
     }
 
     pub(crate) fn asked(&self) -> Vec<(AgentId, PathBuf)> {
@@ -64,6 +73,14 @@ impl LoginCheck for Fake {
             let _released = hold.lock().unwrap().recv();
         }
         *self.answer.lock().unwrap()
+    }
+
+    fn shared(&self, _agent: &AgentId, _agent_home: &Path) -> Shared {
+        let set = *self.shared.lock().unwrap();
+        set.unwrap_or_else(|| match *self.answer.lock().unwrap() {
+            LoginLink::Shared => Shared::Yes,
+            LoginLink::Own | LoginLink::Split | LoginLink::Gone => Shared::No,
+        })
     }
 }
 

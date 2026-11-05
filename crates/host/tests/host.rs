@@ -135,6 +135,9 @@ mod log_file;
 #[path = "host/login_check.rs"]
 mod login_check;
 #[cfg(test)]
+#[path = "host/login_shared.rs"]
+mod login_shared;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
