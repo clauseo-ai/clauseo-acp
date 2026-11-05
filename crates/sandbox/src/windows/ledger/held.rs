@@ -161,7 +161,7 @@ pub(crate) trait Shares {
 }
 
 /// Paths alone: no two names are one file.
-pub(super) struct ByPath;
+pub(crate) struct ByPath;
 
 impl Shares for ByPath {
     fn same_file(&mut self, _a: &Path, _b: &Path) -> bool {

@@ -17,7 +17,9 @@
 //!    wrote (N7). Then the entries are written, path by path from the shallowest.
 //! 4. The walk ([`AclWriter::propagate`]) carries the inherited entries down: on every tree whose
 //!    entry this launch wrote or whose entry was still `pending`, and on the matter, state and
-//!    notes folders at every launch, so a file moved in since the last launch picks them up. A
+//!    notes folders at every launch, so a file moved in since the last launch picks them up
+//!    (unless the launch check found nothing changed in them since a clean close, or only a few
+//!    folders, which are walked instead: [`apply_checked`], `clean_close.rs`, S15 `PR3d`). A
 //!    walk over a tree that carries a deny is strict ([`Strict`]): a child a pool user owns that
 //!    would beat the inherited deny is repaired, one the lawyer owns refuses the launch, and one
 //!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) if it is inside the
@@ -47,6 +49,7 @@ use std::path::{Path, PathBuf};
 use super::FolderSupport;
 use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
+use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::fence::RegisteredMatter;
 use super::ledger::{EntryId, EntryState, Ledger, RecordedFile, is_our_label};
@@ -58,8 +61,8 @@ mod lift;
 mod walk;
 
 pub use back::{forget_matter, reconcile};
-use walk::{OWN_KINDS, Refused, Walk, clearing, inside_any, own_roots, strict_for};
-use walk::{strict_of, walks};
+pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
+use walk::{Refused, Walk, clearing, inside_any, own_roots, walks};
 
 /// What [`apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -101,6 +104,29 @@ pub fn apply(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
 ) -> Result<Applied, Error> {
+    apply_checked(
+        ledger,
+        plan,
+        acl,
+        around,
+        &LaunchCheck::full(FullReason::NoRecord),
+    )
+}
+
+/// [`apply`] after the launch check (`clean_close::check_launch`, S15 `PR3d`): when it found
+/// nothing changed in the own trees since a clean close, their walks are left out; when it found
+/// a few folders changed, only those are walked (strictly, with the set-aside as at any walk).
+/// Everything else is as [`apply`] does it: each grant checked and written if missing, and each
+/// tree whose entry this run wrote or that was still pending walked. A check made for other
+/// walk inputs than `plan`'s is taken as the full walk.
+pub fn apply_checked(
+    ledger: &mut Ledger,
+    plan: &mut AdmittedPlan,
+    acl: &mut dyn AclWriter,
+    around: &mut dyn Surroundings,
+    check: &LaunchCheck,
+) -> Result<Applied, Error> {
+    let own = own_walks(plan, check);
     let roots: Vec<PathBuf> = plan
         .grants()
         .iter()
@@ -109,13 +135,43 @@ pub fn apply(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let run = run_plan(ledger, plan, acl, around)?;
+    let run = run_plan(ledger, plan, acl, around, &own)?;
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),
         lifted,
         walked: run.walked,
     })
+}
+
+/// The own-tree walks a launch runs: all of them, or only the launch check's targets (none
+/// when it skipped).
+#[derive(Debug)]
+enum OwnWalks {
+    All,
+    Only(Vec<Walk>),
+}
+
+/// What `check` lets `plan`'s launch leave out of its own-tree walks.
+fn own_walks(plan: &AdmittedPlan, check: &LaunchCheck) -> OwnWalks {
+    if matches!(check.path(), LaunchPath::Full(_)) {
+        return OwnWalks::All;
+    }
+    if check.inputs() != Some(&WalkInputs::of_plan(plan)) {
+        tracing::warn!(reason = ?FullReason::OtherPlan, "tier B walks in full");
+        return OwnWalks::All;
+    }
+    let walks = check
+        .targets()
+        .iter()
+        .map(|t| Walk {
+            root: t.path(),
+            reach: t.reach,
+            strict: true,
+            kind: t.kind,
+        })
+        .collect();
+    OwnWalks::Only(walks)
 }
 
 /// What a run wrote, for its rollback, and what its walks saw.
@@ -132,6 +188,7 @@ fn run_plan(
     plan: &mut AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
+    own: &OwnWalks,
 ) -> Result<Run, Error> {
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
@@ -139,7 +196,7 @@ fn run_plan(
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
     let mut run = Run::default();
-    match write_all(ledger, plan, acl, around, &mut run) {
+    match write_all(ledger, plan, acl, around, own, &mut run) {
         Ok(()) => Ok(run),
         Err(mut refused) => {
             refused.at = refused.at.or_else(|| acl.refused_at());
@@ -194,6 +251,7 @@ fn write_all(
     plan: &AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
+    own_walks: &OwnWalks,
     run: &mut Run,
 ) -> Result<(), Refused> {
     let grants = plan.grants();
@@ -253,7 +311,11 @@ fn write_all(
     let unwalked = |i: usize| {
         run.written.contains(&i) || plan.entries().get(i).is_some_and(|id| pending.contains(id))
     };
-    for walk in walks(plan, unwalked) {
+    let (all_own, extra): (bool, &[Walk]) = match own_walks {
+        OwnWalks::All => (true, &[]),
+        OwnWalks::Only(targets) => (false, targets),
+    };
+    for walk in walks(plan, unwalked, all_own, extra) {
         let Walk {
             root,
             reach,

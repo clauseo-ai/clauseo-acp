@@ -120,6 +120,8 @@ pub(super) fn before_launch(
     let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
+    // A session is about to start: the last clean close no longer describes the matter.
+    super::fast::spend_clean_close(data_dir, matter)?;
     let mut moved = Vec::new();
     let mut aside: Vec<Aside> = Vec::new();
     let mut sessions = BTreeSet::new();

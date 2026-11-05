@@ -117,7 +117,62 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
             return scan;
         }
     };
-    let mut stack = vec![(top, root.to_owned(), Vec::<OsString>::new(), Vec::new())];
+    scan_from(
+        volume,
+        &mut scan,
+        (top, root.to_owned(), Vec::new(), Vec::new()),
+        true,
+    );
+    if !scan.unscanned.is_empty() {
+        tracing::warn!(
+            folders = scan.unscanned.len(),
+            "the set-aside couldn't scan every folder in the matter"
+        );
+    }
+    scan
+}
+
+/// The scan of one folder, `parts` below `root` (each part opened relative to the one before,
+/// never through a link): its own protected names and links, and with `below` everything
+/// below it too, as [`scan`] finds them. `None` when a folder on the way is gone. A later
+/// launch re-probes the folders the journal says changed this way (S15 `PR3d`).
+pub(super) fn scan_part<V: Volume>(
+    volume: &V,
+    root: &Path,
+    parts: &[OsString],
+    below: bool,
+) -> io::Result<Option<Scan>> {
+    let mut folder = volume.open_root(root)?;
+    let mut path = root.to_owned();
+    let mut through = Vec::new();
+    for part in parts {
+        match volume.open_folder(&folder, part) {
+            Ok(inner) => {
+                through.push(volume.folder_id(&inner)?);
+                folder = inner;
+                path.push(part);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        }
+    }
+    let mut scan = Scan::default();
+    scan_from(
+        volume,
+        &mut scan,
+        (folder, path, parts.to_vec(), through),
+        below,
+    );
+    Ok(Some(scan))
+}
+
+/// A folder the scan will visit: it, its path, its parts below the root and the IDs of the
+/// folders it was reached through.
+type Visit<F> = (F, PathBuf, Vec<OsString>, Vec<FileId>);
+
+/// Scans `start`, and with `below` every folder below it, into `scan`.
+fn scan_from<V: Volume>(volume: &V, scan: &mut Scan, start: Visit<V::Folder>, below: bool) {
+    let mut stack = vec![start];
     while let Some((folder, path, parts, through)) = stack.pop() {
         let at_root = parts.is_empty();
         let names: Vec<&str> = if at_root {
@@ -141,7 +196,7 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
         let listed = match volume.list(&folder) {
             Ok(listed) => listed,
             Err(error) => {
-                unscanned(&mut scan, &path, &error);
+                unscanned(scan, &path, &error);
                 continue;
             }
         };
@@ -154,6 +209,7 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
                         scan.items.push(at.item(&child.name, now, Kept::Link));
                     }
                 },
+                Kind::Folder if !below => {}
                 Kind::Folder => {
                     let next = path.join(&child.name);
                     let opened = volume
@@ -168,19 +224,12 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
                             stack.push((inner, next, deeper, via));
                         }
                         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                        Err(error) => unscanned(&mut scan, &next, &error),
+                        Err(error) => unscanned(scan, &next, &error),
                     }
                 }
             }
         }
     }
-    if !scan.unscanned.is_empty() {
-        tracing::warn!(
-            folders = scan.unscanned.len(),
-            "the set-aside couldn't scan every folder in the matter"
-        );
-    }
-    scan
 }
 
 /// What is at `name` in `folder`, opened as itself.

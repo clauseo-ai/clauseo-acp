@@ -77,6 +77,11 @@ pub enum Error {
         /// from). Never logged.
         at: Option<std::path::PathBuf>,
     },
+    /// Windows tier B couldn't remove the matter's clean-close record at launch
+    /// (`windows::clean_close`): every launch removes it before the agent starts, so the launch
+    /// is refused rather than run with it in place (S15 `PR3d`).
+    #[error("the sandbox couldn't remove the record of the matter's last clean close ({0})")]
+    CleanClose(io::ErrorKind),
 }
 
 impl Error {
@@ -92,7 +97,8 @@ impl Error {
             | Error::FolderUnsupported { .. }
             | Error::NeighbourUnfenceable { .. }
             | Error::AclApply { .. }
-            | Error::SetAside { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::SetAside { .. }
+            | Error::CleanClose(_) => ErrorCode::AgentLaunchFailed,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }

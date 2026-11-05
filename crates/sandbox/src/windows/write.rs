@@ -154,6 +154,18 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
     ))
 }
 
+/// Removes the file this crate keeps at `path` in the sandbox folder, checked first as
+/// [`check_owned_file`] checks it, so a link there is refused, never followed. A missing file is
+/// fine. The clean-close record goes this way at every launch (S15 `PR3d`).
+#[cfg(any(windows, test))]
+pub(crate) fn remove_owned_file(path: &Path) -> io::Result<()> {
+    check_owned_file(path)?;
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 /// Replaces the file `path` with `bytes` in one step: the bytes go to a new file beside it
 /// (`.<name>.<16 hex>.tmp`, made with `create_new`, so nothing there already is opened), are
 /// flushed to disk, and the new file is renamed over `path` (`MoveFileExW` with

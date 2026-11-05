@@ -1,0 +1,188 @@
+//! A launch after the launch check (S15 `PR3d`): the own-tree walks it leaves out, the ones it
+//! keeps, and the record it removes whatever happens next.
+
+use super::*;
+use crate::windows::clean_close::fake::{FakeJournal, journal_for};
+use crate::windows::clean_close::{
+    Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch, session_cursor,
+    write_clean_close,
+};
+use crate::windows::set_aside::Checked;
+
+/// `USN_REASON_SECURITY_CHANGE`.
+const SECURITY: u32 = 0x800;
+
+/// A matter launched once (siblings `sib1`, `sib2`), its session ended clean, and a fake
+/// journal over its own trees: the matter (ID 100), then the state and notes folders.
+struct Launched {
+    w: World,
+    ledger: Ledger,
+    acl: FakeAcl,
+    journal: FakeJournal,
+    roots: Vec<PathBuf>,
+}
+
+impl Launched {
+    fn new(test: &str) -> Launched {
+        let w = world(test, &[]);
+        let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+        let mut plan = launch_plan(&w, &["sib1", "sib2"]);
+        apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
+        // The matter, the state folder, the notes folder.
+        let inputs = WalkInputs::of_plan(&plan);
+        let roots: Vec<PathBuf> = [PathKind::Matter, PathKind::State, PathKind::Notes]
+            .iter()
+            .map(|kind| {
+                inputs
+                    .roots
+                    .iter()
+                    .find(|r| r.1 == *kind)
+                    .unwrap()
+                    .0
+                    .clone()
+            })
+            .collect();
+        let ids: Vec<(PathBuf, u64)> = roots.iter().cloned().zip([100, 200, 300]).collect();
+        let journal = journal_for(&ids, 100);
+        let cursor = session_cursor(&ledger, matter_one(), &journal).unwrap();
+        let closed = write_clean_close(
+            &w.at("data"),
+            &ledger,
+            matter_one(),
+            &journal,
+            Some(&cursor),
+            &Ok(Walked::default()),
+            &Ok(Checked::default()),
+        );
+        assert_eq!(closed, Closed::Written);
+        acl.walks.clear();
+        Launched {
+            w,
+            ledger,
+            acl,
+            journal,
+            roots,
+        }
+    }
+
+    fn plan(&self) -> AdmittedPlan {
+        launch_plan(&self.w, &["sib1", "sib2"])
+    }
+
+    fn check(&self) -> LaunchCheck {
+        check_launch(
+            &self.w.at("data"),
+            &self.ledger,
+            &self.plan(),
+            &self.journal,
+        )
+        .unwrap()
+    }
+
+    fn apply(&mut self, check: &LaunchCheck) -> Result<Applied, Error> {
+        let mut plan = self.plan();
+        let mut around = around(&self.w);
+        apply_checked(
+            &mut self.ledger,
+            &mut plan,
+            &mut self.acl,
+            &mut around,
+            check,
+        )
+    }
+
+    /// The walks of an own tree, or of anything in one.
+    fn own_walks(&self) -> Vec<(PathBuf, Reach, bool)> {
+        self.acl
+            .walks
+            .iter()
+            .filter(|(path, _, _)| self.roots.iter().any(|root| in_folder(path, root)))
+            .cloned()
+            .collect()
+    }
+}
+
+#[test]
+fn a_launch_with_nothing_changed_walks_no_own_tree() {
+    let mut l = Launched::new("checked-skip");
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    let applied = l.apply(&check).unwrap();
+    assert_eq!(applied.written, 0);
+    assert_eq!(l.own_walks(), Vec::new());
+    assert!(l.ledger.entries().all(|e| e.state == EntryState::Applied));
+    // The full walk, for comparison, walks all three.
+    let full = LaunchCheck::full(FullReason::NoRecord);
+    l.apply(&full).unwrap();
+    assert_eq!(l.own_walks().len(), 3);
+}
+
+#[test]
+fn a_targeted_launch_walks_only_the_changed_folders_strictly() {
+    let mut l = Launched::new("checked-targeted");
+    l.journal.change(100_005, 100, SECURITY, false);
+    let state = l.roots[1].clone();
+    l.journal.change(201, 200, SECURITY, true);
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Targeted(3));
+    l.apply(&check).unwrap();
+    let mut walks = l.own_walks();
+    walks.sort_by_key(|w| (w.0.clone(), format!("{:?}", w.1)));
+    let mut want = vec![
+        (l.roots[0].clone(), Reach::Children, true),
+        (state.clone(), Reach::Children, true),
+        (state.join("a"), Reach::Tree, true),
+    ];
+    want.sort_by_key(|w| (w.0.clone(), format!("{:?}", w.1)));
+    assert_eq!(walks, want);
+}
+
+#[test]
+fn a_grant_not_yet_written_is_still_written_and_walked_when_the_check_skips() {
+    let mut l = Launched::new("checked-new-grant");
+    let sib = l.w.canonical("sib1");
+    l.acl.aces.retain(|(path, ..)| *path != sib);
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    let applied = l.apply(&check).unwrap();
+    assert!(applied.written > 0);
+    assert!(
+        l.acl
+            .walks
+            .iter()
+            .any(|(path, _, strict)| *path == sib && *strict)
+    );
+    assert_eq!(l.own_walks(), Vec::new());
+}
+
+#[test]
+fn a_check_made_for_other_walk_inputs_walks_in_full() {
+    let mut l = Launched::new("checked-other-plan");
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    // Applied to a plan with another pool user denied on the matter: its inputs differ.
+    let mut grants = l.plan().grants().to_vec();
+    grants.push(Grant {
+        path: l.roots[0].clone(),
+        sid: sid("S-1-5-21-1111111111-2222222222-3333333333-1099"),
+        rights: Rights::DenyReadWrite,
+        inherit: Inherit::Tree,
+        kind: PathKind::Matter,
+    });
+    let mut plan = AdmittedPlan::from_grants(matter_one(), grants);
+    let mut around = around(&l.w);
+    apply_checked(&mut l.ledger, &mut plan, &mut l.acl, &mut around, &check).unwrap();
+    assert_eq!(l.own_walks().len(), 3);
+}
+
+#[test]
+fn the_record_is_gone_even_when_the_launch_then_fails() {
+    let mut l = Launched::new("checked-fails");
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    let sib = l.w.canonical("sib2");
+    l.acl.aces.retain(|(path, ..)| *path != sib);
+    l.acl.fail_add = Some(sib);
+    assert!(l.apply(&check).is_err());
+    assert_eq!(l.check().path(), LaunchPath::Full(FullReason::NoRecord));
+}

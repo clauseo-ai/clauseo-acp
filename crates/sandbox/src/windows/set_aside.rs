@@ -83,8 +83,15 @@ use serde::{Deserialize, Serialize};
 /// so the uninstaller keeps it by this name, not by a copy of the string.
 pub const SET_ASIDE_DIR: &str = "set-aside";
 
+#[cfg(test)]
+pub(crate) use fast::open_session;
+#[cfg(any(windows, test))]
+pub(crate) use fast::under_lock;
+
 #[cfg(any(windows, test))]
 mod check;
+#[cfg(any(windows, test))]
+mod fast;
 #[cfg(any(windows, test))]
 mod files;
 #[cfg(any(windows, test))]
@@ -208,6 +215,31 @@ pub fn before_launch(
     let root = policy.matter();
     run::before_launch(&ntfs::Ntfs, root, data_dir, matter, session, running, now)
         .map_err(run::Refused::into_error)
+}
+
+/// [`before_launch`] after the launch check (S15 `PR3d`): when the check found nothing changed in
+/// the matter since its last clean close, the last record is kept and only the session added;
+/// when it found changes in a few folders, only those are scanned again. In every other case,
+/// or when no record is there or a session is open after all, the full pass runs.
+#[cfg(windows)]
+pub fn before_launch_checked(
+    policy: &crate::Policy,
+    data_dir: &Path,
+    matter: &MatterId,
+    session: &str,
+    running: &[&str],
+    now: SystemTime,
+    check: &crate::windows::clean_close::LaunchCheck,
+) -> Result<Checked, crate::Error> {
+    let root = policy.matter();
+    if let Some(touched) = check.touched_in_matter() {
+        let fast = fast::before_launch_fast(&ntfs::Ntfs, root, data_dir, matter, session, &touched)
+            .map_err(run::Refused::into_error)?;
+        if let Some(checked) = fast {
+            return Ok(checked);
+        }
+    }
+    before_launch(policy, data_dir, matter, session, running, now)
 }
 
 /// The call when the agent has exited, after `repair_after_session` and whatever it returned:
