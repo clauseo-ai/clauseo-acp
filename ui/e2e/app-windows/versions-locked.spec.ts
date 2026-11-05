@@ -1,9 +1,10 @@
-// fake_agent `claude-files-one-turn`, as versions.spec.ts. Word holds brief.txt open: its owner file
-// `~$brief.txt` sits beside it. Restore to the import version is refused and writes nothing, and the
-// dialog says a paper is open in another program and offers Try again. Once the owner file is gone,
-// Try again restores the matter.
+// fake_agent `claude-files-one-turn`, as versions.spec.ts. Word holds brief.txt open: the file is
+// open with no sharing and its owner file `~$brief.txt` sits beside it (word-hold.ts; since #409 an
+// owner file alone is stale). Restore to the import version is refused and writes nothing, and the
+// dialog says a paper is open in another program and offers Try again. Once Word lets go of the file
+// and the owner file is gone, Try again restores the matter.
 
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
@@ -33,9 +34,9 @@ test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
 test("Restore waits while Word holds a file, then lands once it is closed", async ({
   app,
   scratch,
+  wordLock,
 }) => {
   const w = window(app.page);
-  const brief = join(scratch.matterDir, "brief.txt");
   await openMatter(w);
   await sendPrompt(w, "Finalise clause 4");
   await expect(w.agentMessages.last()).toHaveText(
@@ -45,8 +46,12 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.fileChanged).toHaveCount(3);
   expect(readTree(scratch.matterDir)).toEqual(AFTER);
 
-  // Word opens brief.txt: its owner file appears beside it.
-  writeFileSync(join(scratch.matterDir, OWNER), OWNER_BYTES);
+  // Word opens brief.txt: it holds the file with no sharing, and its owner file appears beside it.
+  const held = await wordLock.hold({
+    document: "brief.txt",
+    owner: OWNER,
+    ownerBytes: OWNER_BYTES,
+  });
 
   await w.versionsButton.click();
   await expect(w.versionsPanel).toBeVisible();
@@ -56,14 +61,15 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.dialog).toContainText(STAYS_LINE);
   await w.dialogConfirm.click();
 
-  // Refused: the dialog shows the lock line and offers Try again; nothing moved.
+  // Refused: the dialog shows the lock line and offers Try again.
   await expect(w.dialogTryAgain).toBeVisible();
   await expect(w.dialog).toContainText(LOCKED_LINE);
-  expect(readFileSync(brief, "utf8")).toBe(AFTER["brief.txt"]);
-  expect(readTree(scratch.matterDir)).toEqual({ ...AFTER, [OWNER]: OWNER_BYTES });
+  expect(existsSync(join(scratch.matterDir, OWNER))).toBe(true);
 
-  // Closed in Word: Try again goes through.
-  rmSync(join(scratch.matterDir, OWNER));
+  // Closed in Word: the file is let go and the owner file goes. Nothing moved while it was held
+  // (the held file cannot be read until then), and Try again goes through.
+  await held.release();
+  expect(readTree(scratch.matterDir)).toEqual(AFTER);
   await w.dialogTryAgain.click();
   await expect(w.dialog).toBeHidden();
   await expect.poll(() => readTree(scratch.matterDir)).toEqual(RESTORED);

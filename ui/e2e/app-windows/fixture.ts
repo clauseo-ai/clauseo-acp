@@ -50,6 +50,7 @@ import {
   type RemovableWarmProfile,
   type Scratch,
 } from "./scratch.ts";
+import { withWordLock, type WordLock } from "./word-hold.ts";
 
 /** The time from starting the app to having its page: the port file, connecting, the page. */
 const SETUP_TIMEOUT_MS = 60_000;
@@ -483,7 +484,7 @@ export interface AppOptions {
 }
 
 export const test = base.extend<
-  AppOptions & { scratch: Scratch; apps: Apps; app: App },
+  AppOptions & { scratch: Scratch; apps: Apps; app: App; wordLock: WordLock },
   { warmProfile: RemovableWarmProfile }
 >({
   scenario: [null, { option: true }],
@@ -566,5 +567,10 @@ export const test = base.extend<
 
   app: async ({ apps }, use) => {
     await use(await apps.start());
+  },
+
+  // Depends on scratch, so it is torn down first: no document is still held when the folders go.
+  wordLock: async ({ scratch }, use) => {
+    await withWordLock(scratch.matterDir, use);
   },
 });
