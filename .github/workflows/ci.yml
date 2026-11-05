@@ -144,7 +144,9 @@ jobs:
     # Not on push (Rohan's CI decision, 2026-11-04): the merge queue already ran it on this code.
     if: github.event_name != 'push'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 40, not 30: the apt step is seconds from the .deb cache, but a new runner image misses it once,
+    # and on 2026-11-05 a slow Ubuntu archive took 15 to 30 minutes over a miss (#469, #462).
+    timeout-minutes: 40
     steps:
       # Full history: `cargo xtask check` diffs against the merge-base with origin/main, and a
       # shallow clone has none.
