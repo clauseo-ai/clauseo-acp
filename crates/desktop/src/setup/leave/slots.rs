@@ -2,11 +2,13 @@
 //!
 //! A leave takes its agent's [`Slot`] for its whole run; a second leave of that agent while one
 //! runs is refused with `command.conflict`. An automatic leave refused so is kept beside the
-//! running one: when that one ends without leaving (a lawyer's leave given up), the automatic
+//! running one: when that one ends without leaving (a lawyer's leave that failed), the automatic
 //! leave is queued again; when it left the login, or a new sign-in ended it, the automatic leave
-//! has nothing left to do and goes. Automatic leaves ([`AutoLeave`]: a split, or a reuse S18
-//! ended by itself) are queued here and run, each on its own, by `auto::follow`, never inside
-//! the pump.
+//! has nothing left to do and goes. A lawyer's leave that gave up keeps its slot
+//! ([`Slot::linger`]) until S18's stop job ends ([`Leaves::end_late`]).
+//!
+//! Automatic leaves ([`AutoLeave`]: a split, or a reuse S18 ended by itself) are queued here
+//! and run, each on its own, by `auto::follow`, never inside the pump.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -33,6 +35,7 @@ pub(crate) struct Leaves {
 }
 
 /// An automatic leave kept for later, with its reason.
+#[derive(Clone, Copy)]
 struct Deferred(Option<Found>);
 
 /// One running leave.
@@ -70,7 +73,27 @@ impl Leaves {
             leaves: self,
             agent: agent.clone(),
             left: false,
+            lingers: false,
         })
+    }
+
+    /// The stop job a lawyer's leave gave up on ended (`left`: the reuse stopped): the agent
+    /// is free again, and a deferred automatic leave goes as when a leave ends.
+    pub(crate) fn end_late(&self, agent: &AgentId, left: bool) {
+        let leave = lock(&self.running).remove(agent);
+        self.ended(agent, deferred(leave), left);
+    }
+
+    /// A leave of `agent` ended: `deferred`, the reason of an automatic leave kept beside it, is
+    /// queued again unless `left`.
+    fn ended(&self, agent: &AgentId, deferred: Option<Deferred>, left: bool) {
+        if let Some(Deferred(why)) = deferred {
+            if left {
+                tracing::info!(%agent, "an automatic leave was done by another");
+            } else {
+                self.submit(agent, why);
+            }
+        }
     }
 
     /// Keeps an automatic leave of `agent` refused while another leave of it runs.
@@ -111,14 +134,27 @@ impl Leaves {
     }
 }
 
+/// The reason of the automatic leave kept beside `leave`, if any.
+fn deferred(leave: Option<Running>) -> Option<Deferred> {
+    leave.and_then(|leave| leave.deferred)
+}
+
 /// A running leave of one agent; the agent is free again when it drops.
 pub(crate) struct Slot<'a> {
     leaves: &'a Leaves,
     agent: AgentId,
     left: bool,
+    /// Kept past its drop, until [`Leaves::end_late`].
+    lingers: bool,
 }
 
 impl Slot<'_> {
+    /// A lawyer's leave gave up while S18's stop job may still run: the slot stays taken until
+    /// the pump sees the job end.
+    pub(crate) fn linger(mut self) {
+        self.lingers = true;
+    }
+
     /// The login was left, or a new sign-in took its place: a deferred automatic leave goes.
     pub(crate) fn left(&mut self) {
         self.left = true;
@@ -136,17 +172,10 @@ impl Slot<'_> {
 
 impl Drop for Slot<'_> {
     fn drop(&mut self) {
-        let leave = lock(&self.leaves.running).remove(&self.agent);
-        if let Some(Running {
-            deferred: Some(Deferred(why)),
-            ..
-        }) = leave
-        {
-            if self.left {
-                tracing::info!(agent = %self.agent, "an automatic leave was done by another");
-            } else {
-                self.leaves.submit(&self.agent, why);
-            }
+        if self.lingers {
+            return;
         }
+        let leave = lock(&self.leaves.running).remove(&self.agent);
+        self.leaves.ended(&self.agent, deferred(leave), self.left);
     }
 }

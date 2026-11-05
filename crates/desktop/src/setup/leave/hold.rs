@@ -8,7 +8,14 @@
 //! **The hold** ([`HostHold`]): from `stop_agents` on, the host holds the agent until
 //! `restart_agents`. A lawyer's leave that does not finish lifts it ([`HostHold::lift`]); one
 //! dropped before it ends (a panic, or its command's future dropped) lifts it from its `Drop`,
-//! on a thread of its own (review L6). A failed `restart_agents` is tried once more, then logged.
+//! on a thread of its own (review L6). An automatic leave's hold lifts from its `Drop` only on
+//! a panic ([`HostHold::on_panic`], review A3): dropped otherwise, the app is quitting. A
+//! failed `restart_agents` is tried once more, then logged.
+//!
+//! **A leave given up** ([`Late`], review A2): S18 has no cancel for its stop job
+//! (`cancel_sign_in` ends only a sign-in), so when a lawyer's leave stops waiting for the job's
+//! `SignedOut`, its holds stay, with the pump, until the job ends. Nothing then changes under
+//! running agents.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +24,7 @@ use clauseo_process::{AsyncIoTimer, Timer};
 use clauseo_protocol::AgentId;
 
 use super::super::host_calls::SetupHost;
+use super::super::readers::ReadHold;
 use crate::dialogs::BoxFuture;
 
 /// How long the leave waits for S18's `SignedOut` after `stop_using_login`.
@@ -72,11 +80,20 @@ impl LeaveTimer for AsyncIoTimer {
     }
 }
 
+/// A lawyer's leave given up before S18's stop job ended: its holds, which the pump lifts once
+/// the job's end has been handled. Fields drop in order: the host's hold, then the reads'.
+pub(crate) struct Late {
+    pub(crate) hold: HostHold,
+    pub(crate) reads: ReadHold,
+}
+
 /// The host's hold on one agent from `stop_agents` on, lifted on drop unless kept.
 pub(crate) struct HostHold {
     host: Arc<dyn SetupHost>,
     agent: AgentId,
     armed: bool,
+    /// Lifted on drop only while a panic unwinds.
+    panic_only: bool,
 }
 
 impl HostHold {
@@ -86,6 +103,17 @@ impl HostHold {
             host,
             agent,
             armed: true,
+            panic_only: false,
+        }
+    }
+
+    /// An automatic leave's hold, lifted on drop only by a panic.
+    pub(crate) fn on_panic(host: Arc<dyn SetupHost>, agent: AgentId) -> Self {
+        Self {
+            host,
+            agent,
+            armed: true,
+            panic_only: true,
         }
     }
 
@@ -103,7 +131,7 @@ impl HostHold {
 
 impl Drop for HostHold {
     fn drop(&mut self) {
-        if !self.armed {
+        if !self.armed || (self.panic_only && !std::thread::panicking()) {
             return;
         }
         let (host, agent) = (Arc::clone(&self.host), self.agent.clone());

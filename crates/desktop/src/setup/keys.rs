@@ -92,6 +92,17 @@ impl KeyCache {
         self.available
     }
 
+    /// `internal`, as a store would answer it, when this computer's keychain can hold no key:
+    /// asked before a key leaves a reused login, so no refusal follows a leave (review N1).
+    pub(crate) fn refuse_unavailable(&self, agent: &AgentId) -> Result<(), HostError> {
+        if self.available {
+            return Ok(());
+        }
+        Err(key_error(&KeyError::NoKeychain {
+            agent: agent.clone(),
+        }))
+    }
+
     /// Whether `agent` has a key.
     pub(crate) fn has(&self, agent: &AgentId) -> bool {
         lock(&self.keys).contains_key(agent)

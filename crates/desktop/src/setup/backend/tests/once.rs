@@ -1,7 +1,9 @@
 //! A lawyer's leave on the recording fakes: one leave per agent (a double `StopUsingLogin`, a
-//! split arriving during one), the 30 s wait running out, a late `SignedOut` with no leave
-//! waiting, a stale state queued before the leave waited, Clauseo's own login signed out, and the
-//! hold lifted when the leave is dropped mid-way or `restart_agents` fails once.
+//! split arriving during one), the 30 s wait running out (the holds kept until S18's stop job
+//! ends: a late `SignedOut` runs the steps after the stop, then lifts the hold; a job that ends
+//! still reused only lifts it), a stale state queued before the leave waited, Clauseo's own login
+//! signed out, and the hold lifted when the leave is dropped mid-way or `restart_agents` fails
+//! once.
 
 use std::future::{Future as _, poll_fn};
 use std::task::Poll;
@@ -95,7 +97,7 @@ fn a_stale_state_queued_before_the_leave_waited_never_ends_it() {
 }
 
 #[test]
-fn the_lawyer_s_leave_with_no_signed_out_in_30_s_lifts_the_hold_and_answers_failed() {
+fn the_lawyer_s_leave_with_no_signed_out_in_30_s_answers_failed_and_keeps_the_holds() {
     let rig = reused_codex();
     let mut script = rig.timer.script();
     let setup = rig.setup();
@@ -105,30 +107,55 @@ fn the_lawyer_s_leave_with_no_signed_out_in_30_s_lifts_the_hold_and_answers_fail
     assert_eq!(error.code(), ErrorCode::SigninFailed);
     assert!(error.code().is_retryable());
     assert_eq!(script.elapsed(), Duration::from_secs(30));
+    // S18's stop job may still end the reuse, and S18 cannot cancel it: no agent relaunches
+    // until it ends, so nothing changes under running agents.
     assert_eq!(
         rig.journal(),
         [
             "readers.hold",
             "host.stop_agents",
-            "agents.stop_using_login",
-            "host.restart_agents",
-            "readers.release",
+            "agents.stop_using_login"
         ]
     );
-    // Nothing else of the host is asked: no turn is dropped, and the queue goes on as
-    // `restart_agents` resumes it.
+    assert_eq!(rig.host.calls(), [HostCall::StopAgents(codex())]);
+    assert!(
+        rig.backend.wiring.reused.get(&codex()),
+        "nothing changed yet"
+    );
+    let again = rig.pumped(setup.run(SETTINGS, stop_using_command(&codex())));
     assert_eq!(
-        rig.host.calls(),
-        [
-            HostCall::StopAgents(codex()),
-            HostCall::RestartAgents(codex())
-        ]
+        again.unwrap_err().code(),
+        ErrorCode::CommandConflict,
+        "the slot stays taken until the job ends"
     );
-    assert!(rig.backend.wiring.reused.get(&codex()), "nothing changed");
+    assert_eq!(rig.host.calls(), [HostCall::StopAgents(codex())]);
 }
 
 #[test]
-fn a_late_signed_out_with_no_leave_waiting_runs_the_steps_after_the_stop() {
+fn a_give_up_whose_job_ends_still_reused_only_lifts_the_hold() {
+    let rig = reused_codex();
+    let mut script = rig.timer.script();
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, stop_using_command(&codex()));
+    let answer = rig.pumped(async {
+        let (answer, ()) = join(send, script.fire(Wait::SignedOut)).await;
+        rig.journal();
+        rig.s18_sends(&codex(), signed_in(Source::Reused));
+        let lifted = || rig.host.calls().contains(&HostCall::RestartAgents(codex()));
+        until("the hold lifted", lifted).await;
+        answer
+    });
+    assert_eq!(answer.unwrap_err().code(), ErrorCode::SigninFailed);
+    assert_eq!(rig.journal(), ["host.restart_agents", "readers.release"]);
+    assert!(rig.backend.wiring.reused.get(&codex()), "nothing changed");
+    assert!(
+        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        "the slot is free"
+    );
+}
+
+#[test]
+fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_lifts_the_hold() {
     let rig = reused_codex();
     let mut script = rig.timer.script();
     let setup = rig.setup();
@@ -149,13 +176,19 @@ fn a_late_signed_out_with_no_leave_waiting_runs_the_steps_after_the_stop() {
             "host.remove_login_links",
             "host.set_agent_launch",
             "readers.set_entry",
+            "host.restart_agents",
+            "readers.release",
             "host.login_changed",
         ]
     );
     ends_own(&rig);
     let restarts = rig.host.calls().into_iter();
     let restarts = restarts.filter(|call| *call == HostCall::RestartAgents(codex()));
-    assert_eq!(restarts.count(), 1, "only the leave's own, when it gave up");
+    assert_eq!(restarts.count(), 1, "once, after the steps");
+    assert!(
+        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        "the slot is free"
+    );
 }
 
 #[test]
