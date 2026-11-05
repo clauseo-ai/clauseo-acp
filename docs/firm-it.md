@@ -44,10 +44,10 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   The silent `/S` uninstall asks nothing and always keeps it. Ticked, `Clauseo.exe` deletes the
   uninstalling user's data folder and `%APPDATA%\ai.clauseo.desktop` without following links: a
   junction or symbolic link inside them is removed as a link, and what it points at is left as it
-  is. A folder moved with `CLAUSEO_DATA_DIR` is never touched. The files the sandbox set aside
-  from a matter (`sandbox\set-aside`) are kept, and so is the `sandbox` folder when removing the
-  sandbox's set-up failed; a message names the kept folder, or the folder to delete by hand when
-  something could not be deleted.
+  is. A folder moved with `CLAUSEO_DATA_DIR` is never touched. The `sandbox` folder is kept
+  unless removing the sandbox's set-up succeeded, and the files the sandbox set aside from a
+  matter (`sandbox\set-aside`) are always kept. A message names the kept folder, or the folder to
+  delete by hand when something could not be deleted and nothing was kept.
 
 ### Intune (Win32 app)
 
