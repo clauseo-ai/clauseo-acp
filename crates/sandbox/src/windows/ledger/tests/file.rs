@@ -75,8 +75,8 @@ fn entries_this_version_cant_read_or_trust_are_set_aside() {
     let before: serde_json::Value = serde_json::from_str(&text).unwrap();
     let entries = written["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 15);
-    // The entry whose removal failed was set back to pending before the removal (M4).
-    assert_eq!(entries[0]["state"], "pending");
+    // The entry whose removal failed was marked removing before the removal (M4, round 4).
+    assert_eq!(entries[0]["state"], "removing");
     assert_eq!(entries[1..12], before["entries"].as_array().unwrap()[1..]);
     assert_eq!(written["written_by"], "a later Clauseo");
     assert_eq!(entries[0]["note"], "kept");

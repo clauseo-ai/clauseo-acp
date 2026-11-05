@@ -196,9 +196,10 @@ fn a_crash_at_each_step_of_a_rollback_leaves_no_applied_entry_without_its_ace() 
     }
 }
 
-/// M4 for forget: a crash during a removal leaves the matter's entries pending, not applied.
+/// M4 for forget: a crash during a removal leaves the matter's entries marked removing (round 4),
+/// not applied.
 #[test]
-fn a_crash_during_forget_leaves_its_entries_pending() {
+fn a_crash_during_forget_leaves_its_entries_removing() {
     let w = world("review-m4-forget", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
     apply(
@@ -220,7 +221,7 @@ fn a_crash_during_forget_leaves_its_entries_pending() {
     assert!(crashed.is_err());
     let ledger = super::ledger(&w);
     assert!(ledger.entries().count() > 0);
-    assert!(ledger.entries().all(|e| e.state == EntryState::Pending));
+    assert!(ledger.entries().all(|e| e.state == EntryState::Removing));
 }
 
 /// L4: the lawyer's own explicit label is recorded before ours and put back on rollback.

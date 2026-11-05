@@ -28,10 +28,10 @@
 //!    replaced by the walk-down set first (`lift.rs`). A refused launch leaves every deny.
 //!
 //! Any failure rolls back this launch's new entries only (`back.rs`): under the ledger's lock
-//! they are set `pending`, each permission entry this launch wrote for them is removed unless
+//! they are marked `removing`, each permission entry this launch wrote for them is removed unless
 //! another entry names it, the trees are walked again so the inherited copies go too, and the
 //! entries whose permission entry is gone are dropped. An entry whose removal fails stays
-//! `pending` for [`forget_matter`] or the next start's [`reconcile`].
+//! `removing`, and [`forget_matter`] or the next start's [`reconcile`] finishes it.
 //!
 //! The set-aside (`set_aside.rs`) runs beside this, not on its results: PR6 calls its
 //! `before_launch` first and then [`apply`]; when the agent exits, [`repair_after_session`]
