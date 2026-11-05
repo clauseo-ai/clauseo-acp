@@ -333,6 +333,16 @@ alone takes about 200 to 300 ms; the later launches stay near the median. No per
 is added; that is a decision for the host. A debug build is far slower at the caps, since the
 workspace's dev profile compiles dependencies, `sha2` among them, without optimisation.
 
+Through the host (PR-D), the ignored test `timing_launch_with_packs`
+(`crates/host/tests/host/packs_timing.rs`) times a prompt to its agent's spawn, which holds the
+whole launch prep, on iris in a release build: 9 launches per case after one warm-up, three runs,
+median / slowest of what packs add over the same launch with none:
+
+| Case | Added to the launch | Target |
+|---|---|---|
+| 2 packs, 3 skills each, about 30 KB | 0.7–1.4 / 0.6–1.4 ms | 50 ms |
+| 16 packs at the caps, 125 MiB | 131–149 / 142–169 ms | 200 ms |
+
 ### Turning packs on, and reporting a skipped pack
 
 - `HostCommand::SetSkillPack { id, on }` (PR-E). Turning on checks the policy on the actor, then
@@ -345,10 +355,13 @@ workspace's dev profile compiles dependencies, `sha2` among them, without optimi
 - `Query::ListSkillPacks` (PR-E) gives each installed pack's manifest fields, its current hash and
   its state: `On`, `Off`, `Changed`, `NotAdmitted` or `Refused(code)`. The later UI reads it.
 - **A skipped pack:** a host log line holding the id and the reason code, with no path or pack text
-  (0047), once per launch. Plus one `Notice` warning in the thread naming each skipped pack by id:
-  "Skill pack nda-kit was not loaded: it changed since you turned it on." The notice is shown once
-  per thread session, not per launch, so an agent that restarts in a loop does not repeat it; the
-  log line stays per launch. The thread view already shows notices.
+  (0047), once per launch. Plus one `Notice` warning in the thread per skipped pack, naming it by id:
+  `Clauseo didn't load the skill pack "nda-kit". Its files changed after it was turned on. Turn
+  it on again to use it.` Each thread is told
+  each skipped pack and reason once for the host's run: a relaunch or a new agent session does
+  not repeat it, so an agent that restarts in a loop cannot fill the thread. Each thread keeps its
+  own record, so another thread is still told, and a new reason for the same pack (`not_admitted`,
+  then `changed`) is told once more. The log line stays per launch. The thread view already shows notices.
 
 ### Windows
 

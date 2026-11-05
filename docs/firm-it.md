@@ -200,7 +200,8 @@ of the wrong type for a known key is a warning and **still locks the key, at its
 source that cannot be read at all (a `policy.json` that does not parse, a registry read that
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
 `tools.browser`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
-`install.registry` unset, and no `plans.<id>` at all. The two `privacy` keys can
+`install.registry` unset, `skills.extra` `off`, `skills.allow_scripts` false, `skills.curated`
+empty, and no `plans.<id>` at all. The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions, **unless its name looks like a security section's** (a section holding a
@@ -234,11 +235,11 @@ the registry or managed preferences) and the section, never a value or a path. (
 **Formats.**
 
 - **Registry:** `REG_DWORD` for a number, or a boolean as 0 or 1; `REG_SZ` for a string, or JSON
-  text for an object (`agents.<id>`, `plans.<id>`, `mcp.servers`); `REG_MULTI_SZ` for a list of strings (no key in
-  the table below takes a list yet). Value names ignore case; an agent id keeps
+  text for an object (`agents.<id>`, `plans.<id>`, `mcp.servers`); `REG_MULTI_SZ` for a list of strings
+  (`skills.curated`). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
-  `ui`, `tools`, `privacy`, `plans` and `install`, each an object; comments and trailing commas are allowed. Sample:
+  `ui`, `tools`, `privacy`, `plans`, `install` and `skills`, each an object; comments and trailing commas are allowed. Sample:
   [`docs/firm-it/policy.sample.json`](firm-it/policy.sample.json) (Windows paths).
 - **macOS profile:** a payload whose `PayloadType` is `ai.clauseo.desktop`, with the dotted keys as
   its keys, except agents and plans: one key `agents`, a dictionary from agent id to launch spec, and
@@ -268,6 +269,10 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `plans.<id>` | object: `endpoint` (`https` URL with a host; no user name, password, query or fragment), `provider` (`anthropic`, `bedrock`, `vertex`), `env` (map) | none: the plan login | `REG_SZ`, JSON | value `plans.claude-acp` = `{"endpoint": "https://ai-gateway.firm.example/anthropic", "provider": "anthropic"}`. **Security key**: replaces the user's whole plan for that agent; an unreadable source leaves no plan at all. An `env` name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case) is dropped with a warning: keep secrets in your own tools (an AWS profile, Google's application default credentials) |
 | `install.bundle` | absolute path | none: download | `REG_SZ` | `D:\Clauseo\bundle`: an offline bundle folder. **Security key**: unset if a source is unreadable |
 | `install.registry` | `https` URL with a host; no user name, password, query or fragment | none: the public hosts | `REG_SZ` | `https://npm.firm.example/`: a firm npm mirror. **Security key**: unset if a source is unreadable |
+| `skills.extra` | `off`, `curated`, `any` | `off` | `REG_SZ` | `curated`: each launch loads only the skill packs in `skills.curated`, and each still needs turning on in `skills.enabled` (decision record [0040](decisions/0040-skill-packs.md)); `off` loads none beyond Clauseo's own. **Security key**: `off` if a source is unreadable or the value does not type |
+| `skills.curated` | list of pack ids (2 to 30 of `a-z 0-9`, single hyphens) | empty | `REG_MULTI_SZ` | `nda-kit` and `lease-kit`, one per line: the packs `curated` admits. Policy only: a `settings.json` value is ignored with a warning. **Security key**: empty if a source is unreadable or any entry is no pack id |
+| `skills.allow_scripts` | boolean | false | `REG_DWORD` 0 or 1 | 0: a pack holding a script or program is not loaded. With 1 such files are copied, never run by Clauseo, though the agent can run them. **Security key**: `false` if a source is unreadable or the value does not type |
+| `skills.enabled` | object: pack id to `sha256:<64 lowercase hex>`, the hash the pack had when turned on | empty | `REG_SZ`, JSON | `{"nda-kit": "sha256:a1b2…"}` (all 64 digits). A pack whose files no longer hash to its value is not loaded. Replaces the user's whole map and locks it. Until turning a pack on from the app ships (0040, PR-E), this is the map in the user's `settings.json` |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -291,10 +296,6 @@ it.
 | Key | Task | Note |
 |---|---|---|
 | `update.mode` (`auto`, `notify`, `none`) | R23 | `none` for managed fleets; locks at `none` if a policy source is unreadable. Per-machine installs never update themselves anyway |
-| `skills.extra` (`off`, `curated`, `any`) | 0040 | Read and locked now; nothing loads a pack until the launch wiring lands. **Security key**: `off` if a source is unreadable or the value does not type |
-| `skills.curated` (list of pack ids; `REG_MULTI_SZ`) | 0040 | Policy only: a `settings.json` value is ignored. **Security key**: empty if a source is unreadable or any entry is no pack id |
-| `skills.allow_scripts` (boolean) | 0040 | Scripts are copied, never run. **Security key**: `false` if a source is unreadable or the value does not type |
-| `skills.enabled` (object: pack id to `sha256:<64 hex>`) | 0040 | The lawyer's turned-on packs; a policy value replaces the whole map and locks it |
 | `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
 
 ## 7. Hosts Clauseo reaches
