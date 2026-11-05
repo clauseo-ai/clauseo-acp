@@ -1073,6 +1073,7 @@ dependencies = [
  "async-channel",
  "async-io",
  "clauseo-acp",
+ "clauseo-connectors",
  "clauseo-counts",
  "clauseo-fake_agent",
  "clauseo-host",
@@ -1102,6 +1103,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
+ "url",
  "uuid",
  "windows",
 ]

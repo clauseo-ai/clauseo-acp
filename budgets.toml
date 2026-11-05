@@ -694,6 +694,16 @@ status = "unmeasured"
 source = "S28 brief, Performance"
 
 [[budget]]
+id = "connector_relay_overhead_p95"
+metric = "case-law relay, the relay's own time per message, p95: its line read to the POST's start plus the reply to its last line written (not the network)"
+limit = 5.0
+unit = "ms"
+gate = "alert"
+measured_by = "cargo bench -p clauseo-host --bench connector_relay"
+status = "unmeasured"
+source = "R24 brief, Budgets"
+
+[[budget]]
 id = "browser_cold_start_p95"
 metric = "first agent_browser_open answered, from the guard's start (agent-browser and headless Chrome cold), p95"
 limit = 3.0

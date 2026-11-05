@@ -60,7 +60,7 @@ fn map_url_leaves_a_lookalike_host_alone() {
 #[test]
 fn fake_maps_onto_loopback_and_refuses_anything_else() {
     let fake = Origin::Fake(url::Url::parse("http://127.0.0.1:4321").unwrap());
-    fake.check().unwrap();
+    assert!(fake.allowed());
     assert_eq!(fake.urls(&CASE_LAW).issuer, "http://127.0.0.1:4321");
     assert_eq!(
         fake.urls(&CASE_LAW).api_base,
@@ -76,7 +76,7 @@ fn fake_maps_onto_loopback_and_refuses_anything_else() {
         "http://127.0.0.1:4321/?q=1",
     ] {
         let origin = Origin::Fake(url::Url::parse(bad).unwrap());
-        assert_eq!(origin.check(), Err(Error::BadOrigin), "{bad}");
+        assert!(!origin.allowed(), "{bad}");
     }
 }
 

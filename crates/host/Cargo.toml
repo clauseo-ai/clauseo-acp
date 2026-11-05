@@ -32,6 +32,8 @@ clauseo-search = { path = "../search" }
 # (decision record 0029, stage C's `BrowserSocketDir` and `ports`), and the Windows folder check
 # of a matter folder (src/agent/folder_support.rs).
 clauseo-sandbox = { path = "../sandbox" }
+# The case-law relay (connectors.rs, R24): the connector's handle, its MCP POST and the relay token.
+clauseo-connectors = { path = "../connectors" }
 # Random agent-browser session names on Windows (`browser/session.rs`).
 getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
@@ -77,6 +79,10 @@ clauseo-matters = { path = "../matters", features = ["test-support"] }
 # `running` and `kill`: the cancel tests watch the processes the agent started.
 clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-profile = { path = "../profile", features = ["test-support"] }
+# The fake connector, its memory store and manual clock for the relay's tests and bench.
+clauseo-connectors = { path = "../connectors", features = ["test-support"] }
+# The relay tests' gated upstream as an `Origin::Fake`.
+url = { workspace = true }
 # The reopen bench's fixture.
 clauseo-store = { path = "../store", features = ["test-support"] }
 proptest = { workspace = true }
@@ -93,6 +99,10 @@ clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 
 [[bench]]
 name = "reopen"
+harness = false
+
+[[bench]]
+name = "connector_relay"
 harness = false
 
 [lints]

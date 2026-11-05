@@ -235,6 +235,9 @@ fn random<const N: usize>(handle: &ConnectorHandle) -> Zeroizing<[u8; N]> {
         rng.fill_bytes(&mut *bytes);
         return bytes;
     }
+    // Without test-support the handle has no seeded generator to offer.
+    #[cfg(not(feature = "test-support"))]
+    let _ = handle;
     rand::rng().fill_bytes(&mut *bytes);
     bytes
 }

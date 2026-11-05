@@ -86,7 +86,9 @@ impl Connectors {
     /// Checks the origin, builds the HTTP agent and reads the state file. Makes no request and
     /// reads no keychain item.
     pub fn new(config: Config, store: Arc<dyn SecretStore>) -> Result<Connectors, Error> {
-        config.origin.check()?;
+        if !config.origin.allowed() {
+            return Err(Error::BadOrigin);
+        }
         let agent = http::agent(&config)?;
         let state = State::load(&config.state_file)?;
         let case_law = config.origin.urls(&CASE_LAW);
