@@ -125,12 +125,13 @@ build 26100):
     nothing changed writes nothing and the lawyer's folders keep their `AI`. As
     `SetNamedSecurityInfo`'s propagation does, a child that isn't protected loses its old inherited
     entries before the strict check and before it is worked out from its parent, and is written
-    auto-inherited. Old inherited entries include explicit ones equal to what the parent alone
-    gives such a child: under a parent that isn't auto-inherited (a plain `C:\m`), NTFS writes its
-    inherited copies without the inherited flag, and `icacls` only displays them as `(I)` (VM run
-    3). The root's write makes it auto-inherited too and keeps its inherited entries. Otherwise an
-    old inherited `Users` allow would count as explicit and refuse every launch. Paths are compared
-    in one normal form, so a walk's verbatim (`\\?\`) paths match the plan's plain ones.
+    auto-inherited. On a child that isn't auto-inherited either, old inherited entries include
+    explicit ones equal to what the parent alone gives it: under a parent that isn't
+    auto-inherited (a plain `C:\m`), NTFS writes its inherited copies without the inherited flag,
+    and `icacls` only displays them as `(I)` (VM run 3). The root's write makes it auto-inherited
+    too and keeps its inherited entries. Otherwise an old inherited `Users` allow would count as
+    explicit and refuse every launch. Paths are compared in one normal form, so a walk's verbatim
+    (`\\?\`) paths match the plan's plain ones.
   - Any failure takes back this launch's new entries: under the ledger's lock they are set
     `removing` on disk (a state of its own, so `reconcile` finishes a rollback or forget that a
     crash stopped, rather than mistake it for a launch), then each permission entry this launch
@@ -278,8 +279,9 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Old inherited entries on a child that isn't protected are dropped**, as Explorer's propagation
   drops them, at every walk that works such a child out, fence walks included: an entry an old tool
   (`cacls`, `xcopy /O`) flagged inherited is lost, isn't recorded, and isn't restored by forget.
-  An explicit lawyer entry identical to what the parent gives the child is taken for an inherited
-  copy and comes back inherited, so access doesn't change (accepted).
+  On such a child that isn't auto-inherited, an explicit lawyer entry identical to what the parent
+  gives it is taken for an inherited copy and comes back inherited, so access doesn't change; an
+  auto-inherited child keeps its explicit entries (accepted).
 - **PR4's uninstall hook must delete every reparse point under the app-data folders, without
   following it, before Tauri's NSIS "delete app data" runs `RMDir /r`**, which follows junctions:
   VM run 3 emptied a lawyer folder through a junction set aside under `<data>\sandbox`.
