@@ -460,8 +460,15 @@ fn a_folder_is_pinned_only_when_it_is_a_real_folder() {
 }
 
 #[test]
+fn a_path_without_a_verbatim_prefix_is_left_as_it_is() {
+    let path = Path::new("/home/a/.local/share");
+    assert_eq!(walk::plain(path), path);
+}
+
+#[test]
 fn the_folder_names_are_the_sandboxs() {
     assert_eq!(walk::SANDBOX_DIR, "sandbox");
+    assert_eq!(walk::SET_ASIDE_PATH, ["sandbox", "set-aside"]);
     // TODO(#465): compare with clauseo_sandbox::windows::SET_ASIDE_DIR once it is exported.
     assert_eq!(walk::SET_ASIDE_DIR, "set-aside");
 }

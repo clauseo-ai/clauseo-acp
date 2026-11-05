@@ -12,11 +12,16 @@ use clauseo_settings::{IDENTIFIER, KnownFolder, PlatformDirs};
 use super::{DELETED, FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
 
 /// The sandbox's folder under the local data folder: S15's records (its ledger, the matter
-/// SIDs), which its `--remove` needs.
+/// SIDs, and the clean-close records of S15's third PR, part d), which its `--remove` needs.
+/// Kept whole unless `--sandbox-removed`, so a record added there later is kept too.
 pub(super) const SANDBOX_DIR: &str = clauseo_sandbox::windows::matters::SANDBOX_DIR;
-/// Where tier B moves the lawyer's protected names aside, under [`SANDBOX_DIR`].
+/// The set-aside's own name, under [`SANDBOX_DIR`].
 // TODO(#465): use clauseo_sandbox::windows::SET_ASIDE_DIR
 pub(super) const SET_ASIDE_DIR: &str = "set-aside";
+/// Where tier B moves the lawyer's protected names aside, under the local data folder, one name
+/// per level: `<data>\sandbox\set-aside\<matter>\<timestamp>\…` (S15, #464). The one place
+/// its location is written; the hook's message path is held to it by a test.
+pub(super) const SET_ASIDE_PATH: [&str; 2] = [SANDBOX_DIR, SET_ASIDE_DIR];
 
 /// Deletes both data folders as `mode` says, the known folders from `dirs`; answers the exit
 /// code.
@@ -58,9 +63,11 @@ pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write
         let toward: &[&str] = match (local, mode.sandbox_removed) {
             (false, _) => &[],
             (true, false) => &[SANDBOX_DIR],
-            (true, true) => &[SANDBOX_DIR, SET_ASIDE_DIR],
+            (true, true) => &SET_ASIDE_PATH,
         };
-        if let Ok(stays) = empty_folder(&root, toward, &mut report) {
+        // `sandbox` stays whole; the set-aside stays unless it is empty.
+        let whole = !mode.sandbox_removed;
+        if let Ok(stays) = empty_folder(&root, toward, whole, &mut report) {
             if stays.is_none() {
                 remove_emptied(&root, &mut report);
             }
@@ -69,8 +76,9 @@ pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write
             }
         }
     }
+    // With --sandbox-removed only the set-aside can stay; without it, `sandbox`.
     match kept {
-        Some(stays) if named(&stays, SET_ASIDE_DIR) => KEPT_SET_ASIDE,
+        Some(_) if mode.sandbox_removed => KEPT_SET_ASIDE,
         Some(_) => KEPT_SANDBOX,
         None if report.failures > 0 => FAILED,
         None => DELETED,
@@ -101,7 +109,9 @@ pub(super) fn check(known: &Path, root: &Path) -> Result<bool, String> {
     let real = |path: &Path| {
         dunce::canonicalize(path).map_err(|error| format!("{}: {error}", path.display()))
     };
-    let (real_known, real_root) = (real(known)?, real(root)?);
+    // Both without a `\\?\` prefix: `dunce` keeps it only on a path it cannot shorten (past
+    // 260 characters), so the data folder could have it while its known folder does not.
+    let (real_known, real_root) = (plain(&real(known)?), plain(&real(root)?));
     if real_root.parent() != Some(real_known.as_path()) {
         return Err(format!(
             "its real path {} is not directly in {}",
@@ -112,16 +122,41 @@ pub(super) fn check(known: &Path, root: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+/// `path` without a verbatim prefix: `\\?\C:\…` as `C:\…`, `\\?\UNC\server\share\…` as
+/// `\\server\share\…`; any other path as it is (every path off Windows).
+pub(super) fn plain(path: &Path) -> PathBuf {
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path.to_owned();
+    };
+    let mut out = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => std::ffi::OsString::from(format!("{}:", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => {
+            let mut unc = std::ffi::OsString::from(r"\\");
+            unc.push(server);
+            unc.push(r"\");
+            unc.push(share);
+            unc
+        }
+        _ => return path.to_owned(),
+    };
+    out.push(components.as_path().as_os_str());
+    PathBuf::from(out)
+}
+
 /// Removes everything in `folder` but the folder that stays, which `toward` names below it
 /// (`[]` for none). `folder` is first held open by handle, which also says it is no reparse
 /// point (`ops::pin_folder`); while it is held it cannot be renamed, deleted or replaced. Each
 /// entry not on the way down is removed by std, never entered here: a reparse point as a link,
 /// a folder with `remove_dir_all` (which opens nothing through a link), a file with
-/// `remove_file`. Only the folder on the way down is entered, the same way. Answers the folder
-/// that stays, if one does; `Err` when `folder` was not entered (reported).
+/// `remove_file`. Only the folder on the way down is entered, the same way. What is at the end
+/// of the way down stays as [`stays_whole`] says with `whole`. Answers the folder that stays,
+/// if one does; `Err` when `folder` was not entered (reported).
 fn empty_folder(
     folder: &Path,
     toward: &[&str],
+    whole: bool,
     report: &mut Report<'_>,
 ) -> Result<Option<PathBuf>, ()> {
     // Held until the folder's entries are done, then closed.
@@ -137,13 +172,13 @@ fn empty_folder(
         // Windows file names ignore case: `Sandbox` is `sandbox`. What stays is the entry as
         // listed.
         let next = toward.split_first().filter(|(name, _)| named(&path, name));
-        if let Some((name, rest)) = next {
-            if rest.is_empty() && stays_whole(&path, &meta, name) {
+        if let Some((_, rest)) = next {
+            if rest.is_empty() && stays_whole(&path, &meta, whole) {
                 stays = Some(path);
                 continue;
             }
             if !rest.is_empty() && !is_link(&meta) && meta.is_dir() {
-                if let Ok(below) = empty_folder(&path, rest, report) {
+                if let Ok(below) = empty_folder(&path, rest, whole, report) {
                     if below.is_none() {
                         remove_emptied(&path, report);
                     }
@@ -165,10 +200,11 @@ fn named(path: &Path, name: &str) -> bool {
         .is_some_and(|listed| listed.eq_ignore_ascii_case(name))
 }
 
-/// Whether the entry at the end of the way down stays as it is: `sandbox` always (whatever it
-/// is, it is not looked into), `set-aside` unless it is a real, empty folder.
-fn stays_whole(path: &Path, meta: &Metadata, name: &str) -> bool {
-    if !name.eq_ignore_ascii_case(SET_ASIDE_DIR) {
+/// Whether the entry at the end of the way down stays as it is: always when `whole` (`sandbox`:
+/// whatever it is, it is not looked into), else (the set-aside) unless it is a real, empty
+/// folder.
+fn stays_whole(path: &Path, meta: &Metadata, whole: bool) -> bool {
+    if whole {
         return true;
     }
     let empty = !is_link(meta)

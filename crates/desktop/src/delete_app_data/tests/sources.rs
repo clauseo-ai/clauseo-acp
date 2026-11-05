@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::delete_app_data::walk::{SANDBOX_DIR, SET_ASIDE_DIR};
+use crate::delete_app_data::walk::{SANDBOX_DIR, SET_ASIDE_PATH};
 use crate::delete_app_data::{FLAG, KEPT_SANDBOX, KEPT_SET_ASIDE, SANDBOX_REMOVED};
 
 fn manifest_dir() -> &'static Path {
@@ -105,7 +105,8 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
     line_with(
         body,
         &[&format!(
-            "StrCpy $R8 \"$R9\\{SANDBOX_DIR}\\{SET_ASIDE_DIR}\""
+            "StrCpy $R8 \"$R9\\{}\"",
+            SET_ASIDE_PATH.join("\\")
         )],
     );
     line_with(

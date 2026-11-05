@@ -2,7 +2,10 @@
 //! beside the junctions the shared tests make, the read-only attribute, a locked file, and what a
 //! pinned folder holds still.
 
+use std::path::Path;
+
 use super::{DATA, World, exists, make};
+use crate::delete_app_data::walk::{check, plain};
 use crate::delete_app_data::{DELETED, FAILED, ops};
 
 #[test]
@@ -83,4 +86,39 @@ fn a_pinned_folder_cannot_be_renamed_nor_can_the_folder_above_it() {
     assert!(make::rename(&root, &world.at("Local/moved")).is_err());
     drop(pinned);
     make::rename(&sandbox, &world.data("moved")).unwrap();
+}
+
+#[test]
+fn verbatim_prefixes_are_dropped_before_the_real_paths_are_compared() {
+    let pairs = [
+        (r"\\?\C:\Users\a\AppData\Local", r"C:\Users\a\AppData\Local"),
+        (r"\\?\UNC\srv\share\Local", r"\\srv\share\Local"),
+        (r"C:\Users\a", r"C:\Users\a"),
+        (r"\\srv\share\Local", r"\\srv\share\Local"),
+    ];
+    for (path, expected) in pairs {
+        assert_eq!(plain(Path::new(path)), Path::new(expected), "{path}");
+    }
+}
+
+#[test]
+fn a_data_folder_past_260_characters_is_still_its_known_folders() {
+    // The known folder just under 260 characters, so `dunce` shortens it; the data folder past
+    // it, so `dunce` keeps its `\\?\` prefix.
+    let world = World::new("dad-long");
+    let base = world.at("Local").as_os_str().len();
+    let name = "k".repeat(250 - base - 1);
+    let known = world.scratch.dir(&format!("Local/{name}"));
+    let root = world.scratch.dir(&format!("Local/{name}/{DATA}"));
+    assert!(known.as_os_str().len() < 260 && root.as_os_str().len() > 260);
+    assert!(
+        dunce::canonicalize(&root).unwrap().as_os_str().len()
+            != dunce::canonicalize(&known)
+                .unwrap()
+                .join(DATA)
+                .as_os_str()
+                .len(),
+        "dunce no longer treats the two differently"
+    );
+    assert_eq!(check(&known, &root), Ok(true));
 }
