@@ -431,7 +431,7 @@ pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&
 /// `descriptor` with its DACL's inherited entries dropped; the DACL marked auto-inherited, the
 /// owner, group, SACL and other control bits kept. When the DACL is not marked auto-inherited,
 /// every explicit entry that copies an inherited one goes too ([`is_copy`]: equal but for the
-/// inherited flag to one of `due`'s inherited entries or one `descriptor` holds). `due` is the
+/// inherited flag to one of `due`'s inherited entries). `due` is the
 /// ACL the parent alone gives a new child of this kind and owner. The walk hands
 /// `CreatePrivateObjectSecurityEx` this for every child not protected, so its result holds the
 /// parent's entries once, all inherited.
@@ -450,10 +450,10 @@ pub(crate) fn without_inherited(descriptor: &[u8], due: &[u8]) -> io::Result<Vec
         return Ok(descriptor.to_vec());
     };
     let plain = now.control & DACL_AUTO_INHERITED == 0;
-    let held = Acl::parse(dacl)?;
+    Acl::parse(dacl)?;
     let due = Acl::parse(due)?;
     keeping(descriptor, |ace| {
-        flags(ace) & INHERITED == 0 && !(plain && is_copy(ace, &due, &held))
+        flags(ace) & INHERITED == 0 && !(plain && is_copy(ace, &due))
     })
 }
 
