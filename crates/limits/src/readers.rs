@@ -144,6 +144,9 @@ pub struct ProcessReaders<T> {
     run_dir: PathBuf,
     /// Clauseo's own Codex home, which the Codex reader forces as `CODEX_HOME`.
     codex_home: PathBuf,
+    /// Clauseo's own Claude home, which the Claude reader forces as `CLAUDE_CONFIG_DIR`;
+    /// `None` leaves the entry's and the inherited variable as they are.
+    claude_home: Option<PathBuf>,
     /// G16's copy of each reader's stdout; `None` everywhere but its live tests.
     tap: Option<tap::StdoutTap>,
     /// Each agent's stored key, asked at each read; `None` for no key source.
@@ -191,6 +194,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
             codex,
             run_dir: effective.data_dir().join("limits").join("run"),
             codex_home,
+            claude_home: None,
             tap: None,
             launch_env: None,
             claude_gate: Arc::default(),
@@ -210,6 +214,52 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     ) -> ProcessReaders<T> {
         self.launch_env = Some(Arc::new(key));
         self
+    }
+
+    /// These readers, forcing `CLAUDE_CONFIG_DIR` to `claude_home` (Clauseo's own Claude home,
+    /// `Locations::agent_home`) last in each Claude read's env, over any inherited or settings
+    /// variable of that name in any case, as the host forces it at an agent's launch (decision
+    /// record 0048): an inherited `CLAUDE_CONFIG_DIR` never points the read at another login.
+    #[must_use]
+    pub fn with_claude_home(mut self, claude_home: PathBuf) -> ProcessReaders<T> {
+        self.claude_home = Some(claude_home);
+        self
+    }
+
+    /// A copy of these readers with `agent`'s settings entry replaced by `launch` (`None` for
+    /// no entry), for desktop to call after each entry it writes. The copy shares these
+    /// readers' gates and key source, so a hold taken on either holds both and a
+    /// [`HoldGuard`] taken before survives the copy; every other part is kept. An entry whose
+    /// paths break a rule is logged here, at `warn`, as [`ProcessReaders::new`] logs one.
+    #[must_use]
+    pub fn with_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) -> ProcessReaders<T> {
+        if let Some(launch) = &launch {
+            let refused = match agent {
+                AgentKind::Claude => paths::claude(launch).err(),
+                AgentKind::Codex => paths::codex_js(launch).err(),
+            };
+            if let Some(err) = refused {
+                tracing::warn!(error = %err, ?agent, "a limits reader is refused");
+            }
+        }
+        let (mut claude, mut codex) = (self.claude.clone(), self.codex.clone());
+        match agent {
+            AgentKind::Claude => claude = launch,
+            AgentKind::Codex => codex = launch,
+        }
+        ProcessReaders {
+            launcher: Arc::clone(&self.launcher),
+            timer: self.timer.clone(),
+            claude,
+            codex,
+            run_dir: self.run_dir.clone(),
+            codex_home: self.codex_home.clone(),
+            claude_home: self.claude_home.clone(),
+            tap: self.tap.clone(),
+            launch_env: self.launch_env.clone(),
+            claude_gate: Arc::clone(&self.claude_gate),
+            codex_gate: Arc::clone(&self.codex_gate),
+        }
     }
 
     /// Holds `agent`'s reads from this call on, and answers a future that resolves to the
@@ -255,12 +305,14 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let launcher = Arc::clone(&self.launcher);
                 let timer = self.timer.clone();
                 let run_dir = self.run_dir.clone();
+                let claude_home = self.claude_home.clone();
                 let tap = self.tap.clone();
                 let gate = Arc::clone(&self.claude_gate);
                 Box::pin(async move {
                     let _running = gate.enter().await;
                     let launch = with_stored_key(launch_env.as_ref(), agent, launch);
-                    claude::read(&*launcher, &timer, &launch, &run_dir, tap).await
+                    let home = claude_home.as_deref();
+                    claude::read(&*launcher, &timer, &launch, &run_dir, home, tap).await
                 })
             }
             AgentKind::Codex => {

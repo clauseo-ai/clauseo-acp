@@ -5,6 +5,7 @@
 //! vendor's Claude Code process reads its own login. Its line is untrusted: unknown fields are
 //! ignored, and a field of the wrong type drops only what it holds.
 
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::time::Duration;
 
@@ -27,6 +28,8 @@ use crate::{AccountRead, ReadFailure, ReadOutcome, write};
 
 /// The helper's bytes, written into the install folder when the file there differs.
 pub(crate) const HELPER: &str = include_str!("../../helper/claude-usage.mjs");
+/// The variable naming Claude Code's config folder, its login's home.
+const CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(25);
 /// The most windows one read keeps.
@@ -50,9 +53,10 @@ pub(crate) async fn read<T: Timer>(
     timer: &T,
     launch: &AgentLaunch,
     run_dir: &Path,
+    claude_home: Option<&Path>,
     tap: Option<StdoutTap>,
 ) -> ReadOutcome {
-    let spec = match prepare(launch, run_dir) {
+    let spec = match prepare(launch, run_dir, claude_home, std::env::vars_os()) {
         Ok(spec) => spec,
         Err(message) => return ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
     };
@@ -99,13 +103,21 @@ fn line_outcome(talked: Line, code: Option<i32>, stderr_tail: String) -> ReadOut
 /// folder is checked again once made, in case a link appeared meanwhile. The helper runs in
 /// `run_dir`, where Claude Code reads a project `.claude/settings.json`, but passes
 /// `settingSources: []`, so no such file there can change the account or provider it reads.
-fn prepare(launch: &AgentLaunch, run_dir: &Path) -> Result<LaunchSpec, String> {
+/// The env is the `inherited` one under the entry's variables, with `CLAUDE_CONFIG_DIR` forced
+/// to `claude_home` when given (`ProcessReaders::with_claude_home`).
+fn prepare(
+    launch: &AgentLaunch,
+    run_dir: &Path,
+    claude_home: Option<&Path>,
+    inherited: impl Iterator<Item = (OsString, OsString)>,
+) -> Result<LaunchSpec, String> {
     let (located, helper) = paths::claude(launch).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     write::replace_if_differs(&helper, HELPER.as_bytes()).map_err(|err| err.to_string())?;
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
-    let env = spec_env(&launch.env, std::env::vars_os(), None, &[]);
+    let forced = claude_home.map(|home| (OsStr::new(CLAUDE_CONFIG_DIR), home.as_os_str()));
+    let env = spec_env(&launch.env, inherited, forced, &[]);
     LaunchSpec::new(
         located.program,
         vec![helper.into_os_string()],
