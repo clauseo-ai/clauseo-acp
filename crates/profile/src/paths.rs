@@ -23,6 +23,7 @@ pub struct BrowserSidecars {
 pub struct ProfilePaths {
     pub(crate) claude_plugin: PathBuf,
     pub(crate) codex_skills: PathBuf,
+    pub(crate) skill_packs: PathBuf,
     pub(crate) stetdoc: PathBuf,
     pub(crate) browser: BrowserSidecars,
     pub(crate) browser_config: PathBuf,
@@ -57,6 +58,7 @@ impl ProfilePaths {
         Ok(Self {
             claude_plugin: data.join("profile").join("claude-plugin"),
             codex_skills: codex_skills(locations),
+            skill_packs: data.join("skill-packs"),
             stetdoc,
             browser,
             browser_config: data.join("browser").join("agent-browser.json"),
@@ -72,6 +74,11 @@ impl ProfilePaths {
     /// Codex's skills, `<data>/agents/codex-acp/home/skills` (R15's agent home).
     pub fn codex_skills(&self) -> &Path {
         &self.codex_skills
+    }
+
+    /// The extra skill packs, `<data>/skill-packs/<id>/` (decision record 0040).
+    pub fn skill_packs(&self) -> &Path {
+        &self.skill_packs
     }
 
     /// The stetdoc binary (U13's sidecar), absolute.

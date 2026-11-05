@@ -478,6 +478,16 @@ fn recheck(root: &Path, skill: &RenderedSkill) -> Result<(), ProfileError> {
 /// `SKILL.md` not in the rendered form (`name` equal to the skill's and `description`, nothing
 /// else), or a shell injection.
 fn check(skill: &SkillSource) -> Result<(), ProfileError> {
+    check_scanning(skill, |_, _| true)
+}
+
+/// [`check`], scanning for a shell injection only the files whose path and bytes `scan`
+/// accepts: a skill pack's binary templates are not skill text, and random bytes hold the
+/// injection's two bytes (decision record 0040).
+pub(crate) fn check_scanning(
+    skill: &SkillSource,
+    scan: impl Fn(&str, &[u8]) -> bool,
+) -> Result<(), ProfileError> {
     let refuse = |reason: String| Err(ProfileError::skill(&skill.name, reason));
     if !is_skill_name(&skill.name) {
         return refuse("the name is not ^[a-z0-9-]{1,64}$, or is a Windows device name".into());
@@ -496,10 +506,11 @@ fn check(skill: &SkillSource) -> Result<(), ProfileError> {
                 file.path
             ));
         }
-        if file
-            .bytes
-            .windows(SHELL_INJECTION.len())
-            .any(|window| window == SHELL_INJECTION.as_bytes())
+        if scan(&file.path, &file.bytes)
+            && file
+                .bytes
+                .windows(SHELL_INJECTION.len())
+                .any(|window| window == SHELL_INJECTION.as_bytes())
         {
             return refuse(format!("`{}` holds \"{SHELL_INJECTION}\"", file.path));
         }

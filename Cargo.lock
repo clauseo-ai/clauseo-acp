@@ -1177,10 +1177,12 @@ dependencies = [
  "dunce",
  "futures",
  "insta",
+ "rustix",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "tracing",
+ "windows",
 ]
 
 [[package]]
