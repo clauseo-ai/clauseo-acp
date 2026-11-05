@@ -424,3 +424,50 @@ fn codex_open_and_find_in_page_are_pages_and_other_is_nothing() {
     );
     assert_eq!(pages[2], None);
 }
+
+/// A call started in turn 3 and completed in turn 9 records nothing: its turn ended before the
+/// completion, so no record can name the call's own turn.
+#[test]
+fn a_call_completed_in_a_later_turn_records_nothing() {
+    let mut sources = Sources::default();
+    claude_search_start(&mut sources);
+    let refined = ToolCallPatch {
+        title: Some(CompactString::from("Search \"lease\"")),
+        raw_input: Some(inline(&json!({"query": "lease"}))),
+        ..ToolCallPatch::default()
+    };
+    sources.updated(turn(), "tc-1", &claude(), &refined);
+    let done = completed(Some(&json!("Links: []")), &[]);
+    assert_eq!(sources.updated(id(9), "tc-1", &claude(), &done), None);
+    // And the call is forgotten: a second completion in its own turn finds nothing either.
+    assert_eq!(sources.updated(turn(), "tc-1", &claude(), &done), None);
+}
+
+/// A call that starts in a turn drops the unfinished calls of the turns before it: they can never
+/// record now, so the map keeps only the current turn's calls.
+#[test]
+fn a_new_turn_drops_the_unfinished_calls_of_earlier_turns() {
+    let mut sources = Sources::default();
+    claude_search_start(&mut sources);
+    let refined = ToolCallPatch {
+        raw_input: Some(inline(&json!({"query": "lease"}))),
+        ..ToolCallPatch::default()
+    };
+    sources.updated(turn(), "tc-1", &claude(), &refined);
+    let other = call(
+        "Web search",
+        ToolKind::Fetch,
+        Some("WebFetch"),
+        ToolCallStatus::Pending,
+        Some(&json!({"url": "https://sci.gov.in/a"})),
+    );
+    let other = ToolCall {
+        acp_id: "tc-2".into(),
+        ..other
+    };
+    assert_eq!(sources.started(id(9), id(11), &claude(), &other), None);
+    let done = completed(Some(&json!("Links: []")), &[]);
+    assert_eq!(sources.updated(turn(), "tc-1", &claude(), &done), None);
+    let record = sources.updated(id(9), "tc-2", &claude(), &completed(None, &[]));
+    assert!(matches!(record, Some(DomainEvent::PageVisited(_))));
+}
