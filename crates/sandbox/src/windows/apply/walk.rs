@@ -2,13 +2,18 @@
 //!
 //! A walk that meets a child the lawyer can't open ([`ApplyFailure::ChildShut`]) sets it aside
 //! ([`Surroundings::set_aside`]) and runs again, until it passes (S15 `PR3b` round 2, N11). Only a
-//! child inside the trees the caller names as its own is moved: the launch's own matter, state
-//! and notes trees, or the forgotten matter's. One anywhere else (a sibling, the parent's files,
-//! another matter's folder) refuses, naming it, and nothing is moved (N9). So does a set-aside
-//! that fails, a child that comes back after its set-aside, and a walk past [`MOST_SET_ASIDE`].
+//! child inside a matter, state or notes tree the caller names is moved, and into the set-aside
+//! of the matter that tree belongs to: the launch's own trees, each registered matter's trees
+//! whose fence the launch applies (round 6: otherwise one matter's agent could plant a child
+//! that blocks other matters' launches), or the forgotten matter's. One anywhere else (a
+//! sibling, the parent's files) refuses, naming it, and nothing is moved (N9). So does a
+//! set-aside that fails, a child that comes back after its set-aside, and a walk past
+//! [`MOST_SET_ASIDE`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+use clauseo_protocol::MatterId;
 
 use super::Surroundings;
 use crate::Error;
@@ -51,12 +56,16 @@ impl Refused {
     }
 }
 
+/// A matter, state or notes tree, and the matter it belongs to: whose set-aside takes a child
+/// in it the lawyer can't open.
+pub(super) type OwnRoot = (PathBuf, MatterId);
+
 /// Runs `walk` until it passes, setting aside each child the lawyer can't open inside one of
-/// `own`; see the module's docs.
+/// `own`, into the set-aside of the matter that tree belongs to; see the module's docs.
 pub(super) fn clearing(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
-    own: &[PathBuf],
+    own: &[OwnRoot],
     kind: PathKind,
     mut walk: impl FnMut(&mut dyn AclWriter) -> Result<Walked, ApplyFailure>,
 ) -> Result<Walked, Refused> {
@@ -77,15 +86,18 @@ pub(super) fn clearing(
                 // The walk reports the child by its final path, verbatim (`\\?\C:\…`);
                 // the roots are the policy's plain paths. Both are compared verbatim, whatever
                 // their length (round 5), and the child must be strictly inside a root, never
-                // the root itself. It is set aside and named as the walk reported it.
-                let inside = own
+                // the root itself. It is set aside, named as the walk reported it, by the matter
+                // whose tree holds it most closely.
+                let owner = own
                     .iter()
-                    .any(|root| in_folder(&shut, root) && !in_folder(root, &shut));
+                    .filter(|(root, _)| in_folder(&shut, root) && !in_folder(root, &shut))
+                    .max_by_key(|(root, _)| root.components().count())
+                    .map(|(_, owner)| *owner);
                 let again = moved.contains(&verbatim(&shut));
-                if !inside || again || moved.len() >= MOST_SET_ASIDE {
+                let Some(owner) = owner.filter(|_| !again && moved.len() < MOST_SET_ASIDE) else {
                     return Err(refuse(Some(shut)));
-                }
-                if let Err(error) = around.set_aside(&shut) {
+                };
+                if let Err(error) = around.set_aside(owner, &shut) {
                     let error = error.kind();
                     tracing::warn!(%error, "a child the lawyer can't open couldn't be set aside");
                     return Err(refuse(Some(shut)));
@@ -103,18 +115,21 @@ pub(super) fn clearing(
     }
 }
 
-/// The launch's own matter, state and notes trees: `plan`'s `Modify` grants of those kinds for
-/// its own matter. Where a child the lawyer can't open may be set aside.
-pub(super) fn own_roots(plan: &AdmittedPlan) -> Vec<PathBuf> {
+/// The matter, state and notes trees `plan` names, each with the matter it belongs to: the
+/// launch's own (its `Modify` grants of those kinds) and every registered matter's whose fence
+/// it applies (the fence's read and write denies, owned by the matter they fence, as the plan
+/// and the ledger record them). Where a child the lawyer can't open may be set aside, and whose
+/// set-aside takes it.
+pub(super) fn own_roots(plan: &AdmittedPlan) -> Vec<OwnRoot> {
     plan.grants()
         .iter()
         .zip(plan.owners())
         .filter(|(g, owner)| {
-            **owner == plan.matter()
-                && g.rights() == Rights::Modify
-                && OWN_KINDS.contains(&g.kind())
+            let own = **owner == plan.matter() && g.rights() == Rights::Modify;
+            let fence = g.rights() == Rights::DenyReadWrite;
+            (own || fence) && OWN_KINDS.contains(&g.kind())
         })
-        .map(|(g, _)| g.path().to_owned())
+        .map(|(g, owner)| (g.path().to_owned(), *owner))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()

@@ -229,6 +229,11 @@ pub fn after_session(
 /// Moves the one item at `path` (the strict walk's child the lawyer can't open: the `DELETE`
 /// open succeeds through the parent's `FILE_DELETE_CHILD`) into this pass's set-aside folder,
 /// under its own name, with a manifest entry giving `reason`. A failure's `at` is `path`.
+/// `matter` is the matter whose tree holds `path` (what [`Surroundings::set_aside`] is asked
+/// for), not always the launching one: a launch that applies another matter's fence sets a child
+/// in that matter's tree aside into that matter's set-aside, under its lock (S15 `PR3b` round 6).
+///
+/// [`Surroundings::set_aside`]: crate::windows::Surroundings::set_aside
 #[cfg(windows)]
 pub fn set_aside_path(
     data_dir: &Path,
@@ -249,7 +254,9 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 
 /// Moves `entry`'s item back to where it was, only if that name is free, and drops it from the
 /// manifest. Never overwrites: a taken name is [`SetAsideFailure::NameTaken`], an item no
-/// longer there (or no longer listed) is [`SetAsideFailure::Gone`].
+/// longer there (or no longer listed) is [`SetAsideFailure::Gone`]. PR6 passes back the
+/// manifest's own `Entry`, as [`list_set_aside`] gave it, never one simplified for display: its
+/// paths may be verbatim (`\\?\C:\…`), and the item is found by them.
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)

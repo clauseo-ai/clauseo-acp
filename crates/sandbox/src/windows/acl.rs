@@ -122,7 +122,7 @@ impl AclWriter for NtfsAcl {
             WRITE_DAC.0
         };
         let opened = Object::open_by_id(&file.path, file.id, rights);
-        let Some(target) = opened.map_err(|e| ApplyFailure::Io(e.kind()))? else {
+        let Some(target) = opened.map_err(|e| ApplyFailure::of(&e))? else {
             return Ok(());
         };
         remove_on(&target, grant)?;

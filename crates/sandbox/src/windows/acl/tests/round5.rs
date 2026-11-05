@@ -37,3 +37,23 @@ fn an_entry_recorded_by_file_id_comes_off_the_original_and_not_the_new_file_at_i
     assert!(!acl.present_recorded(&file, &modify).unwrap());
     assert_eq!(acl.remove_recorded(&file, &modify, None), Ok(()));
 }
+
+/// S15 `PR3b` round 6, issue 2: an entry recorded on a volume other than the file's (here, its
+/// serial number changed) fails the open by ID as `Changed`, and the removal reported that as
+/// `Io(Other)`. It reports `Changed` now, and the entry stays.
+#[test]
+fn a_removal_by_id_whose_volume_doesnt_match_reports_changed() {
+    let place = Place::new("acl-by-id-changed");
+    let path = dunce::canonicalize(place.dir.file("creds/auth.json", "{}")).unwrap();
+    let mut acl = NtfsAcl::new().unwrap();
+    let modify = grant(&path, USER_SID, Rights::Modify, Inherit::ThisOnly);
+    acl.add(&modify).unwrap();
+    let mut id = acl.file_id(&path).unwrap().unwrap();
+    id.volume ^= 1;
+    let file = RecordedFile::new(path.clone(), id);
+    assert_eq!(
+        acl.remove_recorded(&file, &modify, None),
+        Err(ApplyFailure::Changed)
+    );
+    assert!(has(&path, USER_SID, false), "the entry stays");
+}

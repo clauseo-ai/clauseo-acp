@@ -91,9 +91,13 @@ fn a_shut_child_past_max_path_is_matched_to_its_root_and_set_aside() {
         };
         let mut around = around(&w);
         let strict = Strict::default();
-        let walked = clearing(&mut acl, &mut around, &[root], PathKind::Matter, |acl| {
-            acl.propagate(&matter, Reach::Tree, Some(&strict))
-        });
+        let walked = clearing(
+            &mut acl,
+            &mut around,
+            &[(root, matter_one())],
+            PathKind::Matter,
+            |acl| acl.propagate(&matter, Reach::Tree, Some(&strict)),
+        );
         assert!(walked.is_ok(), "{prefix:?}: {walked:?}");
         let reported = PathBuf::from(format!("{prefix}{}", child.display()));
         assert_eq!(around.set_aside, vec![reported]);

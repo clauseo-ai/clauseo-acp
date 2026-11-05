@@ -138,6 +138,9 @@ impl fmt::Display for ApplyFailure {
     }
 }
 
+impl std::error::Error for ApplyFailure {}
+
+/// The failure itself rides inside the error, so [`ApplyFailure::of`] gets it back.
 impl From<ApplyFailure> for io::Error {
     fn from(failure: ApplyFailure) -> io::Error {
         match failure {
@@ -148,8 +151,20 @@ impl From<ApplyFailure> for io::Error {
             | ApplyFailure::LinkedFile
             | ApplyFailure::VolumeRoot
             | ApplyFailure::NoDacl
-            | ApplyFailure::ChildShut) => io::Error::other(other.to_string()),
+            | ApplyFailure::ChildShut) => io::Error::other(other),
         }
+    }
+}
+
+impl ApplyFailure {
+    /// The failure `error` carries, when it was made from one (`Changed` stays `Changed`,
+    /// S15 `PR3b` round 6); otherwise [`ApplyFailure::Io`] of its kind.
+    pub fn of(error: &io::Error) -> ApplyFailure {
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<ApplyFailure>())
+            .copied()
+            .unwrap_or(ApplyFailure::Io(error.kind()))
     }
 }
 
