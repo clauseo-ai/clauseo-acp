@@ -363,6 +363,85 @@ median / slowest of what packs add over the same launch with none:
   own record, so another thread is still told, and a new reason for the same pack (`not_admitted`,
   then `changed`) is told once more. The log line stays per launch. The thread view already shows notices.
 
+### Turning packs on (PR-E)
+
+This settles the code question above: **no new error code.** It supersedes the first bullet's
+"either ... or".
+
+- **`HostCommand::SetSkillPack { id, on }`**, from the settings window only, as the other
+  `Set*` switches are (the desktop bridge refuses it from the main window and any other,
+  `command.invalid`). `ListSkillPacks` is read by both the main window (the matter picker)
+  and the settings window (the Skills pane). Code:
+  `crates/host/src/actor/settings/packs.rs`.
+  - **On.** On the actor, from the effective settings: the lock, then the admission. Then the pack
+    is read off the actor on a `clauseo-codex-fs` thread, waited on for the launch wait (30 s):
+    `packs::inspect_twice` runs `inspect` twice and keeps the pack only when both reads hash
+    the same, so a pack edited mid-read is told apart from one that read whole. Back on the
+    actor, the lock and the admission are checked again (a policy reload may have come in), and
+    a pack holding a script is refused (`settings.refused`, `script`) if `skills.allow_scripts`
+    is off by then; then `Effective::set_skill_pack(id, Some(hash))`.
+  - **Off.** `set_skill_pack(id, None)` on the actor.
+  - **Last command wins.** Every `SetSkillPack` bumps a per-id generation on the actor, and an
+    `on`'s read writes only if the id's generation is still the one it started with. An `on`
+    overtaken by a later `on` or `off` for the same pack writes nothing and still answers
+    `Done`: its request was superseded, not refused. So an `off` sent during an `on`'s read
+    leaves the pack off, and two racing `on`s record one hash.
+  - A change to `skills.enabled` sends `SettingsChanged` to every app subscriber, as the other
+    settings commands do; a write that changes nothing sends nothing.
+- **Codes:**
+
+  | Case | Code |
+  |---|---|
+  | `skills.enabled` locked by policy (on or off) | `settings.locked` |
+  | `skills.extra` locked by policy (at `off`, or at `curated` with the id not in the firm's `skills.curated`) | `settings.locked` |
+  | `skills.curated` set by policy and the id not in it, `skills.extra` `curated` | `settings.locked` |
+  | The lawyer's own unlocked `skills.extra` `off` (or `curated` with no firm list) | `settings.refused` |
+  | The pack's folder is missing | `settings.refused` |
+  | The pack is invalid (any `packs::Refusal`) | `settings.refused` |
+  | The pack changed while it was read | `settings.refused` |
+  | The read did not answer within the wait | `internal` |
+
+  Neither code is retryable; the app offers to turn it on again from `ListSkillPacks`'s `changed` row,
+  not from the code. "A firm decided" is per branch (`Effective::is_locked`, which also holds
+  when a policy source fails closed): for `skills.extra` `off`, policy locks `skills.extra`; for
+  `curated` leaving the id out, policy locks `skills.extra` or sets `skills.curated`. A firm's
+  `skills.curated` alone does not make the lawyer's own `off` the firm's: `settings.refused`.
+- **What a message and a log line hold.** A refusal's message names the pack by its id alone
+  (a `PackId`, so no pack text) and ends with a reason code in parentheses, such as
+  `skill pack nda-kit cannot be turned on (script)`; never the manifest's text, a file name or a
+  path. The host's log line holds the id and the error code; the turning on or off itself is
+  logged with the id and `on`.
+- **`HostQuery::ListSkillPacks`** answers `QueryResult::SkillPacks(Vec<PackStatus>)`, built off
+  the actor (`crates/host/src/actor/query/skill_packs.rs`): one status per entry of
+  `<data>/skill-packs/` that is a folder (or a link, listed as `invalid`, `link`) whose name is
+  a `PackId`, plus one per id in `skills.enabled` with no folder, sorted by id. A folder whose
+  name is no `PackId` is not listed (it has no id to show) and is logged by count. Each pack is
+  read with `inspect_twice`.
+  - `PackStatus { id, name, version, author, licence, source_url, last_reviewed,
+    instruction_only, state, reason, hash }`. The manifest's fields and `hash` are there only
+    when the pack read whole; each string passes `packs::listed` (0031's listable filter: no
+    control, format or other unlisted character) capped at the manifest's own caps (200
+    characters, 2,048 for `source_url`), and is left out when it fails.
+  - `state`, a closed enum (view type, 0002), first match wins:
+
+    | State | When | `reason` |
+    |---|---|---|
+    | `not_admitted` | `skills.extra` / `skills.curated` do not admit the id | `not_admitted { by_policy }` |
+    | `invalid` | `inspect` refused it, `missing` included (a pack turned on whose folder is gone) | `invalid { kind }` |
+    | `changed` | it changed while it was read, or its hash is not the one `skills.enabled` holds | none |
+    | `on` | turned on with the hash it has now | none |
+    | `off` | valid, admitted, not turned on | none |
+
+  - `kind` is `PackRefusal`, a closed mirror of `packs::Refusal` one for one (`missing`,
+    `link`, `hard_link`, `not_a_file`, `bad_path`, `unlisted`, `too_big`, `manifest`,
+    `bad_id`, `id_mismatch`, `script`, `script_in_instruction_only`, `skill`, `io`); the
+    `From` is in `profile`, where the match is exhaustive.
+- **Cost.** Each pack is read twice, so turning one on reads at most 16 MiB, and the list at most
+  16 MiB per folder, all off the actor. The list lists the packs folder once and finds each pack
+  in that listing, so it is linear in the folders, and it reads at most 256 packs, the first by
+  id (folders and `skills.enabled` ids together); the rest are left out of the answer and logged
+  by count alone, never by name or path (`MAX_LISTED`, `crates/host/src/actor/query/skill_packs.rs`).
+
 ### Windows
 
 Beyond the rules above: any reparse point is refused, the link count and final path are read from
