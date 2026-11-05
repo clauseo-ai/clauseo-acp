@@ -101,6 +101,10 @@ impl Volume for Ntfs {
         scan::open_folder(folder, name)
     }
 
+    fn folder_id(&self, folder: &Handle) -> io::Result<FileId> {
+        id_of(folder)
+    }
+
     fn list(&self, folder: &Handle) -> io::Result<Vec<Listed>> {
         scan::list(folder)
     }
@@ -125,8 +129,8 @@ impl Volume for Ntfs {
         &self,
         from: &Path,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
     ) -> Result<(), SetAsideFailure> {
         let folder = folder_chain(sandbox, parts, FILE_OPEN_IF)?;
         let parent_path = from
@@ -148,14 +152,14 @@ impl Volume for Ntfs {
         if !same_path(&item, from).map_err(|e| io_failure(&e))? {
             return Err(SetAsideFailure::Changed);
         }
-        rename(&item, &folder, &wide(name)).map_err(|e| failure(&e))
+        rename(&item, &folder, &wide_os(name)).map_err(|e| failure(&e))
     }
 
     fn move_back(
         &self,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
         to: &Path,
     ) -> Result<(), SetAsideFailure> {
         let folder = folder_chain(sandbox, parts, FILE_OPEN).map_err(|failure| {
@@ -167,7 +171,7 @@ impl Volume for Ntfs {
         })?;
         let options = NTCREATEFILE_CREATE_OPTIONS(0);
         let item =
-            open_at(&folder, &wide(name), MOVE, FILE_OPEN, options).map_err(|e| gone_or(&e))?;
+            open_at(&folder, &wide_os(name), MOVE, FILE_OPEN, options).map_err(|e| gone_or(&e))?;
         let parent_path = to.parent().ok_or(SetAsideFailure::Record)?;
         let leaf = to.file_name().ok_or(SetAsideFailure::Record)?;
         let parent = open_folder(parent_path, FOLDER)?;
@@ -211,7 +215,7 @@ fn open_folder(path: &Path, access: u32) -> Result<Handle, SetAsideFailure> {
 /// `disposition`; refuses any that is a reparse point. Returns the last.
 fn folder_chain(
     sandbox: &Path,
-    parts: &[String],
+    parts: &[OsString],
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
 ) -> Result<Handle, SetAsideFailure> {
     let mut folder = open_path(sandbox, FOLDER).map_err(|e| failure(&e))?;
@@ -221,7 +225,7 @@ fn folder_chain(
     for part in parts {
         let next = open_at(
             &folder,
-            &wide(part),
+            &wide_os(part),
             FOLDER,
             disposition,
             FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
@@ -405,11 +409,6 @@ fn final_path(handle: &Handle) -> io::Result<Vec<u16>> {
             n => buffer.resize(n + 1, 0),
         }
     }
-}
-
-/// `text` as UTF-16, without a NUL.
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().collect()
 }
 
 /// `text` as UTF-16, without a NUL.

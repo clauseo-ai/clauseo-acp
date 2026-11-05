@@ -1,7 +1,7 @@
 //! N10: a crash during a move, settled on the next load so every item in a pass's folder has a
 //! finished manifest entry; and N11: a set-aside that can't happen refuses, naming the item.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
@@ -41,6 +41,10 @@ impl<V: Volume> Volume for Stopping<V> {
         self.inner.open_folder(folder, name)
     }
 
+    fn folder_id(&self, folder: &V::Folder) -> io::Result<FileId> {
+        self.inner.folder_id(folder)
+    }
+
     fn list(&self, folder: &V::Folder) -> io::Result<Vec<Listed>> {
         self.inner.list(folder)
     }
@@ -61,8 +65,8 @@ impl<V: Volume> Volume for Stopping<V> {
         &self,
         from: &Path,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
     ) -> Result<(), SetAsideFailure> {
         match self.stop {
             Stop::CrashBefore => panic!("the process dies before the move"),
@@ -77,8 +81,8 @@ impl<V: Volume> Volume for Stopping<V> {
     fn move_back(
         &self,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
         to: &Path,
     ) -> Result<(), SetAsideFailure> {
         self.inner.move_back(sandbox, parts, name, to)
@@ -142,7 +146,7 @@ fn a_crash_between_the_move_and_the_finish_is_settled_on_the_next_load() {
     let pass = listed[0].to.parent().unwrap();
     let mut in_pass: Vec<_> = std::fs::read_dir(pass)
         .unwrap()
-        .map(|item| item.unwrap().file_name().into_string().unwrap())
+        .map(|item| item.unwrap().file_name())
         .collect();
     in_pass.sort();
     let listed_names: Vec<_> = listed.iter().map(|e| e.name.clone()).collect();

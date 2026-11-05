@@ -18,6 +18,8 @@ mod nested;
 #[cfg(unix)]
 mod posix;
 #[cfg(unix)]
+mod round4;
+#[cfg(unix)]
 mod scans;
 mod sessions;
 
@@ -124,6 +126,11 @@ fn list(data: &Path) -> Vec<Entry> {
     run::list(&volume(), data, &matter_one()).unwrap()
 }
 
+/// The record's key for `rel`, a path below the matter's root with its parts joined by `/`.
+fn key(rel: &str) -> Vec<std::ffi::OsString> {
+    rel.split('/').map(std::ffi::OsString::from).collect()
+}
+
 /// No entries, for the comparisons.
 fn none() -> Vec<Entry> {
     Vec::new()
@@ -166,7 +173,10 @@ fn a_hard_link_named_claude_md_is_set_aside_whoever_owns_it() {
     w.dir.hard_link("matter/CLAUDE.md", &lawyer);
     let moved = after(&root, &data, exit()).unwrap();
 
-    let names: Vec<_> = moved.iter().map(|e| (e.name.as_str(), e.reason)).collect();
+    let names: Vec<_> = moved
+        .iter()
+        .map(|e| (e.name.to_str().unwrap(), e.reason))
+        .collect();
     assert_eq!(names, [("CLAUDE.md", Reason::New)]);
     assert!(!root.join("CLAUDE.md").exists());
     assert!(lawyer.is_file(), "the lawyer's own name stays");
@@ -204,7 +214,10 @@ fn a_name_present_at_launch_and_replaced_is_set_aside_as_changed() {
     rename_new(&agents, &root.join("AGENTS.md")).unwrap();
     let moved = after(&root, &data, exit()).unwrap();
 
-    let names: Vec<_> = moved.iter().map(|e| (e.name.as_str(), e.reason)).collect();
+    let names: Vec<_> = moved
+        .iter()
+        .map(|e| (e.name.to_str().unwrap(), e.reason))
+        .collect();
     assert_eq!(names, [("AGENTS.md", Reason::Changed)]);
     assert!(root.join("old.md").is_file());
 }
@@ -216,7 +229,7 @@ fn a_session_with_no_after_pass_is_checked_at_the_next_launch_first() {
     w.dir.file("matter/.mcp.json", "{}");
 
     let moved = before(&root, &data, exit()).unwrap();
-    let names: Vec<_> = moved.iter().map(|e| e.name.as_str()).collect();
+    let names: Vec<_> = moved.iter().map(|e| e.name.to_str().unwrap()).collect();
     assert_eq!(names, [".mcp.json"]);
     assert!(!root.join(".mcp.json").exists());
 
@@ -321,7 +334,7 @@ fn the_manifest_lists_each_entry_with_its_reason() {
     let listed = list(&data);
     let seen: Vec<_> = listed
         .iter()
-        .map(|e| (e.id, e.name.as_str(), e.reason))
+        .map(|e| (e.id, e.name.to_str().unwrap(), e.reason))
         .collect();
     assert_eq!(
         seen,

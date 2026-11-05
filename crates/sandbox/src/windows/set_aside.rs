@@ -68,6 +68,7 @@
 //! aside keeps its own DACL, so an agent it grants could still open it by its full path; it no
 //! longer loads in the matter.
 
+use std::ffi::OsString;
 use std::io;
 #[cfg(windows)]
 use std::path::Path;
@@ -84,6 +85,7 @@ mod check;
 mod files;
 #[cfg(any(windows, test))]
 mod moves;
+mod names;
 #[cfg(windows)]
 mod ntfs;
 #[cfg(any(windows, test))]
@@ -106,7 +108,9 @@ pub enum Reason {
     LawyerCantOpen,
 }
 
-/// One item set aside, as the manifest lists it.
+/// One item set aside, as the manifest lists it. Its paths and names are kept as the file
+/// system gave them, text or not (a lone surrogate, say): the manifest writes one that isn't
+/// text as its UTF-16 code units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
@@ -115,16 +119,20 @@ pub struct Entry {
     /// The matter it was in.
     pub matter: MatterId,
     /// Where it was, in the matter.
+    #[serde(with = "names::path")]
     pub from: PathBuf,
     /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`.
+    #[serde(with = "names::path")]
     pub to: PathBuf,
     /// The pass's folder, named for its UTC time.
     pub folder: String,
     /// The folders below the pass's folder it is in: its own folders below the matter's root
     /// (`sub` for `sub\.git`). Empty for a name at the root and for the walk's item.
-    pub within: Vec<String>,
+    #[serde(with = "names::many")]
+    pub within: Vec<OsString>,
     /// Its name in that folder: its own name, with `~2` and so on added if that was taken.
-    pub name: String,
+    #[serde(with = "names::one")]
+    pub name: OsString,
     /// Why it was moved.
     pub reason: Reason,
     /// Its owner's SID when it was moved, for information; none when it couldn't be read.

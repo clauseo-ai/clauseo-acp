@@ -159,11 +159,11 @@ fn read_u32(bytes: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
 
-/// Whether two names, or two keys, are the same as NTFS matches names: `CompareStringOrdinal`
-/// with case ignored, so no name is folded here.
-pub(in crate::windows::set_aside) fn same_name(a: &str, b: &str) -> bool {
-    let a: Vec<u16> = a.encode_utf16().collect();
-    let b: Vec<u16> = b.encode_utf16().collect();
+/// Whether two names are the same as NTFS matches names: `CompareStringOrdinal` with case
+/// ignored, so no name is folded here. Text or not: compared as UTF-16.
+pub(in crate::windows::set_aside) fn same_name(a: &OsStr, b: &OsStr) -> bool {
+    let a: Vec<u16> = a.encode_wide().collect();
+    let b: Vec<u16> = b.encode_wide().collect();
     same_wide(&a, &b)
 }
 

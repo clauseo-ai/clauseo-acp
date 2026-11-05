@@ -3,14 +3,14 @@
 //! call, so it builds and is tested on every OS.
 
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use clauseo_protocol::MatterId;
 
-use super::check::{check, snapshot};
+use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{load, set_aside};
 use super::scan::{Listed, scan};
@@ -29,6 +29,9 @@ pub(super) trait Volume {
     /// Opens the folder `name` in `folder` relative to it, as itself, to list it; one that is
     /// a link now is an error.
     fn open_folder(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<Self::Folder>;
+
+    /// The file ID of `folder` itself, read from what the scan opened.
+    fn folder_id(&self, folder: &Self::Folder) -> io::Result<FileId>;
 
     /// The names in `folder`, without `.` and `..`, and what each is.
     fn list(&self, folder: &Self::Folder) -> io::Result<Vec<Listed>>;
@@ -53,8 +56,8 @@ pub(super) trait Volume {
         &self,
         from: &Path,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
     ) -> Result<(), SetAsideFailure>;
 
     /// Moves `name` in the folder `parts` below `sandbox` (opened as for
@@ -63,8 +66,8 @@ pub(super) trait Volume {
     fn move_back(
         &self,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
         to: &Path,
     ) -> Result<(), SetAsideFailure>;
 }
@@ -118,7 +121,7 @@ pub(super) fn before_launch(
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
     let mut moved = Vec::new();
-    let mut aside = Vec::new();
+    let mut aside: Vec<Aside> = Vec::new();
     let mut sessions = BTreeSet::new();
     if let Some(record) = place.read_record()? {
         if !record.sessions.is_empty() {
@@ -217,7 +220,7 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         .position(|e| e.id == entry.id && e.from == entry.from && e.to == entry.to)
         .ok_or(SetAsideFailure::Gone)?;
     let found = manifest.entries.remove(at);
-    let plain = one_part(&found.folder)
+    let plain = one_part(OsStr::new(&found.folder))
         && one_part(&found.name)
         && found.within.iter().all(|part| one_part(part));
     if !plain || !found.from.is_absolute() {
@@ -233,11 +236,14 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     Ok(place.write_manifest(&manifest)?)
 }
 
-/// Whether `text` is one plain path part: no separator, drive, `.` or `..`.
-pub(super) fn one_part(text: &str) -> bool {
-    let mut parts = Path::new(text).components();
+/// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.
+pub(super) fn one_part(name: &OsStr) -> bool {
+    let mut parts = Path::new(name).components();
     matches!(
         (parts.next(), parts.next()),
         (Some(Component::Normal(_)), None)
-    ) && !text.contains(['/', '\\', ':'])
+    ) && !name
+        .as_encoded_bytes()
+        .iter()
+        .any(|byte| matches!(byte, b'/' | b'\\' | b':'))
 }

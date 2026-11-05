@@ -2,7 +2,7 @@
 //! renames that refuse a taken name and a symbolic link on the way, and a scan by path that
 //! never follows a symbolic link (names match exactly, the stand-in's rule).
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,11 @@ impl Volume for Posix {
 
     fn open_folder(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
         listable(folder.join(name))
+    }
+
+    fn folder_id(&self, folder: &PathBuf) -> io::Result<FileId> {
+        self.file_id(folder)?
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     }
 
     fn list(&self, folder: &PathBuf) -> io::Result<Vec<Listed>> {
@@ -78,8 +83,8 @@ impl Volume for Posix {
         &self,
         from: &Path,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
     ) -> Result<(), SetAsideFailure> {
         let mut folder = sandbox.to_owned();
         for part in parts {
@@ -95,8 +100,8 @@ impl Volume for Posix {
     fn move_back(
         &self,
         sandbox: &Path,
-        parts: &[String],
-        name: &str,
+        parts: &[OsString],
+        name: &OsStr,
         to: &Path,
     ) -> Result<(), SetAsideFailure> {
         let from = parts

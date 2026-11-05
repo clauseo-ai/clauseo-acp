@@ -99,7 +99,11 @@ fn a_folder_the_lawyer_cant_list_makes_a_partial_scan_that_keeps_the_session_ope
     w.dir.file("matter/.mcp.json", "{}");
     let later = exit() + Duration::from_secs(60);
     let next = before_launch(&policy, &data, &matter_one(), "s2", &[], later).unwrap();
-    let names: Vec<_> = next.moved.iter().map(|e| e.name.as_str()).collect();
+    let names: Vec<_> = next
+        .moved
+        .iter()
+        .map(|e| e.name.to_str().unwrap())
+        .collect();
     assert_eq!(
         names,
         [".mcp.json"],

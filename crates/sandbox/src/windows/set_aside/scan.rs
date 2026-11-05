@@ -12,6 +12,11 @@
 //!
 //! A folder it can't open or list is named in [`Scan::unscanned`]: the scan carries on, what it
 //! found is still checked, and the pass says the scan was partial.
+//!
+//! Names are kept as the folder's listing gives them, text or not (round 4): a name that isn't
+//! valid UTF-16 text, a lone surrogate say, is scanned, recorded and compared like any other.
+//! Each item also carries the file IDs of the folders it was reached through, so the check can
+//! pass over exactly what is inside a folder it set aside.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -19,6 +24,7 @@ use std::path::{Path, PathBuf};
 
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
+use super::names::Key;
 use super::run::Volume;
 use crate::PROTECTED_NAMES;
 
@@ -61,7 +67,7 @@ pub(super) enum Now {
     At(FileId),
     /// Something whose ID the lawyer can't read: its permissions shut the lawyer out.
     Shut,
-    /// Its ID couldn't be read, or its path isn't text.
+    /// Its ID couldn't be read.
     Failed(SetAsideFailure),
 }
 
@@ -79,12 +85,14 @@ pub(super) enum Kept {
 /// One protected name or link the scan found.
 #[derive(Debug, Clone)]
 pub(super) struct Item {
-    /// Its path below the root, its parts joined by `/`: its key in the record.
-    pub(super) key: String,
+    /// Its path below the root, one name per part: its key in the record.
+    pub(super) key: Key,
     /// Its path: the root joined with each part.
     pub(super) path: PathBuf,
     /// The folders it is in below the root.
-    pub(super) within: Vec<String>,
+    pub(super) within: Vec<OsString>,
+    /// The file IDs of those folders, as the scan opened them: what it was reached through.
+    pub(super) through: Vec<FileId>,
     pub(super) now: Now,
     pub(super) kept: Kept,
 }
@@ -109,13 +117,18 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
             return scan;
         }
     };
-    let mut stack = vec![(top, root.to_owned(), Vec::<String>::new())];
-    while let Some((folder, path, parts)) = stack.pop() {
+    let mut stack = vec![(top, root.to_owned(), Vec::<OsString>::new(), Vec::new())];
+    while let Some((folder, path, parts, through)) = stack.pop() {
         let at_root = parts.is_empty();
         let names: Vec<&str> = if at_root {
             root_names().collect()
         } else {
             NESTED.to_vec()
+        };
+        let at = Here {
+            path: &path,
+            parts: &parts,
+            through: &through,
         };
         for name in names {
             let now = probe(volume, &folder, OsStr::new(name));
@@ -123,7 +136,7 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
                 continue;
             }
             let kept = if at_root { Kept::Root } else { Kept::Nested };
-            scan.items.push(item(&path, &parts, name, now, kept));
+            scan.items.push(at.item(OsStr::new(name), now, kept));
         }
         let listed = match volume.list(&folder) {
             Ok(listed) => listed,
@@ -133,38 +146,31 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
             }
         };
         for child in listed {
-            let at = path.join(&child.name);
-            match (child.kind, child.name.to_str()) {
-                (Kind::Other, _) => {}
-                (Kind::Link, name) => {
-                    let now = probe(volume, &folder, &child.name);
-                    match (now, name) {
-                        (Now::Absent, _) => {}
-                        (now, Some(name)) => {
-                            scan.items.push(item(&path, &parts, name, now, Kept::Link));
-                        }
-                        (_, None) => scan.items.push(Item {
-                            key: at.to_string_lossy().into_owned(),
-                            path: at,
-                            within: Vec::new(),
-                            now: Now::Failed(SetAsideFailure::Io(io::ErrorKind::InvalidData)),
-                            kept: Kept::Link,
-                        }),
+            match child.kind {
+                Kind::Other => {}
+                Kind::Link => match probe(volume, &folder, &child.name) {
+                    Now::Absent => {}
+                    now @ (Now::At(_) | Now::Shut | Now::Failed(_)) => {
+                        scan.items.push(at.item(&child.name, now, Kept::Link));
                     }
-                }
-                (Kind::Folder, None) => {
-                    let error = io::Error::from(io::ErrorKind::InvalidData);
-                    unscanned(&mut scan, &at, &error);
-                }
-                (Kind::Folder, Some(name)) => match volume.open_folder(&folder, &child.name) {
-                    Ok(next) => {
-                        let mut deeper = parts.clone();
-                        deeper.push(name.to_owned());
-                        stack.push((next, at, deeper));
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => unscanned(&mut scan, &at, &error),
                 },
+                Kind::Folder => {
+                    let next = path.join(&child.name);
+                    let opened = volume
+                        .open_folder(&folder, &child.name)
+                        .and_then(|inner| Ok((volume.folder_id(&inner)?, inner)));
+                    match opened {
+                        Ok((id, inner)) => {
+                            let mut deeper = parts.clone();
+                            deeper.push(child.name);
+                            let mut via = through.clone();
+                            via.push(id);
+                            stack.push((inner, next, deeper, via));
+                        }
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => unscanned(&mut scan, &next, &error),
+                    }
+                }
             }
         }
     }
@@ -187,20 +193,27 @@ fn probe<V: Volume>(volume: &V, folder: &V::Folder, name: &OsStr) -> Now {
     }
 }
 
-/// The item `name` in the folder `path`, which is `parts` below the root.
-fn item(path: &Path, parts: &[String], name: &str, now: Now, kept: Kept) -> Item {
-    let key = parts
-        .iter()
-        .map(String::as_str)
-        .chain([name])
-        .collect::<Vec<_>>()
-        .join("/");
-    Item {
-        key,
-        path: path.join(name),
-        within: parts.to_vec(),
-        now,
-        kept,
+/// A folder the scan is in: its path, its parts below the root and the file IDs of the
+/// folders it was reached through.
+struct Here<'a> {
+    path: &'a Path,
+    parts: &'a [OsString],
+    through: &'a [FileId],
+}
+
+impl Here<'_> {
+    /// The item `name` in this folder.
+    fn item(&self, name: &OsStr, now: Now, kept: Kept) -> Item {
+        let mut key = self.parts.to_vec();
+        key.push(name.to_owned());
+        Item {
+            key,
+            path: self.path.join(name),
+            within: self.parts.to_vec(),
+            through: self.through.to_vec(),
+            now,
+            kept,
+        }
     }
 }
 
@@ -214,9 +227,9 @@ fn unscanned(scan: &mut Scan, path: &Path, error: &io::Error) {
     scan.unscanned.push(path.to_owned());
 }
 
-/// Whether two names, or two keys, are the same: on Windows as NTFS matches names
-/// (`CompareStringOrdinal`, case ignored); elsewhere exactly, the stand-in's rule.
-pub(super) fn same(a: &str, b: &str) -> bool {
+/// Whether two names are the same: on Windows as NTFS matches names (`CompareStringOrdinal`,
+/// case ignored); elsewhere exactly, the stand-in's rule.
+pub(super) fn same(a: &OsStr, b: &OsStr) -> bool {
     #[cfg(windows)]
     {
         super::ntfs::same_name(a, b)
@@ -227,10 +240,14 @@ pub(super) fn same(a: &str, b: &str) -> bool {
     }
 }
 
-/// Whether the key `key` is `folder`'s key or below it, part by part as [`same`] compares them.
-pub(super) fn inside(key: &str, folder: &str) -> bool {
-    let mut parts = key.split('/');
-    folder
-        .split('/')
-        .all(|want| parts.next().is_some_and(|part| same(part, want)))
+/// Whether two keys are the same, part by part as [`same`] compares them.
+pub(super) fn same_key(a: &[OsString], b: &[OsString]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
+}
+
+/// Whether the key `key` is `folder`'s key or below it, each part compared exactly (ordinal,
+/// case kept). Not as [`same`] compares: a case-sensitive folder may hold `A` and `a`, and
+/// `a\.git` isn't inside `A\.git` (round 4).
+pub(super) fn inside(key: &[OsString], folder: &[OsString]) -> bool {
+    key.starts_with(folder)
 }

@@ -8,15 +8,19 @@
 //! it is written (`write::check_owned_file`), and replaced in one step (`write::write_atomic`).
 //!
 //! `record.json`: `{"version": 1, "matter": "<id>", "sessions": ["<session>", ...], "names":
-//! {".git": {"volume": 1234, "id": "<32 hex digits>"}, "CLAUDE.md": null, "sub/.git": {...},
-//! ...}, "links": {"Docs/Precedents": {...}, ...}}`: each name's path below the matter's root,
-//! its parts joined by `/`, and `null` for a name at the root that was absent; and each link
-//! (junction or symbolic link) in the matter tree by its own path and file ID (R2).
+//! [{"path": [".git"], "id": {"volume": 1234, "id": "<32 hex digits>"}}, {"path":
+//! ["CLAUDE.md"], "id": null}, {"path": ["sub", ".git"], "id": {...}}, ...], "links": [{"path":
+//! ["Docs", "Precedents"], "id": {...}}, ...]}`: each name's path below the matter's root, one
+//! name per part, and `null` for a name at the root that was absent; and each link (junction
+//! or symbolic link) in the matter tree by its own path and file ID (R2). Each part, like each
+//! name and path in the manifest, is kept as the file system gave it (`names.rs`): a string
+//! when it is text, `{"utf16": [...]}` when it isn't.
 //! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...], "intents": [<Entry>,
 //! ...]}`: `intents` holds the moves begun and not yet finished (N10), and is left out when
 //! empty.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -24,6 +28,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use super::names::{Links, Names, keyed};
 use super::{Entry, SetAsideFailure};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
@@ -58,20 +63,21 @@ pub(super) struct Record {
     /// The sessions launched with no after-session pass yet: running, or ended without one.
     /// The record is clean only when this is empty.
     pub(super) sessions: BTreeSet<String>,
-    /// Each protected name by its path below the matter's root (parts joined by `/`), and
-    /// its file ID, or `None` for a name at the root that was absent.
-    pub(super) names: BTreeMap<String, Option<FileId>>,
+    /// Each protected name by its path below the matter's root, one name per part, and its
+    /// file ID, or `None` for a name at the root that was absent.
+    #[serde(with = "keyed")]
+    pub(super) names: Names,
     /// Each link (a junction or symbolic link, whatever its name) in the matter tree by its
     /// path below the root, and the link's own file ID (R2).
-    #[serde(default)]
-    pub(super) links: BTreeMap<String, FileId>,
+    #[serde(default, with = "keyed")]
+    pub(super) links: Links,
 }
 
 /// What a pass records of the matter: [`Record::names`] and [`Record::links`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Snapshot {
-    pub(super) names: BTreeMap<String, Option<FileId>>,
-    pub(super) links: BTreeMap<String, FileId>,
+    pub(super) names: Names,
+    pub(super) links: Links,
 }
 
 impl Record {
@@ -140,11 +146,11 @@ impl Place {
 
     /// The parts below the sandbox folder of the folder `within` in the pass's folder
     /// `folder`.
-    pub(super) fn parts(&self, folder: &str, within: &[String]) -> Vec<String> {
+    pub(super) fn parts(&self, folder: &str, within: &[OsString]) -> Vec<OsString> {
         [
-            SET_ASIDE_DIR.to_owned(),
-            self.matter.to_string(),
-            folder.to_owned(),
+            OsString::from(SET_ASIDE_DIR),
+            OsString::from(self.matter.to_string()),
+            OsString::from(folder),
         ]
         .into_iter()
         .chain(within.iter().cloned())
@@ -152,7 +158,7 @@ impl Place {
     }
 
     /// Where `name` in the folder `within` in the pass's folder `folder` is.
-    pub(super) fn to(&self, folder: &str, within: &[String], name: &str) -> PathBuf {
+    pub(super) fn to(&self, folder: &str, within: &[OsString], name: &OsStr) -> PathBuf {
         within
             .iter()
             .fold(self.base.join(folder), |path, part| path.join(part))
