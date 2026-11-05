@@ -238,6 +238,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   `<data_dir>/agents/codex-acp/home/auth.json`. If `CLAUSEO_DATA_DIR` puts the data folder in a synced
   folder (OneDrive, iCloud, Dropbox), that file syncs; firm IT should keep the data folder out
   of sync roots.
+- **Deliberate:** the allowlist takes `NODE_EXTRA_CA_CERTS` together with an `http://` proxy,
+  which lets that proxy read the agent's TLS traffic; firms with TLS-inspecting proxies need
+  it. Only someone who can already write the plan (the firm's policy, or the lawyer) can set it.
 - **Not verified:** that `shell_environment_policy.ignore_default_excludes=false` keeps
   `CODEX_API_KEY` out of Codex's shell tools is believed (`limits/src/readers/codex.rs:62-67`),
   not tested; G7 row 15 checks it.
