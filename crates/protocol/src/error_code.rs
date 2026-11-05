@@ -215,6 +215,9 @@ error_codes! {
     SigninAgentsStillRunning = "signin.agents_still_running", retryable: true, meaning: "An \
         agent was still running after Clauseo waited for it to stop, so the login was not \
         changed and nothing was removed; trying again once it has stopped can succeed.";
+    AgentKeysLoading = "agent.keys_loading", retryable: true, meaning: "Clauseo has not \
+        finished loading the stored API keys; no agent was started; trying again in a moment can \
+        succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

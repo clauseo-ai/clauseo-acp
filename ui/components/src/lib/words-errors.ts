@@ -72,6 +72,7 @@ export type ErrorCode =
   | "agent.guard_missing"
   | "update.failed"
   | "signin.agents_still_running"
+  | "agent.keys_loading"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -154,6 +155,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.guard_missing": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
   "update.failed": "The update didn't install. Try again.",
   "signin.agents_still_running": "Clauseo is still finishing. Try again in a moment.",
+  "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

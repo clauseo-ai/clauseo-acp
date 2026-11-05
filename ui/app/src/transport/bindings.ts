@@ -1474,6 +1474,8 @@ export type ErrorCode =
 "matter.folder_too_deep" | 
 /** An agent was still running after Clauseo waited for it to stop, so the login was not changed and nothing was removed; trying again once it has stopped can succeed. */
 "signin.agents_still_running" | 
+/** Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. */
+"agent.keys_loading" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

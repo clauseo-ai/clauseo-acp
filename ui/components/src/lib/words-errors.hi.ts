@@ -112,6 +112,8 @@ export const HI = {
   "The update didn't install. Try again.": null,
   // hi: later
   "Clauseo is still finishing. Try again in a moment.": null,
+  // hi: later
+  "Clauseo is still starting. Try again in a moment.": null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

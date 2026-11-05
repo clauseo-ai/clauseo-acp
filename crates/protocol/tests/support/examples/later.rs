@@ -44,6 +44,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninAgentsStillRunning,
             "an agent was still running after the stop wait",
         ),
+        failed(
+            ErrorCode::AgentKeysLoading,
+            "the stored API keys have not loaded yet",
+        ),
     ]
 }
 
