@@ -96,7 +96,6 @@ fn a_stored_skill_packs_that_does_not_parse_is_corrupt() {
         ("not_json", "not json".to_owned()),
         ("not_an_array", "{\"packs\":[]}".to_owned()),
         ("bad_id", "[\"Not An Id\"]".to_owned()),
-        ("reserved_id", "[\"clauseo\"]".to_owned()),
         ("thirty_three", too_many),
         ("duplicate", "[\"contracts\",\"contracts\"]".to_owned()),
     ];
@@ -122,6 +121,35 @@ fn a_stored_skill_packs_that_does_not_parse_is_corrupt() {
         assert_eq!(error.code(), ErrorCode::StoreCorrupt);
         block_on(store.close()).unwrap();
     }
+}
+
+#[test]
+fn a_stored_reserved_id_reads_without_corrupting_the_matters_read() {
+    // A reserved name (here one that a later build might reserve) is well-shaped, so the store
+    // reads it; the launch skips it, and the whole `matters()` read stays fine.
+    let dir = TestDir::new("skill_packs_reserved");
+    let store = dir.open();
+    block_on(store.commit(Commit {
+        matter: Some(matter_row(1, None)),
+        ..Commit::default()
+    }))
+    .unwrap();
+    block_on(store.close()).unwrap();
+    let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
+    conn.execute(
+        "UPDATE matters SET skill_packs = ?1",
+        ["[\"contracts\",\"clauseo\",\"stetdoc\"]"],
+    )
+    .unwrap();
+    drop(conn);
+    let store = dir.open();
+    let rows = block_on(store.matters()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].skill_packs,
+        Some(packs(&["contracts", "clauseo", "stetdoc"]))
+    );
+    block_on(store.close()).unwrap();
 }
 
 #[test]

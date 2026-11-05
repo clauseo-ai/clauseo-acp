@@ -138,12 +138,6 @@ fn a_pack_id_decodes_only_in_the_charset() {
         "con",
         "nul",
         "com1",
-        "clauseo",
-        "clauseo-x",
-        "builtin",
-        "stetdoc",
-        "legal-drafting",
-        "matter-brief",
         long.as_str(),
         "a é",
     ] {
@@ -153,6 +147,24 @@ fn a_pack_id_decodes_only_in_the_charset() {
             serde_json::from_str::<PackId>(&json).is_err(),
             "{refused:?}"
         );
+    }
+}
+
+#[test]
+fn a_pack_id_accepts_a_reserved_name_because_only_profile_refuses_it() {
+    // The reserved names are Clauseo's own (`clauseo`, `clauseo-*`, the built-in skills and
+    // `stetdoc`). A stored list may hold one, and reads fine; the launch skips it.
+    for reserved in [
+        "clauseo",
+        "clauseo-x",
+        "builtin",
+        "stetdoc",
+        "legal-drafting",
+        "matter-brief",
+    ] {
+        assert_eq!(PackId::new(reserved).unwrap().as_str(), reserved);
+        let decoded: PackId = serde_json::from_str(&format!("\"{reserved}\"")).unwrap();
+        assert_eq!(decoded.as_str(), reserved);
     }
 }
 

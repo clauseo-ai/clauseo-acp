@@ -63,9 +63,11 @@ A pack id matches `^[a-z0-9]+(-[a-z0-9]+)*$`, is 2 to 30 bytes, and is not a Win
 `clauseo`, every `clauseo-*`, `builtin`, `stetdoc` and each name in `skills::builtin::BUILTIN` are
 reserved. Pack skill names follow the same charset with no `--`. Since neither part may hold `--`,
 the rendered name `<pack>--<skill>` splits one way only, never equals a built-in name (none holds
-`--`), and must fit `NAME_MAX` (64 bytes). The rule is `PackId` in `protocol`
-(`crates/protocol/src/details/packs.rs`); `profile::packs::is_pack_id` calls it, and a profile test
-checks that it refuses each of profile's built-in names, so the two lists cannot drift.
+`--`), and must fit `NAME_MAX` (64 bytes). `PackId` in `protocol`
+(`crates/protocol/src/details/packs.rs`) checks the shape only. The reserved names are refused by
+`profile::packs::is_pack_id`, which pack folders load with, and by the host, which refuses a
+matter's list holding one as `command.invalid`. A stored list that holds a reserved name still
+reads; the launch skips that id.
 
 ### Validation (in `profile`)
 
@@ -209,7 +211,8 @@ stored in a new column (store migration `0005`, JSON text) and returned on `Matt
 Per matter, as built (PR-C): the wire types are `PackId` (a checked id) and `PackList` (at most 32
 ids, no duplicates, checked on decode), both in `protocol`. The store keeps the list in a new
 column (migration `0005_matter_skill_packs.sql`, JSON text, NULL for every matter before it).
-Forget keeps the list and unforget restores it as it was. Narrowing to `skills.enabled` and the
+A reserved id in a matter's list is refused on `UpdateMatter` (`command.invalid`). Forget keeps
+the list and unforget restores it as it was. Narrowing to `skills.enabled` and the
 hash check are left to the launch (PR-D).
 
 ### Loading, rendering and the launch

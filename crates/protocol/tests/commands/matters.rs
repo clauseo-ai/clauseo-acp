@@ -138,7 +138,7 @@ fn an_update_keeps_a_missing_skill_packs_clears_a_null_one_and_sets_a_list() {
         r#","skill_packs":["nda-kit","nda-kit"]"#,
         too_many.as_str(),
         r#","skill_packs":["NDA-kit"]"#,
-        r#","skill_packs":["clauseo"]"#,
+        r#","skill_packs":["a--b"]"#,
         r#","skill_packs":"nda-kit""#,
     ] {
         assert!(
