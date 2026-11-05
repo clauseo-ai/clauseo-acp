@@ -62,6 +62,8 @@ export type SetupState = {
   agents: Readonly<Record<AgentId, AgentSetup>>;
   /** The plan the first screen shows getting ready: Claude's, until the lawyer chooses ChatGPT. */
   chosen: AgentId;
+  /** "Use … instead" pressed: the agent the new conversation takes once the room lists it; null after. */
+  pending: AgentId | null;
   /** The gate's own: the key panel open, the paste field open, what was copied for the failure on screen. */
   keyOpen: boolean;
   pasting: boolean;
@@ -73,6 +75,7 @@ const START: SetupState = {
   keys: null,
   agents: {},
   chosen: CLAUDE,
+  pending: null,
   keyOpen: false,
   pasting: false,
   copied: null,
@@ -106,7 +109,9 @@ export type SetupStore = {
   /** One setup command; a refusal goes to the console, and the next event says what came of it. */
   command: (command: SetupCommand) => void;
   /** Changes the gate's own state. */
-  set: (patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen">>) => void;
+  set: (
+    patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen" | "pending">>,
+  ) => void;
   /** The counts switch, pressed: before the first act it is local state only; after it, `set_privacy_settings`. */
   setCounts: (on: boolean) => void;
   /** The lawyer's first act: its count, then `first_act` with the switch's value, once. */

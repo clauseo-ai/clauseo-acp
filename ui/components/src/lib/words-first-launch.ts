@@ -22,8 +22,6 @@ const HI = {
   "How many questions, which features, how long answers take. Never your papers, your questions or the answers.":
     "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
   "What's sent": "क्या भेजा जाता है",
-  // the counts switch when the firm's policy keeps counts off (new)
-  "Your firm keeps anonymous counts off.": null,
 
   // getting the agent ready, on the working line (design)
   "Getting {name} ready. About {mb} MB.": "{name} तैयार हो रहा है। लगभग {mb} MB।",

@@ -6,6 +6,7 @@ import { act } from "react";
 import { expect, test } from "vitest";
 import {
   CLAUDE,
+  CODEX,
   READY,
   SIGNED_IN,
   byId,
@@ -79,4 +80,78 @@ test("a returning lawyer signed in at the first word sees no gate and sends", as
   await typeInto(field(), QUESTION);
   await press(byId("send"));
   expect(sent(t, "create_thread")).toHaveLength(1);
+});
+
+/** The composer's plan switch's button for a plan, as the lawyer presses it. */
+const planButton = (name: string) =>
+  [...document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")].find(
+    (b) => b.textContent?.trim() === name,
+  ) ?? null;
+
+test("the plan switch's ChatGPT sticks with both plans listed and signed in, and the send goes to codex-acp", async () => {
+  const t = await mountFirstRun({
+    first: [
+      install(CLAUDE, READY),
+      install(CODEX, READY),
+      signIn(CLAUDE, SIGNED_IN),
+      signIn(CODEX, SIGNED_IN),
+    ],
+  });
+  await press(planButton("ChatGPT"));
+  expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
+  await typeInto(field(), QUESTION);
+  await press(byId("send"));
+  expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CODEX]);
+});
+
+test("with no word from the host (the desktop stub), the plan switch's ChatGPT sticks too", async () => {
+  const t = await mountFirstRun({ first: [] });
+  await press(planButton("ChatGPT"));
+  expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
+  await typeInto(field(), QUESTION);
+  await press(byId("send"));
+  expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CODEX]);
+});
+
+test("the gate checks the plan the send uses: ChatGPT picked in the switch while only Claude is signed in is held", async () => {
+  const t = await mountFirstRun({
+    first: [
+      install(CLAUDE, READY),
+      install(CODEX, READY),
+      signIn(CLAUDE, SIGNED_IN),
+      signIn(CODEX, { signed_out: {} }),
+    ],
+  });
+  expect(byId("signin")).toBeNull();
+  await typeInto(field(), QUESTION);
+  await press(planButton("ChatGPT"));
+  expect(byId("signin")?.dataset["agent"]).toBe("chatgpt");
+  await enter(field());
+  await act(async () => field().form?.requestSubmit());
+  await settle();
+  expect(asked(t)).toEqual([]);
+  // back to Claude, signed in: the gate goes and the question can go
+  await press(planButton("Claude"));
+  expect(byId("signin")).toBeNull();
+  await press(byId("send"));
+  expect(sent(t, "create_thread").map((c) => c.agent)).toEqual([CLAUDE]);
+});
+
+test("Use ChatGPT instead takes the new conversation to ChatGPT once; the lawyer's later pick of Claude stands", async () => {
+  const t = await mountFirstRun({
+    first: [
+      install(CLAUDE, READY),
+      install(CODEX, READY),
+      signIn(CLAUDE, { signed_out: {} }),
+      signIn(CODEX, SIGNED_IN),
+    ],
+  });
+  await press("Use ChatGPT instead");
+  expect(planButton("ChatGPT")?.getAttribute("aria-pressed")).toBe("true");
+  expect(byId("signin")).toBeNull();
+  await press(planButton("Claude"));
+  await settle();
+  expect(planButton("Claude")?.getAttribute("aria-pressed")).toBe("true");
+  expect(byId("signin")?.dataset["agent"]).toBe("claude");
+  expect(asked(t)).toEqual([]);
 });

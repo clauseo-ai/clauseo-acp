@@ -5,7 +5,7 @@
 // no seconds promised. Offline it waits and resumes by itself; a blocked network, a full disk and any other failure
 // each say what happened and give the one or two things to do, in concrete, never in red.
 import type { ReactNode } from "react";
-import { useDisplay } from "../../lib/display.ts";
+import type { Lang } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
 import { fl } from "../../lib/words-first-launch.ts";
 import { Button } from "../../ui/button.tsx";
@@ -36,14 +36,15 @@ export type InstallActs = {
 
 export type InstallTestIds = { line?: string; retry?: string; proxy?: string; askIt?: string };
 
-/** The working line for the install, or null when there is nothing to say (no install known, ready, managed). */
-export function useInstallLine(
+/** The working line for the install, in the language, or null when there is nothing to say (no install known, ready,
+ * managed). A plain function, no hook: the first run builds it outside render too, as the setup store changes. */
+export function installLine(
+  lang: Lang,
   view: InstallView | null,
   name: string,
   acts: InstallActs,
   ids: InstallTestIds = {},
 ): WorkingState | null {
-  const { lang } = useDisplay();
   if (view === null) return null;
   const w = (key: Parameters<typeof fl>[1], slots?: Record<string, string | number>) =>
     fl(lang, key, slots);

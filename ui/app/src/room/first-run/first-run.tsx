@@ -11,10 +11,13 @@ import {
   type GateAct,
   type Plan,
 } from "@clauseo/components/clauseo/first-launch/gate.tsx";
-import { useInstallLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
+import {
+  installLine,
+  type InstallActs,
+} from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
-import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
@@ -33,7 +36,6 @@ import { holderOf, type Hold } from "./hold.ts";
 import { CaseLawSlot } from "./case-law.tsx";
 import { workspaceStep } from "./workspace.ts";
 import { gateView, installView } from "./views.ts";
-import { useNow } from "../../store/limits.ts";
 
 /** The test ids the brief decides (UD1, "Decided here"). */
 const IDS = {
@@ -75,7 +77,6 @@ function actsFor(
   transport: HostTransport,
   agent: AgentId,
   device: string | null,
-  choose: (agent: AgentId) => void,
 ): (a: GateAct) => void {
   return (a) => {
     switch (a.act) {
@@ -111,11 +112,11 @@ function actsFor(
         store.command({ use_different_account: { agent } });
         return;
       case "instead": {
-        // the other plan's install starts (Claude's download pauses where it is, R20), and new conversations take it
+        // the other plan's install starts (Claude's download pauses where it is, R20), and the new conversation takes
+        // it once, as soon as the room lists it (FirstRun's pending choice)
         const other = agent === CODEX ? CLAUDE : CODEX;
-        store.set({ chosen: other, keyOpen: false, pasting: false });
+        store.set({ chosen: other, pending: other, keyOpen: false, pasting: false });
         store.command({ install_agent: { agent: other } });
-        choose(other);
         return;
       }
       case "key-panel":
@@ -133,6 +134,88 @@ function actsFor(
         return;
     }
   };
+}
+
+/** The install line's buttons for `agent`. */
+const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copied"]) => ({
+  retry: () => store.command({ retry_agent_install: { agent } }),
+  proxy: () => store.command({ retry_agent_install: { agent, use_system_proxy: true } }),
+  copy: copyText,
+  copied,
+  setCopied: (what: "message" | "log") => store.set({ copied: what }),
+});
+
+/** The room's side of the hold: the plan the send uses, and how times and words are said. */
+type RoomSide = { agent: AgentId; zone: string; lang: Lang; platform: string };
+
+/** The composer's hold for this setup state: the gate until the plan the send uses is signed in, the install's working
+ * line, and the room's line under the field. A plain function of the store's state and the room's side, so the composer
+ * reads it as the store changes, in the same commit as FirstRun's own (hold.ts). */
+function holdOf(
+  store: SetupStore,
+  transport: HostTransport,
+  state: SetupState,
+  room: RoomSide,
+): Hold | null {
+  const { agent, lang } = room;
+  const plan = planOf(agent);
+  const setup = state.agents[agent];
+  const clock = (at: number) => clockOf(at, Date.now(), room.zone, lang).time;
+  const working = installLine(
+    lang,
+    installView(setup),
+    NAME[plan],
+    installActs(store, agent, state.copied),
+    IDS.install,
+  );
+  const view = gateView(setup, state, clock);
+  const signedIn = setup?.signIn;
+  if (view !== null) {
+    const device =
+      typeof signedIn === "object" && "device_code" in signedIn
+        ? (signedIn.device_code?.code ?? null)
+        : null;
+    const keys =
+      state.keys === false
+        ? null
+        : room.platform === "mac" || room.platform === "windows"
+          ? room.platform
+          : "linux";
+    return {
+      gate: (
+        <Gate
+          plan={plan}
+          view={view}
+          keys={keys}
+          onAct={actsFor(store, transport, agent, device)}
+          testIds={IDS.gate}
+        />
+      ),
+      working,
+      line: <DocumentsLine name={NAME[plan]} />,
+    };
+  }
+  // the Safe workspace step stands after the first sign-in, once UC merges (workspace.ts); none is needed today
+  if (
+    workspaceStep() === null &&
+    typeof signedIn === "object" &&
+    signedIn.signed_in !== undefined &&
+    setup?.signedHere === true
+  )
+    return {
+      working,
+      line: (
+        <SignedLine
+          plan={plan}
+          method={signedIn.signed_in.method}
+          reused={signedIn.signed_in.source === "reused"}
+          email={signedIn.signed_in.email}
+          label={signedIn.signed_in.plan}
+          testId={IDS.done}
+        />
+      ),
+    };
+  return working === null ? null : { working };
 }
 
 export function FirstRun({
@@ -156,100 +239,40 @@ export function FirstRun({
   useEffect(() => store.start(), [store]);
   const state = useSyncExternalStore(store.subscribe, store.state, store.state);
   const { lang, platform } = useDisplay();
-  const now = useNow();
-  const clock = (at: number) => clockOf(at, now, zone, lang).time;
-  // the plan the gate is for: a new conversation's is the one the lawyer chose here (Claude's until "Use ChatGPT
-  // instead"), once the host has said anything of it; a conversation with a thread keeps its own
-  const drafting = talks.drafting || talks.open === null;
-  const agent =
-    drafting && state.agents[state.chosen] !== undefined
-      ? state.chosen
-      : (talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent);
-  const plan = planOf(agent);
-  const setup = state.agents[agent];
-  const acts = {
-    retry: () => store.command({ retry_agent_install: { agent } }),
-    proxy: () => store.command({ retry_agent_install: { agent, use_system_proxy: true } }),
-    copy: copyText,
-    copied: state.copied,
-    setCopied: (copied: "message" | "log") => store.set({ copied }),
-  };
-  const working = useInstallLine(installView(setup), NAME[plan], acts, IDS.install);
-  const view = gateView(setup, state, clock);
-  // the Safe workspace step stands after the first sign-in, once UC merges (seams.tsx); none is needed today
-  const step = workspaceStep();
-  const signedIn = setup?.signIn;
-  const choose = (other: AgentId) => {
-    if (talks.drafting && talks.options.some((o) => o.value === other)) conversations.choose(other);
-  };
-  // the chosen plan's agent may be listed only once its install is ready (its settings entry is written then): the
-  // new conversation takes it as soon as the room offers it
-  const offered = talks.drafting && talks.options.some((o) => o.value === state.chosen);
+  // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
+  const agent = talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent;
+  // "Use … instead": the new conversation takes the other plan once, as soon as the room lists it, and never again,
+  // so the lawyer's own pick in the plan switch stands
+  const pending = state.pending;
+  const listed =
+    pending !== null && talks.drafting && talks.options.some((o) => o.value === pending);
   useEffect(() => {
-    if (offered && talks.agent !== state.chosen) conversations.choose(state.chosen);
-  }, [offered, talks.agent, state.chosen, conversations]);
-  const device =
-    typeof signedIn === "object" && "device_code" in signedIn
-      ? (signedIn.device_code?.code ?? null)
-      : null;
-  const onAct = actsFor(store, transport, agent, device, choose);
-  const keys =
-    state.keys === false ? null : platform === "mac" || platform === "windows" ? platform : "linux";
-  let hold: Hold | null = null;
-  if (view !== null)
-    hold = {
-      gate: <Gate plan={plan} view={view} keys={keys} onAct={onAct} testIds={IDS.gate} />,
-      working,
-      line: <DocumentsLine name={NAME[plan]} />,
-    };
-  else if (
-    step === null &&
-    typeof signedIn === "object" &&
-    signedIn.signed_in !== undefined &&
-    setup?.signedHere === true
-  )
-    hold = {
-      working,
-      line: (
-        <SignedLine
-          plan={plan}
-          method={signedIn.signed_in.method}
-          reused={signedIn.signed_in.source === "reused"}
-          email={signedIn.signed_in.email}
-          label={signedIn.signed_in.plan}
-          testId={IDS.done}
-        />
-      ),
-    };
-  else if (working !== null) hold = { working };
-  // the composer hears a new hold only when what it says changes: a room render alone (a streaming answer's) sends
-  // nothing, so the composer renders no more than before
-  const said = JSON.stringify([
-    agent,
-    setup,
-    view,
-    state.copied,
-    state.keys,
-    lang,
-    platform,
-    talks.drafting,
-  ]);
-  const last = useRef<string | null>(null);
+    if (!listed || pending === null) return;
+    store.set({ pending: null });
+    conversations.choose(pending);
+  }, [listed, pending, store, conversations]);
+  // the composer reads its hold from the setup store's state as it changes (one commit per event, with this one),
+  // and again when the room's side changes
   useEffect(() => {
-    if (last.current === said) return;
-    last.current = said;
     const holder = holderOf(transport);
-    holder.hold = hold;
-    for (const heard of holder.heard) heard();
-  });
-  useEffect(
-    () => () => {
-      const holder = holderOf(transport);
-      holder.hold = null;
+    const room: RoomSide = { agent, zone, lang, platform };
+    let cache: [SetupState, Hold | null] | null = null;
+    holder.read = () => {
+      const now = store.state();
+      if (cache === null || cache[0] !== now) cache = [now, holdOf(store, transport, now, room)];
+      return cache[1];
+    };
+    const notify = () => {
       for (const heard of holder.heard) heard();
-    },
-    [transport],
-  );
+    };
+    const stop = store.subscribe(notify);
+    notify();
+    return () => {
+      stop();
+      holder.read = () => null;
+      notify();
+    };
+  }, [transport, store, agent, zone, lang, platform]);
   // a matter made from the rail while the first screen stood is the first act too
   const wasWelcome = useRef(welcome);
   useEffect(() => {
@@ -258,21 +281,15 @@ export function FirstRun({
     wasWelcome.current = welcome;
   }, [welcome, matters, store]);
   if (!welcome) return <CaseLawSlot />;
-  const shown = state.agents[state.chosen];
   return (
     <FirstScreen
       store={store}
       matters={matters}
       transport={transport}
       plan={planOf(state.chosen)}
-      setup={shown}
+      setup={state.agents[state.chosen]}
       state={state}
-      acts={{
-        ...acts,
-        retry: () => store.command({ retry_agent_install: { agent: state.chosen } }),
-        proxy: () =>
-          store.command({ retry_agent_install: { agent: state.chosen, use_system_proxy: true } }),
-      }}
+      acts={installActs(store, state.chosen, state.copied)}
     />
   );
 }
@@ -307,9 +324,10 @@ function FirstScreen({
   plan: Plan;
   setup: AgentSetup | undefined;
   state: SetupState;
-  acts: Parameters<typeof useInstallLine>[2];
+  acts: InstallActs;
 }) {
-  const install = useInstallLine(installView(setup), NAME[plan], acts, IDS.install);
+  const { lang } = useDisplay();
+  const install = installLine(lang, installView(setup), NAME[plan], acts, IDS.install);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
   useEffect(() => store.count({ onboarding_step: { step: "welcome_shown" } }), [store]);

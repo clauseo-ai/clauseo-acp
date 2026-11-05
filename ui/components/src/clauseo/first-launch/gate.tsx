@@ -3,14 +3,16 @@
 // will stand, and beneath it the quiet ways round it. It covers the plan, a login already on this computer (said before
 // it is used), signing in in the browser with each way that can end, ChatGPT's device code (never the first offer:
 // only after the browser didn't work), and an API key. No model is named and no lab's logo shows.
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { IconOpen, IconTick } from "../../icons/icons.tsx";
+import { cn } from "../../lib/cn.ts";
 import { useDisplay } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
 import { fl, type FirstLaunchKey } from "../../lib/words-first-launch.ts";
 import { ui } from "../../lib/words-ui.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
+import { WRAP } from "./classes.ts";
 import { Act, Note, PasteRow, Ways } from "./parts.tsx";
 
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
@@ -104,6 +106,26 @@ export function Gate({
   const name = NAME[plan];
   const app = APP[plan];
   const act = (a: GateAct) => () => onAct(a);
+  // the key panel and the paste field take the focus as they open, and give it back to what opened them as they close
+  // (Cancel goes with them); a change the host makes while the focus is elsewhere moves nothing
+  const root = useRef<HTMLDivElement>(null);
+  const panel =
+    view.kind === "key" ? "key" : view.kind === "waiting" && view.pasting ? "paste" : null;
+  const was = useRef(panel);
+  useEffect(() => {
+    const box = root.current;
+    const before = was.current;
+    was.current = panel;
+    if (box === null || before === panel) return;
+    if (panel !== null) {
+      box.querySelector<HTMLElement>("input")?.focus();
+      return;
+    }
+    const at = box.ownerDocument.activeElement;
+    if (at !== null && at !== box.ownerDocument.body && !box.contains(at)) return;
+    const buttons = [...box.querySelectorAll<HTMLButtonElement>("button")];
+    (buttons.find((b) => b.dataset["opens"] === before) ?? buttons[0])?.focus();
+  }, [panel]);
   const signIn = (label: string) => (
     <Button kind="tone" className="room-field-ask" onClick={act({ act: "sign-in" })}>
       {label}
@@ -123,9 +145,11 @@ export function Gate({
     <Button
       kind="quiet"
       size="small"
-      className={quiet ? "fl-way fl-way-quiet" : "fl-way"}
+      // the words wrap on a narrow well: utilities, as the button's own nowrap and height are
+      className={cn(WRAP, "min-h-control-small", quiet ? "fl-way fl-way-quiet" : "fl-way")}
       onClick={act(a)}
       data-testid={testId}
+      data-opens={a.act === "key-panel" && a.open ? "key" : a.act === "paste" ? "paste" : undefined}
     >
       {label}
     </Button>
@@ -355,7 +379,7 @@ export function Gate({
       break;
   }
   return (
-    <div className="fl-gate" data-testid={testIds.root} data-agent={plan}>
+    <div ref={root} className="fl-gate" data-testid={testIds.root} data-agent={plan}>
       <div className="fl-gate-body" data-testid={testIds.state} data-state={stateOf(view)}>
         {body}
       </div>

@@ -5,15 +5,19 @@
 // switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
 import type { ReactNode } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
+import { useDisplay } from "../../lib/display.ts";
 import { useFirstLaunchWords } from "../../lib/words-first-launch.ts";
+import { st } from "../../lib/words-settings.ts";
 import { Button } from "../../ui/button.tsx";
 import { Switch } from "../../ui/switch.tsx";
 import { Lockup } from "../lockup.tsx";
 import { Say } from "../say.tsx";
 import { WorkingLine, type WorkingState } from "../working-line.tsx";
+import { WRAP } from "./classes.ts";
 import { Done, DocumentsLine } from "./parts.tsx";
+import { cn } from "../../lib/cn.ts";
 
-/** The counts switch: on by default; `locked` when the firm's policy keeps counts off, shown off with no control. */
+/** The counts switch: on by default; `locked` when the firm's policy keeps counts off: shown off, with no control. */
 export type CountsSwitch = { on: boolean; locked: boolean; onChange: (on: boolean) => void };
 
 export function Welcome({
@@ -63,7 +67,14 @@ export function Welcome({
                 </Say>
               </p>
               <div className="fl-open">
-                <Button kind="tone" size="large" onClick={onOpenFolder} data-testid={testIds.open}>
+                <Button
+                  kind="tone"
+                  size="large"
+                  // the words wrap in a narrow column rather than run past it
+                  className={cn(WRAP, "min-h-control-large max-w-full py-s2")}
+                  onClick={onOpenFolder}
+                  data-testid={testIds.open}
+                >
                   <IconOpen size={16} />
                   {w("Open the folder for a matter")}
                 </Button>
@@ -83,7 +94,7 @@ export function Welcome({
               <div className="fl-others">
                 <Button
                   kind="quiet"
-                  className="fl-other"
+                  className={cn(WRAP, "fl-other min-h-control max-w-full py-s1")}
                   onClick={onNewMatter}
                   data-testid={testIds.newMatter}
                 >
@@ -119,8 +130,8 @@ export function Welcome({
 }
 
 /** Anonymous counts of how Clauseo is used, on by default and said plainly: one more line of the fine print at the
- * foot, with the system's switch where the others have their glyph. Under the firm's lock the switch is gone and the
- * line says counts stay off. */
+ * foot, with the system's switch where the others have their glyph. Under the firm's lock the switch stands off and
+ * can't be pressed or focused (assistive technology still hears it, off), with Settings' own words for a locked row. */
 function Counts({
   on,
   locked,
@@ -129,23 +140,22 @@ function Counts({
   testId,
 }: CountsSwitch & { onWhatsSent?: (() => void) | undefined; testId?: string | undefined }) {
   const w = useFirstLaunchWords();
+  const { lang } = useDisplay();
+  const shown = on && !locked;
   return (
     <div className="room-line fl-foot-line fl-counts">
-      {!locked && (
-        <span className="fl-counts-switch" data-testid={testId} data-state={on ? "on" : "off"}>
-          <Switch checked={on} onCheckedChange={onChange} label={w("Send anonymous counts")} />
-        </span>
-      )}
+      <span className="fl-counts-switch" data-testid={testId} data-state={shown ? "on" : "off"}>
+        <Switch
+          checked={shown}
+          onCheckedChange={onChange}
+          disabled={locked}
+          label={w("Send anonymous counts")}
+        />
+      </span>
       <span>
-        {locked ? (
-          <span className="text-primary">
-            <Say>{w("Your firm keeps anonymous counts off.")}</Say>
-          </span>
-        ) : (
-          <span className="text-primary">
-            <Say>{w("Send anonymous counts.")}</Say>
-          </span>
-        )}{" "}
+        <span className="text-primary">
+          <Say>{w("Send anonymous counts.")}</Say>
+        </span>{" "}
         <span className="text-muted">
           <Say>
             {w(
@@ -153,6 +163,14 @@ function Counts({
             )}
           </Say>
         </span>
+        {locked && (
+          <>
+            {" "}
+            <span className="text-primary">
+              <Say>{st(lang, "Managed by your organisation")}</Say>
+            </span>
+          </>
+        )}
         {onWhatsSent !== undefined && (
           <>
             {" "}

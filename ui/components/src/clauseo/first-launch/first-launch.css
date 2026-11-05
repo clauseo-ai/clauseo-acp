@@ -26,8 +26,10 @@
     margin-block: auto;
     width: min(100%, var(--measure));
   }
+  /* one column the width of the well's measure: no word, the large button's included, sets it wider */
   .fl-ask {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     justify-items: start;
     gap: var(--s6);
   }
@@ -45,6 +47,7 @@
   }
   .fl-open {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     justify-items: start;
     gap: var(--s3);
   }
@@ -78,8 +81,12 @@
   }
 
   /* the foot, where the composer will stand: the agent getting ready on the working line, then the fine print */
+  /* the same gutter as the welcome's scroller above, so the working line keeps the lockup's and the button's edge where
+     scrollbars take room (Windows, Linux) */
   .fl-foot {
     flex: none;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
     display: flex;
     justify-content: center;
     padding: var(--s2) var(--thread-pad) var(--s3);
@@ -117,6 +124,13 @@
   }
   .fl-install:empty {
     display: none;
+  }
+  /* the working line gives its acts their widest width; holding the install's buttons they may narrow and wrap instead,
+     inside the well */
+  .working-acts:has(> .fl-install) {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
   }
   .fl-bar {
     align-self: center;
@@ -185,10 +199,6 @@
   .fl-way {
     color: var(--primary);
     padding-inline: var(--s2);
-    height: auto;
-    min-height: var(--size-hint);
-    white-space: normal;
-    text-align: left;
   }
   .fl-way-quiet {
     color: var(--muted);

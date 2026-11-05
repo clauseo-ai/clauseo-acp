@@ -35,6 +35,9 @@ test("welcome: the one question, the lede, and the counts switch on by default; 
   expect(toggle()?.getAttribute("aria-checked")).toBe("true");
   expect(text()).not.toMatch(/Safe workspace/i);
   expect(text()).not.toMatch(/agent/i);
+  // the header stands with no title: "No matters yet" is the rail's alone (design, welcome.tsx)
+  expect(byId("matter")?.textContent ?? "").toBe("");
+  expect(text().split("No matters yet").length - 1).toBe(1);
 });
 
 test("counts: before the first act the switch is the window's alone: no command, no settings write", async () => {
@@ -87,14 +90,25 @@ test("counts: a cancelled folder picker is no first act", async () => {
   expect(counts(t).map((c) => c.onboarding_step?.step)).toEqual(["welcome_shown"]);
 });
 
-test("counts: a locked privacy.counts shows off, with no control", async () => {
+test("counts: a locked privacy.counts shows the switch off, with no control: not operable or focusable, its state still spoken", async () => {
   const t = await mountFirstRun({
     matters: [],
     settings: settingsView({ locked: ["privacy.counts"] }),
   });
-  expect(byId("counts-switch")).toBeNull();
-  expect(document.querySelector('[role="switch"]')).toBeNull();
-  expect(text()).toContain("Your firm keeps anonymous counts off.");
+  expect(onOf()).toBe("off");
+  const control = toggle() as HTMLButtonElement;
+  expect(control.getAttribute("role")).toBe("switch");
+  expect(control.getAttribute("aria-checked")).toBe("false");
+  expect(control.disabled).toBe(true);
+  // not focusable: focus stays where it was
+  control.focus();
+  expect(document.activeElement).not.toBe(control);
+  // not operable: a press changes nothing and sends nothing
+  await press(control);
+  expect(onOf()).toBe("off");
+  expect(sent(t, "set_privacy_settings")).toEqual([]);
+  expect(text()).toContain("Send anonymous counts.");
+  expect(text()).toContain("Managed by your organisation");
   await press("Open the folder for a matter");
   expect(sent(t, "first_act")).toEqual([{ counts: false }]);
 });
