@@ -146,6 +146,41 @@ fn a_new_folders_parent_is_checked_as_create_takes_it() {
     host.shutdown();
 }
 
+/// A new folder whose parent is inside the data folder (the data folder itself, its matters
+/// folder, a folder under it) is refused with create's code and never checked: the fixed
+/// `network` answer never shows. The home folder, which holds the data folder, is accepted as a
+/// parent, since create makes a folder in it that is outside the data folder.
+#[test]
+fn a_new_folder_inside_the_data_folder_is_refused_and_the_home_holding_it_is_not() {
+    let dir = Dir::new("folder_query_new_data", &[]);
+    let inside = dir.data().join("x");
+    crate::write::create_dir_all(&inside);
+    let host = network(&dir, |config| {
+        config.with_home_folder(Some(dir.home().to_owned()))
+    });
+    for parent in [dir.data().to_path_buf(), dir.data().join("matters"), inside] {
+        let source = MatterSource::NewFolder {
+            folder: register(&host, &parent),
+        };
+        let error = asked(&host, source).unwrap_err();
+        assert_eq!(
+            error.code(),
+            ErrorCode::MatterFolderInMattersRoot,
+            "{}: {error:?}",
+            parent.display()
+        );
+    }
+    let source = MatterSource::NewFolder {
+        folder: register(&host, dir.home()),
+    };
+    assert_eq!(
+        asked(&host, source).unwrap(),
+        Some(FolderSupportKind::Network),
+        "the home folder"
+    );
+    host.shutdown();
+}
+
 /// A ref the host never gave is `command.invalid`, as for the commands that take one.
 #[test]
 fn an_unknown_folder_ref_is_refused() {

@@ -10,8 +10,12 @@
 //!   sits inside another matter's), as `MatterJob::Import` runs them on its worker, then the
 //!   protected-tree check `Matter::import` runs (`clauseo_matters::check_protected`: inside
 //!   the data folder or the matters root).
-//! - `NewFolder`: the parent, canonicalised as `matter_folder` does. Create checks nothing else
-//!   of a parent: the "exists" check and the registry check both need the new folder's name.
+//! - `NewFolder`: the parent, canonicalised as `matter_folder` does, then the protected-tree
+//!   check create runs on the new folder (`clauseo_matters::check_protected`: inside the data
+//!   folder or the matters root). The new folder's name is not known, so a sentinel child
+//!   (`parent/_`) stands for it: a parent that holds the data folder (the home folder) is
+//!   accepted, and one inside it is refused. The "exists" check and the registry check need
+//!   the name, so create's own refusals there are not shown.
 //! - `DefaultLocation`: the default location, as a new folder's parent. It may not exist before
 //!   the first matter (create makes it), so its nearest folder that exists is checked: the one
 //!   the new folders are made in.
@@ -52,8 +56,17 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
         }
         MatterSource::NewFolder { folder } => {
             let parent = registered(actor, folder)?;
+            let names = RefusalNames::of(actor);
+            let settings = matter_settings(actor.effective.data_dir());
             Ok(Box::new(move || {
-                Ok(dunce::canonicalize(&parent).unwrap_or(parent))
+                let parent = dunce::canonicalize(&parent).unwrap_or(parent);
+                // A child of the parent, not the parent: create makes `parent/<name>`, and the
+                // parent itself may hold the data folder (the home folder does).
+                let child = parent.join("_");
+                clauseo_matters::check_protected(&child, &settings)
+                    .map_err(Error::Matters)
+                    .map_err(|error| names.refusal(error, &parent, |_| false))?;
+                Ok(parent)
             }))
         }
         MatterSource::DefaultLocation => {
