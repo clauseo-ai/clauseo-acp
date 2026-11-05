@@ -354,3 +354,24 @@ fn a_refused_walk_names_the_child() {
     };
     assert_eq!(at, Some(w.canonical("matter").join("child")));
 }
+
+/// M5: when the agent exits, its own trees are walked strictly again, so what it made open is
+/// repaired then (here the fake records the strict walks).
+#[test]
+fn the_agents_own_trees_are_walked_strictly_after_its_session() {
+    let w = world("review-m5-after", &[]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &["sib1"]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
+    acl.walks.clear();
+    repair_after_session(&ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
+    for own in ["matter", STATE, NOTES] {
+        let root = w.canonical(own);
+        assert!(acl.walks.iter().any(|(r, _, s)| *r == root && *s), "{own}");
+    }
+}

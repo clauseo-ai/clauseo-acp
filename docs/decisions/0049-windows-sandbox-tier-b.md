@@ -102,7 +102,8 @@ build 26100):
     strictly. A child an agent made (a pool user owns it) that would beat the inherited deny,
     with an explicit allow for a broad group, another pool user or the pool group, or a
     protected DACL, is repaired: those allows are stripped, the protection cleared and its
-    inherited entries worked out again. A child the lawyer owns that would beat it refuses the
+    inherited entries worked out again. The repair runs at each launch and again when the agent
+    exits (`repair_after_session`, which PR6 calls beside the set-aside's `after_session`). A child the lawyer owns that would beat it refuses the
     launch, naming the child for the running page. A child the lawyer can't open at all (a
     DACL an agent made) is set aside through its folder's `FILE_DELETE_CHILD`, or refuses the
     launch, naming it.
