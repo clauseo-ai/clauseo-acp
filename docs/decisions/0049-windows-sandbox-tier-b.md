@@ -1,76 +1,82 @@
 # 0049: The Windows sandbox, tier B
 
-**Draft.** S15 PR2 starts this record. Later S15 pull requests complete it: the ACL walk and
-ledger (PR1, PR3), set-up (PR4), the runner and token (PR5), the launcher (PR6), the network
-(PR7), the install-folder grants (PR8), and Codex (PR9).
+**Draft.** S15 PR2 starts this record and PR1 brings it to design (B). Later S15 pull requests
+complete it: the ACL walk (PR3), set-up and the pool (PR4), the runner and token (PR5), the
+launcher (PR6), the network (PR7), the install-folder grants (PR8), and Codex (PR9).
 
 ## Context
 
 On macOS the agent runs under Seatbelt (tier A, 0038). Windows has no jail of that kind that
 Clauseo can use today without admin rights, so Windows has been tier C: Not protected, with the
-adapters' own ask modes. S15 adds tier B: one local sandbox user, `ClauseoSandbox`, made once per
-machine after one admin prompt on the Safe workspace screen, with one random SID per matter, so
-one matter's agent cannot read another matter's folders. The parts that make the user, the
-token, the ACL edits and the WFP filters are vendored from Codex's `windows-sandbox-rs`
-(Apache-2.0, tag `rust-v0.162.1`).
+adapters' own ask modes. S15 adds tier B, set up once per machine after one admin prompt on the
+Safe workspace screen, so one matter's agent can't read or write another matter's folders. The
+parts that make users, tokens, ACL edits and WFP filters are vendored from Codex's
+`windows-sandbox-rs` (Apache-2.0, tag `rust-v0.162.1`).
 
 Tier B works only from a desktop session; from session 0 the restricted child fails with
-`0xC0000142` (S11 row 11). The S15 PR0 spikes, on a copy of `clauseo-win-01` (Windows Server
-2025, build 26100), changed the token the plan started from:
+`0xC0000142` (S11 row 11). The spikes ran on copies of `clauseo-win-01` (Windows Server 2025,
+build 26100):
 
-- `CreateProcessWithLogonW` gives the runner the desktop user's own logon SID, so with that SID
-  restricting or in the default DACL, one matter's agent could open another's process with
-  `VM_READ` and `TERMINATE`, read the desktop user's processes, and rewrite the window station's
-  and desktop's DACLs.
-- `0xC0000142` came from the default DACL, not the desktop: the token's own default DACL names
-  no restricting SID.
-- `Users` must be a restricting SID (System32 DLLs outside KnownDLLs grant `Users` only; without
-  it Node fails `0xC0000135`). `Everyone` need not be, and with it any matter reads another
-  matter's default-secured pipes.
+- **PR0** started from one shared user, `ClauseoSandbox`, with one SID per matter. It showed that
+  `CreateProcessWithLogonW` hands the runner the desktop user's own logon SID, that `Users` must be
+  a restricting SID (System32 DLLs outside KnownDLLs grant `Users` only), and that the default
+  DACL, not the desktop, caused `0xC0000142`.
+- **That token was superseded** (spike B, private `measurements/s15-spikes-userpool.md`). NPFS
+  gives a pipe made with no security set a default descriptor that grants its owner full access
+  and `Everyone` read. Under the shared user, the owner wasn't a restricting SID, so the agent
+  couldn't open its own pipes for writing: Node's spawn with pipes, and codex-acp starting codex,
+  failed. With one pool user per matter, the owner is the pool user, a restricting SID, so both
+  work.
 
 ## Decision
 
-- **Tier B is one sandbox user with one SID per matter.** The runner logs on as `ClauseoSandbox`
-  and starts the agent under a restricted token, not write-restricted, so reads are checked too.
-  As PR0 settled it:
-  - restricting SIDs: the matter's SID, `RESTRICTED` and `Users`;
+- **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
+  in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
+  needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
+  user and starts the agent under a restricted token, not write-restricted, so reads are checked
+  too:
+  - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
+    matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;
-  - a narrow default DACL: `ClauseoSandbox`, the matter SID and `SYSTEM` with full access, and
-    the desktop user with `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE`
-    only;
-  - a private desktop per runner (`SYSTEM`, `ClauseoSandbox` and the matter SID), with read and
-    execute on `WinSta0` for `ClauseoSandbox` and the matter SID;
-  - `SetErrorMode` in the runner, so a failed start exits instead of hanging on an error box.
-- **Matter SIDs** are `S-1-5-21-<a>-<b>-<c>-<rid>`, three random sub-authorities and a random
-  relative id of at least 1000, from the OS's randomness. Each is made at the matter's first
-  launch and kept in `<data_dir>\sandbox\matters.json` (matter id to SID), replaced whole and
-  atomically. A matter keeps its SID; only `forget_matter` removes it. A SID is never given to a
-  second matter, and a `matters.json` that can't be read is refused, never rewritten, since
-  rewriting it would lose the SIDs that name existing permission entries
-  (`clauseo_sandbox::windows::sids`).
-- **Grants come in pairs**, one ACE for `ClauseoSandbox` (the normal check) and one for the
-  matter SID (the restricted check), written ahead in `<data_dir>\sandbox\acl-ledger.json`.
-  Nothing is granted in the lawyer's `<profile>\.claude`.
+  - Low integrity, with a Low no-write-up label, `S:(ML;OICI;NW;;;LW)`, on the matter, state and
+    notes folders, the Claude store and the credential link, so the token writes nothing labelled
+    higher;
+  - a narrow default DACL: the pool user and `SYSTEM` with full access, and the desktop user with
+    `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE` only;
+  - a private desktop per runner, labelled Low, and `SetErrorMode` in the runner.
+- **Grants** name the matter's pool user: `Modify` on the matter, state and notes folders and the
+  credential link, `ReadAndExecute` on runtime and read paths, `CreateFiles` on the Claude store
+  folder and `Modify` on its allowed names; a deny of writes on the policy's read-only paths.
+  Nothing is granted in the lawyer's `<profile>\.claude`, on the profile or above it, or on
+  `<data_dir>\sandbox`; inside `<data_dir>` only an allow list is granted.
+- **Isolation between matters** (replacing D8, below):
+  - every registered matter's fence: on its matter, state and notes folders, an inherited deny
+    of reads and writes for every other pool user, planned at the first launch that finds it
+    unfenced, and by set-up and matter creation;
+  - on each folder beside the matter in its parent (walked down to any registered matter there),
+    and on the files directly in the parent, an inherited deny of reads for
+    `ClauseoSandboxUsers`; the parent's own listing still shows names.
+- **The ledger** `<data_dir>\sandbox\acl-ledger.json` lists every entry and label, write-ahead
+  (D4), one entry per matter even when two matters share an entry, so removal waits for the
+  last.
+- **Matter SIDs** are `S-1-5-21-<a>-<b>-<c>-<rid>`, random, made at a matter's first launch and
+  kept in `<data_dir>\sandbox\matters.json`, replaced whole and atomically; a file that can't be
+  read is refused, never rewritten (`clauseo_sandbox::windows::sids`).
 - **The set-up marker** `<data_dir>\sandbox\setup.json` holds the set-up version, the Windows
-  user who ran it, the `ClauseoSandbox` SID and the time (`clauseo_sandbox::windows::marker`).
-  It reads as missing, older, current or another user's (and as newer or unreadable, which fail).
-  The machine's `HKLM\SOFTWARE\Clauseo\Sandbox\UserSid` record names the sandbox user for the
-  desktop's start-up check (#317); its reader now lives in
-  `clauseo_sandbox::windows::sandbox_user_sid`.
+  user who ran it, the sandbox SID and the time (`clauseo_sandbox::windows::marker`). The
+  machine's `HKLM\SOFTWARE\Clauseo\Sandbox\UserSid` record serves the desktop's start-up check
+  (#317), read by `clauseo_sandbox::windows::sandbox_user_sid`.
 - **Set-up state.** `SandboxSetup::state` gives `Ready` only for a current marker of this user
-  whose sandbox SID the `UserSid` record also names; a missing marker or a missing record is
-  `Needed`, an older marker `Outdated`, another user's marker or a record naming another account
-  `SetUpByOtherUser`, and anything unreadable `Failed`.
-- **Detection.** `detect(setup)` caches only what the OS can give: on Windows, the machine's
-  architecture (`IsWow64Process2`'s native machine) and build (`CurrentBuildNumber`). ARM64 and
-  builds before Windows 10 22H2 (19045) are tier C, `UnsupportedOs`. Otherwise the set-up's state
-  is read on every call: tier B only when it is `Ready`, else C with `NeedsSetUp`,
-  `SetUpRefused` or `SetUpFailed`. macOS is unchanged: the Seatbelt probe, once per process.
+  whose SID the record also names; otherwise `Needed`, `Outdated`, `SetUpByOtherUser` or
+  `Failed`.
+- **Detection.** `detect(setup)` caches only the machine's architecture and build; ARM64 and
+  builds before Windows 10 22H2 (19045) are tier C, `UnsupportedOs`. The set-up state is read on
+  every call: tier B only when `Ready`.
 
-The plan's eight decisions (orchestrator, 2026-11-05):
+The plan's decisions (orchestrator, 2026-11-05):
 
 - **D1.** The folder gate runs in the host and again in `SandboxUserLauncher::new`, on every
-  folder it would grant on; a failing data folder makes the machine tier C.
+  folder it grants or denies on; a failing data folder makes the machine tier C.
 - **D2.** Claude on a `CantChangePermissions` matter on a tier-B machine is plain tier C, with
   no forced ask.
 - **D3.** Codex: try its `unelevated` sandbox nested inside tier B first; if that fails, run
@@ -79,14 +85,18 @@ The plan's eight decisions (orchestrator, 2026-11-05):
   reconciled at start.
 - **D5.** The first Windows user owns the set-up; a second user's set-up stops with
   `SetUpFailed` ("set up by another Windows user") and that user stays on tier C.
-- **D6.** Detection caches only the OS, architecture and MXC probe, and reads the set-up state
-  at each tier query, so a finished set-up shows without a restart.
+- **D6.** Detection caches only the OS facts and reads the set-up state at each tier query.
 - **D7.** The ACL walk skips only name-surrogate reparse points (junctions, symbolic links);
   cloud placeholders get the ACE through `FILE_FLAG_OPEN_REPARSE_POINT`.
-- **D8.** On a matter whose root DACL grants a restricting group read (`Users`, per PR0), every
-  other matter's SID gets a ledgered deny-read ACE.
-
-- **D11 (approved; private plan #397).** `Everyone` stays among the token's restricting SIDs.
+- **D8, replaced.** The per-matter deny-read on matters that `Users` can read is replaced by the
+  fences (every other pool user denied each matter) and the group's deny on siblings and loose
+  files, above.
+- **D9.** One pool user per matter, with the token above.
+- **D10.** The browser is off on tier B in v1: Chrome needs `Local\` named objects, which the
+  session grants only to the desktop user's logon SID. A launch that needs the browser falls
+  back to tier C's rules.
+- **D11 (approved; private plan §3 D11, merged #397).** `Everyone` stays among the token's
+  restricting SIDs.
 
 ### Accepted risk: `Everyone` in the token
 
@@ -97,15 +107,29 @@ matter's agent gets error 5. The residual risk: a pipe the agent makes with no s
 NPFS's default descriptor (`Everyone` read), so another matter's agent can read it. A later tier
 may drop `Everyone` behind a proxy that runs as the desktop user.
 
+### Threat model: what stays open, by design
+
+- **FAT and exFAT drives** keep no ACLs, so every pool agent reads them. A matter on one is
+  refused by the gate (`NoPermissions`). Owner: S15 close-out.
+- **Another matter's allowed, read or runtime paths** beside a matter get no sibling deny, so
+  every pool user reads them wherever `Users` can. Owner: S15 close-out, Rohan's read-gap
+  decision.
+- **A neighbour on a network share** gets no fence: the restricted token fails network logon
+  (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
+  PR7's VM row (the (B) token against `\\localhost` and a guest share).
+- **Folders on `C:\` outside the matter's parent, and `ProgramData`**, stay readable where
+  `Users` reads them. Owner: S15 close-out, Rohan's read-gap decision.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
   `RetryProtection` needs no restart.
-- Two matters' agents run as one Windows user, so isolation rests on the restricting SIDs and the
-  default DACL. HKCU stays readable by every matter (`RESTRICTED` reads the hive).
+- Each matter's agent runs as its own Windows user. HKCU is read-only to it at Low integrity, and
+  its `AppData\LocalLow` persists across matters, so reusing a pool user needs a clean-up that
+  empties it and re-owns or removes the old matter's files.
 - A second Windows user on the same machine stays on tier C until machine-scope secrets land.
-- The token, the default DACL and the desktop come from the PR0 spikes on Windows Server 2025;
-  Windows 11 and Windows 10 22H2 are unmeasured.
+- The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
+  and Windows 10 22H2 are unmeasured.
 
 ## Status
 
