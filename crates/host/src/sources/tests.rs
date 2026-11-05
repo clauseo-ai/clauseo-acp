@@ -553,6 +553,11 @@ fn a_query_is_cleaned_like_a_title() {
     );
     // A query that is only control characters is no query.
     assert_eq!(query_of(&json!({"query": "\u{7}\u{202E}"})), None);
+    // The bidi marks go too, as the URL check refuses them (decision record 0041).
+    assert_eq!(
+        query_of(&json!({"query": "a\u{200E}b\u{200F}c\u{061C}d"})),
+        Some("abcd".to_owned())
+    );
 }
 
 /// The 2,000-character cap is on the URL the log keeps: the URL rule runs first, so a URL that the

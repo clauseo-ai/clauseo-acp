@@ -158,7 +158,11 @@ pub(crate) fn output_text(output: &Value) -> String {
 pub(crate) fn clean_title(text: &str) -> String {
     text.chars()
         .filter(|c| {
-            !c.is_control() && !matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+            !c.is_control()
+                && !matches!(
+                    c,
+                    '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+                )
         })
         .collect::<String>()
         .trim()
