@@ -295,7 +295,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   (#416) need nothing new. Actor state alone marks the queue as waiting for the sign-in:
   `restart_agents` clears the mark and resumes the queue, so a second call does nothing. A
   lawyer's `ResumeQueue`, `SendQueuedNow` or new prompt moves the queue as usual, and the mark
-  goes once the queue no longer shows held. Nothing new is logged for the hold beyond one flag.
+  goes once the queue no longer shows held. If the lawyer removes the turn put back, the mark goes too (the host
+  code owner's ruling on #440): the queue stays held the usual way (#408), so the next turn
+  waits for the lawyer's "Send next", and `restart_agents` sends nothing. Nothing new is logged for the hold beyond one flag.
 - *The held turn keeps its head place across a host restart* (the host code owner's ruling,
   2026-11-05). It was sent first, and the turns queued behind it may depend on its answer. Its
   `TurnQueued` carries `at_head: true`, a new optional field (`TurnQueued::at_head`,

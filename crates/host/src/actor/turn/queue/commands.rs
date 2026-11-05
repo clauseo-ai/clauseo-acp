@@ -219,6 +219,12 @@ pub(super) fn removed(actor: &mut Actor, thread: ThreadId, turn: TurnId, ok: boo
     };
     let (at, queued) = queue.removing.remove(index);
     if ok {
+        if queue.sign_in == Some(turn) {
+            // The turn held for the sign-in is gone: the queue stays held the usual way, and the
+            // next turn waits for the lawyer's "Send next", not for `restart_agents`.
+            queue.sign_in = None;
+            tracing::info!(%thread, "the turn held for the sign-in was removed; the queue stays held");
+        }
         if queue.is_empty() {
             queue.held = false;
         }

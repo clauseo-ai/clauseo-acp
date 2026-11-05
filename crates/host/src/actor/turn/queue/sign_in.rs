@@ -95,7 +95,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
         },
     );
     queue.held = true;
-    queue.sign_in = true;
+    queue.sign_in = Some(turn);
     tracing::info!(%thread, "a turn is held for its agent's sign-in");
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));
     if sent.is_err() {
@@ -109,10 +109,10 @@ pub(in crate::actor::turn) fn resume(actor: &mut Actor, thread: ThreadId) {
     let Some(queue) = queue(actor, thread) else {
         return;
     };
-    if !(queue.sign_in && queue.held) {
+    if !(queue.sign_in.is_some() && queue.held) {
         return;
     }
-    queue.sign_in = false;
+    queue.sign_in = None;
     queue.held = false;
     tracing::info!(%thread, "a queue held for the sign-in resumes");
     sync_held(actor, thread);
