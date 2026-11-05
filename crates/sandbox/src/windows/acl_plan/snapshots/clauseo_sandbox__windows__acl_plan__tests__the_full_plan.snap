@@ -1,0 +1,36 @@
+---
+source: crates/sandbox/src/windows/acl_plan/tests.rs
+expression: "render(&w, &grants)"
+---
+Matter Modify user 0x001301bf Tree <root>/matter
+Matter Modify matter 0x001301bf Tree <root>/matter
+State Modify user 0x001301bf Tree <root>/data/agent-state/m1/claude
+State Modify matter 0x001301bf Tree <root>/data/agent-state/m1/claude
+Notes Modify user 0x001301bf Tree <root>/data/agent-state/m1/notes
+Notes Modify matter 0x001301bf Tree <root>/data/agent-state/m1/notes
+CredentialLink Modify user 0x001301bf ThisOnly <root>/data/agent-state/m1/claude/auth.json
+CredentialLink Modify matter 0x001301bf ThisOnly <root>/data/agent-state/m1/claude/auth.json
+ClaudeStore CreateFiles user 0x00000002 ThisOnly <root>/data/claude-home
+ClaudeStore CreateFiles matter 0x00000002 ThisOnly <root>/data/claude-home
+ClaudeStoreFile Modify user 0x001301bf ThisOnly <root>/data/claude-home/.credentials.json
+ClaudeStoreFile Modify matter 0x001301bf ThisOnly <root>/data/claude-home/.credentials.json
+ClaudeStoreFile Modify user 0x001301bf ThisOnly <root>/data/claude-home/.storage-write
+ClaudeStoreFile Modify matter 0x001301bf ThisOnly <root>/data/claude-home/.storage-write
+Runtime ReadAndExecute user 0x001200a9 Tree <root>/data/agents/node
+Runtime ReadAndExecute matter 0x001200a9 Tree <root>/data/agents/node
+Read ReadAndExecute user 0x001200a9 Tree <root>/elsewhere
+Read ReadAndExecute matter 0x001200a9 Tree <root>/elsewhere
+AllowedFolder ReadAndExecute user 0x001200a9 Tree <root>/elsewhere/Precedents
+AllowedFolder ReadAndExecute matter 0x001200a9 Tree <root>/elsewhere/Precedents
+ReadOnlyInMatter DenyWrite matter 0x000d0156 ThisOnly <root>/matter/big.pdf
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.agents
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.claude
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.clauseo
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.codex
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.git
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/.mcp.json
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/AGENTS.md
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/CLAUDE.local.md
+ReadOnlyInMatter DenyWrite matter 0x000d0156 Tree <root>/matter/CLAUDE.md
+ReadOnlyInState DenyWrite matter 0x000d0156 Tree <root>/data/agent-state/m1/claude/settings.json
+OtherMatter DenyReadWrite matter 0x000f01ff Tree <root>/other/m2
