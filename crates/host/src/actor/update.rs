@@ -32,6 +32,7 @@ fn view() -> UpdateView {
         state: UpdateState::Managed {
             by: ManagedBy::Package,
         },
+        // A placeholder until PR 4 reads the effective `update.mode`; nothing reads it yet.
         mode: UpdateMode::Auto,
         checked_at: None,
         updated_from: None,
