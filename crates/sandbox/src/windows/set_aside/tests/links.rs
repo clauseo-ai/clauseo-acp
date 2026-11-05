@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use super::{exit, exit_as, launch, launch_as, none, record, volume, world};
+use super::{exit, exit_as, key, launch, launch_as, none, record, volume, world};
 use crate::windows::set_aside::Reason;
 use crate::windows::test_world::World;
 use crate::windows::write::rename_new;
@@ -59,14 +59,14 @@ fn a_lawyers_link_unchanged_since_launch_stays() {
     w.dir.dir("elsewhere/precedents/.git");
     link(&w, "matter/Docs", &w.canonical("elsewhere/precedents"));
     launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
-    assert!(record(&data).links.contains_key("Docs"));
+    assert!(record(&data).links.contains_key(&key("Docs")));
 
     assert_eq!(
         exit_as(&volume(), &root, &data, "s1", exit()).unwrap(),
         none()
     );
     assert!(there(&root.join("Docs")));
-    assert!(record(&data).links.contains_key("Docs"));
+    assert!(record(&data).links.contains_key(&key("Docs")));
 }
 
 /// R2: a lawyer's link swapped in a session for another link of the same name is set aside as

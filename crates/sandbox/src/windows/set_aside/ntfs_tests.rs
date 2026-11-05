@@ -15,6 +15,7 @@ use crate::windows::test_world::{World, matter_one};
 use crate::windows::write::rename_new;
 
 mod round3;
+mod round4;
 
 fn launch() -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(1_762_337_700_123)
@@ -50,7 +51,10 @@ fn a_lawyer_folder_renamed_to_git_is_set_aside_by_its_file_id() {
         .unwrap()
         .moved;
 
-    let names: Vec<_> = moved.iter().map(|e| (e.name.as_str(), e.reason)).collect();
+    let names: Vec<_> = moved
+        .iter()
+        .map(|e| (e.name.to_str().unwrap(), e.reason))
+        .collect();
     assert_eq!(names, [(".git", Reason::New)], "CLAUDE.md kept its file ID");
     assert!(moved[0].to.join("hooks/pre-commit").is_file());
     assert!(!root.join(".git").exists());

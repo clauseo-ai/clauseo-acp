@@ -34,7 +34,10 @@ fn a_second_session_in_the_same_matter_is_still_checked() {
         .file("matter/.claude/settings.json", "{\"hooks\": {}}");
     let moved = exit_as(&v, &root, &data, "s2", exit()).unwrap();
 
-    let seen: Vec<_> = moved.iter().map(|e| (e.name.as_str(), e.reason)).collect();
+    let seen: Vec<_> = moved
+        .iter()
+        .map(|e| (e.name.to_str().unwrap(), e.reason))
+        .collect();
     assert_eq!(seen, [(".claude", Reason::New)]);
     assert!(!root.join(".claude").exists());
     assert_eq!(record(&data).sessions, sessions(&[]), "clean only now");
@@ -51,7 +54,7 @@ fn a_crashed_session_is_checked_at_the_next_launch_then_dropped() {
     w.dir.file("matter/.mcp.json", "{\"the\": \"agent's\"}");
 
     let moved = launch_as(&v, &root, &data, "s2", &[], exit()).unwrap();
-    let names: Vec<_> = moved.iter().map(|e| e.name.as_str()).collect();
+    let names: Vec<_> = moved.iter().map(|e| e.name.to_str().unwrap()).collect();
     assert_eq!(names, [".mcp.json"], "the crashed session's change");
     assert_eq!(
         record(&data).sessions,

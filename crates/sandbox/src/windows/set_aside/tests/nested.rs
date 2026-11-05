@@ -1,7 +1,7 @@
 //! N1: the protected names below the matter's root that the scan finds, recorded at launch and
 //! set aside when new or changed, each at its own path in the pass's folder.
 
-use super::{aside, exit, exit_as, launch, launch_as, none, record, volume, world};
+use super::{aside, exit, exit_as, key, launch, launch_as, none, record, volume, world};
 use crate::windows::set_aside::Reason;
 use crate::windows::write::rename_new;
 
@@ -57,7 +57,7 @@ fn a_nested_git_gone_since_launch_is_dropped_from_the_record() {
     let (w, root, data) = world("aside-nested-gone");
     w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
     launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
-    assert!(record(&data).names.contains_key("sub/.git"));
+    assert!(record(&data).names.contains_key(&key("sub/.git")));
 
     rename_new(&root.join("sub/.git"), &root.join("sub/git-old")).unwrap();
     assert_eq!(
@@ -65,7 +65,7 @@ fn a_nested_git_gone_since_launch_is_dropped_from_the_record() {
         none()
     );
 
-    assert!(!record(&data).names.contains_key("sub/.git"));
+    assert!(!record(&data).names.contains_key(&key("sub/.git")));
     assert!(root.join("sub/git-old/HEAD").is_file());
 }
 
@@ -90,7 +90,12 @@ fn nested_names_are_set_aside_at_their_own_paths_and_never_clash() {
         .map(|rel| aside(&data, exit(), rel))
         .collect();
     assert_eq!(names, expect);
-    assert!(moved.iter().all(|e| !e.name.contains('~')), "{moved:?}");
+    assert!(
+        moved
+            .iter()
+            .all(|e| !e.name.to_str().unwrap().contains('~')),
+        "{moved:?}"
+    );
     assert!(moved.iter().all(|e| e.reason == Reason::New));
     assert!(expect[3].join("hooks/post-merge").is_file());
 }
@@ -125,5 +130,5 @@ fn a_nested_name_inside_a_folder_set_aside_goes_with_it() {
     let moved_from: Vec<_> = moved.iter().map(|e| e.from.clone()).collect();
     assert_eq!(moved_from, [root.join(".claude")]);
     assert!(moved[0].to.join("x/.git/HEAD").is_file());
-    assert!(!record(&data).names.contains_key(".claude/x/.git"));
+    assert!(!record(&data).names.contains_key(&key(".claude/x/.git")));
 }

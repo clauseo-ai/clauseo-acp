@@ -2,6 +2,7 @@
 //! and finished after it, and each load of the manifest settling an intent a crash left (N10),
 //! so every item in a pass's folder has a finished entry. The matter's lock is held throughout.
 
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::time::SystemTime;
@@ -16,22 +17,19 @@ const NAMES_TRIED: u32 = 9;
 
 /// Moves `from` into the folder `within` in the pass's folder for `now`, made as needed, under
 /// its own name or the first free `~n` one, and adds its manifest entry: an intent first, then,
-/// once the move is done, the finished entry. A failure's `at` is `from`.
+/// once the move is done, the finished entry. Names are kept as they are, text or not. A
+/// failure's `at` is `from`.
 pub(super) fn set_aside(
     volume: &impl Volume,
     place: &Place,
     from: &Path,
-    within: &[String],
+    within: &[OsString],
     reason: Reason,
     now: SystemTime,
 ) -> Result<Entry, Refused> {
     let refuse = |failure| Refused::at(failure, from);
-    let text = from
-        .to_str()
-        .ok_or_else(|| refuse(SetAsideFailure::Io(io::ErrorKind::InvalidData)))?;
     let own = from
         .file_name()
-        .and_then(|name| name.to_str())
         .filter(|name| one_part(name))
         .ok_or_else(|| refuse(SetAsideFailure::Io(io::ErrorKind::InvalidInput)))?;
     if !within.iter().all(|part| one_part(part)) {
@@ -44,11 +42,10 @@ pub(super) fn set_aside(
     let id = manifest.next;
     manifest.next += 1;
     for n in 1..=NAMES_TRIED {
-        let name = if n == 1 {
-            own.to_owned()
-        } else {
-            format!("{own}~{n}")
-        };
+        let mut name = own.to_owned();
+        if n > 1 {
+            name.push(format!("~{n}"));
+        }
         let to = place.to(&folder, within, &name);
         match volume.file_id(&to) {
             Ok(None) => {}
@@ -58,7 +55,7 @@ pub(super) fn set_aside(
         let entry = Entry {
             id,
             matter: place.matter(),
-            from: text.into(),
+            from: from.to_owned(),
             to,
             folder: folder.clone(),
             within: within.to_vec(),
