@@ -12,7 +12,9 @@ use std::ffi::OsString;
 use serde_json::Value;
 
 /// The tools that only read on this computer and change nothing: these alone go on unasked.
-pub(crate) const LOCAL_READS: [&str; 7] = [
+/// `ToolSearch` only loads the schemas of Claude Code's deferred tools (a plan exit loads
+/// `ExitPlanMode`'s that way, live run of 2026-11-05); the tool it finds still asks when called.
+pub(crate) const LOCAL_READS: [&str; 8] = [
     "Read",
     "Glob",
     "Grep",
@@ -20,6 +22,7 @@ pub(crate) const LOCAL_READS: [&str; 7] = [
     "NotebookRead",
     "TodoWrite",
     "Task",
+    "ToolSearch",
 ];
 
 /// What Claude Code is told when it must ask.
