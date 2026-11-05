@@ -21,7 +21,7 @@ import { useHasOlder, useQuestionWords } from "./live.ts";
 import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
 import { useOlder } from "./older.ts";
 import { RowOf } from "./row-of.tsx";
-import { SourcesTransport, toolCallsPick } from "./sources.ts";
+import { SourcesTransport, webPick } from "./sources.ts";
 import { WebSources } from "./sources.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
@@ -127,7 +127,7 @@ function Sections({
 const USER = "user_message:";
 const TOOL = "tool_call:";
 
-/** The web sources of an exchange's turn (sources.tsx): what its tool calls found, by their ids in order, with the
+/** The web sources of an exchange's turn (sources.tsx): what its tool calls found, each entry's `web` in order, with the
  * thread's agent from its header. Its tool call ids are taken once per id list, and an exchange with none draws and
  * subscribes to nothing. */
 function ExchangeSources({
@@ -152,12 +152,12 @@ function ToolSources({
   stream: StreamId;
   paged: ReadonlyMap<EntryId, ViewEntry>;
 }) {
-  // one string, so a flush that leaves the tool calls as they were renders nothing
-  const pick = useMemo(() => toolCallsPick(tools, paged), [tools, paged]);
-  const joined = useStreamPart(useViewStore(), stream, pick);
-  const calls = useMemo(() => (joined === "" ? [] : joined.split("\n")), [joined]);
+  // the calls that carry web, and only their web: the same array while none of them changes, so a flush that leaves
+  // them as they were renders nothing
+  const pick = useMemo(() => webPick(tools, paged), [tools, paged]);
+  const webs = useStreamPart(useViewStore(), stream, pick);
   const agent = useStreamPart(useViewStore(), stream, pickAgent);
-  return <WebSources stream={stream} calls={calls} agent={agent} />;
+  return <WebSources webs={webs} agent={agent} />;
 }
 
 const pickAgent = (v: StreamView | undefined) => v?.header?.header?.agent;

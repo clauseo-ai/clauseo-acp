@@ -8,7 +8,6 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   DisplayInfo,
-  Envelope,
   FileRefId,
   HostError,
   HostEvent,
@@ -90,13 +89,6 @@ export type AppFeed = { ready: Promise<void>; stop: () => void };
  * `threads_changed`). Only the desktop transport is one; the room asks for it by duck type (host-next.ts), so it is not part of HostTransport. */
 export interface AppFeedSource {
   onAppEvent(listener: (event: HostEvent) => void): AppFeed;
-}
-
-/** A transport that hears domain events (`HostEvent`'s `events` arm), in the order the channel delivered them, and
- * plays a new listener the ones it already had. Only FakeTransport is one: the desktop host sends a window no event
- * subscription today, so the room asks for it by duck type and the real app hears none (room/thread/sources.ts). */
-export interface EnvelopeSource {
-  onEnvelopes(listener: (envelopes: readonly Envelope[]) => void): () => void;
 }
 
 /** A host error the transport made itself, for a failure that is not the host's answer. */

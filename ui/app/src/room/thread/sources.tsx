@@ -3,7 +3,7 @@
 // chevron. Open, one row for each search or page in the order they ran, each led by its icon: a search's glyph and its
 // query in quotes, its results nested under it as tile, title and site; a page's tile, title and site, with the browser
 // glyph in the tile's place for a page the browser opened and an info tip for one Codex opened on OpenAI's side. A turn
-// with none draws nothing, which is every turn in the real app today. Links open through the host's open_external (its
+// with none draws nothing. Links open through the host's open_external (its
 // own confirm names the site); none navigates the webview. Tiles are letters, never favicons: nothing here makes a
 // request. Queries, titles and addresses are isolated runs, marked Hindi when most of their letters are Devanagari, and
 // an address wraps anywhere rather than being cut.
@@ -21,8 +21,7 @@ import { useSourcesWords } from "@clauseo/components/lib/words-sources.ts";
 import { InfoTip } from "@clauseo/components/ui/info-tip.tsx";
 import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { Tooltip } from "@clauseo/components/ui/tooltip.tsx";
-import type { HostTransport } from "../../transport/host-transport.ts";
-import type { AgentId, StreamId, ToolCallId, WebResult } from "../../transport/protocol.ts";
+import type { AgentId, ToolCallWeb, WebResult } from "../../transport/protocol.ts";
 import { kindOf, planName } from "../agent.ts";
 import { quietly } from "../open.ts";
 import {
@@ -31,8 +30,7 @@ import {
   pagesShown,
   SourcesOpenAtFirst,
   SourcesTransport,
-  useToolCallWeb,
-  type ToolCallWeb,
+  type ToolWeb,
 } from "./sources.ts";
 
 /** The most marks the folded line shows. */
@@ -214,7 +212,6 @@ type Item =
   | { key: string; kind: "search"; query: string; results: readonly WebResult[] }
   | { key: string; kind: "page"; page: Page };
 
-/** The rows of a turn's tool calls' web, in the tool calls' order: each one's search, then its pages. */
 /** Each answer's count: its distinct pages, the addresses its searches listed and the pages it read, an address in
  * both counted once. A search itself is no page. */
 function pagesCount(items: readonly Item[]): number {
@@ -225,7 +222,8 @@ function pagesCount(items: readonly Item[]): number {
   return urls.size;
 }
 
-function itemsOf(webs: readonly (readonly [ToolCallId, ToolCallWeb])[]): Item[] {
+/** The rows of a turn's tool calls' web, in the tool calls' order: each one's search, then its pages. */
+function itemsOf(webs: readonly ToolWeb[]): Item[] {
   return webs.flatMap(([call, web]) => [
     ...(web.search === undefined
       ? []
@@ -267,43 +265,25 @@ function marksOf(items: readonly Item[], codex: boolean): Mark[] {
   return marks;
 }
 
-/** The web sources at the end of one turn's answer: its tool calls' web, by id, in order; nothing when none found
- * anything. `agent`: the thread's, which ran every search and page (ToolCallWeb names none). */
+/** The web sources at the end of one turn's answer: its tool calls' web, in order; nothing when none found anything.
+ * `agent`: the thread's, which ran every search and page (ToolCallWeb names none). */
 export function WebSources({
-  stream,
-  calls,
+  webs,
   agent,
 }: {
-  stream: StreamId;
-  calls: readonly ToolCallId[];
+  webs: readonly ToolWeb[];
   agent: AgentId | undefined;
 }) {
   const transport = use(SourcesTransport);
-  if (transport === null || calls.length === 0) return null;
-  return <SourcesOf transport={transport} stream={stream} calls={calls} agent={agent} />;
+  if (transport === null || webs.length === 0) return null;
+  return <SourcesOf webs={webs} agent={agent} />;
 }
 
-function SourcesOf({
-  transport,
-  stream,
-  calls,
-  agent,
-}: {
-  transport: HostTransport;
-  stream: StreamId;
-  calls: readonly ToolCallId[];
-  agent: AgentId | undefined;
-}) {
+function SourcesOf({ webs, agent }: { webs: readonly ToolWeb[]; agent: AgentId | undefined }) {
   const w = useSourcesWords();
-  const webs = useToolCallWeb(transport, stream);
   // each answer's own, while it is mounted; shut at first
   const [open, setOpen] = useState(use(SourcesOpenAtFirst));
-  const items = itemsOf(
-    calls.flatMap((call) => {
-      const web = webs.get(call);
-      return web === undefined ? [] : [[call, web] as const];
-    }),
-  );
+  const items = itemsOf(webs);
   if (items.length === 0) return null;
   const codex = agent !== undefined && kindOf(agent, []) === "codex";
   const pages = pagesCount(items);

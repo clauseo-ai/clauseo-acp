@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
-import { searched, titleOf, visited, webCallsFor } from "../testing/web-sources.ts";
+import { pageOf, searchOf, titleOf, webOf } from "../testing/web-sources.ts";
 import { loadThread } from "../room/thread/chunk.ts";
 import { stubFonts } from "../room/thread/testing.ts";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
@@ -141,17 +141,18 @@ test("the cells' tool calls carry the adapters' titles, never \"Web\"", async ()
 });
 
 test("each adapter's title for each kind of web tool call", () => {
-  expect(titleOf(searched(1, "notice"), "claude-acp")).toBe('Search "notice"');
-  expect(titleOf(searched(1, "notice"), "codex-acp")).toBe("Searching for: notice");
-  expect(titleOf(visited(1, "https://a.example"), "claude-acp")).toBe("Fetch https://a.example");
-  expect(titleOf(visited(1, "https://a.example", { via: "codex_open_page" }), "codex-acp")).toBe(
-    "Opening: https://a.example",
-  );
-  expect(titleOf(visited(1, "https://a.example", { via: "browser" }), "claude-acp")).toBe(
-    "https://a.example",
-  );
-  const calls = webCallsFor([searched(1, "q"), visited(2, "https://a.example")], "claude-acp");
-  expect(calls.map((c) => c.tool_call?.title)).toEqual(['Search "q"', "Fetch https://a.example"]);
+  const search = webOf({ search: searchOf("notice") });
+  const page = (via?: "codex_open_page" | "browser") =>
+    webOf({ pages: [pageOf("https://a.example", via === undefined ? {} : { via })] });
+  expect(titleOf(search, "claude-acp")).toBe('Search "notice"');
+  expect(titleOf(search, "codex-acp")).toBe("Searching for: notice");
+  expect(titleOf(page(), "claude-acp")).toBe("Fetch https://a.example");
+  expect(titleOf(page("codex_open_page"), "codex-acp")).toBe("Opening: https://a.example");
+  expect(titleOf(page("browser"), "claude-acp")).toBe("https://a.example");
+  expect([
+    titleOf(webOf({ search: searchOf("q") }), "claude-acp"),
+    titleOf(webOf({ pages: [pageOf("https://a.example")] }), "claude-acp"),
+  ]).toEqual(['Search "q"', "Fetch https://a.example"]);
 });
 
 test("WEB-05's rows lead with icons: a quoted query, nested results, pages as link and site", async () => {
