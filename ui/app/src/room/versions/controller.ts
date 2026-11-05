@@ -24,6 +24,8 @@ import {
   DoneWatch,
   lockedRestore,
   pageBack,
+  previewRestore,
+  refusedPreview,
   stepsSig,
   unsavedOf,
   type Own,
@@ -369,12 +371,8 @@ export class VersionsController {
     this.#set({ ask: { ...ask, choices } });
   }
 
-  async #preview(id: string): Promise<RestorePreview | null> {
-    const r = await this.#transport.query({
-      preview_restore: { matter: this.matter, checkpoint: id, scope: "matter" },
-    });
-    return "restore_preview" in r ? r.restore_preview : null;
-  }
+  #preview = (id: string): Promise<RestorePreview | null> =>
+    previewRestore(this.#transport, this.matter, id);
 
   /** Opens the restore dialog for a version, with what restoring it would write now; undoes: the restore this one
    * takes back. Only the newest ask opens it. */
@@ -389,7 +387,8 @@ export class VersionsController {
         failed: null,
       });
     } catch (e) {
-      if (asked === this.#asked) await this.#refused(toHostError(e).code);
+      const ask = await refusedPreview(id, undoes, toHostError(e), (p) => this.#preview(p));
+      if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
     }
   }
 
@@ -547,7 +546,7 @@ export class VersionsController {
   }
 
   /** Says why the host refused; locked: the dialog to show when a program holds a file. */
-  async #refused(code: string, locked?: () => Ask | Promise<Ask>): Promise<void> {
+  async #refused(code: string, locked?: () => Ask | null | Promise<Ask | null>): Promise<void> {
     if (code === "matter.turn_running" || code === "thread.turn_running") {
       // an answer runs after all: Restore and Undo wait, and the conversations' statuses are read again
       this.#refusedAt = { list: this.#talks.next, rests: this.#talks.rests };

@@ -5,6 +5,8 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
+  HostError,
+  MatterId,
   RestorePreview,
   StreamId,
   ThreadId,
@@ -194,4 +196,35 @@ export async function lockedRestore(
   return files === null
     ? { act: "restore", id, preview, undoes, stage: "confirm", failed: refusal.code }
     : { act: "restore", id, preview, undoes, stage: "word", files };
+}
+
+/** What restoring a version would write now, by the host's preview_restore: null when the answer isn't one. */
+export async function previewRestore(
+  transport: HostTransport,
+  matter: MatterId,
+  id: string,
+): Promise<RestorePreview | null> {
+  const r = await transport.query({ preview_restore: { matter, checkpoint: id, scope: "matter" } });
+  return "restore_preview" in r ? r.restore_preview : null;
+}
+
+/** A restore whose preview rejected: the rejection is logged, and a file a program holds (matter.file_locked, with its
+ * files) gets lockedRestore's Word or lock dialog. That dialog needs what restoring writes, which the rejection didn't
+ * give, so the preview is asked again (lockedRestore does that). Null otherwise, and when the dialog would list
+ * nothing: the code's line says why. */
+export async function refusedPreview(
+  id: string,
+  undoes: string | null,
+  error: HostError,
+  previewOf: (id: string) => Promise<RestorePreview | null>,
+): Promise<Ask | null> {
+  console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
+  if (error.code !== "matter.file_locked" || !error.files?.length) return null;
+  const none: RestorePreview = { changes: [], added_since: [], kept: [], locked: [] };
+  const ask = await lockedRestore(
+    { act: "restore", id, preview: none, undoes, stage: "confirm", failed: null },
+    error,
+    previewOf,
+  );
+  return ask.stage === "word" || (ask.act === "restore" && ask.preview !== none) ? ask : null;
 }
