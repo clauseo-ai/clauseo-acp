@@ -162,7 +162,8 @@ cells, the weekly tally, the queue and the sender. Its row bans `matters`, `acp`
     answer), `queued`, or `steer`. An agent with no value in the schema (`fake-agent`, a firm's
     own) is not counted.
   - `answer_ended`, in `turn::end::finish`, the one place every turn ends, never per stop:
-    `EndTurn` is `done`, `Cancelled` `stopped_by_lawyer`, `AtLimit` `limit`, `MaxTokens`,
+    `EndTurn` is `done`, `Cancelled` and `NotAllowed` → `stopped_by_lawyer` (a refused
+    permission is the lawyer's stop), `AtLimit` `limit`, `MaxTokens`,
     `MaxTurnRequests` and `Refusal` `agent_stopped`, a failure with `agent.auth_required`
     `signin_expired`, any other failure `error`. `took` runs from the turn becoming current to its
     end, `first_words` to its first answer text, on the host's monotonic clock. `offline` has no
