@@ -6,7 +6,7 @@
 //!   Clauseo's data folder, and every folder tier B would grant on must answer
 //!   [`FolderSupport::Ok`], or the launch is refused with
 //!   [`Error::FolderUnsupported`](crate::Error::FolderUnsupported) and nothing is planned or
-//!   written. The other matters a group can reach are found here too (D8).
+//!   written. The sibling folders the pool users are denied are listed here too.
 //! - [`acl_plan`]: the permission entries a launch needs, planned from what the gate admitted,
 //!   with no IO.
 //! - [`ledger`]: `<data_dir>\sandbox\acl-ledger.json`, the write-ahead list of every entry
@@ -49,7 +49,7 @@ mod write;
 pub use admit::admit;
 #[cfg(any(test, feature = "test-support"))]
 pub use admit::admit_with;
-pub use admit::{Admitted, FolderRefusal, GroupAccess, PathKind};
+pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
 #[cfg(windows)]

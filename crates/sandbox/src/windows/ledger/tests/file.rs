@@ -91,7 +91,7 @@ fn the_sandbox_user_and_matter_sids_are_trusted() {
     assert_eq!(sids, [USER_SID, MATTER_SID, MATTER_SID]);
     // With the matter's domain reserved (say, it is the lawyer's), its entries are set aside.
     let lawyer = Reserved::new([Sid::parse(MATTER_SID).unwrap()]);
-    let strict = Ledger::open(&path, &user_sid(), &lawyer).unwrap();
+    let strict = Ledger::open(&path, &trusted(), &lawyer).unwrap();
     assert_eq!(strict.entries().count(), 1);
     assert_eq!(strict.set_aside_entries(), 2);
 }
@@ -108,7 +108,7 @@ fn a_ledger_from_a_newer_version_or_not_json_is_refused_and_left_alone() {
         "",
     ] {
         let path = temp.file("sandbox/acl-ledger.json", text);
-        let error = Ledger::open(&path, &user_sid(), &reserved()).unwrap_err();
+        let error = Ledger::open(&path, &trusted(), &reserved()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{text}");
         assert_eq!(read(&path), text.as_bytes());
     }

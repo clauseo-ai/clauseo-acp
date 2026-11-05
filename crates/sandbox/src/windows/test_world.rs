@@ -8,14 +8,21 @@ use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
-use super::acl_plan::Sids;
-use super::admit::GroupAccess;
+use super::acl_plan::Subjects;
+use super::admit::FolderList;
 use super::sids::{Reserved, Sid};
 use crate::test_support::TempDir;
 use crate::{Policy, PolicyBuilder};
 
-/// The `ClauseoSandbox` user's SID in the tests.
+/// This matter's pool user's SID in the tests.
 pub(super) const USER_SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+/// Two other matters' pool users.
+pub(super) const OTHER_POOL_SIDS: [&str; 2] = [
+    "S-1-5-21-1111111111-2222222222-3333333333-1002",
+    "S-1-5-21-1111111111-2222222222-3333333333-1003",
+];
+/// The `ClauseoSandboxUsers` group.
+pub(super) const GROUP_SID: &str = "S-1-5-21-1111111111-2222222222-3333333333-1010";
 /// This matter's SID in the tests.
 pub(super) const MATTER_SID: &str = "S-1-5-21-2626480971-3383066999-180375651-600177987";
 
@@ -36,9 +43,16 @@ pub(super) fn matter_two() -> MatterId {
     "01890a5d-ac96-774b-8cce-b302099a8058".parse().unwrap()
 }
 
-/// The sandbox user's SID.
+/// The pool user's SID.
 pub(super) fn user_sid() -> Sid {
     Sid::parse(USER_SID).unwrap()
+}
+
+/// The SIDs a ledger trusts: every pool user and the group.
+pub(super) fn trusted() -> Vec<Sid> {
+    let mut sids = vec![user_sid(), Sid::parse(GROUP_SID).unwrap()];
+    sids.extend(OTHER_POOL_SIDS.iter().map(|s| Sid::parse(s).unwrap()));
+    sids
 }
 
 /// The reserved accounts: a stand-in for the lawyer's own account (another domain than the
@@ -47,11 +61,16 @@ pub(super) fn reserved() -> Reserved {
     Reserved::new([Sid::parse("S-1-5-21-7-8-9-1001").unwrap(), user_sid()])
 }
 
-/// Both SIDs.
-pub(super) fn sids() -> Sids {
-    Sids {
-        user: Sid::parse(USER_SID).unwrap(),
-        matter: Sid::parse(MATTER_SID).unwrap(),
+/// The subjects: this pool user, two others, the group; no matter SID.
+pub(super) fn sids() -> Subjects {
+    Subjects {
+        pool_user: user_sid(),
+        matter: None,
+        other_pool_users: OTHER_POOL_SIDS
+            .iter()
+            .map(|s| Sid::parse(s).unwrap())
+            .collect(),
+        pool_group: Sid::parse(GROUP_SID).unwrap(),
     }
 }
 
@@ -140,26 +159,22 @@ impl World {
     }
 }
 
-/// A DACL reader that says a group can reach the folders in `open`, fails on those in
-/// `failing` (`PermissionDenied`) and on those in `missing` (`NotFound`), and says no to the
-/// rest. Records each folder it is asked about.
+/// A folder lister that gives `listing` for any parent, or fails (`PermissionDenied`) when
+/// `failing`; records each parent it is asked about.
 #[derive(Default)]
-pub(super) struct FakeGroups {
-    pub(super) open: Vec<PathBuf>,
-    pub(super) failing: Vec<PathBuf>,
-    pub(super) missing: Vec<PathBuf>,
+pub(super) struct FakeFolders {
+    pub(super) listing: Vec<PathBuf>,
+    pub(super) failing: bool,
     pub(super) asked: RefCell<Vec<PathBuf>>,
 }
 
-impl GroupAccess for FakeGroups {
-    fn group_can_reach(&self, folder: &Path) -> io::Result<bool> {
-        self.asked.borrow_mut().push(folder.to_owned());
-        if self.failing.iter().any(|f| f == folder) {
+impl FolderList for FakeFolders {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        self.asked.borrow_mut().push(parent.to_owned());
+        if self.failing {
             Err(io::Error::from(io::ErrorKind::PermissionDenied))
-        } else if self.missing.iter().any(|f| f == folder) {
-            Err(io::Error::from(io::ErrorKind::NotFound))
         } else {
-            Ok(self.open.iter().any(|f| f == folder))
+            Ok(self.listing.clone())
         }
     }
 }

@@ -4,7 +4,7 @@ use super::*;
 
 /// The plan for `policy`, gated with every folder answering Ok, as an error or not.
 fn refusal(w: &World, policy: &Policy) -> Option<(PathKind, FolderRefusal)> {
-    let admitted = admitted(w, policy, &[], &FakeGroups::default());
+    let admitted = admitted(w, policy, &[], &FakeFolders::default());
     match plan(&admitted, &sids(), matter_one()) {
         Ok(_) => None,
         Err(Error::FolderUnsupported { path_kind, support }) => Some((path_kind, support)),
@@ -86,14 +86,14 @@ fn a_runtime_inside_an_agents_install_folder_is_planned_read_only() {
         .unwrap();
     assert_eq!(refusal(&w, &policy), None);
     let grants = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &admitted(&w, &policy, &[], &FakeFolders::default()),
         &sids(),
         matter_one(),
     )
     .unwrap();
     let node = w.canonical("data/agents/claude-acp/node");
     let on_node: Vec<&Grant> = grants.grants().iter().filter(|g| g.path == node).collect();
-    assert_eq!(on_node.len(), 2, "{on_node:#?}");
+    assert_eq!(on_node.len(), 1, "the pool user alone: {on_node:#?}");
     assert!(on_node.iter().all(|g| g.rights == Rights::ReadAndExecute));
 }
 

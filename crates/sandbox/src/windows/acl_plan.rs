@@ -1,21 +1,26 @@
 //! The grant plan: every permission entry one tier B launch needs, as data. Pure: it reads only
-//! what the gate admitted ([`Admitted`]) and the two SIDs, and writes nothing; S15's PR3 applies
-//! it, through the write-ahead ledger.
+//! what the gate admitted ([`Admitted`]) and the launch's SIDs ([`Subjects`]), and writes
+//! nothing; S15's PR3 applies it, through the write-ahead ledger.
 //!
-//! The rules (S15 brief, "Grants come in pairs" and "Read-only entries"; D8):
+//! Tier B runs each matter as its own pool user (design B): the token's restricting set is {the
+//! pool user, `RESTRICTED`, `Users`, `Everyone`}, at Low integrity. The rules:
 //!
-//! - Every allow comes in a pair, one entry for the `ClauseoSandbox` user's SID (the token's
-//!   normal check) and one for the matter's SID (its restricted check), so matter B's token fails
-//!   on matter A's folders.
+//! - Every allow names the matter's pool user, and also the matter's SID when the launch asks
+//!   for it ([`Subjects::matter`], off by default; spike B found it adds nothing measured).
 //! - `Modify` on the matter, the state and notes folders and the credential link;
 //!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
 //!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
-//! - A deny of writes for the matter's SID alone on each of the policy's read-only paths in the
-//!   matter and the state folder: one deny is enough, since a restricted token needs both checks
-//!   to pass, and no deny ever names the user, which every matter shares.
-//! - A deny of reads and writes for the matter's SID alone on each other matter's folder the
-//!   gate closed (D8): `BUILTIN\Users` stays a restricting SID, so without it this matter's token
-//!   passes both checks on any folder `Users` can reach.
+//! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up, inherited), on the matter, state
+//!   and notes folders ([`Rights::LowLabel`]): the Low token writes nowhere else labelled higher.
+//! - A deny of writes for the pool user on each of the policy's read-only paths in the matter and
+//!   the state folder: one deny refuses both of the token's checks.
+//! - Isolation between matters: on this matter's matter, state and notes folders, an inherited
+//!   deny of reads and writes for every other pool user, so a matter that inherits `C:\`'s
+//!   `Users` write entries is closed to other matters' agents (spike B, rows 2 and 4).
+//! - Sibling folders: on each folder beside the matter in its parent that the gate listed
+//!   ([`Admitted::siblings`]), an inherited deny of reads for the `ClauseoSandboxUsers` group,
+//!   which holds every pool user. The parent itself is left alone, so its listing still shows the
+//!   names (a known limit).
 //! - Nothing in the lawyer's `<profile>\.claude`, in any letter case: NTFS can't limit a create
 //!   right by name, and the lawyer's own Claude Code loads what is there. A policy that would
 //!   grant there is refused.
@@ -33,21 +38,28 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
-use super::admit::{Admitted, FolderRefusal, PathKind};
+use super::admit::{Admitted, PathKind};
 use super::ledger::EntryId;
-use super::matters::SANDBOX_DIR;
 pub use super::sids::Sid;
 use crate::policy::under;
 use crate::{Error, PathRule};
 
-/// The two SIDs a launch's pairs name.
+/// The SIDs a launch's entries name. PR4 makes the pool and the group; the plan takes them as
+/// values.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sids {
-    /// The `ClauseoSandbox` user's SID, shared by every matter.
-    pub user: Sid,
-    /// This matter's own SID, a restricting SID of its token.
-    pub matter: Sid,
+pub struct Subjects {
+    /// This matter's pool user: every allow and the read-only denies name it.
+    pub pool_user: Sid,
+    /// This matter's own SID as a second subject of every allow, when set. Off by default.
+    pub matter: Option<Sid>,
+    /// Every other pool user: each is denied this matter's matter, state and notes folders.
+    pub other_pool_users: Vec<Sid>,
+    /// The `ClauseoSandboxUsers` group, holding every pool user: denied reading the siblings.
+    pub pool_group: Sid,
 }
+
+/// The Low mandatory level, `S-1-16-4096` (`LW`): the subject of a [`Rights::LowLabel`] item.
+pub const LOW_LABEL_SID: &str = "S-1-16-4096";
 
 /// The rights an entry gives or denies. Stored in the ledger by its snake-case name; new rights
 /// are appended.
@@ -68,6 +80,12 @@ pub enum Rights {
     /// Deny reading and writing (`0xf01ff`): [`Rights::DenyWrite`] plus read data, read
     /// attributes, read extended attributes, execute and `READ_CONTROL`.
     DenyReadWrite,
+    /// Deny reading (`0x200a9`): read data, read attributes, read extended attributes, execute
+    /// and `READ_CONTROL`.
+    DenyRead,
+    /// Not an access entry: the Low mandatory label `S:(ML;OICI;NW;;;LW)` (mask `0x1`,
+    /// no-write-up), set with `LABEL_SECURITY_INFORMATION`; its subject is [`LOW_LABEL_SID`].
+    LowLabel,
 }
 
 impl Rights {
@@ -79,12 +97,27 @@ impl Rights {
             Rights::CreateFiles => 0x0000_0002,
             Rights::DenyWrite => DENY_WRITE,
             Rights::DenyReadWrite => DENY_WRITE | DENY_READ,
+            Rights::DenyRead => DENY_READ,
+            Rights::LowLabel => 0x1,
         }
     }
 
     /// Whether the entry is a deny entry.
     pub fn is_deny(self) -> bool {
-        matches!(self, Rights::DenyWrite | Rights::DenyReadWrite)
+        matches!(
+            self,
+            Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead
+        )
+    }
+
+    /// Whether the item is the mandatory label rather than an access entry.
+    pub fn is_label(self) -> bool {
+        self == Rights::LowLabel
+    }
+
+    /// Whether the entry allows access.
+    pub fn is_allow(self) -> bool {
+        !self.is_deny() && !self.is_label()
     }
 }
 
@@ -196,54 +229,54 @@ impl AdmittedPlan {
     }
 }
 
-/// The plan for `admitted`'s policy with `sids`, in a fixed order: the writable folders, the
-/// credential link, the Claude store, the read paths, the read-only denies, then D8's denies.
-/// Each entry appears once.
+/// The plan for `admitted`'s policy with `subjects`, in a fixed order: the writable folders,
+/// the credential link, the Claude store, the read paths, the Low labels, the read-only denies,
+/// the other pool users' denies, then the siblings' denies. Each entry appears once.
 ///
-/// Refuses ([`Error::Policy`], naming the kind of path but not the path) when the two SIDs are
-/// the same, which would collapse every pair, or when any entry would land in `<home>\.claude`;
-/// and refuses ([`Error::FolderUnsupported`]) an entry the profile or data rules forbid (see
-/// [`check_target`]).
-pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<AdmittedPlan, Error> {
-    if sids.user == sids.matter {
+/// Refuses ([`Error::Policy`], naming the kind of path but not the path) when the subjects
+/// collide (the pool user is the group, another pool user or the matter SID), or when any entry
+/// would land in `<home>\.claude`; and refuses ([`Error::FolderUnsupported`]) an entry the
+/// profile or data rules forbid (see [`check_target`]).
+pub fn plan(
+    admitted: &Admitted<'_>,
+    subjects: &Subjects,
+    matter: MatterId,
+) -> Result<AdmittedPlan, Error> {
+    let pool = &subjects.pool_user;
+    if *pool == subjects.pool_group
+        || subjects.other_pool_users.contains(pool)
+        || subjects.matter.as_ref() == Some(pool)
+    {
         return Err(Error::Policy(
-            "the matter's SID is the sandbox user's SID".to_owned(),
+            "the pool user's SID is also another subject's".to_owned(),
         ));
     }
+    let low = Sid::parse(LOW_LABEL_SID).map_err(|error| Error::Policy(error.to_string()))?;
     let policy = admitted.policy();
     let mut plan = Plan {
-        sids,
+        subjects,
         grants: Vec::new(),
     };
-    plan.pair(
-        policy.matter(),
-        Rights::Modify,
-        Inherit::Tree,
-        PathKind::Matter,
-    );
-    plan.pair(
-        policy.state(),
-        Rights::Modify,
-        Inherit::Tree,
-        PathKind::State,
-    );
+    let mut own = vec![
+        (policy.matter(), PathKind::Matter),
+        (policy.state(), PathKind::State),
+    ];
     if let Some(notes) = policy.notes() {
-        plan.pair(notes, Rights::Modify, Inherit::Tree, PathKind::Notes);
+        own.push((notes, PathKind::Notes));
+    }
+    for &(folder, kind) in &own {
+        plan.allow(folder, Rights::Modify, Inherit::Tree, kind);
     }
     if let Some(link) = policy.credential_link() {
-        plan.pair(
-            link,
-            Rights::Modify,
-            Inherit::ThisOnly,
-            PathKind::CredentialLink,
-        );
+        let kind = PathKind::CredentialLink;
+        plan.allow(link, Rights::Modify, Inherit::ThisOnly, kind);
     }
     if let Some(store) = policy.claude_store() {
         let (dir, kind) = (store.dir(), PathKind::ClaudeStore);
-        plan.pair(dir, Rights::CreateFiles, Inherit::ThisOnly, kind);
+        plan.allow(dir, Rights::CreateFiles, Inherit::ThisOnly, kind);
         for file in store.files() {
             let kind = PathKind::ClaudeStoreFile;
-            plan.pair(&file, Rights::Modify, Inherit::ThisOnly, kind);
+            plan.allow(&file, Rights::Modify, Inherit::ThisOnly, kind);
         }
     }
     let read_paths = [
@@ -253,28 +286,33 @@ pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<Ad
     ];
     for (paths, kind) in read_paths {
         for path in paths {
-            plan.pair(path, Rights::ReadAndExecute, Inherit::Tree, kind);
+            plan.allow(path, Rights::ReadAndExecute, Inherit::Tree, kind);
         }
+    }
+    for &(folder, kind) in &own {
+        plan.push(folder, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
     }
     for rule in policy.read_only_in_matter() {
         let inherit = match rule {
             PathRule::Literal(_) => Inherit::ThisOnly,
             PathRule::Subpath(_) => Inherit::Tree,
         };
-        plan.matter_only(
-            rule.path(),
-            Rights::DenyWrite,
-            inherit,
-            PathKind::ReadOnlyInMatter,
-        );
+        let kind = PathKind::ReadOnlyInMatter;
+        plan.push(rule.path(), pool.clone(), Rights::DenyWrite, inherit, kind);
     }
     for path in policy.read_only_in_state() {
         let kind = PathKind::ReadOnlyInState;
-        plan.matter_only(path, Rights::DenyWrite, Inherit::Tree, kind);
+        plan.push(path, pool.clone(), Rights::DenyWrite, Inherit::Tree, kind);
     }
-    for folder in admitted.closed() {
-        let kind = PathKind::OtherMatter;
-        plan.matter_only(folder, Rights::DenyReadWrite, Inherit::Tree, kind);
+    for other in &subjects.other_pool_users {
+        for &(folder, kind) in &own {
+            let rights = Rights::DenyReadWrite;
+            plan.push(folder, other.clone(), rights, Inherit::Tree, kind);
+        }
+    }
+    for sibling in admitted.siblings() {
+        let (group, kind) = (subjects.pool_group.clone(), PathKind::Sibling);
+        plan.push(sibling, group, Rights::DenyRead, Inherit::Tree, kind);
     }
     if let Some(home) = policy.home() {
         let claude = home.join(".claude");
@@ -301,147 +339,20 @@ pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<Ad
     })
 }
 
-/// Why `grant` may not be written, if it may not. `<data_dir>` is an allow list:
-///
-/// - any path with a name that ends in `.` or a space, or holds `:` (an NTFS stream, such as
-///   `home::$INDEX_ALLOCATION`), is refused first ([`FolderRefusal::OddSpelling`]): Windows reads
-///   each as another spelling of a name;
-/// - on the profile folder or above it ([`FolderRefusal::HoldsTheProfile`]);
-/// - on, over or in `<data_dir>\sandbox` ([`FolderRefusal::OverlapsSandboxRecords`]);
-/// - a deny, or a path entirely outside `<data_dir>`, is fine;
-/// - a path that is `<data_dir>` or holds it is refused, and inside it
-///   ([`FolderRefusal::OverlapsDataFolder`] for anything not listed here):
-///   - writable: the state folder exactly one level below `<data_dir>\agent-state\<matter>`
-///     (not `notes`), the notes folder exactly `<data_dir>\agent-state\<matter>\notes`, the
-///     credential link inside that state folder, and the Claude store exactly
-///     `<data_dir>\agents\claude-acp\home` and its allowed names, `matter` being this
-///     launch's matter id, never a string of the policy's;
-///   - read and run: inside one agent's folder under `<data_dir>\agents`, never in its `home`
-///     unless it is that Claude store.
-fn check_target(admitted: &Admitted<'_>, grant: &Grant, matter: MatterId) -> Option<FolderRefusal> {
-    let policy = admitted.policy();
-    let path = &grant.path;
-    if odd_spelling(path) {
-        return Some(FolderRefusal::OddSpelling);
-    }
-    if policy.home().is_some_and(|home| in_folder(home, path)) {
-        return Some(FolderRefusal::HoldsTheProfile);
-    }
-    let data = admitted.data_dir();
-    let sandbox = data.join(SANDBOX_DIR);
-    if in_folder(path, &sandbox) || in_folder(&sandbox, path) {
-        return Some(FolderRefusal::OverlapsSandboxRecords);
-    }
-    if grant.rights.is_deny() || !(in_folder(path, data) || in_folder(data, path)) {
-        return None;
-    }
-    let allowed = in_folder(path, data) && !same_path(path, data) && {
-        let mine = data.join(AGENT_STATE_DIR).join(matter.to_string());
-        let store = data
-            .join(AGENTS_DIR)
-            .join(CLAUDE_AGENT)
-            .join(AGENT_HOME_DIR);
-        let state_ok = |state: &Path| {
-            state
-                .parent()
-                .is_some_and(|parent| same_path(parent, &mine))
-                && !state
-                    .file_name()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(NOTES_DIR))
-        };
-        match grant.rights {
-            Rights::ReadAndExecute => same_path(path, &store) || in_agent_install(path, data),
-            Rights::Modify | Rights::CreateFiles => match grant.kind {
-                PathKind::State => state_ok(path),
-                PathKind::Notes => same_path(path, &mine.join(NOTES_DIR)),
-                PathKind::CredentialLink => {
-                    state_ok(policy.state()) && in_folder(path, policy.state())
-                }
-                PathKind::ClaudeStore => same_path(path, &store),
-                PathKind::ClaudeStoreFile => path.parent().is_some_and(|p| same_path(p, &store)),
-                PathKind::Matter
-                | PathKind::Runtime
-                | PathKind::Read
-                | PathKind::AllowedFolder
-                | PathKind::ReadOnlyInMatter
-                | PathKind::ReadOnlyInState
-                | PathKind::OtherMatter => false,
-            },
-            Rights::DenyWrite | Rights::DenyReadWrite => true,
-        }
-    };
-    (!allowed).then_some(FolderRefusal::OverlapsDataFolder)
-}
-
-/// Whether `path` is inside one agent's folder under `<data_dir>\agents` (not the folder
-/// itself, which holds the home) and outside its `home`.
-fn in_agent_install(path: &Path, data: &Path) -> bool {
-    let agents = data.join(AGENTS_DIR);
-    if !in_folder(path, &agents) {
-        return false;
-    }
-    let below: Vec<Component<'_>> = path
-        .components()
-        .skip(agents.components().count())
-        .collect();
-    let in_home = below
-        .get(1)
-        .is_some_and(|part| part.as_os_str().eq_ignore_ascii_case(AGENT_HOME_DIR));
-    below.len() >= 2 && !in_home
-}
-
-/// Whether `a` and `b` are the same path, by [`in_folder`]'s comparison.
-fn same_path(a: &Path, b: &Path) -> bool {
-    a.components().count() == b.components().count() && in_folder(a, b)
-}
-
-/// Whether a name in `path` is a spelling Windows reads as another name: one ending in `.` or
-/// a space, or one holding `:` (a stream; the drive's colon is in the prefix, not a name).
-/// Short 8.3 names need no rule here: every policy path, and the data folder, is canonical
-/// through the final-path API (`dunce::canonicalize`, `GetFinalPathNameByHandleW` on Windows),
-/// which gives long names, and a `~` is an ordinary character (`Draft~2`).
-pub(super) fn odd_spelling(path: &Path) -> bool {
-    path.components().any(|part| {
-        let Component::Normal(name) = part else {
-            return false;
-        };
-        let name = name.to_string_lossy();
-        name.ends_with('.') || name.ends_with(' ') || name.contains(':')
-    })
-}
-
-/// `<data_dir>\agents`: each agent's install folder, its runtime and its home.
-pub(super) const AGENTS_DIR: &str = "agents";
-
-/// `<data_dir>\agent-state`: each matter's state and notes folders, by matter id.
-const AGENT_STATE_DIR: &str = "agent-state";
-
-/// A matter's notes folder in `<data_dir>\agent-state\<matter>`.
-const NOTES_DIR: &str = "notes";
-
-/// The one agent whose home may be the Claude store: Clauseo's own Claude sign-in.
-const CLAUDE_AGENT: &str = "claude-acp";
-
-/// An agent's home in its install folder, `<data_dir>\agents\<agent>\home`: its sign-in.
-const AGENT_HOME_DIR: &str = "home";
-
 /// The entries planned so far.
 struct Plan<'s> {
-    sids: &'s Sids,
+    subjects: &'s Subjects,
     grants: Vec<Grant>,
 }
 
 impl Plan<'_> {
-    /// An allow for the user's SID and the same for the matter's.
-    fn pair(&mut self, path: &Path, rights: Rights, inherit: Inherit, kind: PathKind) {
-        for sid in [&self.sids.user, &self.sids.matter] {
-            self.push(path, sid.clone(), rights, inherit, kind);
+    /// An allow for the pool user, and the same for the matter's SID when it is a subject.
+    fn allow(&mut self, path: &Path, rights: Rights, inherit: Inherit, kind: PathKind) {
+        let pool = self.subjects.pool_user.clone();
+        self.push(path, pool, rights, inherit, kind);
+        if let Some(matter) = self.subjects.matter.clone() {
+            self.push(path, matter, rights, inherit, kind);
         }
-    }
-
-    /// An entry for the matter's SID alone (a deny).
-    fn matter_only(&mut self, path: &Path, rights: Rights, inherit: Inherit, kind: PathKind) {
-        self.push(path, self.sids.matter.clone(), rights, inherit, kind);
     }
 
     fn push(&mut self, path: &Path, sid: Sid, rights: Rights, inherit: Inherit, kind: PathKind) {
@@ -481,6 +392,12 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
         })
     })
 }
+
+pub(super) mod targets;
+
+use targets::check_target;
+#[cfg(test)]
+use targets::odd_spelling;
 
 #[cfg(test)]
 mod tests;
