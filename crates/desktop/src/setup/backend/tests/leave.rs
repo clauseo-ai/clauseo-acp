@@ -1,6 +1,7 @@
 //! The leave order on the recording fakes, in exact sequence: `StopUsingLogin` on a reused
 //! Codex login, a stop that times out (the leave stops there with nothing changed),
 //! `UseFoundLogin`'s order, and a split found in temp homes running the leave with its reason.
+//! The helpers here (a reused login, the leave's sequence) serve `once.rs` and `switching.rs`.
 
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
@@ -10,14 +11,14 @@ use clauseo_agents::Found;
 use clauseo_agents::testing::installed;
 use clauseo_agents::{SigninState, Source};
 use clauseo_host::AgentsStopped;
-use clauseo_protocol::{CommandOutcome, ErrorCode};
+use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SetupCommand};
 use serde_json::json;
 
 use super::fakes::{HostCall, Rig, command, rig};
 use super::{SETTINGS, codex};
 use crate::bridge::lock;
 
-fn signed_in(source: Source) -> SigninState {
+pub(super) fn signed_in(source: Source) -> SigninState {
     SigninState::SignedIn {
         email: Some("lawyer@firm.example".to_owned()),
         plan: None,
@@ -26,30 +27,43 @@ fn signed_in(source: Source) -> SigninState {
     }
 }
 
-/// A rig whose Codex is installed and signed in with the lawyer's own login, reused.
-fn reused_codex() -> Rig {
-    let rig = rig(true);
-    let folder = PathBuf::from("/data/agents/codex-acp/install/abc");
-    let script = folder.join("node_modules/@agentclientprotocol/codex-acp/dist/index.js");
+/// `agent` installed in `rig`.
+pub(super) fn install(rig: &Rig, agent: &AgentId) {
+    let folder = PathBuf::from(format!("/data/agents/{agent}/install/abc"));
+    let script = folder.join("node_modules/adapter/dist/index.js");
     lock(&rig.agents.installs).insert(
-        codex(),
+        agent.clone(),
         installed(PathBuf::from("/data/node"), script, folder, "0.9.0"),
     );
-    lock(&rig.agents.signin).insert(codex(), signed_in(Source::Reused));
-    rig.backend.wiring.reused.set(&codex(), true);
-    rig.backend
-        .compose
-        .signin(&codex(), signed_in(Source::Reused));
+}
+
+/// `agent` installed in `rig` and signed in with the lawyer's own login, reused.
+pub(super) fn reuse(rig: &Rig, agent: &AgentId) {
+    install(rig, agent);
+    rig.backend.wiring.reused.set(agent, true);
+    rig.s18_was(agent, signed_in(Source::Reused));
+}
+
+/// A rig whose Codex is installed and signed in with the lawyer's own login, reused.
+pub(super) fn reused_codex() -> Rig {
+    let rig = rig(true);
+    reuse(&rig, &codex());
     rig
+}
+
+/// The `stop_using_login` command for `agent`, from the settings window.
+pub(super) fn stop_using_command(agent: &AgentId) -> SetupCommand {
+    command("stop_using_login", agent, &json!({}))
 }
 
 fn stop_using(rig: &Rig) -> Result<CommandOutcome, clauseo_protocol::HostError> {
     let setup = rig.setup();
-    let send = setup.run(SETTINGS, command("stop_using_login", &codex(), &json!({})));
+    let send = setup.run(SETTINGS, stop_using_command(&codex()));
     rig.pumped(send)
 }
 
-const LEAVE: [&str; 9] = [
+/// A leave of Codex that finishes, in exact sequence.
+pub(super) const LEAVE: [&str; 9] = [
     "readers.hold",
     "host.stop_agents",
     "agents.stop_using_login",
@@ -125,8 +139,7 @@ fn use_found_login_tells_the_host_then_writes_the_entry_then_restarts() {
         from: clauseo_agents::LoginFrom::Codex,
         email: None,
     };
-    lock(&rig.agents.signin).insert(codex(), found.clone());
-    rig.backend.compose.signin(&codex(), found);
+    rig.s18_was(&codex(), found);
     lock(&rig.agents.answers).insert("use_found_login", signed_in(Source::Reused));
     let setup = rig.setup();
     let send = setup.run(SETTINGS, command("use_found_login", &codex(), &json!({})));
@@ -186,8 +199,7 @@ fn a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason() {
     };
     lock(&rig.agents.answers).insert("stop_using_login", ended);
     let agent = codex();
-    let leave =
-        crate::setup::leave::leave_reused(&rig.backend, &agent, Some(Found::CodexLinkSplit));
+    let leave = crate::setup::leave::auto_leave(&rig.backend, &agent, Some(Found::CodexLinkSplit));
     assert_eq!(rig.pumped(leave), Ok(()));
     assert_eq!(rig.journal(), LEAVE);
     // Desktop's word is now "not reused": a launch's check is Clauseo's own login's.

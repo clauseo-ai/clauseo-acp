@@ -87,7 +87,8 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
 - `SignInChanged { agent, state: SignIn }`, S18's `SigninState` with how the agent is signed in:
   `SignedOut { found }`, `Queued`, `Waiting { since, nudge }`, `DeviceCode { url, code,
   expires_at }`, `LoginFound { from, email }`, `SignedIn { email, plan, method, source, at }`,
-  `Failed { code, at }`. `found` is a `FoundLogin` (`claude_settings`,
+  `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
+  is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
   `reused_changed`, `codex_link_split`); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
@@ -406,6 +407,47 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   `/login` and `authenticate` guard reads `shared`: the guard refuses `/login`, and the API-key
   `authenticate` retry is not armed, while the login is reused or `shared` counts as shared.
   The split check still reads `check` alone.
+
+**Desktop's leave flow (R20 P5b; the orchestrator's rulings and the host code owner's
+requirements, 2026-11-05).** Desktop runs ruling 1's leave order (`setup/leave.rs`): the reads'
+hold, `stop_agents`, S18's `stop_using_login` and its `SignedOut` (30 s at most), then
+`set_reused_login(false)`, `remove_login_links` (Codex) and the entry rewritten `Own`, then the
+reads' hold dropped and `limits_login_changed`.
+
+- *One leave per agent.* A second leave of an agent while one runs answers `command.conflict`.
+  The leave's waiter on S18's next resting state is its own: taking it back never removes a
+  waiter put after it, and a state S18 sent before the waiter was put never fills it. A change
+  from `SignedIn { Reused }` to any other resting state with no leave waiting (a late
+  `SignedOut`, or S18 ending the reuse by itself) runs the last three steps at once.
+- *A lawyer's leave* (`StopUsingLogin`, `UseDifferentAccount`, `SetAgentKey` or
+  `SetFirmEndpoint` on a reused login) that does not finish changes nothing: `restart_agents`
+  lifts the hold, the reads' guard drops, and the command answers `signin.agents_still_running`
+  (`stop_agents` timed out) or `signin.failed` (no `SignedOut` within 30 s). The queues then go
+  on as `restart_agents` resumes them. A leave dropped before it ends (a panic, or its command
+  dropped) lifts the hold from a drop guard. A failed `restart_agents` is tried once more, then
+  logged as a warning. A leave that finishes keeps the hold until the new login, key or endpoint
+  is in place.
+- *An automatic leave* is a split the host's check found, or a reuse S18 ended by itself:
+  `ReusedFailed`, `ReusedChanged`, or `ReusedSignedOut` from its status check. It runs on a task
+  of its own, never inside the pump. After `ReusedChanged`, no agent goes on with the account the
+  CLI now holds: the entry is rewritten `Own` at once, and the leave stops the agents. A try that
+  does not finish (`stop_agents` timed out, no `SignedOut` within 30 s, or a call failed)
+  **keeps the hold**, so nothing launches on the old or changed login or on a split copy of the
+  lawyer's file. Questions sent meanwhile queue held and marked (P4d). It tries again after 5 s,
+  30 s, then every 5 minutes, until a try finishes or a new `SignedIn` arrives. It never gives
+  up. A try again that finishes calls `restart_agents`, so the held questions run once. An
+  automatic leave refused because another leave runs is run again when that one ends without
+  leaving.
+- *`SignIn::Switching { since, stuck }`* is a new variant of the closed `SignIn`, shown from the
+  first try's end. `since` is that moment, and a try again never moves it. `stuck` turns true 2
+  minutes after `since`, on the timer S18's `Waiting { nudge }` runs on. A running sign-in still
+  shows over it, and the leave's own failures never do. It ends when a try finishes, and the
+  state after it shows, or when a new `SignedIn` arrives. **It has no `Failed` exit.** The hold
+  lives in memory only: quitting Clauseo clears it, and the next start's S18 status check finds
+  the split or the changed login and runs the leave again. **A process that never exits keeps
+  questions waiting until the app restarts.** The app gives the card its words later.
+- *Clauseo's own login signed out* calls `restart_agents` as well as `limits_login_changed`
+  (ruling 3), so no idle agent stays on the old login.
 
 ## Consequences
 

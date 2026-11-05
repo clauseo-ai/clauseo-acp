@@ -1,111 +1,162 @@
 //! Leaving a reused login, and what follows a login change (decision record 0048, ruling 1; the
-//! plan's piece B). [`leave_reused`] runs, in order:
+//! plan's piece B; the P5b section). One try of the leave order ([`attempt`]) runs:
 //!
-//! 1. the hold on the agent's limits reads (desktop keeps the [`ReadHold`]);
-//! 2. the host's `stop_agents`, which holds the id until `restart_agents`. When it answers
-//!    `TimedOut` (an agent process outlived the wait) the leave stops here, with nothing
-//!    changed: `restart_agents` lifts the hold, the guard drops, and the command answers
-//!    `signin.agents_still_running`, which may be retried;
-//! 3. S18's `stop_using_login` (no-reuse and the home's link, one job), then S18's `SignedOut`,
-//!    which the pump hands over ([`Waiters`]);
-//! 4. `set_reused_login(false)`; 5. `remove_login_links` (Codex); 6. the entry rewritten as
-//!    `Own`, and the readers with it; 7. the guard dropped; 8. `limits_login_changed`.
+//! 1. the host's `stop_agents`, which holds the id until `restart_agents`;
+//! 2. S18's `stop_using_login` (no-reuse and the home's link, one job), then S18's `SignedOut`,
+//!    which the pump hands over ([`Waiters`]) within [`LEAVE_WAIT`](hold::LEAVE_WAIT);
+//! 3. [`after_stop`]: `set_reused_login(false)`, `remove_login_links` (Codex), and the entry
+//!    rewritten as `Own`, and the readers with it.
 //!
-//! `restart_agents` runs once the new login, key or endpoint is in place: on the `SignedIn` the
-//! pump sees ([`signin_event`]), or after a key or an endpoint is stored. A
-//! `SignedIn` whose source differs from the one the host was told sets it and rewrites the
-//! entry first, so `UseFoundLogin` runs S18's call, then (on `SignedIn { Reused }`)
-//! `set_reused_login(true)`, then the entry, then the restart.
+//! Around it the leave holds the agent's limits reads (desktop keeps the [`ReadHold`]), then drops
+//! them and sends `limits_login_changed`. One leave runs per agent ([`Leaves`]): a second one
+//! answers `command.conflict`.
+//!
+//! **A lawyer's leave** ([`leave_reused`]: `StopUsingLogin`, `UseDifferentAccount`, a key or an
+//! endpoint set on a reused login) that does not finish changes nothing: `restart_agents` lifts
+//! the hold, the reads' guard drops, and the command answers `signin.agents_still_running`
+//! (`stop_agents` timed out) or `signin.failed` (no `SignedOut` in time), both retryable. A
+//! leave that finishes leaves the hold: `restart_agents` runs once the new login, key or
+//! endpoint is in place, on the `SignedIn` the pump sees or after a key or an endpoint is stored.
+//!
+//! **An automatic leave** (`auto.rs`: a split, or a reuse S18 ended by itself) that does not
+//! finish keeps the hold and tries again, showing `Switching`.
 
-use std::collections::BTreeMap;
-use std::sync::Mutex;
-use std::time::Duration;
+mod auto;
+mod hold;
+mod pump;
+mod slots;
+mod waiters;
 
-use clauseo_agents::{Found, SigninState, Source};
+use clauseo_agents::{Found, SigninState};
 use clauseo_host::AgentsStopped;
-use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SignInSource};
 use futures::channel::oneshot;
 use futures::future::{Either, select};
 
+#[cfg(test)]
+pub(crate) use self::auto::auto_leave;
+pub(crate) use self::auto::follow as follow_auto_leaves;
+use self::hold::HostHold;
+pub(crate) use self::hold::{LeaveTimer, Wait, retry_after};
+pub(crate) use self::pump::signin_event;
+pub(crate) use self::slots::Leaves;
+use self::waiters::Put;
+pub(crate) use self::waiters::{Token, Waiter, Waiters};
 use super::backend::{AgentsBackend, signin_error};
-use super::compose::is_running;
 use super::readers::ReadHold;
-use crate::bridge::lock;
 
-/// How long the leave waits for S18's `SignedOut` after `stop_using_login`.
-pub(crate) const LEAVE_WAIT: Duration = Duration::from_secs(30);
-
-/// What waits on an agent's next resting S18 state.
-pub(crate) enum Waiter {
-    /// The leave order, for `stop_using_login`'s end.
-    Leave(oneshot::Sender<SigninState>),
-    /// `UseFoundLogin`: the hold on the reads, dropped once its end has been handled.
-    Found(ReadHold),
+/// Why one try of the leave order did not finish; nothing of the login changed.
+pub(crate) enum NotLeft {
+    /// `stop_agents` answered `TimedOut`: an agent process outlived the wait.
+    StillRunning,
+    /// S18's `SignedOut` did not come within [`LEAVE_WAIT`](hold::LEAVE_WAIT).
+    NotStopped,
+    /// A call failed.
+    Error(HostError),
 }
 
-/// Each agent's [`Waiter`], at most one.
-#[derive(Default)]
-pub(crate) struct Waiters(Mutex<BTreeMap<AgentId, Waiter>>);
-
-impl Waiters {
-    /// Waits on `agent`'s next resting state, in place of any waiter before.
-    pub(crate) fn put(&self, agent: &AgentId, waiter: Waiter) {
-        lock(&self.0).insert(agent.clone(), waiter);
+impl NotLeft {
+    /// The answer a lawyer's command gets.
+    fn into_error(self, agent: &AgentId) -> HostError {
+        match self {
+            Self::StillRunning => HostError::new(
+                ErrorCode::SigninAgentsStillRunning,
+                format!("an agent of {agent} is still running; the login was not changed"),
+            ),
+            Self::NotStopped => HostError::new(
+                ErrorCode::SigninFailed,
+                format!("{agent}'s login you already had did not stop; try again"),
+            ),
+            Self::Error(error) => error,
+        }
     }
 
-    /// Takes `agent`'s waiter.
-    pub(crate) fn take(&self, agent: &AgentId) -> Option<Waiter> {
-        lock(&self.0).remove(agent)
+    /// Its code, for the logs.
+    fn code(&self) -> ErrorCode {
+        match self {
+            Self::StillRunning => ErrorCode::SigninAgentsStillRunning,
+            Self::NotStopped => ErrorCode::SigninFailed,
+            Self::Error(error) => error.code(),
+        }
     }
 }
 
-/// 0048's leave order for `agent`'s reused login; `why` is the reason reuse stopped, if
-/// one did (a split), else S18 writes no-reuse.
+/// A lawyer's leave of `agent`'s reused login: see the module docs.
 pub(crate) async fn leave_reused(
     backend: &AgentsBackend,
     agent: &AgentId,
-    why: Option<Found>,
 ) -> Result<(), HostError> {
     let Some(kind) = AgentKind::of(agent) else {
         return Err(HostError::new(ErrorCode::CommandInvalid, "no such agent"));
     };
+    let mut slot = backend.wiring.leaves.begin(agent)?;
     tracing::info!(%agent, "leaving a reused login");
-    let guard = backend.wiring.readers.hold(kind).await;
+    let reads = backend.wiring.readers.hold(kind).await;
+    // Declared after `reads`, so on a panic it drops first: the host's hold, then the reads'.
+    let hold = HostHold::new(std::sync::Arc::clone(&backend.host), agent.clone());
+    match attempt(backend, agent, kind, None).await {
+        Ok(first_error) => {
+            hold.keep();
+            slot.left();
+            drop(reads);
+            login_changed(backend, agent).await;
+            first_error.map_or(Ok(()), Err)
+        }
+        Err(not_left) => {
+            tracing::info!(%agent, code = not_left.code().as_str(), "a leave did not finish");
+            hold.lift().await;
+            drop(reads);
+            Err(not_left.into_error(agent))
+        }
+    }
+}
+
+/// One try of the leave order (module docs, steps 1 to 3). `Ok` carries the first error of
+/// step 3, whose steps all run.
+pub(crate) async fn attempt(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    kind: AgentKind,
+    why: Option<Found>,
+) -> Result<Option<HostError>, NotLeft> {
     match backend.host.stop_agents(agent.clone()).await {
         Ok(AgentsStopped::Exited) => {}
-        Ok(AgentsStopped::TimedOut) => {
-            abandon(backend, agent, guard).await;
-            return Err(HostError::new(
-                ErrorCode::SigninAgentsStillRunning,
-                format!("an agent of {agent} is still running; the login was not changed"),
-            ));
-        }
-        Err(error) => {
-            abandon(backend, agent, guard).await;
-            return Err(error);
-        }
+        Ok(AgentsStopped::TimedOut) => return Err(NotLeft::StillRunning),
+        Err(error) => return Err(NotLeft::Error(error)),
     }
     let (tell, stopped) = oneshot::channel();
-    backend.wiring.waiters.put(agent, Waiter::Leave(tell));
+    let Some(token) = wait_on(backend, agent, Waiter::Leave(tell)) else {
+        return Err(NotLeft::Error(HostError::new(
+            ErrorCode::CommandConflict,
+            format!("{agent}'s login is already being left"),
+        )));
+    };
+    let _put = Put {
+        waiters: &backend.wiring.waiters,
+        agent: agent.clone(),
+        token,
+    };
     if let Err(error) = backend.agents.stop_using_login(agent, why) {
-        drop(backend.wiring.waiters.take(agent));
-        abandon(backend, agent, guard).await;
-        return Err(signin_error(&error));
+        return Err(NotLeft::Error(signin_error(&error)));
     }
-    let wait = AsyncIoTimer.after(backend.wiring.leave_wait);
-    let ended = match select(stopped, Box::pin(wait)).await {
+    let wait = backend.wiring.timer.after(Wait::SignedOut);
+    let ended = match select(stopped, wait).await {
         Either::Left((Ok(state), _)) => Some(state),
         Either::Left((Err(_), _)) | Either::Right(_) => None,
     };
     if !matches!(ended, Some(SigninState::SignedOut { .. })) {
-        drop(backend.wiring.waiters.take(agent));
-        abandon(backend, agent, guard).await;
-        return Err(HostError::new(
-            ErrorCode::SigninFailed,
-            format!("{agent}'s login you already had did not stop; try again"),
-        ));
+        return Err(NotLeft::NotStopped);
     }
+    Ok(after_stop(backend, agent, kind).await)
+}
+
+/// The steps after S18 stopped the reuse: `set_reused_login(false)`, `remove_login_links`
+/// (Codex), the entry rewritten as `Own`. All run; the first error comes back.
+pub(crate) async fn after_stop(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    kind: AgentKind,
+) -> Option<HostError> {
     let mut first_error = set_reused(backend, agent, false).await.err();
     if kind == AgentKind::Codex
         && let Err(error) = backend.host.remove_login_links(agent.clone()).await
@@ -114,17 +165,13 @@ pub(crate) async fn leave_reused(
         first_error.get_or_insert(error);
     }
     backend.write_entry_as(agent, SignInSource::Own).await;
-    drop(guard);
-    login_changed(backend, agent).await;
-    first_error.map_or(Ok(()), Err)
+    first_error
 }
 
-/// A leave given up before anything changed: the host's hold lifted, then the reads'.
-async fn abandon(backend: &AgentsBackend, agent: &AgentId, guard: ReadHold) {
-    if let Err(error) = backend.host.restart_agents(agent.clone()).await {
-        tracing::warn!(%agent, code = error.code().as_str(), "the agents' hold not lifted");
-    }
-    drop(guard);
+/// Puts `waiter` for `agent` with S18's latest state (see [`Waiters::put`]).
+pub(crate) fn wait_on(backend: &AgentsBackend, agent: &AgentId, waiter: Waiter) -> Option<Token> {
+    let latest = backend.agents.signin_state(agent);
+    backend.wiring.waiters.put(agent, waiter, latest)
 }
 
 /// Tells the host, and the login check, whether `agent`'s login is reused.
@@ -167,60 +214,4 @@ pub(crate) async fn restart_for_login(backend: &AgentsBackend, agent: &AgentId) 
 pub(crate) async fn hold_reads(backend: &AgentsBackend, agent: &AgentId) -> Option<ReadHold> {
     let kind = AgentKind::of(agent)?;
     Some(backend.wiring.readers.hold(kind).await)
-}
-
-/// One S18 sign-in state from the pump. A resting one goes to the agent's waiter first. A
-/// `SignedIn` that is new (none before, or another email) is handled before it is shown:
-/// a source that differs from the one the host was told is told and the entry rewritten
-/// (a Codex login of Clauseo's own on another account has its matter links removed), the
-/// reads' hold `UseFoundLogin` took drops, then `restart_agents` and
-/// `limits_login_changed`. A `SignedIn` the leave waited on is the leave's.
-pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state: SigninState) {
-    let before = backend.compose.s18(agent);
-    let mut found_hold = None;
-    if !is_running(&state) {
-        match backend.wiring.waiters.take(agent) {
-            Some(Waiter::Leave(tell)) => {
-                // The leave stopped waiting: its own timeout said so.
-                let _gone = tell.send(state.clone());
-                backend.compose.signin(agent, state);
-                return;
-            }
-            Some(Waiter::Found(hold)) => found_hold = Some(hold),
-            None => {}
-        }
-    }
-    if let SigninState::SignedIn { email, source, .. } = &state
-        && !matches!(&before, Some(SigninState::SignedIn { email: was, .. }) if was == email)
-    {
-        let reused = *source == Source::Reused;
-        if reused != backend.wiring.reused.get(agent) {
-            // Logged inside; the entry and the restart go on.
-            let _told = set_reused(backend, agent, reused).await;
-            let source = if reused {
-                SignInSource::Reused
-            } else {
-                SignInSource::Own
-            };
-            backend.write_entry_as(agent, source).await;
-        } else if !reused
-            && AgentKind::of(agent) == Some(AgentKind::Codex)
-            && matches!(&before, Some(SigninState::SignedIn { .. }))
-            && let Err(error) = backend.host.remove_login_links(agent.clone()).await
-        {
-            tracing::warn!(%agent, code = error.code().as_str(), "matter links not removed");
-        }
-        drop(found_hold.take());
-        backend.compose.signin(agent, state);
-        restart_for_login(backend, agent).await;
-        return;
-    }
-    drop(found_hold);
-    let signed_out = matches!(&before, Some(SigninState::SignedIn { .. }))
-        && !is_running(&state)
-        && !matches!(state, SigninState::SignedIn { .. });
-    backend.compose.signin(agent, state);
-    if signed_out {
-        login_changed(backend, agent).await;
-    }
 }

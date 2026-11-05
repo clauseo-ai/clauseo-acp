@@ -8,7 +8,9 @@
 //! 1. S18's running states (`Queued`, `Waiting`, `DeviceCode`) and `Failed` pass through as they
 //!    are, whatever else holds, so a running sign-in can still be joined (`Setup::start_sign_in`
 //!    joins only while the latest state is a running one) and is never restarted under an
-//!    `ApiKey` or `Firm` line, and a failure is shown.
+//!    `ApiKey` or `Firm` line, and a failure is shown. An automatic leave that did not finish
+//!    (`leave/auto.rs`) shows `Switching { since, stuck }` between the two: a running sign-in
+//!    still shows, and a failure of the leave's own S18 call never does.
 //! 2. Otherwise, with policy unreadable and the `firm-policy` marker there (`firm_policy.rs`),
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
 //! 3. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
@@ -50,13 +52,28 @@ pub(crate) struct Facts {
     pub(crate) blocked: Option<SystemTime>,
     /// Since when a firm policy sets the agent's endpoint or provider, if it does.
     pub(crate) managed: Option<SystemTime>,
+    /// Since when an automatic leave has been trying again, if one is (its first try's end).
+    pub(crate) switching: Option<SystemTime>,
+    /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
+    pub(crate) stuck: bool,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
 /// before any) and the other facts. `None` when there is nothing to say yet.
 pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) -> Option<SignIn> {
     if let Some(state) = s18
-        && is_running_or_failed(state)
+        && is_running(state)
+    {
+        return wire(agent, state);
+    }
+    if let Some(since) = facts.switching {
+        return Some(SignIn::Switching {
+            since: timestamp(since),
+            stuck: facts.stuck,
+        });
+    }
+    if let Some(state) = s18
+        && matches!(state, SigninState::Failed { .. })
     {
         return wire(agent, state);
     }
@@ -73,11 +90,6 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return Some(signed_in_by(SignInMethod::ApiKey, since));
     }
     s18.and_then(|state| wire(agent, state))
-}
-
-/// Whether S18's `state` passes through whatever else holds (rule 1).
-fn is_running_or_failed(state: &SigninState) -> bool {
-    is_running(state) || matches!(state, SigninState::Failed { .. })
 }
 
 /// Whether S18's `state` is a running one: `Queued`, `Waiting` or `DeviceCode`.
@@ -346,6 +358,29 @@ impl Compose {
     pub(crate) fn set_blocked(&self, agent: &AgentId, blocked: bool) {
         self.change(agent, |known, now| {
             known.facts.blocked = blocked.then(|| known.facts.blocked.unwrap_or(now));
+        });
+    }
+
+    /// An automatic leave of `agent`'s login did not finish and tries again: `Switching`, from
+    /// now, unless it shows already (a later try never moves `since`).
+    pub(crate) fn start_switching(&self, agent: &AgentId) {
+        self.change(agent, |known, now| {
+            known.facts.switching.get_or_insert(now);
+        });
+    }
+
+    /// `agent`'s automatic leave has tried for 2 minutes: `stuck`, while it still shows.
+    pub(crate) fn set_stuck(&self, agent: &AgentId) {
+        self.change(agent, |known, _| {
+            known.facts.stuck = known.facts.switching.is_some();
+        });
+    }
+
+    /// `agent`'s automatic leave ended (a try succeeded, or a new sign-in arrived).
+    pub(crate) fn end_switching(&self, agent: &AgentId) {
+        self.change(agent, |known, _| {
+            known.facts.switching = None;
+            known.facts.stuck = false;
         });
     }
 

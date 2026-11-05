@@ -35,6 +35,7 @@ fn facts(firm: bool, key: bool, blocked: bool) -> Facts {
         key: since(key),
         blocked: since(blocked),
         managed: None,
+        ..Facts::default()
     }
 }
 

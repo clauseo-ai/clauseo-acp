@@ -4,11 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Clock, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
 };
 use clauseo_host::{AgentsStopped, LoginSplits};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
@@ -18,6 +17,7 @@ use futures::stream::BoxStream;
 use serde_json::json;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents};
+use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
@@ -26,6 +26,7 @@ use crate::setup::compose::{Compose, is_running};
 use crate::setup::confirm::{Ask, SetupConfirm};
 use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
+use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
 use crate::setup::readers::{LeaveReaders, ReadHold};
 use crate::setup::refresh::SettingsRead;
@@ -215,11 +216,15 @@ impl std::fmt::Debug for HostCall {
 }
 
 /// The host's Rust-only calls, recorded in order, each answered `Ok`; `stop_agents` answers
-/// `stopped` (`Exited` unless a test sets `TimedOut`).
+/// `stopped` (`Exited` unless a test sets `TimedOut`), and the next `restart_fails`
+/// `restart_agents` calls answer `internal`.
 pub(super) struct RecordingHost {
     calls: Mutex<Vec<HostCall>>,
     pub(super) journal: Journal,
     pub(super) stopped: Mutex<AgentsStopped>,
+    pub(super) restart_fails: Mutex<usize>,
+    /// Told at each `restart_agents`, once a test sets it.
+    pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 impl RecordingHost {
@@ -228,6 +233,8 @@ impl RecordingHost {
             calls: Mutex::default(),
             journal,
             stopped: Mutex::new(AgentsStopped::Exited),
+            restart_fails: Mutex::new(0),
+            restarted: Mutex::new(None),
         }
     }
 
@@ -265,7 +272,18 @@ impl SetupHost for RecordingHost {
         self.record(HostCall::SetEndpoint(agent, endpoint))
     }
     fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        self.record(HostCall::RestartAgents(agent))
+        self.push(HostCall::RestartAgents(agent));
+        if let Some(told) = &*lock(&self.restarted) {
+            let _told = told.send(());
+        }
+        let mut fails = lock(&self.restart_fails);
+        let answer = if *fails > 0 {
+            *fails -= 1;
+            Err(HostError::new(ErrorCode::Internal, "the restart failed"))
+        } else {
+            Ok(())
+        };
+        Box::pin(std::future::ready(answer))
     }
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
         self.push(HostCall::StopAgents(agent));
@@ -335,17 +353,6 @@ impl Opener for FakeOpener {
     }
 }
 
-pub(super) struct Fixed;
-
-impl Clock for Fixed {
-    fn now(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(1_700_000_000)
-    }
-    fn monotonic(&self) -> Duration {
-        Duration::ZERO
-    }
-}
-
 /// A backend over the fakes, its confirm answering `accept`, and the fakes.
 pub(super) struct Rig {
     pub(super) backend: Arc<AgentsBackend>,
@@ -358,6 +365,8 @@ pub(super) struct Rig {
     pub(super) keychain: Keychain,
     pub(super) readers: Arc<FakeReaders>,
     pub(super) journal: Journal,
+    /// The leave's timer, which the test's [`Script`](super::timing::Script) drives.
+    pub(super) timer: Arc<FakeTimer>,
 }
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
@@ -395,6 +404,8 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
     });
     let opener = Arc::new(FakeOpener::default());
     let events = Arc::new(SetupEvents::default());
+    let clock = Arc::new(Stepping::default());
+    let timer = Arc::new(FakeTimer::new(Arc::clone(&clock)));
     let known = [(claude(), "Claude Code"), (codex(), "Codex")]
         .into_iter()
         .map(|(agent, name)| {
@@ -411,7 +422,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
         keys: Arc::new(KeyCache::load_all(keychain.clone(), [&claude(), &codex()])),
-        compose: Arc::new(Compose::new(Arc::clone(&events), Arc::new(Fixed))),
+        compose: Arc::new(Compose::new(Arc::clone(&events), clock)),
         host: Arc::clone(&host) as Arc<dyn SetupHost>,
         confirm: Arc::clone(&confirm) as Arc<dyn SetupConfirm>,
         opener: Arc::clone(&opener) as Arc<dyn Opener>,
@@ -423,7 +434,8 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
             ReusedLogins::default(),
             Arc::default(),
             SettingsRead::default(),
-        ),
+        )
+        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
     });
     Rig {
         backend,
@@ -435,6 +447,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         keychain,
         readers,
         journal,
+        timer,
     }
 }
 
@@ -463,6 +476,37 @@ impl Rig {
         };
         let (out, ()) = block_on(futures::future::join(work, self.backend.pump(source)));
         out
+    }
+
+    /// [`Rig::pumped`], with the automatic leaves followed beside `work` until it ends.
+    pub(super) fn pumped_with_leaves<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let backend = Arc::clone(&self.backend);
+        self.pumped(async move {
+            let leaves = std::pin::pin!(crate::setup::leave::follow_auto_leaves(&backend));
+            match futures::future::select(std::pin::pin!(work), leaves).await {
+                futures::future::Either::Left((out, _)) => out,
+                futures::future::Either::Right(((), _)) => panic!("the leaves' queue ended"),
+            }
+        })
+    }
+
+    /// S18's latest state for `agent` is `state`, which the pump has taken already.
+    pub(super) fn s18_was(&self, agent: &AgentId, state: SigninState) {
+        lock(&self.agents.signin).insert(agent.clone(), state.clone());
+        drop(self.backend.wiring.waiters.deliver(agent, &state));
+        self.backend.compose.signin(agent, state);
+    }
+
+    /// S18 sends `state` for `agent`, as its latest, to the pump [`Rig::pumped`] runs.
+    pub(super) fn s18_sends(&self, agent: &AgentId, state: SigninState) {
+        lock(&self.agents.signin).insert(agent.clone(), state.clone());
+        let feed = lock(&self.agents.feed);
+        let feed = feed.as_ref().expect("only while pumped");
+        let event = AgentsEvent::Signin {
+            agent: agent.clone(),
+            state,
+        };
+        feed.unbounded_send(event).unwrap();
     }
 
     /// The journal so far, and cleared.
