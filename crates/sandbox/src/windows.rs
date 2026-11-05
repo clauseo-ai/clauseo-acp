@@ -17,8 +17,10 @@
 //!   `sandbox_owner_sid`) and the set-up state they give (`setup_state`).
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
-//!   inherited entries down each tree, the rollback, the sibling denies a new matter lifts,
-//!   `forget_matter` and `fence_registered` (S15 PR3). The writes go through [`AclWriter`]:
+//!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
+//!   denies a new matter lifts once its first launch succeeds, `forget_matter` (which hands back
+//!   what the agent made), `reconcile` and `fence_registered` (S15 PR3), with what a launch
+//!   needs from around the matter as [`Surroundings`]. The writes go through [`AclWriter`]:
 //!   `NtfsAcl` on Windows (`acl.rs`, after Codex's ACL code; `PROVENANCE.md`), whose
 //!   descriptors and entries are edited as bytes in `acl_bytes.rs`.
 //! - [`set_aside_with`] (`set_aside.rs`): protected names the matter's pool user made, moved to
@@ -76,7 +78,7 @@ pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use apply::fence_registered;
-pub use apply::{Applied, apply, forget_matter, lift_sibling_denies, reconcile};
+pub use apply::{Applied, Surroundings, apply, forget_matter, reconcile};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
@@ -89,7 +91,7 @@ pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
 #[cfg(windows)]
 pub use set_aside::set_aside_protected;
 pub use set_aside::set_aside_with;
-pub use writer::{AclWriter, Added, ApplyFailure, Reach, Walked};
+pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

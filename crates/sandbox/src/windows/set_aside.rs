@@ -102,6 +102,7 @@ fn failed(error: &io::Error) -> Error {
     Error::AclApply {
         path_kind: PathKind::ReadOnlyInMatter,
         failure: ApplyFailure::Io(error.kind()),
+        at: None,
     }
 }
 

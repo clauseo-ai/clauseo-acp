@@ -63,24 +63,28 @@ pub(super) fn check_target(
         };
         match grant.rights {
             Rights::ReadAndExecute => same_path(path, &store) || in_agent_install(path, data),
-            Rights::Modify | Rights::CreateFiles | Rights::LowLabel => match grant.kind {
-                PathKind::State => state_ok(path),
-                PathKind::Notes => same_path(path, &mine.join(NOTES_DIR)),
-                PathKind::CredentialLink => {
-                    state_ok(policy.state()) && in_folder(path, policy.state())
+            Rights::Modify | Rights::CreateFiles | Rights::LowLabel | Rights::ReadWriteData => {
+                match grant.kind {
+                    PathKind::State => state_ok(path),
+                    PathKind::Notes => same_path(path, &mine.join(NOTES_DIR)),
+                    PathKind::CredentialLink => {
+                        state_ok(policy.state()) && in_folder(path, policy.state())
+                    }
+                    PathKind::ClaudeStore => same_path(path, &store),
+                    PathKind::ClaudeStoreFile => {
+                        path.parent().is_some_and(|p| same_path(p, &store))
+                    }
+                    PathKind::Matter
+                    | PathKind::Runtime
+                    | PathKind::Read
+                    | PathKind::AllowedFolder
+                    | PathKind::ReadOnlyInMatter
+                    | PathKind::ReadOnlyInState
+                    | PathKind::OtherMatter
+                    | PathKind::Sibling
+                    | PathKind::ParentFiles => false,
                 }
-                PathKind::ClaudeStore => same_path(path, &store),
-                PathKind::ClaudeStoreFile => path.parent().is_some_and(|p| same_path(p, &store)),
-                PathKind::Matter
-                | PathKind::Runtime
-                | PathKind::Read
-                | PathKind::AllowedFolder
-                | PathKind::ReadOnlyInMatter
-                | PathKind::ReadOnlyInState
-                | PathKind::OtherMatter
-                | PathKind::Sibling
-                | PathKind::ParentFiles => false,
-            },
+            }
             Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead => true,
         }
     };

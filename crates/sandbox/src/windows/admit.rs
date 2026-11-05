@@ -472,6 +472,8 @@ pub(crate) fn fences_for(
 mod neighbours;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod siblings;
+#[cfg(any(windows, test, feature = "test-support"))]
+pub(crate) use siblings::walk_down;
 
 #[cfg(test)]
 mod tests;

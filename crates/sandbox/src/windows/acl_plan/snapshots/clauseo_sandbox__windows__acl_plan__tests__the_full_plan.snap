@@ -5,7 +5,7 @@ expression: "render(&w, plan.grants())"
 Matter Modify pool 0x001301bf Tree <root>/matter
 State Modify pool 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
 Notes Modify pool 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
-CredentialLink Modify pool 0x001301bf ThisOnly <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/auth.json
+CredentialLink ReadWriteData pool 0x0012008f ThisOnly <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/auth.json
 ClaudeStore CreateFiles pool 0x00000002 ThisOnly <root>/data/agents/claude-acp/home
 ClaudeStoreFile Modify pool 0x001301bf ThisOnly <root>/data/agents/claude-acp/home/.credentials.json
 ClaudeStoreFile Modify pool 0x001301bf ThisOnly <root>/data/agents/claude-acp/home/.storage-write

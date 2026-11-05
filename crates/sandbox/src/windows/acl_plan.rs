@@ -95,6 +95,10 @@ pub enum Rights {
     /// Not an access entry: the Low mandatory label `S:(ML;OICI;NW;;;LW)` (mask `0x1`,
     /// no-write-up), set with `LABEL_SECURITY_INFORMATION`; its subject is [`LOW_LABEL_SID`].
     LowLabel,
+    /// Read and write the file's data, no `DELETE` and no permission change
+    /// (`FILE_GENERIC_READ | FILE_WRITE_DATA | FILE_APPEND_DATA`, `0x12008f`): the credential
+    /// link's allow, which lands on the lawyer's real credentials file (L5).
+    ReadWriteData,
 }
 
 impl Rights {
@@ -108,6 +112,7 @@ impl Rights {
             Rights::DenyReadWrite => DENY_WRITE | DENY_READ,
             Rights::DenyRead => DENY_READ,
             Rights::LowLabel => 0x1,
+            Rights::ReadWriteData => 0x0012_008f,
         }
     }
 
@@ -279,6 +284,42 @@ impl AdmittedPlan {
         })
     }
 
+    /// The walk-down set's denies for `group`, owned by `matter`: a read deny down each of
+    /// `siblings` and one for the files directly in each of `levels`. What
+    /// [`apply`](super::apply::apply) writes for `matter` in place of its sibling deny on a
+    /// folder that now holds another matter, from the gate's walk (`admit::walk_down`).
+    #[cfg(any(windows, test, feature = "test-support"))]
+    pub(crate) fn walk_down_denies(
+        matter: MatterId,
+        group: &Sid,
+        siblings: &[PathBuf],
+        levels: &[PathBuf],
+    ) -> AdmittedPlan {
+        let deny = |path: &PathBuf, inherit, kind| Grant {
+            path: path.clone(),
+            sid: group.clone(),
+            rights: Rights::DenyRead,
+            inherit,
+            kind,
+        };
+        let mut grants: Vec<Grant> = siblings
+            .iter()
+            .map(|s| deny(s, Inherit::Tree, PathKind::Sibling))
+            .collect();
+        grants.extend(
+            levels
+                .iter()
+                .map(|l| deny(l, Inherit::FilesInFolder, PathKind::ParentFiles)),
+        );
+        AdmittedPlan {
+            matter,
+            owners: vec![matter; grants.len()],
+            grants,
+            entries: Vec::new(),
+            created: Vec::new(),
+        }
+    }
+
     /// A plan of `grants` without the gate, for the ledger's tests.
     #[cfg(test)]
     pub(crate) fn from_grants(matter: MatterId, grants: Vec<Grant>) -> AdmittedPlan {
@@ -331,7 +372,7 @@ pub fn plan(
     }
     if let Some(link) = policy.credential_link() {
         let kind = PathKind::CredentialLink;
-        plan.allow(link, Rights::Modify, Inherit::ThisOnly, kind);
+        plan.allow(link, Rights::ReadWriteData, Inherit::ThisOnly, kind);
     }
     if let Some(store) = policy.claude_store() {
         let (dir, kind) = (store.dir(), PathKind::ClaudeStore);

@@ -2,9 +2,11 @@
 //! so set-up can remove them and a matter can be forgotten (S15's D4, R6).
 //!
 //! It is write-ahead. An entry is recorded `pending` and the file replaced before its permission
-//! entry is written; once it is written, the entry is marked `applied`. At start, [`reconcile`]
-//! keeps each `pending` entry whose permission entry is there (marking it `applied`) and drops
-//! the rest. So every permission entry written is listed, and no `applied` entry lacks one.
+//! entry is written; once it is written and its tree walked, the entry is marked `applied`. At
+//! start, [`reconcile`] walks each `pending` entry's tree again, then marks it `applied` if
+//! its permission entry is there and drops it if not. Taking entries back ([`Ledger::take_back`])
+//! sets them `pending` on disk before any removal. So every permission entry written is listed,
+//! and no `applied` entry lacks one or its walk.
 //!
 //! Every change is a read-modify-write under the exclusive OS lock on `acl-ledger.lock` beside
 //! the file (`write::lock_exclusive_for`, the records' bounded wait): the file is read again
@@ -18,8 +20,8 @@
 //! reaches the ledger, and a missing ledger stays missing until an entry is recorded.
 //!
 //! Only an [`AdmittedPlan`] is recorded, and a rollback ([`Ledger::drop_entries`]) drops only the
-//! entries its own plan added. [`Ledger::lift`] is the one change that drops other matters'
-//! entries: a sibling deny lifted from a folder that became a matter (S15 PR3, `apply`).
+//! entries its own plan added. A take-back that picks other matters' entries is the one change
+//! that drops them: a sibling deny lifted from a folder that became a matter (S15 PR3, `apply`).
 //!
 //! Entries are not trusted on load. One this version can't read (an older shape, a newer kind),
 //! one whose SID is neither a trusted SID given to [`Ledger::open`] (the pool users and their
@@ -28,7 +30,7 @@
 //! they are, written back unchanged, and never acted on or handed out. A file from a newer format
 //! version, or one that isn't JSON, is refused with `InvalidData` and left alone.
 //!
-//! [`reconcile`]: Ledger::reconcile
+//! [`reconcile`]: super::apply::reconcile
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -43,10 +45,13 @@ use super::fence::{MatterFolders, plan_fence};
 use super::matters::SANDBOX_DIR;
 use super::sids::{Reserved, Sid};
 use super::write;
+use super::writer::Label;
 
 mod file;
+mod held;
 
 use file::{Known, Slot, State, Trust, exists, invalid, read_state, render};
+use held::Held;
 
 /// The ledger's file name in `<data_dir>\sandbox`.
 pub const LEDGER_FILE: &str = "acl-ledger.json";
@@ -97,6 +102,10 @@ pub struct Entry {
     pub inherit: Inherit,
     /// Which of the policy's paths.
     pub kind: PathKind,
+    /// For a Low label entry, the explicit label the path had before ours replaced it (the
+    /// lawyer's own), put back when ours goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_label: Option<Label>,
 }
 
 impl Entry {
@@ -128,7 +137,7 @@ impl Entry {
 #[error("the ACL ledger no longer lists {} of this launch's entries", .0.len())]
 pub struct MissingEntries(pub Vec<EntryId>);
 
-/// What [`Ledger::reconcile`] did.
+/// What [`reconcile`](super::apply::reconcile) did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Reconciled {
     /// Pending entries whose permission entry was there, now applied.
@@ -139,7 +148,27 @@ pub struct Reconciled {
     pub unchecked: usize,
 }
 
-/// What [`Ledger::forget_matter`] did.
+/// What [`Ledger::take_back`] does with an entry it takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Take {
+    /// Remove its permission entry, unless another entry names it too; then drop it.
+    Remove,
+    /// Drop it without a removal (its permission entry was there before, or never written).
+    Drop,
+}
+
+/// What [`Ledger::take_back`] did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TakenBack {
+    /// Entries whose permission entry was removed; still `pending` until their trees are walked.
+    pub removed: Vec<Entry>,
+    /// Entries dropped without a removal because another entry names the same permission entry.
+    pub shared: usize,
+    /// Entries whose removal failed, kept `pending` for the next try.
+    pub kept: usize,
+}
+
+/// What [`forget_matter`](super::apply::forget_matter) did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Forgotten {
     /// Entries whose permission entry was removed, now dropped.
@@ -246,6 +275,7 @@ impl Ledger {
                         rights: grant.rights,
                         inherit: grant.inherit,
                         kind: grant.kind,
+                        prior_label: None,
                     },
                     extra: Map::new(),
                 }));
@@ -322,7 +352,8 @@ impl Ledger {
         Ok(())
     }
 
-    /// At start, under the lock: asks `present` about each trusted `pending` entry. One whose
+    /// Under the lock: asks `present` about each trusted `pending` entry, with no walk; the
+    /// caller walks each pending entry's tree first ([`reconcile`] does). One whose
     /// permission entry is there is marked `applied`; one whose permission entry isn't is
     /// dropped; one `present` fails on stays pending for the next start. Applied entries and set
     /// aside ones are left as they are.
@@ -363,87 +394,111 @@ impl Ledger {
         })
     }
 
-    /// Forgets `matter`, under the lock: hands each of its trusted entries to `remove`, which
-    /// removes the permission entry (one already gone counts as removed), unless another
-    /// matter's entry, pending or applied, names the same path, SID, rights and inheritance (a
-    /// shared sibling deny): that entry is dropped without a removal, and the permission entry
-    /// stays for the other matter. Entries removed are dropped; entries `remove` failed on are
-    /// kept for the next try. Other matters' entries and set aside ones are left as they are, and
-    /// never handed to `remove`.
+    /// Forgets `matter`'s entries with no walk: [`Ledger::take_back`] of each of them, then the
+    /// ones whose permission entry `remove` removed dropped. Entries `remove` failed on stay,
+    /// `pending`, for the next try; a shared one is dropped without a removal.
     pub fn forget_matter(
         &mut self,
         matter: MatterId,
-        mut remove: impl FnMut(&Entry) -> io::Result<()>,
+        remove: impl FnMut(&Entry) -> io::Result<()>,
     ) -> io::Result<Forgotten> {
-        self.update(false, |state| {
-            let mut done = Forgotten::default();
-            let others: Vec<Entry> = state
-                .entries()
-                .filter(|entry| entry.matter != matter)
-                .cloned()
-                .collect();
-            let mut slots = Vec::with_capacity(state.slots.len());
-            for slot in std::mem::take(&mut state.slots) {
-                match slot {
-                    Slot::Known(known)
-                        if known.entry.matter == matter
-                            && others.iter().any(|other| same_ace(other, &known.entry)) =>
-                    {
-                        done.shared += 1;
-                    }
-                    Slot::Known(known) if known.entry.matter == matter => {
-                        match remove(&known.entry) {
-                            Ok(()) => done.removed += 1,
-                            Err(error) => {
-                                let (kind, error) = (known.entry.kind, error.kind());
-                                tracing::warn!(%kind, %error, "an ACL entry wasn't removed");
-                                slots.push(Slot::Known(known));
-                                done.kept += 1;
-                            }
-                        }
-                    }
-                    other @ (Slot::Known(_) | Slot::SetAside(_)) => slots.push(other),
-                }
-            }
-            state.slots = slots;
-            Ok((done.removed + done.shared > 0, done))
+        let taken = self.take_back(|e| (e.matter == matter).then_some(Take::Remove), remove)?;
+        let ids: Vec<EntryId> = taken.removed.iter().map(|e| e.id).collect();
+        self.drop_gone(&ids, |_| Ok(false))?;
+        Ok(Forgotten {
+            removed: taken.removed.len(),
+            kept: taken.kept,
+            shared: taken.shared,
         })
     }
 
-    /// Lifts entries of any matter, under the lock: for each trusted entry `pick` takes, hands
-    /// it to `remove` once per permission entry (path, SID, rights and inheritance), and on
-    /// success drops every entry, of any matter, naming that permission entry; on failure keeps
-    /// them. Returns how many entries were dropped. A sibling deny lifted when its folder
-    /// becomes a registered matter goes this way.
-    pub fn lift(
+    /// Whether another matter's entry names the same permission entry as `entry`: PR3's
+    /// rollback leaves such an entry's ACE in place.
+    pub fn is_shared(&self, entry: &Entry) -> bool {
+        self.entries()
+            .any(|other| other.matter != entry.matter && same_ace(other, entry))
+    }
+
+    /// Records `label` as the explicit label entry `id`'s path had before ours: written before
+    /// our label is (L4). Only an entry `plan` added, still pending, with none recorded yet.
+    pub fn set_prior_label(
         &mut self,
-        mut pick: impl FnMut(&Entry) -> bool,
-        mut remove: impl FnMut(&Entry) -> io::Result<()>,
-    ) -> io::Result<usize> {
+        plan: &AdmittedPlan,
+        id: EntryId,
+        label: Label,
+    ) -> io::Result<()> {
+        if !plan.created.contains(&id) {
+            return Ok(());
+        }
         self.update(false, |state| {
-            let picked: Vec<Entry> = state.entries().filter(|e| pick(e)).cloned().collect();
-            let mut gone: Vec<EntryId> = Vec::new();
-            for entry in &picked {
-                if gone.contains(&entry.id) {
-                    continue;
-                }
-                match remove(entry) {
-                    Ok(()) => gone.extend(
-                        state
-                            .entries()
-                            .filter(|other| same_ace(other, entry))
-                            .map(|other| other.id),
-                    ),
-                    Err(error) => {
-                        let (kind, error) = (entry.kind, error.kind());
-                        tracing::warn!(%kind, %error, "an ACL entry wasn't lifted");
-                    }
+            let mut changed = false;
+            for slot in &mut state.slots {
+                if let Slot::Known(known) = slot
+                    && known.entry.id == id
+                    && known.entry.state == EntryState::Pending
+                    && known.entry.prior_label.is_none()
+                {
+                    known.entry.prior_label = Some(label);
+                    changed = true;
                 }
             }
-            state.slots.retain(
-                |slot| !matches!(slot, Slot::Known(known) if gone.contains(&known.entry.id)),
-            );
-            Ok((!gone.is_empty(), gone.len()))
+            Ok((changed, ()))
+        })
+    }
+
+    /// The trusted `pending` entries, read again under the lock: what [`reconcile`] walks.
+    ///
+    /// [`reconcile`]: super::apply::reconcile
+    pub fn pending(&mut self) -> io::Result<Vec<Entry>> {
+        self.update(false, |state| {
+            let pending = state
+                .entries()
+                .filter(|e| e.state == EntryState::Pending)
+                .cloned()
+                .collect();
+            Ok((false, pending))
+        })
+    }
+
+    /// Marks each of `ids` that is still `pending` `applied`: once its permission entry is
+    /// known to be there and its tree walked (S15's D4, and the review's M2).
+    pub fn mark_walked(&mut self, ids: &[EntryId]) -> io::Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.update(false, |state| Ok((held::mark_walked(state, ids), ())))
+    }
+
+    /// Takes permission entries back, under one hold of the lock (the review's M3 and M4): each
+    /// entry `pick` takes, read from the file now, is set back to `pending` and the file
+    /// written, before any removal. Then each one `pick` marks [`Take::Remove`] is handed to
+    /// `remove` once per permission entry, unless an entry `pick` didn't take names the same
+    /// permission entry (it is shared): a shared one, and each [`Take::Drop`], is dropped. The
+    /// file is written again. Entries whose permission entry was removed stay `pending` until
+    /// their trees are walked ([`Ledger::drop_gone`]); entries `remove` failed on stay
+    /// `pending` for the next try. Returns the entries removed.
+    pub fn take_back(
+        &mut self,
+        mut pick: impl FnMut(&Entry) -> Option<Take>,
+        mut remove: impl FnMut(&Entry) -> io::Result<()>,
+    ) -> io::Result<TakenBack> {
+        self.locked(|held| held::take_back(held, &mut pick, &mut remove))
+    }
+
+    /// Drops each of `ids` that is still `pending` and whose permission entry `present` says
+    /// is gone, under the lock: the end of a take-back, once its trees are walked. An entry
+    /// whose permission entry is there again (another launch wrote it) is kept.
+    pub fn drop_gone(
+        &mut self,
+        ids: &[EntryId],
+        mut present: impl FnMut(&Entry) -> io::Result<bool>,
+    ) -> io::Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.update(false, |state| {
+            let gone = held::drop_gone(state, ids, &mut present);
+            Ok((gone > 0, gone))
         })
     }
 
@@ -461,13 +516,6 @@ impl Ledger {
             self.entries()
                 .any(|e| e.state == EntryState::Applied && e.lists(matter, grant))
         })
-    }
-
-    /// Whether another matter's entry names the same permission entry as `entry`: PR3's
-    /// rollback leaves such an entry's ACE in place.
-    pub fn is_shared(&self, entry: &Entry) -> bool {
-        self.entries()
-            .any(|other| other.matter != entry.matter && same_ace(other, entry))
     }
 
     /// One read-modify-write. With `create` false and no ledger file, there is nothing to change:
@@ -521,6 +569,16 @@ impl Ledger {
             self.state = fresh;
         }
         Ok(result)
+    }
+
+    /// Runs `change` under one hold of the lock on the file as read now (`held.rs`); the
+    /// cache then holds what was last saved.
+    fn locked<R>(&mut self, change: impl FnOnce(&mut Held<'_>) -> io::Result<R>) -> io::Result<R> {
+        let (result, saved) = held::locked(&self.path, &self.trust, change);
+        if let Some(saved) = saved {
+            self.state = saved;
+        }
+        result
     }
 }
 
