@@ -9,6 +9,8 @@
 //!    launch is refused. So is an expected file inside the state folder, or the link itself:
 //!    the agent can write there (N8). The link's entry is written through
 //!    [`AclWriter::add_expecting`], which compares the file ID on the handle it writes through.
+//!    Each new entry of the link's first records the credentials file, by its path and file ID,
+//!    and the way back removes the entry from that file, never through the link (round 4, L5).
 //! 3. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
 //!    first records the explicit label its path has now, so it can be put back, unless that
 //!    label is our own: the one this grant writes, or the one another entry for the same file
@@ -45,7 +47,7 @@ use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::fence::RegisteredMatter;
-use super::ledger::{EntryId, EntryState, Ledger, is_our_label};
+use super::ledger::{EntryId, EntryState, Ledger, RecordedFile, is_our_label};
 use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
 use crate::Error;
 
@@ -190,7 +192,15 @@ fn write_all(
     let grants = plan.grants();
     let ledger_failed = |kind, e: io::Error| Refused::new(kind, ApplyFailure::Ledger(e.kind()));
     // L4: a new label entry first records the explicit label there now, before ours replaces it.
+    // Round 4, L5: a new credential link entry first records the credentials file.
     for (grant, &id) in grants.iter().zip(plan.entries()) {
+        if grant.kind() == PathKind::CredentialLink && plan.created().contains(&id) {
+            let file =
+                credentials_file(acl, &*around).map_err(|f| Refused::new(grant.kind(), f))?;
+            ledger
+                .set_file(plan, id, &file)
+                .map_err(|e| ledger_failed(grant.kind(), e))?;
+        }
         if grant.rights().is_label() && plan.created().contains(&id) {
             let found = acl.label(grant.path());
             let found =
@@ -252,6 +262,27 @@ fn write_all(
     ledger
         .mark_walked(plan.entries())
         .map_err(|e| ledger_failed(PathKind::Matter, e))
+}
+
+/// The credentials file the credential link must be, by its path (its folder canonical, as the
+/// check compares it) and its file ID: recorded in the link's entries before they are written,
+/// so the way back removes them from this file, not from whatever the link names then (round 4,
+/// L5). A file that is missing now, or a link there, is [`ApplyFailure::Changed`].
+fn credentials_file(
+    acl: &mut dyn AclWriter,
+    around: &dyn Surroundings,
+) -> Result<RecordedFile, ApplyFailure> {
+    let expected = around.credentials().ok_or(ApplyFailure::Changed)?;
+    let path = expected
+        .parent()
+        .and_then(|folder| dunce::canonicalize(folder).ok())
+        .zip(expected.file_name())
+        .map_or(expected.clone(), |(folder, name)| folder.join(name));
+    match acl.file_id(&path) {
+        Ok(Some(id)) => Ok(RecordedFile::new(path, id)),
+        Ok(None) => Err(ApplyFailure::Changed),
+        Err(error) => Err(ApplyFailure::Io(error.kind())),
+    }
 }
 
 /// Whether `label`, found on label grant `grant`'s path (entry `id`), is our own: the label

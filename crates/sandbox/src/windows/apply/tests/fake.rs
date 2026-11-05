@@ -8,7 +8,9 @@ use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
-use crate::windows::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
+use crate::windows::writer::{
+    AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
+};
 
 pub(super) type Key = (PathBuf, String, Rights, Inherit);
 
@@ -60,6 +62,10 @@ pub(super) struct FakeAcl {
     pub(super) prefix: &'static str,
     /// Other names for one file: each key's entries and label live on its value's.
     pub(super) links: BTreeMap<PathBuf, PathBuf>,
+    /// File IDs given in place of the one a file's path makes: another file at that path.
+    pub(super) ids: BTreeMap<PathBuf, FileId>,
+    /// Paths with no file at all.
+    pub(super) gone: BTreeSet<PathBuf>,
 }
 
 impl FakeAcl {
@@ -203,15 +209,54 @@ impl AclWriter for FakeAcl {
         Ok(Walked::default())
     }
 
+    /// Two paths with one file name are one file. From then on `b` (and its canonical form),
+    /// unless `links` names it already, is a name for the file `a` names now: the credentials
+    /// file, once checked against the credential link, stays the file written through the link
+    /// when the link is swapped later.
     fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool> {
-        Ok(a.file_name() == b.file_name())
+        if a.file_name() != b.file_name() {
+            return Ok(false);
+        }
+        let file = self.file(a);
+        let canonical = b
+            .parent()
+            .and_then(|folder| dunce::canonicalize(folder).ok())
+            .zip(b.file_name())
+            .map(|(folder, name)| folder.join(name));
+        for name in std::iter::once(b.to_owned()).chain(canonical) {
+            if name != file {
+                self.links.entry(name).or_insert_with(|| file.clone());
+            }
+        }
+        Ok(true)
     }
 
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
-        if grant.path().file_name() != expected.file_name() {
+        if !self.same_file(grant.path(), expected).unwrap_or(false) {
             return Err(ApplyFailure::Changed);
         }
         self.add(grant)
+    }
+
+    /// A made-up ID from the file `path` names, unless `ids` gives another.
+    fn file_id(&mut self, path: &Path) -> io::Result<Option<FileId>> {
+        if self.gone.contains(path) {
+            return Ok(None);
+        }
+        if let Some(id) = self.ids.get(path) {
+            return Ok(Some(*id));
+        }
+        let file = self.file(path);
+        let half = |salt: u8| {
+            let mut hasher = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&(salt, &file), &mut hasher);
+            std::hash::Hasher::finish(&hasher).to_le_bytes()
+        };
+        let mut id = [0; 16];
+        let (low, high) = id.split_at_mut(8);
+        low.copy_from_slice(&half(0));
+        high.copy_from_slice(&half(1));
+        Ok(Some(FileId { volume: 1, id }))
     }
 
     /// The label on `path`'s file: ours when one of our label entries is there, else the

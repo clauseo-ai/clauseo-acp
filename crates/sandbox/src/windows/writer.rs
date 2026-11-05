@@ -83,6 +83,16 @@ pub struct Label {
     pub mask: u32,
 }
 
+/// A file's identity: its volume's serial number and its 128-bit file ID (`FILE_ID_INFO`). The
+/// same ID means the same file, whatever name it is opened by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileId {
+    /// The volume's serial number.
+    pub volume: u64,
+    /// The file's ID on that volume.
+    pub id: [u8; 16],
+}
+
 /// Why an apply, a removal or a walk failed. Names no path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplyFailure {
@@ -164,6 +174,11 @@ pub trait AclWriter {
     /// Whether `a` and `b` are the same file (one file ID on one volume), neither followed if
     /// a link: the credential link checked against the credentials file it must be (L5).
     fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool>;
+    /// The ID of the file `path` names, opened as itself: a junction or symbolic link there
+    /// is an error, never followed. `None` when the path is missing. A credential link's
+    /// entries record the credentials file by it, so they are taken back from that file even
+    /// once the link names another (S15 `PR3b` round 4, L5).
+    fn file_id(&mut self, path: &Path) -> io::Result<Option<FileId>>;
     /// [`AclWriter::add`], refused as [`ApplyFailure::Changed`] unless the object it opened
     /// to write is the file `expected` names (one file ID, compared on that same handle): the
     /// credential link's write (L5, N8).
