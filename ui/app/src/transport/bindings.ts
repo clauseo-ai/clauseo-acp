@@ -4229,7 +4229,7 @@ export type SignIn =
 ({ signed_out: {
 	/**  A login seen but not reusable, or why reuse stopped; missing when neither. */
 	found?: FoundLogin,
-} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; waiting?: never } | 
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; switching?: never; waiting?: never } | 
 /**
  *  Waiting for the install to finish or the network to return; the sign-in then starts by
  *  itself.
@@ -4241,7 +4241,7 @@ export type SignIn =
 	since: Timestamp,
 	/**  Whether to offer "Didn't open?" (true after 30 seconds). */
 	nudge: boolean,
-} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; signed_out?: never } | 
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never } | 
 /**  Codex's device code: the lawyer opens `url` and types `code` before `expires_at`. */
 ({ device_code: {
 	/**  The device page, on one of the agent's sign-in hosts. */
@@ -4250,14 +4250,14 @@ export type SignIn =
 	code: string,
 	/**  When the code stops working. */
 	expires_at: Timestamp,
-} }) & { failed?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+} }) & { failed?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**  A login the lawyer already has, not used until they choose "Use it". */
 ({ login_found: {
 	/**  Whose login it is. */
 	from: LoginFrom,
 	/**  The account, from the agent's own status output, when it names one. */
 	email?: string,
-} }) & { device_code?: never; failed?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+} }) & { device_code?: never; failed?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**  Signed in. */
 ({ signed_in: {
 	/**  The account's email, when known. */
@@ -4270,7 +4270,7 @@ export type SignIn =
 	source: SignInSource,
 	/**  When the sign-in was confirmed. */
 	at: Timestamp,
-} }) & { device_code?: never; failed?: never; login_found?: never; signed_out?: never; waiting?: never } | 
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_out?: never; switching?: never; waiting?: never } | 
 /**
  *  The sign-in stopped: a `signin.*` code, `agent.auth_required`, or
  *  `signin.policy_unreadable`.
@@ -4280,7 +4280,19 @@ export type SignIn =
 	code: ErrorCode,
 	/**  When. */
 	at: Timestamp,
-} }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never };
+} }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; switching?: never; waiting?: never } | 
+/**
+ *  Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
+ *  the agent's own CLI ended) and the leave did not finish: it tries again by itself, and
+ *  nothing of the agent launches meanwhile. Ends when a try succeeds (the state after it)
+ *  or a new sign-in arrives; it has no failed end.
+ */
+({ switching: {
+	/**  When the first try did not finish; a later try never moves it. */
+	since: Timestamp,
+	/**  Whether it has gone on for 2 minutes or more. */
+	stuck: boolean,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never };
 
 /**  How a signed-in agent is signed in. */
 export type SignInMethod = 
