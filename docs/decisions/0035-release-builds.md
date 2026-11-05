@@ -119,8 +119,8 @@ Developer ID.
   first and Tauri's 26 other messages as 2.12.2 ships them, except that three name the product
   with `${PRODUCTNAME}` where Tauri's file has a literal `{{product_name}}` (language files are
   included, not rendered). On a Tauri upgrade, copy its `English.nsh` again and keep that fix;
-  tests count the 27 keys, refuse any `{{`, and hold the label to one line (60 characters; the
-  box is 400 x 25 px).
+  tests count the 27 keys (29 since S20 added the uninstall hook's two lines, below), refuse any
+  `{{`, and hold the label to one line (60 characters; the box is 400 x 25 px).
 - **The dialog's look** (from the Windows 11 VM's run): `cxWidth` 280 dialog units, so the main
   instruction fits on one line, and the exe's own icon (tauri-build's
   `WINDOWS_APP_ICON_RESOURCE_ID`) as its main and title-bar icon, named only when the exe holds
@@ -215,6 +215,28 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   the guard returns. Never `clauseo-sandbox-setup.exe` (a jailed agent could raise a real UAC
   prompt), and not `clauseo-sandbox-run.exe` (it runs with the plain logon token). Uninstall has
   nothing to do: the ACEs go with the folder.
+
+## Uninstall deletes app data without following links (S20, 2026-11-05)
+
+- **The bug.** Stage C's Windows VM run (S15 PR3, row 29) put a directory junction under the data
+  folder pointing at a folder outside it, then ticked the uninstaller's "Also delete
+  conversations, saved versions and settings". Tauri's template deletes the data folders with
+  `RmDir /r` (tauri-cli 2.12.2, `installer.nsi` lines 877-891), and NSIS 3.11's `RMDir /r`
+  follows junctions: the outside folder was emptied. `rmdir /s /q` and `Remove-Item -Recurse`
+  did not follow it. Agent tools, npm or pnpm links and tier B's set-aside can all leave a
+  junction there.
+- **The fix.** `hooks.nsh`'s `NSIS_HOOK_PREUNINSTALL`, which the template inserts before its own
+  checks (lines 783-788), keeps S15's `--remove` first (now through `ShellExecuteExW`, so its exit
+  code is read), then, for the ticked box, clears `$DeleteAppDataCheckboxState` so the
+  template's `RmDir /r` never runs, checks the app is closed, and runs
+  `Clauseo.exe --delete-app-data` (`--keep-sandbox` when `--remove` failed). The app takes no
+  path: it deletes `FOLDERID_LocalAppData` and `FOLDERID_RoamingAppData` joined with
+  `ai.clauseo.desktop`, refuses a data folder that is a reparse point or resolves elsewhere,
+  removes every reparse point inside as a link without entering it, then the rest with std's
+  `remove_dir_all`. It keeps `sandbox\set-aside` when it holds anything. Exit 0 deleted, 2 or 3
+  a folder kept, 1 refused or something left; the uninstaller says one line (`English.nsh`'s
+  `deleteAppDataKept` and `deleteAppDataFailed`) unless silent, and never falls back to
+  `RMDir /r`. `crates/desktop/src/delete_app_data.rs` holds the contract.
 
 ## Status
 

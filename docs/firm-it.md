@@ -41,7 +41,13 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`.
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.
-  The silent `/S` uninstall asks nothing and always keeps it.
+  The silent `/S` uninstall asks nothing and always keeps it. Ticked, `Clauseo.exe` deletes the
+  uninstalling user's data folder and `%APPDATA%\ai.clauseo.desktop` without following links: a
+  junction or symbolic link inside them is removed as a link, and what it points at is left as it
+  is. A folder moved with `CLAUSEO_DATA_DIR` is never touched. The files the sandbox set aside
+  from a matter (`sandbox\set-aside`) are kept, and so is the `sandbox` folder when removing the
+  sandbox's set-up failed; a message names the kept folder, or the folder to delete by hand when
+  something could not be deleted.
 
 ### Intune (Win32 app)
 
