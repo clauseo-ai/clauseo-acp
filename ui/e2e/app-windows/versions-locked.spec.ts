@@ -1,8 +1,8 @@
 // fake_agent `claude-files-one-turn`, as versions.spec.ts. Word holds brief.txt open: the file is
-// open with no sharing and its owner file `~$brief.txt` sits beside it (word-hold.ts; since #409 an
-// owner file alone is stale). Restore to the import version is refused and writes nothing, and the
-// dialog says a paper is open in another program and offers Try again. Once Word lets go of the file
-// and the owner file is gone, Try again restores the matter.
+// open, shared for reading only, and its owner file `~$brief.txt` sits beside it (word-hold.ts;
+// since #409 an owner file alone is stale). Restore to the import version is refused and writes
+// nothing, and the dialog says a paper is open in another program and offers Try again. Once Word
+// lets go of the file and the owner file is gone, Try again restores the matter.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -46,7 +46,8 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.fileChanged).toHaveCount(3);
   expect(readTree(scratch.matterDir)).toEqual(AFTER);
 
-  // Word opens brief.txt: it holds the file with no sharing, and its owner file appears beside it.
+  // Word opens brief.txt: it holds the file, sharing reading only, and its owner file appears
+  // beside it.
   const held = await wordLock.hold({
     document: "brief.txt",
     owner: OWNER,
@@ -66,8 +67,8 @@ test("Restore waits while Word holds a file, then lands once it is closed", asyn
   await expect(w.dialog).toContainText(LOCKED_LINE);
   expect(existsSync(join(scratch.matterDir, OWNER))).toBe(true);
 
-  // Closed in Word: the file is let go and the owner file goes. Nothing moved while it was held
-  // (the held file cannot be read until then), and Try again goes through.
+  // Closed in Word: the file is let go and the owner file goes. Nothing moved while it was held,
+  // and Try again goes through.
   await held.release();
   expect(readTree(scratch.matterDir)).toEqual(AFTER);
   await w.dialogTryAgain.click();

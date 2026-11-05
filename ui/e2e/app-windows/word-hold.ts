@@ -2,12 +2,12 @@
 // Since #409 an owner file `~$…` alone is stale on Windows: it counts only while WINWORD.EXE runs
 // or while the document cannot be opened with no sharing (crates/matters/src/locks.rs,
 // `held_open`). So a hold does what Word does: a background PowerShell keeps the document open
-// with no sharing, and the owner file sits beside it. Releasing ends that process and removes the
-// owner file. The fixture's `wordLock` releases every hold still on in teardown, so a failed spec
-// leaves no locked file and no stray process behind.
+// for writing, sharing it for reading only, and the owner file sits beside it. Releasing ends that
+// process and removes the owner file. The fixture's `wordLock` releases every hold still on in
+// teardown, so a failed spec leaves no locked file and no stray process behind.
 //
-// While a hold is on, the document cannot be read either (no sharing), so a spec reads the folder
-// only once it has released the hold.
+// Like Word, a hold lets others read the document but not write it: the app can still read it to
+// show a restore, and its writes are refused. A spec checks the folder once it has released.
 //
 // The script and the process handling run on any OS (word-hold.test.ts, with node standing in for
 // PowerShell); holding a real document needs Windows.
@@ -35,12 +35,13 @@ export function psQuote(text: string): string {
 }
 
 /**
- * The PowerShell that opens `path` for read and write with no sharing, prints {@link HELD_LINE},
- * and keeps it open for `seconds`. A failed open stops it before the line, with an error.
+ * The PowerShell that opens `path` for read and write, sharing reading only, prints
+ * {@link HELD_LINE}, and keeps it open for `seconds`. A failed open stops it before the line,
+ * with an error.
  */
 export function holdScript(path: string, seconds = HOLD_SECONDS): string {
   return `$ErrorActionPreference = 'Stop'
-$f = [IO.File]::Open(${psQuote(path)}, 'Open', 'ReadWrite', 'None')
+$f = [IO.File]::Open(${psQuote(path)}, 'Open', 'ReadWrite', 'Read')
 [Console]::Out.WriteLine('${HELD_LINE}')
 [Console]::Out.Flush()
 Start-Sleep -Seconds ${seconds}
@@ -149,8 +150,9 @@ export interface WordHoldOptions {
 }
 
 /**
- * Word opens `document`: a PowerShell holds it with no sharing (waited on until it says so), and
- * the owner file appears beside it. If writing the owner file fails, the holder is ended.
+ * Word opens `document`: a PowerShell holds it, sharing reading only (waited on until it says
+ * so), and the owner file appears beside it. If writing the owner file fails, the holder is
+ * ended.
  */
 export async function holdWord(options: WordHoldOptions): Promise<WordHold> {
   const holder = await startHolder("powershell", [
@@ -177,7 +179,7 @@ export async function holdWord(options: WordHoldOptions): Promise<WordHold> {
 /** Word holding documents in one folder, for a spec (the fixture's `wordLock`). */
 export interface WordLock {
   /**
-   * Word opens `document`: it is held open with no sharing and `owner` appears beside it.
+   * Word opens `document`: it is held open, shared for reading only, and `owner` appears beside it.
    * Resolves once the document is held.
    */
   hold(options: Omit<WordHoldOptions, "folder">): Promise<WordHold>;

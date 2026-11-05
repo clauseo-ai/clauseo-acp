@@ -1,5 +1,5 @@
 // The hold script and the holder's lifetime, on any OS: node stands in for PowerShell. Holding a
-// real document with no sharing needs Windows (word-locked.spec.ts, versions-locked.spec.ts).
+// real document needs Windows (word-locked.spec.ts, versions-locked.spec.ts).
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,11 +44,11 @@ test("psQuote doubles single quotes, so a path cannot end the string", () => {
   expect(psQuote("O'Brien's $x `n.docx")).toBe("'O''Brien''s $x `n.docx'");
 });
 
-test("the script opens the document with no sharing, then says so, then waits", () => {
+test("the script opens the document sharing reading only, then says so, then waits", () => {
   const script = holdScript(String.raw`C:\m\O'Neil.docx`, 5);
   expect(script).toContain("$ErrorActionPreference = 'Stop'");
   expect(script).toContain(
-    String.raw`[IO.File]::Open('C:\m\O''Neil.docx', 'Open', 'ReadWrite', 'None')`,
+    String.raw`[IO.File]::Open('C:\m\O''Neil.docx', 'Open', 'ReadWrite', 'Read')`,
   );
   expect(script).toContain(`WriteLine('${HELD_LINE}')`);
   expect(script).toContain("Start-Sleep -Seconds 5");
