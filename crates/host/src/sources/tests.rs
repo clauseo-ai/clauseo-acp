@@ -537,3 +537,32 @@ fn the_url_cap_is_on_the_logged_url() {
     assert_eq!(lengthened.chars().count(), 2_000);
     assert_eq!(record_url(&lengthened), None);
 }
+
+#[test]
+fn a_title_drops_every_format_character_and_folds_whitespace_like_an_agent_name() {
+    use super::clean_title;
+    // Zero-width space, word joiner, BOM, soft hyphen and a tag character go, as in agent names.
+    assert_eq!(
+        clean_title("Sup\u{200B}reme\u{2060} Court\u{FEFF} Re\u{AD}port\u{E0041}"),
+        "Supreme Court Report"
+    );
+    // The bidi controls go too, and whitespace runs, tabs and line breaks become one space.
+    assert_eq!(clean_title("  a\u{202E}b\t\n\n c\u{2066}  "), "ab c");
+    // The zero width joiner stays, as emoji and scripts need it.
+    assert_eq!(clean_title("a\u{200D}b"), "a\u{200D}b");
+}
+
+#[test]
+fn a_url_with_any_format_character_is_refused() {
+    use super::is_safe_url_text;
+    assert!(is_safe_url_text("https://sci.gov.in/judgment"));
+    for bad in [
+        "https://sci.gov.in/\u{200B}x",
+        "https://sci.gov.in/\u{2060}x",
+        "https://sci.gov.in/\u{FEFF}x",
+        "https://sci.gov.in/\u{E0041}x",
+        "https://sci.gov.in/\u{202E}x",
+    ] {
+        assert!(!is_safe_url_text(bad), "{bad:?}");
+    }
+}

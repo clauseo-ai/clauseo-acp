@@ -156,35 +156,35 @@ pub(crate) fn output_text(output: &Value) -> String {
     }
 }
 
-/// A title as the log keeps it: control characters and the bidi formatting characters a page
-/// could spoof the sources list with are dropped, and the rest is trimmed.
+/// A title as the log keeps it, cleaned as the agent's name is (`agent/title.rs`): whitespace
+/// runs (tabs and line breaks too) become one space, control characters and the format
+/// characters (Unicode Cf: bidi controls, zero-width space, word joiner, BOM, tag characters) are
+/// dropped, and the ends are trimmed.
 pub(crate) fn clean_title(text: &str) -> String {
-    text.chars()
-        .filter(|c| {
-            !c.is_control()
-                && !matches!(
-                    c,
-                    '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
-                )
-        })
-        .collect::<String>()
-        .trim()
-        .to_owned()
+    let mut cleaned = String::new();
+    let mut space = false;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            space = true;
+        } else if !(ch.is_control() || crate::agent::title::is_format(ch)) {
+            if space && !cleaned.is_empty() {
+                cleaned.push(' ');
+            }
+            space = false;
+            cleaned.push(ch);
+        }
+    }
+    cleaned
 }
 
 /// Whether a URL holds only characters a record may keep: no whitespace, no control character
-/// (C0, DEL, C1), and no bidi control (U+200E, U+200F, U+061C, U+202A to U+202E, U+2066 to U+2069).
+/// (C0, DEL, C1), and no format character (Unicode Cf, as `agent/title.rs` lists them: the bidi
+/// controls, zero-width space, word joiner, BOM, tag characters).
 /// A URL with one is refused, never cleaned: a bidi control could make a link read as another
 /// address, and a space or control character is no part of a URL.
 pub(crate) fn is_safe_url_text(url: &str) -> bool {
-    !url.chars().any(|c| {
-        c.is_whitespace()
-            || c.is_control()
-            || matches!(
-                c,
-                '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
-            )
-    })
+    !url.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || crate::agent::title::is_format(c))
 }
 
 /// The URL a record keeps, when `text` is one: an explicit `http://` or `https://` (in either
