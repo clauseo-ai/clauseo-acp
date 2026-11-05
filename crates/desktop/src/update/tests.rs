@@ -210,32 +210,42 @@ fn windows_is_per_machine_under_program_files_or_with_the_machine_s_uninstall_ke
 }
 
 #[test]
-fn a_mac_app_whose_folder_the_user_cannot_write_is_a_read_only_location() {
+fn a_mac_app_the_user_cannot_move_out_of_its_folder_is_a_read_only_location() {
     let exe = Path::new("/Applications/Clauseo.app/Contents/MacOS/Clauseo");
-    assert_eq!(bundle_folder(exe), Some(Path::new("/Applications")));
+    let folder = Path::new("/Applications");
+    let app = Path::new("/Applications/Clauseo.app");
+    assert_eq!(bundle_folder(exe), Some(folder));
     let asked = std::cell::RefCell::new(Vec::new());
-    let writable = |answer: bool| {
+    // Writable: the paths in `yes`.
+    let writable = |yes: &'static [&'static str]| {
         let asked = &asked;
-        move |folder: &Path| {
-            asked.borrow_mut().push(folder.to_path_buf());
-            answer
+        move |path: &Path| {
+            asked.borrow_mut().push(path.to_path_buf());
+            yes.iter().any(|yes| Path::new(yes) == path)
         }
     };
+    let both = &["/Applications", "/Applications/Clauseo.app"][..];
     assert_eq!(
-        mac_kind(Some(exe), writable(true)),
+        mac_kind(Some(exe), writable(both)),
         InstallKind::CurrentUser
     );
-    assert_eq!(
-        mac_kind(Some(exe), writable(false)),
-        InstallKind::ReadOnlyLocation
-    );
-    assert_eq!(
-        asked.borrow().as_slice(),
-        [
-            PathBuf::from("/Applications"),
-            PathBuf::from("/Applications")
-        ]
-    );
+    let mut asked_now: Vec<PathBuf> = asked.borrow_mut().drain(..).collect();
+    asked_now.sort();
+    assert_eq!(asked_now, [folder.to_path_buf(), app.to_path_buf()]);
+    // The plugin moves the old bundle out of its folder: that needs both writable. A root-owned
+    // `.app` (an MDM install) in an admin-writable `/Applications` would ask for an
+    // administrator.
+    for yes in [
+        &["/Applications"][..],
+        &["/Applications/Clauseo.app"][..],
+        &[][..],
+    ] {
+        assert_eq!(
+            mac_kind(Some(exe), writable(yes)),
+            InstallKind::ReadOnlyLocation,
+            "{yes:?}"
+        );
+    }
     // Not inside an `.app`: nothing the plugin could swap.
     for exe in [
         "/Users/a/clauseo/target/release/clauseo-desktop",

@@ -7,7 +7,8 @@
 //!   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo` exists (64-bit view),
 //!   which the per-machine installer writes. Otherwise per user.
 //! - **macOS:** a read-only location when the user cannot write the folder holding `Clauseo.app`
-//!   (`access(W_OK)`): the plugin would ask for an administrator to swap it. Otherwise per user.
+//!   or the `.app` itself (`access(W_OK)`): the plugin moves the old bundle out of its folder,
+//!   which needs both, and would otherwise ask for an administrator. Otherwise per user.
 //! - **Linux:** always a package (its host never gets this updater anyway).
 
 #[cfg(windows)]
@@ -59,13 +60,17 @@ pub(super) fn windows_kind(
     }
 }
 
-/// macOS: per user when `writable` says the folder holding the `.app` that `exe` runs from can
-/// be written; a read-only location when it cannot, or when `exe` is not inside an `.app`
-/// (nothing the plugin could swap).
+/// macOS: per user when `writable` says both the `.app` that `exe` runs from and the folder
+/// holding it can be written; a read-only location otherwise, or when `exe` is not inside an
+/// `.app` (nothing the plugin could swap). Moving a directory to another folder needs write
+/// permission on the directory itself, so a root-owned `.app` (an MDM install) in an
+/// admin-writable `/Applications` is read-only to its user.
 #[cfg(any(test, target_os = "macos"))]
 pub(super) fn mac_kind(exe: Option<&Path>, writable: impl Fn(&Path) -> bool) -> InstallKind {
-    match exe.and_then(bundle_folder) {
-        Some(folder) if writable(folder) => InstallKind::CurrentUser,
+    match exe.and_then(bundle) {
+        Some(app) if app.parent().is_some_and(&writable) && writable(app) => {
+            InstallKind::CurrentUser
+        }
         _ => InstallKind::ReadOnlyLocation,
     }
 }
@@ -74,13 +79,20 @@ pub(super) fn mac_kind(exe: Option<&Path>, writable: impl Fn(&Path) -> bool) -> 
 /// `/Applications/Clauseo.app/Contents/MacOS/Clauseo`. None when `exe` is not inside an `.app`.
 #[cfg(any(test, target_os = "macos"))]
 pub(super) fn bundle_folder(exe: &Path) -> Option<&Path> {
+    bundle(exe)?.parent()
+}
+
+/// The bundle `exe` runs from: `/Applications/Clauseo.app` for
+/// `/Applications/Clauseo.app/Contents/MacOS/Clauseo`. None when `exe` is not inside an `.app`.
+#[cfg(any(test, target_os = "macos"))]
+fn bundle(exe: &Path) -> Option<&Path> {
     let macos = exe.parent()?;
     let contents = macos.parent()?;
     let app = contents.parent()?;
     let is_bundle = macos.file_name()? == "MacOS"
         && contents.file_name()? == "Contents"
         && app.extension()? == "app";
-    is_bundle.then_some(app.parent()?)
+    is_bundle.then_some(app)
 }
 
 /// Whether this user may write `folder` (`access(2)` with `W_OK`, which asks the kernel, so ACLs
