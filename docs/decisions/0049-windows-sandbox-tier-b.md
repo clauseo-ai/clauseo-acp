@@ -340,13 +340,14 @@ Each target gets `ClauseoSandboxUsers`' `DenyWrite`, inherited to the tree. The 
 `icacls` `(W,DC)`; the code writes `0xd0156`, which adds `DELETE`, `WRITE_DAC` and `WRITE_OWNER`.
 Tools running with the full mask are not measured yet: PR4's VM test must confirm them.
 
-Each pool user owns its `LocalLow`, and an owner always has `WRITE_DAC`, so that `LocalLow` also
-gets an `OWNER RIGHTS` deny, which replaces the owner's implied rights. `DeviceSync` is owned by
-`SYSTEM`, which Windows writes to, so it gets none. The grants are written, then walked down with
-the pool group and every pool user watched: a child a pool user owns is repaired (its explicit
-allows stripped), as the launch walk does. A child the lawyer owns, or one the walk can't repair,
-fails its target. A failed walk keeps the target's deny, which still blocks new files.
-Each target rolls back only its own grants, and only when an add fails.
+`LocalLow` is `SYSTEM`'s, but the files a pool user makes in it are the pool user's, and an owner
+always has `WRITE_DAC`. So each `LocalLow` also gets an inherit-only `OWNER RIGHTS` deny
+(`OI|CI|IO`, `0x0b`): what is below it loses the owner's implied `WRITE_DAC` and `WRITE_OWNER`, and
+`LocalLow` itself keeps `SYSTEM`'s rights. `DeviceSync` is `SYSTEM`'s too, and gets none. The grants
+are written, then walked down with the pool group and every pool user watched: a child a pool user
+owns is repaired (its explicit allows stripped), as the launch walk does. A child the lawyer owns,
+or one the walk can't repair, fails its target. A failed walk keeps the target's deny, which still
+blocks new files. Each target rolls back only its own grants, and only when an add fails.
 
 A `LocalLow` exists only after its pool user's first logon, and Windows makes it `SYSTEM`'s, so PR4
 logs each pool user on once, with its profile loaded, before it applies these. A missing
@@ -354,7 +355,8 @@ logs each pool user on once, with its profile loaded, before it applies these. A
 
 PR4's elevated set-up applies these after it creates each pool user's profile and logs the user
 on, treats any failed target as a set-up failure, and keeps what was written. Uninstall removes
-them (`shared_writes.rs`).
+the `LocalLow` denies before it deletes each profile, then the account, then `DeviceSync`'s deny
+(`shared_writes.rs`).
 
 ## Consequences
 

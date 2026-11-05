@@ -60,6 +60,10 @@ fn entry_flags_follow_its_inheritance_and_target() {
         0x1 | 0x8 | 0x4
     );
     assert!(AceSpec::for_grant(&files, false).is_err());
+    // Below a folder: object inherit, container inherit and inherit only (0x0b), not the folder.
+    let below = grant(OTHER, Rights::DenyWrite, Inherit::Below);
+    assert_eq!(AceSpec::for_grant(&below, true).unwrap().flags, 0x0b);
+    assert!(AceSpec::for_grant(&below, false).is_err());
     let deny = AceSpec::for_grant(&grant(OTHER, Rights::DenyReadWrite, Inherit::Tree), true);
     assert_eq!(deny.unwrap().kind, DENIED);
     let label = AceSpec::for_grant(&grant(LOW_LABEL_SID, Rights::LowLabel, Inherit::Tree), true);

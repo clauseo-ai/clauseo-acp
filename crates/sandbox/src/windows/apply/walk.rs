@@ -224,7 +224,7 @@ pub(super) fn walks(plan: &AdmittedPlan, unwalked: impl Fn(usize) -> bool) -> Ve
 pub(super) fn reach_of(inherit: Inherit) -> Reach {
     match inherit {
         Inherit::FilesInFolder => Reach::FilesOnly,
-        Inherit::Tree | Inherit::ThisOnly => Reach::Tree,
+        Inherit::Tree | Inherit::Below | Inherit::ThisOnly => Reach::Tree,
     }
 }
 

@@ -154,6 +154,8 @@ pub enum Inherit {
     /// Only the files directly in the folder: object inherit, inherit only, no propagation. The
     /// folder itself and every folder in it are untouched.
     FilesInFolder,
+    /// Everything below the folder, not the folder: object and container inherit, inherit only.
+    Below,
 }
 
 /// One permission entry to write. Made only inside this crate: by [`plan`], or read back from

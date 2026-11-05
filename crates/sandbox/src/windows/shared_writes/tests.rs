@@ -173,9 +173,11 @@ fn local_low_gets_an_owner_rights_deny_right_after_the_groups() {
         assert_eq!(grant.path(), target.as_path());
         assert_eq!(grant.rights(), Rights::DenyWrite);
         assert_eq!(grant.rights().mask(), 0x000d_0156);
-        assert_eq!(grant.inherit(), Inherit::Tree);
         assert_eq!(grant.kind(), PathKind::SharedWrite);
     }
+    // The group's deny covers LocalLow and below; the owner's is inherit-only, for the children.
+    assert_eq!(grants[0].inherit(), Inherit::Tree);
+    assert_eq!(grants[1].inherit(), Inherit::Below);
 }
 
 #[test]
@@ -442,7 +444,14 @@ mod ntfs {
         let (group_sid, owner_sid) = (GROUP_SID, OWNER_RIGHTS_SID);
         assert_deny(&target, group_sid, false);
         assert_deny(&target, owner_sid, false);
+        // Inherit-only: the folder's own entry is OI|CI|IO, so SYSTEM's rights on LocalLow stay.
+        assert_eq!(
+            subject_entries(&target, owner_sid),
+            [(DENIED, 0x0b, 0x000d_0156)]
+        );
         // The folder and the file were there before the apply: the walk gives them both denies.
+        // A child folder's inherited copy applies to the child itself, not as inherit-only.
+        assert_eq!(subject_entries(&child, owner_sid)[0].1 & 0x8, 0);
         for path in [&child, &file] {
             assert_deny(path, group_sid, true);
             assert_deny(path, owner_sid, true);
