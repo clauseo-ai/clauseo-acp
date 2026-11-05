@@ -1,5 +1,8 @@
-//! Which listed process is the one asked for by name, for macOS's `named` (`macos.rs`), as a
-//! plain function of what libproc answered, so every row is tested on every OS.
+//! Which listed processes are the ones asked for by name, for macOS's `named` (`macos.rs`), as
+//! plain functions of what libproc answered (the [`Reader`] seam), so every row is tested on
+//! every OS.
+
+use std::time::SystemTime;
 
 /// `MAXCOMLEN`: how many bytes of the executable's name the kernel keeps as `p_comm`, which
 /// `PROC_PIDT_SHORTBSDINFO`'s `pbsi_comm` carries (`Microsoft Word`, 14 bytes, fits).
@@ -60,6 +63,104 @@ pub(crate) fn kind(
         None if gone() => Kind::Other,
         None => Kind::Unknown,
     }
+}
+
+/// What one per-process libproc read answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Read<T> {
+    /// The call answered in full.
+    Got(T),
+    /// It failed with `ESRCH`: no process with the pid can be read now. It exited since the
+    /// listing, whether it is gone or waits to be reaped (`proc_pidinfo` and `proc_pidpath`
+    /// look a pid up with `proc_find`, which skips zombies and exiting processes, while
+    /// `kill(pid, 0)` still answers a zombie), so it is skipped.
+    Gone,
+    /// It failed another way (`EPERM`, a short answer, an unreadable path): the process may run.
+    Failed,
+}
+
+impl<T> Read<T> {
+    /// The answer, if the call gave one.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn got(self) -> Option<T> {
+        match self {
+            Self::Got(value) => Some(value),
+            Self::Gone | Self::Failed => None,
+        }
+    }
+}
+
+/// What `PROC_PIDT_SHORTBSDINFO` said of a process, owned: [`Short`] borrows from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Seen {
+    pub(crate) comm: Vec<u8>,
+    pub(crate) exited: bool,
+}
+
+/// What `PROC_PIDTBSDINFO` said of a match: its start, or that it has exited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Start {
+    Running(SystemTime),
+    Exited,
+}
+
+/// The per-process reads [`starts_named`] makes: libproc on macOS, a script in the tests.
+pub(crate) trait Reader {
+    /// The file name of the executable of `pid` (`proc_pidpath`), empty when the path has none.
+    fn file(&self, pid: u32) -> Read<Vec<u8>>;
+    /// `PROC_PIDT_SHORTBSDINFO` of `pid`.
+    fn short(&self, pid: u32) -> Read<Seen>;
+    /// Whether no process `pid` exists now (`kill(pid, 0)` answers `ESRCH`).
+    fn gone(&self, pid: u32) -> bool;
+    /// `PROC_PIDTBSDINFO` of `pid`, as its start.
+    fn start(&self, pid: u32) -> Read<Start>;
+}
+
+/// The starts of the processes among `pids` (`None`: the listing failed) whose executable's file
+/// name is `name`, read through `reader`. Each pid is read by path; one with no path by its
+/// short info; each is decided by [`kind`], and a match is read for its start:
+/// - a read that answers [`Read::Gone`] skips the pid, at any step: it exited since the listing;
+/// - a match whose start read fails another way skips the pid if `gone` says it is gone, else
+///   makes the answer `None`, as does a [`Kind::Unknown`]: a process that may be the one runs
+///   and cannot be read, so the caller cannot tell.
+pub(crate) fn starts_named(
+    name: &str,
+    pids: Option<Vec<u32>>,
+    reader: &impl Reader,
+) -> Option<Vec<SystemTime>> {
+    let mut starts = Vec::new();
+    for pid in pids? {
+        let file = match reader.file(pid) {
+            Read::Got(file) => Some(file),
+            Read::Gone => continue,
+            Read::Failed => None,
+        };
+        let seen = if file.is_none() {
+            match reader.short(pid) {
+                Read::Got(seen) => Some(seen),
+                Read::Gone => continue,
+                Read::Failed => None,
+            }
+        } else {
+            None
+        };
+        let short = seen.as_ref().map(|seen| Short {
+            comm: &seen.comm,
+            exited: seen.exited,
+        });
+        match kind(name, file.as_deref(), short, || reader.gone(pid)) {
+            Kind::Named => {}
+            Kind::Other => continue,
+            Kind::Unknown => return None,
+        }
+        match reader.start(pid) {
+            Read::Got(Start::Running(start)) => starts.push(start),
+            Read::Got(Start::Exited) | Read::Gone => {}
+            Read::Failed if reader.gone(pid) => {}
+            Read::Failed => return None,
+        }
+    }
+    Some(starts)
 }
 
 #[cfg(test)]
