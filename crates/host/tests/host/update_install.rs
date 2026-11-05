@@ -455,3 +455,30 @@ fn exit_of_exited(mut host: crate::support::Running, exit: HostExit) -> HostExit
         .unwrap_or_else(|e| panic!("join: {e}"));
     exit
 }
+
+#[test]
+fn a_quit_while_the_marker_is_written_leaves_no_marker_and_no_failure() {
+    // Review of #456: the shutdown overtakes the install while its marker is being written. No
+    // install happens, so the next start must find no marker, report no failed install and
+    // keep the download.
+    let dir = Dir::new("update_quit_during_marker", &[]);
+    let fake = FakeUpdater::offering(&dir);
+    let host = start_updating(&dir, 0, &fake);
+    host.ok(HostCommand::CheckForUpdate {});
+    until_ready(&host);
+    host.ok(install(InstallWhen::Now));
+    wait("shutdown", host.handle.shutdown()).unwrap();
+    match exit_of(host) {
+        HostExit::Stopped => {
+            assert_eq!(marker_text(&dir), None);
+            let quiet = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
+            let host = start_updating(&dir, 1, &quiet);
+            let state = view(&host).state;
+            assert!(!matches!(state, UpdateState::Failed { .. }), "{state:?}");
+            host.shutdown();
+        }
+        // The marker's write won the race and the install began first: that run installs.
+        HostExit::Install(_) => assert_eq!(marker_text(&dir).as_deref(), Some(INSTALLING)),
+        other => panic!("the host ended {other:?}"),
+    }
+}
