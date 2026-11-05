@@ -23,8 +23,11 @@
 //!   needs from around the matter as [`Surroundings`]. The writes go through [`AclWriter`]:
 //!   `NtfsAcl` on Windows (`acl.rs`, after Codex's ACL code; `PROVENANCE.md`), whose
 //!   descriptors and entries are edited as bytes in `acl_bytes.rs`.
-//! - [`set_aside_with`] (`set_aside.rs`): protected names the matter's pool user made, moved to
-//!   `<state>\set-aside\<timestamp>\` before the next launch.
+//! - The set-aside (`set_aside.rs`): each protected name at the matter's root recorded by file
+//!   ID at launch (`before_launch`), and every one new or changed set aside when the agent exits
+//!   (`after_session`, or the next launch's check after a session that didn't end), whoever
+//!   owns it, into `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\`, each entry in a
+//!   manifest ([`SetAsideEntry`]) that `list_set_aside` shows and `restore_set_aside` undoes.
 //!
 //! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
 //! no Windows call, so they build and are tested on every OS; the folder check, the registry and
@@ -88,9 +91,11 @@ pub use folder::folder_support;
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
+pub use set_aside::{Entry as SetAsideEntry, Reason as SetAsideReason, SetAsideFailure};
 #[cfg(windows)]
-pub use set_aside::set_aside_protected;
-pub use set_aside::set_aside_with;
+pub use set_aside::{
+    after_session, before_launch, list_set_aside, restore_set_aside, set_aside_path,
+};
 pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
