@@ -43,10 +43,16 @@ pub fn read_update_marker(locations: &Locations) -> Option<UpdateMarker> {
 /// Writes `marker` to `update.json` whole: a temporary file beside it, synced, then a rename, so
 /// a reader sees the old file or the new one (`Files::write_atomic`, as `settings.json`); then
 /// the data folder is synced, so the rename itself survives a power cut during the install.
+/// Once the rename has happened the marker is on disk, so a failed sync is logged by its kind
+/// and is not the write's failure: reporting one would count a failed install the next start
+/// counts again.
 pub(crate) fn write_marker(locations: &Locations, marker: &UpdateMarker) -> io::Result<()> {
     let bytes = serde_json::to_vec(marker).map_err(io::Error::other)?;
     SystemFiles.write_atomic(&locations.update_marker(), &bytes)?;
-    crate::write::sync_dir(locations.data_dir())
+    if let Err(error) = crate::write::sync_dir(locations.data_dir()) {
+        tracing::warn!(kind = %error.kind(), "the data folder was not synced after update.json");
+    }
+    Ok(())
 }
 
 /// Deletes `update.json`; one already gone is fine.

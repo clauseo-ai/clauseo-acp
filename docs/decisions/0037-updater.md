@@ -217,7 +217,9 @@ call before `install` stays a no-op seam until S22 merges.
   and signature again and refuses it. Start-up removes everything else in `updates/`, and that
   download too when the marker says its install failed.
 - **The marker** is written through a temporary file, synced, renamed, then the data folder is
-  synced, so the rename survives a power cut during the install.
+  synced, so the rename survives a power cut during the install. A failed folder sync is logged
+  and the install goes ahead: the marker is on disk, and reporting a failed write would count a
+  failure the next start counts again.
 - **Commands.** `CheckForUpdate`, `InstallUpdate` and `CancelScheduledUpdate` answer `Done` with
   no receipt, as `InstallBrowser` does: their state lives in memory. `InstallUpdate`'s answer
   goes out before the host starts to stop. `SetUpdateMode` is checked by the machine, written to
