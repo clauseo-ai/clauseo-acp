@@ -260,6 +260,58 @@ source: crates/settings/src/schema/tests.rs
       },
       "type": "object"
     },
+    "SkillsExtra": {
+      "description": "Which packs beyond Clauseo's own may load.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "None.",
+          "type": "string"
+        },
+        {
+          "const": "curated",
+          "description": "Only those whose id is in `skills.curated`.",
+          "type": "string"
+        },
+        {
+          "const": "any",
+          "description": "Any pack the lawyer turns on.",
+          "type": "string"
+        }
+      ]
+    },
+    "SkillsSettings": {
+      "description": "The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are\nsecurity keys: a policy source that cannot be read, or a policy value that does not type,\nlocks `extra` `off`, `allow_scripts` `false` and `curated` empty. `curated` is set by\npolicy only: a `settings.json` value is ignored with a warning.",
+      "properties": {
+        "allow_scripts": {
+          "default": false,
+          "description": "Whether a pack may carry scripts (copied, never run). Off by default.",
+          "type": "boolean"
+        },
+        "curated": {
+          "default": [],
+          "description": "The pack ids `curated` admits. Set by policy only; empty by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "The packs turned on, by id, each with the hash it had then (`sha256:<64 lowercase hex>`):\na pack whose files no longer hash to it is not loaded. Empty by default.",
+          "type": "object"
+        },
+        "extra": {
+          "$ref": "#/$defs/SkillsExtra",
+          "default": "off",
+          "description": "Which packs beyond Clauseo's own may load. `off` by default."
+        }
+      },
+      "type": "object"
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -412,6 +464,16 @@ source: crates/settings/src/schema/tests.rs
         "crash_reports": false
       },
       "description": "What Clauseo may count and send about its own use (decision record 0036)."
+    },
+    "skills": {
+      "$ref": "#/$defs/SkillsSettings",
+      "default": {
+        "allow_scripts": false,
+        "curated": [],
+        "enabled": {},
+        "extra": "off"
+      },
+      "description": "The extra skill packs Clauseo may load (decision record 0040)."
     },
     "tools": {
       "$ref": "#/$defs/ToolsSettings",

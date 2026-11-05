@@ -19,7 +19,7 @@ fn kinds(key: &str) -> Option<Kind> {
 
 /// The JSON values, or the warnings, of one registry value.
 fn convert(key: &str, value: RegValue) -> Result<Value, WarningKind> {
-    let (mut raws, refused, mut warnings) = raw_values(vec![(key.to_owned(), value)], kinds);
+    let (mut raws, refused, mut warnings, _, _) = raw_values(vec![(key.to_owned(), value)], kinds);
     match (raws.pop(), warnings.pop()) {
         (Some(raw), None) => {
             assert_eq!(refused, Vec::<String>::new());

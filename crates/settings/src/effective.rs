@@ -2,17 +2,26 @@
 //! changes at runtime through [`Effective::apply_ui_patch`], the `tools` section through
 //! [`Effective::apply_tools_patch`], the `privacy` section through
 //! [`Effective::apply_privacy_patch`], `update.mode` through [`Effective::apply_update_mode`];
-//! one agent's launch entry through [`Effective::set_agent_launch`], and one agent's plan
-//! through [`Effective::set_plan`].
+//! one agent's launch entry through [`Effective::set_agent_launch`], one agent's plan
+//! through [`Effective::set_plan`], and one skill pack's entry in `skills.enabled` through
+//! [`Effective::set_skill_pack`].
 
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(test)]
 mod plans_tests;
 #[cfg(test)]
+mod policy_gaps_tests;
+#[cfg(test)]
+mod policy_known_section_tests;
+#[cfg(test)]
+mod policy_shape_tests;
+#[cfg(test)]
 mod privacy_tests;
 #[cfg(test)]
 mod set_tests;
+#[cfg(test)]
+mod skills_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -28,10 +37,12 @@ use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
+use crate::lock_reason::{self, LockReason};
 use crate::plans;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::privacy::PrivacyPatch;
 use crate::schema::{AgentLaunch, McpServerLaunch, Plan, Settings};
+use crate::skills;
 use crate::tools::ToolsPatch;
 use crate::ui::UiPatch;
 use crate::update::UpdateChoice;
@@ -67,6 +78,8 @@ pub struct Effective {
     policy: PolicyStatus,
     policy_present: bool,
     locked: BTreeSet<String>,
+    /// Why keys are locked, for the locks a lawyer could not guess from the policy itself.
+    reasons: Vec<LockReason>,
     warnings: Vec<Warning>,
 }
 
@@ -82,10 +95,12 @@ impl Effective {
     /// a security key (`leaf::SECURITY_KEYS`), with a warning: fail closed (Rohan, 2026-10-31). A
     /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
     /// `tools` and `privacy` key `false`, `update.mode` `none`, each `install` key unset, no
-    /// plan at all), with a warning, since its value is unknown (2026-11-02, R21; 0036; R23;
-    /// 0048). A plan a stronger source set stands. A policy `true` for a `privacy` key is
-    /// ignored with a warning and locks nothing: a policy can only turn those off (0036). A
-    /// policy may set `update.mode` to any value, and it locks.
+    /// plan at all, `skills.extra` `off`, `skills.allow_scripts` `false`, `skills.curated`
+    /// empty), with a warning, since its value is unknown (2026-11-02, R21; 0036; R23; 0048;
+    /// 0040). A `settings.json` value for a key only a policy sets (`skills.curated`) is
+    /// ignored with a warning. A plan a stronger source set stands. A policy `true` for a
+    /// `privacy` key is ignored with a warning and locks nothing: a policy can only turn those
+    /// off (0036). A policy may set `update.mode` to any value, and it locks.
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -99,28 +114,46 @@ impl Effective {
         let mut status = PolicyStatus::default();
         let mut locked = BTreeSet::new();
         let mut policy_present = false;
+        let mut reasons = Vec::new();
         for source in policy {
             match source.read() {
                 PolicyRead::Absent => {}
                 PolicyRead::Unreadable(error) => {
                     policy_present = true;
+                    let keys = lock_security_keys(
+                        source.name(),
+                        &mut settings,
+                        &mut locked,
+                        &mut warnings,
+                    );
+                    reasons.extend(lock_reason::unreadable(&error, source.name(), keys));
                     status.push_error(source.name(), error);
-                    lock_security_keys(source.name(), &mut settings, &mut locked, &mut warnings);
                 }
                 PolicyRead::Read(values) => {
                     policy_present = true;
                     if values.sets_a_value() {
                         status.push_applied(source.name());
                     }
+                    let misnamed = values.reasons().to_vec();
+                    let mut refused = Vec::new();
+                    let places = values.places().to_vec();
                     let (leaves, source_warnings) = values.into_parts();
                     warnings.extend(source_warnings);
-                    for leaf in leaves {
+                    for (at, leaf) in leaves.into_iter().enumerate() {
                         if leaf.turns_on_an_off_only_key() {
                             warnings.push(policy_on_ignored(source.name(), leaf.key()));
                             continue;
                         }
-                        lock_and_apply(leaf, &mut settings, &mut locked);
+                        let (key, value) = (leaf.key(), leaf.is_value());
+                        if lock_and_apply(leaf, &mut settings, &mut locked) && !value {
+                            let place = places
+                                .iter()
+                                .find_map(|(known, place)| (*known == key).then_some(*place))
+                                .unwrap_or(at + 1);
+                            refused.push((key, place));
+                        }
                     }
+                    reasons.extend(lock_reason::of_source(misnamed, refused, source.name()));
                 }
             }
         }
@@ -130,6 +163,7 @@ impl Effective {
             policy: status,
             policy_present,
             locked,
+            reasons,
             warnings,
         }
     }
@@ -349,6 +383,51 @@ impl Effective {
         Ok(())
     }
 
+    /// Turns the skill pack `id` on with the hash its files have now, or with `None` off: saves
+    /// the entry `skills.enabled.<id>` to `settings.json` through `files` (or removes it), then
+    /// sets it in memory. While policy locks `skills.enabled` (a policy value) it is refused
+    /// with [`Error::Locked`]. An id that is no pack id, or a hash that is not
+    /// `sha256:<64 lowercase hex digits>`, is refused with [`Error::Refused`], naming the key and
+    /// never the value. Nothing is written then; a failed write returns the error with nothing
+    /// changed in memory. It checks no pack's files and no `skills.extra` or `skills.curated`:
+    /// the host does, before it calls this (decision record 0040).
+    pub fn set_skill_pack(
+        &mut self,
+        files: &dyn Files,
+        id: &str,
+        hash: Option<&str>,
+    ) -> Result<(), Error> {
+        const KEY: &str = "skills.enabled";
+        if self.is_locked(KEY) {
+            return Err(Error::Locked {
+                key: KEY.to_owned(),
+            });
+        }
+        let refused = |reason| Error::Refused {
+            key: KEY.to_owned(),
+            reason,
+        };
+        if !skills::is_pack_id(id) {
+            return Err(refused(skills::BAD_ID));
+        }
+        if hash.is_some_and(|hash| !skills::hash_ok(hash)) {
+            return Err(refused(skills::BAD_HASH));
+        }
+        user::write_skill_pack(&self.locations, files, id, hash)?;
+        match hash {
+            Some(hash) => {
+                self.settings
+                    .skills
+                    .enabled
+                    .insert(id.to_owned(), hash.to_owned());
+            }
+            None => {
+                self.settings.skills.enabled.remove(id);
+            }
+        }
+        Ok(())
+    }
+
     /// How to launch the agent `id`, if one is set.
     pub fn agent(&self, id: &str) -> Option<&AgentLaunch> {
         self.settings.agents.get(id)
@@ -422,6 +501,21 @@ impl Effective {
         self.locked.iter().map(String::as_str)
     }
 
+    /// Why policy locked keys without setting them, one [`LockReason`] per cause, in the order
+    /// found: a source that cannot be read, a value that does not type, a section this version
+    /// cannot read, or a `policy.json` that holds a key twice. A plain policy value has none.
+    /// No value and no path; a section only when it is a plain word.
+    pub fn lock_reasons(&self) -> &[LockReason] {
+        &self.reasons
+    }
+
+    /// The [`Effective::lock_reasons`] entry that locked `key`, if any.
+    pub fn lock_reason(&self, key: &str) -> Option<&LockReason> {
+        self.reasons
+            .iter()
+            .find(|reason| reason.keys.iter().any(|locked| locked == key))
+    }
+
     /// What loading worked round, in the order it was found.
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
@@ -446,15 +540,17 @@ fn policy_on_ignored(name: &str, key: String) -> Warning {
 
 /// Locks each security key a stronger source has not set off ([`leaf::refuse`]), for the
 /// unreadable source `name`: what it held for the key is unknown, so the user's value must not
-/// stand in for it, and the default may be on.
+/// stand in for it, and the default may be on. Returns the keys it locked.
 fn lock_security_keys(
     name: &str,
     settings: &mut Settings,
     locked: &mut BTreeSet<String>,
     warnings: &mut Vec<Warning>,
-) {
+) -> Vec<&'static str> {
+    let mut keys = Vec::new();
     for key in leaf::SECURITY_KEYS {
         if lock_and_apply(Leaf::Refused(key.to_owned()), settings, locked) {
+            keys.push(key);
             warnings.push(Warning {
                 origin: Origin::Store {
                     name: name.to_owned(),
@@ -467,6 +563,7 @@ fn lock_security_keys(
             });
         }
     }
+    keys
 }
 
 /// Locks `leaf`'s key and applies it as policy, unless a stronger source locked that key, or a

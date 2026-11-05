@@ -24,8 +24,8 @@
 //! [`Effective::policy`], [`Effective::policy_present`], [`Effective::is_locked`],
 //! [`Effective::warnings`], [`Effective::apply_ui_patch`], [`Effective::apply_tools_patch`],
 //! [`Effective::check_privacy_patch`], [`Effective::apply_privacy_patch`],
-//! [`Effective::apply_update_mode`], [`Effective::set_agent_launch`], [`Effective::set_plan`]
-//! and [`Effective::plan`]. Every input is a trait:
+//! [`Effective::apply_update_mode`], [`Effective::set_agent_launch`], [`Effective::set_plan`],
+//! [`Effective::set_skill_pack`] and [`Effective::plan`]. Every input is a trait:
 //! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
 //! and [`SystemFiles`] over the OS. The
 //! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
@@ -36,7 +36,8 @@
 //! with [`Effective::apply_privacy_patch`] the same way, and the lawyer's `update.mode` is an
 //! [`UpdateChoice`], applied with [`Effective::apply_update_mode`]. The host writes an
 //! installed agent's launch entry with [`Effective::set_agent_launch`] and a firm plan with
-//! [`Effective::set_plan`] (decision record 0048), never from a webview's choice. Everything
+//! [`Effective::set_plan`] (decision record 0048), never from a webview's choice, and turns a
+//! skill pack on or off with [`Effective::set_skill_pack`] (decision record 0040). Everything
 //! else takes effect on the next start. [`Locations::update_marker`] and
 //! [`Locations::updates_dir`] name the updater's files, so the host joins no paths of its own.
 //!
@@ -47,9 +48,14 @@
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
 //!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
 //!   `privacy.counts`, `privacy.crash_reports`, `update.mode`, `install.bundle`,
-//!   `install.registry` and every `plans.<id>`) off: the list empty, each switch `false`, the
-//!   update mode `none`, each install key unset and no plan, so no endpoint the lawyer chose
-//!   stands in for the firm's (decision record 0048).
+//!   `install.registry`, every `plans.<id>`, `skills.extra`, `skills.allow_scripts` and
+//!   `skills.curated`) off: the list empty, each switch `false`, the update mode `none`, each
+//!   install key unset, no plan, so no endpoint the lawyer chose stands in for the firm's
+//!   (decision record 0048), no extra skill pack and none curated (decision record 0040).
+//! - Only a policy sets `skills.curated`: a `settings.json` value is ignored with a warning.
+//!   A `skills.enabled` entry whose id is no pack id or whose value is not
+//!   `sha256:<64 lowercase hex>` is left out with a warning that quotes the id only when it is
+//!   id-shaped, else gives its place; no message quotes a hash.
 //! - A policy may set `update.mode` to any of `auto`, `notify` and `none`, and locks it. The app
 //!   writes only `auto` or `notify` ([`UpdateChoice`], [`Effective::apply_update_mode`]).
 //! - A plan variable's name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, in any case, is
@@ -106,10 +112,12 @@ mod files;
 mod json;
 mod leaf;
 mod locations;
+mod lock_reason;
 mod plans;
 pub mod policy;
 mod privacy;
 mod schema;
+mod skills;
 mod system;
 #[cfg(test)]
 mod testing;
@@ -127,6 +135,7 @@ pub use leaf::RESERVED_MCP_SERVER;
 pub use locations::{
     DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
 };
+pub use lock_reason::{LockCause, LockReason, SourceKind};
 pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
@@ -135,8 +144,9 @@ pub use policy::{
 pub use privacy::PrivacyPatch;
 pub use schema::{
     AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
-    McpServerLaunch, McpSettings, Motion, Plan, PlanProvider, PrivacySettings, Settings, Theme,
-    ToolsSettings, UiSettings, UpdateMode, UpdateSettings, json_schema,
+    McpServerLaunch, McpSettings, Motion, Plan, PlanProvider, PrivacySettings, Settings,
+    SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings, UpdateMode, UpdateSettings,
+    json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

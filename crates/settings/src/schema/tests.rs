@@ -67,7 +67,7 @@ fn the_keys_and_their_kinds_are_the_schemas() {
                 Kind::Number => "integer",
                 Kind::String => "string",
                 Kind::Object => "object",
-                other => panic!("{key}: {other:?}"),
+                Kind::StringArray => "array",
             };
             ((*key).to_owned(), kind.to_owned())
         })

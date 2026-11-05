@@ -199,6 +199,9 @@ crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_me
 crates/settings/src/system/windows.rs - unsafe_code
 crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code
+# Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
+# follows the real user id.
+crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods
 
 # Added by #116: matters' calls to getiopolicy_np and setiopolicy_np (the read guard on macOS).
 crates/matters/src/no_download/macos.rs - unsafe_code

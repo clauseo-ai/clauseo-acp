@@ -3,7 +3,7 @@
 
 use super::tests::one;
 use super::{Leaf, refuse};
-use crate::schema::{Plan, Settings, Theme, UpdateMode};
+use crate::schema::{Plan, Settings, SkillsExtra, Theme, UpdateMode};
 use crate::testing::{abs, abs_str};
 use crate::warning::WarningKind;
 use serde_json::json;
@@ -36,6 +36,13 @@ fn refuse_locks_each_security_key_off() {
         settings.privacy.counts = true;
         settings.privacy.crash_reports = true;
         settings.update.mode = UpdateMode::Notify;
+        settings.skills.extra = SkillsExtra::Any;
+        settings.skills.allow_scripts = true;
+        settings.skills.curated = vec!["nda-kit".to_owned()];
+        settings
+            .skills
+            .enabled
+            .insert("nda-kit".to_owned(), format!("sha256:{}", "a".repeat(64)));
         settings.mcp.servers.insert(
             "s".to_owned(),
             serde_json::from_value(json!({"command": abs_str("s"), "enabled": true})).unwrap(),
@@ -76,6 +83,26 @@ fn refuse_locks_each_security_key_off() {
     assert!(settings.mcp.servers.is_empty());
     assert!(settings.tools.web_search && settings.tools.browser);
 
+    // The skills keys lock at no extra pack, no script and none curated (0040); the lawyer's
+    // turned-on packs are no security key and stay.
+    let mut settings = on();
+    assert!(refuse("skills.extra", &mut settings));
+    assert_eq!(settings.skills.extra, SkillsExtra::Off);
+    assert!(settings.skills.allow_scripts && !settings.skills.curated.is_empty());
+    let mut settings = on();
+    assert!(refuse("skills.allow_scripts", &mut settings));
+    assert!(!settings.skills.allow_scripts);
+    assert_eq!(settings.skills.extra, SkillsExtra::Any);
+    let mut settings = on();
+    assert!(refuse("skills.curated", &mut settings));
+    assert!(settings.skills.curated.is_empty() && settings.skills.allow_scripts);
+    let mut settings = on();
+    assert!(refuse("skills.", &mut settings));
+    assert_eq!(settings.skills.extra, SkillsExtra::Off);
+    assert!(!settings.skills.allow_scripts && settings.skills.curated.is_empty());
+    assert_eq!(settings.skills.enabled, on().skills.enabled);
+    assert!(settings.tools.web_search && settings.privacy.counts);
+
     // A prefix ending in `.` refuses every security key under it, and only those.
     let mut settings = on();
     assert!(refuse("tools.", &mut settings));
@@ -93,6 +120,8 @@ fn refuse_locks_each_security_key_off() {
         "tools",
         "tool.",
         "tools.web",
+        "skills.enabled",
+        "skills",
     ] {
         let mut settings = on();
         assert!(!refuse(key, &mut settings), "{key}");

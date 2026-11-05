@@ -11,10 +11,12 @@
 //! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`.
 
 mod entries;
+mod lock_causes;
 mod privacy;
 mod tools;
 
 pub(in crate::actor) use entries::{set_agent_launch, set_plan};
+pub(in crate::actor) use lock_causes::log as log_lock_causes;
 pub(in crate::actor) use privacy::{first_act, set_privacy_settings};
 pub(super) use tools::set_tool_settings;
 

@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 9] = [
-    "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install",
+pub(crate) const SECTIONS: [&str; 10] = [
+    "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install", "skills",
 ];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
@@ -44,6 +44,8 @@ pub struct Settings {
     pub plans: BTreeMap<String, Plan>,
     /// Where agent installs come from in a firm (decision record 0048).
     pub install: InstallSettings,
+    /// The extra skill packs Clauseo may load (decision record 0040).
+    pub skills: SkillsSettings,
 }
 
 /// The `matters` section.
@@ -109,6 +111,37 @@ pub struct InstallSettings {
     /// A firm npm mirror: an `https` URL with a host, and no user name, password, query or
     /// fragment. Unset by default.
     pub registry: Option<String>,
+}
+
+/// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are
+/// security keys: a policy source that cannot be read, or a policy value that does not type,
+/// locks `extra` `off`, `allow_scripts` `false` and `curated` empty. `curated` is set by
+/// policy only: a `settings.json` value is ignored with a warning.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct SkillsSettings {
+    /// Which packs beyond Clauseo's own may load. `off` by default.
+    pub extra: SkillsExtra,
+    /// The pack ids `curated` admits. Set by policy only; empty by default.
+    pub curated: Vec<String>,
+    /// Whether a pack may carry scripts (copied, never run). Off by default.
+    pub allow_scripts: bool,
+    /// The packs turned on, by id, each with the hash it had then (`sha256:<64 lowercase hex>`):
+    /// a pack whose files no longer hash to it is not loaded. Empty by default.
+    pub enabled: BTreeMap<String, String>,
+}
+
+/// Which packs beyond Clauseo's own may load.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillsExtra {
+    /// None.
+    #[default]
+    Off,
+    /// Only those whose id is in `skills.curated`.
+    Curated,
+    /// Any pack the lawyer turns on.
+    Any,
 }
 
 /// The `mcp` section.

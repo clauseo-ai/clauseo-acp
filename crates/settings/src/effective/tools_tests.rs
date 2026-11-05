@@ -100,6 +100,9 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "plans.",
             "privacy.counts",
             "privacy.crash_reports",
+            "skills.allow_scripts",
+            "skills.curated",
+            "skills.extra",
             "tools.browser",
             "tools.web_search",
             "update.mode"
@@ -135,7 +138,10 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "update.mode",
             "install.bundle",
             "install.registry",
-            "plans."
+            "plans.",
+            "skills.extra",
+            "skills.allow_scripts",
+            "skills.curated"
         ]
     );
 }
