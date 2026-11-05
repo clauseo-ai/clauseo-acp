@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use super::*;
 use crate::windows::NtfsAcl;
-use crate::windows::acl_plan::{Grant, Inherit, LOW_LABEL_SID};
+use crate::windows::acl_plan::{Grant, Inherit, LOW_LABEL_SID, verbatim};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::ledger::ledger_path;
 use crate::windows::test_acl::{Place, grant, has};
@@ -201,8 +201,8 @@ impl Surroundings for Moving {
 
 /// Round 4, rows 4b and 16 of the second VM run: the NTFS walk names a child the lawyer can't
 /// open by its verbatim final path, and the launch's roots are plain, so the launch refused
-/// `ChildShut` rather than set it aside, and so did forget. Both now set it aside, asked by its
-/// plain path.
+/// `ChildShut` rather than set it aside, and so did forget. Both now set it aside, asked by the
+/// path the walk reports, which the test compares in one form (round 9).
 #[test]
 fn a_child_the_lawyer_cant_open_is_set_aside_by_the_launch_and_by_forget() {
     drop_privileges();
@@ -219,13 +219,20 @@ fn a_child_the_lawyer_cant_open_is_set_aside_by_the_launch_and_by_forget() {
     let mut acl = NtfsAcl::new().unwrap();
     let mut plan = AdmittedPlan::from_grants(matter_one(), launch_grants(&matter));
     apply(&mut ledger, &mut plan, &mut acl, &mut around).unwrap();
-    assert_eq!(around.asked, vec![matter.join("shut.txt")]);
+    // The walk reports the verbatim final path (`\\?\C:\…`): both sides compare in that form.
+    let asked = |around: &Moving, from: usize| -> Vec<PathBuf> {
+        around.asked[from..].iter().map(|p| verbatim(p)).collect()
+    };
+    assert_eq!(asked(&around, 0), [verbatim(&matter.join("shut.txt"))]);
     assert!(!shut.exists());
 
     let again = place.dir.file("matter/sub/x.txt", "x");
     protect_with(&again, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
     forget_matter(&mut ledger, matter_one(), &mut acl, &mut around).unwrap();
-    assert_eq!(around.asked[1..], [matter.join("sub").join("x.txt")]);
+    assert_eq!(
+        asked(&around, 1),
+        [verbatim(&matter.join("sub").join("x.txt"))]
+    );
     assert!(!again.exists());
 }
 
