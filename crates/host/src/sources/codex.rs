@@ -53,3 +53,6 @@ fn search(input: &Value) -> Option<Found> {
         results: Vec::new(),
     })
 }
+
+#[cfg(test)]
+mod tests;
