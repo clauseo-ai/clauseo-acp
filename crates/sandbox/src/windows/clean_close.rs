@@ -35,6 +35,8 @@ mod changes;
 mod check;
 #[cfg(any(windows, test))]
 mod close;
+#[cfg(any(windows, test))]
+pub(crate) mod facts;
 #[cfg(test)]
 pub(crate) mod fake;
 mod inputs;

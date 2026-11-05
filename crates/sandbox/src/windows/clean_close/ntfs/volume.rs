@@ -9,7 +9,7 @@
 
 use std::ffi::OsString;
 use std::io;
-use std::os::windows::ffi::OsStringExt as _;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Storage::FileSystem::{
@@ -31,8 +31,8 @@ use windows::core::PCWSTR;
 
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::clean_close::RootFacts;
+use crate::windows::clean_close::facts::{RootProbe, read_facts};
 use crate::windows::folder::verbatim_wide;
-use crate::windows::writer::ApplyFailure;
 
 /// `IsReparseTagNameSurrogate`: the tag's name-surrogate bit (junctions, symbolic links).
 const NAME_SURROGATE: u32 = 0x2000_0000;
@@ -43,30 +43,38 @@ const MAX_PATH_WIDE: usize = 261;
 /// What the root's handles ask for: its attributes, and nothing that could change it.
 pub(super) const READ_ATTRIBUTES: u32 = FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
 
-/// The facts of the own root `path`, opened as itself; a name surrogate there is
-/// [`ApplyFailure::Changed`].
+/// The facts of the own root `path`, opened as itself, in [`read_facts`]' order: the file
+/// system first, so a volume that isn't NTFS never meets an NTFS-only query.
 pub(super) fn facts(path: &Path) -> io::Result<RootFacts> {
     let handle = open_itself(path, READ_ATTRIBUTES)?;
-    if name_surrogate(&handle)? {
-        return Err(ApplyFailure::Changed.into());
+    read_facts(&Opened(handle))
+}
+
+/// An own root opened as itself, read through its handle.
+struct Opened(Handle);
+
+impl RootProbe for Opened {
+    fn ntfs(&self) -> io::Result<bool> {
+        is_ntfs(&self.0)
     }
-    // The file system first: FAT32 refuses the file-ID query (error 87), and a volume that
-    // isn't NTFS must come back as that, not as a root that can't be read.
-    let ntfs = is_ntfs(&handle)?;
-    let (volume, id) = if ntfs {
-        id_info(&handle)?
-    } else {
-        (0, [0xFF; 16])
-    };
-    let final_path = normalized(&handle)?;
-    let removable = removable(&final_path);
-    Ok(RootFacts {
-        volume,
-        id: short_id(id),
-        ntfs,
-        removable,
-        path: PathBuf::from(OsString::from_wide(&final_path)),
-    })
+
+    fn surrogate(&self) -> io::Result<bool> {
+        name_surrogate(&self.0)
+    }
+
+    fn id(&self) -> io::Result<(u64, Option<u64>)> {
+        let (volume, id) = id_info(&self.0)?;
+        Ok((volume, short_id(id)))
+    }
+
+    fn final_path(&self) -> io::Result<PathBuf> {
+        Ok(PathBuf::from(OsString::from_wide(&normalized(&self.0)?)))
+    }
+
+    fn removable(&self, path: &Path) -> bool {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        removable(&wide)
+    }
 }
 
 /// The 64-bit file reference a 128-bit file ID holds: its low 8 bytes, little-endian, when
