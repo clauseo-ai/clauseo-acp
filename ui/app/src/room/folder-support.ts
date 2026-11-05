@@ -1,17 +1,16 @@
 // What the host found about a matter's folder (MatterSummary.folder_support): where Clauseo can't fence Claude and
-// Codex inside it. Absent, the folder is fine or not checked since the host started; "unknown", a newer Clauseo's
-// reading, changes nothing here. Kept apart from the notice (folder-notice.tsx) and its words, which load later.
+// Codex inside it. Absent, the folder is fine or not checked since the host started; "check_failed", the check
+// couldn't answer, so Claude asks before every change; "unknown", a newer Clauseo's reading, changes nothing here.
+// Kept apart from the notice (folder-notice.tsx) and its words, which load later.
 import { createContext, use } from "react";
 import type { FolderSupportKind } from "../transport/protocol.ts";
 
 /** The readings this version shows: the room's notice, and Claude asking before every change. */
-export type FolderNoted = Exclude<FolderSupportKind, "unknown" | "check_failed">;
+export type FolderNoted = Exclude<FolderSupportKind, "unknown">;
 
 /** The reading this version knows, or null: fine, not checked, or a newer Clauseo's. */
 export const notedFolder = (kind: FolderSupportKind | undefined): FolderNoted | null =>
-  kind === "network" || kind === "no_permissions" || kind === "cant_change_permissions"
-    ? kind
-    : null;
+  kind === undefined || kind === "unknown" ? null : kind;
 
 /** A folder Clauseo can't fence at all, so the matter is Not protected: a network drive, or one without permissions. */
 export const unprotectedFolder = (kind: FolderSupportKind | undefined) =>

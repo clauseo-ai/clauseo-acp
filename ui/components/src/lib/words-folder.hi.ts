@@ -25,4 +25,21 @@ export const HI = {
   "This matter's folder is on a drive that doesn't keep file permissions": null, // hi: later
   "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.":
     null, // hi: later
+  // FR7: New matter's warning for a folder picked on a network drive, then its tooltip and accessible name
+  "On a network drive": null, // hi: later
+  "This folder is on a network drive": null, // hi: later
+  // FR8: the warning's body is FR12's second line; behind its info icon (provisional: "an agent" reworded)
+  "Clauseo can't keep Claude and Codex inside a folder on a network drive.": null, // hi: later
+  // FR9: the warning's main button, which opens the picker again
+  "Choose another folder": null, // hi: later
+  // FR10: the warning's other button, which makes the matter there
+  "Create anyway": null, // hi: later
+  // FR13: the warning for a drive without file permissions, then its tooltip and accessible name
+  "No file permissions": null, // hi: later
+  "This drive doesn't keep file permissions": null, // hi: later
+  // FR14: its body as FR8's; behind its info icon (provisional: "an agent" reworded)
+  "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.":
+    null, // hi: later
+  // FR20 (provisional): the room's notice for a folder the host couldn't check
+  "Clauseo couldn't check this folder, so Claude asks before every change.": null, // hi: later
 } as const;

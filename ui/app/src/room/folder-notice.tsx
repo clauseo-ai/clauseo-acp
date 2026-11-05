@@ -2,8 +2,9 @@
 // matter until Close. A folder whose permissions the lawyer can't change says Clauseo asks before each edit (FR1),
 // why behind its info icon (FR2), and What to tell IT (FR3), which opens the text to send IT, selected, with Copy
 // (FR5). A network drive (FR12) and a drive without file permissions (FR15) say that Claude asks before every
-// change and Codex can't work there, how to get full protection behind the info icon. Loaded only for such a matter
-// (work.tsx), with its words (words-folder.ts).
+// change and Codex can't work there, how to get full protection behind the info icon. A folder the host couldn't
+// check says Claude asks before every change, in one line. Loaded only for such a matter (work.tsx), with its words
+// (words-folder.ts).
 import "./folder-notice.css";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
@@ -19,11 +20,14 @@ import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { Tooltip } from "@clauseo/components/ui/tooltip.tsx";
-import type { FolderNoted } from "./folder-support.ts";
+import { unprotectedFolder, type FolderNoted } from "./folder-support.ts";
 
 /** Each reading's words: its name (tooltip and accessible name), what shows, and what its info icon says. */
 const SAYS: Readonly<
-  Record<FolderNoted, { name: FolderKey; head: FolderKey; rest: FolderKey | null; info: FolderKey }>
+  Record<
+    FolderNoted,
+    { name: FolderKey; head: FolderKey; rest: FolderKey | null; info: FolderKey | null }
+  >
 > = {
   cant_change_permissions: {
     name: "Clauseo asks before each edit in this folder",
@@ -42,6 +46,12 @@ const SAYS: Readonly<
     head: "No file permissions.",
     rest: "Claude asks before every change. Codex can't work here.",
     info: "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
+  },
+  check_failed: {
+    name: "Clauseo couldn't check this folder, so Claude asks before every change.",
+    head: "Clauseo couldn't check this folder, so Claude asks before every change.",
+    rest: null,
+    info: null,
   },
 };
 
@@ -75,7 +85,7 @@ export function FolderNotice({
   const [it, setIt] = useState(false);
   const panel = useId();
   const name = fr(lang, says.name);
-  const Icon = kind === "cant_change_permissions" ? IconNeedsPermission : IconNotProtected;
+  const Icon = unprotectedFolder(kind) ? IconNotProtected : IconNeedsPermission;
   return (
     <div
       className="room-folder"
@@ -99,7 +109,7 @@ export function FolderNotice({
               <Say>{fr(lang, says.rest)}</Say>
             </span>
           )}
-          <FolderInfo words={fr(lang, says.info)} />
+          {says.info !== null && <FolderInfo words={fr(lang, says.info)} />}
         </p>
         {kind === "cant_change_permissions" && (
           <Button

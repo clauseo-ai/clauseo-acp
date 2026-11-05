@@ -6,24 +6,35 @@
 // closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters). A folder that is
 // already a matter (matter.folder_is_matter) names that matter when the list has it, and Open it opens it, as the rail does.
 // The first screen (UD1's first run) takes the same form in place, titled, with Back (FirstMatter), and says a folder
-// its Open the folder couldn't make a matter of by the same code's words (RefusedLine); both load with this chunk.
+// its Open the folder couldn't make a matter of by the same code's words (RefusedLine); both load with this chunk. A
+// folder picked, either form asks the host about it first and warns or refuses as folder-check.tsx says.
 import { useEffect, useState, type RefObject } from "react";
 import { NewMatterForm } from "@clauseo/components/clauseo/matter-form.tsx";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { toHostError } from "../transport/host-transport.ts";
-import type { FolderRefId, MatterSource } from "../transport/protocol.ts";
-import type { MatterInfo, NextMatterSource } from "./host-next.ts";
+import type { HostError } from "../transport/protocol.ts";
+import { usePickedFolder, type Picked } from "./folder-check.tsx";
+import type { MatterInfo } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
-
-type Picked = { folder: FolderRefId; display: string };
 
 /** `<location>/<name>`, with the separator the location is written in. */
 const under = (location: string, name: string) => {
   const sep = location.includes("\\") && !location.includes("/") ? "\\" : "/";
   return `${location.replace(/[\\/]+$/, "")}${sep}${name}`;
 };
+
+/** The form's folder line: the existing folder picked; else where the matter goes, under the default location or a
+ * parent Create picked; else none. */
+const folderLine = (existing: Picked | null, parent: Picked | null, location: string | null) =>
+  existing !== null
+    ? { folder: existing.display }
+    : location !== null
+      ? { folderFor: (name: string) => under(location, name) }
+      : parent !== null
+        ? { folderFor: (name: string) => under(parent.display, name) }
+        : { folder: null };
 
 export function NewMatter({
   matters,
@@ -47,11 +58,22 @@ export function NewMatter({
   finalFocus: RefObject<HTMLElement | null>;
 }) {
   const w = useWords();
-  const [existing, setExisting] = useState<Picked | null>(null);
+  const pick = usePickedFolder(matters, w.lang);
   const [location, setLocation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // the matter the refusal names, when the list has it: Open it opens it
   const [named, setNamed] = useState<MatterInfo | null>(null);
+  /** A refusal's line, and the matter on the list it names. */
+  const refusal = (refused: HostError, path: string | undefined) => {
+    const at =
+      refused.code === "matter.folder_is_matter" && refused.matter !== undefined
+        ? (matters.view().matters.find((m) => m.matter === refused.matter) ?? null)
+        : null;
+    return { line: createErrorLine(w.lang, refused.code, path, at?.name), at };
+  };
+  // the existing folder's check refused it: its line at once
+  const checked = pick.refused === null ? null : refusal(pick.refused, pick.existing?.display);
+  const opens = named ?? checked?.at ?? null;
   // H20's default location, read as the form opens: the folder line before a pick
   useEffect(() => {
     if (!open || !detailed) return;
@@ -65,7 +87,7 @@ export function NewMatter({
   }, [open, detailed, matters]);
   const close = (next: boolean) => {
     if (!next) {
-      setExisting(null);
+      pick.reset();
       setError(null);
       setNamed(null);
     }
@@ -74,15 +96,12 @@ export function NewMatter({
   const create = async (name: string, client: string, nextDate: string | null) => {
     setError(null);
     setNamed(null);
-    let source: NextMatterSource;
-    let path = existing?.display;
-    if (existing !== null) source = { existing_folder: { folder: existing.folder } };
-    else if (detailed && location !== null) source = "default_location";
-    else {
-      const parent = await matters.pickFolder();
-      if (parent === null) return false;
-      path = parent.display;
-      source = { new_folder: { folder: parent.folder } } satisfies MatterSource;
+    const where = await pick.where(detailed && location !== null);
+    if (where === null) return false;
+    const { source, path } = where;
+    if (where.refused !== undefined) {
+      setError(refusal(where.refused, path).line);
+      return false;
     }
     const details = detailed
       ? {
@@ -93,16 +112,12 @@ export function NewMatter({
     try {
       await matters.create(name, source, details);
     } catch (thrown) {
-      const refusal = toHostError(thrown);
-      const at =
-        refusal.code === "matter.folder_is_matter" && refusal.matter !== undefined
-          ? (matters.view().matters.find((m) => m.matter === refusal.matter) ?? null)
-          : null;
-      setError(createErrorLine(w.lang, refusal.code, path, at?.name));
+      const { line, at } = refusal(toHostError(thrown), path);
+      setError(line);
       setNamed(at);
       return false;
     }
-    setExisting(null);
+    pick.reset();
     onMade?.();
     return true;
   };
@@ -111,23 +126,16 @@ export function NewMatter({
       open={open}
       onOpenChange={close}
       details={detailed}
-      {...(existing !== null
-        ? { folder: existing.display }
-        : location !== null && detailed
-          ? { folderFor: (name: string) => under(location, name) }
-          : { folder: null })}
-      pickFolder={async () => {
-        const picked = await matters.pickFolder();
-        if (picked === null) return null;
-        setExisting(picked);
-        return picked.display;
-      }}
-      error={error}
-      {...(named === null
+      {...folderLine(pick.existing, pick.parent, detailed ? location : null)}
+      pickFolder={pick.pickExisting}
+      error={error ?? checked?.line ?? null}
+      warning={pick.warning}
+      blocked={checked !== null}
+      {...(opens === null
         ? {}
         : {
             openMatter: () => {
-              matters.open(named.matter);
+              matters.open(opens.matter);
               onOpened?.();
               close(false);
             },
@@ -138,6 +146,8 @@ export function NewMatter({
         existing: "matter-existing",
         create: "create-matter",
         open: "open-matter",
+        choose: "folder-choose",
+        anyway: "folder-anyway",
       }}
       finalFocus={finalFocus}
     />
@@ -157,7 +167,7 @@ export function FirstMatter({
 }) {
   const w = useWords();
   const detailed = matters.view().detailed;
-  const [existing, setExisting] = useState<Picked | null>(null);
+  const pick = usePickedFolder(matters, w.lang);
   const [location, setLocation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -172,15 +182,12 @@ export function FirstMatter({
   }, [detailed, matters]);
   const create = async (name: string, client: string, nextDate: string | null) => {
     setError(null);
-    let source: NextMatterSource;
-    let path = existing?.display;
-    if (existing !== null) source = { existing_folder: { folder: existing.folder } };
-    else if (detailed && location !== null) source = "default_location";
-    else {
-      const parent = await matters.pickFolder();
-      if (parent === null) return false;
-      path = parent.display;
-      source = { new_folder: { folder: parent.folder } };
+    const where = await pick.where(detailed && location !== null);
+    if (where === null) return false;
+    const { source, path } = where;
+    if (where.refused !== undefined) {
+      setError(createErrorLine(w.lang, where.refused.code, path));
+      return false;
     }
     onAct();
     const details = detailed
@@ -201,21 +208,25 @@ export function FirstMatter({
     <NewMatterForm
       titled
       details={detailed}
-      {...(existing !== null
-        ? { folder: existing.display }
-        : location !== null && detailed
-          ? { folderFor: (name: string) => under(location, name) }
-          : { folder: null })}
-      pickFolder={async () => {
-        const picked = await matters.pickFolder();
-        if (picked === null) return null;
-        setExisting(picked);
-        return picked.display;
-      }}
-      error={error}
+      {...folderLine(pick.existing, pick.parent, detailed ? location : null)}
+      pickFolder={pick.pickExisting}
+      error={
+        error ??
+        (pick.refused === null
+          ? null
+          : createErrorLine(w.lang, pick.refused.code, pick.existing?.display))
+      }
+      warning={pick.warning}
+      blocked={pick.refused !== null}
       onCreate={(name, client, _next, nextDate) => create(name, client, nextDate)}
       onCancel={onBack}
-      testIds={{ name: "matter-name", existing: "matter-existing", create: "create-matter" }}
+      testIds={{
+        name: "matter-name",
+        existing: "matter-existing",
+        create: "create-matter",
+        choose: "folder-choose",
+        anyway: "folder-anyway",
+      }}
     />
   );
 }

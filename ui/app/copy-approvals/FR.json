@@ -52,6 +52,42 @@
     "by": "Rohan",
     "note": "Rohan, on the folder-rights copy page"
   },
+  "FR-07": {
+    "en": "On a network drive / This folder is on a network drive",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-08": {
+    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on a network drive.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
+  "FR-09": {
+    "en": "Choose another folder",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-10": {
+    "en": "Create anyway",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
   "FR-11": {
     "en": "Not protected",
     "hi": "संरक्षित नहीं",
@@ -69,6 +105,24 @@
     "by": "app track (provisional; Rohan batch review)",
     "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
   },
+  "FR-13": {
+    "en": "No file permissions / This drive doesn't keep file permissions",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the folder-rights copy page"
+  },
+  "FR-14": {
+    "en": "Claude asks before every change. Codex can't work here. / Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-04",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Rohan's approved line with 'an agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
   "FR-15": {
     "en": "No file permissions. / Claude asks before every change. Codex can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
     "hi": null,
@@ -77,5 +131,14 @@
     "at": "2026-11-04",
     "by": "app track (provisional; Rohan batch review)",
     "note": "Rohan's approved line with 'the agent' replaced by 'Claude and Codex' (word list: no 'agent')"
+  },
+  "FR-20": {
+    "en": "Clauseo couldn't check this folder, so Claude asks before every change.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "the app track's line for the room's notice when the host's folder check couldn't answer (check_failed); not on the approved page"
   }
 }

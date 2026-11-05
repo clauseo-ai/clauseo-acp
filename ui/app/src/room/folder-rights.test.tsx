@@ -2,7 +2,8 @@
 // Folder rights in the room (folder-notice.tsx, folder-reason.tsx), over FakeTransport: the host's folder_support
 // gives each matter its notice once until Close, What to tell IT names the folder, a network drive or a drive without
 // permissions marks the matter Not protected, and a pending file edit's card in a folder whose permissions can't
-// change says why it asks. "unknown", a newer Clauseo's reading, and no reading show nothing.
+// change says why it asks. A folder the host couldn't check says Claude asks before every change, unless the folder
+// is missing. "unknown", a newer Clauseo's reading, and no reading show nothing.
 import { fr } from "@clauseo/components/lib/words-folder.ts";
 import { frc } from "@clauseo/components/lib/words-folder-card.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
@@ -14,6 +15,7 @@ import type {
   PermissionOption,
   ViewEntry,
 } from "../transport/protocol.ts";
+import { detailed, fakeNext } from "./fake-next.ts";
 import { mountRoom, summary, THE_MATTER, type Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
@@ -199,4 +201,29 @@ test("an Editing files card gives the folder reason only where the permissions c
     h = null;
     document.body.replaceChildren();
   }
+});
+
+test("a folder the host couldn't check: one line says Claude asks before every change, with no Codex line, info icon or Not protected", async () => {
+  h = await mountRoom({ matters: [matter("check_failed")] });
+  const line = fr("en", "Clauseo couldn't check this folder, so Claude asks before every change.");
+  expect(notice()?.dataset["kind"]).toBe("check_failed");
+  expect(notice()?.getAttribute("aria-label")).toBe(line);
+  expect(text()).toBe(line);
+  expect(text()).not.toContain("Codex");
+  expect(info()).toBeNull();
+  expect(h.one("folder-it")).toBeNull();
+  expect(unprotected()).toBeNull();
+});
+
+test("a missing folder wins over a check that couldn't answer: the moved line shows, the notice doesn't", async () => {
+  // found, the same matter has its notice
+  const found = detailed(matter("check_failed"));
+  h = await mountRoom({ next: fakeNext({ matters: () => [found] }) });
+  expect(notice()?.dataset["kind"]).toBe("check_failed");
+  await h.unmount();
+  document.body.replaceChildren();
+  const missing = detailed(matter("check_failed"), { folder_state: "missing" });
+  h = await mountRoom({ next: fakeNext({ matters: () => [missing] }) });
+  expect(h.host.querySelector(".room-moved")).not.toBeNull();
+  expect(notice()).toBeNull();
 });
