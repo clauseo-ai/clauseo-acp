@@ -11,6 +11,8 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(test, target_os = "macos"))]
+mod name_match;
 #[cfg(target_os = "macos")]
 pub(crate) use macos::named;
 
