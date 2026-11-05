@@ -126,3 +126,27 @@ fn a_ledger_without_a_version_or_entries_reads_as_version_one() {
     let written: serde_json::Value = serde_json::from_slice(&read(&path)).unwrap();
     assert_eq!(written["version"], LEDGER_VERSION);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_ledger_or_lock_file_with_a_second_link_is_refused_before_any_change() {
+    // `write::check_owned_file` runs on the lock file before the lock and on the ledger under
+    // it; elsewhere than Windows it refuses a link or a second hard link.
+    for name in [LEDGER_FILE, LEDGER_LOCK] {
+        let temp = TempDir::new("ledger-second-link");
+        let path = ledger_path(temp.path());
+        let mut ledger = open(&path);
+        let mut plan = plan_for(matter_one(), "m1");
+        ledger.record_pending(&mut plan).unwrap();
+        let outside = temp.file("outside.json", "{}");
+        let target = temp.path().join("sandbox").join(name);
+        crate::test_support::remove(&target);
+        temp.hard_link(&format!("sandbox/{name}"), &outside);
+        let before = read(&outside);
+        let mut next = plan_for(matter_two(), "m2");
+        let error = ledger.record_pending(&mut next).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{name}");
+        assert_eq!(read(&outside), before, "{name}");
+        assert_eq!(next.entries(), [] as [EntryId; 0]);
+    }
+}
