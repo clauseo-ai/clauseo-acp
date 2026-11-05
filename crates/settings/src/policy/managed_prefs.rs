@@ -75,6 +75,15 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
     let mut warnings = Vec::new();
     for (key, value) in entries {
         let kind = match value.map(plain_json) {
+            Some(Ok(_)) if key.starts_with("plans.") && crate::plans::plan_id(&key).is_none() => {
+                // A plan under a name that is no agent id: what the firm meant is unknown, so
+                // no plan stands, as for a `plans` that is no dictionary.
+                refused.push("plans.".to_owned());
+                WarningKind::InvalidValue {
+                    key: PLANS_KEY.to_owned(),
+                    message: crate::plans::BAD_ID.to_owned(),
+                }
+            }
             Some(Ok(value)) => {
                 raws.push(Raw {
                     key,
