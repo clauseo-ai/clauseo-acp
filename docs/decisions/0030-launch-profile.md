@@ -423,7 +423,8 @@ change from the settings window as `ui` does.
   `session/load` included) runs in forced ask until the sandbox can fence such a folder. Codex
   is refused there. A check that fails (an io error) is unknown and fails closed for Claude:
   forced ask, `check_failed` on the matter's row (2026-11-05, orchestrator; nothing before),
-  and Codex not refused (its own sandbox applies). The host enforces four layers (`agent/forced_ask.rs`):
+  and Codex not refused (its own sandbox applies). The host enforces four layers
+  (`agent/forced_ask.rs`):
   - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
     and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
     too; a mode the agent moves to itself is switched back to `default`.
@@ -456,6 +457,27 @@ change from the settings window as `ui` does.
     keeps only managed (policy) hooks, and the guard is in the flag settings;
   - the adapter refuses `hooks` in `_meta` (`acp-agent.js`, its option table marks `hooks:
     false`), so the guard cannot become a programmatic hook.
+- **2026-11-05 (orchestrator; the row and the New matter dialog).** A failed check shows on the
+  matter's row as `check_failed` (`FolderSupportKind::CheckFailed`) at the create, the import
+  and each launch whose check failed; a missing folder is a failed check too, and the app shows
+  the missing folder first. Only the row's value changes: Codex's refusal and forced ask still
+  decide from the check's own answer. `HostQuery::FolderSupport { source }` takes the
+  `MatterSource` the New matter dialog will send in `CreateMatter` and runs the same check of
+  the place that create would use, before the matter exists: an existing folder; a new
+  folder's parent, canonicalised as create does; the default location, or its nearest folder
+  that exists before the first matter makes it. It answers `QueryResult::FolderSupport` with
+  the row's values (`PickedFolderSupport::support`, left out for a fine folder: the wire has no
+  `null`). First it refuses, with create's codes, what create refuses before its matter is
+  made (`actor/matters/picked.rs`): for an existing folder the import's place check
+  (`check_place`: drive root, home, system and data folders) and its registry check (another
+  matter's folder), then its protected-tree check (`clauseo_matters::check_protected`: inside
+  the data folder or the matters root), all run before anything is made; for a new folder
+  or the default location nothing, since create's other checks need the new folder's name. A
+  refused folder never reaches the check. An unknown ref is `command.invalid`, and the bridge
+  takes only refs this run's picker issued, as for `CreateMatter`. All of it runs off the actor
+  and waits 5 s (`PREPARE_WAIT`); a check that doesn't answer by then, or whose thread fails,
+  answers `check_failed`, never an error: `agent.launch_failed` reads as a broken thread in the
+  app. No log line names the folder (`actor/query/folder_support.rs`).
 
 ### Deviations from the brief (PR-A)
 

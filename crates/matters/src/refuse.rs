@@ -66,6 +66,15 @@ pub fn check_place(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
     check_folder(folder, refused)
 }
 
+/// Import's protected-tree check alone, as [`Matter::import`](crate::Matter::import) runs it
+/// after its marker read ([`check_outside_root`]): refuses a folder that is, holds or sits
+/// inside the matters root (`Refusal::MattersRoot`) or a `refused_trees` entry
+/// (`Refusal::Listed`). For the host's `FolderSupport` query, which refuses what an import
+/// would before checking the folder.
+pub fn check_protected(folder: &Path, settings: &Settings) -> Result<(), Error> {
+    check_outside_root(folder, settings)
+}
+
 /// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
 /// importing it again would take it from that matter), or for its place as
 /// [`check_outside_root`] does. Called after [`check_folder`].

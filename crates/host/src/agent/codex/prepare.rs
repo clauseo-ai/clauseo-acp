@@ -1,13 +1,15 @@
-//! A launch's file system checks and writes, off the actor: every agent's data-folder refusal,
-//! a Codex agent's launch preparation ([`super::prepare_launch`]) and its `.codex` re-check
-//! before each prompt and session call.
+//! File system work that may hang, run off the actor: a launch's checks and writes (every
+//! agent's data-folder refusal, a Codex agent's launch preparation, [`super::prepare_launch`]),
+//! a Codex agent's `.codex` re-check before each prompt and session call, and the folder check
+//! of a folder picked for a new matter (`actor/query/folder_support.rs`).
 //! As `actor/folder_state.rs` does for matter folders, each runs on a `clauseo-codex-fs`
 //! thread that sends its answer back over a channel, and the caller waits at most its
 //! [`Job::wait`] on the host's clock: [`LAUNCH_WAIT`] for a launch's preparation, which writes
-//! several files, [`PREPARE_WAIT`] for the rest. A stat that hangs (a network share that does not
-//! answer) strands at most that thread, and the launch or the turn fails closed. Waiting too long
-//! is not a missing folder: it fails as `agent.launch_failed`, which may be retried, and the
-//! log says what was waited on, for how long, and how it ended once it did.
+//! several files, [`PREPARE_WAIT`] for the rest. A stat that hangs (a network share that does
+//! not answer) strands at most that thread, and the caller fails closed. Waiting too long is
+//! not a missing folder: [`off_actor`] fails as `agent.launch_failed`, which may be retried
+//! (the picked-folder query answers `check_failed` instead), and the log says what was waited
+//! on, for how long, and how it ended once it did.
 
 use std::path::PathBuf;
 use std::sync::Arc;

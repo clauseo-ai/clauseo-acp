@@ -42,13 +42,7 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
 /// and cancelling a scan that is not running does nothing.
 fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
     match command {
-        HostCommand::CreateMatter { source, .. } => match source {
-            MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder } => {
-                picked(bridge, *folder)
-            }
-            // The host's own default location: no folder ref, nothing to check.
-            MatterSource::DefaultLocation => Ok(()),
-        },
+        HostCommand::CreateMatter { source, .. } => picked_source(bridge, source),
         // Both read the folder the ref names: only one this run's picker issued.
         HostCommand::RelocateMatter { folder, .. } | HostCommand::ScanFolder { folder } => {
             picked(bridge, *folder)
@@ -106,6 +100,19 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetPrivacySettings { .. } => Err(invalid(
             "the privacy switches are set from the settings window only",
         )),
+    }
+}
+
+/// Whether a `CreateMatter`'s or a `FolderSupport` query's `source` names a folder ref this
+/// run's `pick_folder` issued: `command.invalid` when it does not, so the window can't probe
+/// other refs.
+pub(super) fn picked_source(bridge: &Bridge, source: &MatterSource) -> Result<(), HostError> {
+    match source {
+        MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder } => {
+            picked(bridge, *folder)
+        }
+        // The host's own default location: no folder ref, nothing to check.
+        MatterSource::DefaultLocation => Ok(()),
     }
 }
 

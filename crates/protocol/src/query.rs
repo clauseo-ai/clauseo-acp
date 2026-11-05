@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterStatus,
+    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
     RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
     ThreadId, ThreadStatus, Timestamp, TurnId, ViewEntry,
 };
@@ -162,6 +162,20 @@ pub enum HostQuery {
     /// Search inside matters and conversations (decision 0043). Answered
     /// `QueryResult::Search`.
     Search(SearchRequest),
+    /// The Windows folder check of the place a `CreateMatter` with `source` would use, before
+    /// the matter exists: the New matter dialog's warning. Send the same `source` the create
+    /// will. `existing_folder` checks that folder; `new_folder` its picked parent;
+    /// `default_location` the default location (its nearest folder that exists, before the
+    /// first matter makes it). Answered `QueryResult::FolderSupport` with the values a matter's
+    /// row shows (`MatterSummary::folder_support`). What `CreateMatter` refuses before its
+    /// matter is made is refused here with the same code (`matter.folder_is_home` and the
+    /// rest, for an existing folder), and an unknown ref is `command.invalid`. A check that
+    /// doesn't answer in time answers `check_failed`. JSON:
+    /// `{"folder_support": {"source": {"existing_folder": {"folder": "..."}}}}`.
+    FolderSupport {
+        /// Where the matter would be made, as `CreateMatter` names it.
+        source: MatterSource,
+    },
 }
 
 /// A query's answer.
@@ -209,6 +223,21 @@ pub enum QueryResult {
     /// For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
     /// came first.
     Search(SearchAnswer),
+    /// For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
+    /// `{"folder_support": {}}` for a fine folder.
+    FolderSupport(PickedFolderSupport),
+}
+
+/// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
+/// accepts fields it does not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PickedFolderSupport {
+    /// What keeps Codex's sandbox from working fully in the folder, as a matter's row shows it
+    /// (`MatterSummary::folder_support`), `check_failed` included. Missing for a fine folder,
+    /// and always off Windows.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub support: Option<FolderSupportKind>,
 }
 
 /// One file of a matter's folder, as `ListPapers` lists it.

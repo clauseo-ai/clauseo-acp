@@ -449,7 +449,8 @@ impl HostConfig {
 
     /// A fixed answer for every launch's folder check (`agent/folder_support.rs`) in place of
     /// the Windows check, so tests of what follows from it (Codex refused, Claude's forced ask)
-    /// run on every OS. `None` is a fine folder. Matter creation still runs the real check.
+    /// run on every OS. `None` is a fine folder. `HostQuery::FolderSupport` answers from it
+    /// too; matter creation still runs the real check.
     #[cfg(feature = "test-support")]
     pub fn with_folder_support(
         mut self,

@@ -4,7 +4,8 @@
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
 //! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
-//! (`turn/undo_preview.rs`).
+//! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
+//! (`query/folder_support.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -25,6 +26,8 @@ use crate::blob_read;
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
+
+mod folder_support;
 
 /// Answers one query.
 pub(super) fn query(
@@ -109,6 +112,9 @@ pub(super) fn query(
                 let _gone = reply.send(answer.map(QueryResult::Search));
             }),
         ),
+        HostQuery::FolderSupport { ref source } => {
+            folder_support::folder_support(actor, source, reply);
+        }
         HostQuery::GetDefaultLocation => {
             let display = super::rail::folder_display(
                 actor.effective.default_matters_dir(),

@@ -15,8 +15,9 @@
 //! the missing folder first); the other folder checks report it. Off Windows nothing is checked
 //! and there is never an answer.
 //!
-//! The New matter dialog asks the same check of a picked folder before the matter exists
-//! (`HostQuery::FolderSupport`, `actor/query/folder_support.rs`), with no matter to log.
+//! The New matter dialog asks the same check of the place its create would use before the
+//! matter exists (`HostQuery::FolderSupport`, `actor/query/folder_support.rs`), with no matter
+//! to log.
 //!
 //! Each check logs one line with the matter (none for a picked folder) and the answer, never the
 //! folder (ADR 0047).

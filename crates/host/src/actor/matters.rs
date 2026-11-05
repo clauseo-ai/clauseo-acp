@@ -30,6 +30,7 @@ use crate::matter_worker::{
 use crate::pipeline::Failure;
 
 mod made;
+pub(super) mod picked;
 
 pub(crate) use made::Made;
 use made::matter_commit;
@@ -250,7 +251,10 @@ fn matter_folder(
 }
 
 /// The folder `folder` names, or `command.invalid` when it names none.
-fn registered(actor: &Actor, folder: clauseo_protocol::FolderRefId) -> Result<PathBuf, Error> {
+pub(super) fn registered(
+    actor: &Actor,
+    folder: clauseo_protocol::FolderRefId,
+) -> Result<PathBuf, Error> {
     actor
         .folders
         .get(&folder)
@@ -299,42 +303,63 @@ fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
 /// folder and the data folder are told apart from the other refused folders by the entry the
 /// refusal names. Any other failure is passed on as it is.
 fn refusal(actor: &Actor, error: Error, folder: &Path) -> Error {
-    let Error::Matters(failure) = &error else {
-        return error;
-    };
-    if let clauseo_matters::Error::Io { path, source, .. } = failure
-        && source.kind() == io::ErrorKind::PermissionDenied
-        && path.starts_with(folder)
-    {
-        return Error::refused(ErrorCode::MatterFolderUnreadable, error.to_string());
+    RefusalNames::of(actor).refusal(error, folder, |matter| actor.matters.contains_key(matter))
+}
+
+/// What [`refusal`] tells the refused folders apart by, taken from the actor, so the
+/// `FolderSupport` query names a refusal off the actor as create does (`picked.rs`).
+struct RefusalNames {
+    home: Option<PathBuf>,
+    data_dir: PathBuf,
+}
+
+impl RefusalNames {
+    fn of(actor: &Actor) -> Self {
+        Self {
+            home: actor.home.clone(),
+            data_dir: actor.effective.data_dir().to_path_buf(),
+        }
     }
-    let clauseo_matters::Error::FolderRefused { reason, .. } = failure else {
-        return error;
-    };
-    let code = match reason {
-        Refusal::DriveRoot => ErrorCode::MatterFolderIsDrive,
-        Refusal::Listed(entry) if actor.home.as_deref() == Some(entry.as_path()) => {
-            ErrorCode::MatterFolderIsHome
+
+    /// [`refusal`]'s code for `error`; `listed` says whether a matter is on the list.
+    fn refusal(&self, error: Error, folder: &Path, listed: impl Fn(&MatterId) -> bool) -> Error {
+        let Error::Matters(failure) = &error else {
+            return error;
+        };
+        if let clauseo_matters::Error::Io { path, source, .. } = failure
+            && source.kind() == io::ErrorKind::PermissionDenied
+            && path.starts_with(folder)
+        {
+            return Error::refused(ErrorCode::MatterFolderUnreadable, error.to_string());
         }
-        Refusal::Listed(entry) if entry.as_path() == actor.effective.data_dir() => {
-            ErrorCode::MatterFolderInMattersRoot
-        }
-        Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
-        // Named only when on the list: a marker from another data folder or computer names a
-        // matter this install has never had, with nothing to open. (A forgotten matter's marker
-        // never gets here: the import brings that matter back.)
-        Refusal::AlreadyMatter(matter) => {
-            let refusal = HostError::new(ErrorCode::MatterFolderIsMatter, error.to_string());
-            return Error::Refused(if actor.matters.contains_key(matter) {
-                refusal.with_matter(*matter)
-            } else {
-                refusal
-            });
-        }
-        Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
-        Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
-    };
-    Error::refused(code, error.to_string())
+        let clauseo_matters::Error::FolderRefused { reason, .. } = failure else {
+            return error;
+        };
+        let code = match reason {
+            Refusal::DriveRoot => ErrorCode::MatterFolderIsDrive,
+            Refusal::Listed(entry) if self.home.as_deref() == Some(entry.as_path()) => {
+                ErrorCode::MatterFolderIsHome
+            }
+            Refusal::Listed(entry) if entry.as_path() == self.data_dir => {
+                ErrorCode::MatterFolderInMattersRoot
+            }
+            Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
+            // Named only when on the list: a marker from another data folder or computer names a
+            // matter this install has never had, with nothing to open. (A forgotten matter's marker
+            // never gets here: the import brings that matter back.)
+            Refusal::AlreadyMatter(matter) => {
+                let refusal = HostError::new(ErrorCode::MatterFolderIsMatter, error.to_string());
+                return Error::Refused(if listed(matter) {
+                    refusal.with_matter(*matter)
+                } else {
+                    refusal
+                });
+            }
+            Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
+            Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
+        };
+        Error::refused(code, error.to_string())
+    }
 }
 
 /// Starts creating the Scratch matter in the first free folder of

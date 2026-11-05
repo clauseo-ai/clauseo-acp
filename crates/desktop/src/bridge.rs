@@ -218,6 +218,9 @@ impl Bridge {
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
+            // The New matter dialog's folder warning: only a ref this run's picker issued, as
+            // for `CreateMatter`.
+            HostQuery::FolderSupport { source } => admit::picked_source(self, source)?,
         }
         self.host().await?.query(PRINCIPAL, query).await
     }
