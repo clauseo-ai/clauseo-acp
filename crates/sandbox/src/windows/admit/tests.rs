@@ -348,6 +348,9 @@ fn a_matter_beside_the_data_folder_is_admitted() {
 /// The siblings: what the walk of the matter's parent denies and leaves alone.
 mod siblings;
 
+/// The registered matters' fences, resolved and checked.
+mod fences;
+
 /// Links where the gate reads names unresolved: the agents' folder, the credential link, the
 /// Claude store's files.
 mod links;

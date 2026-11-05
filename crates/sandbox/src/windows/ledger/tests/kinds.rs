@@ -145,3 +145,34 @@ fn a_label_naming_anything_but_the_low_level_is_set_aside() {
     assert_eq!(reopened.entries().count(), 0);
     assert_eq!(reopened.set_aside_entries(), 1);
 }
+
+#[test]
+fn entries_differing_in_inheritance_are_not_one_ace() {
+    let temp = TempDir::new("ledger-shared-inherit");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let deny = |inherit| Grant {
+        path: abs("Clients"),
+        sid: Sid::parse(GROUP_SID).unwrap(),
+        rights: Rights::DenyRead,
+        inherit,
+        kind: PathKind::Sibling,
+    };
+    let pairs = [
+        (matter_one(), Inherit::Tree),
+        (matter_two(), Inherit::FilesInFolder),
+    ];
+    for (matter, inherit) in pairs {
+        let mut plan = AdmittedPlan::from_grants(matter, vec![deny(inherit)]);
+        ledger.record_pending(&mut plan).unwrap();
+    }
+    assert!(!ledger.is_shared(ledger.entries().next().unwrap()));
+    let mut removed = 0;
+    let done = ledger
+        .forget_matter(matter_one(), |_| {
+            removed += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!((done.removed, done.shared, removed), (1, 0, 1));
+}

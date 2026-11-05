@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::FolderSupport;
-use super::fence::Neighbours;
+use super::fence::{Fence, Neighbours};
 // The gate itself builds on Windows and for tests; elsewhere only its types do.
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::acl_plan::in_folder;
@@ -57,6 +57,9 @@ pub enum PathKind {
     /// A folder beside the matter in its parent that isn't a registered matter: denied to every
     /// pool user's reads.
     Sibling,
+    /// The matter's parent folder, for the files directly in it: denied to every pool user's
+    /// reads, folders untouched.
+    ParentFiles,
 }
 
 impl fmt::Display for PathKind {
@@ -75,6 +78,7 @@ impl fmt::Display for PathKind {
             PathKind::ReadOnlyInState => "a read-only path in the state folder",
             PathKind::OtherMatter => "another matter's folder",
             PathKind::Sibling => "a folder beside the matter",
+            PathKind::ParentFiles => "the files beside the matter",
         })
     }
 }
@@ -171,8 +175,10 @@ impl FolderList for ReadDir {
 pub struct Admitted<'a> {
     policy: &'a Policy,
     neighbours: Neighbours,
+    fences: Vec<Fence>,
     data_dir: PathBuf,
     siblings: Vec<PathBuf>,
+    parent_files: Option<PathBuf>,
 }
 
 impl<'a> Admitted<'a> {
@@ -187,9 +193,21 @@ impl<'a> Admitted<'a> {
         &self.siblings
     }
 
-    /// The other matters the launcher passed: the plan fences each one not fenced yet.
+    /// The other matters the launcher passed, every path resolved to its canonical spelling
+    /// (one that doesn't exist keeps the spelling given).
     pub fn neighbours(&self) -> &Neighbours {
         &self.neighbours
+    }
+
+    /// The fences of the registered matters not fenced yet, resolved and checked: the plan
+    /// carries each.
+    pub fn fences(&self) -> &[Fence] {
+        &self.fences
+    }
+
+    /// The matter's parent, when the plan denies the pool group the files directly in it.
+    pub fn parent_files(&self) -> Option<&Path> {
+        self.parent_files.as_deref()
     }
 
     /// Clauseo's data folder, canonical.
@@ -290,31 +308,30 @@ fn gate<'a>(
     if let Some((kind, refusal)) = unresolved_links(policy) {
         return Err(refused(kind, refusal));
     }
-    let registered_folders = neighbours
+    let given = neighbours;
+    let resolved = neighbours::resolve(given);
+    let nested = resolved
         .registered
         .iter()
         .flat_map(|other| other.folders.each())
-        .map(|(folder, _)| folder);
-    for other in registered_folders {
-        let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.to_owned());
-        let nested = [other, &canonical]
-            .iter()
-            .any(|o| in_folder(o, matter) || in_folder(matter, o));
-        if nested {
-            return Err(refused(PathKind::OtherMatter, FolderRefusal::NestedMatter));
-        }
+        .any(|(o, _)| in_folder(o, matter) || in_folder(matter, o));
+    if nested {
+        return Err(refused(PathKind::OtherMatter, FolderRefusal::NestedMatter));
     }
     for (kind, folder) in grant_folders(policy) {
         if let Some(refusal) = refusal(check(folder)) {
             return Err(refused(kind, refusal));
         }
     }
-    let siblings = siblings::siblings(policy, &data, neighbours, &mut check, folders)?;
+    let fences = neighbours::fences(&resolved, given, &mut check)?;
+    let walked = siblings::siblings(policy, &data, &resolved, &mut check, folders)?;
     Ok(Admitted {
         policy,
-        neighbours: neighbours.clone(),
+        neighbours: resolved,
+        fences,
         data_dir: data,
-        siblings,
+        siblings: walked.siblings,
+        parent_files: walked.parent_files,
     })
 }
 
@@ -428,6 +445,8 @@ pub(super) fn refused(path_kind: PathKind, support: FolderRefusal) -> Error {
     Error::FolderUnsupported { path_kind, support }
 }
 
+#[cfg(any(windows, test, feature = "test-support"))]
+mod neighbours;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod siblings;
 

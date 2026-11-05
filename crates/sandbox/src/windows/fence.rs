@@ -66,9 +66,30 @@ pub struct Neighbours {
 /// matter that inherits `C:\`'s `Users` write entries is closed to other pool agents this way
 /// (spike B, rows 2 and 4).
 pub fn plan_fence(folders: &MatterFolders, assigned: &Sid, pool: &[Sid]) -> Vec<Grant> {
+    fence_grants(&folders.each(), assigned, pool)
+}
+
+/// A registered matter's fence as the gate resolved and checked it: only the folders that exist,
+/// each in its canonical spelling and able to take the fence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fence {
+    /// The matter's id: the entries are its own.
+    pub id: MatterId,
+    /// Its assigned pool user, left out of the fence.
+    pub pool_user: Sid,
+    /// Its folders that exist, canonical, with their kinds.
+    pub folders: Vec<(PathBuf, PathKind)>,
+}
+
+/// [`plan_fence`] over a list of folders.
+pub(crate) fn fence_grants(
+    folders: &[(&Path, PathKind)],
+    assigned: &Sid,
+    pool: &[Sid],
+) -> Vec<Grant> {
     let mut fence = Vec::new();
     for other in pool.iter().filter(|sid| *sid != assigned) {
-        for (folder, kind) in folders.each() {
+        for &(folder, kind) in folders {
             fence.push(Grant {
                 path: folder.to_owned(),
                 sid: other.clone(),

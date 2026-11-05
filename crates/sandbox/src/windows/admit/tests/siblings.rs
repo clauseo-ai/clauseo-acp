@@ -179,3 +179,69 @@ fn a_linked_sibling_is_left_alone() {
     .unwrap();
     assert_eq!(admitted.siblings(), [] as [PathBuf; 0]);
 }
+
+/// A matter in `<root>/Clients/A`, so its parent holds neither the home nor the data folder.
+fn client_policy(w: &World) -> Policy {
+    w.dir.dir("Clients/A");
+    w.dir.file("Clients/brief.txt", "loose");
+    Policy::builder(w.at("Clients/A"), w.at(STATE))
+        .home(w.at("home"))
+        .hidden(w.at("data"))
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn the_files_directly_in_the_parent_are_denied_through_the_parent() {
+    let w = World::new("admit-parent-files");
+    let policy = client_policy(&w);
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let none = Neighbours::default();
+    let admitted = admit_with(&policy, &w.at("data"), &none, check, &ReadDir).unwrap();
+    assert_eq!(
+        admitted.parent_files(),
+        Some(w.canonical("Clients").as_path())
+    );
+    let plan = crate::windows::acl_plan::plan(&admitted, &sids(), matter_one()).unwrap();
+    let on_parent: Vec<&crate::windows::acl_plan::Grant> = plan
+        .grants()
+        .iter()
+        .filter(|g| g.path() == w.canonical("Clients"))
+        .collect();
+    assert_eq!(on_parent.len(), 1, "{on_parent:#?}");
+    let deny = on_parent[0];
+    assert_eq!(deny.rights(), crate::windows::acl_plan::Rights::DenyRead);
+    assert_eq!(
+        deny.inherit(),
+        crate::windows::acl_plan::Inherit::FilesInFolder
+    );
+    assert_eq!(deny.kind(), PathKind::ParentFiles);
+    // A parent that can't take it refuses, as a sibling does.
+    let refusing = answering(w.canonical("Clients"), || {
+        Ok(FolderSupport::CantChangePermissions)
+    });
+    let refused = admit_with(&policy, &w.at("data"), &none, refusing, &ReadDir);
+    let Err(Error::FolderUnsupported { path_kind, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(path_kind, PathKind::ParentFiles);
+}
+
+#[test]
+fn no_parent_deny_when_a_path_left_alone_is_a_file_in_it_or_it_holds_the_home() {
+    let w = World::new("admit-parent-files-skipped");
+    let policy = client_policy(&w);
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    // Another matter's policy reads `Clients/brief.txt`: its allow is left alone.
+    let reach = Neighbours {
+        reach: vec![w.canonical("Clients/brief.txt")],
+        ..Neighbours::default()
+    };
+    let admitted = admit_with(&policy, &w.at("data"), &reach, check, &ReadDir).unwrap();
+    assert_eq!(admitted.parent_files(), None);
+    // The world's own matter: its parent holds the home and the data folder.
+    let world = w.builder().build().unwrap();
+    let none = Neighbours::default();
+    let admitted = admit_with(&world, &w.at("data"), &none, check, &ReadDir).unwrap();
+    assert_eq!(admitted.parent_files(), None);
+}

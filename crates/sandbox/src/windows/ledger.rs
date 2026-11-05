@@ -364,11 +364,11 @@ impl Ledger {
 
     /// Forgets `matter`, under the lock: hands each of its trusted entries to `remove`, which
     /// removes the permission entry (one already gone counts as removed), unless another
-    /// matter's entry, pending or applied, names the same path, SID and rights (a shared sibling
-    /// deny): that entry is dropped without a removal, and the permission entry stays for the
-    /// other matter. Entries removed are dropped; entries `remove` failed on are kept for the
-    /// next try. Other matters' entries and set aside ones are left as they are, and never handed
-    /// to `remove`.
+    /// matter's entry, pending or applied, names the same path, SID, rights and inheritance (a
+    /// shared sibling deny): that entry is dropped without a removal, and the permission entry
+    /// stays for the other matter. Entries removed are dropped; entries `remove` failed on are
+    /// kept for the next try. Other matters' entries and set aside ones are left as they are, and
+    /// never handed to `remove`.
     pub fn forget_matter(
         &mut self,
         matter: MatterId,
@@ -486,9 +486,9 @@ impl Ledger {
     }
 }
 
-/// Whether two entries name the same permission entry: path, SID and rights.
+/// Whether two entries name the same permission entry: path, SID, rights and inheritance.
 fn same_ace(a: &Entry, b: &Entry) -> bool {
-    a.path == b.path && a.sid == b.sid && a.rights == b.rights
+    a.path == b.path && a.sid == b.sid && a.rights == b.rights && a.inherit == b.inherit
 }
 
 #[cfg(test)]
