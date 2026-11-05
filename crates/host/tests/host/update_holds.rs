@@ -19,7 +19,7 @@ enum First {
     SignIn,
 }
 
-fn both_holds(test: &str, first: First) {
+fn both_holds(test: &str, first: First, resume_queue: bool) {
     let dir = Dir::new(
         test,
         &[
@@ -60,6 +60,23 @@ fn both_holds(test: &str, first: First) {
     assert!(none_started(&events), "{}", events.dump());
     assert!(held(&host, matter, thread), "{}", events.dump());
 
+    // Under `stop_agents`' hold the lawyer's `ResumeQueue` changes nothing (#480).
+    if resume_queue {
+        host.ok(HostCommand::ResumeQueue { thread });
+        host.settle();
+        events.drain_ready();
+        assert!(
+            none_started(&events),
+            "after ResumeQueue: {}",
+            events.dump()
+        );
+        assert!(
+            held(&host, matter, thread),
+            "after ResumeQueue: {}",
+            events.dump()
+        );
+    }
+
     // The first lift leaves the other hold: still nothing starts.
     let lift_update = || {
         host.ok(HostCommand::CancelScheduledUpdate {});
@@ -97,10 +114,16 @@ fn both_holds(test: &str, first: First) {
 
 #[test]
 fn both_holds_lifting_the_update_first_holds_until_the_sign_in_is_lifted() {
-    both_holds("update_holds_update_first", First::Update);
+    both_holds("update_holds_update_first", First::Update, false);
 }
 
 #[test]
 fn both_holds_lifting_the_sign_in_first_holds_until_the_update_is_lifted() {
-    both_holds("update_holds_sign_in_first", First::SignIn);
+    both_holds("update_holds_sign_in_first", First::SignIn, false);
+}
+
+#[test]
+fn resume_queue_under_stop_and_update_changes_nothing_then_each_lift_order_runs_once() {
+    both_holds("update_holds_resume_update_first", First::Update, true);
+    both_holds("update_holds_resume_sign_in_first", First::SignIn, true);
 }

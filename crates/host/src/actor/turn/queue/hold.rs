@@ -5,7 +5,7 @@
 //! - `Stop`: `stop_agents` holds the thread's agent; `restart_agents` lifts it
 //!   (`sign_in/stops.rs`).
 //! - `SignIn`: the queue is held for its agent's sign-in (`sign_in.rs`); `restart_agents`
-//!   lifts it, or the lawyer's `ResumeQueue` or `SendQueuedNow`.
+//!   lifts it, or the lawyer's `ResumeQueue` or `SendQueuedNow` unless `Stop` applies too.
 //! - `UpdateNow`: an install under `now` holds new sends while its turns stop
 //!   (`actor/update.rs`); the install going ahead or being taken back lifts it.
 //!
@@ -40,6 +40,12 @@ impl Holds {
     /// An install's hold applies.
     pub(super) fn update_now(self) -> bool {
         self.update_now
+    }
+
+    /// `stop_agents` holds the agent: the lawyer's `ResumeQueue` and `SendQueuedNow` change
+    /// nothing (`commands.rs`).
+    pub(super) fn stop(self) -> bool {
+        self.stop
     }
 
     /// A hold that keeps anything from starting applies: `Stop` or `UpdateNow`. `SignIn` holds
