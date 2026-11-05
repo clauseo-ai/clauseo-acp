@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_profile::{SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentKind, MatterId, ThreadId};
+use clauseo_protocol::{AgentId, AgentKind, MatterId, ThreadId};
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -46,6 +46,7 @@ use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 
 use crate::agent::folder_support::{Answer, FolderCheck};
+use crate::agent::login_link::{self, LoginCheck, Seen};
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -303,6 +304,9 @@ pub(crate) struct CodexPrepared {
     /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
     /// (`profile_loads::launch_keys`).
     pub(super) keys: serde_json::Map<String, serde_json::Value>,
+    /// What the sign-in hook found for the home (`agent/login_link.rs`), asked after the
+    /// rest succeeded; `None` with no hook set.
+    pub(super) login: Option<Seen>,
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state.
@@ -337,6 +341,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         ))
     })();
     let sweep = actor.run_sweep.clone();
+    let login = login_hook(actor, thread);
     let (stored, data, (home, claude), mut run, skills, browser) = match paths {
         Ok(paths) => paths,
         Err(error) => {
@@ -354,6 +359,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
         source: actor.folder_check,
     };
     let clock = std::sync::Arc::clone(&actor.clock);
+    let check_clock = std::sync::Arc::clone(&actor.clock);
+    let matter = run.key.matter;
     actor.spawn_post(async move {
         let result = codex::prepare::off_actor_or_undo(
             clock,
@@ -371,6 +378,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                             folder,
                             home,
                             keys: serde_json::Map::new(),
+                            login: None,
                         })
                     }
                     None => None,
@@ -395,9 +403,30 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             |late: Prepared| late.run.remove(),
         )
         .await;
+        let result = match (result, login) {
+            (Ok(mut prepared), Some((hook, agent))) => {
+                if let Some(codex) = prepared.codex.as_mut() {
+                    let home = codex.home.clone();
+                    let seen = login_link::check(check_clock, matter, hook, agent, home).await;
+                    codex.login = Some(seen);
+                }
+                Ok(prepared)
+            }
+            (result, _) => result,
+        };
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
+}
+
+/// The sign-in hook and the agent it asks about, for a Codex thread when a hook is set.
+fn login_hook(
+    actor: &Actor,
+    thread: ThreadId,
+) -> Option<(Arc<dyn LoginCheck + Send + Sync>, AgentId)> {
+    let hook = actor.wiring.sign_in.check.clone()?;
+    let agent = actor.threads.get(&thread)?.row.agent.clone();
+    (AgentKind::of(&agent) == Some(AgentKind::Codex)).then_some((hook, agent))
 }
 
 /// A launch's folder check answered (`agent/folder_support.rs`, a Codex or a Claude agent):
@@ -471,6 +500,11 @@ pub(super) fn on_prepared(
     if host_stopping(actor) {
         discard(actor, thread, prepared.run);
         agents::fail_all(actor, thread, waiting, &Error::Closed);
+        return;
+    }
+    if let Err(error) = super::sign_in::check_launch(actor, thread, &prepared) {
+        discard(actor, thread, prepared.run);
+        agents::fail_all(actor, thread, waiting, &error);
         return;
     }
     if let Err(error) = super::profile_loads::launch_keys(actor, thread, &mut prepared) {

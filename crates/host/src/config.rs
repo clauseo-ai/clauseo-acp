@@ -14,6 +14,7 @@ use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
 
+use crate::agent::login_link::{LoginCheck, LoginSplit, SignIn, SignInAgain};
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
@@ -139,6 +140,8 @@ pub(crate) struct LaunchWiring {
     pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
     /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
     pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
+    /// The sign-in hook, the sign-in-again test, and the host's sign-in state.
+    pub(crate) sign_in: SignIn,
 }
 
 impl Default for LaunchWiring {
@@ -153,6 +156,7 @@ impl Default for LaunchWiring {
             browser_socket_root: None,
             inherited_env: None,
             install_tools: None,
+            sign_in: SignIn::default(),
         }
     }
 }
@@ -168,6 +172,7 @@ impl std::fmt::Debug for LaunchWiring {
             // Names and values stay out: the environment holds secrets.
             .field("inherited_env", &self.inherited_env.is_some())
             .field("install_tools", &self.install_tools.is_some())
+            .field("sign_in", &self.sign_in)
             .finish_non_exhaustive()
     }
 }
@@ -512,6 +517,28 @@ impl HostConfig {
         self.search.rebuild_hold = rebuild;
         self.search.query_hold = query;
         self
+    }
+
+    /// The sign-in hook (decision record 0048, ruling 2): asked off the actor at every Codex
+    /// launch, with a bounded wait, whether Clauseo's Codex home shares the lawyer's login file
+    /// (`agent/login_link.rs`). Unset (the default), nothing is checked: no split check and no
+    /// guard.
+    pub fn with_login_check(mut self, check: Arc<dyn LoginCheck + Send + Sync>) -> Self {
+        self.wiring.sign_in.check = Some(check);
+        self
+    }
+
+    /// The sign-in-again test (S18's `is_sign_in_again`): a turn whose agent error's text it
+    /// accepts fails as `agent.auth_required`, so its turn is held for the sign-in. Unset (the
+    /// default), only `agent.auth_required` itself is.
+    pub fn with_sign_in_again(mut self, again: SignInAgain) -> Self {
+        self.wiring.sign_in.again = Some(again);
+        self
+    }
+
+    /// The receiving end of the login splits, for `HostHandle::login_splits`.
+    pub(crate) fn login_splits(&self) -> async_channel::Receiver<LoginSplit> {
+        self.wiring.sign_in.receiver()
     }
 
     /// Takes the config apart.

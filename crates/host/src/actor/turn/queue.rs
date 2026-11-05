@@ -14,6 +14,7 @@
 mod commands;
 mod held;
 mod restore;
+mod sign_in;
 mod steer;
 
 use std::collections::VecDeque;
@@ -37,6 +38,7 @@ pub(super) use commands::{edit, remove, resume, send_now};
 pub(crate) use held::queue_held;
 pub(super) use held::sync_held;
 pub(super) use restore::restore;
+pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};
 pub(super) use steer::{Steered, on_steer_timer, on_steered};
 
 /// A thread's queued turns, in the order they start, and what moves them.
@@ -53,6 +55,11 @@ pub(crate) struct ThreadQueue {
     removed: Option<TurnId>,
     /// The `queue_held` last shown.
     shown: bool,
+    /// The queue is held for its agent's sign-in: `restart_agents` resumes it once
+    /// (`sign_in.rs`). Cleared whenever the queue no longer shows held.
+    sign_in: bool,
+    /// A turn that ended for the sign-in, put back once its close is durable.
+    requeue: Option<Requeue>,
     /// Queued turns whose `RemoveQueuedPrompt` commit is in flight, with their place: gone
     /// once it is durable, back in their place if it fails, and never started meanwhile.
     removing: Vec<(usize, Queued)>,
@@ -412,6 +419,7 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
     }
     move_on(actor, thread);
     sync_held(actor, thread);
+    sign_in::on_closed(actor, thread, turn);
 }
 
 /// Starts the head when nothing runs, no end or steer is outstanding, and the queue is not

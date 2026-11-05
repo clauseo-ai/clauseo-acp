@@ -15,7 +15,8 @@ use clauseo_protocol::{
 };
 use futures::channel::oneshot;
 
-use crate::actor::input::{Input, Request};
+use crate::actor::input::{Input, Request, SignInRequest};
+use crate::agent::login_link::{self, LoginSplit};
 use crate::config::HostConfig;
 use crate::error::Error;
 
@@ -46,7 +47,10 @@ impl Host {
     /// threads, creates the Scratch matter on the first start, repairs what the last run left
     /// open, and serves. Fails with `store.locked` when another host holds the data folder.
     pub fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), HostError> {
-        crate::actor::start(config).map_err(HostError::from)
+        let splits = config.login_splits();
+        let (mut handle, join) = crate::actor::start(config).map_err(HostError::from)?;
+        handle.splits = splits;
+        Ok((handle, join))
     }
 }
 
@@ -54,6 +58,8 @@ impl Host {
 #[derive(Debug, Clone)]
 pub struct HostHandle {
     requests: async_channel::Sender<Request>,
+    /// The login splits the actor sends (`HostHandle::login_splits`).
+    splits: async_channel::Receiver<LoginSplit>,
     /// The actor's internal input channel, for `abort_for_test`.
     #[cfg(feature = "test-support")]
     internal: async_channel::Sender<Input>,
@@ -91,6 +97,8 @@ impl HostHandle {
         drop(internal);
         Self {
             requests,
+            // `Host::start` puts the config's own in.
+            splits: async_channel::bounded(1).1,
             #[cfg(feature = "test-support")]
             internal,
         }
@@ -314,6 +322,67 @@ impl HostHandle {
         let plan = plan.map(Box::new);
         self.call(|reply| Request::SetPlan { agent, plan, reply })
             .await
+    }
+
+    /// Stops every live agent of `agent` that is not in a turn, so the next question launches
+    /// with the new login, and resumes, once, each queue held for that agent's sign-in (a turn
+    /// that failed with `agent.auth_required`, or one [`Self::stop_agents`] cancelled). Rust
+    /// only: desktop calls it on `SignedIn` and after a key, endpoint or source change. A
+    /// second call resumes nothing more. A lawyer's `ResumeQueue` before it resumes the queue
+    /// as usual, and the call then leaves it alone.
+    pub async fn restart_agents(&self, agent: AgentId) -> Result<(), HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::Restart { agent, reply }))
+            .await
+    }
+
+    /// Step 1 of the leave order (decision record 0048, ruling 1): cancels each turn of
+    /// `agent` through the Cancel path, puts it back at the head of its queue held for the
+    /// sign-in, and stops every live agent of that id, launches being prepared included, so no
+    /// process of it runs while the login link changes. Rust only. [`Self::restart_agents`]
+    /// relaunches and resumes.
+    pub async fn stop_agents(&self, agent: AgentId) -> Result<(), HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::Stop { agent, reply }))
+            .await
+    }
+
+    /// Desktop's word that `agent`'s login is the lawyer's own, reused (`true`, after
+    /// `UseFoundLogin`'s link), or no longer (`false`). While it is, each Codex launch runs
+    /// the split check through the [`LoginCheck`](crate::LoginCheck) hook. Rust only.
+    pub async fn set_reused_login(&self, agent: AgentId, reused: bool) -> Result<(), HostError> {
+        self.call(|reply| {
+            Request::SignIn(SignInRequest::Reused {
+                agent,
+                reused,
+                reply,
+            })
+        })
+        .await
+    }
+
+    /// The reused Codex logins that split, as each launch's split check finds them: desktop
+    /// reads them and runs S18's `stop_using_login` and the leave order. Rust only. Every
+    /// clone of the receiver takes from the same channel, so one reader takes each split.
+    pub fn login_splits(&self) -> async_channel::Receiver<LoginSplit> {
+        self.splits.clone()
+    }
+
+    /// Step 3 of the leave order: removes each matter's link to `agent`'s login file, without
+    /// a restart. The actor only names the folders; the removal runs on a thread of its own with
+    /// a bounded wait, so no file call blocks the actor. Matters get links in stage C (R17):
+    /// until then there are none and nothing is removed. Rust only.
+    pub async fn remove_login_links(&self, agent: AgentId) -> Result<(), HostError> {
+        let asked = agent.clone();
+        let homes = self
+            .call(|reply| {
+                Request::SignIn(SignInRequest::LinkHomes {
+                    agent: asked,
+                    reply,
+                })
+            })
+            .await?;
+        login_link::remove_links(agent, homes)
+            .await
+            .map_err(HostError::from)
     }
 
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text

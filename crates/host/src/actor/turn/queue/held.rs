@@ -24,6 +24,10 @@ pub(in super::super) fn sync_held(actor: &mut Actor, thread: ThreadId) {
     let Some(queue) = queue(actor, thread) else {
         return;
     };
+    if !shown {
+        // A queue held for the sign-in that moved on, or emptied, waits for it no more.
+        queue.sign_in = false;
+    }
     if queue.shown == shown {
         return;
     }

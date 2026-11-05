@@ -44,7 +44,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         return;
     };
     current.phase = TurnPhase::Prompting;
-    let blocks = std::mem::take(&mut current.prompt);
+    let blocks = current.prompt.clone();
     let mut content = Vec::with_capacity(blocks.len() + 1);
     if let Some(text) = note {
         content.push(ContentBlock::Text { text });

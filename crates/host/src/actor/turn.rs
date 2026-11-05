@@ -29,6 +29,7 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
+mod sign_in;
 mod state;
 mod steps;
 mod text;
@@ -64,6 +65,7 @@ pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
+pub(crate) use sign_in::on_request as sign_in_request;
 pub(crate) use undo_preview::preview_undo;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
@@ -106,6 +108,9 @@ pub(crate) struct TurnState {
     undo: Option<Box<undo::UndoLog>>,
     /// The prompts waiting behind the current turn, whether they are held, steers in flight.
     queue: queue::ThreadQueue,
+    /// The turn `HostHandle::stop_agents` cancelled: unless it ends `EndTurn`, it goes back
+    /// to the queue held for the sign-in (`sign_in.rs`).
+    stopped_for_sign_in: Option<TurnId>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -150,7 +155,8 @@ struct Current {
     turn: TurnId,
     /// The lawyer's message that opened it.
     message: clauseo_protocol::MessageId,
-    /// The prompt's content, until step 5 sends it.
+    /// The prompt's content, as step 5 sends it (kept, so a turn held for the sign-in goes
+    /// back to the queue with it, `sign_in.rs`).
     prompt: Vec<ContentBlock>,
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.

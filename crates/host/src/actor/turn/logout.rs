@@ -6,6 +6,11 @@
 //! advertises before they are logged as `CommandsAvailable`, and [`refuse`] refuses a prompt
 //! to a Codex agent whose text starts `/logout` with `command.invalid`, before anything is
 //! queued or sent. Any other agent's commands and prompts pass as they are.
+//!
+//! S18's guard: while Clauseo's Codex home shares the lawyer's login file (the sign-in hook
+//! says so, or gave no answer, or desktop says the login is reused; `agent/login_link.rs`), a
+//! prompt starting `/login` is refused too, with `signin.login_shared`: the lawyer changes it
+//! with "Stop using it here". The host itself never calls `login` or `authenticate`.
 
 use clauseo_protocol::{AgentKind, AvailableCommand, ContentBlock, ErrorCode, ThreadId};
 
@@ -14,6 +19,9 @@ use crate::error::Error;
 
 /// The command codex-acp advertises that signs the agent out.
 const LOGOUT: &str = "logout";
+
+/// The command that signs the agent in.
+const LOGIN: &str = "login";
 
 /// The kind of `thread`'s agent, when the host knows the thread and the agent has one.
 fn kind(actor: &Actor, thread: ThreadId) -> Option<AgentKind> {
@@ -43,15 +51,27 @@ pub(super) fn refuse(
     if kind(actor, thread) != Some(AgentKind::Codex) {
         return Ok(());
     }
-    let typed = blocks.iter().any(|block| match block {
-        ContentBlock::Text { text } => starts_logout(text),
-        ContentBlock::Image { .. }
-        | ContentBlock::Audio { .. }
-        | ContentBlock::ResourceLink { .. }
-        | ContentBlock::Resource { .. }
-        | ContentBlock::Unsupported { .. } => false,
-    });
-    if typed {
+    let typed = |name: &str| {
+        blocks.iter().any(|block| match block {
+            ContentBlock::Text { text } => starts_command(text, name),
+            ContentBlock::Image { .. }
+            | ContentBlock::Audio { .. }
+            | ContentBlock::ResourceLink { .. }
+            | ContentBlock::Resource { .. }
+            | ContentBlock::Unsupported { .. } => false,
+        })
+    };
+    let guarded = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| actor.wiring.sign_in.guards(&entry.row.agent));
+    if guarded && typed(LOGIN) {
+        return Err(Error::refused(
+            ErrorCode::SigninLoginShared,
+            "/login is not sent to the agent: Clauseo is using the ChatGPT login on this computer",
+        ));
+    }
+    if typed(LOGOUT) {
         return Err(Error::refused(
             ErrorCode::CommandInvalid,
             "/logout is not sent to the agent: sign out from Clauseo's Plans instead",
@@ -65,14 +85,15 @@ fn is_logout(name: &str) -> bool {
     name.eq_ignore_ascii_case(LOGOUT)
 }
 
-/// Whether `text`, past leading white space, is the command `/logout`: a slash, `logout` in
-/// any case, then the end or white space.
-fn starts_logout(text: &str) -> bool {
+/// Whether `text`, past leading white space, is the command `name`: a slash, `name` in any
+/// case, then the end or white space.
+fn starts_command(text: &str, name: &str) -> bool {
     let Some(rest) = text.trim_start().strip_prefix('/') else {
         return false;
     };
     let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    rest.get(..name_end).is_some_and(is_logout)
+    rest.get(..name_end)
+        .is_some_and(|typed| typed.eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]
