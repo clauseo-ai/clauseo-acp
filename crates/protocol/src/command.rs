@@ -18,8 +18,8 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId,
-    Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    MessageId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope,
+    ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
@@ -430,6 +430,22 @@ pub enum HostCommand {
     SetToolSettings {
         /// The switches to change.
         patch: ToolsPatch,
+    },
+    /// Turn the skill pack `id` on or off (decision record 0040); answers `Done`, and every
+    /// app subscriber gets `HostEvent::SettingsChanged` when `skills.enabled` changed. On:
+    /// the pack must be admitted by `skills.extra` (and `skills.curated`), then it is read and
+    /// hashed off the host thread and its hash recorded. Refused with `settings.locked` when
+    /// the firm's policy locks `skills.enabled` or decides the pack is not admitted, and with
+    /// `settings.refused` when the lawyer's own `skills.extra` does not admit it, or the pack
+    /// is missing, invalid or changed while it was read; `ListSkillPacks` gives the reason.
+    /// Off: removes its entry, refused only while `skills.enabled` is locked. Nothing changes
+    /// on a refusal, and its message names no pack text but the id. Only the settings
+    /// window sends it.
+    SetSkillPack {
+        /// The pack.
+        id: PackId,
+        /// Whether to turn it on.
+        on: bool,
     },
     /// Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
     /// and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the

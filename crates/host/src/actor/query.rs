@@ -5,7 +5,8 @@
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
 //! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
 //! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
-//! (`query/folder_support.rs`).
+//! (`query/folder_support.rs`), and `ListSkillPacks` reads the skill packs off it
+//! (`query/skill_packs.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -29,6 +30,7 @@ use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 
 mod folder_support;
+mod skill_packs;
 
 /// Answers one query.
 pub(super) fn query(
@@ -130,6 +132,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
         HostQuery::GetUpdate => super::update::answer(reply),
+        HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));

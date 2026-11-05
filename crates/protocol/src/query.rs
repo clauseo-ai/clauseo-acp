@@ -10,8 +10,8 @@ use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    PackList, RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile,
-    StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    PackList, PackStatus, RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView,
+    SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -179,6 +179,10 @@ pub enum HostQuery {
     /// Where the updater stands (decision record 0037), read after subscribing to the app
     /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
     GetUpdate,
+    /// Every skill pack folder in `<data>/skill-packs/`, and every pack `skills.enabled`
+    /// names, each with its state (decision record 0040), sorted by id; read off the host
+    /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
+    ListSkillPacks,
 }
 
 /// A query's answer.
@@ -231,6 +235,8 @@ pub enum QueryResult {
     /// For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
     /// `{"folder_support": {}}` for a fine folder.
     FolderSupport(PickedFolderSupport),
+    /// For `ListSkillPacks`.
+    SkillPacks(Vec<PackStatus>),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it

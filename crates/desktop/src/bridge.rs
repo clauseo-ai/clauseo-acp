@@ -215,8 +215,8 @@ impl Bridge {
 
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
-    /// until the bridge rules on it. The `settings` window reads the settings (0028) and the
-    /// updater's state (0037) alone, and any other window nothing.
+    /// until the bridge rules on it. The `settings` window reads the settings (0028), the
+    /// updater's state (0037) and the skill packs (0040) alone, and any other window nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -224,10 +224,15 @@ impl Bridge {
     ) -> Result<QueryResult, HostError> {
         match label {
             crate::MAIN_WINDOW => {}
-            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings | HostQuery::GetUpdate) => {}
+            SETTINGS_WINDOW
+                if matches!(
+                    query,
+                    HostQuery::GetSettings | HostQuery::GetUpdate | HostQuery::ListSkillPacks
+                ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
-                    "the settings window reads only the settings and the update state",
+                    "the settings window reads only the settings, the update state and the \
+                     skill packs",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -247,7 +252,10 @@ impl Bridge {
             | HostQuery::GetUpdate
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
-            | HostQuery::ListPapers { .. } => {}
+            | HostQuery::ListPapers { .. }
+            // The skill packs and their states (0040): reads the packs folder, writes nothing.
+            // Both windows show them: Settings' Skills pane and the main window's matter picker.
+            | HostQuery::ListSkillPacks => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.

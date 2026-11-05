@@ -161,6 +161,7 @@ mod serde_util;
 mod session;
 mod settings;
 mod setup;
+mod skill_packs;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -256,6 +257,7 @@ wire_types! {
         Language, Lite, Motion, PlanProvider, PlanView, PrivacyPatch, PrivacySettings,
         SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
     },
+    skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
     setup::{
         FoundLogin, InstallLog, InstallProgress, LoginFrom, Secret, SetupCommand, SetupEvent,
         SignIn, SignInMethod, SignInSource,

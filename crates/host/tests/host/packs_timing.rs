@@ -29,12 +29,12 @@ use crate::write;
 /// Timed launches per case, after one launch that warms the caches.
 const RUNS: usize = 9;
 
-/// The clock, for this timing run alone.
+/// The clock, for this timing run and the list's timing guard (`skill_packs_cap`) alone.
 #[expect(
     clippy::disallowed_methods,
     reason = "the host's timing run reads the clock to time a launch; the core takes time as input"
 )]
-fn now() -> Instant {
+pub(crate) fn now() -> Instant {
     Instant::now()
 }
 

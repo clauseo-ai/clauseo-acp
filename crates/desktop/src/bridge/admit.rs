@@ -14,7 +14,8 @@ use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its
+/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its Skills
+/// pane `SetSkillPack` (0040), for its
 /// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), and for its
 /// updates row `SetUpdateMode` and `CheckForUpdate` (0037), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
@@ -26,13 +27,17 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             HostCommand::SetUiSettings { .. }
             | HostCommand::SetToolSettings { .. }
             | HostCommand::SetPrivacySettings { .. }
+            // Skills (0040, PR-E): turning a pack on or off is a setting; the id is checked
+            // by its type, the pack by the host.
+            | HostCommand::SetSkillPack { .. }
             | HostCommand::RefreshLimits { .. }
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
             | HostCommand::CheckForUpdate {} => Ok(()),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, refresh_limits, set_update_mode and check_for_update",
+                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode and \
+                 check_for_update",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -114,6 +119,11 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // The mode lives in the settings window only, as the other switches do.
         HostCommand::SetUpdateMode { .. } => Err(invalid(
             "the update mode is set from the settings window only",
+        )),
+        // Skill packs are turned on and off in the settings window's Skills pane only, as the
+        // other switches are (least privilege, 0040); the matter picker only reads them.
+        HostCommand::SetSkillPack { .. } => Err(invalid(
+            "skill packs are turned on and off from the settings window only",
         )),
     }
 }

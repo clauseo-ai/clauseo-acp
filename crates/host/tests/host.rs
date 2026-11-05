@@ -207,6 +207,12 @@ mod settings_entries;
 #[path = "host/sign_in_hold.rs"]
 mod sign_in_hold;
 #[cfg(test)]
+#[path = "host/skill_packs.rs"]
+mod skill_packs;
+#[cfg(test)]
+#[path = "host/skill_packs_cap.rs"]
+mod skill_packs_cap;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]

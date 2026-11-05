@@ -22,7 +22,7 @@ pub const FORMAT: u64 = 1;
 pub const DISPLAY_MAX: usize = 200;
 
 /// The most bytes `source_url` has.
-const URL_MAX: usize = 2048;
+pub const URL_MAX: usize = 2048;
 
 /// The most bytes a rendered skill name has (`skills::NAME_MAX`).
 const RENDERED_MAX: usize = 64;
