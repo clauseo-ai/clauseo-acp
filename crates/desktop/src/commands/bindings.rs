@@ -39,6 +39,7 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             reveal::<tauri::Wry>,
             open_settings::<tauri::Wry>,
             count_ui,
+            setup::<tauri::Wry>,
         ])
         .constant(
             "KNOWN_DOMAIN_EVENT_KINDS",

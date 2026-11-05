@@ -8,12 +8,14 @@
 //! `docs/decisions/0019-app-stream-to-the-window.md` the tenth, `subscribe_app`, and the
 //! allow-lists of `dispatch` and `query`, and `docs/decisions/0026-open-and-reveal.md` the three
 //! that leave the app: `open_external`, `open_file` and `reveal` (`open.rs`).
+//! `docs/decisions/0048-signin-on-the-wire.md` records `setup`, granted to `main` and the
+//! settings window, each with its own allow-list (`setup.rs`).
 //! `lib.rs` registers them with `tauri::generate_handler!`; tauri-specta reads them only in the
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
 use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, FileRefId, HostError, HostQuery,
-    PermissionRequestId, QueryResult, StreamId, ThreadId, ViewPosition,
+    PermissionRequestId, QueryResult, SetupCommand, StreamId, ThreadId, ViewPosition,
 };
 use clauseo_settings::{PlatformDirs as _, SystemDirs};
 use serde::Serialize;
@@ -29,7 +31,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 15] = [
+pub(crate) const COMMANDS: [&str; 16] = [
     "dispatch",
     "query",
     "open_stream",
@@ -45,6 +47,7 @@ pub(crate) const COMMANDS: [&str; 15] = [
     "reveal",
     "open_settings",
     "count_ui",
+    "setup",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -317,6 +320,21 @@ pub(crate) async fn count_ui(
     let _started = bridge.host().await;
     counts.count(event);
     Ok(())
+}
+
+/// Runs an install or sign-in command (0048): refused with `transport.unauthorized`, before
+/// anything runs, when the window may not send it (`main` the first-run and sign-in actions and
+/// a first key, the settings window every action). A `StartSignIn` for a sign-in already
+/// running answers `Done` and joins it. What changes comes on the window's channel as `setup`
+/// messages, after `subscribe_app`. Never waits for the host.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn setup<R: Runtime>(
+    webview: Webview<R>,
+    bridge: State<'_, Bridge>,
+    command: SetupCommand,
+) -> Result<CommandOutcome, HostError> {
+    bridge.setup(webview.label(), command).await
 }
 
 #[cfg(test)]

@@ -12,6 +12,9 @@ pub(crate) enum Feed {
     /// Every agent account's limits (`HostHandle::subscribe_limits`), followed from
     /// `open_stream` on.
     Limits,
+    /// The install and sign-in events (`setup.rs`, 0048), desktop's own, followed with the
+    /// app feed by the windows that may send setup commands.
+    Setup,
 }
 
 /// A followed feed: its current restart id, and whether a restart is untaken.

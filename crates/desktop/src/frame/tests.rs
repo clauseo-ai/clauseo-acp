@@ -140,7 +140,7 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 }
 
 /// The top-level keys the reader takes for a message of the bridge's own, never an event's.
-const RESERVED: [&str; 3] = ["fragment", "stream_failed", "timed"];
+const RESERVED: [&str; 4] = ["fragment", "stream_failed", "setup", "timed"];
 
 /// The number of `HostEvent` variants [`variant`] names.
 const VARIANTS: usize = 11;

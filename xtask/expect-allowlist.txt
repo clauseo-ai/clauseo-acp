@@ -24,6 +24,9 @@
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/open.rs open_url_unconfirmed dead_code
+# R20 P5a: setup's pieces that only P5b's backend calls outside the tests.
+crates/desktop/src/setup/admit.rs key_stored dead_code
+crates/desktop/src/setup/events.rs note dead_code
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods

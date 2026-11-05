@@ -1048,6 +1048,7 @@ dependencies = [
  "tauri-specta",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "windows",
