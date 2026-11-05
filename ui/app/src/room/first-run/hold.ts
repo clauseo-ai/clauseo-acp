@@ -2,7 +2,7 @@
 // chunk (slot.tsx) sets the hold; the composer reads it (thread/work-composer.tsx): the gate in the field's row while
 // the conversation's plan isn't signed in, the install's working line, and the room's line under the field. Until the
 // chunk sets one there is none, so a lawyer whose plan is signed in sends without waiting for the chunk, and a host
-// with no setup wire (no event ever arrives) never holds a question back.
+// whose setup events have not arrived never holds a question back.
 import { useSyncExternalStore, type ReactNode } from "react";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 

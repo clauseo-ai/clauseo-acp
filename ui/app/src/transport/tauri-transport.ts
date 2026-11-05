@@ -32,12 +32,19 @@ import type {
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SetupCommand,
+  SetupEvent,
   StreamId,
   ThreadId,
   UiCount,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
+import type { SetupFeed } from "./setup-feed.ts";
+
+/** Desktop's `setup` command, from the setup feed's module: the lazy store calls it, so it loads with the feed. */
+const sendSetup = async (command: SetupCommand) =>
+  (await import("./setup-feed.ts")).sendSetup(command);
 import { Subscriptions } from "./subscriptions.ts";
 
 type Answer<T> = { status: "ok"; data: T } | { status: "error"; error: unknown };
@@ -88,6 +95,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   #appReady: Promise<void> | null = null;
   /** The limits view the channel carries from `open_stream` on (R16): the last one, and its listeners. */
   readonly #limits: LimitsFeed;
+  /** The install and sign-in events `subscribe_app` brings (0048): the last of each, and their listeners. Loaded on
+   * the first `onSetup` or setup message (setup-feed.ts lives outside the first load); null until then. */
+  #setup: SetupFeed | null = null;
+  #setupLoad: Promise<SetupFeed> | null = null;
+  /** The setup messages that came while the feed loaded, in order; handed to it once it has. */
+  readonly #setupEarly: object[] = [];
+  /** `onSetup` listeners not stopped. */
+  #setupListeners = 0;
 
   constructor(options: TauriOptions = {}) {
     const warn = options.warn ?? ((m: string) => console.warn(m));
@@ -112,7 +127,14 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
         // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
         // under an answer (room/thread/sources.tsx) come from the view's tool calls, each one's `web`.
         const failed = streamFailedOf(event);
-        if (failed !== null) {
+        if ("setup" in (event as object)) {
+          // no stream and no position: processed at once, as settings_changed is
+          if (this.#setup !== null) this.#setup.receive(event);
+          else {
+            this.#setupEarly.push(event);
+            this.#setupFeed().catch(() => {});
+          }
+        } else if (failed !== null) {
           this.#subs.fail(failed.stream, toHostError(failed.error));
         } else if ("patches" in event && event.patches !== undefined) {
           this.#carried = this.#subs.deliver(event.patches) > 0;
@@ -152,7 +174,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
       // a channel opened again (after a failed open) carries no app events until subscribed again
       opened.then(
         () => {
-          if (this.#appListeners.size > 0 && this.#appReady === null)
+          if ((this.#appListeners.size > 0 || this.#setupListeners > 0) && this.#appReady === null)
             this.#subscribeApp().catch(() => {});
         },
         () => {},
@@ -288,13 +310,52 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
   }
-  // A stub of R20's setup wire (store/setup.ts's SetupSource): desktop's `setup` command and stream arm come with
-  // stage D's P5. Until then no SetupEvent arrives, so the first run shows its first screen but no install line and no
-  // sign-in gate; with no state to act on no setup command can be pressed, and one sent anyway does nothing.
-  onSetup(): () => void {
-    return () => {};
+  /** Hears each install and sign-in event (R20's `setup` arm; store/setup.ts's SetupSource). Desktop sends them after
+   * `subscribe_app`, which the first listener asks for; a listener first hears the current picture (setup-feed.ts). */
+  onSetup(listener: (event: SetupEvent) => void): () => void {
+    this.#setupListeners += 1;
+    let stopped = false;
+    let stop = () => {};
+    this.#setupFeed().then(
+      (feed) => {
+        if (!stopped) stop = feed.onSetup(listener);
+      },
+      () => {},
+    );
+    // a refusal is warned in #subscribeApp; the next listener, or the next open, tries again
+    this.#subscribeApp().catch(() => {});
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      this.#setupListeners -= 1;
+      stop();
+    };
   }
-  async setup(): Promise<void> {}
+
+  /** The setup feed, imported once; the messages that came meanwhile go to it first, in order. A failed import is
+   * warned, and the next listener or message tries again. */
+  #setupFeed(): Promise<SetupFeed> {
+    if (this.#setupLoad === null) {
+      const load = import("./setup-feed.ts").then(({ SetupFeed }) => {
+        const feed = new SetupFeed(this.#warn);
+        for (const message of this.#setupEarly.splice(0)) feed.receive(message);
+        this.#setup = feed;
+        return feed;
+      });
+      this.#setupLoad = load;
+      load.catch((e: unknown) => {
+        this.#warn(`the setup feed did not load: ${toHostError(e).message}`);
+        if (this.#setupLoad === load) this.#setupLoad = null;
+      });
+    }
+    return this.#setupLoad;
+  }
+  /** Sends one install or sign-in command (desktop's `setup`); rejects with desktop's HostError when it refuses. The
+   * command can hold a pasted code or an API key: nothing keeps or prints it, and a rejection that is not desktop's
+   * own HostError (Tauri's text, which can quote what it could not decode) becomes `internal` naming the kind only. */
+  async setup(command: SetupCommand): Promise<void> {
+    await sendSetup(command);
+  }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {
     await call(commands.countUi(event));
