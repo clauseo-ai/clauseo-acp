@@ -103,11 +103,22 @@ export const HI = {
   "You undid Clauseo's changes to 1 paper.": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
   // the host's notices in the app's words (a notice's kind; a kind this version doesn't know shows its text): a new
   // agent session that doesn't remember the earlier turns (provisional, TN-01); papers an undo removed that a sync
-  // client put back, one or {n} (provisional, TN-02 and TN-03; {papers} as Versions' undo rows name them)
+  // client put back, one or {n} (provisional, TN-02 and TN-03; {papers} as Versions' undo rows name them); a skill
+  // pack the launch left out, one full line per reason (provisional, TN-04 to TN-09; {pack} is the pack's id)
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.":
     null, // hi: later
   "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.": null, // hi: later
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.": null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.":
+    null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.":
+    null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.":
+    null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.": null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.": null, // hi: later
+  "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
+    null, // hi: later
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": null,

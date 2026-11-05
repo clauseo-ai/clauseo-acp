@@ -544,3 +544,28 @@ test("a host notice shows the app's line for its kind, not its text; an agent's 
   expect(notices[0]?.getAttribute("dir")).toBe("auto");
   expect(notices[0]?.dataset["level"]).toBe("info");
 });
+
+test("a skill pack the launch left out shows its line with the pack named, not the host's text", async () => {
+  h = await mountRoom();
+  const text = "Clauseo's own fallback text.";
+  h.deliver([
+    reset([
+      userMessage(5, 1, "Q"),
+      {
+        notice: {
+          order: 6,
+          event: uuid(1, 10),
+          level: "info",
+          text,
+          kind: { skill_pack_not_loaded: { pack: "nda-kit", reason: "changed" } },
+          ts: 6000,
+        },
+      },
+    ]),
+  ]);
+  const notices = h.all("notice");
+  expect(notices.map((n) => n.textContent)).toEqual([
+    "Clauseo didn't load the skill pack 'nda-kit'. Its files changed after it was turned on. Turn it on again to use it.",
+  ]);
+  expect(notices[0]?.textContent).not.toBe(text);
+});

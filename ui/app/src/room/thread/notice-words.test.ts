@@ -3,7 +3,7 @@
 import { t, type Key } from "@clauseo/components/lib/words.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { expect, test } from "vitest";
-import type { NoticeKind } from "../../transport/protocol.ts";
+import type { NoticeKind, PackSkipReason } from "../../transport/protocol.ts";
 import { noticeLine, type NoticeWords } from "./notice-words.ts";
 
 const words = (lang: "en" | "hi"): NoticeWords => ({
@@ -82,4 +82,51 @@ test("two papers with one bare name in different folders: each shows its whole p
 
 test("an object kind with no files and no more gives null, so the row shows its text", () => {
   expect(noticeLine({ files_came_back: { files: [], more: 0 } }, en)).toBeNull();
+});
+
+const skipped = (reason: string): NoticeKind =>
+  ({ skill_pack_not_loaded: { pack: "nda-kit", reason } }) as NoticeKind;
+
+test.each<[PackSkipReason, string]>([
+  [
+    "not_turned_on",
+    "Clauseo didn't load the skill pack 'nda-kit'. This matter is set to use it, but it isn't turned on.",
+  ],
+  [
+    "not_admitted",
+    "Clauseo didn't load the skill pack 'nda-kit'. The skill pack settings on this computer don't allow it.",
+  ],
+  [
+    "changed",
+    "Clauseo didn't load the skill pack 'nda-kit'. Its files changed after it was turned on. Turn it on again to use it.",
+  ],
+  [
+    "missing",
+    "Clauseo didn't load the skill pack 'nda-kit'. Clauseo couldn't find it on this computer.",
+  ],
+  ["invalid", "Clauseo didn't load the skill pack 'nda-kit'. Its files aren't a valid skill pack."],
+  [
+    "too_many",
+    "Clauseo didn't load the skill pack 'nda-kit'. Clauseo loads at most 16 skill packs at a time.",
+  ],
+])("a skill pack left out for %s gives its line, with the pack named", (reason, line) => {
+  expect(noticeLine(skipped(reason), en)).toBe(line);
+  expect(noticeLine(skipped(reason), words("hi"))).toBe(line);
+});
+
+test("a skill pack left out for a reason this version does not know gives null, so the row shows its text", () => {
+  expect(noticeLine(skipped("unknown"), en)).toBeNull();
+  expect(noticeLine(skipped("something_newer"), en)).toBeNull();
+});
+
+test("a skill pack notice with no reason gives null, so the row shows its text", () => {
+  expect(
+    noticeLine({ skill_pack_not_loaded: { pack: "nda-kit" } } as unknown as NoticeKind, en),
+  ).toBeNull();
+});
+
+test("a skill pack notice with no pack gives null, so the row shows its text", () => {
+  expect(
+    noticeLine({ skill_pack_not_loaded: { reason: "changed" } } as unknown as NoticeKind, en),
+  ).toBeNull();
 });

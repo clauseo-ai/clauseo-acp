@@ -2,8 +2,9 @@
 // notice the host sends with its kind, in the room's thread, shown in the app's words (notice-words.ts). Each over the
 // thread the notice is in, as the host sends it.
 import type { ReactNode } from "react";
+import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { uuid, userMessage } from "../testing/stream-script.ts";
-import type { NoticeEntry, ViewEntry } from "../transport/protocol.ts";
+import type { NoticeEntry, PackSkipReason, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
 import { RoomOver } from "./states.tsx";
@@ -14,6 +15,27 @@ const CONTEXT =
 const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.";
 const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
+/** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
+const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
+  not_turned_on:
+    "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.",
+  not_admitted:
+    "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.",
+  changed:
+    "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.",
+  missing:
+    "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.",
+  invalid: "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.",
+  too_many:
+    "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.",
+};
+
+/** A skill pack the launch left out, for a reason, as the host sends it. */
+const packSkipped = (reason: PackSkipReason): ViewEntry =>
+  notice(6, {
+    text: "A skill pack was left out of this launch.",
+    kind: { skill_pack_not_loaded: { pack: "nda-kit", reason } },
+  });
 
 /** The lawyer's question, then the host's notice. */
 const thread =
@@ -84,4 +106,19 @@ export const TN: Entry[] = [
     screen: "room/thread",
     render: thread(MANY_PAPERS),
   },
+  ...(
+    [
+      ["TN-04", "not_turned_on"],
+      ["TN-05", "not_admitted"],
+      ["TN-06", "changed"],
+      ["TN-07", "missing"],
+      ["TN-08", "invalid"],
+      ["TN-09", "too_many"],
+    ] as const
+  ).map(([id, reason]): Entry => ({
+    id,
+    words: threadWords(PACK_LINE[reason]),
+    screen: "room/thread",
+    render: thread(packSkipped(reason)),
+  })),
 ];
