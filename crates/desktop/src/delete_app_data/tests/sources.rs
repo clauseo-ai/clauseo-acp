@@ -81,6 +81,20 @@ fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_dele
         runs_removed,
         "{body:?}"
     );
+    // fMask: SEE_MASK_NOCLOSEPROCESS (0x40) for the exit code, and SEE_MASK_FLAG_NO_UI (0x400)
+    // so a failed call (a declined prompt, 1223; a blocked program, 1260) shows no error box of
+    // Windows' own. The flag does not suppress the consent prompt. A failed call leaves $R5 at 0.
+    let info = line_with(body, &["System::Call '*(&l4, i "]);
+    let hex = body[info]
+        .split_once("(&l4, i ")
+        .and_then(|(_, rest)| rest.split_once(','))
+        .and_then(|(mask, _)| mask.strip_prefix("0x"))
+        .unwrap_or_else(|| panic!("no hex fMask in {}", body[info]));
+    let mask = u32::from_str_radix(hex, 16).unwrap();
+    assert_eq!(mask, 0x0000_0400 | 0x0000_0040, "{}", body[info]);
+    let call = line_with(body, &["shell32::ShellExecuteExW(p R6) i .R7"]);
+    assert_eq!(info + 1, call, "{body:?}");
+    assert!(call < exited_zero, "{body:?}");
     // The box tested once and cleared once; nothing in the file deletes a tree itself.
     let box_lines = code
         .iter()

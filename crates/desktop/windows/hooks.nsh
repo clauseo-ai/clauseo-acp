@@ -42,8 +42,11 @@
     !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
     ; 1. S15's removal, elevated. ExecShellWait gives no exit code, so ShellExecuteExW with
-    ; "runas" and SEE_MASK_NOCLOSEPROCESS (0x40), then wait on the process and read its code. A
-    ; declined prompt fails the call. $R5 is 1 only when the removal ran and exited 0.
+    ; "runas" and SEE_MASK_NOCLOSEPROCESS (0x40), then wait on the process and read its code.
+    ; SEE_MASK_FLAG_NO_UI (0x400) keeps Windows' own error box away when the call fails; it does
+    ; not suppress the consent prompt. A declined prompt (1223) or a policy that blocks the
+    ; program (1260) fails the call, exactly like a failed --remove: $R5 stays 0 and the app
+    ; keeps `sandbox\`. $R5 is 1 only when the removal ran and exited 0.
     StrCpy $R5 0
     ${If} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
@@ -52,7 +55,7 @@
       !endif
       ; cbSize, fMask, hwnd, lpVerb, lpFile, lpParameters, lpDirectory, nShow (SW_HIDE),
       ; hInstApp, lpIDList, lpClass, hkeyClass, dwHotKey, hIcon, hProcess.
-      System::Call '*(&l4, i 0x40, p $HWNDPARENT, w "runas", w "$INSTDIR\clauseo-sandbox-setup.exe", w "--remove", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
+      System::Call '*(&l4, i 0x440, p $HWNDPARENT, w "runas", w "$INSTDIR\clauseo-sandbox-setup.exe", w "--remove", p 0, i 0, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .R6'
       System::Call 'shell32::ShellExecuteExW(p R6) i .R7'
       ${If} $R7 <> 0
         System::Call '*$R6(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .R7)'
