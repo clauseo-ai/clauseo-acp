@@ -44,8 +44,10 @@
 //! # Interface
 //!
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
-//!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
-//!   `installed`; `sign_in(agent, Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
+//!   [`AgentsEvent`]s ([`Agents::start_with_launchers`]`(config, install, signin, timer)` with
+//!   one launcher for installs and one, clearing the environment, for sign-in); `install`,
+//!   `pause`, `retry(agent, use_system_proxy)`, `state` and `installed`; `sign_in(agent,
+//!   Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
 //!   `Result<(), SigninError>`) and `signin_state`.
@@ -89,10 +91,10 @@
 //!   https, becomes `OpenUrl`, once; an address in a run's output never does. No status
 //!   process runs once a sign-in is confirmed, cancelled, expired or failed.
 //! - A sign-in, status or detection child gets exactly the environment `signin/env.rs` builds
-//!   (`SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` removed). **The caller's launcher must be
-//!   made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that inherits the
-//!   app's environment would pass those names on, since a `LaunchSpec` can add variables but
-//!   never remove one.
+//!   (`SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` removed). **The caller's sign-in launcher
+//!   must be made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that
+//!   inherits the app's environment would pass those names on, since a `LaunchSpec` can add
+//!   variables but never remove one.
 //!
 //! # Depends on
 //!

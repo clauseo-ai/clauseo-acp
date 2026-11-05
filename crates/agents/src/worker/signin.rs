@@ -480,7 +480,7 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         installed,
         home,
         browser,
-        launcher: Arc::clone(&worker.launcher),
+        launcher: Arc::clone(&worker.signin_launcher),
         timer: Arc::clone(&worker.timer),
         shared: Arc::clone(&worker.shared),
         paste,

@@ -27,6 +27,12 @@
 //! - Every call is a blocking keychain call (macOS may show a prompt), so the caller keeps them
 //!   off the host's actor: desktop loads the keys once at start on the agents thread and keeps
 //!   them in memory.
+//! - Every write in this process ([`Keychain::store`], [`Keychain::clear`] and
+//!   [`Keychain::store_if_absent`]) takes one lock for the whole process, so
+//!   `store_if_absent`'s check and store are one step against every other write here. The OS
+//!   stores have no create-only write (Credential Manager has none), so another process can
+//!   still write between the two: desktop's single-instance plugin keeps a second Clauseo from
+//!   running.
 //! - Test seam: [`Keychain`], whose [`Keychain::os`] is the free functions' keychain. Tests use
 //!   [`Keychain::memory`] (an in-memory store) and [`Keychain::none`] (the Linux rule), never the
 //!   real keychain.
@@ -40,6 +46,7 @@ mod os;
 mod tests;
 
 use std::fmt;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use clauseo_protocol::AgentId;
 use zeroize::Zeroizing;
@@ -47,7 +54,7 @@ use zeroize::Zeroizing;
 #[cfg(any(test, feature = "test-support"))]
 use std::collections::BTreeMap;
 #[cfg(any(test, feature = "test-support"))]
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 
 /// The keychain service every agent's key is stored under.
 pub const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop";
@@ -74,6 +81,12 @@ pub fn store(agent: &AgentId, key: &str) -> Result<(), KeyError> {
 /// `agent`'s API key from the OS keychain, or `None` when there is none.
 pub fn load(agent: &AgentId) -> Result<Option<Zeroizing<String>>, KeyError> {
     Keychain::os().load(agent)
+}
+
+/// Stores `key` as `agent`'s API key in the OS keychain only when it has none: see
+/// [`Keychain::store_if_absent`].
+pub fn store_if_absent(agent: &AgentId, key: &str) -> Result<bool, KeyError> {
+    Keychain::os().store_if_absent(agent, key)
 }
 
 /// Removes `agent`'s API key from the OS keychain; `Ok` when there is none.
@@ -192,6 +205,29 @@ impl Keychain {
     /// Stores `key` as `agent`'s key, replacing any; refuses it (writing nothing) unless it is
     /// printable ASCII of at most [`MAX_KEY_BYTES`] bytes (see [`refusal`]).
     pub fn store(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
+        let _writes = writes();
+        self.store_unlocked(agent, key)
+    }
+
+    /// Stores `key` as `agent`'s key only when none is stored: `Ok(true)` when it was stored,
+    /// `Ok(false)` (nothing written) when a key was there. A stored item that is not a valid key
+    /// is [`KeyError::StoredInvalid`], and nothing is written; a refused key is refused as
+    /// [`Keychain::store`] refuses it.
+    ///
+    /// Atomic within this process only: it holds the process's write lock from the load to the
+    /// store, so no other write here falls between them; the OS stores have no create-only
+    /// write, so another process could, and desktop's single-instance plugin keeps a second
+    /// Clauseo from running.
+    pub fn store_if_absent(&self, agent: &AgentId, key: &str) -> Result<bool, KeyError> {
+        let _writes = writes();
+        if self.load(agent)?.is_some() {
+            return Ok(false);
+        }
+        self.store_unlocked(agent, key).map(|()| true)
+    }
+
+    /// [`Keychain::store`] with the write lock already held.
+    fn store_unlocked(&self, agent: &AgentId, key: &str) -> Result<(), KeyError> {
         if let Some(reason) = refusal(key) {
             return Err(KeyError::Invalid {
                 agent: agent.clone(),
@@ -235,6 +271,7 @@ impl Keychain {
         )
     )]
     pub fn clear(&self, agent: &AgentId) -> Result<(), KeyError> {
+        let _writes = writes();
         match &self.backend {
             Backend::None => {
                 // No keychain, so no key of this agent's can exist.
@@ -250,6 +287,12 @@ impl Keychain {
             }
         }
     }
+}
+
+/// The lock every keychain write in this process takes, past a poisoning.
+fn writes() -> MutexGuard<'static, ()> {
+    static WRITES: Mutex<()> = Mutex::new(());
+    WRITES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The memory keychain's items: account to bytes.
