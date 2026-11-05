@@ -78,7 +78,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # DeviceIoControl for the tests' junctions (System_IO). The walk (src/windows/acl/object.rs):
 # NtCreateFile relative to a folder's handle (Wdk_Foundation, Wdk_Storage_FileSystem). The
 # set-aside's scan (src/windows/set_aside/ntfs/scan.rs): CompareStringOrdinal, to compare names as
-# NTFS does (Win32_Globalization).
+# NTFS does (Win32_Globalization). The change journal (src/windows/clean_close/ntfs.rs):
+# FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_UNPRIVILEGED_USN_JOURNAL and its structs, and the storage
+# bus from IOCTL_STORAGE_QUERY_PROPERTY (Win32_System_Ioctl).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -92,6 +94,7 @@ windows = { workspace = true, features = [
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
+  "Win32_System_Ioctl",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
