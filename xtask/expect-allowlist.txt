@@ -209,10 +209,12 @@ crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 # clauseo-process: its Windows Job Object calls, its pipe tests' write module (each run's own
 # folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
+crates/process/src/os/linux/death.rs - unsafe_code
 # Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
 crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
+crates/process/tests/parent_death.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
 crates/process/tests/spawn_options.rs console_processes unsafe_code
 
@@ -342,6 +344,7 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 # the Windows proxy registry read.
 crates/agents/src/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
+crates/agents/tests/install/quit.rs - clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
 crates/agents/src/write/extract.rs - clippy::disallowed_methods

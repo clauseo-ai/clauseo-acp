@@ -240,6 +240,11 @@ impl Compose {
         }
     }
 
+    /// The clock's monotonic reading, which times the pump's counted runs (`backend/count.rs`).
+    pub(crate) fn monotonic(&self) -> std::time::Duration {
+        self.clock.monotonic()
+    }
+
     /// S18's new `state` for `agent`. A resting one (any state but a running one) ends a
     /// `StartSignIn`'s starting mark (`SetupEvents::end_start`), even when the composed
     /// state is unchanged and nothing is sent: a reserved job that was cancelled, or replaced

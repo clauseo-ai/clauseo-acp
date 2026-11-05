@@ -253,6 +253,8 @@ pub fn run() -> tauri::Result<()> {
             // The setup command waits on this cell until the setup thread fills it
             // (setup/start.rs).
             let (backend, backend_start) = setup::BackendCell::new();
+            // The quit shuts `Agents` down through it (`stop_host_then_exit`).
+            app.manage(SetupStop(Arc::clone(&backend)));
             let setup = setup::Setup::new(backend);
             let parts = setup::SetupParts {
                 start: backend_start,
@@ -261,6 +263,7 @@ pub fn run() -> tauri::Result<()> {
                 confirm: Arc::new(setup::NativeSetupConfirm::new(app.handle().clone())),
                 opener: Arc::new(open::NativeOpener::new(app.handle().clone())),
                 home: SystemDirs.home(),
+                counts: Arc::new(counts::AppCounts(app.handle().clone())),
             };
             app.manage(Bridge::with_setup(cell, setup));
             app.manage(counts::CountsState::default());
@@ -450,8 +453,15 @@ pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptio
     }
 }
 
-/// Stops the usage counts' task, then the host off the UI thread (waits for its start, shuts it
-/// down, joins it), saves the counts, then exits with `code`.
+/// The setup backend the quit shuts down: `Agents`' installs and sign-ins.
+struct SetupStop(Arc<setup::BackendCell>);
+
+/// How long the quit waits for the agents' jobs to end and their children to be killed.
+const AGENTS_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Stops the usage counts' task, then, off the UI thread, the agents' jobs (`Agents::shutdown`,
+/// at most [`AGENTS_STOP_WAIT`]) and the host (waits for its start, shuts it down, joins it),
+/// saves the counts, then exits with `code`.
 fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i32) {
     // The counts' task first, so no tick asks a host that is shutting down (`counts.rs`).
     if let Some(counts) = app.try_state::<counts::CountsState>() {
@@ -464,6 +474,12 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
+            // The agents' installs and sign-ins first, their children killed (#386).
+            if let Some(setup) = app.try_state::<SetupStop>()
+                && !setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT)
+            {
+                tracing::warn!("an agents job was still running at quit");
+            }
             if let Some(cell) = cell {
                 host_start::stop(&cell);
             }

@@ -62,6 +62,7 @@ use clauseo_protocol::{AgentId, CommandOutcome, HostError, SetupAction, SetupCom
 use crate::dialogs::BoxFuture;
 
 pub(crate) use admit::may_setup;
+pub(crate) use backend::SetupCounts;
 pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
 pub(crate) use hook::{SetupHook, plans_of};
@@ -100,6 +101,13 @@ pub(crate) trait SetupBackend: Send + Sync {
     /// joins a running sign-in, since a bar replaces the join. `None` by default.
     fn sign_in_refused(&self, _agent: &AgentId) -> Option<HostError> {
         None
+    }
+
+    /// The app's quit: stops the agents' installs and sign-ins and kills their children,
+    /// waiting at most `wait` (`Agents::shutdown`); whether everything ended. `true` by
+    /// default: nothing runs.
+    fn shutdown(&self, _wait: std::time::Duration) -> bool {
+        true
     }
 }
 

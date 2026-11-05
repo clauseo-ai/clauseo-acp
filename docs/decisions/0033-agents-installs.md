@@ -205,6 +205,22 @@ starts its work only after a paused one has stopped. There is one worker thread 
 install, and a job lock makes the jobs run one after another. Every job event is sent under the
 lock `pause` takes, and dropped once the job is paused or superseded.
 
+**Quitting** (#386). `npm ci` leads its own process group, and a pause, a cancel or the drop of
+its handle kills that group; so does the end of the job's thread once it sees a cancel. Every job
+thread's handle is kept. `Agents::shutdown(wait)`, which the app's quit calls for at most 3 s
+before it stops the host, closes the worker to new jobs, cancels every install and sign-in job and
+joins their threads within `wait`. Dropping `Agents` does the same without the wait. In case the
+app dies without either:
+- **Linux:** the install and sign-in launchers' children set SIGKILL as their parent-death signal
+  (`SpawnOptions::end_with_parent`, `PR_SET_PDEATHSIG` from `pre_exec`). It reaches npm itself;
+  npm's own children are left, which `--ignore-scripts` makes few. The signal follows the thread
+  that started the child, which is the job's thread, alive until its child is killed.
+- **Windows:** every child is in a Job Object with kill-on-close (`clauseo-process`), which ends
+  its whole tree when the app's handle closes, however the app ends.
+- **macOS:** the bounded wait only. A crash or a `kill -9` of the app during `npm ci` leaves npm
+  running until it finishes or fails by itself; its temp folder goes at the next start's
+  clean-up. Accepted as a residual risk.
+
 Between processes, each job holds an exclusive lock on `agents/.lock` (`File::try_lock`) from
 its start until just before its last event. A lock another process holds means another Clauseo
 is installing: the job fails at once with a log line saying so, and a retry works once that one

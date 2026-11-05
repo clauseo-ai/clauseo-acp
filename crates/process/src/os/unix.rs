@@ -20,9 +20,16 @@ use super::linux as listing;
 use super::macos as listing;
 
 /// Puts the agent in a new process group whose id is its own pid, so a signal to the group
-/// reaches every process it starts that stays in the group. Safe std, no `pre_exec`.
-pub(crate) fn prepare(command: &mut Command, _opts: &SpawnOptions) {
+/// reaches every process it starts that stays in the group. Safe std, no `pre_exec`, except on
+/// Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
+pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
     command.process_group(0);
+    #[cfg(target_os = "linux")]
+    if opts.end_with_parent {
+        listing::end_with_parent(command);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = opts;
 }
 
 /// The agent's process group.

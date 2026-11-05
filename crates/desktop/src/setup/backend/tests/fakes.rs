@@ -4,11 +4,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
     AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
 };
+use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
@@ -16,7 +18,7 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
 use serde_json::json;
 
-use super::super::{AgentInfo, AgentsBackend, SetupAgents};
+use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
 use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
@@ -59,6 +61,8 @@ pub(super) struct FakeAgents {
     pub(super) answers: Mutex<BTreeMap<&'static str, SigninState>>,
     /// Where `answers` go: the pump's source while [`Rig::pumped`] runs.
     pub(super) feed: Mutex<Option<UnboundedSender<AgentsEvent>>>,
+    /// What `install_tries` answers, by agent.
+    pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
 }
 
 impl FakeAgents {
@@ -156,6 +160,23 @@ impl SetupAgents for FakeAgents {
     }
     fn stop_using_login(&self, agent: &AgentId, _why: Option<Found>) -> Result<(), SigninError> {
         self.reserve("stop_using_login", agent, false)
+    }
+    fn install_tries(&self, agent: &AgentId) -> Option<u32> {
+        lock(&self.tries).get(agent).copied()
+    }
+    fn shutdown(&self, _wait: Duration) -> bool {
+        lock(&self.journal).push("agents.shutdown".to_owned());
+        true
+    }
+}
+
+/// The usage counts, recording each event.
+#[derive(Default)]
+pub(super) struct FakeCounts(pub(super) Mutex<Vec<Event>>);
+
+impl SetupCounts for FakeCounts {
+    fn bump(&self, event: Event) {
+        lock(&self.0).push(event);
     }
 }
 
@@ -389,6 +410,8 @@ pub(super) struct Rig {
     pub(super) journal: Journal,
     /// The leave's timer, which the test's [`Script`](super::timing::Script) drives.
     pub(super) timer: Arc<FakeTimer>,
+    /// The pump's usage counts.
+    pub(super) counts: Arc<FakeCounts>,
 }
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
@@ -425,6 +448,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         asked: Mutex::default(),
     });
     let opener = Arc::new(FakeOpener::default());
+    let counts = Arc::new(FakeCounts::default());
     let events = Arc::new(SetupEvents::default());
     let clock = Arc::new(Stepping::default());
     let timer = Arc::new(FakeTimer::new(Arc::clone(&clock)));
@@ -458,6 +482,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
             SettingsRead::default(),
         )
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
+        counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
     });
     Rig {
         backend,
@@ -470,6 +495,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         readers,
         journal,
         timer,
+        counts,
     }
 }
 

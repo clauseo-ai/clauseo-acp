@@ -46,6 +46,8 @@ pub struct SpawnOptions {
     pub(crate) clear_env: bool,
     #[cfg(windows)]
     pub(crate) creation_flags: u32,
+    #[cfg(target_os = "linux")]
+    pub(crate) end_with_parent: bool,
 }
 
 impl SpawnOptions {
@@ -64,6 +66,24 @@ impl SpawnOptions {
     /// The child gets only the spec's variables: none of this process's environment.
     pub fn clear_env(mut self) -> SpawnOptions {
         self.clear_env = true;
+        self
+    }
+
+    /// The child ends when this process does, however it ends. On Linux the child gets SIGKILL
+    /// as its parent-death signal (`PR_SET_PDEATHSIG`), which comes when the *thread* that
+    /// started it ends, so a launcher with this option must start children only on threads
+    /// that outlive them; it reaches the child alone, not what the child started. On Windows
+    /// every child has it already: its Job Object kills its tree when this process's handle
+    /// closes. On macOS it does nothing: there is no such signal, and the caller's own shutdown
+    /// is all there is.
+    pub fn end_with_parent(self) -> SpawnOptions {
+        #[cfg(target_os = "linux")]
+        {
+            let mut opts = self;
+            opts.end_with_parent = true;
+            opts
+        }
+        #[cfg(not(target_os = "linux"))]
         self
     }
 
