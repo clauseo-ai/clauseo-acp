@@ -15,6 +15,8 @@ AllowedFolder ReadAndExecute pool 0x001200a9 Tree <root>/elsewhere/Precedents
 Matter LowLabel low 0x00000001 Tree <root>/matter
 State LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
 Notes LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+ClaudeStore LowLabel low 0x00000001 Tree <root>/data/agents/claude-acp/home
+CredentialLink LowLabel low 0x00000001 ThisOnly <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/auth.json
 ReadOnlyInMatter DenyWrite pool 0x000d0156 ThisOnly <root>/matter/big.pdf
 ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/.agents
 ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/.claude

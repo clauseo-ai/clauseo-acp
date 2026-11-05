@@ -30,7 +30,13 @@ fn agents_as_a_link_refuses_the_launch() {
     };
     let policy = w.builder().build().unwrap();
     let check = |_: &Path| Ok(FolderSupport::Ok);
-    let refused = admit_with(&policy, &w.at("data2"), &[], check, &FakeFolders::default());
+    let refused = admit_with(
+        &policy,
+        &w.at("data2"),
+        &Neighbours::default(),
+        check,
+        &FakeFolders::default(),
+    );
     let Err(Error::FolderUnsupported { support, .. }) = refused else {
         panic!("not refused: {refused:?}");
     };
@@ -50,7 +56,14 @@ fn a_symlinked_credential_link_or_store_file_refuses_and_a_hard_link_passes() {
     w.dir.hard_link(&auth, &real);
     let linked = w.builder().credential_link(w.at(&auth)).build().unwrap();
     let (mut ledger, before) = ledger_with_an_entry(&w);
-    let admitted = admit_with(&linked, &w.at("data"), &[], check, &groups).unwrap();
+    let admitted = admit_with(
+        &linked,
+        &w.at("data"),
+        &Neighbours::default(),
+        check,
+        &groups,
+    )
+    .unwrap();
     assert_ne!(
         plan(&admitted, &sids(), matter_one())
             .unwrap()
@@ -75,7 +88,13 @@ fn a_symlinked_credential_link_or_store_file_refuses_and_a_hard_link_passes() {
     let store_file = format!("{STORE}/.credentials.json");
     w.dir.symlink(&store_file, &secret);
     let policy = w.builder().claude_store(w.at(STORE)).build().unwrap();
-    let refused = admit_with(&policy, &w.at("data"), &[], check, &groups);
+    let refused = admit_with(
+        &policy,
+        &w.at("data"),
+        &Neighbours::default(),
+        check,
+        &groups,
+    );
     let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
         panic!("not refused: {refused:?}");
     };

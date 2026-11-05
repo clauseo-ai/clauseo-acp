@@ -4,10 +4,11 @@ use std::path::Path;
 use super::super::admit::{Admitted, FolderRefusal, PathKind, admit_with};
 use super::super::test_world::{
     FakeFolders, GROUP_SID, MATTER_SID, NOTES, OTHER_POOL_SIDS, STATE, STORE, USER_SID, World,
-    matter_one, sids,
+    matter_one, registered, sids,
 };
 use super::*;
 use crate::windows::FolderSupport;
+use crate::windows::fence::{MatterFolders, Neighbours, RegisteredMatter};
 use crate::{Error, Policy};
 
 /// The gate with every folder answering `Ok`, `registered` the other matters and `folders` the
@@ -15,14 +16,24 @@ use crate::{Error, Policy};
 fn admitted<'a>(
     w: &World,
     policy: &'a Policy,
-    registered: &[PathBuf],
+    roots: &[PathBuf],
+    folders: &FakeFolders,
+) -> Admitted<'a> {
+    admitted_with(w, policy, &registered(roots), folders)
+}
+
+/// The gate with every folder answering `Ok` and `neighbours` as given.
+fn admitted_with<'a>(
+    w: &World,
+    policy: &'a Policy,
+    neighbours: &Neighbours,
     folders: &FakeFolders,
 ) -> Admitted<'a> {
     let data = w.at("data");
     admit_with(
         policy,
         &data,
-        registered,
+        neighbours,
         |_| Ok(FolderSupport::Ok),
         folders,
     )
@@ -128,7 +139,11 @@ fn the_matter_state_and_notes_folders_get_the_low_label() {
     let w = World::new("plan-low-label");
     let policy = w.full_policy();
     let grants = grants_for(&w, &policy, &sids());
-    let labels: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_label()).collect();
+    let own = [PathKind::Matter, PathKind::State, PathKind::Notes];
+    let labels: Vec<&Grant> = grants
+        .iter()
+        .filter(|g| g.rights.is_label() && own.contains(&g.kind))
+        .collect();
     let want = [
         (policy.matter(), PathKind::Matter),
         (policy.state(), PathKind::State),
@@ -365,6 +380,77 @@ fn a_pool_user_that_is_the_group_or_the_matter_sid_is_refused() {
         let error = plan(&admitted, &subjects, matter_one()).unwrap_err();
         assert!(matches!(error, Error::Policy(_)), "{error:?}");
     }
+}
+
+#[test]
+fn an_unlaunched_registered_matter_is_fenced_at_another_matters_launch() {
+    let w = World::new("plan-fence-registered");
+    let m2 = MatterFolders {
+        root: w.canonical("other/m2"),
+        state: w.canonical("other/m3"),
+        notes: None,
+    };
+    let assigned = Sid::parse(OTHER_POOL_SIDS[0]).unwrap();
+    let neighbour = |fenced| Neighbours {
+        registered: vec![RegisteredMatter {
+            id: super::super::test_world::matter_two(),
+            folders: m2.clone(),
+            pool_user: assigned.clone(),
+            fenced,
+        }],
+        reach: Vec::new(),
+    };
+    let policy = w.builder().build().unwrap();
+    let unfenced = neighbour(false);
+    let admitted = admitted_with(&w, &policy, &unfenced, &FakeFolders::default());
+    let plan = plan(&admitted, &sids(), matter_one()).unwrap();
+    let theirs: Vec<(&Grant, MatterId)> = plan
+        .grants()
+        .iter()
+        .zip(plan.owners().iter().copied())
+        .filter(|(g, _)| g.path == m2.root || g.path == m2.state)
+        .collect();
+    // This launch's pool user and the other one, denied on m2's two folders; m2's own user not.
+    assert_eq!(theirs.len(), 4, "{theirs:#?}");
+    for (grant, owner) in &theirs {
+        assert_eq!(
+            *owner,
+            super::super::test_world::matter_two(),
+            "the entry is m2's own"
+        );
+        assert_eq!(grant.rights, Rights::DenyReadWrite);
+        assert_ne!(grant.sid, assigned);
+    }
+    assert!(theirs.iter().any(|(g, _)| g.sid.as_str() == USER_SID));
+    // Once the ledger lists it as applied, the launcher passes `fenced` and it isn't planned.
+    let fenced = neighbour(true);
+    let admitted = admitted_with(&w, &policy, &fenced, &FakeFolders::default());
+    let again = super::plan(&admitted, &sids(), matter_one()).unwrap();
+    assert!(again.grants().iter().all(|g| g.path != m2.root));
+    assert!(again.owners().iter().all(|o| *o == matter_one()));
+}
+
+#[test]
+fn the_claude_store_and_the_credential_link_get_the_low_label() {
+    let w = World::new("plan-store-label");
+    let policy = w.full_policy();
+    let grants = grants_for(&w, &policy, &sids());
+    let label = |path: &Path| {
+        grants
+            .iter()
+            .find(|g| g.path == path && g.rights == Rights::LowLabel)
+            .unwrap_or_else(|| panic!("no label on {path:?}"))
+    };
+    let store = label(policy.claude_store().unwrap().dir());
+    assert_eq!(
+        (store.inherit, store.kind),
+        (Inherit::Tree, PathKind::ClaudeStore)
+    );
+    let link = label(policy.credential_link().unwrap());
+    assert_eq!(
+        (link.inherit, link.kind),
+        (Inherit::ThisOnly, PathKind::CredentialLink)
+    );
 }
 
 /// The profile, the sandbox records and the data folder's allow list.

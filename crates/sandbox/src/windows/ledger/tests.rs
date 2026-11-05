@@ -275,69 +275,6 @@ fn marking_an_entry_another_process_dropped_fails() {
 }
 
 #[test]
-fn labels_and_the_pool_denies_are_recorded_and_forget_matter_returns_them() {
-    // Each new kind of item: the Low label, another pool user's deny, the group's sibling deny.
-    let temp = TempDir::new("ledger-new-kinds");
-    let path = ledger_path(temp.path());
-    let mut ledger = open(&path);
-    let matter = abs("m1");
-    let item = |sid: &str, rights, kind| Grant {
-        path: matter.clone(),
-        sid: Sid::parse(sid).unwrap(),
-        rights,
-        inherit: Inherit::Tree,
-        kind,
-    };
-    let grants = vec![
-        item(LOW_LABEL_SID, Rights::LowLabel, PathKind::Matter),
-        item(OTHER_POOL_SIDS[0], Rights::DenyReadWrite, PathKind::Matter),
-        Grant {
-            path: abs("Drafts"),
-            ..item(GROUP_SID, Rights::DenyRead, PathKind::Sibling)
-        },
-    ];
-    let mut plan = AdmittedPlan::from_grants(matter_one(), grants.clone());
-    ledger.record_pending(&mut plan).unwrap();
-    let reopened = open(&path);
-    let read: Vec<Grant> = reopened.entries().map(Entry::grant).collect();
-    assert_eq!(read, grants, "every kind is read back and trusted");
-    let mut handed = Vec::new();
-    let done = ledger
-        .forget_matter(matter_one(), |entry| {
-            handed.push(entry.grant());
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(
-        done,
-        Forgotten {
-            removed: 3,
-            kept: 0
-        }
-    );
-    assert_eq!(handed, grants);
-}
-
-#[test]
-fn a_label_naming_anything_but_the_low_level_is_set_aside() {
-    let temp = TempDir::new("ledger-label-trust");
-    let path = ledger_path(temp.path());
-    let mut ledger = open(&path);
-    let label = |sid: &str| Grant {
-        path: abs("m1"),
-        sid: Sid::parse(sid).unwrap(),
-        rights: Rights::LowLabel,
-        inherit: Inherit::Tree,
-        kind: PathKind::Matter,
-    };
-    let mut plan = AdmittedPlan::from_grants(matter_one(), vec![label(USER_SID)]);
-    ledger.record_pending(&mut plan).unwrap();
-    let reopened = open(&path);
-    assert_eq!(reopened.entries().count(), 0);
-    assert_eq!(reopened.set_aside_entries(), 1);
-}
-
-#[test]
 fn reconcile_with_nothing_to_change_leaves_the_file() {
     let temp = TempDir::new("ledger-reconcile-nothing");
     let path = ledger_path(temp.path());
@@ -381,7 +318,8 @@ fn forget_matter_drops_exactly_that_matters_entries() {
         done,
         Forgotten {
             removed: 3,
-            kept: 0
+            kept: 0,
+            shared: 0
         }
     );
     let reopened = open(&path);
@@ -410,7 +348,8 @@ fn forget_matter_keeps_an_entry_whose_removal_failed() {
         done,
         Forgotten {
             removed: 2,
-            kept: 1
+            kept: 1,
+            shared: 0
         }
     );
     assert_eq!(ids(&open(&path)), [failing]);
@@ -475,6 +414,9 @@ fn the_ledgers_folder_is_made_private_and_owned_by_the_user() {
         "{owner}"
     );
 }
+
+/// Design B's kinds: labels, pool denies, shared sibling denies, fences.
+mod kinds;
 
 /// What is read back from a file: unread, untrusted and refused files.
 mod file;

@@ -61,7 +61,8 @@ fn entries_this_version_cant_read_or_trust_are_set_aside() {
         done.unwrap(),
         Forgotten {
             removed: 0,
-            kept: 1
+            kept: 1,
+            shared: 0
         }
     );
     assert_eq!(handed, [EntryId(1)]);

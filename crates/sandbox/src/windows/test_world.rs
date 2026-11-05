@@ -10,6 +10,7 @@ use clauseo_protocol::MatterId;
 
 use super::acl_plan::Subjects;
 use super::admit::FolderList;
+use super::fence::{MatterFolders, Neighbours, RegisteredMatter};
 use super::sids::{Reserved, Sid};
 use crate::test_support::TempDir;
 use crate::{Policy, PolicyBuilder};
@@ -156,6 +157,27 @@ impl World {
             })
             .collect();
         format!("<root>/{}", parts.join("/"))
+    }
+}
+
+/// Neighbours with a registered matter at each of `roots` (state and notes folders beside it,
+/// assigned the first other pool user, fenced already), and nothing reached.
+pub(super) fn registered(roots: &[PathBuf]) -> Neighbours {
+    Neighbours {
+        registered: roots
+            .iter()
+            .map(|root| RegisteredMatter {
+                id: matter_two(),
+                folders: MatterFolders {
+                    root: root.clone(),
+                    state: root.with_extension("state"),
+                    notes: None,
+                },
+                pool_user: Sid::parse(OTHER_POOL_SIDS[0]).unwrap(),
+                fenced: true,
+            })
+            .collect(),
+        reach: Vec::new(),
     }
 }
 

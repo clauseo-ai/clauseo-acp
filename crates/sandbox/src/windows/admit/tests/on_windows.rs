@@ -13,7 +13,7 @@ const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
 fn assert_refused(w: &World, policy: &Policy, kind: PathKind, want: FolderRefusal) {
     let (mut ledger, before) = ledger_with_an_entry(w);
     let groups = FakeFolders::default();
-    let admitted = admit(policy, &w.at("data"), &[], &groups);
+    let admitted = admit(policy, &w.at("data"), &Neighbours::default(), &groups);
     let Err(Error::FolderUnsupported { path_kind, support }) = admitted else {
         panic!("not refused: {admitted:?}");
     };
@@ -48,7 +48,13 @@ fn has_admin_share(w: &World) -> bool {
 fn a_local_world_is_admitted() {
     let w = World::new("admit-win-ok");
     let policy = w.full_policy();
-    let admitted = admit(&policy, &w.at("data"), &[], &FakeFolders::default()).unwrap();
+    let admitted = admit(
+        &policy,
+        &w.at("data"),
+        &Neighbours::default(),
+        &FakeFolders::default(),
+    )
+    .unwrap();
     assert_ne!(
         plan(&admitted, &sids(), matter_one())
             .unwrap()
@@ -123,7 +129,12 @@ fn a_matter_holding_the_data_folder_is_refused_in_any_letter_case() {
     w.dir.dir("matter/Clauseo");
     let policy = w.builder().build().unwrap();
     let shouted = PathBuf::from(w.at("matter/Clauseo").to_string_lossy().to_uppercase());
-    let refused = admit(&policy, &shouted, &[], &FakeFolders::default());
+    let refused = admit(
+        &policy,
+        &shouted,
+        &Neighbours::default(),
+        &FakeFolders::default(),
+    );
     let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
         panic!("not refused: {refused:?}");
     };
@@ -147,7 +158,12 @@ fn agents_as_a_junction_like_link_refuses_on_windows() {
         return;
     };
     let policy = w.builder().build().unwrap();
-    let refused = admit(&policy, &w.at("data2"), &[], &FakeFolders::default());
+    let refused = admit(
+        &policy,
+        &w.at("data2"),
+        &Neighbours::default(),
+        &FakeFolders::default(),
+    );
     let Err(Error::FolderUnsupported { support, .. }) = refused else {
         panic!("not refused: {refused:?}");
     };
@@ -170,7 +186,12 @@ fn a_claude_store_file_that_is_a_link_refuses_on_windows() {
         return;
     };
     let policy = w.builder().claude_store(w.at(STORE)).build().unwrap();
-    let refused = admit(&policy, &w.at("data"), &[], &FakeFolders::default());
+    let refused = admit(
+        &policy,
+        &w.at("data"),
+        &Neighbours::default(),
+        &FakeFolders::default(),
+    );
     let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
         panic!("not refused: {refused:?}");
     };
