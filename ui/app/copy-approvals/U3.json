@@ -623,5 +623,29 @@
     "status": "provisional",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.firm_managed": {
+    "en": "Questions go through your firm's own account, so there's nothing to sign in to here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.key_in_use": {
+    "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.endpoint_in_use": {
+    "en": "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }
