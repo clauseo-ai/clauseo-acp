@@ -182,31 +182,38 @@ source cannot be read:
 
 | key | what it is | safe value |
 |---|---|---|
-| `plans.<id>` | one agent's firm plan, one object (like `agents.<id>`); a policy that sets it locks the whole entry | no plan: the lawyer's `plans.<id>` is dropped |
-| `plans.<id>.endpoint` | the firm's gateway: `https`, a host, no user name, password, query or fragment | none, so no endpoint the lawyer chose stands in for the firm's |
+| `plans.<id>` | one agent's firm plan, one object (like `agents.<id>`), `<id>` an agent id (`[a-z0-9-]`); a policy that sets it locks the whole entry | no plan: the lawyer's `plans.<id>` is dropped |
+| `plans.<id>.endpoint` | the firm's gateway: `https`, ASCII (punycode for a foreign host), a host, a port of at most 65535, no user name, password, query, fragment or backslash | none, so no endpoint the lawyer chose stands in for the firm's |
 | `plans.<id>.provider` | `anthropic`, `bedrock` or `vertex` | none: the plan login; the `firm-policy` marker below refuses it in a firm |
-| `plans.<id>.env` | extra variables; a name is `[A-Za-z_][A-Za-z0-9_]*` and never holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` in any case | none |
+| `plans.<id>.env` | extra variables, only these: `AWS_REGION`, `AWS_PROFILE`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `NODE_EXTRA_CA_CERTS`, and `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` in any case with no user name or password (`@`) in the value. No `*_BASE_URL` or `CLAUDE_CODE_USE_*`: the endpoint and provider set those | none |
 | `install.bundle` | an offline bundle folder, an absolute path | unset |
-| `install.registry` | a firm npm mirror: `https`, a host, no user name, password, query or fragment | unset: the pinned public hosts with their integrity checks |
+| `install.registry` | a firm npm mirror: the same rule as an endpoint | unset: the pinned public hosts with their integrity checks |
 
 All five are security keys. An unreadable source locks `plans.` (every `plans.<id>`, listed in
 `SettingsView.locked` as `plans.`) and both `install` keys; a plan or install key a stronger
 source set stands. A policy `plans` section that is no object (or a managed-preferences `plans`
-that is no dictionary) locks `plans.` the same way. A secret-shaped or malformed variable name
-is dropped with a warning naming it, in `settings.json` and in every policy source alike; the
-rest of the plan loads. No warning or error quotes a value: endpoint, mirror or variable.
+that is no dictionary) locks `plans.` the same way, and so does a policy plan in a dotted shape
+(`"plans.claude-acp"` at the top of `policy.json`, `"claude-acp.endpoint"` inside `plans`,
+the registry value `plans.claude-acp.endpoint`), since a plan id takes no dot. A variable not on
+the list, or a proxy with a login, is dropped with a warning naming it, in `settings.json` and
+in every policy source alike; the rest of the plan loads. A name that is no variable name is
+given by its place (`plans.claude-acp.env[2]`, in name order), never its text, which can be
+`NAME=value`. No warning or error quotes a value: endpoint, mirror or variable.
 
 The host writes these through `settings`: `Effective::set_plan` (refused with `settings.locked`
 for a locked id, and whole for a banned name or a bad endpoint) and
-`Effective::set_agent_launch`, which writes only Clauseo's own installs (a command or script
-under `<data_dir>/agents/`), refuses a locked id, and leaves the lawyer's or the firm's own
-entry as it is.
+`Effective::set_agent_launch`, which writes only Clauseo's own installs (a command under
+`<data_dir>/agents/`, or a `node` or `node.exe` whose script is there), refuses an `env` that
+sets a `KEY`, `TOKEN`, `SECRET` or `PASSWORD` name to anything but empty (keys live only in
+the keychain), refuses a locked id, and leaves the lawyer's or the firm's own entry as it is.
 
 `limits` takes the stored key at each read through `ProcessReaders::with_launch_env`, as
 `ANTHROPIC_API_KEY` (Claude) or `CODEX_API_KEY` (Codex) over the entry's empty placeholder, so a
 key sign-in reads as pay-as-you-go and the stderr tail redacts the key. `ProcessReaders::hold`
-stops an agent's reads (resolving once none runs) until `resume`; the host holds around a
-sign-in, a sign-out or a key change, then sends `Input::LoginChanged`, which reads at once past
+stops an agent's reads and resolves, once none runs, to a `HoldGuard`; the reads stay held
+until every guard of that agent drops, so two overlapping holds need two drops and no hold
+outlives the code that took it. The host (P4) keeps the guard across the whole leave order of a
+sign-in, a sign-out or a key change, drops it, then sends `Input::LoginChanged`, which reads at once past
 the back-off and reads again after a read that was in flight. `CODEX_OVERRIDES` gains
 `cli_auth_credentials_store="file"` (the login stays in `CODEX_HOME/auth.json`, never the OS
 keyring) and `shell_environment_policy.ignore_default_excludes=false` (Codex's shell tools do
@@ -227,6 +234,13 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
 - `SettingsView` literals gain `plans`; the host fills it in P3 from the `plans` section.
 - **Not covered:** zeroing a `Secret` on drop does not reach the IPC buffer serde read it from
   (Tauri's, and serde_json's input); only Clauseo's own copy is zeroed.
+- **Not covered:** with `cli_auth_credentials_store="file"`, Codex's login is plain text at
+  `<data_dir>/agents/codex-acp/home/auth.json`. If `CLAUSEO_DATA_DIR` puts the data folder in a synced
+  folder (OneDrive, iCloud, Dropbox), that file syncs; firm IT should keep the data folder out
+  of sync roots.
+- **Not verified:** that `shell_environment_policy.ignore_default_excludes=false` keeps
+  `CODEX_API_KEY` out of Codex's shell tools is believed (`limits/src/readers/codex.rs:62-67`),
+  not tested; G7 row 15 checks it.
 - `setup` is outside `HostCommand`, so `cli` and `transport_ws` cannot install or sign in. A
   phone client that needs to would get its own record.
 
