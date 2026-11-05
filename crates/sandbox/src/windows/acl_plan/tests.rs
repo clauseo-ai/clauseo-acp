@@ -8,8 +8,14 @@ use crate::windows::FolderSupport;
 use crate::{Error, Policy};
 
 /// The gate with every folder answering `Ok`.
-fn admitted<'a>(policy: &'a Policy, others: &[PathBuf], groups: &FakeGroups) -> Admitted<'a> {
-    admit_with(policy, others, |_| Ok(FolderSupport::Ok), groups).unwrap()
+fn admitted<'a>(
+    w: &World,
+    policy: &'a Policy,
+    others: &[PathBuf],
+    groups: &FakeGroups,
+) -> Admitted<'a> {
+    let data = w.at("data");
+    admit_with(policy, &data, others, |_| Ok(FolderSupport::Ok), groups).unwrap()
 }
 
 /// The plan as text, one entry a line, paths relative to the temp folder.
@@ -44,7 +50,7 @@ fn the_full_plan() {
         ..FakeGroups::default()
     };
     let others = [w.canonical("other/m2"), w.canonical("other/m3")];
-    let grants = plan(&admitted(&policy, &others, &groups), &sids()).unwrap();
+    let grants = plan(&admitted(&w, &policy, &others, &groups), &sids()).unwrap();
     insta::assert_snapshot!(render(&w, &grants));
 }
 
@@ -52,7 +58,7 @@ fn the_full_plan() {
 fn every_allow_comes_in_a_pair() {
     let w = World::new("plan-pairs");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
     let allows: Vec<&Grant> = grants.iter().filter(|g| !g.rights.is_deny()).collect();
     assert!(allows.len() >= 20, "{allows:#?}");
     let (user, matter) = (Sid::new(USER_SID).unwrap(), Sid::new(MATTER_SID).unwrap());
@@ -77,7 +83,7 @@ fn every_deny_names_the_matter_sid_alone() {
         open: vec![w.canonical("other/m2")],
         ..FakeGroups::default()
     };
-    let admitted = admitted(&policy, &[w.canonical("other/m2")], &groups);
+    let admitted = admitted(&w, &policy, &[w.canonical("other/m2")], &groups);
     let grants = plan(&admitted, &sids()).unwrap();
     let denies: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_deny()).collect();
     assert_ne!(denies.len(), 0);
@@ -90,7 +96,7 @@ fn every_deny_names_the_matter_sid_alone() {
 fn read_only_names_get_deny_write() {
     let w = World::new("plan-read-only");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
     let denied = |path: &Path| {
         grants.iter().find(|g| {
             g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == MATTER_SID
@@ -148,7 +154,7 @@ fn modify_never_gives_delete_child_or_permission_changes() {
 fn nothing_lands_in_the_profiles_claude_folder() {
     let w = World::new("plan-no-claude");
     let policy = w.full_policy();
-    let grants = plan(&admitted(&policy, &[], &FakeGroups::default()), &sids()).unwrap();
+    let grants = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap();
     let claude = w.canonical("home/.claude");
     let home = w.canonical("home");
     for g in &grants {
@@ -168,7 +174,7 @@ fn a_claude_store_in_the_profiles_claude_folder_is_refused() {
         .claude_store(w.at("home/.claude"))
         .build()
         .unwrap();
-    let error = plan(&admitted(&policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
+    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
     let Error::Policy(message) = &error else {
         panic!("{error:?}");
     };
@@ -189,7 +195,7 @@ fn a_read_path_in_the_profiles_claude_folder_is_refused() {
         .read(w.at("home/.claude/skills"))
         .build()
         .unwrap();
-    let error = plan(&admitted(&policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
+    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &sids()).unwrap_err();
     assert!(error.to_string().contains("a read path"), "{error}");
 }
 
@@ -221,7 +227,7 @@ fn another_matter_a_group_can_reach_is_denied_to_this_matter() {
         ..FakeGroups::default()
     };
     let grants = plan(
-        &admitted(&policy, &[m2.clone(), m3.clone()], &groups),
+        &admitted(&w, &policy, &[m2.clone(), m3.clone()], &groups),
         &sids(),
     )
     .unwrap();
@@ -246,7 +252,7 @@ fn the_same_sid_twice_is_refused() {
         user: Sid::new(MATTER_SID).unwrap(),
         matter: Sid::new(MATTER_SID).unwrap(),
     };
-    let error = plan(&admitted(&policy, &[], &FakeGroups::default()), &same).unwrap_err();
+    let error = plan(&admitted(&w, &policy, &[], &FakeGroups::default()), &same).unwrap_err();
     assert!(matches!(error, Error::Policy(_)), "{error:?}");
 }
 

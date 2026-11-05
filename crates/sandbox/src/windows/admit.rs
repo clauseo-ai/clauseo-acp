@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::FolderSupport;
+use super::acl_plan::in_folder;
 use crate::{Error, Policy};
 
 /// Which kind of path a grant or a refusal is about. Errors and logs name this, never the path,
@@ -76,6 +77,10 @@ pub enum FolderRefusal {
     /// The folder check failed, as the host's `Answer::Failed` does: a missing folder, a file,
     /// a final path that can't be read.
     CheckFailed(io::ErrorKind),
+    /// The matter folder is Clauseo's data folder, holds it, or is inside it, or the data folder
+    /// doesn't resolve. Holding it, the matter's `Modify` pair would reach `<data_dir>\sandbox`
+    /// (the SID map, the ledger, the marker); inside it, the agent would reach Clauseo's state.
+    OverlapsDataFolder,
 }
 
 impl fmt::Display for FolderRefusal {
@@ -92,6 +97,9 @@ impl fmt::Display for FolderRefusal {
                 f.write_str("its drive keeps no permissions")
             }
             FolderRefusal::CheckFailed(kind) => write!(f, "the folder check failed ({kind})"),
+            FolderRefusal::OverlapsDataFolder => {
+                f.write_str("it is, holds or is inside Clauseo's data folder")
+            }
         }
     }
 }
@@ -148,14 +156,20 @@ pub fn grant_folders(policy: &Policy) -> Vec<(PathKind, &Path)> {
 #[cfg(windows)]
 pub fn admit<'a>(
     policy: &'a Policy,
+    data_dir: &Path,
     others: &[PathBuf],
     groups: &dyn GroupAccess,
 ) -> Result<Admitted<'a>, Error> {
-    admit_with(policy, others, super::folder_support, groups)
+    admit_with(policy, data_dir, others, super::folder_support, groups)
 }
 
 /// The gate, with the folder check `check` and the DACL reader `groups` as parameters.
 ///
+/// 0. The matter folder must not be `data_dir` (Clauseo's data folder), hold it, or sit inside
+///    it, compared canonically: `data_dir` is canonicalised (the policy's paths already are),
+///    then compared part by part by the policy's comparison and also without ASCII case, as
+///    NTFS compares names. A `data_dir` that doesn't resolve refuses, failing closed. Either
+///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
 /// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`]; any other answer, or an
 ///    error, refuses with [`Error::FolderUnsupported`] naming the folder's kind.
 /// 2. Each of `others`, the other matters' folders (their matter, state and notes folders):
@@ -168,10 +182,14 @@ pub fn admit<'a>(
 /// Nothing is written. A refusal returns before anything is planned.
 pub fn admit_with<'a>(
     policy: &'a Policy,
+    data_dir: &Path,
     others: &[PathBuf],
     mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     groups: &dyn GroupAccess,
 ) -> Result<Admitted<'a>, Error> {
+    if overlaps_data_folder(policy.matter(), data_dir) {
+        return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
+    }
     for (kind, folder) in grant_folders(policy) {
         if let Some(refusal) = refusal(check(folder)) {
             return Err(refused(kind, refusal));
@@ -197,6 +215,19 @@ pub fn admit_with<'a>(
         }
     }
     Ok(Admitted { policy, closed })
+}
+
+/// Whether `matter` (canonical) and `data_dir` are the same folder or one holds the other, or
+/// `data_dir` doesn't resolve.
+fn overlaps_data_folder(matter: &Path, data_dir: &Path) -> bool {
+    match dunce::canonicalize(data_dir) {
+        Ok(data) => in_folder(matter, &data) || in_folder(&data, matter),
+        Err(error) => {
+            let error = error.kind();
+            tracing::warn!(%error, "the data folder doesn't resolve; tier B refuses");
+            true
+        }
+    }
 }
 
 /// `None` for `Ok`, else why the folder is refused.

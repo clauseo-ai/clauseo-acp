@@ -281,7 +281,7 @@ impl Plan<'_> {
 
 /// Whether `path` is `folder` or under it, by the policy's comparison and also without ASCII
 /// case, as NTFS compares `.claude` with `.Claude`.
-fn in_folder(path: &Path, folder: &Path) -> bool {
+pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
     if under(path, folder) {
         return true;
     }
