@@ -173,7 +173,7 @@ function Counts({
           <>
             {" "}
             <span className="text-primary">
-              <Say>{st(lang, "Managed by your organisation")}</Say>
+              <Say>{st(lang, "Managed by firm")}</Say>
             </span>
           </>
         )}
