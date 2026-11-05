@@ -18,7 +18,8 @@ Three constraints shape it:
   would never save the counts or the window state, and the host log would not be flushed.
 - The webview is untrusted (0001): it may ask for a check or an install, never reach the plugin.
 
-R23 lands in six pull requests. What PRs 3 to 6 deliver is marked below as "lands with PR n";
+R23 lands in five pull requests, then a one-line sixth with Rohan's real key and the endpoint.
+What PRs 3 to 6 deliver is marked below as "lands with PR n";
 PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
 
 ## Decision
@@ -120,7 +121,11 @@ does with `GetSettings` (lands with PR 5; until then the main window alone carri
 background, install at the next start or on "Restart to update"), `notify` (download, install
 only on the lawyer's command) or `none` (managed). The settings window offers only `auto` and
 `notify`. `update.mode` is in `SECURITY_KEYS` with safe value `none` through `refuse`, so an
-unreadable policy source makes the run `managed` by `policy` and no check runs. `SetUpdateMode`
+unreadable policy source makes the run `managed` by `policy` and no check runs. So does a policy
+value for `update.mode` that does not type, or an `update.*` policy name this version does not
+know: the shared rule for a misnamed security key (`typed_policy` in the settings crate) locks
+`update.mode` at `none`, since what the firm meant is unknown. Firm IT should add a new
+`update.*` policy only after the version that knows it is rolled out. `SetUpdateMode`
 on a policy-locked key gives `settings.locked` (lands with PR 1 for settings, PR 4 for the host).
 
 ### The install, in order
