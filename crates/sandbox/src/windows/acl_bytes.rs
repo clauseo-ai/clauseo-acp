@@ -43,6 +43,9 @@ pub(crate) const INHERITED: u8 = 0x10;
 const DACL_PRESENT: u16 = 0x0004;
 /// `SE_SACL_PRESENT`.
 const SACL_PRESENT: u16 = 0x0010;
+/// `SE_DACL_AUTO_INHERIT_REQ`: asks `SetKernelObjectSecurity` to keep
+/// `SE_DACL_AUTO_INHERITED`, which it drops otherwise.
+const DACL_AUTO_INHERIT_REQ: u16 = 0x0100;
 /// `SE_DACL_AUTO_INHERITED`.
 pub(crate) const DACL_AUTO_INHERITED: u16 = 0x0400;
 /// `SE_SACL_AUTO_INHERITED`.
@@ -252,7 +255,8 @@ pub(crate) fn empty_acl() -> Vec<u8> {
 /// Whether `dacl` holds an explicit allow, of any right but `SYNCHRONIZE`, that may beat an
 /// inherited deny: a plain or callback allow for one of [`BROAD_SIDS`], of `watched` (the pool
 /// group, the other pool users) or of the `None` group of a watched SID's machine
-/// (`S-1-5-21-<machine>-513`, in every local account's token); or an allow of any other type
+/// (`S-1-5-21-<machine>-513`: the Windows run found no pool token holding it, but it is kept as
+/// broad, which costs nothing); or an allow of any other type
 /// (object and compound allows, whose SID sits elsewhere), whoever it names. An explicit entry
 /// is checked before every inherited one, so on a child it beats the inherited deny of a fence
 /// or a sibling; an inherit-only one does the same for the child's children.
@@ -410,9 +414,15 @@ impl<'a> Descriptor<'a> {
 }
 
 /// A self-relative descriptor with no owner or group, `dacl` and `sacl` when given, and the
-/// control bits `control` (the caller passes the inheritance bits to keep).
+/// control bits `control` (the caller passes the inheritance bits to keep). A DACL marked
+/// auto-inherited also asks to stay so (`SE_DACL_AUTO_INHERIT_REQ`): without it a write drops
+/// the mark, every later walk rewrites the child, and the lawyer's folder loses its `AI` for
+/// good (the Windows run at `fca0bf0ca`).
 pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&[u8]>) -> Vec<u8> {
     let mut control = control | SELF_RELATIVE;
+    if dacl.is_some() && control & DACL_AUTO_INHERITED != 0 {
+        control |= DACL_AUTO_INHERIT_REQ;
+    }
     let mut out = vec![1, 0, 0, 0];
     out.extend_from_slice(&[0; 16]);
     let mut put = |acl: Option<&[u8]>, offset_at: usize, present: u16, out: &mut Vec<u8>| {

@@ -360,3 +360,34 @@ fn a_root_that_is_a_junction_now_refuses_the_walk() {
         .propagate(&place.at("matter"), Reach::Tree, None);
     assert_eq!(walked, Err(ApplyFailure::Changed));
 }
+
+/// The Windows run at `fca0bf0ca`: a second walk writes nothing, and the matter root keeps its
+/// auto-inherited mark (`AI`) through add, walk and remove.
+#[test]
+fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
+    let place = Place::new("acl-auto-inherit");
+    place.dir.file("matter/sub/doc.txt", "x");
+    let matter = place.at("matter");
+    let auto = |path: &Path| {
+        let bytes = descriptor(path).unwrap();
+        Descriptor::parse(&bytes).unwrap().control & DACL_AUTO_INHERITED != 0
+    };
+    assert!(
+        auto(&matter),
+        "a new folder under the temp folder is auto-inherited"
+    );
+    let grants = fence(&matter);
+    put(&matter, &grants).unwrap();
+    assert!(auto(&matter));
+    assert!(auto(&place.at("matter/sub/doc.txt")));
+    let again = NtfsAcl::new()
+        .unwrap()
+        .propagate(&matter, Reach::Tree, None)
+        .unwrap();
+    assert_eq!(again.written, 0, "{again:?}");
+    let mut acl = NtfsAcl::new().unwrap();
+    for g in &grants {
+        acl.remove(g).unwrap();
+    }
+    assert!(auto(&matter));
+}

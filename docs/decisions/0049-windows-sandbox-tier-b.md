@@ -85,10 +85,11 @@ build 26100):
   - A walk can be strict (PR3b makes every tree that carries a deny strict): a child with a
     protected DACL, or with an explicit allow for a group a pool token holds (`Everyone`,
     `Users`, `Authenticated Users`, `INTERACTIVE`, `RESTRICTED` and the rest of
-    `acl_bytes::BROAD_SIDS`), the `None` group of the pool's machine (`S-1-5-21-<machine>-513`), the
-    pool group or another pool user, or with an explicit allow of any type but plain or callback
-    (an object allow with no object type applies as a plain one), fails the walk: such a child
-    beats the inherited deny. Adding explicit denies there instead was not chosen.
+    `acl_bytes::BROAD_SIDS`), the `None` group of the pool's machine (`S-1-5-21-<machine>-513`;
+    the Windows run found it in no pool token, and it stays in the set at no cost), the pool
+    group or another pool user, or with an explicit allow of any type but plain or callback (an
+    object allow with no object type applies as a plain one), fails the walk: such a child beats
+    the inherited deny. Adding explicit denies there instead was not chosen.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
     desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
