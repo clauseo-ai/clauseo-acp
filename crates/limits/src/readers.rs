@@ -24,6 +24,7 @@ use clauseo_settings::{AgentLaunch, Effective};
 
 pub(crate) use claude::looks_like_email;
 pub use codex::CODEX_OVERRIDES;
+pub use hold::HoldGuard;
 use paths::{CLAUDE_ID, CODEX_ID};
 #[cfg(feature = "live-tap")]
 #[doc(hidden)]
@@ -130,8 +131,8 @@ pub trait ReadLimits: Send + Sync {
 ///
 /// With [`ProcessReaders::with_launch_env`] each read also carries the agent's stored API key
 /// (`ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for Codex), so a key sign-in reads as
-/// pay-as-you-go. [`ProcessReaders::hold`] and [`ProcessReaders::resume`] keep an agent's
-/// reads off while its login changes (decision record 0048).
+/// pay-as-you-go. [`ProcessReaders::hold`] keeps an agent's reads off while its login changes,
+/// until its [`HoldGuard`] drops (decision record 0048).
 pub struct ProcessReaders<T> {
     launcher: Arc<dyn Launcher>,
     timer: T,
@@ -211,18 +212,13 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
         self
     }
 
-    /// Holds `agent`'s reads from this call on, and answers a future that resolves once none
-    /// is running. A read asked for meanwhile waits, unlaunched, until [`Self::resume`]. The
-    /// host holds around a sign-in, a sign-out and a key change, then resumes and sends
+    /// Holds `agent`'s reads from this call on, and answers a future that resolves to the
+    /// hold's [`HoldGuard`] once none is running. A read asked for meanwhile waits, unlaunched,
+    /// until every guard of that agent is dropped: two overlapping holds need two drops. The
+    /// host keeps the guard around a sign-in, a sign-out and a key change, drops it, then sends
     /// `Input::LoginChanged`.
-    pub fn hold(&self, agent: AgentKind) -> impl Future<Output = ()> + Send + 'static {
+    pub fn hold(&self, agent: AgentKind) -> impl Future<Output = HoldGuard> + Send + 'static {
         self.gate(agent).hold()
-    }
-
-    /// Lets `agent`'s held reads go, and every later one. Resuming an agent not held does
-    /// nothing.
-    pub fn resume(&self, agent: AgentKind) {
-        self.gate(agent).resume();
     }
 
     fn gate(&self, agent: AgentKind) -> &Arc<hold::Gate> {
