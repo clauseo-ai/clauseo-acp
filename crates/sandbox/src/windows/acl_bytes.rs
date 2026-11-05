@@ -113,6 +113,15 @@ pub(crate) fn sid_text(bytes: &[u8]) -> Option<Sid> {
     Sid::parse(&text).ok()
 }
 
+/// The owner of the self-relative descriptor `bytes`, when it holds one.
+pub(crate) fn owner_sid(bytes: &[u8]) -> Option<Sid> {
+    let offset = usize::try_from(read_u32(bytes, 4)?).ok()?;
+    if offset == 0 {
+        return None;
+    }
+    sid_text(bytes.get(offset..)?)
+}
+
 /// One entry to find, add or remove: type, flags, mask and SID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AceSpec {

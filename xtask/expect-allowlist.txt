@@ -155,6 +155,9 @@ crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+# The apply layer's NTFS tests (S15 PR3b): win-01's timing row, and a WRITE_DAC open.
+crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_costs clippy::disallowed_methods
+crates/sandbox/src/windows/apply/ntfs_tests.rs can_change_dacl clippy::disallowed_methods
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.

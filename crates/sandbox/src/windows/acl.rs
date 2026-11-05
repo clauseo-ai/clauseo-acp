@@ -33,7 +33,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
     AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
-    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec,
+    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
@@ -225,6 +225,13 @@ fn open_planned(path: &Path) -> Result<Option<Object>, ApplyFailure> {
         return Err(ApplyFailure::Changed);
     }
     Ok(Some(target))
+}
+
+/// The owner of `path`, read without following a link: for the set-aside.
+pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
+    let object = Object::open(path)?;
+    let bytes = object.security(OWNER_SECURITY_INFORMATION.0)?;
+    owner_sid(&bytes).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no owner"))
 }
 
 /// Refuses a target that isn't what the gate checked: a junction or symbolic link now; a file

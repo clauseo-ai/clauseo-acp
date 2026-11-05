@@ -56,6 +56,7 @@ fn who(sid: &Sid) -> &'static str {
         MATTER_SID => "matter",
         GROUP_SID => "group",
         LOW_LABEL_SID => "low",
+        OWNER_RIGHTS_SID => "owner-rights",
         s if s == OTHER_POOL_SIDS[0] => "other-pool-1",
         s if s == OTHER_POOL_SIDS[1] => "other-pool-2",
         _ => "?",
@@ -99,12 +100,49 @@ fn the_full_plan() {
 fn every_allow_names_the_pool_user_and_no_one_else_by_default() {
     let w = World::new("plan-pool-user");
     let grants = grants_for(&w, &w.full_policy(), &sids());
-    let allows: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_allow()).collect();
+    let allows: Vec<&Grant> = grants
+        .iter()
+        .filter(|g| g.rights.is_allow() && g.sid.as_str() != OWNER_RIGHTS_SID)
+        .collect();
     assert!(allows.len() >= 10, "{allows:#?}");
     for g in &allows {
         assert_eq!(g.sid.as_str(), USER_SID, "{g:?}");
     }
     assert!(grants.iter().all(|g| g.sid.as_str() != MATTER_SID));
+}
+
+#[test]
+fn owner_rights_get_the_pool_users_modify_and_the_pool_user_cant_re_permission() {
+    let w = World::new("plan-owner-rights");
+    let grants = grants_for(&w, &w.full_policy(), &sids());
+    let owner: Vec<&Grant> = grants
+        .iter()
+        .filter(|g| g.sid.as_str() == OWNER_RIGHTS_SID)
+        .collect();
+    let at = |rel: &str| w.canonical(rel);
+    let want = [
+        (at("matter"), Inherit::Tree),
+        (at(STATE), Inherit::Tree),
+        (at(NOTES), Inherit::Tree),
+        (at(STORE), Inherit::FilesInFolder),
+    ];
+    assert_eq!(owner.len(), want.len(), "{owner:#?}");
+    for (path, inherit) in want {
+        let found = owner
+            .iter()
+            .any(|g| g.path == path && g.inherit == inherit && g.rights == Rights::Modify);
+        assert!(found, "{path:?}");
+        let deny = grants.iter().any(|g| {
+            g.path == path
+                && g.sid.as_str() == USER_SID
+                && g.rights == Rights::DenyChangePermissions
+                && g.inherit == Inherit::Tree
+        });
+        assert!(deny, "{path:?}");
+    }
+    // Modify has neither WRITE_DAC (0x40000) nor WRITE_OWNER (0x80000).
+    assert_eq!(Rights::Modify.mask() & 0x000c_0000, 0);
+    assert_eq!(Rights::DenyChangePermissions.mask(), 0x000c_0000);
 }
 
 #[test]

@@ -12,6 +12,14 @@ ClaudeStoreFile Modify pool 0x001301bf ThisOnly <root>/data/agents/claude-acp/ho
 Runtime ReadAndExecute pool 0x001200a9 Tree <root>/runtime/node
 Read ReadAndExecute pool 0x001200a9 Tree <root>/elsewhere
 AllowedFolder ReadAndExecute pool 0x001200a9 Tree <root>/elsewhere/Precedents
+Matter Modify owner-rights 0x001301bf Tree <root>/matter
+Matter DenyChangePermissions pool 0x000c0000 Tree <root>/matter
+State Modify owner-rights 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
+State DenyChangePermissions pool 0x000c0000 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
+Notes Modify owner-rights 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+Notes DenyChangePermissions pool 0x000c0000 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+ClaudeStore Modify owner-rights 0x001301bf FilesInFolder <root>/data/agents/claude-acp/home
+ClaudeStore DenyChangePermissions pool 0x000c0000 Tree <root>/data/agents/claude-acp/home
 Matter LowLabel low 0x00000001 Tree <root>/matter
 State LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
 Notes LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes

@@ -36,6 +36,21 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Moves `from` (a name in the matter, not followed if a link) to `to`, making `to`'s parents
+/// first: [`set_aside_with`](super::set_aside_with)'s one change. Refuses (`AlreadyExists`)
+/// when something is at `to`, since a rename over an empty folder would succeed on Unix.
+pub(crate) fn move_aside(from: &Path, to: &Path) -> io::Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::symlink_metadata(to) {
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::fs::rename(from, to)
+}
+
 /// What the repair found on an opened record file or the sandbox folder, through its handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Found {
