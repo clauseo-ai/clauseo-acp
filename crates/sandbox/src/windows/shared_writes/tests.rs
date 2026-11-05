@@ -485,6 +485,13 @@ mod ntfs {
 
     #[test]
     fn a_real_local_low_gets_both_denies_and_what_was_there_inherits_them() {
+        // The children inherit the OWNER RIGHTS deny, and this user owns them, so unelevated the
+        // remove at the end can't rewrite their DACLs (the VM's Medium run). In production the
+        // elevated admin who sets up and uninstalls never owns a pool user's children.
+        if !elevated() {
+            eprintln!("skipped: the apply-and-remove test needs an elevated token");
+            return;
+        }
         let place = Place::new("shared-ntfs");
         place
             .dir
