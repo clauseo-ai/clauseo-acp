@@ -89,3 +89,18 @@ fn cwd_must_be_a_folder() {
     let why = refused(spec(absolute("agent"), missing));
     assert!(why.ends_with("is not a folder"), "{why}");
 }
+
+#[test]
+fn the_debug_names_each_variable_and_shows_no_value() {
+    const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
+    let env = BTreeMap::from([
+        (OsString::from("ANTHROPIC_API_KEY"), OsString::from(KEY)),
+        (OsString::from("CODEX_HOME"), OsString::from("/never/shown")),
+    ]);
+    let spec = LaunchSpec::new(absolute("agent"), Vec::new(), env, std::env::temp_dir()).unwrap();
+    let shown = format!("{spec:?}");
+    assert!(!shown.contains(KEY), "{shown}");
+    assert!(!shown.contains("/never/shown"), "{shown}");
+    assert!(shown.contains("ANTHROPIC_API_KEY"), "{shown}");
+    assert!(shown.contains("[redacted]"), "{shown}");
+}

@@ -9,7 +9,10 @@ use crate::Error;
 /// A program to start, with its arguments, the variables to set on top of the inherited
 /// environment, and its working folder. Built only by [`LaunchSpec::new`], so every spec has
 /// passed its checks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Its `Debug` names each variable but shows no value: the env may carry an API key
+/// (decision record 0048, ruling 5), which never reaches a log, an error or a `Debug`.
+#[derive(Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     program: PathBuf,
     args: Vec<OsString>,
@@ -72,6 +75,28 @@ impl LaunchSpec {
     /// The working folder, an absolute path to a folder.
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+}
+
+impl std::fmt::Debug for LaunchSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchSpec")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("env", &RedactedEnv(&self.env))
+            .field("cwd", &self.cwd)
+            .finish()
+    }
+}
+
+/// An env's names, each value shown as `[redacted]`.
+struct RedactedEnv<'a>(&'a BTreeMap<OsString, OsString>);
+
+impl std::fmt::Debug for RedactedEnv<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.0.keys().map(|name| (name, format_args!("[redacted]"))))
+            .finish()
     }
 }
 

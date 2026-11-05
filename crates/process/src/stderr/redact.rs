@@ -16,12 +16,21 @@ const BEARER: &str = "bearer ";
 /// A shorter value is not redacted: it would hide common words, and guessing it is easy anyway.
 const MIN_SECRET: usize = 8;
 
-/// The rules for one agent, fixed when it starts.
-#[derive(Debug)]
+/// The rules for one agent, fixed when it starts. It keeps the secret values as long as the
+/// agent's handle lives, to redact its tail; its `Debug` counts them and shows none.
 pub(crate) struct Redactor {
     home: Option<String>,
     /// Longest first, so a secret that holds another goes whole.
     secrets: Vec<String>,
+}
+
+impl std::fmt::Debug for Redactor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Redactor")
+            .field("home", &self.home.is_some())
+            .field("secrets", &self.secrets.len())
+            .finish()
+    }
 }
 
 impl Redactor {
@@ -176,4 +185,20 @@ fn is_key_char(c: char) -> bool {
 /// A char of an HTTP bearer token (RFC 6750's `b64token`).
 fn is_token68_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '+' | '/' | '=')
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn the_debug_shows_no_secret_and_no_home() {
+        const KEY: &str = "sk-ant-api03-NEVER-IN-A-DEBUG-5c1e";
+        let env = BTreeMap::from([(OsString::from("ANTHROPIC_API_KEY"), OsString::from(KEY))]);
+        let redactor = Redactor::new(Some(Path::new("/home/lawyer")), &env);
+        let shown = format!("{redactor:?}");
+        assert!(!shown.contains(KEY), "{shown}");
+        assert!(!shown.contains("/home/lawyer"), "{shown}");
+        assert!(redactor.redact(KEY).contains(REDACTED));
+    }
 }
