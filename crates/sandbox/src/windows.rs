@@ -16,11 +16,19 @@
 //!   on Windows, the machine's sandbox user and owner records (`sandbox_user_sid`,
 //!   `sandbox_owner_sid`) and the set-up state they give (`setup_state`).
 //!
-//! The plan, the ledger, the records and the gate's logic hold no Windows call, so they build and
-//! are tested on every OS; the folder check, the registry and token reads, the folder's DACL and
-//! the tests' DACL helper need Windows. No code here writes a permission entry yet: S15's PR3
-//! applies the plan.
+//! - [`writer`]: the permission writes as a seam, [`AclWriter`]. `NtfsAcl` (Windows, `acl.rs`,
+//!   after Codex's ACL code; `PROVENANCE.md`) writes entries and labels without following a
+//!   link and walks each tree to carry inherited entries down; `acl_bytes.rs` edits the
+//!   descriptors and entries as bytes. S15's `PR3b` applies the plan through it.
+//!
+//! The plan, the ledger, the records, the gate's logic and the byte edits hold no Windows call,
+//! so they build and are tested on every OS; the folder check, the registry and token reads, the
+//! permission writes and the walk, and the tests' DACL helper need Windows.
 
+#[cfg(windows)]
+mod acl;
+#[cfg(any(windows, test))]
+mod acl_bytes;
 pub mod acl_plan;
 pub mod admit;
 #[cfg(windows)]
@@ -36,6 +44,9 @@ mod private_dir;
 #[cfg(windows)]
 mod record;
 pub mod sids;
+#[cfg(test)]
+#[cfg(windows)]
+mod test_acl;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_dacl;
 // Two attributes, as for `tests` below.
@@ -49,7 +60,10 @@ mod test_world;
 #[cfg(windows)]
 mod tests;
 mod write;
+pub mod writer;
 
+#[cfg(windows)]
+pub use acl::NtfsAcl;
 #[cfg(windows)]
 pub use admit::admit;
 #[cfg(any(test, feature = "test-support"))]
@@ -64,6 +78,7 @@ pub use folder::folder_support;
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
+pub use writer::{AclWriter, Added, ApplyFailure, Reach, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
