@@ -18,14 +18,27 @@ use windows::Win32::Security::Authorization::{
     SetNamedSecurityInfoW,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::core::{BOOL, PCWSTR};
 
 /// Gives `path` the protected DACL that `sddl` describes, such as
 /// `D:P(A;OICI;0x1301bf;;;OW)`: no entry is inherited from the parent any more.
 pub fn protect_with(path: &Path, sddl: &str) -> io::Result<()> {
+    set_dacl(path, sddl, PROTECTED_DACL_SECURITY_INFORMATION)
+}
+
+/// Gives `path` the explicit entries `sddl` describes, with its parent's inheritable entries
+/// after them, through `SetNamedSecurityInfoW`, which marks the DACL auto-inherited
+/// (`SE_DACL_AUTO_INHERITED`): a folder in that state whatever its parent's state.
+pub fn auto_inherit_with(path: &Path, sddl: &str) -> io::Result<()> {
+    set_dacl(path, sddl, UNPROTECTED_DACL_SECURITY_INFORMATION)
+}
+
+/// `SetNamedSecurityInfoW` with the DACL of `sddl` and `DACL_SECURITY_INFORMATION | how`.
+fn set_dacl(path: &Path, sddl: &str, how: OBJECT_SECURITY_INFORMATION) -> io::Result<()> {
     let text: Vec<u16> = sddl.encode_utf16().chain(once(0)).collect();
     let mut descriptor = PSECURITY_DESCRIPTOR(null_mut());
     // SAFETY: `text` is NUL-terminated and outlives the call; `descriptor` is a live out-pointer,
@@ -66,7 +79,7 @@ pub fn protect_with(path: &Path, sddl: &str) -> io::Result<()> {
         SetNamedSecurityInfoW(
             PCWSTR(target.as_ptr()),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | how,
             None,
             None,
             Some(dacl.cast_const()),

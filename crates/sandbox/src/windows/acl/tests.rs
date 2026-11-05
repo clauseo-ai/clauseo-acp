@@ -4,7 +4,7 @@
 use super::*;
 use crate::windows::acl_plan::{LOW_LABEL_SID, Rights};
 use crate::windows::test_acl::{Place, grant, has, protected};
-use crate::windows::test_dacl::protect_with;
+use crate::windows::test_dacl::{auto_inherit_with, protect_with};
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::Label;
@@ -372,10 +372,9 @@ fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
         let bytes = descriptor(path).unwrap();
         Descriptor::parse(&bytes).unwrap().control & DACL_AUTO_INHERITED != 0
     };
-    assert!(
-        auto(&matter),
-        "a new folder under the temp folder is auto-inherited"
-    );
+    // The temp folder may not be auto-inherited (the VM's isn't), so the matter is made so.
+    auto_inherit_with(&matter, "D:(A;OICI;FA;;;SY)").unwrap();
+    assert!(auto(&matter), "the matter starts auto-inherited");
     let grants = fence(&matter);
     put(&matter, &grants).unwrap();
     assert!(auto(&matter));
