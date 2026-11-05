@@ -104,12 +104,17 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     }
     let io = |what: &'static str| io_error(what, config);
     let cache = npm_cache(&config.data_dir);
-    write::create_dir_all(&cache).map_err(io("making the npm cache"))?;
+    // Made through no link below the data folder, as `install/` is below, so the removals in
+    // them never reach a folder a link points at.
+    write::create_private_dirs_under(&config.data_dir, &cache)
+        .map_err(io("making the npm cache"))?;
     let npmrc = config.data_dir.join("agents").join("npmrc");
     write::write_atomic(&npmrc, b"").map_err(io("writing npmrc"))?;
     let global = config.data_dir.join("agents").join("npmrc-global");
     write::write_atomic(&global, b"").map_err(io("writing npmrc-global"))?;
     let root = install_root(&config.data_dir, agent);
+    write::create_private_dirs_under(&config.data_dir, &root)
+        .map_err(io("making the install folder"))?;
     let tmp = root.join(format!(".tmp-{hash}-{}", run.attempts));
     write::remove_dir_all(&tmp).map_err(io("clearing the temp folder"))?;
     write::create_dir_all(&tmp).map_err(io("making the temp folder"))?;

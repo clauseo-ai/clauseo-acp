@@ -129,7 +129,10 @@ pub(crate) struct Scan {
 
 /// Sorts `<data_dir>/agents/<id>/install/`: the `hash` folder with a valid receipt is kept;
 /// every other entry (that folder without a valid receipt, `.tmp-*`, other hashes, strays) is
-/// to remove. A missing `install/` is an empty scan.
+/// to remove. A missing `install/` is an empty scan. A link (symbolic link, junction or other
+/// reparse point) or a file at `agents`, `agents/<id>` or `install` fails with `InvalidInput`
+/// and nothing is listed: `read_dir` would follow it, and the removal would empty a folder
+/// outside the data folder.
 pub(crate) fn scan(
     data_dir: &Path,
     agent: &AgentId,
@@ -137,6 +140,9 @@ pub(crate) fn scan(
     platform: Platform,
 ) -> io::Result<Scan> {
     let root = install_root(data_dir, agent);
+    if !write::real_dirs_under(data_dir, &root)? {
+        return Ok(Scan::default());
+    }
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Scan::default()),
