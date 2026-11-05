@@ -156,6 +156,12 @@ fn set_agent_launch_refuses_a_launch_that_is_not_clauseos_install() {
             args: vec![abs_str("data/agents/claude-acp/install/h/index.js")],
             env: BTreeMap::new(),
         },
+        // A shell running an adapter's script is not Clauseo's install: only a Node is.
+        AgentLaunch {
+            command: abs_str("bin/sh"),
+            args: vec![abs_str("data/agents/claude-acp/install/h/index.js")],
+            env: BTreeMap::new(),
+        },
     ] {
         assert!(matches!(
             effective.set_agent_launch(&files, "claude-acp", &launch),
@@ -274,4 +280,48 @@ fn a_failed_write_changes_nothing_in_memory() {
     ));
     assert_eq!(effective.agent("claude-acp"), None);
     assert_eq!(effective.plan("claude-acp"), None);
+}
+
+#[test]
+fn set_agent_launch_refuses_a_key_in_its_env_and_writes_nothing() {
+    let files = user("{}");
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    let mut launch = ours();
+    launch.env.insert("ANTHROPIC_API_KEY".to_owned(), secret());
+    let error = effective
+        .set_agent_launch(&files, "claude-acp", &launch)
+        .unwrap_err();
+    let key = "agents.claude-acp.env.ANTHROPIC_API_KEY";
+    assert!(
+        matches!(&error, Error::Refused { key: refused, .. } if refused == key),
+        "{error:?}"
+    );
+    assert!(!format!("{error} {error:?}").contains(&secret()));
+    assert_eq!(effective.agent("claude-acp"), None);
+    assert_eq!(saved(&files).as_deref(), Some("{}"));
+}
+
+#[test]
+fn set_plan_gives_a_name_that_is_no_variable_name_by_its_place() {
+    let files = user("{}");
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    let plan = Plan {
+        env: BTreeMap::from([(format!("ANTHROPIC_API_KEY={}", secret()), String::new())]),
+        ..gateway()
+    };
+    let error = effective
+        .set_plan(&files, "claude-acp", Some(&plan))
+        .unwrap_err();
+    assert!(
+        !format!("{error} {error:?}").contains("sk-ant"),
+        "{error:?}"
+    );
+    // `ANTHROPIC_API_KEY=…` sorts before `ANTHROPIC_MODEL`.
+    assert!(matches!(&error, Error::Refused { key, .. } if key == "plans.claude-acp.env[0]"));
+    // Nor is a dotted id a plan's.
+    assert!(matches!(
+        effective.set_plan(&files, "claude-acp.endpoint", Some(&gateway())),
+        Err(Error::Refused { .. })
+    ));
+    assert_eq!(saved(&files).as_deref(), Some("{}"));
 }

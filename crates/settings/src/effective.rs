@@ -46,14 +46,14 @@ use std::path::Path;
 pub enum EntryWrite {
     /// The entry was written to `settings.json` and is in force.
     Written,
-    /// The entry there is the lawyer's or the firm's own (its program is outside
-    /// `<data_dir>/agents/`), so it was left as it is and nothing was written.
+    /// The entry there is the lawyer's or the firm's own (neither its program nor a `node`'s
+    /// script is under `<data_dir>/agents/`), so it was left as it is and nothing was written.
     LeftAlone,
 }
 
 /// Why [`Effective::set_agent_launch`] refuses a launch that is not Clauseo's own install.
-const NOT_OURS: &str =
-    "Clauseo writes only its own installs: a command or script under <data_dir>/agents/";
+const NOT_OURS: &str = "Clauseo writes only its own installs: a command under \
+                        <data_dir>/agents/, or node with its script there";
 
 /// The settings after the defaults, the user's `settings.json` and the policy layer, in that
 /// order: policy wins. The `ui` and `tools` sections change at runtime only through
@@ -249,12 +249,15 @@ impl Effective {
 
     /// Writes the launch entry `agents.<id>`: saves it to `settings.json` through `files`,
     /// then sets it in memory. Only Clauseo's own installs are written: `launch` must have an
-    /// absolute `command`, and that command or its first argument (the adapter's script) must
-    /// lie under `<data_dir>/agents/`, or it is refused with [`Error::Refused`].
+    /// absolute `command` that lies under `<data_dir>/agents/`, or is a `node` (or `node.exe`)
+    /// whose first argument (the adapter's script) lies there, or it is refused with
+    /// [`Error::Refused`]. So is an `env` that sets a name holding `KEY`, `TOKEN`, `SECRET` or
+    /// `PASSWORD` to anything but empty: keys live only in the keychain. The refusal names the
+    /// key, never the value.
     ///
-    /// A policy-locked id is refused with [`Error::Locked`]. An entry already there whose
-    /// command and first argument are both outside `<data_dir>/agents/` (or that does not type)
-    /// is the lawyer's or the firm's own: it is never replaced, and the answer is
+    /// A policy-locked id is refused with [`Error::Locked`]. An entry already there that is not
+    /// Clauseo's by the same rule (or that does not type) is the lawyer's or the firm's own: it
+    /// is never replaced, and the answer is
     /// [`EntryWrite::LeftAlone`] with nothing written. A failed write returns the error with
     /// nothing changed in memory.
     pub fn set_agent_launch(
@@ -277,6 +280,7 @@ impl Effective {
                 reason: NOT_OURS,
             });
         }
+        plans::check_launch_env(id, launch)?;
         if self
             .settings
             .agents
@@ -300,10 +304,12 @@ impl Effective {
     /// Writes the plan `plans.<id>`, or with `None` (or an empty plan) removes it: saves it to
     /// `settings.json` through `files`, then sets it in memory. A policy-locked id is refused
     /// with [`Error::Locked`]; while a policy source cannot be read every plan is locked. An
-    /// endpoint that is not an `https` URL with a host (no user name, password, query or
-    /// fragment), or a variable whose name holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` in any
-    /// case, is refused with [`Error::Refused`], naming the key and never the value. Nothing is
-    /// written then; a failed write returns the error with nothing changed in memory.
+    /// id that is not an agent id, an endpoint that is not an ASCII `https` URL with a host (no
+    /// user name, password, query, fragment or backslash, a port of at most 65535), a variable
+    /// a plan may not set (anything but [`crate::PLAN_ENV_NAMES`] and [`crate::PLAN_PROXY_NAMES`])
+    /// or a proxy address with a user name is refused with [`Error::Refused`], naming the key
+    /// (or the variable's place, for a name that is no variable name) and never the value.
+    /// Nothing is written then; a failed write returns the error with nothing changed in memory.
     pub fn set_plan(
         &mut self,
         files: &dyn Files,
@@ -314,10 +320,10 @@ impl Effective {
         if self.is_locked(&key) {
             return Err(Error::Locked { key });
         }
-        if id.is_empty() {
+        if !plans::id_ok(id) {
             return Err(Error::Refused {
                 key,
-                reason: "a plan needs an agent id",
+                reason: plans::BAD_ID,
             });
         }
         let plan = plan.filter(|plan| **plan != Plan::default());

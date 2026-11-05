@@ -32,7 +32,7 @@ fn unreadable() -> FakeSource<impl Fn() -> PolicyRead> {
 fn lawyers_choices() -> String {
     format!(
         r#"{{
-            "plans": {{"claude-acp": {{"endpoint": "https://elsewhere.example", "env": {{"A": "1"}}}}}},
+            "plans": {{"claude-acp": {{"endpoint": "https://elsewhere.example", "env": {{"AWS_REGION": "eu-west-2"}}}}}},
             "install": {{"bundle": "{}", "registry": "https://npm.elsewhere.example"}}
         }}"#,
         abs_json("bundle")
@@ -246,4 +246,69 @@ fn a_policy_install_value_that_does_not_type_locks_it_unset() {
         Some(abs("firm/bundle").as_path())
     );
     assert!(effective.is_locked("install.registry"));
+}
+
+/// Checks the lawyer's plan does not stand and every plan is locked, for a policy `shape`.
+fn every_plan_locked(effective: &Effective, shape: &str) {
+    assert!(effective.settings().plans.is_empty(), "{shape}");
+    assert!(effective.is_locked("plans.claude-acp"), "{shape}");
+    assert!(effective.is_locked("plans.codex-acp"), "{shape}");
+}
+
+#[test]
+fn a_policy_plan_written_in_a_dotted_shape_locks_every_plan() {
+    let endpoint = "https://gateway.firm.example";
+    // policy.json: the plan key at the top level, and the endpoint's key inside `plans`.
+    for text in [
+        format!(r#"{{"plans.claude-acp": {{"endpoint": "{endpoint}"}}}}"#),
+        format!(r#"{{"plans": {{"claude-acp.endpoint": "{endpoint}"}}}}"#),
+    ] {
+        let firm = policy("firm", text.clone());
+        let effective = Effective::load(&locations(), &user(&lawyers_choices()), &[&firm]);
+        every_plan_locked(&effective, &text);
+    }
+    // The registry: a value named for the endpoint's key.
+    let values = registry::parse(vec![(
+        "plans.claude-acp.endpoint".to_owned(),
+        registry::RegValue::Sz(endpoint.to_owned()),
+    )]);
+    let reg = FakeSource {
+        name: registry::SOURCE,
+        read: move || PolicyRead::Read(values.clone()),
+    };
+    let effective = Effective::load(&locations(), &user(&lawyers_choices()), &[&reg]);
+    every_plan_locked(&effective, "registry");
+    // Managed preferences: a `plans` dictionary entry under a dotted name.
+    let dict = managed_prefs::PlistValue::Dict(vec![(
+        "claude-acp.endpoint".to_owned(),
+        managed_prefs::PlistValue::String(endpoint.to_owned()),
+    )]);
+    let PolicyRead::Read(values) = managed_prefs::parse(vec![("plans".to_owned(), dict, true)])
+    else {
+        panic!("managed preferences read nothing");
+    };
+    let prefs = FakeSource {
+        name: managed_prefs::SOURCE,
+        read: move || PolicyRead::Read(values.clone()),
+    };
+    let effective = Effective::load(&locations(), &user(&lawyers_choices()), &[&prefs]);
+    every_plan_locked(&effective, "managed preferences");
+}
+
+#[test]
+fn a_name_that_is_no_variable_name_never_reaches_a_warning() {
+    let name = format!("ANTHROPIC_API_KEY={}", secret());
+    let text = serde_json::json!({"plans": {"claude-acp": {"env": {name: "x"}}}}).to_string();
+    let effective = Effective::load(&locations(), &user(&text), &[]);
+    assert!(
+        effective
+            .plan("claude-acp")
+            .is_some_and(|plan| plan.env.is_empty())
+    );
+    assert_eq!(effective.warnings().len(), 1);
+    for warning in effective.warnings() {
+        let shown = format!("{warning} {warning:?}");
+        assert!(!shown.contains("sk-ant"), "{shown}");
+        assert!(shown.contains("plans.claude-acp.env[0]"), "{shown}");
+    }
 }
