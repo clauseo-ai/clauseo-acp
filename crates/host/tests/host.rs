@@ -141,6 +141,15 @@ mod not_allowed;
 #[path = "host/own_logout.rs"]
 mod own_logout;
 #[cfg(test)]
+#[path = "host/packs.rs"]
+mod packs;
+#[cfg(test)]
+#[path = "host/packs_log.rs"]
+mod packs_log;
+#[cfg(test)]
+#[path = "host/packs_timing.rs"]
+mod packs_timing;
+#[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]

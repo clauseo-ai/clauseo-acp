@@ -9,7 +9,7 @@ use clauseo_acp::McpServer;
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_profile::{SkillWrite, SkillsWritten};
+use clauseo_profile::{PackWrite, PacksWritten, SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
@@ -43,13 +43,23 @@ use crate::window::PATCH_WINDOW_BYTES;
 ///   and the host's own (`web_search`, `hooks`) leave room.
 /// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
 ///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
+/// - `pack_write` turns the launch's [`PackRequest`] (decision record 0040) into the packs the
+///   launch-prep thread loads and writes into `run/<session id>/skill-packs/`; the
+///   [`PacksWritten`] it gets goes to that launch's `session_meta` and `codex_config` only.
 ///
 /// Every method runs on the host thread, at each launch and session start, and must do no I/O:
 /// no file, network or process call, and nothing that blocks. It hands back data the adapter
 /// already holds; the host does any file work (writing `launch_writes`) off that thread.
 pub trait ProfileHook: Send {
     /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>>;
+    /// `packs` is this launch's own pack plugin, written on its launch-prep thread; `None` when
+    /// it has none. The desktop adapter names it as Claude's second plugin
+    /// (`ClauseoProfile::session_meta_with_packs`).
+    fn session_meta(
+        &self,
+        agent: &AgentId,
+        packs: Option<&PacksWritten>,
+    ) -> Option<Map<String, Value>>;
     /// Variables set on top of the agent's own when it launches.
     fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString>;
     /// MCP servers for `agent`'s sessions, after the lawyer's (default: none). Strings may hold
@@ -63,11 +73,13 @@ pub trait ProfileHook: Send {
     /// on its launch-prep thread; `None` when that write failed or there was none. The desktop
     /// adapter hands it to `ClauseoProfile::codex_keys`, and without it calls
     /// `ClauseoProfile::codex_keys_without_index`, so the skills index names only files this
-    /// launch wrote (decision record 0031).
+    /// launch wrote (decision record 0031). `packs` is this launch's own pack plugin, so the
+    /// pack lines name exactly the files it wrote (`ClauseoProfile::codex_keys_with_packs`).
     fn codex_config(
         &self,
         _agent: &AgentId,
         _written: Option<&SkillsWritten>,
+        _packs: Option<&PacksWritten>,
     ) -> Map<String, Value> {
         Map::new()
     }
@@ -78,7 +90,15 @@ pub trait ProfileHook: Send {
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         Vec::new()
     }
+    /// The skill packs to load and write before `agent` starts, from `request` (default:
+    /// none): `ClauseoProfile::pack_write` adds where the packs live. A load or write failure
+    /// is a warning, never a failed launch.
+    fn pack_write(&self, _agent: &AgentId, _request: &PackRequest) -> Option<PackWrite> {
+        None
+    }
 }
+
+pub use crate::actor::turn::PackRequest;
 
 /// One agent session, as the egress proxy knows it: the matter, the thread, and the launch (the
 /// launch prep's id, from the same counter as the agent's).
@@ -183,7 +203,11 @@ impl std::fmt::Debug for LaunchWiring {
 pub struct NoProfile;
 
 impl ProfileHook for NoProfile {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         None
     }
 

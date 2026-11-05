@@ -4,10 +4,11 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use clauseo_host::{McpServer, ProfileHook as _};
-use clauseo_profile::{ClauseoProfile, SkillWrite, SkillsWritten, write_skills};
+use clauseo_host::{McpServer, PackRequest, ProfileHook as _};
+use clauseo_profile::packs;
+use clauseo_profile::{ClauseoProfile, SkillWrite, SkillsWritten, write_packs, write_skills};
 use clauseo_protocol::{AgentId, AgentKind};
-use clauseo_settings::Locations;
+use clauseo_settings::{Locations, SkillsExtra, SkillsSettings};
 use serde_json::Value;
 
 use super::{DesktopProfile, paths_for};
@@ -50,7 +51,7 @@ fn claude_meta_carries_the_instructions_and_the_plugin_dir() {
     let scratch = Scratch::new("profile-claude-meta", &[]);
     let profile = profile(&scratch);
     let hook = DesktopProfile::new(profile.clone(), true);
-    let meta = Value::Object(hook.session_meta(&agent(CLAUDE)).unwrap());
+    let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
     assert_eq!(
         meta.pointer("/systemPrompt/append").and_then(Value::as_str),
         Some(profile.instructions().as_str())
@@ -61,7 +62,7 @@ fn claude_meta_carries_the_instructions_and_the_plugin_dir() {
             .and_then(Value::as_str),
         plugin.to_str()
     );
-    assert!(hook.session_meta(&agent(CODEX)).is_none());
+    assert!(hook.session_meta(&agent(CODEX), None).is_none());
 }
 
 #[test]
@@ -72,10 +73,13 @@ fn codex_keys_carry_the_index_only_with_a_token_from_this_folders_write() {
     assert_ne!(index, "");
     let hook = DesktopProfile::new(profile.clone(), true);
     let token = written(&profile);
-    let keys = hook.codex_config(&agent(CODEX), Some(&token));
+    let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
     assert!(developer_instructions(&keys).ends_with(&index));
     // Claude never gets Codex's keys, token or not.
-    assert!(hook.codex_config(&agent(CLAUDE), Some(&token)).is_empty());
+    assert!(
+        hook.codex_config(&agent(CLAUDE), Some(&token), None)
+            .is_empty()
+    );
 }
 
 #[test]
@@ -83,7 +87,7 @@ fn without_a_token_codex_gets_no_index() {
     let scratch = Scratch::new("profile-codex-no-token", &[]);
     let profile = profile(&scratch);
     let hook = DesktopProfile::new(profile.clone(), true);
-    let keys = hook.codex_config(&agent(CODEX), None);
+    let keys = hook.codex_config(&agent(CODEX), None, None);
     assert_eq!(developer_instructions(&keys), profile.instructions());
     assert!(!developer_instructions(&keys).contains(&profile.skills_index()));
 }
@@ -100,7 +104,7 @@ fn two_launches_with_different_tokens_never_mix() {
     // Another folder's token, then this folder's, then none, then another folder's again:
     // each launch's keys follow its own token alone, and nothing is kept between them.
     let keys = |token: Option<&SkillsWritten>| {
-        developer_instructions(&hook.codex_config(&agent(CODEX), token))
+        developer_instructions(&hook.codex_config(&agent(CODEX), token, None))
     };
     assert!(!keys(Some(&theirs)).contains(&index));
     assert!(keys(Some(&mine)).ends_with(&index));
@@ -184,12 +188,89 @@ fn an_agent_the_profile_does_not_know_gets_nothing() {
     let token = written(&profile);
     let hook = DesktopProfile::new(profile, true);
     let other = agent("gemini-acp");
-    assert!(hook.session_meta(&other).is_none());
+    assert!(hook.session_meta(&other, None).is_none());
     assert!(hook.launch_env(&other).is_empty());
     assert_eq!(hook.mcp_servers(&other), Vec::<McpServer>::new());
-    assert!(hook.codex_config(&other, Some(&token)).is_empty());
-    assert!(hook.codex_config(&other, None).is_empty());
+    assert!(hook.codex_config(&other, Some(&token), None).is_empty());
+    assert!(hook.codex_config(&other, None, None).is_empty());
     assert_eq!(hook.launch_writes(&other), Vec::<SkillWrite>::new());
+    assert!(hook.pack_write(&other, &request(&["nda-kit"])).is_none());
+}
+
+/// The launch's pack request with `ids` turned on (each with a made-up hash) and no matter list.
+fn request(ids: &[&str]) -> PackRequest {
+    let skills = SkillsSettings {
+        extra: SkillsExtra::Any,
+        enabled: ids
+            .iter()
+            .map(|id| ((*id).to_owned(), format!("sha256:{}", "1".repeat(64))))
+            .collect(),
+        ..SkillsSettings::default()
+    };
+    PackRequest::new(&skills, None)
+}
+
+#[test]
+fn no_pack_file_is_read_on_the_actor() {
+    let scratch = Scratch::new("profile-pack-write-pure", &[]);
+    // Where the packs go is a file: a hook that read it would fail or leave the pack out.
+    let packs_root = scratch.file("skill-packs", b"not a folder");
+    let hook = DesktopProfile::new(profile(&scratch), true);
+    let request = request(&["nda-kit"]);
+    for id in [CLAUDE, CODEX] {
+        let write = hook
+            .pack_write(&agent(id), &request)
+            .expect("packs to write");
+        assert_eq!(write.packs_root(), packs_root);
+        assert_eq!(write.entries(), request.entries());
+        assert!(!write.allow_scripts());
+    }
+    assert!(
+        hook.pack_write(&agent(CLAUDE), &self::request(&[]))
+            .is_none()
+    );
+    assert_eq!(std::fs::read(&packs_root).unwrap(), b"not a folder");
+}
+
+#[test]
+fn the_launch_packs_go_to_claudes_second_plugin_and_codexs_index() {
+    let scratch = Scratch::new(
+        "profile-pack-tokens",
+        &["skill-packs/nda-kit/skills/nda-review"],
+    );
+    let manifest = serde_json::json!({"format": 1, "id": "nda-kit", "name": "A pack",
+        "version": "1.0.0", "author": "Example Chambers", "source_url": "https://example.org/pack",
+        "licence": "CC-BY-4.0", "last_reviewed": "2026-10-20", "instruction_only": true,
+        "skills": [{"name": "nda-review"}]});
+    scratch.file(
+        "skill-packs/nda-kit/clauseo-pack.json",
+        manifest.to_string().as_bytes(),
+    );
+    scratch.file(
+        "skill-packs/nda-kit/skills/nda-review/SKILL.md",
+        b"---\nname: nda-review\ndescription: Reviews an NDA.\n---\n# NDA\n",
+    );
+    let profile = profile(&scratch);
+    let pack = packs::inspect(profile.paths().skill_packs(), "nda-kit", false).unwrap();
+    let plugin = scratch.path().join("run").join("s-1").join("skill-packs");
+    let token = write_packs(&plugin, &[pack]).unwrap();
+    let hook = DesktopProfile::new(profile, true);
+    let meta = Value::Object(hook.session_meta(&agent(CLAUDE), Some(&token)).unwrap());
+    assert_eq!(
+        meta.pointer("/claudeCode/options/plugins/1/path")
+            .and_then(Value::as_str),
+        plugin.to_str()
+    );
+    let keys = hook.codex_config(&agent(CODEX), None, Some(&token));
+    let skill = plugin
+        .join("skills")
+        .join("nda-kit--nda-review")
+        .join("SKILL.md");
+    assert!(
+        developer_instructions(&keys).contains(skill.to_str().unwrap()),
+        "{keys:?}"
+    );
+    assert!(hook.session_meta(&agent(CODEX), Some(&token)).is_none());
 }
 
 #[test]
@@ -197,7 +278,12 @@ fn the_host_config_gets_the_hook_and_stetdocs_folder() {
     let scratch = Scratch::new("profile-host-config", &[]);
     let hook = DesktopProfile::new(profile(&scratch), true);
     let config = crate::with_profile(scratch.config(Vec::new()), Some(hook));
-    assert!(config.profile_hook().session_meta(&agent(CLAUDE)).is_some());
+    assert!(
+        config
+            .profile_hook()
+            .session_meta(&agent(CLAUDE), None)
+            .is_some()
+    );
     assert_eq!(
         config.agent_path_prepend(),
         Some(scratch.path().join("bin").join("stetdoc").as_path())
@@ -210,7 +296,12 @@ fn stetdoc_not_found_goes_on_no_path() {
     let hook = DesktopProfile::new(profile(&scratch), false);
     assert_eq!(hook.path_prepend(), None);
     let config = crate::with_profile(scratch.config(Vec::new()), Some(hook));
-    assert!(config.profile_hook().session_meta(&agent(CLAUDE)).is_some());
+    assert!(
+        config
+            .profile_hook()
+            .session_meta(&agent(CLAUDE), None)
+            .is_some()
+    );
     assert_eq!(config.agent_path_prepend(), None);
 }
 
@@ -232,7 +323,12 @@ fn a_relative_path_folder_is_never_prepended() {
 fn no_profile_leaves_the_host_without_a_hook() {
     let scratch = Scratch::new("profile-none", &[]);
     let config = crate::with_profile(scratch.config(Vec::new()), None);
-    assert!(config.profile_hook().session_meta(&agent(CLAUDE)).is_none());
+    assert!(
+        config
+            .profile_hook()
+            .session_meta(&agent(CLAUDE), None)
+            .is_none()
+    );
     assert_eq!(config.agent_path_prepend(), None);
 }
 
@@ -241,7 +337,7 @@ fn build_puts_the_profile_under_the_data_folder() {
     let scratch = Scratch::new("profile-build", &[]);
     let locations = Locations::under_root(scratch.path());
     let hook = DesktopProfile::build(&locations).unwrap();
-    let meta = Value::Object(hook.session_meta(&agent(CLAUDE)).unwrap());
+    let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
         meta.pointer("/claudeCode/options/plugins/0/path")
@@ -268,7 +364,7 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     let hook = DesktopProfile::build_with(&locations, Some(folder.as_os_str())).unwrap();
     assert_eq!(hook.path_prepend(), Some(folder));
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
-    let keys = hook.codex_config(&agent(CODEX), Some(&token));
+    let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
     let skill = token.root().join("stetdoc").join("SKILL.md");
     assert!(skill.is_file());
     assert!(

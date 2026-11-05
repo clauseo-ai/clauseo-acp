@@ -18,7 +18,11 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 struct Hook(Value, BTreeMap<OsString, OsString>);
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        _agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         self.0.as_object().cloned()
     }
 

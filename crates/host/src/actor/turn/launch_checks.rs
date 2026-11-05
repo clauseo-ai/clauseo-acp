@@ -14,7 +14,8 @@
 //! notes folder) and, for an agent with a kind, writes the profile's skills
 //! (`ProfileHook::launch_writes`, `clauseo_profile::write_skills`). A skill write that fails is
 //! a warning, never a failed launch. The first write's token goes in [`Prepared`], so only that
-//! launch's Codex keys carry the skills index; a failed write leaves none. The notes folder
+//! launch's Codex keys carry the skills index; a failed write leaves none. Then the launch's
+//! skill packs go into its own plugin under the run folder ([`packs`]). The notes folder
 //! stays; the run folder is the launch's own (its id is in the name) and is removed off the
 //! actor on every way out: by the prep thread when nobody waits for its answer any more
 //! ([`codex::prepare::off_actor_or_undo`]), and otherwise from the actor ([`discard`]) when
@@ -37,7 +38,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_profile::{SkillWrite, SkillsWritten};
+use clauseo_profile::{PacksWritten, SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind, MatterId, ThreadId};
 
 use super::super::Actor;
@@ -80,6 +81,8 @@ pub(crate) struct Prepared {
     /// This launch's own token for its first skills write (Claude's plugin), taken by
     /// `profile_loads::launch_keys`; `None` when that write failed or there was none.
     pub(super) skills_written: Option<SkillsWritten>,
+    /// The skill packs this launch left out, by id, with the reason, for its notice.
+    pub(super) packs_skipped: Vec<(String, PackSkip)>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -109,6 +112,13 @@ pub(crate) struct RunFolders {
     /// `PolicyBuilder::browser_socket_dir(&session.socket_dir)` and
     /// `Loopback::Ports(session.ports.loopback())`.
     pub(crate) browser_session: Option<Arc<BrowserSession>>,
+    /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
+    /// written by the launch prep only when a pack loaded. R17 passes this to
+    /// `PolicyBuilder::read_only_in_state`.
+    pub(crate) skill_packs: PathBuf,
+    /// What the launch prep wrote into [`Self::skill_packs`]; none when it wrote nothing. This
+    /// launch's `session_meta` and `codex_config` take it, and no other launch's.
+    pub(crate) packs_written: Option<Arc<PacksWritten>>,
 }
 
 impl RunFolders {
@@ -119,10 +129,12 @@ impl RunFolders {
             key,
             work: root.join("work"),
             browser: root.join("browser"),
+            skill_packs: root.join("skill-packs"),
             notes: notes_dir(data, key.matter),
             root,
             chrome: None,
             browser_session: None,
+            packs_written: None,
         }
     }
 
@@ -169,108 +181,6 @@ impl RunFolders {
         }
         if crate::write::is_real_dir(&self.root) {
             remove_tree(&self.root);
-        }
-    }
-}
-
-/// The start-up sweep of `<data>/run`, once per host start: no launch is live before the
-/// first, so every folder there is an earlier run's leftover. The first launch-prep thread, under
-/// a lock every launch's prep takes before making its folders, renames `run` to
-/// `run.old-<n>` in one call, so no live folder is taken and no launch waits on a delete; a
-/// `clauseo-run-sweep` thread then deletes every `run.old-*` folder. A `run` that is a link
-/// is left as it is, and the launches refuse it.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RunSweep(std::sync::Arc<std::sync::Mutex<Swept>>);
-
-/// Whether the start-up sweep ran, and (for the tests) its delete's thread.
-#[derive(Debug, Default)]
-struct Swept {
-    done: bool,
-    #[cfg(test)]
-    delete: Option<std::thread::JoinHandle<()>>,
-}
-
-impl RunSweep {
-    /// Sets `<data>/run` aside the first time and starts its delete; nothing after.
-    pub(crate) fn once(&self, data: &Path) {
-        let mut swept = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if swept.done {
-            return;
-        }
-        swept.done = true;
-        set_aside(data);
-        let data = data.to_owned();
-        let started = std::thread::Builder::new()
-            .name("clauseo-run-sweep".to_owned())
-            .spawn(move || delete_set_aside(&data));
-        match started {
-            #[cfg(test)]
-            Ok(delete) => swept.delete = Some(delete),
-            #[cfg(not(test))]
-            Ok(_delete) => {}
-            Err(error) => {
-                tracing::warn!(%error, "the earlier run's folders stay until the next start");
-            }
-        }
-    }
-
-    /// Waits for the start-up sweep's delete, when it started.
-    #[cfg(test)]
-    pub(crate) fn join_delete(&self) {
-        let delete = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .delete
-            .take();
-        if let Some(delete) = delete {
-            delete.join().unwrap();
-        }
-    }
-}
-
-/// The prefix of a `run` folder set aside.
-const SET_ASIDE: &str = "run.old-";
-
-/// Renames `<data>/run` to the first free `run.old-<n>`, when it is a real folder.
-fn set_aside(data: &Path) {
-    let run = run_dir(data);
-    match std::fs::symlink_metadata(&run) {
-        Err(_) => return,
-        Ok(meta) if !meta.is_dir() => {
-            tracing::warn!("the run folder is a link or no folder; left as is");
-            return;
-        }
-        Ok(_) => {}
-    }
-    let free = (0..1000_u32)
-        .map(|n| data.join(format!("{SET_ASIDE}{n}")))
-        .find(|old| std::fs::symlink_metadata(old).is_err());
-    let renamed = match free {
-        Some(old) => crate::write::rename_folder(&run, &old),
-        None => Err(std::io::Error::other("no free run.old-<n> name")),
-    };
-    if let Err(error) = renamed {
-        tracing::warn!(%error, "the earlier run's folders stay");
-    }
-}
-
-/// Deletes every real `run.old-*` folder under `data`; a link of that name is left alone.
-fn delete_set_aside(data: &Path) {
-    let Ok(entries) = std::fs::read_dir(data) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let named = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with(SET_ASIDE));
-        if named && crate::write::is_real_dir(&path) {
-            remove_tree(&path);
         }
     }
 }
@@ -330,19 +240,21 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             None => Vec::new(),
         };
         let browser = browser_prep(actor, &row.agent, key);
+        let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
+        let packs = pack_prep(actor, &row.agent, matter);
         let claude = kind == Some(AgentKind::Claude);
         Ok((
             stored,
             locations.data_dir().to_owned(),
             (home, claude),
             run,
-            skills,
+            (skills, packs),
             browser,
         ))
     })();
     let sweep = actor.run_sweep.clone();
     let login = login_hook(actor, thread);
-    let (stored, data, (home, claude), mut run, skills, browser) = match paths {
+    let (stored, data, (home, claude), mut run, (skills, packs), browser) = match paths {
         Ok(paths) => paths,
         Err(error) => {
             agents::fail_all(actor, thread, waiting, &error);
@@ -391,6 +303,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                 run.make(&data, &sweep)?;
                 (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
                 let skills_written = write_skills(&skills);
+                let packs_skipped;
+                (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
                 Ok(Prepared {
                     stored,
                     codex,
@@ -398,6 +312,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                     folder: answer,
                     run,
                     skills_written,
+                    packs_skipped,
                 })
             },
             |late: Prepared| late.run.remove(),
@@ -513,12 +428,15 @@ pub(super) fn on_prepared(
         return;
     }
     let run = prepared.run.clone();
+    let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
     if let Some(state) = state(actor, thread) {
         state.run = Some(run.clone());
     }
     agents::launch_now(actor, thread, waiting, *prepared);
     let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
-    if !launched {
+    if launched {
+        packs::hold_notice(actor, thread, packs_skipped);
+    } else {
         if let Some(state) = state(actor, thread) {
             state.run = None;
         }
@@ -571,6 +489,12 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 
 mod browser;
 use browser::browser_prep;
+mod sweep;
+pub(crate) use sweep::RunSweep;
+mod packs;
+pub use packs::PackRequest;
+pub(super) use packs::{PackNotices, pack_notices};
+use packs::{PackSkip, pack_prep};
 
 #[cfg(test)]
 mod tests;

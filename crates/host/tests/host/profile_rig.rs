@@ -24,11 +24,13 @@ pub(crate) const CLAUDE: &str = "claude-acp";
 pub(crate) const CODEX: &str = "codex-acp";
 
 /// One launch as [`Wired`] saw it: its session folder (`<data>/run/<session id>`, none for a
-/// launch whose prep made none) and its environment.
+/// launch whose prep made none), its environment, and the files its pack plugin
+/// (`<run>/skill-packs`) held, by path under it with `/`, sorted.
 #[derive(Debug, Clone)]
 pub(crate) struct Seen {
     pub(crate) run: Option<PathBuf>,
     pub(crate) env: BTreeMap<OsString, OsString>,
+    pub(crate) packs: Vec<String>,
 }
 
 impl Seen {
@@ -97,17 +99,43 @@ impl Launcher for Wired {
                 let text = text
                     .replace("@WORK@", &escaped(&path_text(&run.join("work"))))
                     .replace("@BROWSER@", &escaped(&path_text(&run.join("browser"))))
-                    .replace("@SESSION@", &escaped(session));
+                    .replace("@SESSION@", &escaped(session))
+                    .replace("@PACKS@", &escaped(&path_text(&run.join("skill-packs"))));
                 write::write(Path::new(scenario.as_ref()), text.as_bytes());
                 FILLED.lock().unwrap().push(text);
             }
         }
+        let packs = run
+            .as_ref()
+            .map(|run| files_under(&run.join("skill-packs")))
+            .unwrap_or_default();
         self.seen.lock().unwrap().push(Seen {
             run,
             env: spec.env().clone(),
+            packs,
         });
         self.inner.launch(spec)
     }
+}
+
+/// Every file under `root`, by path under it with `/`, sorted; none when it does not exist.
+pub(crate) fn files_under(root: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_owned()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let rel = path.strip_prefix(root).unwrap();
+                let parts: Vec<_> = rel.iter().map(|part| part.to_str().unwrap()).collect();
+                files.push(parts.join("/"));
+            }
+        }
+    }
+    files.sort();
+    files
 }
 
 /// Every scenario [`Wired`] filled in this process, for [`turn`]'s failure message. nextest
@@ -161,7 +189,11 @@ pub(crate) struct Hook {
 }
 
 impl ProfileHook for Hook {
-    fn session_meta(&self, agent: &AgentId) -> Option<Map<String, Value>> {
+    fn session_meta(
+        &self,
+        agent: &AgentId,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Option<Map<String, Value>> {
         (agent.as_str() == CLAUDE)
             .then(|| self.meta.as_object().cloned())
             .flatten()
@@ -179,7 +211,12 @@ impl ProfileHook for Hook {
         self.skills.clone()
     }
 
-    fn codex_config(&self, agent: &AgentId, written: Option<&SkillsWritten>) -> Map<String, Value> {
+    fn codex_config(
+        &self,
+        agent: &AgentId,
+        written: Option<&SkillsWritten>,
+        _packs: Option<&clauseo_profile::PacksWritten>,
+    ) -> Map<String, Value> {
         if agent.as_str() != CODEX {
             return Map::new();
         }

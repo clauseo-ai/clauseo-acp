@@ -33,7 +33,8 @@ fn switches(actor: &Actor) -> (Switch, Switch) {
 }
 
 /// A Codex agent's `CODEX_CONFIG` keys from the profile, filled into `prepared`. The hook gets
-/// this launch's own skills token, taken out of `prepared` so nothing keeps it. An unfillable
+/// this launch's own skills token, taken out of `prepared` so nothing keeps it, and its own
+/// skill packs token (decision record 0040). An unfillable
 /// instructions token, or a folder that is no UTF-8, fails the launch with
 /// `agent.launch_failed`.
 pub(super) fn launch_keys(
@@ -46,7 +47,10 @@ pub(super) fn launch_keys(
     if let Some(codex) = prepared.codex.as_mut() {
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?;
         let (web_search, _) = switches(actor);
-        let keys = actor.profile.codex_config(&agent_id, written.as_ref());
+        let packs = prepared.run.packs_written.as_deref();
+        let keys = actor
+            .profile
+            .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
     }
     Ok(())
@@ -54,7 +58,8 @@ pub(super) fn launch_keys(
 
 /// The `_meta` and MCP servers for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
-/// host's switches and keys over it and its tokens filled; the servers the lawyer turned on, then
+/// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
+/// packs token, so Claude's second plugin is this launch's); the servers the lawyer turned on, then
 /// the hook's (none when the firm's `managed-mcp.json` is present). Holds the session's tool
 /// state for the thread's header until the session call answers ([`show_tools`]).
 pub(super) fn session_loads(
@@ -119,7 +124,9 @@ pub(super) fn session_loads(
         ));
     }
     let mut meta = loads::session_meta(
-        actor.profile.session_meta(&agent_id),
+        actor
+            .profile
+            .session_meta(&agent_id, run.packs_written.as_deref()),
         control,
         guard,
         claude.as_ref(),
