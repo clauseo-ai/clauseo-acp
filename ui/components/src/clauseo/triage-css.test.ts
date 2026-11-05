@@ -1,7 +1,7 @@
 // triage.css (U16b), read as text with the rail's other sheets: nothing moves under the pointer or the focus (no rule
 // that applies only then changes a row's box), nothing clips or fades a title at rest, under the pointer or with the
-// focus, a conversation's buttons stand over its end on an opaque fill while a shelf or done row holds its one button's width, the info icon's target is at least 24 px, and Undo is padded so its
-// focus ring clears its letters.
+// focus, every row's buttons stand over its end on an opaque fill, the info icon's target is at least 24 px, and Undo is
+// padded so its focus ring clears its letters.
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
@@ -64,12 +64,10 @@ test("no title is clipped or faded, at rest, under the pointer or with the focus
         found.push(`${sheet}: ${(m[1] ?? "").trim()}`);
   }
   expect(found).toEqual([]);
-  // a done row holds its one button's width at all times, not only under the pointer
-  const held = rules().filter((r) =>
-    r.decls.get("padding-right")?.includes("--size-control-small"),
-  );
-  expect(held.map((r) => r.selector)).toEqual([".room-one-act .room-conv"]);
-  expect(held.every((r) => !/:hover|:focus/.test(r.selector))).toBe(true);
+  // no row holds a button's width: every row's buttons stand over its end, out of the flow
+  expect(
+    rules().filter((r) => r.decls.get("padding-right")?.includes("--size-control-small")),
+  ).toEqual([]);
 });
 
 test("a conversation's title takes the row up to its mark: its buttons stand over the row's end on an opaque fill", () => {
@@ -78,7 +76,18 @@ test("a conversation's title takes the row up to its mark: its buttons stand ove
     rules().filter((r) => /\.room-conv-item\[data-triage\] \.room-conv\b(?!-)/.test(r.selector)),
   ).toEqual([]);
   // the hovered row's tone over the plane it sits on, so no word shows through
-  const fill = rules().find((r) => r.selector === ".room-conv-item[data-triage] .room-conv-acts");
+  const fill = rules().find(
+    (r) =>
+      r.selector === ".room-conv-item[data-triage] .room-conv-acts, .room-done .room-conv-acts",
+  );
+  expect(fill?.decls.get("background")).toBe(
+    "linear-gradient(var(--hover), var(--hover)), var(--tile-hover)",
+  );
+});
+
+test("a done row's title takes the row: Mark as not done stands over its end on the hovered row's opaque tone", () => {
+  expect(rules().filter((r) => r.selector.includes("room-one-act"))).toEqual([]);
+  const fill = rules().find((r) => r.selector.split(", ").includes(".room-done .room-conv-acts"));
   expect(fill?.decls.get("background")).toBe(
     "linear-gradient(var(--hover), var(--hover)), var(--tile-hover)",
   );
