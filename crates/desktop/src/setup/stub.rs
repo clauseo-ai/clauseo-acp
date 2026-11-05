@@ -1,78 +1,53 @@
-//! The stand-in backends until R20 P5b puts S18's `Agents` behind [`SetupBackend`]:
+//! [`StubBackend`], the tests' setup backend: it answers each action from a script a test
+//! sets, and publishes the script's events in order; with no script, it answers `internal`.
 //!
-//! - [`NotWired`], the app's: it answers every command `internal` and publishes nothing
-//!   (`Setup::not_wired` publishes its one `setup_info`).
-//! - [`StubBackend`], the tests': it answers each action from a script a test sets, and
-//!   publishes the script's events in order; with no script, it answers as `NotWired`.
-//!
-//! `StubBackend` keeps no key, only which agents have one, in one lock, so a
-//! [`KeyWrite::OnlyIfAbsent`] write checks and stores in one step, as `agents`' key store must
-//! in P5b. A `Secret` is dropped with its command when [`StubBackend::run`] returns; the calls
-//! it records are the action and the agent alone.
+//! It keeps no key, only which agents have one, in one lock, so a [`KeyWrite::OnlyIfAbsent`]
+//! write checks and stores in one step, as the app's backend does through
+//! `Keychain::store_if_absent`. A `Secret` is dropped with its command when
+//! [`StubBackend::run`] returns; the calls it records are the action and the agent alone.
 
-#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
-#[cfg(test)]
 use std::sync::Mutex;
 
-#[cfg(test)]
-use clauseo_protocol::{AgentId, SetupEvent};
-use clauseo_protocol::{CommandOutcome, ErrorCode, HostError, SetupAction, SetupCommand};
+use clauseo_protocol::{
+    AgentId, CommandOutcome, ErrorCode, HostError, SetupAction, SetupCommand, SetupEvent,
+};
 
-#[cfg(test)]
 use super::admit::key_stored;
 use super::{KeyWrite, SetupBackend, SetupEvents};
-#[cfg(test)]
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 
-/// The app's backend until R20 P5b: nothing is wired yet.
-pub(crate) struct NotWired;
-
-/// The answer to an action nothing runs yet.
-fn not_wired(action: SetupAction) -> HostError {
-    HostError::new(
-        ErrorCode::Internal,
-        format!("{action:?} is not wired to the agents yet (R20 P5b)"),
-    )
-}
-
-impl SetupBackend for NotWired {
-    fn run<'a>(
-        &'a self,
-        command: SetupCommand,
-        _key_write: KeyWrite,
-        _events: &'a SetupEvents,
-    ) -> BoxFuture<'a, Result<CommandOutcome, HostError>> {
-        Box::pin(std::future::ready(Err(not_wired(command.action()))))
-    }
+/// The answer to an action no script covers.
+fn unscripted(action: SetupAction) -> HostError {
+    HostError::new(ErrorCode::Internal, format!("{action:?} has no script"))
 }
 
 /// A scripted backend, for tests.
-#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct StubBackend {
     state: Mutex<StubState>,
 }
 
 /// The scripts, the calls and the agents with a key.
-#[cfg(test)]
 #[derive(Default)]
 struct StubState {
     scripts: BTreeMap<SetupAction, Script>,
     calls: Vec<(SetupAction, AgentId)>,
     keys: BTreeSet<AgentId>,
+    /// Each key write that stored, in order: the agent and how it was written.
+    stores: Vec<(AgentId, KeyWrite)>,
+    /// Whether reading the keychain fails, as a locked keychain or a denied prompt does.
+    reads_fail: bool,
 }
 
 /// An action's answer and the events published before it.
-#[cfg(test)]
 #[derive(Clone)]
 struct Script {
     answer: Result<CommandOutcome, HostError>,
     events: Vec<SetupEvent>,
 }
 
-#[cfg(test)]
 impl StubBackend {
     /// Answers every later `action` with `answer`, after publishing `events` in order.
     pub(crate) fn script(
@@ -91,6 +66,17 @@ impl StubBackend {
         lock(&self.state).calls.clone()
     }
 
+    /// From now on, reading the keychain fails (or no longer does): an `OnlyIfAbsent` key is
+    /// refused with `internal` and nothing is stored, since a failed read is not "absent".
+    pub(crate) fn fail_reads(&self, fail: bool) {
+        lock(&self.state).reads_fail = fail;
+    }
+
+    /// Each key write that stored, in order.
+    pub(crate) fn stores(&self) -> Vec<(AgentId, KeyWrite)> {
+        lock(&self.state).stores.clone()
+    }
+
     /// Whether a `SetAgentKey` for `agent` stored a key, and no `ClearAgentKey` removed it.
     pub(crate) fn has_key(&self, agent: &AgentId) -> bool {
         lock(&self.state).keys.contains(agent)
@@ -107,16 +93,26 @@ impl StubBackend {
         let mut state = lock(&self.state);
         state.calls.push((action, agent.clone()));
         let stored = state.keys.contains(agent);
-        if action == SetupAction::SetAgentKey && key_write == KeyWrite::OnlyIfAbsent && stored {
-            return (Err(key_stored(agent)), Vec::new());
+        if action == SetupAction::SetAgentKey && key_write == KeyWrite::OnlyIfAbsent {
+            if state.reads_fail {
+                let refused = HostError::new(
+                    ErrorCode::Internal,
+                    format!("the keychain refused access to {agent}'s API key"),
+                );
+                return (Err(refused), Vec::new());
+            }
+            if stored {
+                return (Err(key_stored(agent)), Vec::new());
+            }
         }
         let Some(script) = state.scripts.get(&action).cloned() else {
-            return (Err(not_wired(action)), Vec::new());
+            return (Err(unscripted(action)), Vec::new());
         };
         if script.answer.is_ok() {
             match action {
                 SetupAction::SetAgentKey => {
                     state.keys.insert(agent.clone());
+                    state.stores.push((agent.clone(), key_write));
                 }
                 SetupAction::ClearAgentKey => {
                     state.keys.remove(agent);
@@ -128,7 +124,6 @@ impl StubBackend {
     }
 }
 
-#[cfg(test)]
 impl SetupBackend for StubBackend {
     fn run<'a>(
         &'a self,

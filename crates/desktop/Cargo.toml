@@ -47,6 +47,11 @@ clauseo-settings = { path = "../settings" }
 clauseo-process = { path = "../process" }
 # Clauseo's launch profile, adapted to the host's ProfileHook (src/profile.rs, 0030).
 clauseo-profile = { path = "../profile" }
+# Agent installs, sign-in and the API keys (src/setup/, R20 P5b, 0048); the keys held in memory
+# as Zeroizing text; the sign-in line's plan words, as limits names them.
+clauseo-agents = { path = "../agents" }
+zeroize = { workspace = true }
+clauseo-limits = { path = "../limits" }
 # The profile's start-up warnings (a skill left out, no profile).
 tracing = { workspace = true }
 # Polling host subscriptions on Tauri's runtime; the bridge's watchdog timer.
@@ -121,9 +126,8 @@ specta-typescript = { workspace = true }
 clauseo-protocol = { path = "../protocol", features = ["specta"] }
 # The scripted agent for the permission tests (its binary is built in a workspace run).
 clauseo-fake_agent = { path = "../fake_agent" }
-# The limits tests (src/bridge/tests/limits.rs): a scripted limits reader, and the host's
-# ManualClock to pass the 5 minutes a `Shown` refresh waits for. No reader process starts.
-clauseo-limits = { path = "../limits" }
+# The setup tests (src/setup/tests/): the in-memory keychain and test installs.
+clauseo-agents = { path = "../agents", features = ["test-support"] }
 clauseo-host = { path = "../host", features = ["test-support"] }
 # The mock runtime, to see what Tauri itself rejects with.
 tauri = { workspace = true, features = ["test", "specta"] }

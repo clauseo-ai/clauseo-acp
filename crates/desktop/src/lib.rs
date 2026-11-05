@@ -249,10 +249,22 @@ pub fn run() -> tauri::Result<()> {
             app.manage(open::AppData(locations.data_dir().to_path_buf()));
             app.manage(open::OpenGates::default());
             let (cell, start) = HostCell::new();
-            app.manage(Bridge::with_setup(cell, setup::Setup::not_wired()));
+            // The setup command waits on this cell until the setup thread fills it
+            // (setup/start.rs).
+            let (backend, backend_start) = setup::BackendCell::new();
+            let setup = setup::Setup::new(backend);
+            let parts = setup::SetupParts {
+                start: backend_start,
+                events: setup.events(),
+                host: Arc::new(setup::CellHost::new(Arc::clone(&cell))),
+                confirm: Arc::new(setup::NativeSetupConfirm::new(app.handle().clone())),
+                opener: Arc::new(open::NativeOpener::new(app.handle().clone())),
+                home: SystemDirs.home(),
+            };
+            app.manage(Bridge::with_setup(cell, setup));
             app.manage(counts::CountsState::default());
             open_main_window(app)?;
-            start_host(app.handle().clone(), start, locations)?;
+            start_host(app.handle().clone(), start, locations, parts)?;
             Ok(())
         })
         .build(context)?;
@@ -280,17 +292,24 @@ pub fn run() -> tauri::Result<()> {
 /// its outcome going into the bridge's cell through `start`. The launch profile is built on
 /// that thread too (it runs stetdoc and reads files), and so is the machine's memory, which the
 /// host's browser limit takes (`machine_memory`), before the host starts. So are the usage
-/// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here.
+/// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here. So
+/// does the agents' setup, from the same effective settings, on a `clauseo-setup` thread of its
+/// own (`setup/start.rs`).
 fn start_host<R: Runtime>(
     app: AppHandle<R>,
     start: HostStart,
     locations: Locations,
+    setup_parts: setup::SetupParts,
 ) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
         let effective = load_effective(&locations);
+        let setup_read = setup::SetupStart::read(&effective, &locations);
+        if let Err(err) = setup::spawn(setup_read, setup_parts) {
+            tracing::warn!(%err, "no setup thread: setup commands answer internal");
+        }
         let exe = std::env::current_exe().ok();
         let counts = counts::open(&locations, &effective, exe.as_deref());
         let config = host_config(effective);
@@ -381,11 +400,17 @@ fn host_config(effective: Effective) -> HostConfig {
 /// variables and nothing else, and the variables the host drops (`GIT_*`, `SSH_*`, Codex's
 /// dropped names) stay dropped. `home` shows as `~` in stderr tails.
 pub(crate) fn host_launcher(home: Option<std::path::PathBuf>) -> PassthroughLauncher {
-    let mut spawn = SpawnOptions::new().clear_env();
-    if let Some(home) = home {
-        spawn = spawn.home(home);
+    PassthroughLauncher::new(host_spawn_options(home))
+}
+
+/// [`host_launcher`]'s options: the environment cleared, `home` shown as `~`. S18's sign-in
+/// launcher uses them too (`setup/start.rs`).
+pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptions {
+    let spawn = SpawnOptions::new().clear_env();
+    match home {
+        Some(home) => spawn.home(home),
+        None => spawn,
     }
-    PassthroughLauncher::new(spawn)
 }
 
 /// Stops the usage counts' task, then the host off the UI thread (waits for its start, shuts it

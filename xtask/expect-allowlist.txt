@@ -23,10 +23,13 @@
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
-crates/desktop/src/open.rs open_url_unconfirmed dead_code
-# R20 P5a: setup's pieces that only P5b's backend calls outside the tests.
-crates/desktop/src/setup/admit.rs key_stored dead_code
-crates/desktop/src/setup/events.rs note dead_code
+# R20 P5b piece A: the host calls and the key read that only piece B makes.
+crates/desktop/src/setup/host_calls.rs SetupHost::restart_agents dead_code
+crates/desktop/src/setup/host_calls.rs SetupHost::stop_agents dead_code
+crates/desktop/src/setup/host_calls.rs SetupHost::set_reused_login dead_code
+crates/desktop/src/setup/host_calls.rs SetupHost::remove_login_links dead_code
+crates/desktop/src/setup/host_calls.rs SetupHost::login_changed dead_code
+crates/desktop/src/setup/keys.rs KeyCache::get dead_code
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
