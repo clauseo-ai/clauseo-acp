@@ -16,6 +16,7 @@ use crate::update::{
 };
 
 mod refusals;
+mod scheduled;
 mod start;
 
 const MIN: i64 = 60_000;
