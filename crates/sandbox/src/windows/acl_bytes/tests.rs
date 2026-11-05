@@ -355,9 +355,11 @@ fn explicit_copies_of_inherited_entries_are_dropped_and_the_rest_kept() {
         ace(ALLOWED, 0, 0x001f_01ff, "S-1-5-18"),
         ace(ALLOWED, 0, 0x0012_00a9, users),
         ace(ALLOWED, 0, 0x001f_01ff, owner),
-        ace(DENIED, 0, 0x1, OTHER),
     ];
     let kept = [
+        // Equal to the child's own stale inherited deny, which the parent no longer gives:
+        // the lawyer's, kept (round 10).
+        ace(DENIED, 0, 0x1, OTHER),
         ace(ALLOWED, 0, 0x0012_00a9, everyone),
         ace(ALLOWED, 0, 0x0012_0089, users),
         ace(ALLOWED, OBJECT_INHERIT, 0x001f_01ff, "S-1-5-18"),
@@ -399,6 +401,20 @@ fn a_bare_child_keeps_its_owner_and_has_no_entries() {
 /// Round 9: an auto-inherited child's explicit entry is one somebody wrote, so it stays even
 /// when it equals an inheritable entry of the parent; on a child not auto-inherited (where NTFS
 /// writes flagless copies) the same entry goes. Inherited entries go from both.
+/// Round 10: an explicit deny equal to an inherited entry the child still holds, but which its
+/// parent no longer gives, is the lawyer's and stays explicit; only what the parent gives now
+/// (`due`) makes an explicit entry a copy.
+#[test]
+fn an_explicit_deny_equal_only_to_a_stale_inherited_entry_stays() {
+    let deny = ace(DENIED, 0, 0x0001_0000, OTHER);
+    let stale = ace(DENIED, INHERITED, 0x0001_0000, OTHER);
+    let due = render(2, &[&ace(ALLOWED, INHERITED, 0x0012_00a9, "S-1-5-32-545")]);
+    let plain = build_descriptor(0, Some(&render(2, &[&deny, &stale])), None);
+    let after = without_inherited(&plain, &due).unwrap();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(render(2, &[&deny]).as_slice()));
+}
+
 #[test]
 fn an_auto_inherited_child_keeps_an_explicit_entry_equal_to_an_inherited_one() {
     let users = "S-1-5-32-545";
