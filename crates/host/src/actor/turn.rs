@@ -162,6 +162,8 @@ struct Current {
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
+    /// The same Stop, for the prompt's API-key retry off the actor (`key_retry.rs`).
+    stopped: key_retry::Stopped,
     /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
     /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
     /// reject option ends the turn). Another answer or a Stop clears it.

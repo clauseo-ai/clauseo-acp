@@ -6,8 +6,11 @@
 //! the lawyer's linked one (`Shared`, desktop says it is reused, a split, a gone file, or no
 //! answer; S18's guard). One try per agent process: a second auth-required, or an
 //! `authenticate` that fails, ends the call with the first auth-required, so the turn is held
-//! for the sign-in as any other (`sign_in.rs`). The host never reads the key's value; the logs
-//! name the outcome and an error's code only.
+//! for the sign-in as any other (`sign_in.rs`). A prompt's retry also carries its turn's Stop
+//! ([`KeyRetry::unless_stopped`]): a Stop while `authenticate` runs found no prompt in flight, so
+//! the agent dropped its `session/cancel`, and the prompt is not sent again; the first answer
+//! stands and the turn ends cancelled. The host never reads the key's value; the logs name the
+//! outcome and an error's code only.
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -27,9 +30,18 @@ const API_KEY_METHOD: &str = "api-key";
 /// The variable a Codex key is launched in.
 const KEY_VAR: &str = "CODEX_API_KEY";
 
-/// A Codex agent's one retry: `None` when it may not retry at all, else whether the try is left.
+/// A Codex agent's one retry.
 #[derive(Debug, Clone, Default)]
-pub(super) struct KeyRetry(Option<Rc<Cell<bool>>>);
+pub(super) struct KeyRetry {
+    /// `None` when it may not retry at all, else whether the try is left (shared by every call
+    /// to the agent process).
+    left: Option<Rc<Cell<bool>>>,
+    /// The turn's Stop, for a prompt: once set, the call is not sent again.
+    stopped: Option<Stopped>,
+}
+
+/// A turn's Stop, set by the Cancel path (`cancel.rs`) and read by its prompt's retry.
+pub(super) type Stopped = Rc<Cell<bool>>;
 
 impl KeyRetry {
     /// A launch's retry: armed when the profile hook's env (`hook`) sets a key and the launch's
@@ -39,12 +51,23 @@ impl KeyRetry {
             .get(OsStr::new(KEY_VAR))
             .is_some_and(|value| !value.is_empty());
         let own = login == Some(Seen::Answered(LoginLink::Own));
-        Self((key && own).then(|| Rc::new(Cell::new(true))))
+        Self {
+            left: (key && own).then(|| Rc::new(Cell::new(true))),
+            stopped: None,
+        }
+    }
+
+    /// The retry for a prompt of a turn whose Stop sets `stopped`.
+    pub(super) fn unless_stopped(self, stopped: Stopped) -> Self {
+        Self {
+            stopped: Some(stopped),
+            ..self
+        }
     }
 
     /// Runs `call`; when it answers auth-required and the try is left, takes the try:
     /// `authenticate` with `api-key`, then `call` again. Otherwise, or when `authenticate`
-    /// fails, the first answer stands.
+    /// fails, or the turn was stopped meanwhile, the first answer stands.
     pub(super) async fn run<T, F, Fut>(
         &self,
         client: &AcpClient,
@@ -58,7 +81,7 @@ impl KeyRetry {
         if !matches!(first, Err(clauseo_acp::Error::AuthRequired { .. })) {
             return first;
         }
-        let Some(left) = &self.0 else {
+        let Some(left) = &self.left else {
             return first;
         };
         if !left.replace(false) {
@@ -66,6 +89,10 @@ impl KeyRetry {
         }
         tracing::info!("the agent asks for a sign-in with a key set: authenticate api-key, once");
         match client.authenticate(API_KEY_METHOD).await {
+            Ok(()) if self.stopped.as_ref().is_some_and(|stopped| stopped.get()) => {
+                tracing::info!("the turn was stopped during authenticate; the prompt is not sent");
+                first
+            }
             Ok(()) => call().await,
             Err(error) => {
                 let code = error.code();

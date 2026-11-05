@@ -1,0 +1,8 @@
+{"scenario":"codex-auth-required-key-stop","description":"A Stop during the host's one api-key authenticate (review of #440): the first prompt answers auth_required (JSON-RPC -32000), the agent holds authenticate, streams a chunk so the test knows it is held, and expects the session/cancel of the lawyer's Stop before it answers authenticate. The host must not send the prompt again: any second session/prompt is a mismatch","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","error":{"code":-32000,"message":"Authentication required"}}}
+{"note":"codex-acp's authenticate(\"api-key\") reads the key from CODEX_API_KEY when the request has no _meta (research 22 §2.4); the host sends only the method id.","expect":{"method":"authenticate","as":"auth","params":{"methodId":"api-key"},"off":["/_meta"]}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-held-1","content":{"type":"text","text":"Signing in with the key."}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"auth","result":{}}}

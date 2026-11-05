@@ -141,6 +141,7 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
         return;
     };
     running.cancelled = true;
+    running.stopped.set(true);
     // A Stop after a refusal ends the turn `Cancelled`: the lawyer stopped it.
     running.refused = false;
     let turn = running.turn;

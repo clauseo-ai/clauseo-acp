@@ -55,6 +55,7 @@ bundled! {
         "codex-auth-required",
         "codex-auth-required-key",
         "codex-auth-required-key-again",
+        "codex-auth-required-key-stop",
         "codex-deny-ends-turn",
         "codex-files",
         "codex-handshake",
