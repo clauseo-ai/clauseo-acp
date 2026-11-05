@@ -22,6 +22,7 @@ use super::writer::Label;
 #[cfg(any(windows, test))]
 use copies::is_copy;
 pub(crate) use repair::{owner_descriptor, rebuild};
+pub(crate) use steps::{Write, lacking, protected_name, writes};
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 pub(crate) const ALLOWED: u8 = 0;
@@ -640,5 +641,6 @@ fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Er
 #[cfg(any(windows, test))]
 mod copies;
 mod repair;
+mod steps;
 #[cfg(test)]
 mod tests;

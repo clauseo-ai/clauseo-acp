@@ -12,6 +12,7 @@ use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::{Label, Strict};
 use walk::race::{HOOK, REFUSE, Stage};
 
+mod round2;
 mod round8;
 
 /// The pool user's `Modify` and another pool user's deny, both down the tree.
@@ -395,10 +396,9 @@ fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
     assert!(auto(&matter));
 }
 
-/// A strict walk whose pool is this process's own user, which stands in for the agent: what it
-/// owns is repaired rather than refused (M5).
-fn as_agent(root: &Path) -> Result<Walked, ApplyFailure> {
-    let mut acl = NtfsAcl::new().unwrap();
+/// A strict walk with `acl` whose pool is this process's own user, which stands in for the
+/// agent: what it owns is repaired rather than refused (M5).
+fn as_agent(acl: &mut NtfsAcl, root: &Path) -> Result<Walked, ApplyFailure> {
     for g in &fence(root) {
         acl.add(g)?;
     }
@@ -416,8 +416,9 @@ fn a_child_the_agent_owns_is_repaired_not_refused() {
     let place = Place::new("acl-repair");
     let doc = place.dir.file("matter/made/doc.txt", "the agent's");
     let made = place.at("matter/made");
+    own(&made);
     protect_with(&made, "D:P(A;OICI;FA;;;OW)(A;OICI;FR;;;WD)").unwrap();
-    let walked = as_agent(&place.at("matter")).unwrap();
+    let walked = as_agent(&mut NtfsAcl::new().unwrap(), &place.at("matter")).unwrap();
     assert!(walked.repaired >= 1, "{walked:?}");
     assert!(!protected(&made));
     assert!(!has(&made, "S-1-1-0", false));
@@ -429,6 +430,7 @@ fn a_child_the_agent_owns_is_repaired_not_refused() {
 /// strict walk as `ChildShut`, naming the child.
 #[test]
 fn a_child_the_lawyer_cant_open_refuses_naming_it() {
+    drop_privileges();
     let place = Place::new("acl-shut");
     let shut = place.dir.file("matter/shut.txt", "x");
     protect_with(&shut, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
@@ -449,6 +451,7 @@ fn a_child_the_lawyer_cant_open_refuses_naming_it() {
 fn reclaiming_strips_the_agents_label_and_broad_allows() {
     let place = Place::new("acl-reclaim");
     let doc = place.dir.file("matter/doc.txt", "the agent's");
+    own(&doc);
     let mut acl = NtfsAcl::new().unwrap();
     let everyone = grant(&doc, "S-1-1-0", Rights::ReadAndExecute, Inherit::ThisOnly);
     let label = grant(&doc, LOW_LABEL_SID, Rights::LowLabel, Inherit::ThisOnly);
@@ -459,6 +462,59 @@ fn reclaiming_strips_the_agents_label_and_broad_allows() {
     assert!(walked.repaired >= 1, "{walked:?}");
     assert!(!has(&doc, "S-1-1-0", false));
     assert!(!has(&doc, LOW_LABEL_SID, false));
+}
+
+/// Makes this process's user the owner of `path`, as the agent owns what it makes. Under an
+/// elevated admin token (an SSH session) new files are owned by `BUILTIN\Administrators`
+/// instead; a user may always make itself the owner.
+fn own(path: &Path) {
+    let me = sid_bytes(&current_user_sid().unwrap());
+    let descriptor = crate::windows::acl_bytes::owner_descriptor(&me);
+    Object::open(path)
+        .unwrap()
+        .set(OWNER_SECURITY_INFORMATION, &descriptor)
+        .unwrap();
+}
+
+/// Removes `SeBackupPrivilege`, `SeRestorePrivilege` and `SeTakeOwnershipPrivilege` from this
+/// test process's token, so an elevated admin token opens files as the lawyer's Medium token
+/// would: with them, a backup-intent open gets past a DACL that shuts the owner out. nextest
+/// runs each test in its own process. A token without them is left as it is.
+fn drop_privileges() {
+    use windows::Win32::Foundation::LUID;
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_REMOVED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows::core::w;
+
+    let mut token = HANDLE::default();
+    // SAFETY: a pseudo-handle and a live out-pointer; the handle is closed by `Handle`.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
+        .unwrap();
+    let token = Handle(token);
+    for name in [
+        w!("SeBackupPrivilege"),
+        w!("SeRestorePrivilege"),
+        w!("SeTakeOwnershipPrivilege"),
+    ] {
+        let mut luid = LUID::default();
+        // SAFETY: a NUL-terminated literal and a live out-pointer.
+        unsafe { LookupPrivilegeValueW(None, name, &raw mut luid) }.unwrap();
+        let privileges = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_REMOVED,
+            }],
+        };
+        // SAFETY: the token was opened to adjust; `privileges` lives for the call. A token
+        // without the privilege succeeds with "not all assigned", which is what is wanted.
+        unsafe {
+            AdjustTokenPrivileges(token.0, false, Some(&raw const privileges), 0, None, None)
+        }
+        .unwrap();
+    }
 }
 
 /// Whether `path`'s DACL is marked auto-inherited (`SE_DACL_AUTO_INHERITED`).

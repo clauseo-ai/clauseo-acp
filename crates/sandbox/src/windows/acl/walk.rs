@@ -13,15 +13,14 @@
 //! folder moved away after its check refuses the walk (`Changed`). So does a root that is a
 //! junction now, and in a strict walk a child whose open met a reparse point (a plain walk skips
 //! it).
+//!
+//! Every walk records each `.git`, `.claude` and `.mcp.json` below its root by the file ID of
+//! the name itself, links included, for the set-aside (S15 `PR3b` round 2, N1).
 
-#[cfg(test)]
 use std::ffi::OsString;
 use std::io;
-#[cfg(test)]
 use std::os::windows::ffi::OsStringExt as _;
-use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::Security::{
     CreatePrivateObjectSecurityEx, DestroyPrivateObjectSecurity, GENERIC_MAPPING,
@@ -33,14 +32,15 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
 
-use super::object::{Object, os_error, reparse_refused, words};
-use super::{NtfsAcl, READ_ALL, dacl_info, same_path};
+use super::object::{Child, Handle, Object, os_error, reparse_refused, words};
+use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label,
-    owner_bytes, owner_descriptor, rebuild, without_broad, without_inherited,
+    Write, bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label,
+    lacking, owner_bytes, owner_descriptor, protected_name, rebuild, without_broad,
+    without_inherited, writes,
 };
-use crate::windows::writer::{ApplyFailure, Reach, Walked};
+use crate::windows::writer::{ApplyFailure, Found, Reach, Walked};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
@@ -50,11 +50,12 @@ const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
     GenericAll: FILE_ALL_ACCESS.0,
 };
 
-/// A folder the walk has checked and will list: its handle, its final path, and its descriptor
-/// as its children inherit from it.
+/// A folder the walk has checked and will list: its handle, its final path, its path in the
+/// form the root was given in, and its descriptor as its children inherit from it.
 struct Folder {
     object: Object,
     path: Vec<u16>,
+    given: PathBuf,
     descriptor: Vec<u8>,
 }
 
@@ -72,13 +73,26 @@ pub(super) enum Mode<'a> {
     Reclaim { pool: &'a [Vec<u8>], me: &'a [u8] },
 }
 
+impl Mode<'_> {
+    /// Whether `descriptor`'s owner is one of the pool users this mode repairs or hands back.
+    fn owned(self, descriptor: &[u8]) -> bool {
+        let pool = match self {
+            Mode::Plain => return false,
+            Mode::Strict { pool, .. } | Mode::Reclaim { pool, .. } => pool,
+        };
+        owner_bytes(descriptor).is_some_and(|owner| pool.iter().any(|p| p == owner))
+    }
+}
+
 /// Why a walk failed, and the child it refused when it was one (its final path).
 pub(super) type Refused = (ApplyFailure, Option<Vec<u16>>);
 
-/// The walk below `root` with `acl`'s token; see
-/// [`AclWriter::propagate`](super::AclWriter::propagate).
+/// The walk below `root` with `token`; see
+/// [`AclWriter::propagate`](super::AclWriter::propagate). Each protected name met below the
+/// root goes into `found` as it is met, so a walk that fails partway keeps what it found.
 pub(super) fn walk(
-    acl: &NtfsAcl,
+    token: &Handle,
+    found: &mut Vec<Found>,
     root: &Path,
     reach: Reach,
     mode: Mode<'_>,
@@ -98,6 +112,7 @@ pub(super) fn walk(
     let strict = matches!(mode, Mode::Strict { .. });
     let mut stack = vec![Folder {
         path: top.normalized().map_err(io)?,
+        given: root.to_path_buf(),
         descriptor: top.security(READ_ALL).map_err(io)?,
         object: top,
     }];
@@ -109,7 +124,12 @@ pub(super) fn walk(
         let children = folder.object.children().map_err(io)?;
         race::point(race::Stage::Listed, &folder.path);
         for child in children {
+            let protected = protected_name(&child.name);
+            let given = || folder.given.join(OsString::from_wide(&child.name));
             if reach == Reach::FilesOnly && child.folder {
+                if protected {
+                    note_unwalked(&folder.object, &child, given(), found);
+                }
                 continue;
             }
             let mut path = folder.path.clone();
@@ -132,9 +152,27 @@ pub(super) fn walk(
                 }
                 Err(e) => return Err(io(e)),
             };
-            if object.name_surrogate() || (!object.folder && object.links > 1) {
+            // Recorded whatever it is, before any skip (N1).
+            if protected {
+                let (volume, id) = object.file_id().map_err(io)?;
+                found.push(Found {
+                    path: given(),
+                    volume,
+                    id,
+                });
+            }
+            if object.name_surrogate() {
                 seen.skipped += 1;
                 continue;
+            }
+            // A file with another name elsewhere: its DACL belongs to the file, so one a pool
+            // user owns is repaired or handed back like any other (N2); the rest are left bare.
+            if !object.folder && object.links > 1 {
+                let owner = object.security(OWNER_SECURITY_INFORMATION.0).map_err(io)?;
+                if !mode.owned(&owner) {
+                    seen.skipped += 1;
+                    continue;
+                }
             }
             if reach == Reach::FilesOnly && object.folder {
                 continue;
@@ -148,7 +186,7 @@ pub(super) fn walk(
             }
             let current = object.security(READ_ALL).map_err(io)?;
             let settled =
-                settle(acl, &object, &folder.descriptor, &current, mode).map_err(refuse)?;
+                settle(token, &object, &folder.descriptor, &current, mode).map_err(refuse)?;
             seen.visited += 1;
             if settled.repaired {
                 seen.repaired += 1;
@@ -160,6 +198,7 @@ pub(super) fn walk(
                 stack.push(Folder {
                     object,
                     path,
+                    given: given(),
                     descriptor: settled.written.unwrap_or(current),
                 });
             }
@@ -174,6 +213,21 @@ pub(super) fn walk(
     Ok(seen)
 }
 
+/// Records a protected folder a files-only walk lists but never walks (N1). It was never part
+/// of that walk, so one that can't be opened or read is left out rather than fail the walk.
+fn note_unwalked(folder: &Object, child: &Child, given: PathBuf, found: &mut Vec<Found>) {
+    let Ok(object) = race::open(folder, child) else {
+        return;
+    };
+    if let Ok((volume, id)) = object.file_id() {
+        found.push(Found {
+            path: given,
+            volume,
+            id,
+        });
+    }
+}
+
 /// What [`settle`] did to one child.
 struct Settled {
     /// Its descriptor as written, or `None` when nothing changed.
@@ -182,10 +236,12 @@ struct Settled {
     repaired: bool,
 }
 
-/// One child of the walk: held to `mode` (refused, repaired or reclaimed), then its DACL and
-/// label written as its parent's entries make them, if they changed.
+/// One child of the walk: held to `mode` (refused, repaired or reclaimed), then its DACL,
+/// owner and label written as its parent's entries and the mode make them, if they changed, in
+/// [`writes`]' order. A child a pool user owns whose handle lacks a right one of those writes
+/// needs is refused as [`ApplyFailure::ChildShut`] before any write, so it is set aside (N3).
 fn settle(
-    acl: &NtfsAcl,
+    token: &Handle,
     child: &Object,
     parent: &[u8],
     current: &[u8],
@@ -196,24 +252,24 @@ fn settle(
     // A DACL not protected loses its inherited entries before it is checked or worked out again,
     // and one not auto-inherited the explicit copies of them too; see [`without_inherited`].
     let checked = if now.dacl.is_some() && !now.dacl_protected() {
-        trimmed(acl, parent, current, child.folder).map_err(io)?
+        trimmed(token, parent, current, child.folder).map_err(io)?
     } else {
         current.to_vec()
     };
     let checked_dacl = Descriptor::parse(&checked).map_err(io)?.dacl;
     let dacl = checked_dacl.map(Acl::parse).transpose().map_err(io)?;
-    let owned_by =
-        |pool: &[Vec<u8>]| owner_bytes(current).is_some_and(|o| pool.iter().any(|p| p == o));
+    let owned = mode.owned(current);
     // The descriptor the inherited entries are worked out from, and whether it was cleaned.
     let mut base = checked.clone();
     let mut repaired = false;
-    let mut drop_label = false;
+    // The hand-back's new owner.
+    let mut new_owner = None;
     match mode {
         Mode::Plain => {}
-        Mode::Strict { watched, pool } => {
+        Mode::Strict { watched, .. } => {
             let broad = dacl.as_ref().is_some_and(|d| broad_allow(d, watched));
             if now.dacl_protected() || broad {
-                if !owned_by(pool) {
+                if !owned {
                     return Err(if now.dacl_protected() {
                         ApplyFailure::ProtectedChild
                     } else {
@@ -226,49 +282,41 @@ fn settle(
             }
         }
         Mode::Reclaim { pool, me } => {
-            if owned_by(pool) {
-                if !child.write_owner {
-                    return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
-                }
-                child
-                    .set(OWNER_SECURITY_INFORMATION, &owner_descriptor(me))
-                    .map_err(io)?;
+            if owned {
                 let cleaned = dacl.as_ref().map(|d| without_broad(d, pool));
                 base =
                     rebuild(&checked, Some(me), cleaned.as_deref(), DACL_PROTECTED).map_err(io)?;
                 repaired = true;
-                drop_label = true;
+                new_owner = Some(me);
             }
         }
     }
+    let drop_label = new_owner.is_some();
     let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
     // A repaired DACL, protected no more and maybe with a new owner, is trimmed against it. The
     // repair leaves it marked auto-inherited, so whether its explicit copies go is decided by the
     // DACL as it was before the repair: the mark is cleared for the trim when it lacked it.
     if repaired && Descriptor::parse(&base).map_err(io)?.dacl.is_some() {
         let before = rebuild(&base, None, None, !now.control & DACL_AUTO_INHERITED).map_err(io)?;
-        base = trimmed(acl, parent, &before, child.folder).map_err(io)?;
+        base = trimmed(token, parent, &before, child.folder).map_err(io)?;
     }
     let base_now = Descriptor::parse(&base).map_err(io)?;
-    let mut changed = false;
-    let inherited = inherit(acl, parent, &base, child.folder).map_err(io)?;
+    let inherited = inherit(token, parent, &base, child.folder).map_err(io)?;
     let new = Descriptor::parse(&inherited).map_err(io)?;
     let mut want = new.control & bits;
     if want & DACL_PROTECTED == 0 {
         want |= DACL_AUTO_INHERITED;
     }
-    if let Some(new_dacl) = new.dacl
-        && (new.dacl != now.dacl || want != now.control & bits)
-    {
-        let mut info = dacl_info(new.control);
-        if now.dacl_protected() && new.control & DACL_PROTECTED == 0 {
-            info |= UNPROTECTED_DACL_SECURITY_INFORMATION;
-        }
-        child
-            .set(info, &build_descriptor(want, Some(new_dacl), None))
-            .map_err(io)?;
-        changed = true;
-    }
+    let dacl_write = new
+        .dacl
+        .filter(|_| new.dacl != now.dacl || want != now.control & bits)
+        .map(|new_dacl| {
+            let mut info = dacl_info(new.control);
+            if now.dacl_protected() && new.control & DACL_PROTECTED == 0 {
+                info |= UNPROTECTED_DACL_SECURITY_INFORMATION;
+            }
+            (info, build_descriptor(want, Some(new_dacl), None))
+        });
     let above = Descriptor::parse(parent).map_err(io)?;
     let parent_sacl = above.sacl.map(Acl::parse).transpose().map_err(io)?;
     let child_sacl = now.sacl.map(Acl::parse).transpose().map_err(io)?;
@@ -287,25 +335,40 @@ fn settle(
             child.folder,
         )
     };
-    if let Some(sacl) = label {
-        if !child.write_owner {
-            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
-        }
+    let label_write = label.map(|sacl| {
         let keep = if drop_label {
             SACL_AUTO_INHERITED
         } else {
             SACL_PROTECTED | SACL_AUTO_INHERITED
         };
-        let bits = now.control & keep;
-        child
-            .set(
-                LABEL_SECURITY_INFORMATION,
-                &build_descriptor(bits, None, Some(&sacl)),
-            )
-            .map_err(io)?;
-        changed = true;
+        build_descriptor(now.control & keep, None, Some(&sacl))
+    });
+    let order = writes(
+        dacl_write.is_some(),
+        new_owner.is_some(),
+        label_write.is_some(),
+    );
+    if lacking(&order, child.write_dac, child.write_owner).is_some() {
+        return Err(if owned {
+            ApplyFailure::ChildShut
+        } else {
+            ApplyFailure::Io(io::ErrorKind::PermissionDenied)
+        });
     }
-    let written = if changed || repaired {
+    for write in &order {
+        match (write, &dacl_write, new_owner, &label_write) {
+            (Write::Dacl, Some((info, descriptor)), _, _) => child.set(*info, descriptor),
+            (Write::Owner, _, Some(me), _) => {
+                child.set(OWNER_SECURITY_INFORMATION, &owner_descriptor(me))
+            }
+            (Write::Label, _, _, Some(descriptor)) => {
+                child.set(LABEL_SECURITY_INFORMATION, descriptor)
+            }
+            _ => Ok(()),
+        }
+        .map_err(io)?;
+    }
+    let written = if !order.is_empty() || repaired {
         Some(child.security(READ_ALL).map_err(io)?)
     } else {
         None
@@ -316,8 +379,8 @@ fn settle(
 /// `child` (a descriptor) without its inherited entries and, unless it is auto-inherited, the
 /// explicit copies of them ([`without_inherited`]), measured against what `parent` alone gives a
 /// new child of its kind and owner ([`bare_child`] worked out from `parent`).
-fn trimmed(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
-    let fresh = inherit(acl, parent, &bare_child(child)?, folder)?;
+fn trimmed(token: &Handle, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
+    let fresh = inherit(token, parent, &bare_child(child)?, folder)?;
     let due = Descriptor::parse(&fresh)?
         .dacl
         .map_or_else(empty_acl, <[u8]>::to_vec);
@@ -328,7 +391,7 @@ fn trimmed(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Resu
 /// inheritable ones: explicit entries kept, a protected DACL left as it is
 /// (`CreatePrivateObjectSecurityEx` with `SEF_DACL_AUTO_INHERIT`, as Windows' own
 /// propagation does). Only the DACL and its control bits of the result are used.
-fn inherit(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
+fn inherit(token: &Handle, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
     let mut parent = words(parent);
     let mut child = words(child);
     let mut new = PSECURITY_DESCRIPTOR::default();
@@ -348,7 +411,7 @@ fn inherit(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Resu
             None,
             folder,
             flags,
-            Some(acl.token.0),
+            Some(token.0),
             &raw const mapping,
         )
     }

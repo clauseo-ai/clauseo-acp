@@ -338,6 +338,52 @@ fn a_descriptor_is_built_and_read_back() {
     assert!(Acl::parse(&dacl[..dacl.len() - 1]).is_err());
 }
 
+/// N1: the protected names are matched without ASCII case, and only whole.
+#[test]
+fn protected_names_match_without_ascii_case_and_only_whole() {
+    let wide = |text: &str| text.encode_utf16().collect::<Vec<u16>>();
+    for name in [".git", ".GIT", ".Claude", ".mcp.json", ".MCP.Json"] {
+        assert!(protected_name(&wide(name)), "{name}");
+    }
+    for name in [
+        "git",
+        ".gitignore",
+        ".git ",
+        "x.git",
+        ".claudé",
+        ".mcp.jsonx",
+        "",
+    ] {
+        assert!(!protected_name(&wide(name)), "{name}");
+    }
+}
+
+/// N13: a hand-back writes the cleaned DACL before the owner, so a failure between them leaves
+/// a file a pool user still owns, which the next hand-back takes again.
+#[test]
+fn a_hand_back_writes_the_dacl_before_the_owner() {
+    assert_eq!(
+        writes(true, true, true),
+        [Write::Dacl, Write::Owner, Write::Label]
+    );
+    assert_eq!(writes(true, true, false), [Write::Dacl, Write::Owner]);
+    assert_eq!(writes(false, true, true), [Write::Owner, Write::Label]);
+    assert_eq!(writes(false, false, false), []);
+}
+
+/// N3: a write the handle has no right for is found before any write is made: the DACL needs
+/// `WRITE_DAC`, the owner and the label `WRITE_OWNER`.
+#[test]
+fn a_write_the_handle_has_no_right_for_is_found_first() {
+    let all = writes(true, true, true);
+    assert_eq!(lacking(&all, true, true), None);
+    assert_eq!(lacking(&all, false, true), Some(Write::Dacl));
+    assert_eq!(lacking(&all, true, false), Some(Write::Owner));
+    assert_eq!(lacking(&[Write::Label], true, false), Some(Write::Label));
+    assert_eq!(lacking(&[Write::Dacl], true, false), None);
+    assert_eq!(lacking(&[], false, false), None);
+}
+
 /// The Windows run 2, row 15 (a plain `C:\m`): a child not marked auto-inherited loses its
 /// inherited copies before it is worked out again, so none comes back explicit; its explicit
 /// entries, owner, group and SACL stay, and the DACL is marked auto-inherited.

@@ -52,6 +52,9 @@ pub(in crate::windows) struct Object {
     pub(in crate::windows) folder: bool,
     pub(in crate::windows) links: u32,
     tag: Option<u32>,
+    /// Whether the handle has `WRITE_DAC`.
+    pub(in crate::windows) write_dac: bool,
+    /// Whether the handle has `WRITE_OWNER` (an owner or a label write).
     pub(in crate::windows) write_owner: bool,
 }
 
@@ -84,7 +87,7 @@ impl Object {
         ladder(extra, |access| open_at(&self.handle, name, access))
     }
 
-    fn describe(handle: Handle, write_owner: bool) -> io::Result<Object> {
+    fn describe(handle: Handle, write_dac: bool, write_owner: bool) -> io::Result<Object> {
         let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
         let mut standard = FILE_STANDARD_INFO::default();
         // SAFETY: the handle is open and each struct is valid and writable for its size.
@@ -110,6 +113,7 @@ impl Object {
             folder: standard.Directory,
             links: standard.NumberOfLinks,
             tag: reparse.then_some(tag.ReparseTag),
+            write_dac,
             write_owner,
         })
     }
@@ -249,13 +253,13 @@ impl Object {
 fn ladder(extra: u32, mut open: impl FnMut(u32) -> io::Result<Handle>) -> io::Result<Object> {
     let base = READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0 | extra;
     let mut denied = io::Error::from(io::ErrorKind::PermissionDenied);
-    for (access, write_owner) in [
-        (base | WRITE_DAC.0 | WRITE_OWNER.0, true),
-        (base | WRITE_DAC.0, false),
-        (base, false),
+    for (access, write_dac, write_owner) in [
+        (base | WRITE_DAC.0 | WRITE_OWNER.0, true, true),
+        (base | WRITE_DAC.0, true, false),
+        (base, false, false),
     ] {
         match open(access) {
-            Ok(handle) => return Object::describe(handle, write_owner),
+            Ok(handle) => return Object::describe(handle, write_dac, write_owner),
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied => denied = e,
             Err(e) => return Err(e),
         }
