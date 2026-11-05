@@ -27,9 +27,9 @@ pub enum HeldOpen {
 /// exact name and then, for a name that is not all ASCII, in any Unicode form
 /// ([`owner_in_another_form`]); on Windows also a sharing or lock violation when it exists and
 /// is opened with no sharing. A missing file with no owner file, and any other error, is `None`.
-/// An owner file the stale rule passes over ([`stale::is_stale`]: on macOS no lock on the
-/// document, the owner file older than every running Word and a local APFS or HFS+ volume; on
-/// Windows a no-share open that succeeds and no Word running; never on Linux) does not count, so
+/// An owner file the stale rule passes over ([`stale::is_stale`]: on macOS no Word running, no
+/// lock on the document and a local APFS or HFS+ volume; on Windows a no-share open that
+/// succeeds and no Word running; never on Linux) does not count, so
 /// one a crashed Word left blocks nothing; the next owner file found is checked the same way.
 /// One `symlink_metadata` per owner name (at most three), a `read_dir` of the parent for a
 /// non-ASCII name none of them finds or all of them are stale (at most [`MAX_LISTED`] entries;

@@ -95,10 +95,15 @@ mod macos {
             "{err:?}"
         );
     }
+    /// What [`hold_lock_for_parent`] writes to its stderr once it holds the lock. Matched within
+    /// a line and on stderr, so libtest's own output (on stdout; with one test thread its
+    /// `test .. ... ` prefix shares the line) never hides it.
+    const LOCKED: &str = "clauseo-hold-lock: locked";
+
     /// Run in a child of the test below: takes a shared `F_SETLK` lock on the whole file
-    /// `CLAUSEO_HOLD_LOCK` names, as Word does on a document it has open, prints `locked`, and
-    /// keeps it until its stdin closes. Ignored, so it runs only when the test starts it; without
-    /// the variable it does nothing.
+    /// `CLAUSEO_HOLD_LOCK` names, as Word does on a document it has open, writes [`LOCKED`] to
+    /// stderr, and keeps it until its stdin closes. Ignored, so it runs only when the test starts
+    /// it; without the variable it does nothing.
     #[test]
     #[ignore = "a helper the stale-owner test runs in a child process"]
     fn hold_lock_for_parent() {
@@ -119,18 +124,19 @@ mod macos {
             l_whence: libc::c_short::try_from(libc::SEEK_SET).unwrap(),
         };
         fcntl(&file, FcntlArg::F_SETLK(&lock)).unwrap();
-        println!("locked");
+        eprintln!("{LOCKED}");
         let mut rest = Vec::new();
         drop(io::stdin().lock().read_to_end(&mut rest));
         drop(file);
     }
 
     /// The stale owner-file rule on macOS (this binary never calls `test_support`'s pretend
-    /// Word, so it reads the real process list; no Word runs on CI): an owner file whose document
-    /// no process locks, in a local APFS temp folder, is stale and shows nothing held. While
-    /// another process holds a shared `F_SETLK` lock on the document, as Word does, the same
-    /// owner file is held. (`F_GETLK` does not report this process's own locks, so the lock is
-    /// taken by a child: this test binary again, running [`hold_lock_for_parent`].)
+    /// Word, so it reads the real process list; no Word runs on CI): with no Word running, an
+    /// owner file whose document no process locks, in a local APFS temp folder, is stale and
+    /// shows nothing held. While another process holds a shared `F_SETLK` lock on the document,
+    /// as Word does, the same owner file is held. (`F_GETLK` does not report this process's own
+    /// locks, so the lock is taken by a child: this test binary again, running
+    /// [`hold_lock_for_parent`].)
     #[test]
     fn an_owner_file_is_stale_with_no_word_and_no_lock_and_held_while_another_process_locks_it() {
         use std::io::{BufRead, BufReader};
@@ -161,14 +167,15 @@ mod macos {
             ])
             .env("CLAUSEO_HOLD_LOCK", &document)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let mut lines = BufReader::new(child.stderr.take().unwrap()).lines();
         let locked = lines
             .by_ref()
             .map_while(Result::ok)
-            .any(|line| line == "locked");
+            .any(|line| line.contains(LOCKED));
         assert!(locked, "the child never took the lock");
         assert_eq!(
             clauseo_matters::held_open(root, &invoice),

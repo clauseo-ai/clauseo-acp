@@ -3,13 +3,15 @@
 //! (private #224). [`is_stale`] reads the facts and [`mac_rule`] or [`windows_rule`] decides;
 //! anything it cannot read counts as held, so a doubt never lets a write through.
 //!
-//! - macOS (research 38, point 3): stale only when `F_GETLK` sees no lock on the document, the
-//!   owner file's birthtime is older than the start of every running `Microsoft Word` process
-//!   (or none runs), and the owner file's folder is on a local APFS or HFS+ volume (`statfs`:
-//!   `MNT_LOCAL`, and `apfs` or `hfs` as its type). Word locks the document while it has it
-//!   open, and a Word that started after the owner file was made may be saving it (Word swaps in
-//!   a new file at each save and locks it a moment later). On a network volume a colleague's
-//!   Word elsewhere leaves an owner file and no lock here, so there it stays held.
+//! - macOS (research 38, point 3, narrowed by the orchestrator for its point 5): stale only when
+//!   no `Microsoft Word` process runs at all, `F_GETLK` sees no lock on the document, and the
+//!   owner file's folder is on a local APFS or HFS+ volume (`statfs`: `MNT_LOCAL`, and `apfs`
+//!   or `hfs` as its type). Research 38's rule also let an owner file older than every running
+//!   Word through, but Word reuses a crashed session's owner file when it reopens the document
+//!   (point 5), and inside a save (a new file swapped in, locked a moment later) only the lock
+//!   would guard it; so while any Word runs, an owner file is held. On a network volume a
+//!   colleague's Word elsewhere leaves an owner file and no lock here, so there it stays held.
+//!   Decision record 0021 has the reasons.
 //! - Windows (the orchestrator's conservative rule): stale only when a no-share open of the
 //!   document succeeds and no `WINWORD.EXE` runs. A missing document fails the open: held.
 //! - Linux: no Word, so an owner file always means held, as before the rule.
@@ -19,7 +21,7 @@
 
 #[cfg(any(target_os = "macos", windows))]
 use std::path::Path;
-#[cfg(any(test, target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", windows))]
 use std::time::SystemTime;
 
 /// Word's process name on macOS (`/Applications/Microsoft Word.app/Contents/MacOS/Microsoft
@@ -56,32 +58,27 @@ impl Decision {
 
 #[cfg(any(test, target_os = "macos"))]
 /// What the macOS rule reads; `None` is a query that failed.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MacFacts {
     /// Whether `F_GETLK` found a lock that conflicts with a write lock on the whole document.
     pub(crate) lock_seen: Option<bool>,
-    /// The owner file's birthtime.
-    pub(crate) owner_born: Option<SystemTime>,
-    /// The start of every running Word process; empty when none runs.
-    pub(crate) word_starts: Option<Vec<SystemTime>>,
+    /// Whether a Word process runs.
+    pub(crate) word_running: Option<bool>,
     /// Whether the owner file's folder is on a local APFS or HFS+ volume.
     pub(crate) local_apfs_or_hfs: Option<bool>,
 }
 
 #[cfg(any(test, target_os = "macos"))]
-/// The macOS rule: [`Decision::Stale`] only when no lock is seen, the owner file was born
-/// before every Word process started (strictly), and the volume is local APFS or HFS+. Any
-/// fact missing is [`Decision::QueryFailed`], whatever the others say.
-pub(crate) fn mac_rule(facts: &MacFacts) -> Decision {
-    let (Some(lock_seen), Some(born), Some(starts), Some(local)) = (
-        facts.lock_seen,
-        facts.owner_born,
-        facts.word_starts.as_deref(),
-        facts.local_apfs_or_hfs,
-    ) else {
+/// The macOS rule: [`Decision::Stale`] only when no Word runs, no lock is seen, and the volume
+/// is local APFS or HFS+. Any fact missing is [`Decision::QueryFailed`], whatever the others
+/// say (a failed process listing: a Word may run).
+pub(crate) fn mac_rule(facts: MacFacts) -> Decision {
+    let (Some(word_running), Some(lock_seen), Some(local)) =
+        (facts.word_running, facts.lock_seen, facts.local_apfs_or_hfs)
+    else {
         return Decision::QueryFailed;
     };
-    if lock_seen || !local || starts.iter().any(|&start| born >= start) {
+    if word_running || lock_seen || !local {
         Decision::Held
     } else {
         Decision::Stale
@@ -126,7 +123,7 @@ pub(crate) fn word_starts() -> Option<Vec<SystemTime>> {
 
 /// Whether the owner file `owner` in `parent`, beside `document`, is stale by this OS's rule,
 /// logging the decision. Always `false` on Linux. Blocks: on macOS one open, one `fcntl`, one
-/// stat, one `statfs` and one listing of every process; on Windows one open and one process
+/// `statfs` and one listing of every process; on Windows one open and one process
 /// snapshot.
 pub(crate) fn is_stale(parent: &std::path::Path, owner: &str, document: &std::path::Path) -> bool {
     #[cfg(any(target_os = "macos", windows))]
@@ -154,14 +151,12 @@ pub(crate) fn decide(
     document: &Path,
     word: impl FnOnce() -> Option<Vec<SystemTime>>,
 ) -> Decision {
-    mac_rule(&MacFacts {
+    // The owner file's own facts no longer count on macOS (its birthtime went with research
+    // 38's start-time comparison); the caller found it.
+    let _ = owner;
+    mac_rule(MacFacts {
+        word_running: word().map(|starts| !starts.is_empty()),
         lock_seen: mac::lock_seen(document),
-        owner_born: parent
-            .join(owner)
-            .symlink_metadata()
-            .and_then(|meta| meta.created())
-            .ok(),
-        word_starts: word(),
         local_apfs_or_hfs: mac::local_apfs_or_hfs(parent),
     })
 }
