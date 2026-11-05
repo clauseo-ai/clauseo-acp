@@ -380,3 +380,20 @@ fn a_cancelled_fetch_that_completes_after_the_next_prompt_records_nothing() {
     assert_eq!(pages(&events), [], "{}", events.dump());
     host.shutdown();
 }
+
+/// Live (stage B, codex-acp 2.2.2): a search of three queries sends the first with " ..." as
+/// `rawInput.query`, and all three in `action.queries`; the record keeps all three, joined.
+#[test]
+fn a_codex_search_of_several_queries_records_all_of_them() {
+    let run = one_turn("web_codex_queries", CODEX, "codex-web-search-queries");
+    let logged = searches(&run.events);
+    assert_eq!(logged.len(), 1, "{}", run.events.dump());
+    assert_eq!(
+        logged[0].query,
+        "site:sci.gov.in Section 138 Negotiable Instruments Act Supreme Court judgment 2026, \
+         Supreme Court latest judgment Section 138 NI Act 2025 2026, \
+         site:api.sci.gov.in \"Section 138\" \"Negotiable Instruments Act\" 2025"
+    );
+    assert_eq!(logged[0].results, []);
+    run.host.shutdown();
+}

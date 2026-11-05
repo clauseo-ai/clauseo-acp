@@ -22,8 +22,8 @@ mod tests;
 
 use clauseo_acp::ToolCall;
 use clauseo_protocol::{
-    AgentId, DomainEvent, PageVia, PageVisited, TextOrBlob, ToolCallId, ToolCallPatch, TurnId,
-    WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, MAX_SEARCH_QUERY_CHARS, PageVia, PageVisited, TextOrBlob, ToolCallId,
+    ToolCallPatch, TurnId, WebResult, WebSearchRecorded,
 };
 use serde_json::Value;
 
@@ -111,11 +111,12 @@ impl Found {
     }
 }
 
-/// The query a search sent, from its input: `rawInput.query`, else `action.query`, else
-/// `action.queries` joined with ", " (Codex's `action`). The first one that is not empty; none
-/// when all are.
+/// The query a search sent, from its input, cleaned as a title is (`clean_title`) and capped at
+/// [`MAX_SEARCH_QUERY_CHARS`]. Two or more non-empty `action.queries` entries are the query, joined
+/// with ", ": codex-acp runs several queries in one call and sends the first with " ..." as
+/// `rawInput.query` (confirmed live with codex-acp 2.2.2, stage B, 2026-11-05). Otherwise the
+/// first that is not empty of `rawInput.query`, `action.query`, and the one `action.queries` entry.
 pub(crate) fn query_of(input: &Value) -> Option<String> {
-    // Cleaned as a title is (`clean_title`), so a bidi or control character never reaches a log.
     let text = |value: Option<&Value>| {
         value
             .and_then(Value::as_str)
@@ -123,19 +124,19 @@ pub(crate) fn query_of(input: &Value) -> Option<String> {
             .filter(|text| !text.is_empty())
     };
     let action = input.get("action");
-    let queries = action
+    let queries: Vec<String> = action
         .and_then(|action| action.get("queries"))
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
-        });
-    text(input.get("query"))
-        .or_else(|| text(action.and_then(|action| action.get("query"))))
-        .or_else(|| queries.filter(|joined| !joined.trim().is_empty()))
+        .map(|items| items.iter().filter_map(|item| text(Some(item))).collect())
+        .unwrap_or_default();
+    let query = if queries.len() >= 2 {
+        Some(queries.join(", "))
+    } else {
+        text(input.get("query"))
+            .or_else(|| text(action.and_then(|action| action.get("query"))))
+            .or_else(|| queries.into_iter().next())
+    };
+    query.map(|query| query.chars().take(MAX_SEARCH_QUERY_CHARS).collect())
 }
 
 /// A tool result's text, from `rawOutput` as the agent sent it: a string; an array of blocks

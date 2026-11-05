@@ -150,8 +150,12 @@ Codex (`sources/codex.rs`):
 
 - **Which call**: kind `search`, no `name`, and a `rawInput` that has a `query` key. An MCP server's
   own search tool has a `name`, so it is no Codex search.
-- **Query**: `rawInput.query`, else `action.query`, else `action.queries` joined with ", " (the first
-  that is not empty). With none, no record.
+- **Query**: when `action.queries` holds two or more non-empty entries, they are joined with ", ". This
+  comes first because codex-acp 2.2.2 runs several queries in one call and sends `rawInput.query` as the
+  first one with " ..." after it; the join was confirmed live with codex-acp 2.2.2 (stage B, 2026-11-05).
+  Otherwise the first non-empty of `rawInput.query`, `action.query`, and the one `action.queries` entry.
+  Each query is cleaned as a title is, and the joined text is capped at 1,000 characters. With none, no
+  record.
 - **Action**: `rawInput.action`, which the AIR shape and the standard shape both carry. `null` (or
   absent): a `WebSearchRecorded` with no results. `type` `search`: the same. `openPage` or
   `findInPage`: a `PageVisited` with `action.url` through the URL rule, `via` `CodexOpenPage`, no title.
