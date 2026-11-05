@@ -72,6 +72,8 @@ Two agents may edit the brief close together, and there is no lock. The `matter-
 | Each reference file | at most 1,000 words |
 | Codex's skills index | at most 150 words |
 
+Amended by 0040 (skill packs): the 150 words cover the built-in lines; with a launch's pack lines after them, the whole index is at most 600 words, 4,800 characters and 40 entries.
+
 Words are counted by splitting on whitespace, as `wc -w` does. At launch: `legal.md` 1,168 words, the whole (tools part and `legal.md`) 1,362, and Codex's index 82 with stetdoc's skill and a data folder at `/data`, so Codex's `developer_instructions` is 1,444 words there. A data folder whose path holds spaces adds those words once per index line, and the host's filled folders add theirs: with `/Users/Ann Mary/Library/Application Support/Clauseo` and the work and notes folders filled, the index is 90 words, the shared text 1,370 and Codex's whole 1,460, under 1,500 (`the_budgets_hold_for_a_long_macos_path_with_the_folders_filled`).
 
 ### The version lock
