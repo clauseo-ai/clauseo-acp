@@ -9,7 +9,7 @@ use crate::windows::acl_plan::{Grant, Inherit, LOW_LABEL_SID};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::ledger::ledger_path;
 use crate::windows::test_acl::{Place, grant, has};
-use crate::windows::test_dacl::protect_with;
+use crate::windows::test_dacl::{drop_privileges, protect_with};
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID, matter_one, reserved, trusted};
 
 fn ledger(place: &Place) -> Ledger {
@@ -157,4 +157,63 @@ fn timing_first_propagation_and_fix_costs() {
     .unwrap();
     let sibling = started.elapsed();
     println!("files {count}: first {first:?}, next launch {again:?}, one sibling deny {sibling:?}");
+}
+
+/// Around a temp matter that sets aside for real: each item is renamed into `aside`, and its
+/// path as asked is kept.
+struct Moving {
+    aside: PathBuf,
+    asked: Vec<PathBuf>,
+}
+
+impl FolderList for Moving {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        ReadDir.subfolders(parent)
+    }
+}
+
+impl Surroundings for Moving {
+    fn check(&self, _folder: &Path) -> io::Result<crate::windows::FolderSupport> {
+        Ok(crate::windows::FolderSupport::Ok)
+    }
+
+    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
+        self.asked.push(path.to_owned());
+        let name = format!("{}", self.asked.len());
+        crate::windows::write::rename_new(path, &self.aside.join(name))
+    }
+
+    fn credentials(&self) -> Option<PathBuf> {
+        None
+    }
+}
+
+/// Round 4, rows 4b and 16 of the second VM run: the NTFS walk names a child the lawyer can't
+/// open by its verbatim final path, and the launch's roots are plain, so the launch refused
+/// `ChildShut` rather than set it aside, and so did forget. Both now set it aside, asked by its
+/// plain path.
+#[test]
+fn a_child_the_lawyer_cant_open_is_set_aside_by_the_launch_and_by_forget() {
+    drop_privileges();
+    let place = Place::new("apply-ntfs-shut-aside");
+    let matter = place.at("matter");
+    let shut = place.dir.file("matter/shut.txt", "x");
+    place.dir.dir("aside");
+    protect_with(&shut, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
+    let mut around = Moving {
+        aside: place.at("aside"),
+        asked: Vec::new(),
+    };
+    let mut ledger = ledger(&place);
+    let mut acl = NtfsAcl::new().unwrap();
+    let mut plan = AdmittedPlan::from_grants(matter_one(), launch_grants(&matter));
+    apply(&mut ledger, &mut plan, &mut acl, &mut around).unwrap();
+    assert_eq!(around.asked, vec![matter.join("shut.txt")]);
+    assert!(!shut.exists());
+
+    let again = place.dir.file("matter/sub/x.txt", "x");
+    protect_with(&again, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around).unwrap();
+    assert_eq!(around.asked[1..], [matter.join("sub").join("x.txt")]);
+    assert!(!again.exists());
 }

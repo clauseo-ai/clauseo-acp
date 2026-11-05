@@ -13,6 +13,7 @@ use crate::windows::writer::{Label, Strict};
 use walk::race::{HOOK, REFUSE, Stage};
 
 mod round2;
+mod round4;
 mod round8;
 
 /// The pool user's `Modify` and another pool user's deny, both down the tree.

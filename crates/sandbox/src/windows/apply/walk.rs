@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::Surroundings;
 use crate::Error;
-use crate::windows::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder};
+use crate::windows::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder, plain};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::Entry;
 use crate::windows::writer::{AclWriter, ApplyFailure, Reach, Strict, Walked};
@@ -74,9 +74,13 @@ pub(super) fn clearing(
                 let Some(shut) = shut else {
                     return Err(refuse(None));
                 };
+                // The walk reports the child by its final path, verbatim (`\\?\C:\…`);
+                // the roots are the policy's plain paths. Both are compared plain, and the
+                // child must be strictly inside a root, never the root itself.
+                let shut = plain(&shut);
                 let inside = own
                     .iter()
-                    .any(|root| shut != *root && in_folder(&shut, root));
+                    .any(|root| in_folder(&shut, root) && !in_folder(root, &shut));
                 if !inside || moved.contains(&shut) || moved.len() >= MOST_SET_ASIDE {
                     return Err(refuse(Some(shut)));
                 }

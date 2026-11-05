@@ -107,6 +107,9 @@ pub(super) fn walk(
         return Err((ApplyFailure::Changed, None));
     }
     let strict = matches!(mode, Mode::Strict { .. });
+    // A child the lawyer can't open refuses a strict walk and forget's reclaim walk alike, as
+    // `ChildShut` naming it, so the caller sets it aside (S15 `PR3b` round 4).
+    let shut_refuses = strict || matches!(mode, Mode::Reclaim { .. });
     let mut stack = vec![Folder {
         path: top.normalized().map_err(io)?,
         descriptor: top.security(READ_ALL).map_err(io)?,
@@ -138,7 +141,7 @@ pub(super) fn walk(
                     seen.skipped += 1;
                     continue;
                 }
-                Err(e) if e.kind() == io::ErrorKind::PermissionDenied && strict => {
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied && shut_refuses => {
                     return Err(refuse(ApplyFailure::ChildShut));
                 }
                 Err(e) => return Err(io(e)),
