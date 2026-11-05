@@ -215,6 +215,12 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the signature did not verify".to_owned()),
         }
         .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::SettingsRefused,
+            detail: Some("plans.claude-acp.endpoint: not an https address".to_owned()),
+        }
+        .into(),
     ]
     .into_iter()
     .chain(setup::turns())

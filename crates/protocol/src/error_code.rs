@@ -193,6 +193,10 @@ error_codes! {
     UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
         signature check or install failed; the version running keeps running, and a later check \
         tries again.";
+    SettingsRefused = "settings.refused", retryable: false, meaning: "The change breaks a \
+        settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped \
+        variable or an address that is not https; the message names the key, never the value, \
+        and nothing was changed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

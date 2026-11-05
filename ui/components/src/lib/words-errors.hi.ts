@@ -77,6 +77,8 @@ export const HI = {
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your organisation manages that setting, so it can't be changed.":
     "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
+  // hi: later
+  "Clauseo couldn't save that setting. Your settings are as they were.": null,
   "You're offline. Setting up waits for the connection.": null,
   "Your network is blocking the download.": null,
   "There isn't enough free space on this computer for the download.": null,
