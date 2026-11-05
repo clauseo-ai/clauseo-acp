@@ -34,7 +34,15 @@ impl Homes {
 
 /// The paths and the check the unix tests use (the fake files need unix modes).
 #[cfg(unix)]
-impl Homes {
+trait UnixHomes {
+    fn lawyer(&self) -> PathBuf;
+    fn lawyers_file(&self) -> PathBuf;
+    fn home_file(&self) -> PathBuf;
+    fn check(&self, reused: bool) -> DesktopLoginCheck;
+}
+
+#[cfg(unix)]
+impl UnixHomes for Homes {
     fn lawyer(&self) -> PathBuf {
         self.scratch.path().join("lawyer")
     }
