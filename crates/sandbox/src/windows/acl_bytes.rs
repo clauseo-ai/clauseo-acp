@@ -21,6 +21,7 @@ use super::sids::Sid;
 use super::writer::Label;
 #[cfg(any(windows, test))]
 use copies::is_copy;
+pub(crate) use repair::{owner_descriptor, rebuild};
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 pub(crate) const ALLOWED: u8 = 0;
@@ -115,11 +116,26 @@ pub(crate) fn sid_text(bytes: &[u8]) -> Option<Sid> {
 
 /// The owner of the self-relative descriptor `bytes`, when it holds one.
 pub(crate) fn owner_sid(bytes: &[u8]) -> Option<Sid> {
-    let offset = usize::try_from(read_u32(bytes, 4)?).ok()?;
+    sid_text(owner_bytes(bytes)?)
+}
+
+/// The owner of the self-relative descriptor `bytes`, as bytes, when it holds one.
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "the walk's repair is Windows only")
+)]
+pub(crate) fn owner_bytes(bytes: &[u8]) -> Option<&[u8]> {
+    sid_at(bytes, 4)
+}
+
+/// The SID whose offset sits at `offset_at` in the self-relative descriptor `bytes`.
+fn sid_at(bytes: &[u8], offset_at: usize) -> Option<&[u8]> {
+    let offset = usize::try_from(read_u32(bytes, offset_at)?).ok()?;
     if offset == 0 {
         return None;
     }
-    sid_text(bytes.get(offset..)?)
+    let sid = bytes.get(offset..)?;
+    sid.get(..8 + 4 * usize::from(*sid.get(1)?))
 }
 
 /// One entry to find, add or remove: type, flags, mask and SID.
@@ -272,6 +288,29 @@ pub(crate) fn empty_acl() -> Vec<u8> {
 /// is checked before every inherited one, so on a child it beats the inherited deny of a fence
 /// or a sibling; an inherit-only one does the same for the child's children.
 pub(crate) fn broad_allow(dacl: &Acl<'_>, watched: &[Vec<u8>]) -> bool {
+    let broad = broad_sids(watched);
+    dacl.aces().iter().any(|ace| offends(ace, &broad))
+}
+
+/// `dacl` without the explicit allows [`broad_allow`] finds: the strict walk's repair of a
+/// child a pool user owns, and `forget_matter`'s of what the agent made.
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "the walk's repair is Windows only")
+)]
+pub(crate) fn without_broad(dacl: &Acl<'_>, watched: &[Vec<u8>]) -> Vec<u8> {
+    let broad = broad_sids(watched);
+    let kept: Vec<&[u8]> = dacl
+        .aces()
+        .iter()
+        .copied()
+        .filter(|ace| !offends(ace, &broad))
+        .collect();
+    render(dacl.revision.max(2), &kept)
+}
+
+/// [`BROAD_SIDS`], `watched`, and each watched SID's machine `None` group, as bytes.
+fn broad_sids(watched: &[Vec<u8>]) -> Vec<Vec<u8>> {
     let mut broad: Vec<Vec<u8>> = BROAD_SIDS
         .iter()
         .filter_map(|s| Sid::parse(s).ok())
@@ -284,13 +323,17 @@ pub(crate) fn broad_allow(dacl: &Acl<'_>, watched: &[Vec<u8>]) -> bool {
             broad.push(sid_bytes(&none));
         }
     }
-    dacl.aces().iter().any(|ace| {
-        flags(ace) & INHERITED == 0
-            && is_allow_kind(kind(ace))
-            && mask(ace).is_some_and(|m| m & !SYNCHRONIZE != 0)
-            && (!matches!(kind(ace), ALLOWED | ALLOWED_CALLBACK)
-                || sid(ace).is_some_and(|s| broad.iter().chain(watched).any(|b| b == s)))
-    })
+    broad.extend(watched.iter().cloned());
+    broad
+}
+
+/// Whether `ace` is an explicit allow that may beat an inherited deny (see [`broad_allow`]).
+fn offends(ace: &[u8], broad: &[Vec<u8>]) -> bool {
+    flags(ace) & INHERITED == 0
+        && is_allow_kind(kind(ace))
+        && mask(ace).is_some_and(|m| m & !SYNCHRONIZE != 0)
+        && (!matches!(kind(ace), ALLOWED | ALLOWED_CALLBACK)
+            || sid(ace).is_some_and(|s| broad.iter().any(|b| b == s)))
 }
 
 /// The explicit mandatory label in `sacl`, if it has one: the first, as Windows reads it.
@@ -596,5 +639,6 @@ fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Er
 
 #[cfg(any(windows, test))]
 mod copies;
+mod repair;
 #[cfg(test)]
 mod tests;

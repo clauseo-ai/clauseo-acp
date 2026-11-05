@@ -4,7 +4,7 @@
 
 use std::fmt;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::acl_plan::{Grant, Sid};
 
@@ -36,6 +36,23 @@ pub struct Walked {
     pub written: u64,
     /// Junctions, symbolic links and files with more than one link, left bare.
     pub skipped: u64,
+    /// Children a pool user owns whose entries were repaired (see [`Strict`]), or, for
+    /// [`AclWriter::reclaim`], handed back to the desktop user.
+    pub repaired: u64,
+}
+
+/// What a strict walk holds a child to. An explicit allow on a child, for a broad group, one of
+/// `watched` (the pool group, the other pool users) or of any type but plain or callback, is
+/// checked before an inherited deny, as is a protected DACL. A child one of `pool` owns (an
+/// agent made it) is repaired: those allows stripped, the protection cleared, its inherited
+/// entries worked out again. A child the lawyer owns is refused. A child the lawyer can't open
+/// at all is refused as [`ApplyFailure::ChildShut`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Strict {
+    /// Whose explicit allow beats an inherited deny, besides the broad groups.
+    pub watched: Vec<Sid>,
+    /// Every pool user: the owners whose children are repaired.
+    pub pool: Vec<Sid>,
 }
 
 impl Walked {
@@ -44,6 +61,7 @@ impl Walked {
         self.visited += other.visited;
         self.written += other.written;
         self.skipped += other.skipped;
+        self.repaired += other.repaired;
     }
 }
 
@@ -81,6 +99,9 @@ pub enum ApplyFailure {
     Io(io::ErrorKind),
     /// The ledger couldn't be read or written, of this kind.
     Ledger(io::ErrorKind),
+    /// A child in a strict walk that the lawyer can't open (a DACL an agent made shuts the
+    /// lawyer out), and that couldn't be set aside.
+    ChildShut,
 }
 
 impl fmt::Display for ApplyFailure {
@@ -96,6 +117,7 @@ impl fmt::Display for ApplyFailure {
             ApplyFailure::NoDacl => f.write_str("it has no permission list"),
             ApplyFailure::Io(kind) => write!(f, "a file-system call failed ({kind})"),
             ApplyFailure::Ledger(kind) => write!(f, "the permission ledger failed ({kind})"),
+            ApplyFailure::ChildShut => f.write_str("a folder or file in it can't be opened"),
         }
     }
 }
@@ -109,7 +131,8 @@ impl From<ApplyFailure> for io::Error {
             | ApplyFailure::Changed
             | ApplyFailure::LinkedFile
             | ApplyFailure::VolumeRoot
-            | ApplyFailure::NoDacl) => io::Error::other(other.to_string()),
+            | ApplyFailure::NoDacl
+            | ApplyFailure::ChildShut) => io::Error::other(other.to_string()),
         }
     }
 }
@@ -126,14 +149,24 @@ pub trait AclWriter {
     fn present(&mut self, grant: &Grant) -> io::Result<bool>;
     /// Works out each file and folder below `root` from its parent's inheritable entries and
     /// the Low label, as far as `reach`, writing what changed. Skips junctions, symbolic links
-    /// and files with more than one link. With `strict`, refuses a protected child or one with
-    /// an explicit allow for a broad group or one of `strict`'s SIDs.
+    /// and files with more than one link. With `strict`, holds each child to [`Strict`].
     fn propagate(
         &mut self,
         root: &Path,
         reach: Reach,
-        strict: Option<&[Sid]>,
+        strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure>;
+    /// Whether `a` and `b` are the same file (one file ID on one volume), neither followed if
+    /// a link: the credential link checked against the credentials file it must be (L5).
+    fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool>;
+    /// The child the last failed walk refused, when it was one (for the lawyer to see; never
+    /// logged). Taking it clears it.
+    fn refused_at(&mut self) -> Option<PathBuf>;
+    /// `forget_matter`'s walk below `root`: each child one of `pool` owns is handed to the
+    /// desktop user (this process's user, through the lawyer's `WRITE_OWNER`), its explicit
+    /// label and the allows a strict walk would strip removed, its protection cleared; then
+    /// every child's inherited entries are worked out again, as [`AclWriter::propagate`] does.
+    fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
     /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
     /// path is missing. Read before a label grant is written over it.
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>>;

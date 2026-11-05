@@ -4,11 +4,12 @@
 use super::*;
 use crate::windows::acl_bytes::{ALLOWED, CONTAINER_INHERIT, INHERITED, OBJECT_INHERIT, sid_bytes};
 use crate::windows::acl_plan::{LOW_LABEL_SID, Rights};
+use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{Place, grant, has, protected};
 use crate::windows::test_dacl::{auto_inherit_with, protect_with};
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
-use crate::windows::writer::Label;
+use crate::windows::writer::{Label, Strict};
 use walk::race::{HOOK, REFUSE, Stage};
 
 mod round8;
@@ -32,8 +33,12 @@ fn put(root: &Path, grants: &[Grant]) -> Result<Walked, ApplyFailure> {
     for g in grants {
         acl.add(g)?;
     }
-    let watched = [Sid::parse(OTHER_POOL_SIDS[0]).unwrap()];
-    acl.propagate(root, Reach::Tree, Some(&watched))
+    let other = Sid::parse(OTHER_POOL_SIDS[0]).unwrap();
+    let strict = Strict {
+        watched: vec![other.clone()],
+        pool: vec![Sid::parse(USER_SID).unwrap(), other],
+    };
+    acl.propagate(root, Reach::Tree, Some(&strict))
 }
 
 #[test]
@@ -388,6 +393,72 @@ fn a_second_walk_writes_nothing_and_the_root_keeps_auto_inherited() {
         acl.remove(g).unwrap();
     }
     assert!(auto(&matter));
+}
+
+/// A strict walk whose pool is this process's own user, which stands in for the agent: what it
+/// owns is repaired rather than refused (M5).
+fn as_agent(root: &Path) -> Result<Walked, ApplyFailure> {
+    let mut acl = NtfsAcl::new().unwrap();
+    for g in &fence(root) {
+        acl.add(g)?;
+    }
+    let strict = Strict {
+        watched: vec![Sid::parse(OTHER_POOL_SIDS[0]).unwrap()],
+        pool: vec![current_user_sid().unwrap()],
+    };
+    acl.propagate(root, Reach::Tree, Some(&strict))
+}
+
+/// M5: a child the agent made, open to `Everyone` by its own entry and protected, is repaired:
+/// the allow goes, the protection goes, and the fence's inherited deny reaches it.
+#[test]
+fn a_child_the_agent_owns_is_repaired_not_refused() {
+    let place = Place::new("acl-repair");
+    let doc = place.dir.file("matter/made/doc.txt", "the agent's");
+    let made = place.at("matter/made");
+    protect_with(&made, "D:P(A;OICI;FA;;;OW)(A;OICI;FR;;;WD)").unwrap();
+    let walked = as_agent(&place.at("matter")).unwrap();
+    assert!(walked.repaired >= 1, "{walked:?}");
+    assert!(!protected(&made));
+    assert!(!has(&made, "S-1-1-0", false));
+    assert!(has(&made, OTHER_POOL_SIDS[0], true));
+    assert!(has(&doc, OTHER_POOL_SIDS[0], true));
+}
+
+/// M5: a child that shuts the lawyer out (no rights for its owner, none inherited) refuses a
+/// strict walk as `ChildShut`, naming the child.
+#[test]
+fn a_child_the_lawyer_cant_open_refuses_naming_it() {
+    let place = Place::new("acl-shut");
+    let shut = place.dir.file("matter/shut.txt", "x");
+    protect_with(&shut, "D:P(A;;FA;;;SY)(A;;0x0;;;OW)").unwrap();
+    let mut acl = NtfsAcl::new().unwrap();
+    let other = Sid::parse(OTHER_POOL_SIDS[0]).unwrap();
+    let strict = Strict {
+        watched: vec![other.clone()],
+        pool: vec![other],
+    };
+    let walked = acl.propagate(&place.at("matter"), Reach::Tree, Some(&strict));
+    assert_eq!(walked, Err(ApplyFailure::ChildShut));
+    let at = acl.refused_at().unwrap();
+    assert!(at.ends_with("shut.txt"), "{at:?}");
+}
+
+/// M5: forget's walk hands back what a pool user made: its explicit label and broad allows go.
+#[test]
+fn reclaiming_strips_the_agents_label_and_broad_allows() {
+    let place = Place::new("acl-reclaim");
+    let doc = place.dir.file("matter/doc.txt", "the agent's");
+    let mut acl = NtfsAcl::new().unwrap();
+    let everyone = grant(&doc, "S-1-1-0", Rights::ReadAndExecute, Inherit::ThisOnly);
+    let label = grant(&doc, LOW_LABEL_SID, Rights::LowLabel, Inherit::ThisOnly);
+    acl.add(&everyone).unwrap();
+    acl.add(&label).unwrap();
+    let me = current_user_sid().unwrap();
+    let walked = acl.reclaim(&place.at("matter"), &[me]).unwrap();
+    assert!(walked.repaired >= 1, "{walked:?}");
+    assert!(!has(&doc, "S-1-1-0", false));
+    assert!(!has(&doc, LOW_LABEL_SID, false));
 }
 
 /// Whether `path`'s DACL is marked auto-inherited (`SE_DACL_AUTO_INHERITED`).

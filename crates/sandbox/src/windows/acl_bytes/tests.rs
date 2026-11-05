@@ -219,6 +219,48 @@ fn the_explicit_label_is_read_back_as_written() {
     assert_eq!(ours_back, ours);
 }
 
+/// M5: the repair of a child a pool user owns strips exactly the allows a strict walk refuses,
+/// and the rebuilt descriptor keeps its owner and group, drops the protection, and reads back.
+#[test]
+fn a_repair_strips_the_offending_allows_and_keeps_the_owner() {
+    let pool_user = "S-1-5-21-1-2-3-1005";
+    let keep = spec(pool_user, Rights::Modify).bytes();
+    let everyone = spec("S-1-1-0", Rights::ReadAndExecute).bytes();
+    let other = spec("S-1-5-21-1-2-3-1006", Rights::Modify).bytes();
+    let dacl = render(
+        2,
+        &[&keep, &everyone, &object_allow("S-1-5-21-9-9-9-9"), &other],
+    );
+    let watched = [sid_bytes(&sid("S-1-5-21-1-2-3-1006"))];
+    let cleaned = without_broad(&Acl::parse(&dacl).unwrap(), &watched);
+    let cleaned = Acl::parse(&cleaned).unwrap();
+    assert_eq!(cleaned.aces(), &[keep.as_slice()]);
+    assert!(!broad_allow(&cleaned, &watched));
+
+    let owner = sid_bytes(&sid(pool_user));
+    let me = sid_bytes(&sid("S-1-5-21-7-8-9-1001"));
+    let before = rebuild(
+        &build_descriptor(DACL_PROTECTED, Some(&dacl), None),
+        Some(&owner),
+        None,
+        0,
+    )
+    .unwrap();
+    assert_eq!(owner_bytes(&before), Some(owner.as_slice()));
+    let repaired = rebuild(&before, None, Some(&render(2, &[&keep])), DACL_PROTECTED).unwrap();
+    let read = Descriptor::parse(&repaired).unwrap();
+    assert!(!read.dacl_protected());
+    assert_eq!(owner_bytes(&repaired), Some(owner.as_slice()));
+    assert_eq!(
+        Acl::parse(read.dacl.unwrap()).unwrap().aces(),
+        &[keep.as_slice()]
+    );
+    let reowned = rebuild(&repaired, Some(&me), None, 0).unwrap();
+    assert_eq!(owner_bytes(&reowned), Some(me.as_slice()));
+    assert_eq!(owner_descriptor(&me).len(), 20 + me.len());
+    assert_eq!(owner_bytes(&owner_descriptor(&me)), Some(me.as_slice()));
+}
+
 #[test]
 fn a_child_inherits_its_parents_low_label_unless_it_has_its_own() {
     let low = spec(LOW_LABEL_SID, Rights::LowLabel);
