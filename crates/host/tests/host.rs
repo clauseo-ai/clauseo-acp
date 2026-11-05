@@ -201,6 +201,9 @@ mod sign_in_hold;
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]
+#[path = "host/steer_at_head.rs"]
+mod steer_at_head;
+#[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
 #[cfg(all(test, unix))]

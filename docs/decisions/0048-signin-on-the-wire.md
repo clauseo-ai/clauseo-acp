@@ -305,9 +305,10 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   every older entry, and every other `TurnQueued`, is written byte for byte as before, the
   corpus is unchanged, and an old log restores in log order as before. Start-up's queue rebuild
   (`queue/restore.rs`) puts the turns marked `at_head` first, the latest put back first, then
-  the rest in the order they joined the queue. When the first restored turn is one of them, the
-  queue comes back held for the sign-in as well as held, so `restart_agents` resumes it as it
-  would have before the restart.
+  the rest in the order they joined the queue. When a restored turn marked `at_head` is a turn held
+  for the sign-in, the queue comes back held for the sign-in as well as held, so `restart_agents`
+  resumes it as it would have before the restart. A requeued steer is marked `at_head` too, and
+  keeps the head place, but it does not mark the queue as waiting for the sign-in.
 - *Every view shows that order* (the host code owner's review of #440). The reducer marks the
   prompt of a turn whose `TurnQueued` is `at_head` with `UserMessageEntry::at_head`, a new
   optional field written only when true, so older views and snapshots read as before.
@@ -315,9 +316,11 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   `at_head` ones first, the latest put back first, then the rest by `order`. `bindings.ts`
   gains `at_head?: boolean`, and the app's queue strip (`room/queue-picks.ts`) reads it with
   the same rule, so after a restart the strip shows `[again, two, three]` as the host sends them.
-  A view with no `at_head` orders by `order` exactly as before. A requeued steer still takes
-  the head live while the view shows it in its message's place; that is left to the host
-  thread to decide, since a restart restores a steer in log order by an earlier ruling.
+  A view with no `at_head` orders by `order` exactly as before. Until this ruling a requeued steer
+  took the head live but its view showed it in its message's place, and a restart restored it in
+  log order. The host code owner's follow-up ruling: a requeued steer is queued `at_head` too
+  (`TurnQueued::at_head` on the `TurnQueued` behind the steered turn), so a restart keeps it at the
+  head as it runs live, and the view orders it first, the same as the host.
 - *The `LoginCheck` hook.* `HostConfig::with_login_check(Arc<dyn LoginCheck + Send + Sync>)` sets
   it. Its one call is `check(&AgentId, agent_home: &Path) -> LoginLink`, and `LoginLink` is
   `Own`, `Shared`, `Split` or `Gone`. Desktop backs it with S18's `codex_link_holds` and

@@ -2,13 +2,13 @@
 //! prompts whose turn neither started nor ended, in the order they joined the queue (a prompt's
 //! `UserMessage`, a requeued steer's `SteerResolved`), with their edits applied. A steer saved
 //! and never answered (the host stopped first) moves to a new queued turn, so it is not lost; it
-//! keeps its message's place in the log, behind any prompt queued before it. That differs from a
-//! live requeue, which takes the head: a restart restores the log's order, and the queue comes
-//! back held, so nothing runs before the lawyer looks. The one exception is a turn put back for
-//! its agent's sign-in (`sign_in.rs`), whose `TurnQueued` is marked `at_head`: it was sent
-//! first and the turns queued behind it may depend on its answer, so it comes back first, and
-//! the queue comes back held for the sign-in, so `restart_agents` resumes it. An older log
-//! has no mark and restores in log order.
+//! keeps its message's place in the log, behind any prompt queued before it. The turns put back
+//! at the head live keep that place across a restart: a requeued steer (`steer.rs`) and a turn
+//! put back for its agent's sign-in (`sign_in.rs`) both have their `TurnQueued` marked
+//! `at_head`, so they come back first, the latest put back first, as the live queue has them.
+//! The queue comes back held, so nothing runs before the lawyer looks. Only a turn put back for
+//! the sign-in marks the queue as waiting for it, so `restart_agents` resumes that one; a steer
+//! does not. An older log has no mark and restores in log order.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,11 +34,10 @@ struct Prompt {
     unanswered: bool,
 }
 
-/// The queued turns of a log, in queue order, and whether the first was put back for the
-/// sign-in.
+/// The queued turns of a log, in queue order, and the turn put back for the sign-in, if any.
 struct QueuedTurns {
     turns: Vec<(Restored, MessageId, Vec<ContentBlock>)>,
-    sign_in: bool,
+    sign_in: Option<TurnId>,
 }
 
 /// A turn the restored queue holds.
@@ -94,22 +93,20 @@ pub(in super::super) fn restore(
     let queue = &mut state(actor, thread).ok_or_else(|| lost("a thread"))?.queue;
     queue.turns = turns.into();
     queue.held = !queue.turns.is_empty();
-    queue.sign_in = queue
-        .turns
-        .front()
-        .filter(|_| queue.held && queued.sign_in)
-        .map(|first| first.turn);
+    queue.sign_in = queued.sign_in;
     sync_held(actor, thread);
     Ok(())
 }
 
 /// The queued turns of `log` in queue order: turn, message, content as step 5 sends it. A turn
-/// whose `TurnQueued` is marked `at_head` goes first, the latest put back first, as each took
-/// the head when it was put back; the rest follow in the order they joined the queue.
+/// whose `TurnQueued` is marked `at_head` (a requeued steer, or a turn put back for the
+/// sign-in) goes first, the latest put back first, as each took the head when it was put back;
+/// the rest follow in the order they joined the queue.
 fn queued_turns(log: &[Envelope]) -> QueuedTurns {
     let mut prompts: BTreeMap<MessageId, Prompt> = BTreeMap::new();
     let mut done: BTreeSet<TurnId> = BTreeSet::new();
     let mut heads: BTreeSet<TurnId> = BTreeSet::new();
+    let mut steered: BTreeSet<TurnId> = BTreeSet::new();
     for (at, envelope) in log.iter().enumerate() {
         let event = &envelope.event;
         if let DomainEvent::UserMessage(message) = event {
@@ -133,6 +130,9 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
             {
                 prompt.turn = *turn;
                 prompt.at = at;
+            }
+            if let SteerOutcome::Requeued { turn } = &resolved.outcome {
+                steered.insert(*turn);
             }
         } else if let DomainEvent::TurnQueued(queued) = event
             && queued.is_at_head()
@@ -163,9 +163,14 @@ fn queued_turns(log: &[Envelope]) -> QueuedTurns {
         })
         .collect();
     queued.sort_by_key(|(place, ..)| *place);
-    let sign_in = queued
-        .first()
-        .is_some_and(|(place, ..)| matches!(place, Place::Head(_)));
+    // A steer put back at the head is not waiting for the sign-in; the first turn put back for
+    // it is.
+    let sign_in = queued.iter().find_map(|(place, restored, ..)| {
+        let Restored::Queued(turn) = restored else {
+            return None;
+        };
+        (matches!(place, Place::Head(_)) && !steered.contains(turn)).then_some(*turn)
+    });
     let turns = queued
         .into_iter()
         .map(|(_, restored, message, content)| (restored, message, content))
