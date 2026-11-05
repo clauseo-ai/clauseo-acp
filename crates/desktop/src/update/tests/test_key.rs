@@ -40,15 +40,23 @@ fn test_key_forms() -> Vec<String> {
     vec![file, key, id]
 }
 
+/// Pieces of the key file's path that a path put together by hand would hold.
+const PATH_PIECES: [&str; 4] = ["updater-test", "updater-", "-test.pub", "test.pub"];
+
+/// The one line of `choice.rs` that may name the test key.
+const INCLUDE_LINE: &str = r#"pub(super) const TEST_KEY: Option<&str> = Some(include_str!("../../release/updater-test.pub"));"#;
+
 /// (b) of "release builds reject the test key", by text: no file under `crates/desktop` (its
 /// sources, configs and release overlays; tests aside) holds the test key in any form, or names
-/// its file (`updater-test`, however the path is pieced together), except the file itself and
-/// `src/update/choice.rs`, the `e2e`-gated module that loads it, where the one `include_str!` of
-/// it sits directly under `#[cfg(feature = "e2e")]`.
+/// its file (`updater-test`, or a piece of that path: `updater-`, `-test.pub`, `test.pub`),
+/// except the file itself and `src/update/choice.rs`, the module that loads it. There only one
+/// line may: the `include_str!` of it, exactly as written, directly under
+/// `#[cfg(feature = "e2e")]`. This catches a key pasted or a path pieced together by hand; the
+/// release workflow's scan of each shipped binary is the control that does not depend on how.
 #[test]
 fn only_the_key_s_file_and_the_e2e_module_name_the_test_key() {
     let mut needles = test_key_forms();
-    needles.push("updater-test".to_owned());
+    needles.extend(PATH_PIECES.map(str::to_owned));
     let allowed = [
         Path::new("release/updater-test.pub"),
         Path::new("src/update/choice.rs"),
@@ -84,17 +92,26 @@ fn only_the_key_s_file_and_the_e2e_module_name_the_test_key() {
     assert_eq!(naming, Vec::<String>::new(), "files naming the test key");
     let choice = std::fs::read_to_string(root.join("src/update/choice.rs")).unwrap();
     let lines: Vec<&str> = choice.lines().collect();
-    let includes: Vec<usize> = (0..lines.len())
-        .filter(|at| lines[*at].contains("updater-test") && !lines[*at].trim().starts_with("//"))
+    let holding: Vec<usize> = (0..lines.len())
+        .filter(|at| {
+            needles
+                .iter()
+                .any(|needle| lines[*at].contains(needle.as_str()))
+        })
         .collect();
-    assert_eq!(includes.len(), 1, "choice.rs names the key's file once");
-    let at = includes[0];
-    assert!(lines[at].contains("include_str!"), "{}", lines[at]);
+    assert_eq!(
+        holding.len(),
+        1,
+        "choice.rs names the test key on lines {holding:?}"
+    );
+    let at = holding[0];
+    assert_eq!(lines[at].trim(), INCLUDE_LINE);
     assert_eq!(lines[at - 1].trim(), r#"#[cfg(feature = "e2e")]"#);
 }
 
 /// (b) by the bytes built: this test binary, without `e2e`, holds the test key in no form, so
-/// no `include_bytes!`, `concat!` path or pasted key put it in the crate.
+/// no `include_bytes!`, `concat!` path or pasted key put it in code the tests reach. Code only
+/// `run()` reaches is dropped by the linker here; the release workflow scans the shipped binary.
 #[cfg(not(feature = "e2e"))]
 #[test]
 fn a_build_without_e2e_holds_no_byte_of_the_test_key() {
