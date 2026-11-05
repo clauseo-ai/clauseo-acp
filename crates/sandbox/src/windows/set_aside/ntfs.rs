@@ -11,10 +11,14 @@
 //! - An item is opened as itself with `DELETE | FILE_READ_ATTRIBUTES` alone, relative to its
 //!   folder's handle (that folder opened by its path as itself, refused if a reparse point or
 //!   if its final path isn't the planned one), its own final path checked against the planned
-//!   one, and renamed on that handle (`SetFileInformationByHandle(FileRenameInfo)`) into the
-//!   pass folder's handle (`RootDirectory`), `ReplaceIfExists` false. A restore opens the item
-//!   relative to its pass's folder and renames it into its old folder, opened and checked the
-//!   same way.
+//!   one, and renamed on that handle (`NtSetInformationFile(FileRenameInformation)`) into the
+//!   pass folder's handle (`RootDirectory`), `ReplaceIfExists` false. Not
+//!   `SetFileInformationByHandle(FileRenameInfo)`: kernelbase refuses a non-NULL
+//!   `RootDirectory` with `ERROR_INVALID_PARAMETER`, which the VM showed. A restore opens the
+//!   item relative to its pass's folder and renames it into its old folder, opened and checked
+//!   the same way.
+//! - The folders below a pass's folder that mirror the item's folders in the matter
+//!   (`<pass>\sub\.git`) are made the same way as the pass's folder, one handle at a time.
 //!
 //! A rename across volumes fails with `ERROR_NOT_SAME_DEVICE`: [`SetAsideFailure::OtherVolume`].
 #![expect(
@@ -30,8 +34,9 @@ use std::path::{Path, PathBuf};
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
     FILE_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_IF,
-    FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_DISPOSITION,
-    NTCREATEFILE_CREATE_OPTIONS, NtCreateFile,
+    FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
+    FileRenameInformation, NTCREATEFILE_CREATE_DISPOSITION, NTCREATEFILE_CREATE_OPTIONS,
+    NtCreateFile, NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_NOT_SAME_DEVICE, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE,
@@ -41,10 +46,9 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, DELETE, FILE_ACCESS_RIGHTS, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_TRAVERSE, FileAttributeTagInfo, FileIdInfo, FileRenameInfo,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
-    OPEN_EXISTING, SYNCHRONIZE, SetFileInformationByHandle, VOLUME_NAME_DOS,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
+    FileAttributeTagInfo, FileIdInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, SYNCHRONIZE, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
@@ -201,30 +205,42 @@ fn folder_chain(
 }
 
 /// Renames the item `item` (opened with `DELETE`) to `name` in the folder `folder`, never
-/// replacing what is there.
+/// replacing what is there. `NtSetInformationFile`, which takes the folder's handle as
+/// `RootDirectory`; `SetFileInformationByHandle` refuses one.
 fn rename(item: &Handle, folder: &Handle, name: &[u16]) -> io::Result<()> {
-    let header = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let header = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
     let name_bytes = name.len() * 2;
-    let size = (header + name_bytes + 2).max(size_of::<FILE_RENAME_INFO>());
+    let size = (header + name_bytes + 2).max(size_of::<FILE_RENAME_INFORMATION>());
     let length = u32::try_from(name_bytes).map_err(io::Error::other)?;
     let size_u32 = u32::try_from(size).map_err(io::Error::other)?;
     // u64 words, so the structure is aligned; zeroed, so `ReplaceIfExists` starts false and
     // the name ends in a NUL.
     let mut buffer = vec![0_u64; size.div_ceil(8)];
     let base = buffer.as_mut_ptr();
-    let info = base.cast::<FILE_RENAME_INFO>();
-    // SAFETY: `buffer` is at least `size_of::<FILE_RENAME_INFO>()` bytes, aligned for it and
-    // zeroed; the name's `name_bytes` bytes fit from `header` on, as `size` counts them; the
-    // pointers stay inside `buffer`, which outlives the call; both handles are open.
-    unsafe {
+    let info = base.cast::<FILE_RENAME_INFORMATION>();
+    let mut status = IO_STATUS_BLOCK::default();
+    // SAFETY: `buffer` is at least `size_of::<FILE_RENAME_INFORMATION>()` bytes, aligned for it
+    // and zeroed; the name's `name_bytes` bytes fit from `header` on, as `size` counts them;
+    // the pointers stay inside `buffer`, which outlives the call; `status` is live; both
+    // handles are open.
+    let done = unsafe {
         (&raw mut (*info).Anonymous.ReplaceIfExists).write(false);
         (&raw mut (*info).RootDirectory).write(folder.0);
         (&raw mut (*info).FileNameLength).write(length);
         let start = base.cast::<u8>().add(header);
         std::ptr::copy_nonoverlapping(name.as_ptr().cast::<u8>(), start, name_bytes);
-        SetFileInformationByHandle(item.0, FileRenameInfo, base.cast_const().cast(), size_u32)
+        NtSetInformationFile(
+            item.0,
+            &raw mut status,
+            base.cast_const().cast(),
+            size_u32,
+            FileRenameInformation,
+        )
+    };
+    if done.is_err() {
+        return Err(nt_error(done));
     }
-    .map_err(|e| os_error(&e))
+    Ok(())
 }
 
 /// Opens `path` itself, a folder too, never what a link at it names, for `access`.
