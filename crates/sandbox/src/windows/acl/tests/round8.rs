@@ -18,6 +18,11 @@ fn owner(path: &Path) -> Vec<u8> {
 /// Writes allows of (SID, flags, mask) as `path`'s DACL, raw: not auto-inherited, nothing
 /// propagated.
 fn raw_dacl(path: &Path, aces: &[(Vec<u8>, u8, u32)]) {
+    raw_dacl_marked(path, 0, aces);
+}
+
+/// Writes allows of (SID, flags, mask) as `path`'s DACL, raw, with the control bits `control`.
+fn raw_dacl_marked(path: &Path, control: u16, aces: &[(Vec<u8>, u8, u32)]) {
     let mut dacl = empty_acl();
     for (sid, flags, mask) in aces {
         let ace = AceSpec {
@@ -28,7 +33,7 @@ fn raw_dacl(path: &Path, aces: &[(Vec<u8>, u8, u32)]) {
         };
         dacl = Acl::parse(&dacl).unwrap().with(&ace);
     }
-    let written = build_descriptor(0, Some(&dacl), None);
+    let written = build_descriptor(control, Some(&dacl), None);
     Object::open(path)
         .unwrap()
         .set(DACL_SECURITY_INFORMATION, &written)
@@ -136,4 +141,34 @@ fn the_rollback_walk_after_a_refused_launch_leaves_a_plain_child_each_entry_once
     assert!(auto(&lawyer), "lawyer.txt ends auto-inherited");
     assert_eq!(twice(&lawyer), []);
     assert!(has(&lawyer, USERS, true) && !has(&lawyer, USERS, false));
+}
+
+/// Round 9: an auto-inherited child's explicit entry equal to one its parent passes down is one
+/// somebody wrote, so the walk keeps it; a child not auto-inherited holds such an entry as
+/// NTFS's flagless copy, and the walk takes it for the inherited one.
+#[test]
+fn an_auto_inherited_child_keeps_an_explicit_entry_its_parent_also_passes_down() {
+    let place = Place::new("acl-ai-explicit");
+    place.dir.file("matter/ai.txt", "x");
+    place.dir.file("matter/plain.txt", "x");
+    let sid = |text: &str| sid_bytes(&Sid::parse(text).unwrap());
+    let (full, read) = (0x001f_01ff, 0x0012_00a9);
+    let other = OTHER_POOL_SIDS[1];
+    let matter = place.at("matter");
+    let tree = OBJECT_INHERIT | CONTAINER_INHERIT;
+    let passed = [(sid("S-1-5-18"), tree, full), (sid(other), tree, read)];
+    raw_dacl_marked(&matter, DACL_AUTO_INHERITED, &passed);
+    let ai = place.at("matter/ai.txt");
+    let held = [(sid(other), 0, read), (sid("S-1-5-18"), INHERITED, full)];
+    raw_dacl_marked(&ai, DACL_AUTO_INHERITED, &held);
+    let plain = place.at("matter/plain.txt");
+    raw_dacl(&plain, &[(sid(other), 0, read), (sid("S-1-5-18"), 0, full)]);
+
+    NtfsAcl::new()
+        .unwrap()
+        .propagate(&matter, Reach::Tree, None)
+        .unwrap();
+    assert!(has(&ai, other, false), "ai.txt keeps its explicit entry");
+    assert!(has(&ai, other, true), "ai.txt inherits the matter's");
+    assert!(has(&plain, other, true) && !has(&plain, other, false));
 }

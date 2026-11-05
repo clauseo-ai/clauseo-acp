@@ -350,20 +350,36 @@ fn a_read_path_in_the_profiles_claude_folder_is_refused() {
     assert!(error.to_string().contains("a read path"), "{error}");
 }
 
+/// The profile's `.claude` folder is found in any letter case. On Windows the paths are drive
+/// paths, as production passes there; a `/`-rooted path isn't one (round 9).
 #[test]
 fn the_claude_folder_matches_in_any_letter_case() {
-    let folder = Path::new("/Users/lawyer/.claude");
-    assert!(in_folder(Path::new("/Users/lawyer/.CLAUDE/skills"), folder));
-    assert!(in_folder(Path::new("/Users/lawyer/.Claude"), folder));
-    assert!(!in_folder(Path::new("/Users/lawyer/.claude-home"), folder));
-    assert!(!in_folder(Path::new("/Users/lawyer"), folder));
-    // Windows paths split into parts only on Windows.
     #[cfg(windows)]
-    let windows = Path::new(r"C:\Users\lawyer\.claude");
+    let [folder, upper, title, longer, home] = [
+        r"C:\Users\lawyer\.claude",
+        r"C:\Users\lawyer\.CLAUDE\skills",
+        r"C:\Users\lawyer\.Claude",
+        r"C:\Users\lawyer\.claude-home",
+        r"C:\Users\lawyer",
+    ];
+    #[cfg(not(windows))]
+    let [folder, upper, title, longer, home] = [
+        "/Users/lawyer/.claude",
+        "/Users/lawyer/.CLAUDE/skills",
+        "/Users/lawyer/.Claude",
+        "/Users/lawyer/.claude-home",
+        "/Users/lawyer",
+    ];
+    let folder = Path::new(folder);
+    assert!(in_folder(Path::new(upper), folder));
+    assert!(in_folder(Path::new(title), folder));
+    assert!(!in_folder(Path::new(longer), folder));
+    assert!(!in_folder(Path::new(home), folder));
+    // Windows paths split into parts only on Windows.
     #[cfg(windows)]
     assert!(in_folder(
         Path::new(r"c:\users\LAWYER\.Claude\agents"),
-        windows
+        folder
     ));
 }
 

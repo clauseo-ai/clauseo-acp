@@ -428,28 +428,32 @@ pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&
     assemble(control, [None, None, sacl, dacl])
 }
 
-/// `descriptor` with its DACL's inherited entries dropped, and with them every explicit entry
-/// that copies an inherited one ([`is_copy`]: equal but for the inherited flag to one of `due`'s
-/// inherited entries or one `descriptor` holds); the DACL marked auto-inherited, the owner,
-/// group, SACL and other control bits kept. `due` is the ACL the parent alone gives a new child
-/// of this kind and owner. The walk hands `CreatePrivateObjectSecurityEx` this for every child
-/// not protected, so its result holds the parent's entries once, all inherited.
+/// `descriptor` with its DACL's inherited entries dropped; the DACL marked auto-inherited, the
+/// owner, group, SACL and other control bits kept. When the DACL is not marked auto-inherited,
+/// every explicit entry that copies an inherited one goes too ([`is_copy`]: equal but for the
+/// inherited flag to one of `due`'s inherited entries or one `descriptor` holds). `due` is the
+/// ACL the parent alone gives a new child of this kind and owner. The walk hands
+/// `CreatePrivateObjectSecurityEx` this for every child not protected, so its result holds the
+/// parent's entries once, all inherited.
 ///
 /// Under a parent that isn't auto-inherited, NTFS writes a child's inherited copies without the
 /// inherited flag (flags `00` in the kernel's DACL; `icacls` and `Get-Acl` still show `(I)`):
 /// kept, they stay explicit, so a `Users` allow refused a strict walk (the Windows run 3, row
-/// 15, a plain `C:\m`) and a plain walk left each entry twice, explicit and inherited. An
-/// explicit entry the lawyer wrote that equals one the parent gives goes too: it comes back
-/// inherited, so the access is the same. A descriptor with no DACL comes back as it is.
+/// 15, a plain `C:\m`) and a plain walk left each entry twice, explicit and inherited. Such a
+/// child's DACL is never marked auto-inherited. On an auto-inherited child an explicit entry is
+/// one somebody wrote, ours or the lawyer's, and stays: folded into an inherited one it would go
+/// with a later change to the parent (round 9). A descriptor with no DACL comes back as it is.
 #[cfg(any(windows, test))]
 pub(crate) fn without_inherited(descriptor: &[u8], due: &[u8]) -> io::Result<Vec<u8>> {
-    let Some(dacl) = Descriptor::parse(descriptor)?.dacl else {
+    let now = Descriptor::parse(descriptor)?;
+    let Some(dacl) = now.dacl else {
         return Ok(descriptor.to_vec());
     };
+    let plain = now.control & DACL_AUTO_INHERITED == 0;
     let held = Acl::parse(dacl)?;
     let due = Acl::parse(due)?;
     keeping(descriptor, |ace| {
-        flags(ace) & INHERITED == 0 && !is_copy(ace, &due, &held)
+        flags(ace) & INHERITED == 0 && !(plain && is_copy(ace, &due, &held))
     })
 }
 

@@ -165,8 +165,8 @@ fn settle(
     if watched.is_some() && now.dacl_protected() {
         return Err(ApplyFailure::ProtectedChild);
     }
-    // A DACL not protected loses its inherited entries, and the explicit copies of them, before
-    // it is checked or worked out again; see [`without_inherited`].
+    // A DACL not protected loses its inherited entries before it is checked or worked out again,
+    // and one not auto-inherited the explicit copies of them too; see [`without_inherited`].
     let creator = if now.dacl.is_some() && !now.dacl_protected() {
         trimmed(acl, parent, current, child.folder).map_err(io)?
     } else {
@@ -224,9 +224,9 @@ fn settle(
     child.security(READ_ALL).map(Some).map_err(io)
 }
 
-/// `child` (a descriptor) without its inherited entries and the explicit copies of them
-/// ([`without_inherited`]), measured against what `parent` alone gives a new child of its kind
-/// and owner ([`bare_child`] worked out from `parent`).
+/// `child` (a descriptor) without its inherited entries and, unless it is auto-inherited, the
+/// explicit copies of them ([`without_inherited`]), measured against what `parent` alone gives a
+/// new child of its kind and owner ([`bare_child`] worked out from `parent`).
 fn trimmed(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
     let fresh = inherit(acl, parent, &bare_child(child)?, folder)?;
     let due = Descriptor::parse(&fresh)?
