@@ -3106,6 +3106,17 @@ export type NoticeEntry = {
 export type NoticeKind = 
 /**  The agent started a new session after earlier turns, so it does not remember them. */
 "context_not_restored" | 
+/**
+ *  Papers an undo removed are in the folder again: a sync client put them back
+ *  (`OneDrive` on macOS can, seconds later, as cloud-only placeholders). Clauseo did not
+ *  remove them again.
+ */
+{ files_came_back: {
+	/**  The first of them, at most five, sorted by path bytes. */
+	files: MatterPath[],
+	/**  How many more came back beyond `files`. */
+	more: number,
+} } | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

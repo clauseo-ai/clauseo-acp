@@ -20,6 +20,8 @@
 //! The logs here name the matter, the error's code and the stage, never a folder: a path names a
 //! client.
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clauseo_matters::CommitId;
@@ -41,14 +43,17 @@ use crate::pipeline::{Draft, MatterEvent};
 /// was sent.
 pub(crate) struct Made {
     worker: MatterWorker<MatterTag>,
+    /// The matter's folder, for the marker's re-check after a discard ([`recheck_marker`]).
+    folder: PathBuf,
     /// The command to answer (none for the Scratch matter) and its error.
     failed: Option<(Option<CommandId>, Error)>,
 }
 
 impl Made {
-    pub(crate) const fn new(worker: MatterWorker<MatterTag>) -> Self {
+    pub(crate) const fn new(worker: MatterWorker<MatterTag>, folder: PathBuf) -> Self {
         Self {
             worker,
+            folder,
             failed: None,
         }
     }
@@ -188,6 +193,9 @@ pub(crate) fn discarded(actor: &mut Actor, matter: MatterId, reply: &MatterReply
     };
     // Joins the worker, idle now that its last job has answered.
     drop(made.worker);
+    if matches!(reply, MatterReply::Discarded(Ok(()))) {
+        recheck_marker(actor, matter, made.folder);
+    }
     if let Some((command, error)) = made.failed {
         answer(actor, command, error);
     }
@@ -229,7 +237,9 @@ pub(super) fn matter_commit(
         cancel: _,
     } = pending;
     // Kept aside until the commit returns, so a failure from here on can discard the matter.
-    actor.made.insert(new.id, Made::new(worker));
+    actor
+        .made
+        .insert(new.id, Made::new(worker, new.folder.clone()));
     let now = actor.now();
     let stream = StreamId::Matter(new.id);
     let command_id = command.map(|(id, _)| id);
@@ -282,4 +292,41 @@ pub(super) fn matter_commit(
         turns: turn::MatterTurns::default(),
     };
     Ok((draft, entry))
+}
+
+/// How long after a cancelled, failed or discarded create or import the folder's marker is
+/// looked at again.
+pub(crate) const MARKER_RECHECK: Duration = Duration::from_secs(10);
+
+/// Once, [`MARKER_RECHECK`] from now: a sync client can put back the `.clauseo/matter.json` a
+/// cancelled, failed or discarded create or import of `matter` removed, and every later "New
+/// matter" there would then be refused as already a matter. Removed again (with `.clauseo`
+/// when that leaves it empty) only if it names `matter`, the id minted for that create or
+/// import, which no row holds; a marker naming any other matter, one this host knows or one
+/// from another computer, is left alone. Off the actor; never repeated. Shutdown does not wait
+/// for it.
+pub(super) fn recheck_marker(actor: &Actor, matter: MatterId, folder: PathBuf) {
+    let clock = Arc::clone(&actor.clock);
+    let task = async move {
+        clock.after(MARKER_RECHECK).await;
+        let job = crate::agent::codex::prepare::Job::short("marker re-check", Some(matter));
+        let removed = crate::agent::codex::prepare::off_actor(clock, job, move || {
+            clauseo_matters::remove_marker_of(&folder, matter).map_err(Error::from)
+        })
+        .await;
+        match removed {
+            Ok(true) => tracing::warn!(
+                %matter,
+                files = 1,
+                "a matter.json put back after its create or import was undone was removed"
+            ),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%matter, code = %error.code(), stage = "recheck", "not checked");
+            }
+        }
+    };
+    if let Err(error) = actor.spawner.spawn_local(task) {
+        tracing::error!(%error, "the host pool refused a marker re-check");
+    }
 }

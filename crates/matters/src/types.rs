@@ -235,6 +235,10 @@ pub struct Undone {
     /// checkpoint's tree holds one only if it came back downloaded, read as the folder holds it;
     /// never with the blob it had before the undo.
     pub resurrected: Vec<MatterPath>,
+    /// The files the undo deleted (the step's added files and the new names of the renames it
+    /// reversed), sorted by path bytes: what a sync client might put back later
+    /// ([`crate::Matter::still_gone`]).
+    pub deleted: Vec<MatterPath>,
 }
 
 /// Which files a restore puts back.

@@ -50,6 +50,8 @@ pub(crate) struct ThreadEntry {
     /// step when the stream is unloaded, and from each durable `TurnEnded`.
     pub(crate) last_stop: Option<super::rail::Stop>,
     pub(crate) turn: turn::TurnState,
+    /// The papers its undos removed that the host still looks for (`turn/came_back.rs`).
+    pub(crate) came_back: turn::CameBackWatches,
 }
 
 /// Work in flight that start-up and shutdown wait for.

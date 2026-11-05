@@ -435,6 +435,7 @@ fn create_thread(
         header: None,
         last_stop: None,
         turn: turn::TurnState::default(),
+        came_back: turn::CameBackWatches::default(),
     };
     let tag = Tag::Command {
         id: ctx.id,

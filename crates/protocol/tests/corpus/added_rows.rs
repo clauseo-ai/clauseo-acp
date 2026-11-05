@@ -317,4 +317,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (524, 0xcc5a_9bdd_1255_eceb),
         (384, 0x39d1_cb47_9ef5_994a),
     ),
+    (
+        "added/notice-FilesCameBack",
+        include_bytes!("added/notice-FilesCameBack.jsonl"),
+        include_bytes!("added/notice-FilesCameBack.msgpack"),
+        (398, 0xaaba_155f_7a30_893c),
+        (307, 0x9e5d_c501_2498_fe3d),
+    ),
 ];

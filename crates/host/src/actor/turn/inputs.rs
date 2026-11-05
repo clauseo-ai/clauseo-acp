@@ -31,6 +31,8 @@ pub(crate) enum TurnInput {
     },
     /// A run folder's removal off the actor (`launch_checks::discard`) ended.
     RunRemoved,
+    /// A check for papers an undo removed that came back is due (`came_back.rs`).
+    CameBack(super::came_back::Check),
 }
 
 /// An agent call's result.

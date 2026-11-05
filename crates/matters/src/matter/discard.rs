@@ -5,6 +5,8 @@
 use std::io;
 use std::path::Path;
 
+use clauseo_protocol::MatterId;
+
 use super::{Matter, exists, json, matter_home};
 use crate::{Error, write};
 
@@ -86,4 +88,17 @@ pub(super) fn undo_make(home: &Path, folder: &Path, fresh: Fresh) {
     if let Err(err) = json::remove(folder, fresh.marker_dir) {
         tracing::warn!(code = %err.code(), stage = "marker", "matter.json left behind");
     }
+}
+
+/// After a cancelled, failed or discarded create or import of matter `id`: removes
+/// `folder`'s `.clauseo/matter.json` if it names `id` (a sync client put back the one that
+/// create or import wrote and removed), and `.clauseo` if that leaves it empty. `Ok(true)` when
+/// it removed it; a marker naming another matter, an unreadable one, or none, is left as it is.
+/// Never reads more than the marker.
+pub fn remove_marker_of(folder: &Path, id: MatterId) -> Result<bool, Error> {
+    if json::read(folder)? != json::Found::Matter(id) {
+        return Ok(false);
+    }
+    json::remove(folder, true)?;
+    Ok(true)
 }

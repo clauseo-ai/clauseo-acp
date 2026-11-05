@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{CompactString, Count, Finite};
+use crate::{CompactString, Count, Finite, MatterPath};
 
 /// The agent's stable ACP v1 capabilities, plus Clauseo's steering capability.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,11 +291,26 @@ open_data_enum! {
     pub enum NoticeKind {
         /// The agent started a new session after earlier turns, so it does not remember them.
         ContextNotRestored = "context_not_restored",
+        /// Papers an undo removed are in the folder again: a sync client put them back
+        /// (`OneDrive` on macOS can, seconds later, as cloud-only placeholders). Clauseo did not
+        /// remove them again.
+        FilesCameBack = "files_came_back" {
+            /// The first of them, at most five, sorted by path bytes.
+            files: Vec<MatterPath>,
+            /// How many more came back beyond `files`.
+            more: u32,
+        },
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
     }
-    test mod notice_kind with [NoticeKind::ContextNotRestored];
+    test mod notice_kind with [
+        NoticeKind::ContextNotRestored,
+        NoticeKind::FilesCameBack {
+            files: vec![MatterPath::new("Drafts/memo.docx").unwrap()],
+            more: 2,
+        },
+    ];
 }
 
 open_unit_enum! {

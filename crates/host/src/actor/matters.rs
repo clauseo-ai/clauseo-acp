@@ -445,6 +445,7 @@ pub(super) fn on_matter_reply(
             if let Err(error) = committed {
                 let error = refusal(actor, error, &folder);
                 made::not_created(Some(minted), &error, "worker");
+                made::recheck_marker(actor, minted, folder);
                 actor.finish_command(id, Err(error));
             }
         }
@@ -487,6 +488,7 @@ pub(super) fn on_matter_reply(
         }
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
         MatterTag::Discard => made::discarded(actor, matter, &reply),
+        MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),
     }
 }
 

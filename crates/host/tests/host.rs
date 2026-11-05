@@ -38,6 +38,12 @@ mod browser;
 #[path = "host/browser_install.rs"]
 mod browser_install;
 #[cfg(test)]
+#[path = "host/came_back.rs"]
+mod came_back;
+#[cfg(test)]
+#[path = "host/came_back_marker.rs"]
+mod came_back_marker;
+#[cfg(test)]
 #[path = "host/cancel.rs"]
 mod cancel;
 #[cfg(test)]

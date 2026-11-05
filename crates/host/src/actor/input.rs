@@ -175,6 +175,8 @@ pub(crate) enum MatterTag {
     Papers(Reply<QueryResult>),
     /// The discard of a matter made on disk whose commit failed (`matters/made.rs`).
     Discard,
+    /// A check for papers an undo removed that came back (`turn/came_back.rs`).
+    CameBack(super::turn::CameBackCheck),
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.

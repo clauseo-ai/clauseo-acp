@@ -281,7 +281,36 @@ pub(crate) fn undo(
         kept,
         edited_since,
         resurrected,
+        deleted: sorted(deleted),
     })
+}
+
+/// `paths` sorted by path bytes, each once.
+fn sorted(mut paths: Vec<MatterPath>) -> Vec<MatterPath> {
+    paths.sort_by(|a, b| a.as_str().as_bytes().cmp(b.as_str().as_bytes()));
+    paths.dedup();
+    paths
+}
+
+/// See [`crate::Matter::still_gone`]: the paths of `paths` the folder holds now, by their
+/// exact names, sorted by path bytes. Stats only: nothing is opened, so nothing is downloaded,
+/// and a cloud-only placeholder is there like any file. A path whose stat or folder listing
+/// fails otherwise counts as not there.
+pub(crate) fn back_again(folder: &Path, paths: &[MatterPath]) -> Vec<MatterPath> {
+    let mut names = Names::default();
+    let mut back = Vec::new();
+    let mut failed = 0_usize;
+    for path in paths {
+        match names.metadata(folder, path) {
+            Ok(Some(_)) => back.push(path.clone()),
+            Ok(None) => {}
+            Err(_) => failed += 1,
+        }
+    }
+    if failed > 0 {
+        tracing::debug!(files = failed, "files whose stat failed counted as gone");
+    }
+    sorted(back)
 }
 
 /// Takes the `undo` checkpoint after `writeback::apply` deleted `deleted`, walking without the

@@ -3,8 +3,8 @@
 //! host notices with a kind, which it chains on last.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, ErrorCode, Notice, NoticeKind, NoticeLevel, PageVia, PageVisited,
-    SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PageVia,
+    PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{tool_call_id, turn_id};
@@ -56,6 +56,18 @@ pub(super) fn notices() -> Vec<DomainEvent> {
             level: NoticeLevel::Info,
             text: "Clauseo doesn't remember the earlier questions and answers.".to_owned(),
             kind: Some(NoticeKind::ContextNotRestored),
+        }
+        .into(),
+        Notice {
+            level: NoticeLevel::Info,
+            text: "2 papers came back after the undo. Clauseo didn't remove them again.".to_owned(),
+            kind: Some(NoticeKind::FilesCameBack {
+                files: vec![
+                    MatterPath::new("Drafts/memo.docx").unwrap(),
+                    MatterPath::new("notes.txt").unwrap(),
+                ],
+                more: 0,
+            }),
         }
         .into(),
     ]
