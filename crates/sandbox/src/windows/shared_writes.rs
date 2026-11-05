@@ -8,7 +8,9 @@
 //! listed here.
 //!
 //! The deny applies even though allows to the group don't: deny entries are matched against the
-//! token's normal groups, which the pool group is one of.
+//! token's normal groups, which the pool group is one of. Each grant is walked down after it is
+//! written, so what's already there inherits the deny; files with more than one link are skipped,
+//! as the walk does.
 //!
 //! Set-up (PR4) applies these with admin rights after it creates each pool user's profile, and
 //! uninstall removes them: profile, then account, then the entries (fix 5's order).
@@ -21,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use super::acl_plan::{Grant, Inherit, Rights, Sid};
 use super::admit::PathKind;
-use super::writer::{AclWriter, Added, ApplyFailure};
+use super::writer::{AclWriter, Added, ApplyFailure, Reach};
 
 #[cfg(test)]
 mod tests;
@@ -61,9 +63,9 @@ pub fn plan_shared_write_denies(group: &Sid, targets: &[PathBuf]) -> Vec<Grant> 
         .collect()
 }
 
-/// Writes each grant, in order. A target that doesn't exist is skipped and listed in
-/// [`SharedWrites::skipped`]. Any other failure removes the grants this call already wrote, last
-/// first, and returns the failure.
+/// Writes each grant, in order, and walks it down to what's there. A target that doesn't exist
+/// is skipped and listed in [`SharedWrites::skipped`]. Any other failure removes the grants this
+/// call already wrote, last first, and returns the failure.
 pub fn apply_shared_write_denies(
     writer: &mut impl AclWriter,
     grants: &[Grant],
@@ -78,17 +80,15 @@ pub fn apply_shared_write_denies(
             }
             Err(failure) => return Err(rollback(writer, &done.added, failure)),
         }
-        match writer.add(grant) {
-            Ok(Added::Written) => done.added.push(grant.clone()),
-            Ok(Added::AlreadyThere) => {}
-            Err(failure) => return Err(rollback(writer, &done.added, failure)),
+        if let Err(failure) = write_one(writer, grant, &mut done.added) {
+            return Err(rollback(writer, &done.added, failure));
         }
     }
     Ok(done)
 }
 
-/// Removes each grant whose target exists, in order. Every grant is tried; the first failure is
-/// returned.
+/// Removes each grant whose target exists, in order, and walks it down so what's there loses
+/// the inherited deny. Every grant is tried; the first failure is returned.
 pub fn remove_shared_write_denies(
     writer: &mut impl AclWriter,
     grants: &[Grant],
@@ -96,7 +96,7 @@ pub fn remove_shared_write_denies(
     let mut first_failure = None;
     for grant in grants {
         let result = match exists(grant.path()) {
-            Ok(true) => writer.remove(grant),
+            Ok(true) => unwrite_one(writer, grant),
             Ok(false) => Ok(()),
             Err(failure) => Err(failure),
         };
@@ -116,11 +116,35 @@ fn exists(path: &Path) -> Result<bool, ApplyFailure> {
     }
 }
 
-/// Removes `added`, last first, and gives back `failure`, the one that stopped the apply. A
-/// removal that fails here is not reported: the caller hears the first failure.
+/// Writes `grant`'s entry on its folder, then walks it down (the walk is what gives the children
+/// the inherited deny). A grant written here goes into `added` before the walk, so a failed walk
+/// rolls it back too; an entry that was there already doesn't.
+fn write_one(
+    writer: &mut impl AclWriter,
+    grant: &Grant,
+    added: &mut Vec<Grant>,
+) -> Result<(), ApplyFailure> {
+    match writer.add(grant)? {
+        Added::Written => added.push(grant.clone()),
+        Added::AlreadyThere => {}
+    }
+    writer.propagate(grant.path(), Reach::Tree, None)?;
+    Ok(())
+}
+
+/// Removes `grant`'s entry on its folder, then walks it down so the children lose the inherited
+/// deny.
+fn unwrite_one(writer: &mut impl AclWriter, grant: &Grant) -> Result<(), ApplyFailure> {
+    writer.remove(grant)?;
+    writer.propagate(grant.path(), Reach::Tree, None)?;
+    Ok(())
+}
+
+/// Undoes `added`, last first, and gives back `failure`, the one that stopped the apply. An undo
+/// that fails here is not reported: the caller hears the first failure.
 fn rollback(writer: &mut impl AclWriter, added: &[Grant], failure: ApplyFailure) -> ApplyFailure {
     for grant in added.iter().rev() {
-        let _unreported: Result<(), ApplyFailure> = writer.remove(grant);
+        let _unreported: Result<(), ApplyFailure> = unwrite_one(writer, grant);
     }
     failure
 }
