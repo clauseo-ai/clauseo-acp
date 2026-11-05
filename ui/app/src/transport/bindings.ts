@@ -92,6 +92,14 @@ export const commands = {
 	 *  starts, so it waits for the host's start, whatever its outcome; it never fails.
 	 */
 	countUi: (event: UiCount) => typedError<null, HostError>(__TAURI_INVOKE("count_ui", { event })),
+	/**
+	 *  Runs an install or sign-in command (0048): refused with `transport.unauthorized`, before
+	 *  anything runs, when the window may not send it (`main` the first-run and sign-in actions and
+	 *  a first key, the settings window every action). A `StartSignIn` for a sign-in already
+	 *  running answers `Done` and joins it. What changes comes on the window's channel as `setup`
+	 *  messages, after `subscribe_app`. Never waits for the host.
+	 */
+	setup: (command: SetupCommand) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("setup", { command })),
 };
 
 /* Constants */
@@ -1295,6 +1303,8 @@ export type ErrorCode =
 "update.failed" | 
 /** The change breaks a settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped variable or an address that is not https; the message names the key, never the value, and nothing was changed. */
 "settings.refused" | 
+/** A key is already stored for this agent, so this window may not replace it; it is changed or removed in Settings. No key text is in the message. */
+"settings.key_stored" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -3746,6 +3756,11 @@ export type SetupEvent =
 	state: SignIn,
 } }) & { agent_install_progress?: never; setup_info?: never };
 
+/**  `{"setup": <SetupEvent>}`. */
+export type SetupMessage = {
+	setup: SetupEvent,
+};
+
 /**  Where an agent's sign-in is: `agents`' `SigninState`, with how the agent is signed in. */
 export type SignIn = 
 /**  Not signed in. */
@@ -4030,7 +4045,9 @@ HostEvent |
 /**  A piece of an event too long for one message. */
 FragmentMessage | 
 /**  A stream the bridge could not restart. */
-StreamFailedMessage;
+StreamFailedMessage | 
+/**  An install or sign-in change (0048). */
+SetupMessage;
 
 /**
  *  The parameters of `subscribe`: the tail after `after`, or a `Reset` when `after` is `None`,
