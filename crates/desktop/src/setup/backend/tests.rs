@@ -3,6 +3,7 @@
 //! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, no key in a log, and the
 //! two launchers; installs, keys, endpoints, sign-in bars and sign-in races in `tests/`.
 
+mod counts;
 mod endpoint;
 mod fakes;
 mod keys;
@@ -435,6 +436,11 @@ fn the_sign_in_launcher_clears_the_environment_and_the_install_launcher_does_not
     assert!(install.contains("clear_env: false"), "{install}");
     assert!(signin.contains("clear_env: true"), "{signin}");
     assert!(signin.contains("/Users/lawyer"), "{signin}");
+    // Both end with the app on Linux (#386); elsewhere the option has no field to show.
+    #[cfg(target_os = "linux")]
+    for shown in [&install, &signin] {
+        assert!(shown.contains("end_with_parent: true"), "{shown}");
+    }
 }
 
 #[test]

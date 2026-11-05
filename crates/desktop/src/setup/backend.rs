@@ -23,6 +23,7 @@
 //!   and a key or an endpoint set while the login is reused run 0048's leave order first. A key
 //!   or an endpoint change holds the agent's limits reads while it is written, then restarts
 //!   the agents and has the limits read the new login.
+//! - **Counts and quit** (piece C): `count.rs` counts run ends; [`SetupBackend::shutdown`] on quit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -50,6 +51,8 @@ use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::{Opener, open_url_unconfirmed};
 
+pub(crate) use self::count::SetupCounts;
+use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 use self::parts::{FirstRun, checked_endpoint, plan_method};
 pub(crate) use self::seam::SetupAgents;
@@ -88,6 +91,8 @@ pub(crate) struct AgentsBackend {
     pub(crate) signin_gate: Mutex<()>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
+    /// Where the pump's usage counts go (`count.rs`).
+    pub(crate) counts: Arc<dyn SetupCounts>,
 }
 
 impl SetupBackend for AgentsBackend {
@@ -108,6 +113,10 @@ impl SetupBackend for AgentsBackend {
         self.compose
             .sign_in_bar(agent)
             .map(|bar| sign_in_barred(agent, bar))
+    }
+
+    fn shutdown(&self, wait: std::time::Duration) -> bool {
+        self.agents.shutdown(wait)
     }
 }
 
@@ -462,9 +471,13 @@ impl AgentsBackend {
         let mut source = std::pin::pin!(source);
         let mut first_run = FirstRun::new(self.known.keys().cloned());
         let mut checked = BTreeSet::new();
+        let mut tally = Tally::default();
         while let Some(event) = source.next().await {
             match event {
                 AgentsEvent::Install { agent, state } => {
+                    let now = self.compose.monotonic();
+                    let tries = || self.agents.install_tries(&agent);
+                    tally.install(&*self.counts, &agent, &state, now, tries);
                     self.install_event(&agent, &state, &mut checked).await;
                     if first_run.saw(&agent, &state)
                         && let Ok(first) = AgentId::new(FIRST_RUN_AGENT)
@@ -475,6 +488,7 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::Signin { agent, state } => {
+                    tally.signin(&*self.counts, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
                 }
                 AgentsEvent::OpenUrl { agent, url } => {
@@ -578,6 +592,7 @@ fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
 }
 
+mod count;
 mod entry;
 mod parts;
 mod seam;

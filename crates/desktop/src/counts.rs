@@ -20,6 +20,7 @@
 //! - `time_open`: the foreground time of the `main` and `settings` windows, through
 //!   `Counts::set_foreground` ([`on_window_event`]).
 //! - `count_ui`'s events ([`UiCount`]): only what the webview alone sees.
+//! - The setup pump's `agent_install` and `sign_in` ([`AppCounts`], `CountsState::bump`).
 //! - The upload ([`upload`]): HTTPS only, to the endpoint of the build.
 //!
 //! `app_opened` (`cold`) is the host's: it counts it once it has started (`actor/counting.rs`),
@@ -34,12 +35,12 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use clauseo_counts::schema::Time;
+use clauseo_counts::schema::{Event, Time};
 use clauseo_counts::{About, Counts, Upload, send_due};
 use clauseo_protocol::{HostQuery, Principal, QueryResult};
 use clauseo_settings::{Effective, Locations, Origin, WarningKind};
 use tauri::async_runtime::JoinHandle;
-use tauri::{Manager as _, Runtime, WindowEvent};
+use tauri::{AppHandle, Manager as _, Runtime, WindowEvent};
 
 use crate::host_start::HostCell;
 
@@ -110,6 +111,14 @@ impl CountsState {
         counts.bump(event.event());
     }
 
+    /// Counts one of the app's own events (the setup pump's, `setup/backend/count.rs`). Before
+    /// the counts open, or without counts, nothing.
+    pub(crate) fn bump(&self, event: Event) {
+        if let Some(counts) = self.counts.get() {
+            counts.bump(event);
+        }
+    }
+
     /// Starts the tick task with `spawn`, unless the exit has stopped it already.
     pub(crate) fn run_ticker(&self, spawn: impl FnOnce() -> JoinHandle<()>) {
         let mut ticker = self.ticker.lock().unwrap_or_else(PoisonError::into_inner);
@@ -137,6 +146,18 @@ impl CountsState {
             && let Err(err) = counts.tick(now())
         {
             tracing::debug!(kind = %err.kind(), "the usage counts were not all saved at exit");
+        }
+    }
+}
+
+/// The app's counts as the setup pump sees them: `app`'s [`CountsState`], looked up per count
+/// (nothing when it is not managed or the counts are absent).
+pub(crate) struct AppCounts<R: Runtime>(pub(crate) AppHandle<R>);
+
+impl<R: Runtime> crate::setup::SetupCounts for AppCounts<R> {
+    fn bump(&self, event: Event) {
+        if let Some(state) = self.0.try_state::<CountsState>() {
+            state.bump(event);
         }
     }
 }

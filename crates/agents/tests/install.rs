@@ -1,7 +1,8 @@
 //! `Agents` end to end, through its public API alone: a fixture snapshot of two agents made of
 //! tiny tarballs, the local test registry under `registry.test`, the real Node and npm from
 //! `PATH` (a test fails, rather than skips, when there is none), a `ManualTimer` the test
-//! fires, and a clock that moves 250 ms per reading. No test sleeps or reaches the network.
+//! fires, and a clock that moves 250 ms per reading. No test reaches the network, and none sleeps
+//! but `quit.rs`'s, which poll real processes for their pids and their end.
 //!
 //! A test crate root resolves modules beside itself, so each submodule names its path. Each
 //! carries `#[cfg(test)]` so clippy treats its helpers as test code.
@@ -33,3 +34,7 @@ mod firm;
 #[cfg(test)]
 #[path = "install/npm_file.rs"]
 mod npm_file;
+
+#[cfg(test)]
+#[path = "install/quit.rs"]
+mod quit;

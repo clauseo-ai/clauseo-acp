@@ -291,7 +291,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
         if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
-            self.ready(installed);
+            self.ready(installed, 0);
             return;
         }
         let user = search.found;
@@ -303,7 +303,7 @@ impl<T: Timer + Send + Sync> Job<T> {
             run.attempts += 1;
             let err = match self.attempt(user.as_ref(), &mut run).await {
                 Ok(installed) => {
-                    self.ready(installed);
+                    self.ready(installed, run.tries + 1);
                     return;
                 }
                 Err(err) => err,
@@ -414,8 +414,10 @@ impl<T: Timer + Send + Sync> Job<T> {
         self.shared.emit_job(&self.ticket, state, None, ends)
     }
 
-    fn ready(&self, installed: Installed) {
+    /// Sends the job's last state, `Ready`, after `tries` tries.
+    fn ready(&self, installed: Installed, tries: u32) {
         self.release_lock();
+        self.shared.set_tries(&self.ticket.agent, tries);
         let version = installed.version.clone();
         self.shared.emit_job(
             &self.ticket,
@@ -431,6 +433,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         let mut log = run.log.clone();
         push_error(&mut log, err);
         finish_log(&mut log, run, kind);
+        self.shared.set_tries(&self.ticket.agent, run.tries);
         let (need_mb, free_mb) = if kind == FailureKind::DiskFull {
             let node_needed = user.is_none() && !runtime_ready(&self.config);
             let (need, free) = self.space(node_needed);

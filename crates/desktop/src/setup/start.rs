@@ -39,7 +39,7 @@ use futures::StreamExt as _;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
 
-use super::backend::{AgentInfo, AgentsBackend};
+use super::backend::{AgentInfo, AgentsBackend, SetupCounts};
 use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
@@ -115,15 +115,24 @@ impl SetupBackend for BackendCell {
     fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
         self.backend.get()?.sign_in_refused(agent)
     }
+
+    /// The backend's, once the cell is filled; before that `Agents` has not started.
+    fn shutdown(&self, wait: std::time::Duration) -> bool {
+        self.backend
+            .get()
+            .is_none_or(|backend| backend.shutdown(wait))
+    }
 }
 
 /// The two launchers `Agents` starts with, each made by `make` from its options: the install
 /// launcher's (the environment inherited) and the sign-in launcher's (the host's: the
 /// environment cleared, `home` shown as `~`).
+/// Both end with the app (`SpawnOptions::end_with_parent`, #386): every child of theirs
+/// starts on a job thread that outlives it.
 pub(crate) fn launchers<L>(home: Option<PathBuf>, make: impl Fn(SpawnOptions) -> L) -> (L, L) {
     (
-        make(SpawnOptions::new()),
-        make(crate::host_spawn_options(home)),
+        make(SpawnOptions::new().end_with_parent()),
+        make(crate::host_spawn_options(home).end_with_parent()),
     )
 }
 
@@ -197,6 +206,8 @@ pub(crate) struct SetupParts {
     pub(crate) opener: Arc<dyn Opener>,
     /// The lawyer's home, shown as `~` in a sign-in child's stderr tail.
     pub(crate) home: Option<PathBuf>,
+    /// Where the pump's usage counts go: the app's `CountsState`.
+    pub(crate) counts: Arc<dyn SetupCounts>,
 }
 
 /// What the host's start thread builds for setup before the host starts (piece B).
@@ -273,6 +284,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         known: read.known,
         signin_gate: Mutex::new(()),
         wiring,
+        counts: parts.counts,
     });
     for agent in backend.known.keys() {
         backend.set_firm_policy(agent, firm_policy.contains(agent));

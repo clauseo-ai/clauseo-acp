@@ -1,6 +1,8 @@
 //! The seam between the setup backend and S18's `Agents`: [`SetupAgents`], which the app's
 //! `Agents` implements by forwarding and the tests implement by recording.
 
+use std::time::Duration;
+
 use clauseo_agents::{
     Agents, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
 };
@@ -39,6 +41,10 @@ pub(crate) trait SetupAgents: Send + Sync {
     /// `Agents::stop_using_login`: no-reuse (unless `why` is a reason reuse stopped) and the
     /// home's link removed, in one job, which reports `SignedOut`.
     fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError>;
+    /// `Agents::install_tries`.
+    fn install_tries(&self, agent: &AgentId) -> Option<u32>;
+    /// `Agents::shutdown`.
+    fn shutdown(&self, wait: Duration) -> bool;
 }
 
 impl SetupAgents for Agents {
@@ -86,5 +92,11 @@ impl SetupAgents for Agents {
     }
     fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError> {
         Agents::stop_using_login(self, agent, why)
+    }
+    fn install_tries(&self, agent: &AgentId) -> Option<u32> {
+        Agents::install_tries(self, agent)
+    }
+    fn shutdown(&self, wait: Duration) -> bool {
+        Agents::shutdown(self, wait)
     }
 }

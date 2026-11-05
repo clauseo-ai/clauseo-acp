@@ -10,10 +10,17 @@
 //! Sign-in jobs (`signin`) run beside the installs, one per agent, on the model in
 //! [`crate::signin::job`]: the calls reserve the agent's job slot, the worker starts the job.
 //! Every install `Ready` kicks the agent's queued sign-in, if any (`SigninHub::install_ready`).
+//!
+//! Quitting (#386): the job threads are counted as they start and end, and
+//! [`Agents::shutdown`] cancels every job and waits, within a bound, for the count to reach 0.
+//! A job's thread drops its child's handle as it sees the cancel, which kills the child's tree
+//! (npm leads its own process group), so an ended thread has left no child. Once shut down or
+//! dropped, no job starts.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
@@ -53,6 +60,10 @@ enum Command {
 #[derive(Debug)]
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
+    /// How many job threads run, installs and sign-ins; `job_ended` wakes `shutdown` as one
+    /// ends.
+    jobs: Mutex<usize>,
+    job_ended: Condvar,
     events: async_channel::Sender<AgentsEvent>,
     /// Every agent's sign-in state and running sign-in job.
     pub(crate) signin: SigninHub,
@@ -65,6 +76,10 @@ struct Inner {
     /// The job that may emit now, if any.
     current: Option<Ticket>,
     next_job: u64,
+    /// Each agent's tries in its last install job that ended, the last one included.
+    tries: BTreeMap<AgentId, u32>,
+    /// Set by `shutdown` or the drop: no job starts after it.
+    closed: bool,
 }
 
 /// One job's identity and pause signal.
@@ -103,6 +118,8 @@ impl Agents {
         let (events, receiver) = async_channel::unbounded();
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner::default()),
+            jobs: Mutex::new(0),
+            job_ended: Condvar::new(),
             signin: SigninHub::new(&config, events.clone()),
             events,
         });
@@ -151,6 +168,34 @@ impl Agents {
     /// `agent`'s finished install, when it is `Ready`.
     pub fn installed(&self, agent: &AgentId) -> Option<Installed> {
         self.shared.installed(agent)
+    }
+
+    /// How many tries `agent`'s last install job that ended made, the one that ended it
+    /// included: set as it sends `Ready` (0 when it found the agent installed already) or
+    /// `Failed`. `None` before any job ended.
+    pub fn install_tries(&self, agent: &AgentId) -> Option<u32> {
+        self.shared.lock().tries.get(agent).copied()
+    }
+
+    /// Stops everything for the app's quit: no job starts from now on, every install and
+    /// sign-in job is cancelled (each kills its child's tree as it sees it), then their threads
+    /// are waited for, at most `wait`. Returns whether every one ended in time; a thread still
+    /// running is left to end by itself. Blocks, so it runs off any UI thread.
+    pub fn shutdown(&self, wait: Duration) -> bool {
+        self.stop();
+        self.shared.wait_for_jobs(wait)
+    }
+
+    /// Closes the worker to new jobs and cancels every running one, install and sign-ins.
+    fn stop(&self) {
+        {
+            let mut inner = self.shared.lock();
+            inner.closed = true;
+            if let Some(running) = inner.current.take() {
+                running.cancel.cancel();
+            }
+        }
+        self.shared.signin.stop_all();
     }
 
     /// Tests only: ends `agent`'s install as an install job would, through the same emit,
@@ -318,13 +363,11 @@ impl Agents {
 }
 
 impl Drop for Agents {
-    /// Stops the running jobs, install and sign-ins; the worker ends once its commands' sender
-    /// is gone.
+    /// Stops the running jobs, install and sign-ins, as `shutdown` does but without waiting:
+    /// each job's thread kills its child's tree as it sees the cancel. The worker ends once its
+    /// commands' sender is gone.
     fn drop(&mut self) {
-        if let Some(running) = self.shared.lock().current.take() {
-            running.cancel.cancel();
-        }
-        self.shared.signin.stop_all();
+        self.stop();
     }
 }
 
@@ -477,6 +520,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
     fn start_job(&self, agent: &AgentId) {
         let ticket = {
             let mut inner = self.shared.lock();
+            if inner.closed {
+                return;
+            }
             inner.stop_current(&self.shared.events, Some(agent));
             inner.next_job += 1;
             let ticket = Ticket {
@@ -497,9 +543,11 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             system_proxy: self.system_proxy.clone(),
             data_lock: Mutex::new(None),
         };
-        let spawned = std::thread::Builder::new()
-            .name(format!("clauseo-install-{agent}"))
-            .spawn(move || install::run(&job));
+        let spawned = self
+            .shared
+            .spawn_job(format!("clauseo-install-{agent}"), move || {
+                install::run(&job);
+            });
         if let Err(err) = spawned {
             let mut log = InstallLog::new(agent);
             let detail = format!("the install could not start: {err}");

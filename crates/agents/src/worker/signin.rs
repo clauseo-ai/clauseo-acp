@@ -494,9 +494,11 @@ pub(super) fn start_job<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, st
         shared: Arc::clone(&worker.shared),
         paste,
     };
-    let spawned = std::thread::Builder::new()
-        .name(format!("clauseo-signin-{}", ticket.agent))
-        .spawn(move || job::run(job, kick));
+    let spawned = worker
+        .shared
+        .spawn_job(format!("clauseo-signin-{}", ticket.agent), move || {
+            job::run(job, kick);
+        });
     if spawned.is_err() {
         fail(&ticket);
     }
