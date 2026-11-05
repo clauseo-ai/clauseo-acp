@@ -26,7 +26,7 @@ use crate::windows::writer::{AclWriter, ApplyFailure, Reach, Strict, Walked};
 pub(super) const MOST_SET_ASIDE: usize = 64;
 
 /// The launch's own kinds of folder: what its agent writes.
-pub(super) const OWN_KINDS: [PathKind; 3] = [PathKind::Matter, PathKind::State, PathKind::Notes];
+pub(crate) const OWN_KINDS: [PathKind; 3] = [PathKind::Matter, PathKind::State, PathKind::Notes];
 
 /// Why a step refused: the kind of path, the failure, and the child it names, if any.
 #[derive(Debug)]
@@ -137,7 +137,7 @@ pub(super) fn own_roots(plan: &AdmittedPlan) -> Vec<OwnRoot> {
 
 /// What a strict walk of `plan`'s trees holds children to: the SIDs its denies name, and every
 /// pool SID it names (the owners whose children are repaired).
-pub(super) fn strict_for(plan: &AdmittedPlan) -> Strict {
+pub(crate) fn strict_for(plan: &AdmittedPlan) -> Strict {
     let items: Vec<(Rights, &Sid)> = plan
         .grants()
         .iter()
@@ -147,7 +147,7 @@ pub(super) fn strict_for(plan: &AdmittedPlan) -> Strict {
 }
 
 /// [`strict_for`] of a matter's ledger entries.
-pub(super) fn strict_of(entries: &[Entry]) -> Strict {
+pub(crate) fn strict_of(entries: &[Entry]) -> Strict {
     let items: Vec<(Rights, &Sid)> = entries.iter().map(|e| (e.rights, &e.sid)).collect();
     strict_from(&items)
 }
@@ -178,21 +178,30 @@ pub(super) struct Walk {
 }
 
 /// The walks `plan` needs, shallowest first: each path with an inheritable grant `unwalked`
-/// names (this run wrote its entry, or its entry was still pending), and the launch's own
-/// matter, state and notes folders always. A tree inside another walked tree is left to that
-/// walk. A tree is strict when it is one of the launch's own folders or carries a deny.
-pub(super) fn walks(plan: &AdmittedPlan, unwalked: impl Fn(usize) -> bool) -> Vec<Walk> {
+/// names (this run wrote its entry, or its entry was still pending), the launch's own matter,
+/// state and notes folders when `own` (always, unless the launch check let them go: S15
+/// `PR3d`), and `extra` (the check's targeted walks). A walk inside another walked tree is
+/// left to that walk. A tree is strict when it is one of the launch's own folders or carries a
+/// deny.
+pub(super) fn walks(
+    plan: &AdmittedPlan,
+    unwalked: impl Fn(usize) -> bool,
+    own: bool,
+    extra: &[Walk],
+) -> Vec<Walk> {
     let mut found: BTreeMap<(usize, PathBuf), Walk> = BTreeMap::new();
     for (i, (grant, owner)) in plan.grants().iter().zip(plan.owners()).enumerate() {
         if grant.inherit() == Inherit::ThisOnly {
             continue;
         }
-        let own = *owner == plan.matter()
+        let is_own = *owner == plan.matter()
             && grant.rights() == Rights::Modify
             && OWN_KINDS.contains(&grant.kind());
-        if !own && !unwalked(i) {
+        let always = is_own && own;
+        if !always && !unwalked(i) {
             continue;
         }
+        let own = is_own;
         let reach = reach_of(grant.inherit());
         let key = (grant.path().components().count(), grant.path().to_owned());
         let walk = found.entry(key).or_insert_with(|| Walk {
@@ -202,9 +211,13 @@ pub(super) fn walks(plan: &AdmittedPlan, unwalked: impl Fn(usize) -> bool) -> Ve
             kind: grant.kind(),
         });
         walk.strict |= own || grant.rights().is_deny();
-        if reach == Reach::Tree {
-            walk.reach = Reach::Tree;
-        }
+        walk.reach = wider(walk.reach, reach);
+    }
+    for more in extra {
+        let key = (more.root.components().count(), more.root.clone());
+        let walk = found.entry(key).or_insert_with(|| more.clone());
+        walk.strict |= more.strict;
+        walk.reach = wider(walk.reach, more.reach);
     }
     let all: Vec<Walk> = found.into_values().collect();
     all.iter()
@@ -218,6 +231,16 @@ pub(super) fn walks(plan: &AdmittedPlan, unwalked: impl Fn(usize) -> bool) -> Ve
         })
         .cloned()
         .collect()
+}
+
+/// The farther of two reaches: the whole tree, then every child, then the files alone.
+fn wider(a: Reach, b: Reach) -> Reach {
+    let rank = |r: Reach| match r {
+        Reach::FilesOnly => 0,
+        Reach::Children => 1,
+        Reach::Tree => 2,
+    };
+    if rank(b) > rank(a) { b } else { a }
 }
 
 /// How far an entry's inheritance reaches.

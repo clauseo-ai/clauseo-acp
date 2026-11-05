@@ -13,6 +13,7 @@ use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
 
 mod crash;
+mod fast;
 mod links;
 mod nested;
 #[cfg(unix)]

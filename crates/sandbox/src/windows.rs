@@ -33,6 +33,11 @@
 //!   each entry in a manifest ([`SetAsideEntry`]) that `list_set_aside` shows and
 //!   `restore_set_aside` undoes. A pass returns [`SetAsideChecked`]: what moved, and the
 //!   folders its scan couldn't open or list.
+//! - [`clean_close`]: fast later launches (S15 `PR3d`). A clean session end records the trees'
+//!   file IDs and the change journal's cursor in `<data_dir>\sandbox\clean\<matter>.bin`; the
+//!   next launch reads the journal from it, through `NtfsJournal` on Windows, and skips the
+//!   own-tree walks and the set-aside scan when nothing in the trees changed, walks only the
+//!   changed folders when a few did, and walks in full on any doubt.
 //!
 //! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
 //! no Windows call, so they build and are tested on every OS; the folder check, the registry and
@@ -88,7 +93,9 @@ pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use apply::fence_registered;
-pub use apply::{Applied, Surroundings, apply, forget_matter, reconcile, repair_after_session};
+pub use apply::{
+    Applied, Surroundings, apply, apply_checked, forget_matter, reconcile, repair_after_session,
+};
 #[cfg(windows)]
 pub use clean_close::NtfsJournal;
 #[cfg(windows)]
@@ -106,7 +113,8 @@ pub use set_aside::{
 };
 #[cfg(windows)]
 pub use set_aside::{
-    after_session, before_launch, list_set_aside, restore_set_aside, set_aside_path,
+    after_session, before_launch, before_launch_checked, list_set_aside, restore_set_aside,
+    set_aside_path,
 };
 pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 

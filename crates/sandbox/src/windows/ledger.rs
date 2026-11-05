@@ -66,8 +66,12 @@ mod recorded;
 mod settle;
 
 use file::{Known, Slot, State, Trust, invalid, read_state};
+#[cfg(test)]
+pub(crate) use held::ByPath;
+#[cfg(not(test))]
+use held::ByPath;
+use held::Held;
 pub(crate) use held::Shares;
-use held::{ByPath, Held};
 pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
 pub use owed::HandbackOwed;
 pub use recorded::RecordedFile;

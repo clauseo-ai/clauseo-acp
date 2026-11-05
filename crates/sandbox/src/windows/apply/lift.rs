@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use super::Surroundings;
 use super::back::take_back;
 #[cfg(any(windows, test, feature = "test-support"))]
-use super::run_plan;
+use super::{OwnWalks, run_plan};
 use crate::windows::acl_plan::{AdmittedPlan, Rights, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Entry, Ledger, Take};
@@ -113,7 +113,7 @@ fn replace(
     };
     let mut sub =
         AdmittedPlan::walk_down_denies(deny.matter, &deny.sid, &set.siblings, &set.levels);
-    match run_plan(ledger, &mut sub, acl, around) {
+    match run_plan(ledger, &mut sub, acl, around, &OwnWalks::All) {
         Ok(_) => true,
         Err(error) => {
             tracing::warn!(%error, "the walk-down set wasn't applied; the deny stays");

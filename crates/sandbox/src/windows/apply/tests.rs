@@ -15,6 +15,7 @@ use crate::windows::test_world::{
 };
 use crate::windows::writer::Label;
 
+mod checked;
 mod fake;
 mod review;
 mod round2;

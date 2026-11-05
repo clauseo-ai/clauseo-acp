@@ -152,6 +152,9 @@ crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
 # play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs/volume.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/ntfs_timing.rs later_launch clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs the_next_walk_reaches_a_file_moved_in_since clippy::disallowed_methods
 crates/sandbox/src/windows/acl_bytes.rs SACL_AUTO_INHERITED dead_code
 crates/sandbox/src/windows/acl_bytes.rs empty_acl dead_code
