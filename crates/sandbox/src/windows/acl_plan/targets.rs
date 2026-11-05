@@ -81,10 +81,7 @@ pub(super) fn check_target(
                 | PathKind::Sibling
                 | PathKind::ParentFiles => false,
             },
-            Rights::DenyWrite
-            | Rights::DenyReadWrite
-            | Rights::DenyRead
-            | Rights::DenyChangePermissions => true,
+            Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead => true,
         }
     };
     (!allowed).then_some(FolderRefusal::OverlapsDataFolder)

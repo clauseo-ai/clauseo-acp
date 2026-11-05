@@ -67,10 +67,6 @@ pub struct Subjects {
     pub pool_group: Sid,
 }
 
-/// `OWNER RIGHTS`, `S-1-3-4`: an allow for it replaces the rights a file's owner gets
-/// implicitly (`READ_CONTROL` and `WRITE_DAC`).
-pub const OWNER_RIGHTS_SID: &str = "S-1-3-4";
-
 /// The Low mandatory level, `S-1-16-4096` (`LW`): the subject of a [`Rights::LowLabel`] item.
 pub const LOW_LABEL_SID: &str = "S-1-16-4096";
 
@@ -99,10 +95,6 @@ pub enum Rights {
     /// Not an access entry: the Low mandatory label `S:(ML;OICI;NW;;;LW)` (mask `0x1`,
     /// no-write-up), set with `LABEL_SECURITY_INFORMATION`; its subject is [`LOW_LABEL_SID`].
     LowLabel,
-    /// Deny changing permissions and owner (`WRITE_DAC | WRITE_OWNER`, `0xc0000`): a file the
-    /// agent makes under a folder with an inheritable `CREATOR OWNER` allow (such as `C:\`'s
-    /// full control) would otherwise give the agent `WRITE_DAC` on it.
-    DenyChangePermissions,
 }
 
 impl Rights {
@@ -116,7 +108,6 @@ impl Rights {
             Rights::DenyReadWrite => DENY_WRITE | DENY_READ,
             Rights::DenyRead => DENY_READ,
             Rights::LowLabel => 0x1,
-            Rights::DenyChangePermissions => 0x000c_0000,
         }
     }
 
@@ -124,10 +115,7 @@ impl Rights {
     pub fn is_deny(self) -> bool {
         matches!(
             self,
-            Rights::DenyWrite
-                | Rights::DenyReadWrite
-                | Rights::DenyRead
-                | Rights::DenyChangePermissions
+            Rights::DenyWrite | Rights::DenyReadWrite | Rights::DenyRead
         )
     }
 
@@ -363,7 +351,6 @@ pub fn plan(
             plan.allow(path, Rights::ReadAndExecute, Inherit::Tree, kind);
         }
     }
-    plan.owner_rights(policy, &own)?;
     plan.labels(policy, &own)?;
     plan.read_only(policy);
     let mut pool = vec![pool.clone()];
@@ -462,30 +449,6 @@ impl Plan<'_> {
         if let Some(link) = policy.credential_link() {
             let kind = PathKind::CredentialLink;
             self.push(link, low, Rights::LowLabel, Inherit::ThisOnly, kind);
-        }
-        Ok(())
-    }
-
-    /// What an agent owns, it may not re-permission. On the matter, state and notes folders, an
-    /// inherited allow for `OWNER RIGHTS` with the pool user's own `Modify`, which replaces the
-    /// owner's implicit `READ_CONTROL | WRITE_DAC`; on the Claude store folder, the same for the
-    /// files in it (the rights the pool user has on the store's files). With each, the pool
-    /// user's inherited deny of `WRITE_DAC | WRITE_OWNER`, which a `CREATOR OWNER` allow
-    /// inherited from above can't beat (the deny comes first in the copy a new file gets). The
-    /// lawyer keeps full control of the lawyer's own files: their allows for the lawyer's SID
-    /// (explicit or inherited) still apply; only the implicit owner rights are replaced.
-    fn owner_rights(&mut self, policy: &Policy, own: &[(&Path, PathKind)]) -> Result<(), Error> {
-        let owner = Sid::parse(OWNER_RIGHTS_SID).map_err(|e| Error::Policy(e.to_string()))?;
-        let pool = self.subjects.pool_user.clone();
-        let mut targets: Vec<(&Path, PathKind, Inherit)> =
-            own.iter().map(|&(p, k)| (p, k, Inherit::Tree)).collect();
-        if let Some(store) = policy.claude_store() {
-            targets.push((store.dir(), PathKind::ClaudeStore, Inherit::FilesInFolder));
-        }
-        for (path, kind, inherit) in targets {
-            self.push(path, owner.clone(), Rights::Modify, inherit, kind);
-            let deny = Rights::DenyChangePermissions;
-            self.push(path, pool.clone(), deny, Inherit::Tree, kind);
         }
         Ok(())
     }

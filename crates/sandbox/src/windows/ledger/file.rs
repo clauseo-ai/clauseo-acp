@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{Entry, LEDGER_VERSION};
-use crate::windows::acl_plan::{LOW_LABEL_SID, OWNER_RIGHTS_SID};
+use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::sids::{Reserved, Sid};
 
 /// Which SIDs a ledger entry may name to be acted on.
@@ -25,8 +25,6 @@ impl Trust {
     pub(super) fn admits(&self, entry: &Entry) -> bool {
         let sid_ok = if entry.rights.is_label() {
             entry.sid.as_str() == LOW_LABEL_SID
-        } else if entry.sid.as_str() == OWNER_RIGHTS_SID {
-            entry.rights.is_allow()
         } else {
             self.trusted.contains(&entry.sid)
                 || (entry.sid.is_matter_form() && self.reserved.admits(&entry.sid))
