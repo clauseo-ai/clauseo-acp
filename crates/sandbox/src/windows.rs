@@ -45,6 +45,7 @@ mod acl_bytes;
 pub mod acl_plan;
 pub mod admit;
 pub mod apply;
+pub mod clean_close;
 #[cfg(windows)]
 mod detect;
 pub mod fence;

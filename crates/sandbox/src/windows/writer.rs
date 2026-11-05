@@ -17,6 +17,9 @@ pub enum Reach {
     /// Only the files directly in the folder
     /// ([`Inherit::FilesInFolder`](super::acl_plan::Inherit::FilesInFolder)).
     FilesOnly,
+    /// Every file and folder directly in the folder, each worked out from it, and nothing
+    /// deeper: a later launch's targeted walk of a folder whose names changed (S15 `PR3d`).
+    Children,
 }
 
 /// What a write did.
