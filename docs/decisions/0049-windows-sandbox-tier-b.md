@@ -278,6 +278,10 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   propagation drops them, at every walk that works such a child out, fence walks included: an
   entry an old tool (`cacls`, `xcopy /O`) flagged inherited is lost, isn't recorded, and isn't
   restored by forget (accepted).
+- **Under the `C:\m` layout the lawyer has no `FILE_DELETE_CHILD`**, so a fence walk can't set
+  aside a child the lawyer can't open in another matter's tree, and one matter's agent can still
+  block other matters' launches until its own exit repair or next launch; PR4's elevated clean-up
+  is the recovery (accepted).
 - **A launch killed mid-walk** ends with its own pool user's allow and label entries `applied`
   (`reconcile` finds them present), while its fence and sibling denies stay `pending` (N4), so
   the next launch walks those deny trees strictly and still refuses what it would have refused.
