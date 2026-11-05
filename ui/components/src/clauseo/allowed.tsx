@@ -61,7 +61,11 @@ export function WorkspaceLine({
         ) : (
           <NotProtectedMark
             {...(unprotected.why === "setup"
-              ? { meaning: w.v("Clauseo asks before each change in this matter.") }
+              ? {
+                  meaning: w.v(
+                    "Clauseo can read any file on this computer and asks before each change.",
+                  ),
+                }
               : {})}
           />
         )}
@@ -163,11 +167,13 @@ export function AllowedList({
       <BasePopover.Title render={<Heading level={2} className="allows-title" />}>
         {w.v("What this matter allows")}
       </BasePopover.Title>
-      <p className="allows-sub">
-        <Say>
-          {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
-        </Say>
-      </p>
+      {unprotected === null && (
+        <p className="allows-sub">
+          <Say>
+            {w.v("Clauseo works inside this matter's folder and asks before going beyond it.")}
+          </Say>
+        </p>
+      )}
       <section className="allows-group">
         <Heading level={3} className="allows-head">
           {w.v("Always")}
@@ -228,7 +234,7 @@ export function AllowedList({
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(
-                      "Couldn't be set up on this computer. Clauseo asks before each change in this matter.",
+                      "Couldn't be set up on this computer. Clauseo can read any file on it and asks before each change.",
                     )}
             </Say>
           </span>

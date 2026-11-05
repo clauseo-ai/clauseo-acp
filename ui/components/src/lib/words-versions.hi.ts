@@ -234,11 +234,11 @@ const EDGE = {
     "चालू। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
   "Off since {time} today. Clauseo can reach any file on this computer without asking.":
     "आज {time} बजे से बंद। Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
-  "Couldn't be set up on this computer. Clauseo asks before each change in this matter.":
-    "इस कंप्यूटर पर सेट नहीं हो सका। Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  "Clauseo asks before each change in this matter.": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  "Protection couldn't be set up on this computer, so Clauseo asks before each change in this matter.":
-    "इस कंप्यूटर पर संरक्षण सेट नहीं हो सका, इसलिए Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
+  "Couldn't be set up on this computer. Clauseo can read any file on it and asks before each change.":
+    null, // hi: later
+  "Clauseo can read any file on this computer and asks before each change.": null, // hi: later
+  "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before each change.":
+    null, // hi: later
   "Switch off protection": "संरक्षण बंद करें",
   "Switch protection on": "संरक्षण चालू करें",
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":
