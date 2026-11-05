@@ -2,8 +2,8 @@
 //! it completes or fails, because the completion is where its input and output are whole: Claude's
 //! first `tool_call` has an empty `rawInput`, and Codex's start item an empty query. Only the calls
 //! that could be web calls are kept: kind `search` or `fetch`, or a name of `WebSearch` or
-//! `WebFetch`. A call records only in the turn it started in: one that fails, is still open when its
-//! turn ends, or completes in a later turn records nothing.
+//! `WebFetch`. A call records only in the turn it started in: one that fails, is still open when
+//! its turn ends, or completes in a later turn records nothing.
 
 use std::collections::BTreeMap;
 
