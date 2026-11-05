@@ -33,8 +33,9 @@ build 26100):
 - **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
   in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
   needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
-  user and starts the agent under a restricted token, not write-restricted, so reads are checked
-  too:
+  user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
+  logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
+  under a restricted token, not write-restricted, so reads are checked too:
   - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
     matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;
@@ -59,13 +60,18 @@ build 26100):
 - **The ledger** `<data_dir>\sandbox\acl-ledger.json` lists every entry and label, write-ahead
   (D4), one entry per matter even when two matters share an entry, so removal waits for the
   last.
-- **Matter SIDs** are `S-1-5-21-<a>-<b>-<c>-<rid>`, random, made at a matter's first launch and
-  kept in `<data_dir>\sandbox\matters.json`, replaced whole and atomically; a file that can't be
-  read is refused, never rewritten (`clauseo_sandbox::windows::sids`).
-- **The set-up marker** `<data_dir>\sandbox\setup.json` holds the set-up version, the Windows
-  user who ran it, the sandbox SID and the time (`clauseo_sandbox::windows::marker`). The
-  machine's `HKLM\SOFTWARE\Clauseo\Sandbox\UserSid` record serves the desktop's start-up check
-  (#317), read by `clauseo_sandbox::windows::sandbox_user_sid`.
+- **Records.**
+  - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
+    desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
+    and `OwnerSid`, the Windows user who owns the set-up (D5; `sandbox_owner_sid`). PR2 ships
+    the readers, of the values `UserSid` and `OwnerSid`; PR4's set-up writes the pool's SIDs.
+  - The local group `ClauseoSandboxUsers`, holding every pool user (PR4).
+  - `<data_dir>\sandbox\matters.json`, replaced whole and atomically and refused, never
+    rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's
+    random `S-1-5-21-<a>-<b>-<c>-<rid>` SID, optional under D9 (`windows::sids`); PR4 adds
+    each matter's assigned pool user.
+  - `<data_dir>\sandbox\setup.json`, the set-up marker: the set-up version, the Windows user
+    who ran it, the sandbox SID and the time (`clauseo_sandbox::windows::marker`).
 - **Set-up state.** `SandboxSetup::state` gives `Ready` only for a current marker of this user
   whose SID the record also names; otherwise `Needed`, `Outdated`, `SetUpByOtherUser` or
   `Failed`.
@@ -98,6 +104,12 @@ The plan's decisions (orchestrator, 2026-11-05):
 - **D11 (approved; private plan §3 D11, merged #397).** `Everyone` stays among the token's
   restricting SIDs.
 
+### Rejected: AppContainer (spike A)
+
+One AppContainer profile with a capability per matter failed: a container can create pipes only
+under `\\.\pipe\LOCAL\`, so Node's spawn hangs and codex-acp never starts codex; Chrome's
+crashpad dies; and `NUL` needs an admin-set entry after every boot.
+
 ### Accepted risk: `Everyone` in the token
 
 Fix 3 (dropping `Everyone`) failed: bcrypt needs write access to KsecDD, and nsiproxy's IOCTL
@@ -128,6 +140,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   its `AppData\LocalLow` persists across matters, so reusing a pool user needs a clean-up that
   empties it and re-owns or removes the old matter's files.
 - A second Windows user on the same machine stays on tier C until machine-scope secrets land.
+- A lawyer without admin rights can't answer the set-up prompt, so no pool is made and the
+  machine stays on tier C. Firms often lock admin rights down, so this is common. A "B-minus"
+  tier (the lawyer's own token at Low integrity, no accounts, no prompt) may follow v1.
+- Uninstall (S15a, fix 5) removes, for each pool user, the profile and then the account, then the
+  entries naming pool SIDs, from the ledger. Deleting the account first leaves its profile folder
+  and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
 
