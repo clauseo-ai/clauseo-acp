@@ -19,17 +19,21 @@
 //! `WRITE_DAC` and `WRITE_OWNER`. `DeviceSync` is owned by `SYSTEM`, which Windows writes to, so
 //! it gets no `OWNER RIGHTS` deny.
 //!
-//! Each grant is written, then walked down with the pool group and every pool user as strict
-//! SIDs, so what's already there inherits it. A protected child, or one with an explicit allow
-//! for them, fails its target. Files with more than one link are skipped, as the walk skips
-//! them, and counted.
+//! Each grant is written, then walked down (`propagate`) with the pool group and every pool user
+//! watched, and the pool users as the owners to repair. So what's already there inherits the
+//! deny: a child a pool user owns has its explicit allows stripped and its entries worked out
+//! again, as the launch's own walk does; a child the lawyer owns, or a protected one the walk can't
+//! repair, fails its target. Files with more than one link are skipped and counted, as the walk
+//! skips them.
 //!
-//! Each target is independent: a failure undoes only that target's own grants, and the rest go
-//! on. A `LocalLow` must exist before the apply, since a later one would come without the deny,
-//! so a missing one is a failure; a missing `DeviceSync` has nothing to close and is skipped.
+//! Each target is independent. An add failure rolls back that target's own grants; a walk failure
+//! keeps them (the deny still blocks new files and covers what the walk reached) and is listed as
+//! a failure. A `LocalLow` doesn't exist until its pool user's first logon, and Windows makes it
+//! SYSTEM's, so PR4 logs each pool user on once, with its profile loaded, before it applies these.
+//! A missing `LocalLow` is a failure; a missing `DeviceSync` has nothing to close and is skipped.
 //!
-//! Set-up (PR4) creates each pool user's profile, `LocalLow` included, then applies these with
-//! admin rights. It treats any failed target as a set-up failure, and keeps what was written.
+//! Set-up (PR4) applies these with admin rights after it creates each pool user's profile and
+//! logs the user on, and treats any failed target as a set-up failure, keeping what was written.
 //! Uninstall removes them: profile, then account, then the entries (fix 5's order).
 //!
 //! The planning and the apply take an [`AclWriter`], so they build and test on every OS; the
@@ -41,7 +45,7 @@ use std::path::{Component, Path, PathBuf};
 use super::acl_plan::{Grant, Inherit, Rights, Sid};
 use super::admit::PathKind;
 use super::sids::NotASid;
-use super::writer::{AclWriter, Added, ApplyFailure, Reach};
+use super::writer::{AclWriter, Added, ApplyFailure, Reach, Strict};
 
 #[cfg(test)]
 mod tests;
@@ -58,8 +62,8 @@ pub struct SharedWrites {
     pub added: Vec<Grant>,
     /// The targets that don't exist and have nothing to close: a missing `DeviceSync`.
     pub skipped: Vec<PathBuf>,
-    /// The targets that failed, each with why. Their own grants were rolled back; the other
-    /// targets were applied anyway.
+    /// The targets that failed, each with why. An add failure rolls back the target's own
+    /// grants; a walk failure keeps them. The other targets were applied anyway.
     pub failed: Vec<(PathBuf, ApplyFailure)>,
     /// How many files and folders the walks skipped: junctions, symbolic links and files with
     /// more than one link.
@@ -121,15 +125,16 @@ fn is_local_low(path: &Path) -> bool {
 /// Writes the grants, target by target (consecutive grants on one path), and walks each down.
 ///
 /// A target that doesn't exist is skipped, except a `LocalLow`, which fails with
-/// `Io(NotFound)`. A target whose add or walk fails has its own grants rolled back and is listed
-/// in [`SharedWrites::failed`]; the other targets carry on. Walks run strict with the pool group
-/// and `pool_users`.
+/// `Io(NotFound)`. A target whose add fails has its own grants rolled back and is listed in
+/// [`SharedWrites::failed`]. A target whose walk fails keeps its grants (the deny still blocks
+/// new files, and covers what the walk reached) and is listed there too. The other targets
+/// carry on. Walks are strict ([`strict_for`]): a child a pool user owns is repaired, not refused.
 pub fn apply_shared_write_denies(
     writer: &mut impl AclWriter,
     grants: &[Grant],
     pool_users: &[Sid],
 ) -> SharedWrites {
-    let strict = strict_sids(grants, pool_users);
+    let strict = strict_for(grants, pool_users);
     let mut done = SharedWrites::default();
     for target in grants.chunk_by(|a, b| a.path() == b.path()) {
         let Some(first) = target.first() else {
@@ -155,9 +160,12 @@ pub fn apply_shared_write_denies(
         let mut written = Vec::new();
         let mut walk_skipped = 0;
         match write_target(writer, target, &strict, &mut written, &mut walk_skipped) {
-            Ok(()) => {
+            Ok(walk_failure) => {
                 done.added.extend(written);
                 done.walk_skipped += walk_skipped;
+                if let Some(failure) = walk_failure {
+                    done.failed.push((path.to_owned(), failure));
+                }
             }
             Err(failure) => {
                 rollback(writer, &written);
@@ -188,41 +196,54 @@ pub fn remove_shared_write_denies(
     first_failure.map_or(Ok(()), Err)
 }
 
-/// The walk's strict SIDs: the subjects of the grants (the pool group; `OWNER RIGHTS` is left
-/// out), then every pool user, each once.
-fn strict_sids(grants: &[Grant], pool_users: &[Sid]) -> Vec<Sid> {
-    let mut strict: Vec<Sid> = Vec::new();
+/// The walk's strictness: the grants' subjects (the pool group; `OWNER RIGHTS` is left out) and
+/// every pool user are watched, so an explicit allow for either beats nothing; the pool users are
+/// the owners whose children are repaired.
+fn strict_for(grants: &[Grant], pool_users: &[Sid]) -> Strict {
+    let mut watched: Vec<Sid> = Vec::new();
     for sid in grants
         .iter()
         .map(Grant::sid)
         .filter(|sid| sid.as_str() != OWNER_RIGHTS_SID)
         .chain(pool_users)
     {
-        if !strict.contains(sid) {
-            strict.push(sid.clone());
+        if !watched.contains(sid) {
+            watched.push(sid.clone());
         }
     }
-    strict
+    let mut pool: Vec<Sid> = Vec::new();
+    for sid in pool_users {
+        if !pool.contains(sid) {
+            pool.push(sid.clone());
+        }
+    }
+    Strict { watched, pool }
 }
 
-/// Writes one target's grants in order. Each grant's entry goes in, then the walk carries it
-/// down. Written grants are listed in `written` as they go, so a failure can undo them.
+/// Writes one target's grants in order: each entry goes in, then the walk carries it down. The
+/// written grants are listed in `written` as they go. An add failure is the `Err`, and stops the
+/// target. A walk failure is the `Ok(Some(..))`: the grants stay, and the rest still go in.
 fn write_target(
     writer: &mut impl AclWriter,
     target: &[Grant],
-    strict: &[Sid],
+    strict: &Strict,
     written: &mut Vec<Grant>,
     walk_skipped: &mut u64,
-) -> Result<(), ApplyFailure> {
+) -> Result<Option<ApplyFailure>, ApplyFailure> {
+    let mut walk_failure = None;
     for grant in target {
         match writer.add(grant)? {
             Added::Written => written.push(grant.clone()),
             Added::AlreadyThere => {}
         }
-        let walked = writer.propagate(grant.path(), Reach::Tree, Some(strict))?;
-        *walk_skipped += walked.skipped;
+        match writer.propagate(grant.path(), Reach::Tree, Some(strict)) {
+            Ok(walked) => *walk_skipped += walked.skipped,
+            Err(failure) => {
+                walk_failure.get_or_insert(failure);
+            }
+        }
     }
-    Ok(())
+    Ok(walk_failure)
 }
 
 /// Whether `path` is there, without following a link. Any failure but "not found" is an error.

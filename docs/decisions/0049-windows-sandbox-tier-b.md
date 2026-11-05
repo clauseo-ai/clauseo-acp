@@ -342,14 +342,19 @@ Tools running with the full mask are not measured yet: PR4's VM test must confir
 
 Each pool user owns its `LocalLow`, and an owner always has `WRITE_DAC`, so that `LocalLow` also
 gets an `OWNER RIGHTS` deny, which replaces the owner's implied rights. `DeviceSync` is owned by
-`SYSTEM`, which Windows writes to, so it gets none. The grants are written, then walked down
-strictly: a protected child, or one with an explicit allow for the pool, fails its target. A
-`LocalLow` must exist, so PR4 creates each profile first; a missing `DeviceSync` is skipped.
-Each target rolls back only its own grants.
+`SYSTEM`, which Windows writes to, so it gets none. The grants are written, then walked down with
+the pool group and every pool user watched: a child a pool user owns is repaired (its explicit
+allows stripped), as the launch walk does. A child the lawyer owns, or one the walk can't repair,
+fails its target. A failed walk keeps the target's deny, which still blocks new files.
+Each target rolls back only its own grants, and only when an add fails.
 
-PR4's elevated set-up applies these after it creates each pool user's profile, treats any failed
-target as a set-up failure, and keeps what was written. Uninstall removes them
-(`shared_writes.rs`).
+A `LocalLow` exists only after its pool user's first logon, and Windows makes it `SYSTEM`'s, so PR4
+logs each pool user on once, with its profile loaded, before it applies these. A missing
+`LocalLow` is a failure; a missing `DeviceSync` is skipped.
+
+PR4's elevated set-up applies these after it creates each pool user's profile and logs the user
+on, treats any failed target as a set-up failure, and keeps what was written. Uninstall removes
+them (`shared_writes.rs`).
 
 ## Consequences
 
