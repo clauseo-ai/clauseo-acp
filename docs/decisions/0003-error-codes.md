@@ -104,6 +104,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `signin.key_in_use` | Sign-in is refused: an API key is stored. | no | desktop (`setup`: a sign-in start while an API key is stored for the agent, decision record 0048) |
 | `signin.endpoint_in_use` | Sign-in is refused: an endpoint is set in Settings. | no | desktop (`setup`: a sign-in start while an endpoint set in Settings is in force, decision record 0048) |
 | `signin.agents_still_running` | An agent was still running after Clauseo waited for it to stop, so the login was not changed and nothing was removed; trying again once it has stopped can succeed. | yes | desktop (the leave order's stop_agents timed out) |
+| `agent.keys_loading` | Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. | yes | host (a launch while desktop still loads the stored API keys, decision record 0048) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

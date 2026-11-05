@@ -1502,7 +1502,8 @@ expression: counts_schema()
         "signin.key_in_use",
         "signin.endpoint_in_use",
         "matter.folder_too_deep",
-        "signin.agents_still_running"
+        "signin.agents_still_running",
+        "agent.keys_loading"
       ],
       "type": "string"
     },
