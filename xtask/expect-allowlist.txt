@@ -133,6 +133,8 @@ crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
 crates/sandbox/src/windows/folder.rs - unsafe_code
 crates/sandbox/src/windows/test_dacl.rs - unsafe_code
 crates/sandbox/src/windows/tests.rs - unsafe_code
+crates/sandbox/src/windows/test_junction.rs - unsafe_code
+crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code

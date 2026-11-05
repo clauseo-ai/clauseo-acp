@@ -38,6 +38,10 @@ mod record;
 pub mod sids;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_dacl;
+// Two attributes, as for `tests` below.
+#[cfg(test)]
+#[cfg(windows)]
+mod test_junction;
 #[cfg(test)]
 mod test_world;
 // Two attributes, not `all(windows, test)`: clippy's test allowances look for `cfg(test)`.

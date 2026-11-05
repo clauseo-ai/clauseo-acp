@@ -74,7 +74,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (GetCurrentProcess and OpenProcessToken from Win32_System_Threading), and the test's SDDL and
 # SetNamedSecurityInfoW. Tier B's records (src/windows/{record,detect}.rs): RegGetValueW for the
 # sandbox user record and the build number (System_Registry), the token's user and
-# ConvertSidToStringSidW, and IsWow64Process2's machine type (System_SystemInformation).
+# ConvertSidToStringSidW, and IsWow64Process2's machine type (System_SystemInformation);
+# DeviceIoControl for the tests' junctions (System_IO).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -84,6 +85,7 @@ windows = { workspace = true, features = [
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_IO",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
