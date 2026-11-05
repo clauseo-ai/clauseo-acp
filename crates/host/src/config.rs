@@ -14,7 +14,8 @@ use clauseo_protocol::{AgentId, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
 
-use crate::agent::login_link::{LoginCheck, LoginSplit, SignIn, SignInAgain};
+use crate::agent::login_link::{LoginCheck, SignIn, SignInAgain};
+use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
@@ -537,7 +538,7 @@ impl HostConfig {
     }
 
     /// The receiving end of the login splits, for `HostHandle::login_splits`.
-    pub(crate) fn login_splits(&self) -> async_channel::Receiver<LoginSplit> {
+    pub(crate) fn login_splits(&self) -> LoginSplits {
         self.wiring.sign_in.receiver()
     }
 

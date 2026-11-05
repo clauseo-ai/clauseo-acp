@@ -16,7 +16,8 @@ use clauseo_protocol::{
 use futures::channel::oneshot;
 
 use crate::actor::input::{Input, Request, SignInRequest};
-use crate::agent::login_link::{self, LoginSplit};
+use crate::agent::login_link;
+use crate::agent::login_splits::{self, LoginSplits};
 use crate::config::HostConfig;
 use crate::error::Error;
 
@@ -59,7 +60,7 @@ impl Host {
 pub struct HostHandle {
     requests: async_channel::Sender<Request>,
     /// The login splits the actor sends (`HostHandle::login_splits`).
-    splits: async_channel::Receiver<LoginSplit>,
+    splits: LoginSplits,
     /// The actor's internal input channel, for `abort_for_test`.
     #[cfg(feature = "test-support")]
     internal: async_channel::Sender<Input>,
@@ -98,7 +99,7 @@ impl HostHandle {
         Self {
             requests,
             // `Host::start` puts the config's own in.
-            splits: async_channel::bounded(1).1,
+            splits: login_splits::channel().1,
             #[cfg(feature = "test-support")]
             internal,
         }
@@ -360,9 +361,10 @@ impl HostHandle {
     }
 
     /// The reused Codex logins that split, as each launch's split check finds them: desktop
-    /// reads them and runs S18's `stop_using_login` and the leave order. Rust only. Every
-    /// clone of the receiver takes from the same channel, so one reader takes each split.
-    pub fn login_splits(&self) -> async_channel::Receiver<LoginSplit> {
+    /// reads them and runs S18's `stop_using_login` and the leave order. Rust only. The
+    /// receiver keeps the latest split per agent, so a slow reader loses none and none back up
+    /// (`LoginSplits`). Every clone takes from the same splits, so one reader takes each.
+    pub fn login_splits(&self) -> LoginSplits {
         self.splits.clone()
     }
 
