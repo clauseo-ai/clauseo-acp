@@ -31,6 +31,7 @@ use super::plugin::Pending;
 use crate::test_support::block_on;
 
 mod plugin;
+mod test_key;
 
 /// The crate's folder.
 pub(super) fn crate_dir() -> PathBuf {
@@ -182,38 +183,6 @@ fn no_release_config_trusts_the_test_key() {
             config.display()
         );
     }
-}
-
-/// Only `choice.rs` names the test key's file, behind `cfg(feature = "e2e")`.
-#[test]
-fn only_the_e2e_build_compiles_the_test_key_in() {
-    let mut naming = Vec::new();
-    let mut folders = vec![crate_dir().join("src")];
-    while let Some(folder) = folders.pop() {
-        for entry in std::fs::read_dir(folder).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                folders.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs")
-                && !path.to_string_lossy().contains("tests")
-            {
-                let text = std::fs::read_to_string(&path).unwrap();
-                let lines: Vec<&str> = text.lines().collect();
-                for (at, line) in lines.iter().enumerate() {
-                    if line.contains("updater-test.pub") && line.contains("include_str!") {
-                        let before = at
-                            .checked_sub(1)
-                            .map(|before| lines[before].trim().to_owned());
-                        naming.push((path.clone(), before));
-                    }
-                }
-            }
-        }
-    }
-    assert_eq!(naming.len(), 1, "{naming:?}");
-    let (path, before) = &naming[0];
-    assert!(path.ends_with("src/update/choice.rs"), "{}", path.display());
-    assert_eq!(before.as_deref(), Some(r#"#[cfg(feature = "e2e")]"#));
 }
 
 #[test]
