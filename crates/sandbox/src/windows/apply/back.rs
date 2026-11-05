@@ -107,7 +107,7 @@ pub(super) fn roll_back(
     };
     match take_back(ledger, None, acl, pick) {
         Ok(taken) => {
-            if let Err(refused) = finish(ledger, acl, around, &taken, &[]) {
+            if let Err(refused) = finish(ledger, acl, around, &taken, None, &[]) {
                 let failure = refused.failure;
                 tracing::warn!(%failure, "a rollback's walks or drops failed; entries stay removing");
             }
@@ -122,13 +122,14 @@ pub(super) fn roll_back(
 /// Walks the trees of `taken`'s removed entries again (`reclaim`'s with the matter's pool user
 /// handing back what it made, the rest plainly), then drops each removed entry whose tree was
 /// walked and whose permission entry is gone. Returns how many were dropped. A child the lawyer
-/// can't open inside one of `reclaim`'s trees is set aside and the walk run again (`walk.rs`);
-/// anywhere else it fails the walk.
+/// can't open inside one of `reclaim`'s trees, which are `forgotten`'s, is set aside into
+/// `forgotten`'s set-aside and the walk run again (`walk.rs`); anywhere else it fails the walk.
 pub(super) fn finish(
     ledger: &mut Ledger,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
     taken: &TakenBack,
+    forgotten: Option<MatterId>,
     reclaim: &[(PathBuf, Vec<Sid>)],
 ) -> Result<usize, Refused> {
     let mut trees: BTreeMap<(usize, PathBuf), Reach> = BTreeMap::new();
@@ -145,7 +146,12 @@ pub(super) fn finish(
     for (root, _) in reclaim {
         trees.insert((root.components().count(), root.clone()), Reach::Tree);
     }
-    let own: Vec<PathBuf> = reclaim.iter().map(|(root, _)| root.clone()).collect();
+    let own: Vec<(PathBuf, MatterId)> = forgotten
+        .map(|matter| {
+            let roots = reclaim.iter().map(|(root, _)| root.clone());
+            roots.map(|root| (root, matter)).collect()
+        })
+        .unwrap_or_default();
     let mut walked: Vec<PathBuf> = Vec::new();
     let mut failed: Option<Refused> = None;
     for ((_, root), reach) in &trees {
@@ -230,7 +236,7 @@ pub fn forget_matter(
         .collect();
     let pick = |entry: &Entry| (entry.matter == matter).then_some(Take::Remove);
     let taken = take_back(ledger, Some(matter), acl, pick).map_err(failed)?;
-    finish(ledger, acl, around, &taken, &reclaim).map_err(Refused::error)?;
+    finish(ledger, acl, around, &taken, Some(matter), &reclaim).map_err(Refused::error)?;
     ledger.clear_handbacks(matter).map_err(failed)?;
     Ok(Forgotten {
         removed: taken.removed.len(),

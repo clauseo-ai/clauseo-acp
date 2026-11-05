@@ -72,7 +72,7 @@ pub(super) fn lift(
             return 0;
         }
     };
-    if let Err(refused) = super::back::finish(ledger, acl, around, &taken, &[]) {
+    if let Err(refused) = super::back::finish(ledger, acl, around, &taken, None, &[]) {
         let failure: ApplyFailure = refused.failure;
         tracing::warn!(%failure, "a lifted folder's walk failed; its entries stay removing");
     }

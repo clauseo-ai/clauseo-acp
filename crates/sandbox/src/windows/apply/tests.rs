@@ -23,6 +23,7 @@ mod round4;
 mod round4_crash;
 mod round4_ledger;
 mod round5;
+mod round6;
 
 use fake::{Around, FakeAcl, Key, key};
 

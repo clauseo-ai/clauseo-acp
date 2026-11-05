@@ -21,7 +21,9 @@
 //!    walk over a tree that carries a deny is strict ([`Strict`]): a child a pool user owns that
 //!    would beat the inherited deny is repaired, one the lawyer owns refuses the launch, and one
 //!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) if it is inside the
-//!    launch's own matter, state or notes tree, and refuses it anywhere else (`walk.rs`).
+//!    launch's own matter, state or notes tree, or a registered matter's whose fence this
+//!    launch applies (into that matter's set-aside, round 6), and refuses it anywhere else
+//!    (`walk.rs`).
 //! 5. Only then are the entries marked `applied`.
 //! 6. Only after all that succeeds does a folder that is now a registered matter lose the
 //!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
@@ -74,14 +76,19 @@ pub struct Applied {
 /// What a launch needs from around the matter besides the permission writes: the gate's folder
 /// listing and folder check (to replace a deny on a folder holding the matter by the walk-down
 /// set), the set-aside of a child the lawyer can't open, and the credentials file the
-/// credential link must be. PR6's launcher gives `admit::ReadDir`, `folder_support`, the
-/// set-aside under `<data_dir>\sandbox\set-aside\<matter>\` and the agent's credentials file.
+/// credential link must be. PR6's launcher gives `admit::ReadDir`, `folder_support`,
+/// `set_aside_path` into `<data_dir>\sandbox\set-aside\<matter>\` for the matter it is
+/// asked for, and the agent's credentials file.
 pub trait Surroundings: FolderList {
     /// The gate's folder check.
     fn check(&self, folder: &Path) -> io::Result<FolderSupport>;
-    /// Moves `path`, a child the lawyer can't open, aside (through its folder's
-    /// `FILE_DELETE_CHILD`), with a manifest entry the lawyer can restore from.
-    fn set_aside(&mut self, path: &Path) -> io::Result<()>;
+    /// Moves `path`, a child the lawyer can't open in one of `matter`'s trees, aside (through
+    /// its folder's `FILE_DELETE_CHILD`) into `matter`'s set-aside, under that matter's
+    /// set-aside lock, with a manifest entry the lawyer can restore from, as
+    /// `set_aside_path(data_dir, matter, path, …)` does. `matter` is the matter whose tree holds
+    /// the child, which is not the launching matter when the walk is of another matter's fenced
+    /// tree (round 6); the lawyer finds the child in that matter's list.
+    fn set_aside(&mut self, matter: clauseo_protocol::MatterId, path: &Path) -> io::Result<()>;
     /// The file the credential link must be (the same file, by its ID), when the plan has one.
     fn credentials(&self) -> Option<PathBuf>;
 }
@@ -325,7 +332,10 @@ pub fn repair_after_session(
         .filter(|e| OWN_KINDS.contains(&e.kind) && e.rights == Rights::Modify)
         .map(|e| (e.path.clone(), e.kind))
         .collect();
-    let own: Vec<PathBuf> = roots.iter().map(|(root, _)| root.clone()).collect();
+    let own: Vec<(PathBuf, clauseo_protocol::MatterId)> = roots
+        .iter()
+        .map(|(root, _)| (root.clone(), matter))
+        .collect();
     let mut done = Walked::default();
     for (root, kind) in &roots {
         let walked = clearing(acl, around, &own, *kind, |acl| {

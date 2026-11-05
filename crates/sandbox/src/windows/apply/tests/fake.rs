@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
+
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
 use crate::windows::admit::{FolderList, ReadDir};
@@ -111,6 +113,8 @@ impl FakeAcl {
 #[derive(Debug, Default)]
 pub(super) struct Around {
     pub(super) set_aside: Vec<PathBuf>,
+    /// The matter each of `set_aside` went to, in the same order.
+    pub(super) owners: Vec<MatterId>,
     pub(super) credentials: Option<PathBuf>,
     /// Every set-aside fails (another volume, no `FILE_DELETE_CHILD`).
     pub(super) fail_set_aside: bool,
@@ -127,11 +131,12 @@ impl Surroundings for Around {
         Ok(FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, matter: MatterId, path: &Path) -> io::Result<()> {
         if self.fail_set_aside {
             return Err(io::Error::from(io::ErrorKind::CrossesDevices));
         }
         self.set_aside.push(path.to_owned());
+        self.owners.push(matter);
         Ok(())
     }
 

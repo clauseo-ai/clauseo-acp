@@ -6,6 +6,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clauseo_protocol::MatterId;
+
 use super::super::ntfs::Ntfs;
 use super::super::run::Volume as _;
 use super::{after_session, before_launch, exit, launch, list_set_aside, set_aside_path};
@@ -129,9 +131,9 @@ impl Surroundings for Aside {
         Ok(FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, matter: MatterId, path: &Path) -> io::Result<()> {
         let now = exit() - Duration::from_secs(60);
-        set_aside_path(&self.data, &matter_one(), path, Reason::LawyerCantOpen, now)
+        set_aside_path(&self.data, &matter, path, Reason::LawyerCantOpen, now)
             .map(drop)
             .map_err(io::Error::other)
     }

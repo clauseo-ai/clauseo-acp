@@ -45,7 +45,7 @@ impl Surroundings for Around {
         Ok(crate::windows::FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, _path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, _matter: clauseo_protocol::MatterId, _path: &Path) -> io::Result<()> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
@@ -177,7 +177,7 @@ impl Surroundings for Moving {
         Ok(crate::windows::FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, _matter: clauseo_protocol::MatterId, path: &Path) -> io::Result<()> {
         self.asked.push(path.to_owned());
         let name = format!("{}", self.asked.len());
         crate::windows::write::rename_new(path, &self.aside.join(name))
@@ -232,7 +232,7 @@ impl Surroundings for Credentials {
         Ok(crate::windows::FolderSupport::Ok)
     }
 
-    fn set_aside(&mut self, _path: &Path) -> io::Result<()> {
+    fn set_aside(&mut self, _matter: clauseo_protocol::MatterId, _path: &Path) -> io::Result<()> {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
