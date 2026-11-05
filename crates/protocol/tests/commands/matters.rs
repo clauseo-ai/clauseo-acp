@@ -1,10 +1,10 @@
 //! The matter commands of the rail: `CreateMatter`'s details and its default location,
-//! `UpdateMatter`'s missing, `null` and set fields, `OpenMatter` and `ForgetMatter`, and the
-//! matter a `HostError` names.
+//! `UpdateMatter`'s missing, `null` and set fields (its skill packs too), `OpenMatter` and
+//! `ForgetMatter`, and the matter a `HostError` names.
 
 use clauseo_protocol::{
     ClientName, Date, DefaultLocation, ErrorCode, FieldChange, HostCommand, HostError, HostQuery,
-    MatterSource, QueryResult,
+    MatterSource, PackId, PackList, QueryResult,
 };
 
 use super::Validate;
@@ -69,6 +69,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             matter,
             client: FieldChange::Keep,
             next_date: FieldChange::Keep,
+            skill_packs: FieldChange::Keep,
             pinned: None,
         }
     );
@@ -78,6 +79,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             matter,
             client: FieldChange::Clear,
             next_date: FieldChange::Set("2027-01-04".parse::<Date>().unwrap()),
+            skill_packs: FieldChange::Keep,
             pinned: Some(false),
         }
     );
@@ -88,6 +90,7 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
             matter,
             client: FieldChange::Set(ClientName::new("Acme").unwrap()),
             next_date: FieldChange::Clear,
+            skill_packs: FieldChange::Keep,
             pinned: Some(true),
         }
     );
@@ -102,6 +105,71 @@ fn an_update_keeps_a_missing_field_clears_a_null_one_and_sets_a_value() {
         decode(""),
         "a null pinned is no change"
     );
+}
+
+#[test]
+fn an_update_keeps_a_missing_skill_packs_clears_a_null_one_and_sets_a_list() {
+    let matter = matter_id(1);
+    let json = |fields: &str| format!(r#"{{"update_matter":{{"matter":"{matter}"{fields}}}}}"#);
+    let packs = |fields: &str| -> FieldChange<PackList> {
+        let HostCommand::UpdateMatter { skill_packs, .. } =
+            serde_json::from_str(&json(fields)).unwrap()
+        else {
+            panic!("not an update");
+        };
+        skill_packs
+    };
+    let list = |ids: &[&str]| {
+        PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
+    };
+    assert_eq!(packs(""), FieldChange::Keep);
+    assert_eq!(packs(r#","skill_packs":null"#), FieldChange::Clear);
+    assert_eq!(
+        packs(r#","skill_packs":["nda-kit","a1"]"#),
+        FieldChange::Set(list(&["nda-kit", "a1"]))
+    );
+    assert_eq!(packs(r#","skill_packs":[]"#), FieldChange::Set(list(&[])));
+    let too_many: Vec<String> = (0..33).map(|at| format!("p{at}")).collect();
+    let too_many = format!(
+        r#","skill_packs":{}"#,
+        serde_json::to_string(&too_many).unwrap()
+    );
+    for bad in [
+        r#","skill_packs":["nda-kit","nda-kit"]"#,
+        too_many.as_str(),
+        r#","skill_packs":["NDA-kit"]"#,
+        r#","skill_packs":["clauseo"]"#,
+        r#","skill_packs":"nda-kit""#,
+    ] {
+        assert!(
+            serde_json::from_str::<HostCommand>(&json(bad)).is_err(),
+            "{bad}"
+        );
+    }
+    let keep = HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Keep,
+        pinned: None,
+    };
+    let encoded = serde_json::to_string(&keep).unwrap();
+    assert!(!encoded.contains("skill_packs"), "{encoded}");
+    for change in [
+        FieldChange::Clear,
+        FieldChange::Set(list(&[])),
+        FieldChange::Set(list(&["nda-kit", "a1"])),
+    ] {
+        let command = HostCommand::UpdateMatter {
+            matter,
+            client: FieldChange::Keep,
+            next_date: FieldChange::Keep,
+            skill_packs: change,
+            pinned: None,
+        };
+        round_trips(&command);
+        assert!(command.validate().is_ok());
+    }
 }
 
 #[test]

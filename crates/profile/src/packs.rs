@@ -29,9 +29,6 @@ mod windows;
 
 use std::path::{Path, PathBuf};
 
-use crate::skills::builtin::BUILTIN;
-use crate::skills::stetdoc::STETDOC;
-
 pub use hash::PackHash;
 pub use manifest::PackManifest;
 pub use plugin::{PacksWritten, write_packs};
@@ -73,19 +70,14 @@ pub const SKILLS_MAX: usize = 32;
 /// The most extra packs one launch loads; the rest are skipped as [`Skip::TooMany`].
 pub const PACKS_PER_LAUNCH: usize = 16;
 
-/// The fewest and most bytes a pack id has.
-const ID_LEN: std::ops::RangeInclusive<usize> = 2..=30;
-
-/// Ids no pack may take: the built-in pack's and the built-in skills' names.
-const RESERVED: [&str; 2] = ["clauseo", "builtin"];
-
-/// Whether `id` may name a pack (or a skill inside one): `^[a-z0-9]+(-[a-z0-9]+)*$`, 2 to 30
-/// bytes, no Windows device name, and none of the reserved names: `clauseo`, every
-/// `clauseo-*`, `builtin`, `stetdoc` and each built-in skill. Since no part holds `--`, the
-/// rendered `<pack>--<skill>` splits one way only and never equals a built-in name. PR-C moves
-/// this rule to `protocol` as `PackId`.
+/// Whether `id` may name a pack: the rule is [`PackId`](clauseo_protocol::PackId)'s in
+/// `protocol` (`^[a-z0-9]+(-[a-z0-9]+)*$`, 2 to 30 bytes, no Windows device name, not `clauseo`,
+/// any `clauseo-*`, `builtin`, `stetdoc` or a built-in skill's name). That its reserved list
+/// holds profile's own built-in names (`BUILTIN` and `STETDOC`) is checked by a test in
+/// `tests/packs.rs`. Since no id holds `--`, the rendered `<pack>--<skill>` splits one way
+/// only and never equals a built-in name.
 pub fn is_pack_id(id: &str) -> bool {
-    ID_LEN.contains(&id.len()) && is_part(id) && !is_reserved(id)
+    clauseo_protocol::PackId::new(id).is_ok()
 }
 
 /// Whether `name` may name a skill inside a pack: [`is_pack_id`]'s charset and no `--`, 1 to
@@ -104,11 +96,6 @@ fn is_part(text: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
         && crate::skills::is_skill_name(text)
-}
-
-/// Whether `id` is reserved for Clauseo's own skills.
-fn is_reserved(id: &str) -> bool {
-    RESERVED.contains(&id) || id.starts_with("clauseo-") || id == STETDOC || BUILTIN.contains(&id)
 }
 
 /// Why a pack is refused. Each has a [`Self::code`] for log lines and notices, which never

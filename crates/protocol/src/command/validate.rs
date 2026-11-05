@@ -210,6 +210,7 @@ impl HostCommand {
                 matter: _,
                 client: _,
                 next_date: _,
+                skill_packs: _,
                 pinned: _,
             }
             | Self::OpenMatter { matter: _ }

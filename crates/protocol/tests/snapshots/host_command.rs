@@ -18,6 +18,7 @@ golden! { HostCommand::name_of {
         matter: matter_id(1),
         client: FieldChange::Set(ClientName::new("Rathi Steels").unwrap()),
         next_date: FieldChange::Clear,
+        skill_packs: FieldChange::Set(pack_list(&["nda-kit", "a1"])),
         pinned: Some(true),
     };
     OpenMatter => open_matter: HostCommand::OpenMatter { matter: matter_id(1) };

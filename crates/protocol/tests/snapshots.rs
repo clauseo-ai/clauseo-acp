@@ -65,6 +65,8 @@ use clauseo_protocol::{
     MatterStatus,
     MatterSummary,
     MattersChanged,
+    PackId,
+    PackList,
     PatchBatch,
     PromptBlock,
     RefreshWhy,
@@ -98,6 +100,12 @@ use fixtures::{
 };
 use fixtures::{blob as sample_blob, envelope as sample_envelope};
 use limits::{account_limits, limits_view};
+
+/// The skill packs `ids`, in order.
+#[cfg(test)]
+fn pack_list(ids: &[&str]) -> PackList {
+    PackList::new(ids.iter().map(|id| PackId::new(id).unwrap()).collect()).unwrap()
+}
 
 /// The example of the known kind `kind`, from `examples::every_event`.
 #[cfg(test)]
@@ -356,6 +364,7 @@ mod host_event {
                 last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),
                 client: Some(ClientName::new("Rathi Steels").unwrap()),
                 next_date: None,
+                skill_packs: Some(pack_list(&["nda-kit"])),
                 pinned: true,
                 last_opened: None,
                 status: MatterStatus::Stopped { at: Timestamp::new(1_760_000_008_000).unwrap() },

@@ -10,8 +10,8 @@ use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    PackList, RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile,
+    StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -335,6 +335,10 @@ pub struct MatterSummary {
     /// Its next date, once set.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub next_date: Option<Date>,
+    /// The skill packs it may load, once set (decision record 0040); missing means the global
+    /// `skills.enabled` list, and `[]` means no pack for this matter.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub skill_packs: Option<PackList>,
     /// Whether it is pinned to the top of the rail; missing reads as `false`.
     #[serde(default)]
     pub pinned: bool,
