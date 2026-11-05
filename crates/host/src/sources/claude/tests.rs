@@ -240,3 +240,44 @@ fn a_nameless_claude_search_completes_as_a_search_of_its_refined_query() {
     let done = completed(Some(&json!("Links: []")), &[]);
     assert!(sources.updated(turn(), "tc-1", &claude(), &done).is_some());
 }
+
+/// D2: a `Title (url)`-shaped line whose "url" is no URL is no result: no scheme is added to it.
+#[test]
+fn text_in_parentheses_is_no_result_when_it_is_not_a_url() {
+    let input = json!({"query": "x"});
+    let content = text(
+        "Supreme Court judgments (2024)\nNote (see below)\nSection 138 (a web address with a dot.example)",
+    );
+    assert_eq!(results_of(search(Some(&input), None, &content)), Vec::new());
+    // The same goes for a `Links:` URL with no scheme.
+    let output = json!("Links: [{\"title\":\"Bare\",\"url\":\"sci.gov.in/a\"}]");
+    assert_eq!(
+        results_of(search(Some(&input), Some(&output), &[])),
+        Vec::new()
+    );
+}
+
+/// D2: the record URL rule takes an explicit `http://` or `https://` and adds nothing.
+#[test]
+fn a_record_url_needs_an_explicit_web_scheme() {
+    use crate::sources::record_url;
+    assert_eq!(
+        record_url("https://sci.gov.in/a").as_deref(),
+        Some("https://sci.gov.in/a")
+    );
+    assert_eq!(
+        record_url("HTTP://sci.gov.in/a").as_deref(),
+        Some("HTTP://sci.gov.in/a")
+    );
+    for text in [
+        "sci.gov.in/a",
+        "https:/x",
+        "https://",
+        "ftp://a.example/",
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "",
+    ] {
+        assert_eq!(record_url(text), None, "{text:?}");
+    }
+}

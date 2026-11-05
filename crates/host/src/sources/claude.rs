@@ -16,8 +16,7 @@ use std::collections::BTreeSet;
 use clauseo_protocol::{MAX_SEARCH_RESULTS, PageVia, ToolKind, WebResult};
 use serde_json::Value;
 
-use super::browser::web_url;
-use super::{Found, clean_title, output_text, query_of};
+use super::{Found, clean_title, output_text, query_of, record_url};
 
 /// The name of Claude Code's search tool.
 pub(crate) const SEARCH: &str = "WebSearch";
@@ -87,7 +86,7 @@ pub(crate) fn search(
 /// A finished `WebFetch`: the page its input names, with no title. None when the URL is not a web
 /// URL.
 pub(crate) fn fetch(input: Option<&Value>) -> Option<Found> {
-    let url = web_url(input?.get("url")?.as_str()?)?;
+    let url = record_url(input?.get("url")?.as_str()?)?;
     Some(Found::Page {
         url,
         title: None,
@@ -163,7 +162,7 @@ fn results(links: Vec<Link>) -> Vec<WebResult> {
         if link.url.chars().count() > super::MAX_RESULT_URL_CHARS {
             continue;
         }
-        let Some(url) = web_url(&link.url) else {
+        let Some(url) = record_url(&link.url) else {
             continue;
         };
         let title = clean_title(&link.title);
