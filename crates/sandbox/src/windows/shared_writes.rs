@@ -1,41 +1,69 @@
-//! Shared writable places (S15 PR3a): a deny of writes for `ClauseoSandboxUsers` on the two
-//! folders a Low-integrity sandbox token can write that every pool user shares.
+//! Places a sandbox token can write at Low integrity, and the denies that close them.
 //!
 //! The VM spike (private `measurements/s15-spikes-traverse.md`, (c)) probed 62,145 folders and
-//! found exactly two: `C:\ProgramData\Microsoft\DeviceSync` and each pool user's own
-//! `AppData\LocalLow`. One group deny-write on each closed both, with no tool regressions. A
-//! folder a lawyer makes directly under `C:\` is already refused by Low integrity, so it isn't
-//! listed here.
+//! found exactly two it could write: `C:\ProgramData\Microsoft\DeviceSync`, which every pool user
+//! shares, and each pool user's own `AppData\LocalLow`. A folder a lawyer makes directly under
+//! `C:\` is already refused by Low integrity, so it isn't listed here.
+//!
+//! The group's deny closes each one. The spike measured `icacls` `(W,DC)`; the code writes
+//! `0xd0156`, a superset that adds `DELETE`, `WRITE_DAC` and `WRITE_OWNER`. Tools running with
+//! the full mask are not measured yet: PR4's VM test must confirm them.
+//!
+//! `LocalLow` is denied because it is the one Low-writable place outside the session-end repair:
+//! a file an agent makes there with its own DACL would outlive the session.
 //!
 //! The deny applies even though allows to the group don't: deny entries are matched against the
-//! token's normal groups, which the pool group is one of. Each grant is walked down after it is
-//! written, so what's already there inherits the deny; files with more than one link are skipped,
-//! as the walk does.
+//! token's normal groups, which the pool group is one of. The owner always has `WRITE_DAC`, and
+//! each pool user owns its `LocalLow`, so that `LocalLow` also gets an `OWNER RIGHTS` deny
+//! ([`OWNER_RIGHTS_SID`]): it replaces the owner's implied rights, so the owner loses
+//! `WRITE_DAC` and `WRITE_OWNER`. `DeviceSync` is owned by `SYSTEM`, which Windows writes to, so
+//! it gets no `OWNER RIGHTS` deny.
 //!
-//! Set-up (PR4) applies these with admin rights after it creates each pool user's profile, and
-//! uninstall removes them: profile, then account, then the entries (fix 5's order).
+//! Each grant is written, then walked down with the pool group and every pool user as strict
+//! SIDs, so what's already there inherits it. A protected child, or one with an explicit allow
+//! for them, fails its target. Files with more than one link are skipped, as the walk skips
+//! them, and counted.
+//!
+//! Each target is independent: a failure undoes only that target's own grants, and the rest go
+//! on. A `LocalLow` must exist before the apply, since a later one would come without the deny,
+//! so a missing one is a failure; a missing `DeviceSync` has nothing to close and is skipped.
+//!
+//! Set-up (PR4) creates each pool user's profile, `LocalLow` included, then applies these with
+//! admin rights. It treats any failed target as a set-up failure, and keeps what was written.
+//! Uninstall removes them: profile, then account, then the entries (fix 5's order).
 //!
 //! The planning and the apply take an [`AclWriter`], so they build and test on every OS; the
 //! real-NTFS test is Windows-only (`tests.rs`).
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use super::acl_plan::{Grant, Inherit, Rights, Sid};
 use super::admit::PathKind;
+use super::sids::NotASid;
 use super::writer::{AclWriter, Added, ApplyFailure, Reach};
 
 #[cfg(test)]
 mod tests;
 
-/// What [`apply_shared_write_denies`] did: the grants it wrote, and the targets it skipped.
+/// The `OWNER RIGHTS` well-known SID. An entry for it replaces the owner's implied rights, which
+/// always include `WRITE_DAC`.
+pub const OWNER_RIGHTS_SID: &str = "S-1-3-4";
+
+/// What [`apply_shared_write_denies`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SharedWrites {
-    /// The grants this call wrote, in order. An entry that was there already is not listed, so
-    /// a rollback never removes a deny an earlier set-up wrote.
+    /// The grants written, in order. An entry that was there already is not listed, so a
+    /// rollback never removes a deny an earlier set-up wrote.
     pub added: Vec<Grant>,
-    /// The targets that don't exist yet, and so got no deny.
+    /// The targets that don't exist and have nothing to close: a missing `DeviceSync`.
     pub skipped: Vec<PathBuf>,
+    /// The targets that failed, each with why. Their own grants were rolled back; the other
+    /// targets were applied anyway.
+    pub failed: Vec<(PathBuf, ApplyFailure)>,
+    /// How many files and folders the walks skipped: junctions, symbolic links and files with
+    /// more than one link.
+    pub walk_skipped: u64,
 }
 
 /// The shared places, in order: `<program_data>\Microsoft\DeviceSync`, then each pool profile's
@@ -48,43 +76,96 @@ pub fn shared_write_targets(program_data: &Path, pool_profiles: &[PathBuf]) -> V
     std::iter::once(device_sync).chain(local_lows).collect()
 }
 
-/// One grant per target: `group` denied writes (`Rights::DenyWrite`) on the target and,
-/// inherited, everything under it.
-pub fn plan_shared_write_denies(group: &Sid, targets: &[PathBuf]) -> Vec<Grant> {
-    targets
-        .iter()
-        .map(|path| Grant {
-            path: path.clone(),
-            sid: group.clone(),
-            rights: Rights::DenyWrite,
-            inherit: Inherit::Tree,
-            kind: PathKind::SharedWrite,
-        })
-        .collect()
+/// The grants for `targets`, in order: each target gets `group`'s `DenyWrite`, inherited to the
+/// tree; a `LocalLow` target also gets an [`OWNER_RIGHTS_SID`] `DenyWrite`, right after its
+/// group's. Refuses only if [`OWNER_RIGHTS_SID`] doesn't parse, which it does.
+pub fn plan_shared_write_denies(group: &Sid, targets: &[PathBuf]) -> Result<Vec<Grant>, NotASid> {
+    let owner_rights = Sid::parse(OWNER_RIGHTS_SID)?;
+    let mut grants = Vec::new();
+    for path in targets {
+        grants.push(deny(path, group.clone()));
+        if is_local_low(path) {
+            grants.push(deny(path, owner_rights.clone()));
+        }
+    }
+    Ok(grants)
 }
 
-/// Writes each grant, in order, and walks it down to what's there. A target that doesn't exist
-/// is skipped and listed in [`SharedWrites::skipped`]. Any other failure removes the grants this
-/// call already wrote, last first, and returns the failure.
+/// One `DenyWrite` for `sid` on `path`, inherited to the tree.
+fn deny(path: &Path, sid: Sid) -> Grant {
+    Grant {
+        path: path.to_owned(),
+        sid,
+        rights: Rights::DenyWrite,
+        inherit: Inherit::Tree,
+        kind: PathKind::SharedWrite,
+    }
+}
+
+/// Whether `path` ends in `AppData\LocalLow`, without ASCII case.
+fn is_local_low(path: &Path) -> bool {
+    let mut parts = path.components().rev().filter_map(|part| match part {
+        Component::Normal(name) => Some(name),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            None
+        }
+    });
+    parts
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("LocalLow"))
+        && parts
+            .next()
+            .is_some_and(|name| name.eq_ignore_ascii_case("AppData"))
+}
+
+/// Writes the grants, target by target (consecutive grants on one path), and walks each down.
+///
+/// A target that doesn't exist is skipped, except a `LocalLow`, which fails with
+/// `Io(NotFound)`. A target whose add or walk fails has its own grants rolled back and is listed
+/// in [`SharedWrites::failed`]; the other targets carry on. Walks run strict with the pool group
+/// and `pool_users`.
 pub fn apply_shared_write_denies(
     writer: &mut impl AclWriter,
     grants: &[Grant],
-) -> Result<SharedWrites, ApplyFailure> {
+    pool_users: &[Sid],
+) -> SharedWrites {
+    let strict = strict_sids(grants, pool_users);
     let mut done = SharedWrites::default();
-    for grant in grants {
-        match exists(grant.path()) {
+    for target in grants.chunk_by(|a, b| a.path() == b.path()) {
+        let Some(first) = target.first() else {
+            continue;
+        };
+        let path = first.path();
+        match exists(path) {
             Ok(true) => {}
-            Ok(false) => {
-                done.skipped.push(grant.path().to_owned());
+            Ok(false) if is_local_low(path) => {
+                done.failed
+                    .push((path.to_owned(), ApplyFailure::Io(io::ErrorKind::NotFound)));
                 continue;
             }
-            Err(failure) => return Err(rollback(writer, &done.added, failure)),
+            Ok(false) => {
+                done.skipped.push(path.to_owned());
+                continue;
+            }
+            Err(failure) => {
+                done.failed.push((path.to_owned(), failure));
+                continue;
+            }
         }
-        if let Err(failure) = write_one(writer, grant, &mut done.added) {
-            return Err(rollback(writer, &done.added, failure));
+        let mut written = Vec::new();
+        let mut walk_skipped = 0;
+        match write_target(writer, target, &strict, &mut written, &mut walk_skipped) {
+            Ok(()) => {
+                done.added.extend(written);
+                done.walk_skipped += walk_skipped;
+            }
+            Err(failure) => {
+                rollback(writer, &written);
+                done.failed.push((path.to_owned(), failure));
+            }
         }
     }
-    Ok(done)
+    done
 }
 
 /// Removes each grant whose target exists, in order, and walks it down so what's there loses
@@ -107,6 +188,43 @@ pub fn remove_shared_write_denies(
     first_failure.map_or(Ok(()), Err)
 }
 
+/// The walk's strict SIDs: the subjects of the grants (the pool group; `OWNER RIGHTS` is left
+/// out), then every pool user, each once.
+fn strict_sids(grants: &[Grant], pool_users: &[Sid]) -> Vec<Sid> {
+    let mut strict: Vec<Sid> = Vec::new();
+    for sid in grants
+        .iter()
+        .map(Grant::sid)
+        .filter(|sid| sid.as_str() != OWNER_RIGHTS_SID)
+        .chain(pool_users)
+    {
+        if !strict.contains(sid) {
+            strict.push(sid.clone());
+        }
+    }
+    strict
+}
+
+/// Writes one target's grants in order. Each grant's entry goes in, then the walk carries it
+/// down. Written grants are listed in `written` as they go, so a failure can undo them.
+fn write_target(
+    writer: &mut impl AclWriter,
+    target: &[Grant],
+    strict: &[Sid],
+    written: &mut Vec<Grant>,
+    walk_skipped: &mut u64,
+) -> Result<(), ApplyFailure> {
+    for grant in target {
+        match writer.add(grant)? {
+            Added::Written => written.push(grant.clone()),
+            Added::AlreadyThere => {}
+        }
+        let walked = writer.propagate(grant.path(), Reach::Tree, Some(strict))?;
+        *walk_skipped += walked.skipped;
+    }
+    Ok(())
+}
+
 /// Whether `path` is there, without following a link. Any failure but "not found" is an error.
 fn exists(path: &Path) -> Result<bool, ApplyFailure> {
     match std::fs::symlink_metadata(path) {
@@ -114,22 +232,6 @@ fn exists(path: &Path) -> Result<bool, ApplyFailure> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(ApplyFailure::Io(error.kind())),
     }
-}
-
-/// Writes `grant`'s entry on its folder, then walks it down (the walk is what gives the children
-/// the inherited deny). A grant written here goes into `added` before the walk, so a failed walk
-/// rolls it back too; an entry that was there already doesn't.
-fn write_one(
-    writer: &mut impl AclWriter,
-    grant: &Grant,
-    added: &mut Vec<Grant>,
-) -> Result<(), ApplyFailure> {
-    match writer.add(grant)? {
-        Added::Written => added.push(grant.clone()),
-        Added::AlreadyThere => {}
-    }
-    writer.propagate(grant.path(), Reach::Tree, None)?;
-    Ok(())
 }
 
 /// Removes `grant`'s entry on its folder, then walks it down so the children lose the inherited
@@ -140,11 +242,10 @@ fn unwrite_one(writer: &mut impl AclWriter, grant: &Grant) -> Result<(), ApplyFa
     Ok(())
 }
 
-/// Undoes `added`, last first, and gives back `failure`, the one that stopped the apply. An undo
-/// that fails here is not reported: the caller hears the first failure.
-fn rollback(writer: &mut impl AclWriter, added: &[Grant], failure: ApplyFailure) -> ApplyFailure {
+/// Undoes one target's `added` grants, last first. A failure here is not reported: the caller
+/// reports the failure that stopped the target.
+fn rollback(writer: &mut impl AclWriter, added: &[Grant]) {
     for grant in added.iter().rev() {
         let _unreported: Result<(), ApplyFailure> = unwrite_one(writer, grant);
     }
-    failure
 }
