@@ -136,6 +136,57 @@ fn a_linked_fence_folder_refuses_the_launch() {
     assert_eq!(support, FolderRefusal::ReparsePoint);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_neighbour_its_own_gate_accepts_is_fenced_at_its_target_and_the_launch_passes() {
+    // The neighbour's root sits under a linked folder (`Linked` -> `elsewhere`, as a junction
+    // to another drive would): its own policy accepts it, so the fence lands on the target.
+    let w = World::new("admit-fence-through-link");
+    w.dir.dir("elsewhere/B");
+    w.dir.symlink("Linked", &w.at("elsewhere"));
+    let root = w.at("Linked/B");
+    let own = Policy::builder(&root, w.at("other/m3"))
+        .home(w.at("home"))
+        .build();
+    assert!(
+        own.is_ok(),
+        "the neighbour's own launch accepts its root: {own:?}"
+    );
+    let policy = w.builder().build().unwrap();
+    let given = unfenced(root, w.at("other/m3"));
+    let admitted = admit_with(
+        &policy,
+        &w.at("data"),
+        &given,
+        by_existence,
+        &FakeFolders::default(),
+    )
+    .unwrap();
+    let paths: Vec<&Path> = admitted.fences()[0]
+        .folders
+        .iter()
+        .map(|(p, _)| p.as_path())
+        .collect();
+    assert_eq!(paths, [w.canonical("elsewhere/B"), w.canonical("other/m3")]);
+    // Its own launch refuses a root that is itself a link; so does the neighbour check.
+    let own = Policy::builder(w.at("Linked"), w.at("other/m3"))
+        .home(w.at("home"))
+        .build();
+    assert!(own.is_err());
+    let linked = unfenced(w.at("Linked"), w.at("other/m3"));
+    let refused = admit_with(
+        &policy,
+        &w.at("data"),
+        &linked,
+        by_existence,
+        &FakeFolders::default(),
+    );
+    assert!(
+        matches!(refused, Err(Error::NeighbourUnfenceable { .. })),
+        "{refused:?}"
+    );
+}
+
 #[test]
 fn a_fenced_matter_is_not_checked() {
     let w = World::new("admit-fence-fenced");
