@@ -75,7 +75,8 @@ fn is_dropped_inherited(name: &OsStr) -> bool {
         .any(|drop| same(OsStr::new(drop), name))
 }
 
-/// Puts the stored key in the agent's settings variables as `var` (decision record 0048): every
+/// Puts the stored key (or a firm plan's variable, which goes in the same way) in the agent's
+/// settings variables as `var` (decision record 0048): every
 /// settings variable of that name in any case is dropped first, so an empty placeholder (the
 /// installed entry's `ANTHROPIC_API_KEY: ""`) gives way. Never logged; the redactor takes it
 /// from the spec's env, so a tail that echoes it shows `[redacted]`. Neither key variable is in
@@ -246,9 +247,7 @@ mod tests {
     /// settings side, under the Codex reader's drops too.
     #[test]
     fn a_stored_key_survives_every_drop() {
-        use clauseo_protocol::AgentKind;
-        for agent in [AgentKind::Claude, AgentKind::Codex] {
-            let var = crate::readers::key_var(agent);
+        for var in ["ANTHROPIC_API_KEY", "CODEX_API_KEY"] {
             assert!(!is_dropped_inherited(OsStr::new(var)), "{var}");
             assert!(
                 !CODEX_DROPPED

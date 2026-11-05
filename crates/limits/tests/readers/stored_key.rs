@@ -49,6 +49,14 @@ fn stored(agent: AgentKind) -> String {
     }
 }
 
+/// The variable a stored key goes in for `agent`, as desktop's hook names it.
+fn key_var(agent: AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Claude => "ANTHROPIC_API_KEY",
+        AgentKind::Codex => "CODEX_API_KEY",
+    }
+}
+
 fn keyed(
     setup: &Setup,
     launcher: &Arc<TestLauncher>,
@@ -56,7 +64,7 @@ fn keyed(
 ) -> ProcessReaders<SharedTimer> {
     setup
         .readers(launcher, timer)
-        .with_launch_env(|agent| Some(stored(agent)))
+        .with_launch_env(|agent| vec![(key_var(agent).to_owned(), stored(agent))])
 }
 
 /// The one spec's env names, and its value of `var`. Never prints a value but `var`'s.
@@ -171,13 +179,13 @@ fn a_crash_never_shows_the_stored_key() {
 }
 
 #[test]
-fn no_key_or_an_empty_one_leaves_the_settings_variables() {
+fn no_variable_given_leaves_the_settings_variables() {
     for empty in [false, true] {
         let setup = installed_setup();
         let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
         let reader = setup.readers(&launcher, &SharedTimer::default());
         let reader = if empty {
-            reader.with_launch_env(|_| Some(String::new()))
+            reader.with_launch_env(|_| Vec::new())
         } else {
             reader
         };
@@ -285,4 +293,61 @@ fn a_hold_survives_with_entry_and_the_copy_reads_the_new_entry_with_the_key() {
         block_on(gone.read(AgentKind::Claude)),
         ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
     ));
+}
+
+/// The security review's L7: a read asked for during a hold, on the readers as they were,
+/// takes its entry once past the gate, so after a leave it reads the entry written meanwhile.
+#[test]
+fn a_read_queued_during_a_hold_reads_the_entry_set_before_the_hold_drops() {
+    let setup = installed_setup();
+    let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+    let reader = keyed(&setup, &launcher, &SharedTimer::default());
+    let guard = reader
+        .hold(AgentKind::Claude)
+        .now_or_never()
+        .expect("no read ran");
+    let mut queued = reader.read(AgentKind::Claude);
+    assert!((&mut queued).now_or_never().is_none(), "held");
+    let mut entry = setup
+        .effective()
+        .agent("claude-acp")
+        .cloned()
+        .expect("Claude's entry");
+    entry
+        .env
+        .insert("ANTHROPIC_MODEL".to_owned(), "after-the-leave".to_owned());
+    reader.set_entry(AgentKind::Claude, Some(entry));
+    drop(guard);
+    assert!(matches!(block_on(queued), ReadOutcome::Usage { .. }));
+    let (_names, model) = names_and(&launcher, "ANTHROPIC_MODEL");
+    assert_eq!(model, Some(OsString::from("after-the-leave")));
+    launcher.wait_stdout_closed();
+}
+
+/// The security review's M4: the plan's variables the caller gives go in beside the key, each
+/// over a settings variable of that name in any case.
+#[test]
+fn the_plan_s_variables_go_in_beside_the_key() {
+    let setup = installed_setup();
+    let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+    let reader = setup
+        .readers(&launcher, &SharedTimer::default())
+        .with_launch_env(|agent| {
+            vec![
+                (key_var(agent).to_owned(), stored(agent)),
+                (
+                    "ANTHROPIC_BASE_URL".to_owned(),
+                    "https://gw.firm.example".to_owned(),
+                ),
+                ("CLAUDE_CODE_USE_BEDROCK".to_owned(), "1".to_owned()),
+            ]
+        });
+    block_on(reader.read(AgentKind::Claude));
+    let (_names, url) = names_and(&launcher, "ANTHROPIC_BASE_URL");
+    assert_eq!(url, Some(OsString::from("https://gw.firm.example")));
+    let (_names, bedrock) = names_and(&launcher, "CLAUDE_CODE_USE_BEDROCK");
+    assert_eq!(bedrock, Some(OsString::from("1")));
+    let (_names, key) = names_and(&launcher, "ANTHROPIC_API_KEY");
+    assert!(key == Some(OsString::from(FAKE_KEY)), "not the stored key");
+    launcher.wait_stdout_closed();
 }
