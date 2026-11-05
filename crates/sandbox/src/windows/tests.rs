@@ -3,6 +3,7 @@
 //!
 //! Past 500 lines: split tier B's record tests (from the registry read down) into a file of
 //! their own when this grows.
+#![expect(unsafe_code, reason = "FFI to read a test folder's DACL back as SDDL")]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -161,7 +162,7 @@ fn admin_share_root(path: &Path) -> PathBuf {
 }
 
 /// `path` as a UNC path through the admin share: `C:\x\y` gives `\\localhost\C$\x\y`.
-fn admin_share_path(path: &Path) -> PathBuf {
+pub(in crate::windows) fn admin_share_path(path: &Path) -> PathBuf {
     let (drive, rest) = drive_and_rest(path);
     PathBuf::from(format!(r"\\localhost\{drive}$\{rest}"))
 }

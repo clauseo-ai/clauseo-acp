@@ -34,7 +34,10 @@
 //!   `matters.json` (`windows::matters`), the set-up marker `setup.json` (`windows::marker`),
 //!   the machine's sandbox user and owner records (`windows::sandbox_user_sid`, which the
 //!   desktop's start-up check reads, and `windows::sandbox_owner_sid`), and the set-up state they
-//!   give (`windows::setup_state`).
+//!   give (`windows::setup_state`). Tier B's folder gate (`windows::admit`), grant plan
+//!   (`windows::acl_plan`) and write-ahead ACL ledger (`windows::ledger`); nothing writes a
+//!   permission entry yet.
+
 //!
 //! # Interface
 //!
@@ -128,7 +131,7 @@
 //! lines); on Unix, `rustix` (the open-file limit, and the browser socket folder's effective
 //! user id, lock file and `flock`); on Windows, `socket2` and `windows` (the proxy's
 //! listeners, the folder check, the registry and token reads) and `serde_json` (tier B's
-//! records).
+//! records and ACL ledger, built on every OS).
 //!
 //! # Start reading
 //!
@@ -157,22 +160,7 @@ pub mod proxy;
 mod setup;
 #[cfg(test)]
 mod test_support;
-#[cfg(windows)]
 pub mod windows;
-// Tier B's record files are plain files, so their tests run on every OS: elsewhere they compile
-// for tests alone, at the crate root, where `super::` names the same siblings as in `windows`.
-#[cfg(all(test, not(windows)))]
-#[path = "windows/marker.rs"]
-pub mod marker;
-#[cfg(all(test, not(windows)))]
-#[path = "windows/matters.rs"]
-pub mod matters;
-#[cfg(all(test, not(windows)))]
-#[path = "windows/sids.rs"]
-pub mod sids;
-#[cfg(all(test, not(windows)))]
-#[path = "windows/write.rs"]
-mod write;
 
 #[cfg(unix)]
 pub use browser_dir::BrowserSocketDir;
