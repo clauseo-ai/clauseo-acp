@@ -67,6 +67,9 @@ impl TempDir {
     /// A hard link at `rel` under the folder to the existing file `original`.
     pub(crate) fn hard_link(&self, rel: &str, original: &Path) -> PathBuf {
         let path = self.0.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
         std::fs::hard_link(original, &path).unwrap();
         path
     }
