@@ -79,10 +79,11 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # machine's total memory (src/machine_memory.rs).
 # The agent sandbox check (src/jailed/windows.rs): Foundation for HANDLE, CloseHandle and LocalFree,
 # Security for GetTokenInformation and EqualSid, Security_Authorization for ConvertStringSidToSidW,
-# System_Registry for RegGetValueW (the sandbox user record), Threading for OpenProcessToken. Its
+# Threading for OpenProcessToken; clauseo-sandbox reads the sandbox user record. Its
 # CI test (tests/jailed_windows.rs) also uses Security's CreateRestrictedToken and Threading's
 # CreateProcessAsUserW.
 [target.'cfg(windows)'.dependencies]
+clauseo-sandbox = { path = "../sandbox" }
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security",
@@ -90,7 +91,6 @@ windows = { workspace = true, features = [
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
-  "Win32_System_Registry",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Controls",

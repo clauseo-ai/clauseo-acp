@@ -2,6 +2,10 @@
 //! asks the folder and its volume a few questions, in order, and stops at the first answer. It
 //! writes nothing and takes no lock, and it answers for the calling process's own token, which
 //! the agent inherits.
+//!
+//! Tier B's records (S15): each matter's SID in `<data_dir>\sandbox\matters.json` ([`sids`]),
+//! the set-up marker `setup.json` ([`marker`]), the machine's sandbox user record
+//! ([`sandbox_user_sid`]), and the set-up state they give ([`setup_state`]).
 #![expect(
     unsafe_code,
     reason = "FFI to the Win32 file, volume and security calls"
@@ -392,7 +396,16 @@ fn os_error(error: &windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
 }
 
+mod detect;
+pub mod marker;
+mod record;
+pub mod sids;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_dacl;
+mod write;
+
+pub(crate) use detect::os_facts;
+pub use marker::setup_state;
+pub use record::{RecordError, sandbox_user_sid};
 #[cfg(test)]
 mod tests;

@@ -1018,6 +1018,7 @@ dependencies = [
  "clauseo-process",
  "clauseo-profile",
  "clauseo-protocol",
+ "clauseo-sandbox",
  "clauseo-settings",
  "dunce",
  "flate2",
