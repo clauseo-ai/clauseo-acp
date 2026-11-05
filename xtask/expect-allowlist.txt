@@ -31,6 +31,9 @@ crates/desktop/src/setup/host_calls.rs SetupHost::remove_login_links dead_code
 crates/desktop/src/setup/host_calls.rs SetupHost::login_changed dead_code
 crates/desktop/src/setup/keys.rs KeyCache::get dead_code
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
+# The uninstaller's --delete-app-data (S20): its only writes, and its tests' links, locks and modes.
+crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
+crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods

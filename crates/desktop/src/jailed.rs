@@ -6,9 +6,12 @@
 //! Contract:
 //! - `main` calls [`launch`] with the arguments after the program and nothing else has run.
 //!   [`launch`] answers `--pre-write-guard` first ([`guard_requested`]): the guard runs inside
-//!   the sandbox by design, so it never asks. Every other start asks the [`SandboxProbe`] next,
-//!   before logging, settings, the Tauri builder and its single-instance plugin: a jailed start
-//!   must not forward its arguments (deep links included) to a running window.
+//!   the sandbox by design, so it never asks. `--delete-app-data` (the uninstaller's,
+//!   `delete_app_data.rs`) asks next and runs only on a plain `Ok(false)`: sandboxed, it refuses
+//!   as below; a failed probe refuses it with `delete_app_data::FAILED` and deletes nothing.
+//!   Every other start asks the [`SandboxProbe`] next, before logging, settings, the Tauri
+//!   builder and its single-instance plugin: a jailed start must not forward its arguments (deep
+//!   links included) to a running window.
 //! - Sandboxed: one line, [`REFUSAL`], on stderr (no path, no secret) and exit code
 //!   [`SANDBOXED_EXIT`]; no window, nothing else runs. Not sandboxed: the app starts.
 //! - The probe failing is not "sandboxed": one stderr line says the check failed and why, and
@@ -40,7 +43,7 @@ mod windows;
 use std::ffi::OsString;
 use std::io::{self, Write};
 
-use crate::guard_requested;
+use crate::{delete_app_data, guard_requested};
 
 /// The exit code of a start refused inside the agent sandbox: sysexits' `EX_NOPERM`, apart from
 /// the guard's own codes (0, and `clauseo_host::pre_write_guard::DENY`).
@@ -74,17 +77,23 @@ impl SandboxProbe for SystemProbe {
 pub trait Stages {
     /// Runs the pre-write guard with the arguments after its flag; returns its exit code.
     fn guard(&mut self, args: &[OsString]) -> i32;
+    /// Runs the uninstaller's deletion with the arguments after its flag; returns its exit code.
+    fn delete_app_data(&mut self, args: &[OsString]) -> i32;
     /// Builds and runs the app until it exits.
     fn app(&mut self) -> tauri::Result<()>;
 }
 
-/// The real stages: `clauseo_host::pre_write_guard::run` on stdin, stdout and stderr, and
-/// [`crate::run`].
+/// The real stages: `clauseo_host::pre_write_guard::run` on stdin, stdout and stderr,
+/// `delete_app_data::run` on stderr, and [`crate::run`].
 pub struct AppStages;
 
 impl Stages for AppStages {
     fn guard(&mut self, args: &[OsString]) -> i32 {
         clauseo_host::pre_write_guard::run(args, io::stdin().lock(), io::stdout(), io::stderr())
+    }
+
+    fn delete_app_data(&mut self, args: &[OsString]) -> i32 {
+        delete_app_data::run(args, &mut io::stderr())
     }
 
     fn app(&mut self) -> tauri::Result<()> {
@@ -95,14 +104,15 @@ impl Stages for AppStages {
 /// How a start ended: `main` exits with the code, or returns the app's result.
 #[derive(Debug)]
 pub enum Launched {
-    /// Exit with this code: the guard's, or [`SANDBOXED_EXIT`].
+    /// Exit with this code: the guard's, the deletion's, or [`SANDBOXED_EXIT`].
     Exit(i32),
     /// The app ran; its result.
     App(tauri::Result<()>),
 }
 
 /// The start: the guard when `args` (the arguments after the program) ask for it, else the
-/// sandbox check, then the app unless the probe said sandboxed. Lines go to `stderr`.
+/// sandbox check, then the uninstaller's deletion when they ask for it and the probe said no, or
+/// the app unless the probe said sandboxed. Lines go to `stderr`.
 pub fn launch(
     args: &[OsString],
     probe: &dyn SandboxProbe,
@@ -113,6 +123,27 @@ pub fn launch(
         && guard_requested(Some(first.as_os_str()))
     {
         return Launched::Exit(stages.guard(rest));
+    }
+    if let Some((first, rest)) = args.split_first()
+        && delete_app_data::requested(first)
+    {
+        return Launched::Exit(match probe.sandboxed() {
+            Ok(false) => stages.delete_app_data(rest),
+            Ok(true) => {
+                say(stderr, REFUSAL);
+                SANDBOXED_EXIT
+            }
+            Err(error) => {
+                say(
+                    stderr,
+                    &format!(
+                        "Clauseo could not tell whether it runs in the agent sandbox ({error}); \
+                         nothing deleted."
+                    ),
+                );
+                delete_app_data::FAILED
+            }
+        });
     }
     match probe.sandboxed() {
         Ok(true) => {

@@ -33,3 +33,5 @@ nd = "nd"
 # The flate2 crate (gzip), a dependency of crates/agents and crates/counts named in ARCHITECTURE.md
 # and their decision records.
 flate = "flate"
+# NSIS's StrCpy instruction (copy a string), in crates/desktop/windows/hooks.nsh.
+Cpy = "Cpy"
