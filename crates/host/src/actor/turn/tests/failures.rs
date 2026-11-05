@@ -342,3 +342,22 @@ fn held_text_survives_a_blocked_stream() {
     assert!(logged);
     rig.finish();
 }
+
+#[test]
+fn a_turn_left_for_the_next_start_holds_no_install() {
+    // Review of R23 PR 4: its end failed twice, so it ends only at the next start; an install
+    // waiting on it (`TurnsCancelled`, `TurnsRunning(false)`) would wait as long.
+    let mut rig = Rig::start("turn-stuck-install", "");
+    let thread = rig.thread();
+    let _turn = rig.running_turn(thread);
+    end_failing(&mut rig, thread, 2);
+    assert!(
+        !crate::actor::turn::any_active(&rig.actor),
+        "TurnsCancelled never comes"
+    );
+    assert!(
+        !crate::actor::turn::any_running(&rig.actor),
+        "TurnsRunning(false) never comes"
+    );
+    rig.finish();
+}

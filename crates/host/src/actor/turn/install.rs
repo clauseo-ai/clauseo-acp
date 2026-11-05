@@ -5,29 +5,39 @@
 use clauseo_protocol::ThreadId;
 
 use super::super::Actor;
-use super::{cancel, queue};
+use super::{TurnState, cancel, queue};
 
 /// Whether any thread has a turn running, for `after_turn`: a current turn (queued for the
-/// writer, starting or prompting), a last turn whose `TurnEnded` is not durable yet, or queued
-/// turns that start by themselves once the current one ends. A held queue does not count: it
-/// waits for the lawyer (after a stop other than `EndTurn`, and at every start), so it would
-/// keep an install waiting for as long as the lawyer leaves it. That is `turn_running`'s rule
-/// for `ArchiveThread`, held queues apart.
+/// writer, starting or prompting), a last turn whose `TurnEnded` is on its way to the store,
+/// or queued turns that start by themselves once the current one ends. A held queue does not
+/// count: it waits for the lawyer (after a stop other than `EndTurn`, and at every start), so
+/// it would keep an install waiting for as long as the lawyer leaves it. Nor does a turn whose
+/// end failed twice: it ends only at the next start, and its thread takes no send meanwhile.
+/// That is `turn_running`'s rule for `ArchiveThread`, those two apart.
 pub(crate) fn any_running(actor: &Actor) -> bool {
     actor.threads.values().any(|entry| {
         let state = &entry.turn;
-        state.current.is_some() || state.closing.is_some() || queue::moves_by_itself(&state.queue)
+        state.current.is_some() || closing(state) || queue::moves_by_itself(&state.queue)
     })
 }
 
-/// Whether any thread still has a turn that has not ended durably: a current turn, or one
-/// whose `TurnEnded` commit has not returned. Once none has, every turn [`cancel_all`]
-/// cancelled has its `TurnEnded`.
+/// Whether any thread still has a turn that has not ended: a current turn, or one whose
+/// `TurnEnded` commit has not returned and is tried again in this run. Once none has, every
+/// turn [`cancel_all`] cancelled has its `TurnEnded`, or is left for the next start.
 pub(crate) fn any_active(actor: &Actor) -> bool {
     actor
         .threads
         .values()
-        .any(|entry| entry.turn.current.is_some() || entry.turn.closing.is_some())
+        .any(|entry| entry.turn.current.is_some() || closing(&entry.turn))
+}
+
+/// A last turn whose `TurnEnded` this run still commits: not one whose end failed twice, which
+/// the next start ends.
+fn closing(state: &TurnState) -> bool {
+    state
+        .closing
+        .as_ref()
+        .is_some_and(|closing| !closing.retried)
 }
 
 /// `InstallUpdate { now }`: every current turn goes through Stop's path without a command
