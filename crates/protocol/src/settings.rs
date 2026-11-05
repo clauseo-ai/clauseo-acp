@@ -123,7 +123,9 @@ pub struct SettingsView {
     /// change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
     /// refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
     /// (`matters.default_location`, `agents.<id>`, `plans.<id>`). A key ending in `.` stands
-    /// for every key under it: `plans.` while a policy source cannot be read.
+    /// for every key under it: `plans.` while a policy source cannot be read. So a client asks
+    /// whether a key is locked by prefix as well, not only by exact match: `plans.` locks
+    /// `plans.claude-acp` though that exact key is not in the list.
     pub locked: Vec<String>,
     /// Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
