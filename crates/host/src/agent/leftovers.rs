@@ -36,7 +36,10 @@ pub(crate) async fn snapshot(descendants: Descendants, clock: Arc<dyn Clock>) ->
             drop(send.send_blocking(descendants.snapshot()));
         });
     if let Err(error) = started {
-        tracing::warn!(%error, "could not start {THREAD_NAME} for a listing");
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "could not start {THREAD_NAME} for a listing"
+        );
         return None;
     }
     let answer = pin!(answer.recv());
@@ -78,7 +81,10 @@ pub(crate) fn sweep(
             }
         });
     if let Err(error) = started {
-        tracing::warn!(%error, "could not start {THREAD_NAME}; a cancelled turn's processes run on");
+        tracing::warn!(
+            error = %crate::log_file::Cause(&error),
+            "could not start {THREAD_NAME}; a cancelled turn's processes run on"
+        );
     }
 }
 

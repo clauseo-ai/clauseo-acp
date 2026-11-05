@@ -209,7 +209,11 @@ fn load_threads(actor: &mut Actor, matter: MatterId) {
             stream,
             Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
                 if let Err(error) = loaded {
-                    tracing::warn!(%error, %thread, "a returned matter's thread did not load");
+                    tracing::warn!(
+                        error = %crate::log_file::Cause(&error),
+                        %thread,
+                        "a returned matter's thread did not load"
+                    );
                 }
                 actor.release(stream);
             }),

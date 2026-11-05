@@ -264,6 +264,8 @@ impl MatterReply {
             Self::Previewed(_) => "Previewed",
             Self::HeldOpen(_) => "HeldOpen",
             Self::Papers(_) => "Papers",
+            Self::EditedSince(_) => "EditedSince",
+            Self::Discarded(_) => "Discarded",
         }
     }
 }

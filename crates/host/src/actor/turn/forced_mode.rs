@@ -52,6 +52,10 @@ pub(super) fn on_mode_reset(
         commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new())
     });
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "a forced-ask session was not switched back to default");
+        tracing::warn!(
+            %thread,
+            error = %crate::log_file::Cause(&error),
+            "a forced-ask session was not switched back to default"
+        );
     }
 }

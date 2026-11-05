@@ -161,7 +161,12 @@ pub(crate) fn sweep_stale(root: Option<&Path>) {
     match swept {
         Ok(0) => {}
         Ok(removed) => tracing::info!(removed, "removed stale browser socket folders"),
-        Err(error) => tracing::warn!(%error, "the stale browser socket folders were not swept"),
+        Err(error) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the stale browser socket folders were not swept"
+            );
+        }
     }
 }
 
