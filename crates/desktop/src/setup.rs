@@ -31,6 +31,9 @@
 //! The app's backend is [`backend::AgentsBackend`], over S18's `Agents`, the keychain and the
 //! host's Rust-only calls (`backend.rs`, `keys.rs`, `compose.rs`, `host_calls.rs`), behind a
 //! cell its start fills (`start.rs`); the tests use a scripted `StubBackend` (`stub.rs`) too.
+//! Piece B wires it to the host: the leave order (`leave.rs`), the login check
+//! (`login_check.rs`), the limits readers (`readers.rs`), the launch hook (`hook.rs`) and the
+//! settings it follows (`refresh.rs`).
 
 mod admit;
 mod backend;
@@ -38,13 +41,19 @@ mod compose;
 mod confirm;
 mod events;
 mod firm_policy;
+mod hook;
 mod host_calls;
 mod keys;
+mod leave;
+mod login_check;
+mod readers;
+mod refresh;
 mod start;
 #[cfg(test)]
 mod stub;
 #[cfg(test)]
 mod tests;
+mod wiring;
 
 use std::sync::Arc;
 
@@ -55,8 +64,12 @@ use crate::dialogs::BoxFuture;
 pub(crate) use admit::may_setup;
 pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
+pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
-pub(crate) use start::{BackendCell, SetupParts, SetupStart, spawn};
+pub(crate) use keys::KeySlot;
+pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};
+pub(crate) use readers::{LeaveReaders, SwappableReaders};
+pub(crate) use start::{BackendCell, HostSide, SetupParts, SetupStart, spawn};
 #[cfg(test)]
 pub(crate) use stub::StubBackend;
 

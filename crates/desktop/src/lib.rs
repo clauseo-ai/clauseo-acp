@@ -308,12 +308,36 @@ fn start_host<R: Runtime>(
             .ok();
         let effective = load_effective(&locations);
         let setup_read = setup::SetupStart::read(&effective, &locations);
-        if let Err(err) = setup::spawn(setup_read, setup_parts) {
+        let keys = setup::KeySlot::default();
+        let launcher: Arc<dyn clauseo_process::Launcher> =
+            Arc::new(host_launcher(SystemDirs.home()));
+        let readers = Arc::new(setup::SwappableReaders::new(
+            &effective,
+            launcher,
+            Arc::clone(&keys),
+        ));
+        let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
+        let reused = setup::ReusedLogins::default();
+        let reread_at = locations.clone();
+        let side = setup::HostSide {
+            keys: Arc::clone(&keys),
+            readers: Arc::clone(&readers) as Arc<dyn setup::LeaveReaders>,
+            reused: reused.clone(),
+            plans: Arc::clone(&plans),
+            reread: Box::new(move || load_effective(&reread_at)),
+        };
+        if let Err(err) = setup::spawn(setup_read, setup_parts, side) {
             tracing::warn!(%err, "no setup thread: setup commands answer internal");
         }
         let exe = std::env::current_exe().ok();
         let counts = counts::open(&locations, &effective, exe.as_deref());
-        let config = host_config(effective);
+        let config = host_config(effective)
+            .with_login_check(Arc::new(setup::DesktopLoginCheck::new(
+                SystemDirs.home(),
+                reused,
+            )))
+            .with_sign_in_again(clauseo_agents::is_sign_in_again)
+            .with_limits_reader(readers);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());
@@ -326,22 +350,28 @@ fn start_host<R: Runtime>(
             machine_memory::total_bytes,
             HostConfig::with_machine_memory,
         );
-        Host::start(with_profile(config, profile))
+        let hook = setup::SetupHook::new(keys, plans);
+        Host::start(with_profile(config, profile, hook))
     })
 }
 
-/// `config` with the launch profile as its hook and stetdoc's folder first on the agents'
-/// `PATH` (when stetdoc was found), or unchanged (`NoProfile`) when the profile could not be
-/// built. No egress proxy yet: stage C's is not wired, so the browser shows `NoProxy` (0030).
-fn with_profile(config: HostConfig, profile: Option<DesktopProfile>) -> HostConfig {
+/// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
+/// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
+/// profile (it could not be built) the hook adds only setup's variables. No egress proxy yet:
+/// stage C's is not wired, so the browser shows `NoProxy` (0030).
+fn with_profile(
+    config: HostConfig,
+    profile: Option<DesktopProfile>,
+    hook: setup::SetupHook,
+) -> HostConfig {
     let Some(profile) = profile else {
-        return config;
+        return config.with_profile_hook(Box::new(hook));
     };
     let config = match profile.path_prepend().and_then(absolute_folder) {
         Some(folder) => config.with_agent_path_prepend(folder),
         None => config,
     };
-    config.with_profile_hook(Box::new(profile))
+    config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
 }
 
 /// `folder` when it is absolute. The host takes the agents' `PATH` folder as given, and a
