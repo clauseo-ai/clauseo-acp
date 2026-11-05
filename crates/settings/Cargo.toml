@@ -16,6 +16,10 @@ serde_json_lenient = { workspace = true, features = [
 ] }
 schemars = { workspace = true, features = ["std", "derive", "indexmap2"] }
 thiserror = { workspace = true }
+# NFKC for the misnamed-section rule (policy names).
+unicode-normalization = { workspace = true }
+# The key names in macOS managed preferences files; plain Rust, so tested on every OS.
+plist = { workspace = true }
 
 # The registry and the known folders.
 [target.'cfg(windows)'.dependencies]
@@ -25,14 +29,17 @@ windows = { workspace = true, features = [
   "Win32_System_Com",
 ] }
 
+# The login user's name from the real user id, for its managed preferences file (macOS); built
+# on every Unix so it is tested off macOS too.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["user"] }
+
 # Managed preferences.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFPreferences"] }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json", "redactions"] }
-# tests/firm_it.rs reads the sample configuration profile's payload.
-plist = { workspace = true }
 
 [lints]
 workspace = true

@@ -114,7 +114,7 @@ fn name_shaped(name: &str) -> bool {
 /// Whether an unknown field `text` may be quoted: `[a-z][a-z0-9_]{0,31}`, which still shows a
 /// typo (`envv`, `endpoit`). Anything else may be pasted text (`NAME=value`, a `ghp_…` or other
 /// token, which mixes case or runs long), so a message gives its place instead.
-fn field_shaped(text: &str) -> bool {
+pub(crate) fn field_shaped(text: &str) -> bool {
     text.len() <= 32
         && text
             .bytes()

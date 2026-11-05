@@ -23,6 +23,7 @@ mod windows;
 use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::{self, Leaf};
+use crate::lock_reason::LockReason;
 use crate::warning::Warning;
 use std::path::PathBuf;
 
@@ -52,6 +53,10 @@ pub enum PolicyRead {
 pub struct PolicyValues {
     leaves: Vec<Leaf>,
     warnings: Vec<Warning>,
+    /// Why the keys the source names in a form this version cannot read are locked.
+    reasons: Vec<LockReason>,
+    /// Where each key it sets or refuses sits in it, from 1 ([`LockReason::place`]).
+    places: Vec<(String, usize)>,
 }
 
 /// The policy layer after start-up.
@@ -129,7 +134,35 @@ impl PolicyValues {
             },
             "a policy source's leaves must come from leaf::typed: one leaf per key"
         );
-        PolicyValues { leaves, warnings }
+        PolicyValues {
+            leaves,
+            warnings,
+            reasons: Vec::new(),
+            places: Vec::new(),
+        }
+    }
+
+    /// The values, with why the misnamed keys are locked.
+    pub(crate) fn with_reasons(mut self, reasons: Vec<LockReason>) -> PolicyValues {
+        self.reasons = reasons;
+        self
+    }
+
+    /// The values, with `more` reasons after those they hold.
+    pub(crate) fn with_more_reasons(mut self, more: Vec<LockReason>) -> PolicyValues {
+        self.reasons.extend(more);
+        self
+    }
+
+    /// The values, with where each key sits in the source.
+    pub(crate) fn with_places(mut self, places: Vec<(String, usize)>) -> PolicyValues {
+        self.places = places;
+        self
+    }
+
+    /// Where each key this source sets or refuses sits in it, from 1, as far as known.
+    pub(crate) fn places(&self) -> &[(String, usize)] {
+        &self.places
     }
 
     /// The dotted keys this source locks, each once, in the order of its last value in the
@@ -151,6 +184,11 @@ impl PolicyValues {
 
     pub(crate) fn into_parts(self) -> (Vec<Leaf>, Vec<Warning>) {
         (self.leaves, self.warnings)
+    }
+
+    /// Why each misnamed key is locked, as [`PolicyValues::with_reasons`] set it.
+    pub(crate) fn reasons(&self) -> &[LockReason] {
+        &self.reasons
     }
 }
 

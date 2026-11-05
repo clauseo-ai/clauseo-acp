@@ -165,3 +165,20 @@ fn a_symlink_loop_is_an_error() {
     let error = SystemFiles.write_atomic(&a, b"{}").unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
 }
+
+// A managed preferences file that is a symlink is read through the link, not refused.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_managed_preferences_file_is_read_through_the_link() {
+    let root = fresh("managed-symlink").unwrap();
+    let real = root.join("real.plist");
+    write::write(
+        &real,
+        br#"<plist version="1.0"><dict><key>skills</key><dict/></dict></plist>"#,
+    )
+    .unwrap();
+    let link = root.join("ai.clauseo.desktop.plist");
+    write::symlink(std::path::Path::new("real.plist"), &link).unwrap();
+    let names = clauseo_settings::policy::managed_prefs::file_names(&SystemFiles, &[link]).unwrap();
+    assert_eq!(names, ["skills"]);
+}

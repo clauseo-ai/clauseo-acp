@@ -24,7 +24,9 @@
 //!   arm in [`refuse`] (`leaf/reset.rs`), which sets the value it is locked at when its policy
 //!   is unknown;
 //! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
-//!   ignores a policy `true` for it, with a warning).
+//!   ignores a policy `true` for it, with a warning);
+//! - for a key only a policy may set, its name in [`POLICY_ONLY_KEYS`] (`settings.json`'s value
+//!   is ignored, with a warning).
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
@@ -38,14 +40,15 @@ mod security_tests;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use misnamed::typed_policy;
+pub(crate) use misnamed::{Places, typed_policy};
 
 use crate::plans::{self, plan_id};
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings, Theme,
-    UpdateMode,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings,
+    SkillsExtra, Theme, UpdateMode,
 };
+use crate::skills;
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -58,7 +61,7 @@ use reset::reset;
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 15] = [
+pub(crate) const KEYS: [(&str, Kind); 19] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -74,6 +77,10 @@ pub(crate) const KEYS: [(&str, Kind); 15] = [
     ("update.mode", Kind::String),
     ("install.bundle", Kind::String),
     ("install.registry", Kind::String),
+    ("skills.extra", Kind::String),
+    ("skills.curated", Kind::StringArray),
+    ("skills.allow_scripts", Kind::Boolean),
+    ("skills.enabled", Kind::Object),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -82,8 +89,9 @@ pub(crate) const KEYS: [(&str, Kind); 15] = [
 /// there is unknown, and the user's must not stand in. Off is not always the default: both
 /// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
 /// default would fail open. `plans.` stands for every `plans.<id>` (decision record 0048):
-/// locked, no plan stands, so no endpoint the lawyer chose does.
-pub(crate) const SECURITY_KEYS: [&str; 9] = [
+/// locked, no plan stands, so no endpoint the lawyer chose does. The three `skills` keys lock
+/// at no extra pack, none from a list, and no script (decision record 0040).
+pub(crate) const SECURITY_KEYS: [&str; 12] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
@@ -93,12 +101,20 @@ pub(crate) const SECURITY_KEYS: [&str; 9] = [
     "install.bundle",
     "install.registry",
     "plans.",
+    "skills.extra",
+    "skills.allow_scripts",
+    "skills.curated",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
 /// ignored with a warning and does not lock it, so the lawyer's own switch stands. A policy
 /// `false` locks it, as any policy value does.
 pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_reports"];
+
+/// The keys only a policy may set (decision record 0040): a `settings.json` value for one is
+/// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
+/// `skills.curated` is empty and admits nothing.
+pub(crate) const POLICY_ONLY_KEYS: [&str; 1] = ["skills.curated"];
 
 /// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
 /// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
@@ -143,6 +159,11 @@ pub(crate) enum Leaf {
     Plan(String, Plan),
     Bundle(Option<PathBuf>),
     Registry(Option<String>),
+    SkillsExtra(SkillsExtra),
+    Curated(Vec<String>),
+    AllowScripts(bool),
+    /// The whole `skills.enabled` map: a policy value replaces the user's map, never merges.
+    SkillsEnabled(BTreeMap<String, String>),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -153,6 +174,25 @@ pub(crate) enum Leaf {
 /// The agent id in an `agents.<id>` key.
 pub(crate) fn agent_id(key: &str) -> Option<&str> {
     key.strip_prefix("agents.").filter(|id| !id.is_empty())
+}
+
+/// `raws` from `settings.json` without the keys only a policy may set ([`POLICY_ONLY_KEYS`]):
+/// each such value gets a warning where it sits, and is left out before it is typed.
+pub(crate) fn without_policy_only(raws: Vec<Raw>, warnings: &mut Vec<Warning>) -> Vec<Raw> {
+    let (ignored, kept): (Vec<Raw>, Vec<Raw>) = raws
+        .into_iter()
+        .partition(|raw| POLICY_ONLY_KEYS.contains(&raw.key.as_str()));
+    warnings.extend(ignored.into_iter().map(|raw| Warning {
+        kind: WarningKind::InvalidValue {
+            message: format!(
+                "only a policy can set {}, so this value is ignored and admits nothing",
+                raw.key
+            ),
+            key: raw.key,
+        },
+        origin: raw.origin,
+    }));
+    kept
 }
 
 /// Types every raw value of a source, in order, with one rule for every source. A value that
@@ -240,6 +280,10 @@ impl Leaf {
             "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
             "install.bundle" => plans::bundle(key, value).map(Leaf::Bundle),
             "install.registry" => plans::registry(key, value).map(Leaf::Registry),
+            "skills.extra" => typed_value(key, value).map(Leaf::SkillsExtra),
+            "skills.curated" => skills::curated(key, value).map(Leaf::Curated),
+            "skills.allow_scripts" => typed_value(key, value).map(Leaf::AllowScripts),
+            "skills.enabled" => skills::enabled(key, value, unknown).map(Leaf::SkillsEnabled),
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -270,6 +314,10 @@ impl Leaf {
             Leaf::Plan(id, _) => format!("plans.{id}"),
             Leaf::Bundle(_) => "install.bundle".to_owned(),
             Leaf::Registry(_) => "install.registry".to_owned(),
+            Leaf::SkillsExtra(_) => "skills.extra".to_owned(),
+            Leaf::Curated(_) => "skills.curated".to_owned(),
+            Leaf::AllowScripts(_) => "skills.allow_scripts".to_owned(),
+            Leaf::SkillsEnabled(_) => "skills.enabled".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -312,6 +360,10 @@ impl Leaf {
             }
             Leaf::Bundle(path) => settings.install.bundle = path,
             Leaf::Registry(url) => settings.install.registry = url,
+            Leaf::SkillsExtra(extra) => settings.skills.extra = extra,
+            Leaf::Curated(ids) => settings.skills.curated = ids,
+            Leaf::AllowScripts(on) => settings.skills.allow_scripts = on,
+            Leaf::SkillsEnabled(packs) => settings.skills.enabled = packs,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

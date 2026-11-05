@@ -95,11 +95,11 @@ pub(crate) struct Actor {
     pub(crate) snapshots: SnapshotWorker,
     /// The search thread (`search.rs`): each returned commit goes to it, and searches.
     pub(crate) search: crate::search::Search,
-    /// The settings. Only the actor touches them, so it is the one lock their writes need:
-    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, `SetToolSettings`
-    /// `Effective::apply_tools_patch` and `SetPrivacySettings` `Effective::apply_privacy_patch`,
-    /// one command at a time.
+    /// The settings. Only the actor touches them, so it is the one lock their writes need: each
+    /// `Set…Settings` runs its `Effective` write here, one command at a time.
     pub(crate) effective: Effective,
+    /// The policy lock causes last logged (`settings/lock_causes.rs`): a reload logs a change.
+    pub(crate) lock_causes: Vec<clauseo_settings::LockReason>,
     /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
     /// (`counting.rs`).
     pub(crate) counts: Option<clauseo_counts::Counts>,

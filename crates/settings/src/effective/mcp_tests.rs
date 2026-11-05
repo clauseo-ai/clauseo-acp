@@ -295,6 +295,9 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
             "plans.",
             "privacy.counts",
             "privacy.crash_reports",
+            "skills.allow_scripts",
+            "skills.curated",
+            "skills.extra",
             "tools.browser",
             "tools.web_search",
             "update.mode"

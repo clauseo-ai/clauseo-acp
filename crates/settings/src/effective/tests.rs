@@ -277,13 +277,16 @@ fn only_a_source_that_sets_a_valid_value_is_applied() {
     assert_eq!(effective.settings().ui.theme, Theme::Light);
 }
 
+// The lawyer's own file: the last copy wins, with a warning at the second copy (a
+// `policy.json` that repeats a key is dropped whole: `effective/policy_shape_tests.rs`).
 #[test]
 fn a_repeated_key_takes_its_last_value_valid_or_not() {
     // The last value is valid: it wins over the earlier one.
     let files = user(r#"{"ui": {"theme": "purple", "theme": "dark"}}"#);
     let effective = Effective::load(&locations(), &files, &[]);
     assert_eq!(effective.settings().ui.theme, Theme::Dark);
-    assert_eq!(effective.warnings().len(), 1, "{:?}", effective.warnings());
+    assert_eq!(effective.warnings().len(), 2, "{:?}", effective.warnings());
+    assert_eq!(effective.warnings()[0].kind, WarningKind::DuplicateKey);
 
     // The last value does not type: the key is the default, though an earlier value was valid.
     let files = user(r#"{"ui": {"theme": "dark", "theme": "purple"}}"#);
@@ -292,7 +295,10 @@ fn a_repeated_key_takes_its_last_value_valid_or_not() {
     assert!(
         matches!(
             effective.warnings(),
-            [Warning { kind: WarningKind::InvalidValue { key, .. }, .. }] if key == "ui.theme"
+            [
+                Warning { kind: WarningKind::DuplicateKey, .. },
+                Warning { kind: WarningKind::InvalidValue { key, .. }, .. },
+            ] if key == "ui.theme"
         ),
         "{:?}",
         effective.warnings()
@@ -306,7 +312,16 @@ fn a_repeated_section_is_its_last_copy_on_load() {
     let effective = Effective::load(&locations(), &files, &[]);
     assert_eq!(effective.settings().ui.theme, Theme::System);
     assert_eq!(effective.settings().ui.density, Density::Compact);
-    assert_eq!(effective.warnings(), []);
+    let duplicate = |effective: &Effective| {
+        matches!(
+            effective.warnings(),
+            [Warning {
+                kind: WarningKind::DuplicateKey,
+                ..
+            }]
+        )
+    };
+    assert!(duplicate(&effective), "{:?}", effective.warnings());
 
     // The first `agents` copy's ids are gone, the last copy's stand.
     let text = format!(
@@ -320,7 +335,7 @@ fn a_repeated_section_is_its_last_copy_on_load() {
         effective.agent("codex").map(|codex| codex.command.clone()),
         Some(abs("user/codex").display().to_string())
     );
-    assert_eq!(effective.warnings(), []);
+    assert!(duplicate(&effective), "{:?}", effective.warnings());
 }
 
 /// Locations for a run whose data folder `CLAUSEO_DATA_DIR` named: `tmp/clauseo-ci`.

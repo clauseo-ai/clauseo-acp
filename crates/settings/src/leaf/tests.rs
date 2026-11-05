@@ -346,6 +346,10 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("notify"),
         json!(abs_str("bundle")),
         json!("https://npm.firm.example"),
+        json!("curated"),
+        json!(["nda-kit"]),
+        json!(true),
+        json!({"nda-kit": format!("sha256:{}", "ab".repeat(32))}),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -378,6 +382,10 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("none"),
         json!(abs_str("bundle")),
         json!("https://npm.firm.example"),
+        json!("any"),
+        json!(["nda-kit"]),
+        json!(true),
+        json!({"nda-kit": format!("sha256:{}", "ab".repeat(32))}),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {

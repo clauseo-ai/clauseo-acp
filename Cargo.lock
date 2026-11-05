@@ -1276,6 +1276,7 @@ name = "clauseo-settings"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "nix",
  "objc2-core-foundation",
  "plist",
  "schemars 1.2.3",
@@ -1283,6 +1284,7 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "thiserror 2.0.21",
+ "unicode-normalization",
  "windows",
 ]
 

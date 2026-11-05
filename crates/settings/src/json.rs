@@ -9,12 +9,13 @@
 #[cfg(test)]
 mod tests;
 
-use crate::leaf::{self, Raw};
+use crate::leaf::{self, Places, Raw};
 use crate::schema::SECTIONS;
 use crate::warning::{Origin, Position, Warning, WarningKind};
-use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde::de::{Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
 use serde_json_lenient::value::RawValue;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -29,12 +30,23 @@ pub(crate) struct Syntax {
     pub message: String,
 }
 
+/// What [`read`] found: the values, the warnings, and the dotted name of every key nested
+/// inside an unknown section that is an object (`clauseo.skills`, `clauseo.skills.extra`, each
+/// a [`Raw`] with a `null` value at its section's place), so a policy's misnamed-key pass can
+/// see a security section wrapped in an unknown one, through arrays too
+/// (`{"clauseo": [{"skills": {}}]}` names `clauseo.skills`). `Err` when an unknown section's
+/// value cannot be read whole (a number too big for an `f64`, nesting past the parser's
+/// limit), so its names are unknown: a policy is then malformed. `settings.json`'s reader
+/// ignores them.
+/// Last, each name's place in the file ([`Places`]): its top-level entry's, from 1.
+pub(crate) type Read = (Vec<Raw>, Vec<Warning>, Result<Vec<Raw>, Syntax>, Places);
+
 /// The values of a file: one per key of a known section, in file order, with a warning for each
 /// unknown section and each section that is not an object.
-pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>), Syntax> {
+pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<Read, Syntax> {
     let text = bytes.strip_prefix(BOM).unwrap_or(bytes);
     if is_blank(text) {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), Ok(Vec::new()), Places::default()));
     }
     let text = blank_trailing_commas(text);
     let text = text.as_ref();
@@ -53,10 +65,15 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
     let mut warnings = Vec::new();
     // A section the file sets twice is its last copy, whole: the save keeps only that copy, so
     // the earlier copy's entries must not load either. Its warnings go with it.
+    let mut wrapped = Ok(Vec::new());
     let mut plans_seen = 0;
-    for (section, value) in leaf::keep_last(sections.0, |(section, _)| section.clone()) {
+    let mut places = Places::default();
+    let numbered = sections.0.into_iter().enumerate().collect();
+    for (at, (section, value)) in leaf::keep_last(numbered, |(_, (section, _))| section.clone()) {
+        let place = at + 1;
         plans_seen += usize::from(section.starts_with("plans."));
         if !SECTIONS.contains(&section.as_str()) {
+            places.warnings.push(place);
             // A top-level `plans.` name can be pasted text: shown by its place.
             warnings.push(Warning {
                 origin: origin(value),
@@ -64,9 +81,26 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
                     key: crate::plans::shown_plan_key(&section, plans_seen),
                 },
             });
+            match (
+                serde_json_lenient::from_str::<serde_json::Value>(value.get()),
+                &mut wrapped,
+            ) {
+                (Ok(nested), Ok(names)) => {
+                    nested_names(&section, &nested, &origin(value), names);
+                    places.wrapped.resize(names.len(), place);
+                }
+                (Err(error), Ok(_)) => {
+                    wrapped = Err(Syntax {
+                        position: position(text, &newlines, value),
+                        message: syntax(&error).message,
+                    });
+                }
+                (_, Err(_)) => {}
+            }
             continue;
         }
         let Ok(entries) = serde_json_lenient::from_str::<Entries<'_>>(value.get()) else {
+            places.warnings.push(place);
             warnings.push(Warning {
                 origin: origin(value),
                 kind: WarningKind::InvalidValue {
@@ -77,6 +111,7 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
             continue;
         };
         for (name, value) in entries.0 {
+            places.raws.push(place);
             raws.push(Raw {
                 key: format!("{section}.{name}"),
                 // The file already parsed, so this cannot fail; if it did, the value would be
@@ -86,7 +121,120 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
             });
         }
     }
-    Ok((raws, warnings))
+    Ok((raws, warnings, wrapped, places))
+}
+
+/// Pushes `prefix.<key>` for each key of `value`, when it is an object, then the same for each
+/// value under it, at every depth; an array's items are walked under `prefix` itself.
+fn nested_names(prefix: &str, value: &serde_json::Value, origin: &Origin, names: &mut Vec<Raw>) {
+    let entries = match value {
+        serde_json::Value::Object(entries) => entries,
+        serde_json::Value::Array(items) => {
+            for item in items {
+                nested_names(prefix, item, origin, names);
+            }
+            return;
+        }
+        _ => return,
+    };
+    for (key, value) in entries {
+        let name = format!("{prefix}.{key}");
+        nested_names(&name, value, origin, names);
+        names.push(Raw {
+            key: name,
+            value: serde_json::Value::Null,
+            origin: origin.clone(),
+        });
+    }
+}
+
+/// The message [`NoDuplicates`] fails with, so [`duplicate`] tells it from a syntax error.
+const DUPLICATE: &str = "duplicate key";
+
+/// Where a file holds a key twice in one object, at any level: `Ok(Some)` with the place just
+/// after the second copy's name, or `Ok(None)` when every object's keys differ. `serde_json`
+/// keeps the last copy silently, so this walks the file itself. Never the key: only its place.
+///
+/// `Err` when the walk cannot finish though [`read`] may have: a number too big for an `f64`
+/// (`1e400`), or nesting deeper than the parser's limit (128), which `read` skips over as a
+/// raw value. A duplicate after it would go unseen, so a policy reads such a file as malformed
+/// (host's review of #450); `settings.json` only loses the duplicate warning.
+pub(crate) fn duplicate(bytes: &[u8]) -> Result<Option<Position>, Syntax> {
+    let text = bytes.strip_prefix(BOM).unwrap_or(bytes);
+    if is_blank(text) {
+        return Ok(None);
+    }
+    let text = blank_trailing_commas(text);
+    match serde_json_lenient::from_slice::<NoDuplicates>(&text) {
+        Err(error) => {
+            let found = syntax(&error);
+            if found.message == DUPLICATE {
+                Ok(Some(found.position))
+            } else {
+                Err(found)
+            }
+        }
+        Ok(NoDuplicates) => Ok(None),
+    }
+}
+
+/// Any JSON value whose objects, at every level, hold each key once.
+struct NoDuplicates;
+
+impl<'de> Deserialize<'de> for NoDuplicates {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(NoDuplicatesVisitor)
+    }
+}
+
+struct NoDuplicatesVisitor;
+
+impl<'de> Visitor<'de> for NoDuplicatesVisitor {
+    type Value = NoDuplicates;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<NoDuplicates, A::Error> {
+        let mut seen = HashSet::new();
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            if !seen.insert(key) {
+                return Err(A::Error::custom(DUPLICATE));
+            }
+            map.next_value::<NoDuplicates>()?;
+        }
+        Ok(NoDuplicates)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<NoDuplicates, A::Error> {
+        while seq.next_element::<NoDuplicates>()?.is_some() {}
+        Ok(NoDuplicates)
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
+
+    fn visit_unit<E>(self) -> Result<NoDuplicates, E> {
+        Ok(NoDuplicates)
+    }
 }
 
 /// Where [`blank_trailing_commas`] is in the text.

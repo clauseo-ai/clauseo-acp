@@ -5,10 +5,9 @@
 #[cfg(test)]
 mod tests;
 
-use super::managed_prefs::{self, AGENTS_KEY, PLANS_KEY, PlistValue, SOURCE};
+use super::managed_prefs::{self, PlistValue, SOURCE};
 use super::{FilePolicy, PolicyRead, PolicySource};
 use crate::SystemFiles;
-use crate::leaf::KEYS;
 use crate::locations::IDENTIFIER;
 use objc2_core_foundation::{
     CFArray, CFBoolean, CFDictionary, CFNumber, CFPreferencesAppValueIsForced,
@@ -40,25 +39,39 @@ impl PolicySource for ManagedPreferences {
     }
 
     fn read(&self) -> PolicyRead {
-        managed_prefs::parse(self.values())
+        // The computer's file and the login user's, named by the real user id; values and
+        // "forced" still come from the store.
+        managed_prefs::read_for(
+            &SystemFiles,
+            &self.domain,
+            managed_prefs::login_user(),
+            |names| self.ask(names),
+        )
     }
 }
 
 impl ManagedPreferences {
-    /// Each key a setting can have, with its value and whether it is forced. Managed
-    /// preferences are read key by key, so only these keys are seen.
-    fn values(&self) -> Vec<(String, PlistValue, bool)> {
+    /// Each of `names` the store has a value for, with that value and whether it is forced.
+    /// Only a forced value is policy ([`managed_prefs::parse`]), so a name a file lists that the
+    /// store does not force is never read as policy.
+    fn ask(&self, names: Vec<String>) -> Vec<(String, PlistValue, bool)> {
         let domain = CFString::from_str(&self.domain);
-        KEYS.iter()
-            .map(|&(key, _)| key)
-            .chain([AGENTS_KEY, PLANS_KEY])
+        names
+            .into_iter()
             .filter_map(|key| {
-                let name = CFString::from_str(key);
+                let name = CFString::from_str(&key);
                 let value = CFPreferencesCopyAppValue(&name, &domain)?;
                 let forced = CFPreferencesAppValueIsForced(&name, &domain);
-                Some((key.to_owned(), plist_value(&value), forced))
+                Some((key, plist_value(&value), forced))
             })
             .collect()
+    }
+
+    /// What [`ManagedPreferences::ask`] gives for every name it asks about when no managed file
+    /// lists more: each key a setting can have.
+    #[cfg(test)]
+    fn values(&self) -> Vec<(String, PlistValue, bool)> {
+        self.ask(managed_prefs::names_to_ask(Vec::new()))
     }
 }
 

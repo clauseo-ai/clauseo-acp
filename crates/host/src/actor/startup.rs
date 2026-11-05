@@ -77,6 +77,7 @@ pub(super) async fn open(
         snapshots,
         search,
         effective: parts.effective,
+        lock_causes: Vec::new(),
         launcher: parts.launcher,
         profile: parts.profile,
         managed_mcp: parts.managed_mcp,
@@ -131,6 +132,7 @@ pub(super) async fn open(
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
     super::browser_install::start(&mut actor);
+    super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     tracing::info!(
         target: crate::log_file::LIFECYCLE,
         matters = actor.matters.len(),

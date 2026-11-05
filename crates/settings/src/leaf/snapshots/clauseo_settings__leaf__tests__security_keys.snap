@@ -11,5 +11,8 @@ expression: SECURITY_KEYS
   "update.mode",
   "install.bundle",
   "install.registry",
-  "plans."
+  "plans.",
+  "skills.extra",
+  "skills.allow_scripts",
+  "skills.curated"
 ]
