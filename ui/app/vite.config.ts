@@ -271,6 +271,10 @@ export const SLOW_TESTS = [
   /\/components\/src\/markdown\/(?:split|repair|spec)\.test\.ts$/,
 ];
 
+/** The setup that gives a DOM test a working localStorage on a Node whose global one is unusable (storage-setup.ts): both
+ * projects' setupFiles, before their own. */
+const STORAGE_SETUP = fileURLToPath(new URL("./src/testing/storage-setup.ts", import.meta.url));
+
 /**
  * Vitest's order with the slowest files (SLOW_TESTS) first. Without a results cache (CI starts from none) vitest
  * runs the app project's files before ui/components' and the larger files first, so the small files that stream the
@@ -362,7 +366,7 @@ export default defineConfig(({ mode }) => {
             include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
             environment: "node",
             // each test waits for its late imports (ui/components/src/lib/late.ts)
-            setupFiles: ["../components/src/testing/setup.ts"],
+            setupFiles: [STORAGE_SETUP, "../components/src/testing/setup.ts"],
             sequence: { groupOrder: AFTER_TIMED },
           },
         },
@@ -376,7 +380,7 @@ export default defineConfig(({ mode }) => {
             include: ["src/**/*.test.{ts,tsx}"],
             exclude: [...configDefaults.exclude, TIMED],
             environment: "node",
-            setupFiles: ["src/testing/setup.ts"],
+            setupFiles: [STORAGE_SETUP, "src/testing/setup.ts"],
             sequence: { groupOrder: AFTER_TIMED },
           },
         },
