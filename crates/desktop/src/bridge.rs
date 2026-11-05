@@ -190,8 +190,8 @@ impl Bridge {
 
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
-    /// until the bridge rules on it. The `settings` window reads the settings alone (0028), and
-    /// any other window nothing.
+    /// until the bridge rules on it. The `settings` window reads the settings (0028) and the
+    /// updater's state (0037) alone, and any other window nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -199,8 +199,12 @@ impl Bridge {
     ) -> Result<QueryResult, HostError> {
         match label {
             crate::MAIN_WINDOW => {}
-            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings) => {}
-            SETTINGS_WINDOW => return Err(invalid("the settings window reads only the settings")),
+            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings | HostQuery::GetUpdate) => {}
+            SETTINGS_WINDOW => {
+                return Err(invalid(
+                    "the settings window reads only the settings and the update state",
+                ));
+            }
             _ => return Err(invalid(format!("window {label} may send no query"))),
         }
         match &query {
@@ -214,6 +218,8 @@ impl Bridge {
             | HostQuery::PreviewUndo { .. }
             | HostQuery::ReadBlob { .. }
             | HostQuery::GetSettings
+            // The updater's state (0037): both windows show it.
+            | HostQuery::GetUpdate
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}

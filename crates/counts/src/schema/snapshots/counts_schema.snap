@@ -1493,7 +1493,8 @@ expression: counts_schema()
         "signin.port_busy",
         "signin.failed",
         "signin.policy_unreadable",
-        "agent.guard_missing"
+        "agent.guard_missing",
+        "update.failed"
       ],
       "type": "string"
     },

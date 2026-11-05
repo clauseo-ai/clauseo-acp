@@ -3,7 +3,7 @@
 //! name rules in `commands/names.rs`, file lists in `commands/files.rs`, the display settings'
 //! wire form in `commands/settings.rs`, `list_agents` in `commands/agents.rs`, `refresh_limits` in
 //! `commands/limits.rs`, `preview_undo` in `commands/undo_preview.rs`, folder support in
-//! `commands/folder_support.rs`.
+//! `commands/folder_support.rs`, the updater's in `commands/update.rs`.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -50,6 +50,10 @@ mod undo_preview;
 #[cfg(test)]
 #[path = "commands/folder_support.rs"]
 mod folder_support;
+
+#[cfg(test)]
+#[path = "commands/update.rs"]
+mod update;
 
 use std::str::FromStr;
 

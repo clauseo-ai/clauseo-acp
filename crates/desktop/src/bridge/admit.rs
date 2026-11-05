@@ -4,16 +4,19 @@
 //! `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits`, the last throttled in
 //! `dispatch_at`. Any other window sends nothing. Of the usage counts' two commands (0036), each
 //! window gets the one its screen sends: `main` the welcome's `FirstAct`, the settings window
-//! the privacy switches.
+//! the privacy switches. Of the updater's four (0037), `main` sends `InstallUpdate`,
+//! `CancelScheduledUpdate` and `CheckForUpdate` (its "Restart to update" row), and the settings
+//! window `SetUpdateMode` and `CheckForUpdate`: settings never installs, main never changes the
+//! mode.
 
 use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and, for its
-/// Plan and usage, `RefreshLimits` (0028, U12; `dispatch_at` throttles it), any other window
-/// nothing.
+/// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its
+/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), and for its
+/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -23,10 +26,13 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             HostCommand::SetUiSettings { .. }
             | HostCommand::SetToolSettings { .. }
             | HostCommand::SetPrivacySettings { .. }
-            | HostCommand::RefreshLimits { .. } => Ok(()),
+            | HostCommand::RefreshLimits { .. }
+            // Updates (0037): the mode and "Check now"; installing is the main window's.
+            | HostCommand::SetUpdateMode { .. }
+            | HostCommand::CheckForUpdate {} => Ok(()),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings and refresh_limits",
+                 set_privacy_settings, refresh_limits, set_update_mode and check_for_update",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -80,7 +86,12 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // The Chrome for Testing download (0029): the main window's consent dialog sends
         // it after the lawyer agrees, and its Cancel button the cancel. No field to check.
         | HostCommand::InstallBrowser {}
-        | HostCommand::CancelBrowserInstall {} => Ok(()),
+        | HostCommand::CancelBrowserInstall {}
+        // R23: the rail card's update actions, "Restart to update" (now or after the answer),
+        // taking a scheduled install back, and "Check again"; settings may not install (0037).
+        | HostCommand::InstallUpdate { .. }
+        | HostCommand::CancelScheduledUpdate {}
+        | HostCommand::CheckForUpdate {} => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),
@@ -99,6 +110,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // tool switches do (least privilege, 0036).
         HostCommand::SetPrivacySettings { .. } => Err(invalid(
             "the privacy switches are set from the settings window only",
+        )),
+        // The mode lives in the settings window only, as the other switches do.
+        HostCommand::SetUpdateMode { .. } => Err(invalid(
+            "the update mode is set from the settings window only",
         )),
     }
 }

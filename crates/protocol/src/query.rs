@@ -11,7 +11,7 @@ use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
     RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, TurnId, ViewEntry,
+    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -176,6 +176,9 @@ pub enum HostQuery {
         /// Where the matter would be made, as `CreateMatter` names it.
         source: MatterSource,
     },
+    /// Where the updater stands (decision record 0037), read after subscribing to the app
+    /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
+    GetUpdate,
 }
 
 /// A query's answer.
@@ -199,6 +202,8 @@ pub enum QueryResult {
     Blob(BlobRange),
     /// For `GetSettings`.
     Settings(SettingsView),
+    /// For `GetUpdate`.
+    Update(UpdateView),
     /// For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
     /// it by (the same excluded names, size cap and cloud-only files).
     Papers {

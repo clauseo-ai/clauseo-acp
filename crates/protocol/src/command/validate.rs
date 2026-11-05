@@ -10,7 +10,7 @@ use crate::title::shows_something;
 use crate::{AgentChoiceId, DeliveryRequest, check_display_title};
 use crate::{
     CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision, MatterPath,
-    PromptBlock, RawPayload, RestoreRequest, Title, is_windows_reserved_name,
+    PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode, is_windows_reserved_name,
 };
 
 /// Most prompt text, in UTF-8 bytes summed over the prompt's `Text` blocks (256 KiB). Raw bytes,
@@ -228,8 +228,25 @@ impl HostCommand {
             | Self::SweepDone { day_start: _ }
             // No fields; a second download while one runs is the host's refusal (state).
             | Self::InstallBrowser {}
-            | Self::CancelBrowserInstall {} => Ok(()),
+            | Self::CancelBrowserInstall {}
+            // Whether the updater's state takes them is the host's check.
+            | Self::CheckForUpdate {}
+            | Self::InstallUpdate { when: _ }
+            | Self::CancelScheduledUpdate {} => Ok(()),
+            Self::SetUpdateMode { mode } => check_update_mode(*mode),
         }
+    }
+}
+
+/// `SetUpdateMode`'s mode: `auto` or `notify`. `none` comes only from the firm's policy (or a
+/// hand-edited file), never a window.
+fn check_update_mode(mode: UpdateMode) -> Result<(), Error> {
+    match mode {
+        UpdateMode::Auto | UpdateMode::Notify => Ok(()),
+        UpdateMode::None => Err(Error::Format {
+            kind: "SetUpdateMode",
+            rule: "a window sets auto or notify; none comes only from policy",
+        }),
     }
 }
 

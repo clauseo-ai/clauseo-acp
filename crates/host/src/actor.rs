@@ -63,6 +63,7 @@ mod subs;
 mod title_source;
 mod triage;
 pub(crate) mod turn;
+mod update;
 
 use commands::PendingCommand;
 use input::{Input, MatterTag, Request};

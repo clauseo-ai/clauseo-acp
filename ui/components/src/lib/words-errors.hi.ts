@@ -92,6 +92,8 @@ export const HI = {
   // hi: later
   "Codex can't work on a network drive. Move the matter to this computer.": null,
   "Codex can't work on a drive without file permissions. Move the matter to this computer.": null,
+  // hi: later
+  "The update didn't install. Try again.": null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

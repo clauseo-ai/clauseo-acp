@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 32
+expression: "UpdateState::Managed { by: ManagedBy::PerMachine }"
+---
+{
+  "managed": {
+    "by": "per_machine"
+  }
+}

@@ -123,6 +123,10 @@ golden! { HostCommand::name_of {
     CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
     InstallBrowser => install_browser: HostCommand::InstallBrowser {};
     CancelBrowserInstall => cancel_browser_install: HostCommand::CancelBrowserInstall {};
+    CheckForUpdate => check_for_update: HostCommand::CheckForUpdate {};
+    InstallUpdate => install_update: HostCommand::InstallUpdate { when: InstallWhen::AfterTurn };
+    CancelScheduledUpdate => cancel_scheduled_update: HostCommand::CancelScheduledUpdate {};
+    SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

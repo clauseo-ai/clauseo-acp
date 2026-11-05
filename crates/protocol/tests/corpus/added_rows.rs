@@ -94,6 +94,13 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (248, 0x0a24_9e02_11c7_988d),
     ),
     (
+        "added/turn_failed-UpdateFailed",
+        include_bytes!("added/turn_failed-UpdateFailed.jsonl"),
+        include_bytes!("added/turn_failed-UpdateFailed.msgpack"),
+        (340, 0x45bf_8350_bf09_5b7e),
+        (241, 0x55ef_4338_4788_deed),
+    ),
+    (
         "added/agent_named",
         include_bytes!("added/agent_named.jsonl"),
         include_bytes!("added/agent_named.msgpack"),

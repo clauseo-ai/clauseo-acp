@@ -306,6 +306,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Agent install (0048) | `ErrorCode::AgentInstallBlocked` | no |
 | Sign-in (0048) | `ErrorCode::SigninLinkExpired`, `ErrorCode::SigninPortBusy`, `ErrorCode::SigninFailed` | yes |
 | Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable` | no |
+| Update (0037) | `ErrorCode::UpdateFailed` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

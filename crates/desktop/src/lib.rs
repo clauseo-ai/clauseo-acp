@@ -32,7 +32,8 @@
 //!   grants the settings window six of the commands (`dispatch`, `query`, `open_stream`,
 //!   `subscribe_app`, `ack`, `display_info`) and the same drag pair, and the bridge admits
 //!   from it only `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `GetSettings`
-//!   (and `RefreshLimits`), and of the app feed
+//!   (and `RefreshLimits`, and the updater's `SetUpdateMode`, `CheckForUpdate` and
+//!   `GetUpdate`, 0037), and of the app feed
 //!   only `settings_changed`: never the matter and thread lists (0028).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),

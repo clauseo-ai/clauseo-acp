@@ -20,6 +20,7 @@
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
 //! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`], the privacy
 //! switches a [`PrivacySettings`] and a [`PrivacyPatch`], each agent's firm plan a [`PlanView`].
+//! The updater crosses as an [`UpdateView`] holding an [`UpdateState`] (decision record 0037).
 //! Sign-in and installs cross outside `HostCommand` and `HostEvent`, through desktop's own
 //! `setup` command and stream arm: a [`SetupCommand`] (a pasted code or a key inside it a
 //! [`Secret`], which never encodes) and a [`SetupEvent`] carrying [`InstallProgress`] and
@@ -166,6 +167,7 @@ mod text;
 mod title;
 mod tool;
 mod turn;
+mod update;
 mod view;
 mod web;
 #[cfg(feature = "specta")]
@@ -264,6 +266,7 @@ wire_types! {
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
+    update::{FailedStage, InstallWhen, ManagedBy, UpdateMode, UpdateState, UpdateView},
     view::{
         AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, ElicitationEntry,
         ElicitationState,

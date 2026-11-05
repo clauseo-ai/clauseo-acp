@@ -23,6 +23,7 @@ use crate::{
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
+use crate::{InstallWhen, UpdateMode};
 
 mod validate;
 
@@ -483,13 +484,35 @@ pub enum HostCommand {
     /// leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
     /// JSON: `{"cancel_browser_install": {}}`.
     CancelBrowserInstall {},
+    /// Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
+    /// `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
+    /// does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every
+    /// command's, so a window can test a command's kind with `in`.
+    CheckForUpdate {},
+    /// Install the `ready` version: `now` stops running turns first, `after_turn` waits until
+    /// no thread has one (`scheduled`). Answers `Done` before the host starts to stop. In a
+    /// state that does not take it, `command.invalid`. Only the main window sends it.
+    InstallUpdate {
+        /// When to install.
+        when: InstallWhen,
+    },
+    /// Take a `scheduled` install back to `ready`. Answers `Done`; in another state,
+    /// `command.invalid`. Only the main window sends it. JSON: `{"cancel_scheduled_update": {}}`.
+    CancelScheduledUpdate {},
+    /// Change `update.mode` to `auto` or `notify`; `none` is refused as `command.invalid`,
+    /// since it comes only from policy. A policy-locked key gives `settings.locked`. Answers
+    /// `Done`. Only the settings window sends it.
+    SetUpdateMode {
+        /// The new mode.
+        mode: UpdateMode,
+    },
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
 /// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
 /// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
-/// `InstallBrowser` and `CancelBrowserInstall` answer `Done`.
+/// `InstallBrowser`, `CancelBrowserInstall` and the four update commands answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
