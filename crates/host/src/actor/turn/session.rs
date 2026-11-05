@@ -4,7 +4,9 @@
 //! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
 //! Clauseo's mode; then the attach commit, the held replay and the work that waited. When
 //! `initialize` gave the agent a title, its name is logged first (`AgentNamed`,
-//! `log_agent_name`), so a failed `session/new` leaves it in the thread.
+//! `log_agent_name`), so a failed `session/new` leaves it in the thread. A Codex agent with a
+//! key that answers a session call with auth-required gets its one `authenticate` first
+//! (`key_retry.rs`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,6 +21,7 @@ use clauseo_protocol::{
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::{Stage, call, launch_failed, run_waiting};
+use super::key_retry;
 use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
@@ -92,6 +95,7 @@ pub(super) fn on_replay_log(
     }
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -121,7 +125,9 @@ pub(super) fn on_replay_log(
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.load_session(request).await;
+        let result = retry
+            .run(&client, || client.load_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: true,
@@ -143,6 +149,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -163,7 +170,9 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.resume_session(request).await;
+        let result = retry
+            .run(&client, || client.resume_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: true,
@@ -183,6 +192,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     };
     let clock = Arc::clone(&actor.clock);
     let matter = matter_of(actor, thread);
+    let retry = key_retry::for_call(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -202,7 +212,9 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             mcp_servers,
             meta: Some(meta),
         };
-        let result = client.new_session(request).await;
+        let result = retry
+            .run(&client, || client.new_session(request.clone()))
+            .await;
         fence.await;
         AgentReply::Session {
             loaded: false,

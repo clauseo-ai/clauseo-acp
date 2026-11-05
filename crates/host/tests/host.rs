@@ -93,6 +93,9 @@ mod hindi;
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]
+#[path = "host/key_retry.rs"]
+mod key_retry;
+#[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]
