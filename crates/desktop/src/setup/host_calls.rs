@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use clauseo_host::AgentsStopped;
 use clauseo_protocol::{AgentId, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 
@@ -40,9 +41,10 @@ pub(crate) trait SetupHost: Send + Sync {
     fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>>;
 
     /// Cancels any turn of that id, keeping it held, and stops its live agents (P4b's
-    /// `stop_agents`). Piece B: the leave order's first step.
+    /// `stop_agents`), answering whether they exited or the bounded wait ran out (P4d).
+    /// Piece B: the leave order's first step.
     #[expect(dead_code, reason = "R20 P5b piece B calls it")]
-    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>>;
+    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
 
     /// Tells the host whether `agent`'s login is the lawyer's own, reused (P4b's
     /// `set_reused_login`). Piece B.
@@ -117,7 +119,7 @@ impl SetupHost for CellHost {
         Box::pin(async move { self.cell.host().await?.restart_agents(agent).await })
     }
 
-    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
+    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
         Box::pin(async move { self.cell.host().await?.stop_agents(agent).await })
     }
 
