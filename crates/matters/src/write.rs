@@ -25,9 +25,16 @@ pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
     std::fs::create_dir_all(path)
 }
 
-/// `fs::remove_file`.
+/// `fs::remove_file`. In unit tests a file can come back after it (`no_download::resurrect`).
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
-    std::fs::remove_file(path)
+    #[cfg(test)]
+    let back = crate::no_download::resurrect::removing(path);
+    let removed = std::fs::remove_file(path);
+    #[cfg(test)]
+    if let (Ok(()), Some(back)) = (&removed, back) {
+        crate::no_download::resurrect::removed(path, back);
+    }
+    removed
 }
 
 /// `fs::remove_dir` (an empty folder only).

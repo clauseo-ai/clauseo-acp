@@ -162,7 +162,7 @@ impl Core {
 
     /// Makes the cache describe the tip's tree: kept if its blobs match the tree, otherwise
     /// rebuilt from the tree with empty stats, so every file is read once.
-    fn check_cache(&mut self) -> Result<(), Error> {
+    pub(crate) fn check_cache(&mut self) -> Result<(), Error> {
         let Some((_, tree)) = self.timeline.tip() else {
             self.cache = StatCache::default();
             self.cache_tree = None;

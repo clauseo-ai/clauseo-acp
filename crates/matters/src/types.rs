@@ -229,6 +229,12 @@ pub struct Undone {
     /// The undone files that had been edited since the step ("Undo anyway"), sorted. Their
     /// edits are in the `outside_edits` checkpoint or an earlier one.
     pub edited_since: Vec<MatterPath>,
+    /// The files the undo deleted that the `undo` checkpoint's walk found there again, sorted
+    /// by path bytes: a sync client put them back (`OneDrive` on macOS can, as a cloud-only
+    /// placeholder, seconds after a delete). Each is a path of a step in `restored`. The
+    /// checkpoint's tree holds one only if it came back downloaded, read as the folder holds it;
+    /// never with the blob it had before the undo.
+    pub resurrected: Vec<MatterPath>,
 }
 
 /// Which files a restore puts back.
