@@ -237,3 +237,52 @@ fn a_hold_waits_for_the_read_in_flight_to_end() {
     drop(guard);
     launcher.wait_stdout_closed();
 }
+
+#[test]
+fn a_hold_survives_with_entry_and_the_copy_reads_the_new_entry_with_the_key() {
+    let setup = installed_setup();
+    let launcher = TestLauncher::new(Play::Scenario("claude-api-key"));
+    let reader = keyed(&setup, &launcher, &SharedTimer::default());
+    let guard = reader
+        .hold(AgentKind::Claude)
+        .now_or_never()
+        .expect("no read ran");
+    let mut entry = setup
+        .effective()
+        .agent("claude-acp")
+        .cloned()
+        .expect("Claude's entry");
+    entry
+        .env
+        .insert("ANTHROPIC_MODEL".to_owned(), "new-entry".to_owned());
+    let rebuilt = reader.with_entry(AgentKind::Claude, Some(entry));
+    // The hold taken on the old readers holds the copy.
+    let mut read = rebuilt.read(AgentKind::Claude);
+    assert!(
+        (&mut read).now_or_never().is_none(),
+        "held across with_entry"
+    );
+    assert_eq!(launcher.launches(), 0);
+    drop(guard);
+    assert!(matches!(block_on(read), ReadOutcome::Usage { .. }));
+    let (_names, model) = names_and(&launcher, "ANTHROPIC_MODEL");
+    assert_eq!(model, Some(OsString::from("new-entry")));
+    let (_names, key) = names_and(&launcher, "ANTHROPIC_API_KEY");
+    assert!(
+        key == Some(OsString::from(FAKE_KEY)),
+        "the key source is kept"
+    );
+    launcher.wait_stdout_closed();
+    // A hold taken on the copy holds the old readers too, and no entry reads as none.
+    let guard = rebuilt
+        .hold(AgentKind::Claude)
+        .now_or_never()
+        .expect("no read ran");
+    assert!(reader.read(AgentKind::Claude).now_or_never().is_none());
+    drop(guard);
+    let gone = rebuilt.with_entry(AgentKind::Claude, None);
+    assert!(matches!(
+        block_on(gone.read(AgentKind::Claude)),
+        ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
+    ));
+}
