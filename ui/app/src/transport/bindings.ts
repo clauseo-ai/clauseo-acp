@@ -1307,6 +1307,12 @@ export type ErrorCode =
 "settings.key_stored" | 
 /** A Codex login, logout or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login file; the remedy is in the app, "Stop using it here". */
 "signin.login_shared" | 
+/** Sign-in is refused: a firm endpoint is set by policy. */
+"signin.firm_managed" | 
+/** Sign-in is refused: an API key is stored. */
+"signin.key_in_use" | 
+/** Sign-in is refused: an endpoint is set in Settings. */
+"signin.endpoint_in_use" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
