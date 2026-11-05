@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::windows::NtfsAcl;
-use crate::windows::acl_plan::{Grant, LOW_LABEL_SID};
+use crate::windows::acl_plan::{Grant, Inherit, LOW_LABEL_SID};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::ledger::ledger_path;
 use crate::windows::test_acl::{Place, grant, has};
@@ -91,7 +91,13 @@ fn a_launch_then_forget_leaves_nothing() {
     launch(&place, &matter).unwrap();
     assert!(has(&doc, USER_SID, true) && has(&doc, LOW_LABEL_SID, true));
     let mut ledger = ledger(&place);
-    let done = forget_matter(&mut ledger, matter_one(), &mut NtfsAcl::new().unwrap()).unwrap();
+    let done = forget_matter(
+        &mut ledger,
+        matter_one(),
+        &mut NtfsAcl::new().unwrap(),
+        &mut Around,
+    )
+    .unwrap();
     assert_eq!((done.removed, done.kept), (3, 0));
     for path in [&matter, &doc] {
         for sid in [USER_SID, OTHER_POOL_SIDS[0], LOW_LABEL_SID] {
