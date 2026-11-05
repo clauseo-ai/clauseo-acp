@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::support::{A_PACKAGES, Fixture, agent_a};
 use crate::write;
 
-/// What a test saw at each npm launch: its arguments after `npm-cli.js`, the lock in its
+/// What a test saw at each npm launch: its Node arguments, the lock in its
 /// folder and the files in `downloads/` at that moment.
 type Seen = Arc<Mutex<Vec<(Vec<String>, Option<String>, Vec<PathBuf>)>>>;
 
@@ -26,15 +26,17 @@ fn url_of(path: &Path) -> String {
     }
 }
 
-/// The arguments after `npm-cli.js` when `spec` is an npm run, else `None`.
+/// The Node arguments when `spec` is an npm run (one of them ends in `npm-cli.js`), else
+/// `None`.
 fn npm_args(spec: &clauseo_process::LaunchSpec) -> Option<Vec<String>> {
     let args: Vec<String> = spec
         .args()
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let first = args.first()?;
-    first.ends_with("npm-cli.js").then(|| args[1..].to_vec())
+    args.iter()
+        .any(|arg| arg.ends_with("npm-cli.js"))
+        .then_some(args)
 }
 
 /// The `.tgz` files in `<data>/agents/downloads`.
@@ -73,7 +75,11 @@ fn npm_ci_alone_reads_each_checked_tarball_through_a_file_url_with_its_integrity
     let seen = seen.lock().unwrap_or_else(PoisonError::into_inner).clone();
     assert_eq!(seen.len(), 1, "one npm run, `npm ci`: {seen:?}");
     let (args, lock, files) = &seen[0];
-    assert_eq!(args[0], "ci");
+    // Node runs npm with no V8 background tasks, so it cannot deadlock as it exits
+    // (nodejs/node#54918); then `npm-cli.js ci`.
+    assert_eq!(args[0], "--single-threaded", "{args:?}");
+    assert!(args[1].ends_with("npm-cli.js"), "{args:?}");
+    assert_eq!(args[2], "ci");
     for flag in [
         "--offline",
         "--ignore-scripts",
@@ -115,7 +121,7 @@ fn a_tarball_changed_after_its_check_fails_npm_ci_with_eintegrity() {
     let count = Arc::clone(&swaps);
     let other = npm_tarball("dep-a", "1.0.0", &[("index.js", b"module.exports = 2;\n")]).unwrap();
     let (agents, events) = fx.start_hooked(move |spec| {
-        if npm_args(spec).is_some_and(|args| args.first().is_some_and(|arg| arg == "ci")) {
+        if npm_args(spec).is_some_and(|args| args.iter().any(|arg| arg == "ci")) {
             // Same names, different bytes, after the download's own check.
             for path in downloaded(&data) {
                 write::write(&path, &other).unwrap();
