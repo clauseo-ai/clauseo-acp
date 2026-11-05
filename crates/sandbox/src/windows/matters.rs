@@ -162,6 +162,8 @@ impl MatterSids {
             Some(wait) => write::lock_exclusive_for(&lock, wait),
         }
         .map_err(|error| SetupError::Failed(format!("matter SIDs: {error}")))?;
+        // A lock file the open above just made gets the same explicit DACL.
+        write::check_owned_file(&lock).map_err(failed)?;
         let file = self.folder.join(MATTERS_FILE);
         write::check_owned_file(&file).map_err(failed)?;
         self.sids = read(&file, &self.reserved)?;

@@ -409,7 +409,7 @@ fn enable_restore_privilege() -> bool {
 }
 
 #[test]
-fn a_sandbox_folder_owned_by_another_account_is_taken_back_or_refused() {
+fn a_sandbox_folder_owned_by_another_account_is_taken_back() {
     use super::private_dir::{owner, owner_allowed, set_owner};
     use super::sids::Sid;
 
@@ -429,13 +429,11 @@ fn a_sandbox_folder_owned_by_another_account_is_taken_back_or_refused() {
     }
     set_owner(&folder, &local_service).unwrap();
     assert_eq!(owner(&folder).unwrap(), local_service);
-    match super::write::make_sandbox_dir(&folder) {
-        Ok(()) => {
-            assert_eq!(owner(&folder).unwrap(), user);
-            assert_private(&folder);
-        }
-        Err(error) => assert!(error.to_string().contains("owned by S-1-5-19"), "{error}"),
-    }
+    // The folder's DACL still grants the user full access, WRITE_OWNER included, so the user
+    // takes it back.
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_eq!(owner(&folder).unwrap(), user);
+    assert_private(&folder);
 }
 
 /// A sandbox folder made by `make_sandbox_dir` under a fresh temp folder.

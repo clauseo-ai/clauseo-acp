@@ -32,10 +32,9 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle,
-    OPEN_EXISTING, ReOpenFile,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
-use windows::Win32::System::SystemServices::MAXIMUM_ALLOWED;
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 
 use super::record::current_user_sid;
@@ -90,7 +89,8 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
 /// then given the protected DACL again.
 fn secure_existing(path: &Path) -> io::Result<()> {
     let user = current_user_sid()?;
-    let handle = Handle::open(path)?;
+    let handle =
+        Handle::open(path).map_err(|error| named(path, "can't be opened to secure", &error))?;
     let handle = repair(path, handle, &user, true)?;
     let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
     let dacl = descriptor.dacl()?;
@@ -118,7 +118,7 @@ pub(crate) fn check_file(path: &Path) -> io::Result<()> {
     let handle = match Handle::open(path) {
         Ok(handle) => handle,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
+        Err(error) => return Err(named(path, "can't be opened to check", &error)),
     };
     let handle = repair(path, handle, &user, false)?;
     let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
@@ -147,10 +147,14 @@ pub(crate) fn set_owner(path: &Path, sid: &Sid) -> io::Result<()> {
 }
 
 /// Reads [`Found`] from `handle`, refuses what [`repair_plan`] refuses, and takes ownership back
-/// for `user` when it says so. Returns a handle with the rights the owner now has.
+/// for `user` when it says so, before any DACL change. Every failure names `path`.
 fn repair(path: &Path, handle: Handle, user: &Sid, folder: bool) -> io::Result<Handle> {
-    let info = handle.information()?;
-    let owner = handle.owner()?;
+    let info = handle
+        .information()
+        .map_err(|error| named(path, "can't be read", &error))?;
+    let owner = handle
+        .owner()
+        .map_err(|error| named(path, "has an owner that can't be read", &error))?;
     let found = Found {
         reparse: info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0,
         right_kind: (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0) == folder,
@@ -170,8 +174,7 @@ fn repair(path: &Path, handle: Handle, user: &Sid, folder: bool) -> io::Result<H
         let why = format!("is owned by {owner}, not this user, and can't be taken back");
         named(path, &why, &error)
     })?;
-    // The rights were granted at the open, before the user owned it; open again for an owner's.
-    handle.reopen()
+    Ok(handle)
 }
 
 /// `error` with what failed on `path`.
@@ -210,35 +213,34 @@ struct Handle(HANDLE);
 
 impl Handle {
     /// Opens `path` itself, never what a link at it names (`FILE_FLAG_OPEN_REPARSE_POINT`), a
-    /// folder too (`FILE_FLAG_BACKUP_SEMANTICS`), with the rights the caller is granted.
+    /// folder too (`FILE_FLAG_BACKUP_SEMANTICS`), for reading its attributes and security
+    /// (`FILE_READ_ATTRIBUTES | READ_CONTROL`) and changing its DACL and owner (`WRITE_DAC |
+    /// WRITE_OWNER`). When `WRITE_OWNER` is refused it opens without it, and a re-own then fails
+    /// naming the owner.
     fn open(path: &Path) -> io::Result<Handle> {
+        let base = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0;
+        match Handle::open_for(path, base | WRITE_OWNER.0) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                Handle::open_for(path, base)
+            }
+            other => other,
+        }
+    }
+
+    /// Opens `path` as [`Handle::open`] does, asking for `access`.
+    fn open_for(path: &Path, access: u32) -> io::Result<Handle> {
         let target = wide(path);
         // SAFETY: `target` is NUL-terminated and outlives the call; no security attributes or
         // template are passed, and the handle is owned by `Handle` from here.
         unsafe {
             CreateFileW(
                 PCWSTR(target.as_ptr()),
-                MAXIMUM_ALLOWED,
+                access,
                 share(),
                 None,
                 OPEN_EXISTING,
                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
                 None,
-            )
-        }
-        .map(Handle)
-        .map_err(|error| os_error(&error))
-    }
-
-    /// The same file opened again through this handle, with the rights granted now.
-    fn reopen(&self) -> io::Result<Handle> {
-        // SAFETY: the handle is open; the new one is owned by `Handle` from here.
-        unsafe {
-            ReOpenFile(
-                self.0,
-                MAXIMUM_ALLOWED,
-                share(),
-                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
             )
         }
         .map(Handle)
@@ -313,7 +315,7 @@ impl Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        // SAFETY: the handle came from CreateFileW or ReOpenFile and is closed once, here. A
+        // SAFETY: the handle came from CreateFileW and is closed once, here. A
         // failed close leaves nothing to do.
         drop(unsafe { CloseHandle(self.0) });
     }
