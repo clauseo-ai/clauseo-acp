@@ -6,11 +6,16 @@
 //! A request forwarded to the relay is pending (`pending.rs`) until its reply line comes back.
 //! When the link ends, the relay thread answers each pending request with the same error, so an
 //! agent never waits for a reply that will not come.
+//!
+//! The stdin side ends a link by dropping its [`Writer`]: the relay thread's read sees that at
+//! once (`socket.rs`), and the socket closes when the thread lets go of it. No `shutdown` is
+//! needed for that, as none wakes a blocked read on Windows; the one `shutdown` that matters is
+//! the half-close at stdin's end, and if it does not reach the relay the grace still ends the link.
 
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -22,30 +27,49 @@ use super::handshake::{CONNECT_FAILED, Link};
 use super::head::{self, Head};
 use super::line::{self, Line, Out};
 use super::pending::{Added, Pending};
+use super::socket::{self, Polled, Shut};
 
 /// How long, after the agent closes stdin, the mode waits for the relay to finish its last
 /// answers and close. The agent has closed its side, so a longer wait only delays the exit.
 const EXIT_GRACE: Duration = Duration::from_secs(2);
 
+/// The stdin side's end of a link. Dropping it ends the link: the relay thread's read fails at
+/// once, as its stop's sender is gone, and the socket closes when that thread drops it too.
+struct Writer {
+    socket: Arc<TcpStream>,
+    stop: Sender<()>,
+}
+
+impl Writer {
+    /// Tells the relay thread a request has gone out: its reader stops backing off and tries at
+    /// once, so the reply is not left waiting out an idle wait.
+    fn nudge(&self) {
+        if self.stop.send(()).is_err() {
+            // The relay thread has ended: nothing is waiting to be nudged.
+        }
+    }
+}
+
 /// Pumps stdin to the relay and the relay to `out` until stdin closes. `refusal` is the reason
-/// the agent gets with its errors when `link` is `None`. An `Err` means stdout (or stdin) failed.
+/// the agent gets with its errors when `link` is `None`; `shut` is the `shutdown` used (tests
+/// give one that does nothing). An `Err` means stdout (or stdin) failed.
+///
+/// When it returns, the link has been ended: the relay thread's read has failed or will at its
+/// next try. On `Ok` the thread has also been waited for, within a bound: it has ended and the
+/// socket is closed, unless a stdout write held it (an agent that stopped reading). Then, as on
+/// an `Err`, the thread may still hold the socket, and the process's exit closes it.
 pub(crate) fn serve(
     mut stdin: impl BufRead,
     out: &Out,
     link: Option<Link>,
     mut refusal: String,
+    shut: Shut,
 ) -> io::Result<()> {
     let pending = Arc::new(Pending::default());
     let (mut writer, relay_done) = match link {
-        Some(Link { reader, writer }) => {
-            let (done_tx, done_rx) = mpsc::channel::<()>();
-            let (out, pending) = (Arc::clone(out), Arc::clone(&pending));
-            thread::spawn(move || {
-                relay_to_agent(reader, &out, &pending);
-                // The sender's drop is the signal: the receiver sees the disconnect.
-                drop(done_tx);
-            });
-            (Some(writer), Some(done_rx))
+        Some(link) => {
+            let (writer, done) = start_relay(link, out, &pending, shut);
+            (Some(writer), Some(done))
         }
         None => (None, None),
     };
@@ -57,9 +81,7 @@ pub(crate) fn serve(
                 // requests are answered by the relay thread, and the agent's later requests get
                 // the not-reachable errors.
                 line::write_line(out, answer::line_too_long().as_bytes())?;
-                if let Some(socket) = writer.take() {
-                    hang_up(&socket);
-                }
+                writer = None;
                 refusal = String::from(CONNECT_FAILED);
             }
             Line::Text(text) if line::is_blank(&text) => {}
@@ -78,11 +100,18 @@ pub(crate) fn serve(
         }
     }
     // The agent is done: half-close so the relay can finish its last answers, then wait for it.
-    if let Some(socket) = writer.take() {
-        shut_write(&socket);
+    if let Some(link) = &writer
+        && shut(&link.socket, Shutdown::Write).is_err()
+    {
+        // Already gone, or the relay never sees it: the grace below ends the link either way.
     }
     if let Some(done) = relay_done {
-        wait_for_relay(&done);
+        wait_for_relay(&done, EXIT_GRACE);
+        // Done or out of time: end the link, and wait for the relay thread to let go of the
+        // socket. Its read fails at once; what is left is writing its last answers to stdout,
+        // which a stuck stdout can hold for ever, so this wait is bounded too.
+        drop(writer);
+        wait_for_relay(&done, EXIT_GRACE);
     }
     // A relay that did not close within the grace leaves requests unanswered: answer them now.
     // Closing the set is atomic, so the relay thread, if it ends later, answers none of them again.
@@ -103,7 +132,7 @@ fn request_id(line: &[u8]) -> Option<Value> {
 /// after the relay thread's last answers (the set is closed) is answered here and not forwarded:
 /// a write into a link the relay has closed may still succeed, and no one would answer it.
 fn send_request(
-    writer: &mut Option<TcpStream>,
+    writer: &mut Option<Writer>,
     out: &Out,
     pending: &Pending,
     refusal: &str,
@@ -115,13 +144,14 @@ fn send_request(
         Added::Full => return line::write_line(out, answer::busy_for(id).as_bytes()),
         Added::Closed => {
             // The link is over; later lines take the no-link path.
-            if let Some(socket) = writer.take() {
-                hang_up(&socket);
-            }
+            *writer = None;
             return line::write_line(out, answer::unreachable_for(id, refusal).as_bytes());
         }
     }
     if forward(writer, line) {
+        if let Some(link) = writer {
+            link.nudge();
+        }
         return Ok(());
     }
     if pending.release(id) {
@@ -132,45 +162,50 @@ fn send_request(
 
 /// Writes one line to the relay. `false` when there is no link or the write fails; a failed link
 /// is dropped here, so no later line goes into it.
-fn forward(writer: &mut Option<TcpStream>, line: &[u8]) -> bool {
-    let Some(socket) = writer.as_ref() else {
+fn forward(writer: &mut Option<Writer>, line: &[u8]) -> bool {
+    let Some(link) = writer.as_ref() else {
         return false;
     };
-    if send(socket, line).is_ok() {
+    if send(&link.socket, line).is_ok() {
         return true;
     }
-    if let Some(socket) = writer.take() {
-        hang_up(&socket);
-    }
+    *writer = None;
     false
 }
 
-/// Writes `line` and a newline, flushed.
+/// Writes `line` and a newline.
 fn send(socket: &TcpStream, line: &[u8]) -> io::Result<()> {
-    let mut writer = socket;
-    writer.write_all(line)?;
-    writer.write_all(b"\n")?;
-    writer.flush()
+    socket::write_all(socket, line, None)?;
+    socket::write_all(socket, b"\n", None)
 }
 
-/// Ends both halves of a link, so its reader ends too.
-fn hang_up(socket: &TcpStream) {
-    if socket.shutdown(Shutdown::Both).is_err() {
-        // Already gone: the reader sees that and ends.
-    }
+/// Starts the relay thread on `link`'s reader, and returns the stdin side's [`Writer`] with the
+/// receiver whose disconnect says the thread has ended.
+fn start_relay(
+    link: Link,
+    out: &Out,
+    pending: &Arc<Pending>,
+    shut: Shut,
+) -> (Writer, Receiver<()>) {
+    let Link { mut reader, socket } = link;
+    let (stop, stopped) = mpsc::channel::<()>();
+    reader.get_mut().stop_on(stopped);
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    let (out, pending) = (Arc::clone(out), Arc::clone(pending));
+    thread::spawn(move || {
+        relay_to_agent(reader, &out, &pending, shut);
+        // The sender's drop is the signal: the receiver sees the disconnect.
+        drop(done_tx);
+    });
+    let writer = Writer { socket, stop };
+    (writer, done_rx)
 }
 
-/// Ends the write half of a link: the relay sees the agent is done and may finish its answers.
-fn shut_write(socket: &TcpStream) {
-    if socket.shutdown(Shutdown::Write).is_err() {
-        // Already gone: nothing is left to finish.
-    }
-}
-
-/// Copies the relay's lines to the agent until the relay ends or a write fails. A reply releases
-/// its pending request. Then the link is shut down, and each request still pending is answered
-/// with the not-reachable error; the set is closed, so the stdin side answers any later one.
-fn relay_to_agent(mut reader: BufReader<TcpStream>, out: &Out, pending: &Pending) {
+/// Copies the relay's lines to the agent until the relay ends, the stdin side ends the link, or
+/// a write fails. A reply releases its pending request. Then the link is shut down and this
+/// thread's handle on the socket dropped, and each request still pending is answered with the
+/// not-reachable error; the set is closed, so the stdin side answers any later one.
+fn relay_to_agent(mut reader: BufReader<Polled>, out: &Out, pending: &Pending, shut: Shut) {
     // The end, a read error, or a line over the cap: the link is gone either way.
     while let Ok(Line::Text(text)) = line::read(&mut reader, MAX_LINE_BYTES) {
         if line::is_blank(&text) {
@@ -187,7 +222,12 @@ fn relay_to_agent(mut reader: BufReader<TcpStream>, out: &Out, pending: &Pending
             break;
         }
     }
-    hang_up(reader.get_ref());
+    // The shutdown tells the relay at once, and makes the stdin side's next write fail; the link
+    // ends without it too, when the stdin side drops its handle.
+    if shut(reader.get_ref().socket(), Shutdown::Both).is_err() {
+        // Already gone.
+    }
+    drop(reader);
     for id in pending.close() {
         if line::write_line(out, answer::unreachable_for(&id, CONNECT_FAILED).as_bytes()).is_err() {
             break;
@@ -195,11 +235,11 @@ fn relay_to_agent(mut reader: BufReader<TcpStream>, out: &Out, pending: &Pending
     }
 }
 
-/// Waits up to [`EXIT_GRACE`] for the relay thread to end. It ends when the relay closes, or when
-/// the grace runs out; either way the mode exits.
-fn wait_for_relay(done: &Receiver<()>) {
-    if done.recv_timeout(EXIT_GRACE).is_err() {
-        // The relay closed (the sender is gone) or did not close in time: exit either way.
+/// Waits up to `within` for the relay thread to end, which its sender's drop says. It ends when
+/// the relay closes, or when the link is ended and nothing holds it in a stdout write.
+fn wait_for_relay(done: &Receiver<()>, within: Duration) {
+    if done.recv_timeout(within).is_err() {
+        // The thread has ended (the sender is gone) or did not within the bound: go on either way.
     }
 }
 

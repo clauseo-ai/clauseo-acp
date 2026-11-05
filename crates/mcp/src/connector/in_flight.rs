@@ -6,6 +6,8 @@ use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -16,10 +18,20 @@ use super::tests::{
 };
 
 /// Stdin that yields `first`, then waits until `open` fires, then yields `rest`.
-struct Gated {
+pub(super) struct Gated {
     first: Cursor<Vec<u8>>,
     rest: Cursor<Vec<u8>>,
     open: Option<Receiver<()>>,
+}
+
+impl Gated {
+    pub(super) fn new(first: Vec<u8>, rest: Vec<u8>, open: Receiver<()>) -> Self {
+        Self {
+            first: Cursor::new(first),
+            rest: Cursor::new(rest),
+            open: Some(open),
+        }
+    }
 }
 
 impl Read for Gated {
@@ -37,11 +49,22 @@ impl Read for Gated {
 }
 
 /// A writer that fires `tx` once, when a write holds `needle`. The bytes go to `out` as well.
-struct Signal {
+pub(super) struct Signal {
     out: Capture,
     needle: &'static str,
     sent: bool,
     tx: Sender<()>,
+}
+
+impl Signal {
+    pub(super) fn new(out: Capture, needle: &'static str, tx: Sender<()>) -> Self {
+        Self {
+            out,
+            needle,
+            sent: false,
+            tx,
+        }
+    }
 }
 
 impl Write for Signal {
@@ -58,6 +81,25 @@ impl Write for Signal {
 
     fn flush(&mut self) -> io::Result<()> {
         self.out.flush()
+    }
+}
+
+/// Stdout that blocks every write until `release`'s sender is dropped, then fails: an agent that
+/// stopped reading, so its pipe is full.
+struct Stuck {
+    release: Receiver<()>,
+}
+
+impl Write for Stuck {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+        if self.release.recv().is_err() {
+            // Released: the test is over.
+        }
+        Err(io::ErrorKind::BrokenPipe.into())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -89,20 +131,19 @@ fn a_request_in_flight_when_the_relay_drops_gets_not_reachable() {
     });
     let (open_tx, open_rx) = mpsc::channel::<()>();
     let capture = Capture::default();
-    let out: Out = Arc::new(Mutex::new(Signal {
-        out: capture.clone(),
-        needle: "\"id\":4",
-        sent: false,
-        tx: open_tx,
-    }));
+    let out: Out = Arc::new(Mutex::new(Signal::new(
+        capture.clone(),
+        "\"id\":4",
+        open_tx,
+    )));
     // Request 6 is read only after request 4's answer has been written, so after the relay thread
     // has closed the pending set: it meets a dead link, and the socket may still take its bytes
     // (macOS, where the local shutdown of a reset socket fails), so it must be answered here.
-    let stdin = BufReader::new(Gated {
-        first: Cursor::new(line(4).into_bytes()),
-        rest: Cursor::new(line(6).into_bytes()),
-        open: Some(open_rx),
-    });
+    let stdin = BufReader::new(Gated::new(
+        line(4).into_bytes(),
+        line(6).into_bytes(),
+        open_rx,
+    ));
     let vars = good_env(port, &file);
     let map = env_of(&vars);
     let lookup = |key: &str| map.get(key).cloned();
@@ -229,4 +270,55 @@ fn an_answered_request_is_not_answered_again_when_the_relay_drops() {
         replies,
         [serde_json::json!({"jsonrpc":"2.0","id":4,"result":{}})]
     );
+}
+
+#[test]
+fn the_mode_returns_at_stdin_end_when_stdout_is_stuck_and_the_relay_stays() {
+    let scratch = Scratch::new("stuck-stdout");
+    let file = token_file(&scratch, TOKEN);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // The relay answers request 1, then keeps the link open until the test ends.
+    let (hold_tx, hold_rx) = mpsc::channel::<()>();
+    let server = relay(listener, Some(OK), move |reader, writer| {
+        let mut request = String::new();
+        reader.read_line(&mut request).unwrap();
+        let mut writer = writer;
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n")
+            .unwrap();
+        if hold_rx.recv().is_err() {
+            // The sender's drop, at the test's end, is the release.
+        }
+        request
+    });
+    // The relay thread blocks writing the reply to stdout, for as long as the test holds it.
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let out: Out = Arc::new(Mutex::new(Stuck {
+        release: release_rx,
+    }));
+    let (result_tx, result_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let vars = good_env(port, &file);
+        let map = env_of(&vars);
+        let lookup = |key: &str| map.get(key).cloned();
+        let stdin = Cursor::new(line(1).into_bytes());
+        let result = run_with(&[OsString::from("case-law")], &lookup, stdin, &out);
+        if result_tx
+            .send(result.map_err(|failure| failure.message))
+            .is_err()
+        {
+            // The test gave up waiting and failed already.
+        }
+    });
+    // Two 2 s graces at most: the relay's, then the relay thread's after the link is ended.
+    let result = result_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the mode did not return within 10 s of stdin's end: a stuck stdout held it");
+    assert_eq!(result, Ok(0));
+    drop(release_tx);
+    drop(hold_tx);
+    let (_, forwarded) = server.join().unwrap();
+    assert_eq!(forwarded, line(1));
+    drop(scratch);
 }

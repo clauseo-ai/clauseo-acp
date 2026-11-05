@@ -3,28 +3,30 @@
 //! `{"clauseo_relay":1,"ok":true}`, or `ok:false` with an error code and closes. Any refusal, and
 //! any failure to connect or to get an answer in time, is a reason the mode reports to the agent.
 
-use std::io::{self, BufReader, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::thread;
+use std::io::{self, BufReader};
+use std::net::{SocketAddr, TcpStream};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use super::line::{self, Line};
+use super::socket::{self, Polled, Stop};
 
 /// The reason when the relay cannot be reached or does not answer the handshake.
 pub(crate) const CONNECT_FAILED: &str = "connect_failed";
-/// How long the handshake may take in all, from the connect to the answer, and how long each
-/// read or write may wait. The host answers at once.
+/// How long the connect may take, and then how long the hello and the answer may take in all.
+/// The host answers at once.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// The longest handshake answer. The host's answers are a few dozen bytes.
 const ANSWER_MAX_BYTES: usize = 1024;
 
-/// A connection past its handshake: the reader keeps the buffered bytes after the answer.
+/// A connection past its handshake. The reader keeps the buffered bytes after the answer; its
+/// stop is the handshake's deadline, which has fired by then, so the pump gives it its own before
+/// it reads. The socket is the same one, for the stdin side's writes; it closes when both drop.
 pub(crate) struct Link {
-    pub(crate) reader: BufReader<TcpStream>,
-    pub(crate) writer: TcpStream,
+    pub(crate) reader: BufReader<Polled>,
+    pub(crate) socket: Arc<TcpStream>,
 }
 
 /// Connects to the relay at `addr` and completes the handshake for `connector`. The `Err` is the
@@ -32,56 +34,29 @@ pub(crate) struct Link {
 pub(crate) fn connect(addr: SocketAddr, token: &str, connector: &str) -> Result<Link, String> {
     let stream =
         TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT).map_err(|_io| CONNECT_FAILED)?;
-    stream
-        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT)))
-        .map_err(|_io| CONNECT_FAILED)?;
-    let writer = stream.try_clone().map_err(|_io| CONNECT_FAILED)?;
-    // One deadline for the whole handshake: the per-read timeouts above do not stop a relay that
-    // sends a byte at a time. It lives until this function returns.
-    let _deadline = Deadline::start(stream.try_clone().map_err(|_io| CONNECT_FAILED)?);
-    let mut reader = BufReader::new(stream);
-    send_hello(&writer, token, connector).map_err(|_io| CONNECT_FAILED)?;
+    // One deadline for the hello and the answer together, so a relay that sends a byte at a time
+    // is given up too. It is a stop that fires by itself; the writer and the reader check it
+    // between their tries on the non-blocking socket, so nothing has to wake a blocked read. The
+    // guard ends its timer when this function returns.
+    let (_timer, deadline) = socket::stop_after(HANDSHAKE_TIMEOUT);
+    stream.set_nonblocking(true).map_err(|_io| CONNECT_FAILED)?;
+    let socket = Arc::new(stream);
+    send_hello(&socket, token, connector, &deadline).map_err(|_io| CONNECT_FAILED)?;
+    let reader = Polled::new(Arc::clone(&socket), deadline).map_err(|_io| CONNECT_FAILED)?;
+    let mut reader = BufReader::new(reader);
+    // On any failure the reader and the socket drop here, and the connection closes with them.
     let Ok(Line::Text(answer)) = line::read(&mut reader, ANSWER_MAX_BYTES) else {
         return Err(CONNECT_FAILED.to_owned());
     };
     verdict(&answer)?;
-    // The timeouts were for the handshake; the agent's session may be idle for long.
-    reader
-        .get_ref()
-        .set_read_timeout(None)
-        .and_then(|()| reader.get_ref().set_write_timeout(None))
-        .map_err(|_no_reset| CONNECT_FAILED.to_owned())?;
-    Ok(Link { reader, writer })
+    Ok(Link { reader, socket })
 }
 
-/// Shuts the connection down when the handshake has not finished within [`HANDSHAKE_TIMEOUT`]. The
-/// handshake drops it when it returns: the watchdog then sees the disconnect and does nothing.
-struct Deadline {
-    _done: Sender<()>,
-}
-
-impl Deadline {
-    fn start(socket: TcpStream) -> Self {
-        let (done, expired) = mpsc::channel::<()>();
-        thread::spawn(move || {
-            if let Err(RecvTimeoutError::Timeout) = expired.recv_timeout(HANDSHAKE_TIMEOUT) {
-                // Both halves: the handshake's read returns at once, as at an end.
-                if socket.shutdown(Shutdown::Both).is_err() {
-                    // Already gone: the handshake has ended some other way.
-                }
-            }
-        });
-        Self { _done: done }
-    }
-}
-
-/// Writes the handshake line. The token is in it, so nothing reports this line's bytes.
-fn send_hello(mut writer: &TcpStream, token: &str, connector: &str) -> io::Result<()> {
-    let hello = format!(r#"{{"clauseo_relay":1,"token":"{token}","connector":"{connector}"}}"#);
-    writer.write_all(hello.as_bytes())?;
-    writer.write_all(b"\n")?;
-    writer.flush()
+/// Writes the handshake line in one write. The token is in it, so nothing reports its bytes.
+fn send_hello(socket: &TcpStream, token: &str, connector: &str, deadline: &Stop) -> io::Result<()> {
+    let hello =
+        format!("{{\"clauseo_relay\":1,\"token\":\"{token}\",\"connector\":\"{connector}\"}}\n");
+    socket::write_all(socket, hello.as_bytes(), Some(deadline))
 }
 
 /// `Ok` for `clauseo_relay: 1` with `ok: true`. Otherwise the host's error code, if it is a plain

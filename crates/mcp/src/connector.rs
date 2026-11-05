@@ -22,19 +22,23 @@ mod head;
 #[cfg(test)]
 mod in_flight;
 mod line;
+#[cfg(test)]
+mod no_shutdown;
 mod pending;
 mod pump;
+mod socket;
 #[cfg(test)]
 mod tests;
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, BufRead, Read};
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::{SocketAddr, SocketAddrV4, TcpStream};
 use std::sync::{Arc, Mutex};
 
 use crate::Failure;
 use line::Out;
+pub(crate) use socket::Shut;
 
 /// The mode's command line.
 pub const USAGE: &str = "usage: clauseo-mcp connector <name>";
@@ -77,6 +81,18 @@ pub(crate) fn run_with(
     stdin: impl BufRead,
     out: &Out,
 ) -> Result<i32, Failure> {
+    run_with_shut(args, env, stdin, out, TcpStream::shutdown)
+}
+
+/// [`run_with`] with `shut` as the socket's `shutdown`: tests give one that does nothing, as
+/// a stand-in for Windows, where a `shutdown` wakes no blocked read.
+pub(crate) fn run_with_shut(
+    args: &[OsString],
+    env: &dyn Fn(&str) -> Option<OsString>,
+    stdin: impl BufRead,
+    out: &Out,
+    shut: Shut,
+) -> Result<i32, Failure> {
     let settings = Settings::parse(args, env).map_err(usage_failure)?;
     let (link, refusal) = match handshake::connect(settings.addr, &settings.token, &settings.name) {
         // The reason a link that later fails gives: the same as a refused handshake's default.
@@ -85,7 +101,7 @@ pub(crate) fn run_with(
     };
     // The token is no longer needed; the handshake has been sent.
     drop(settings);
-    pump::serve(stdin, out, link, refusal).map_err(|error| Failure {
+    pump::serve(stdin, out, link, refusal, shut).map_err(|error| Failure {
         code: EXIT_FAILED,
         message: format!("clauseo-mcp connector: stdio failed: {error}"),
     })?;

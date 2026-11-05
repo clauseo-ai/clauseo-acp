@@ -1,14 +1,17 @@
 //! The handshake's refusals: the reply's shape, and the deadline for a relay that never finishes.
 
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
 use serde_json::Value;
 
+use super::super::Shut;
+use super::super::no_shutdown::IGNORED;
 use super::super::tests::{
-    Scratch, TOKEN, accept_within_limit, good_env, pause, relay, run_mode, token_file,
+    Scratch, TOKEN, accept_within_limit, good_env, pause, relay, run_mode, run_mode_with,
+    token_file,
 };
 
 /// The request line the tests send, with id `id`.
@@ -70,7 +73,20 @@ enum Trickle {
 
 #[test]
 fn a_relay_that_trickles_bytes_past_the_deadline_is_given_up() {
-    let scratch = Scratch::new("trickle");
+    trickle_past_the_deadline("trickle", TcpStream::shutdown);
+}
+
+/// The Windows model: a `shutdown` there does not wake the handshake's blocked read, so the
+/// deadline must not depend on one.
+#[test]
+fn the_deadline_holds_when_shutdown_wakes_no_reader() {
+    trickle_past_the_deadline("trickle-no-wake", IGNORED);
+}
+
+/// Runs the mode against a relay that answers the hello one byte a second, with `shut` as the
+/// mode's `shutdown`, and checks the mode gave up at the 5 s deadline and closed the socket.
+fn trickle_past_the_deadline(name: &str, shut: Shut) {
+    let scratch = Scratch::new(name);
     let file = token_file(&scratch, TOKEN);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -92,10 +108,11 @@ fn a_relay_that_trickles_bytes_past_the_deadline_is_given_up() {
         }
         Trickle::WritesKeptSucceeding(TRICKLE_SECS)
     });
-    let (result, capture) = run_mode(
+    let (result, capture) = run_mode_with(
         &good_env(port, &file),
         &["case-law"],
         request("1").as_bytes(),
+        shut,
     );
     // Checked before the relay is joined: a mode that stopped early leaves the relay waiting in
     // `accept`, and the reply is what says why.
