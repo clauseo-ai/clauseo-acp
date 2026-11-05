@@ -1,0 +1,10 @@
+{"scenario":"web-replay-load","description":"S26's replay, the relaunch: session/load replays the search's tool call and its completion (Origin::Replay); they add no record; then one more prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-replayed","title":"Web search","name":"WebSearch","kind":"fetch","status":"pending","rawInput":{}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-replayed","status":"completed","rawOutput":"Links: [{\"title\":\"Replay\",\"url\":\"https://example.org/replay\"}]"}}}
+{"respond":{"to":"load","result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-2","content":{"type":"text","text":"Second answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

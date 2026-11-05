@@ -84,10 +84,10 @@ pub(crate) struct TurnState {
     run: Option<launch_checks::RunFolders>,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
-    /// The browser opens of the thread's turns that have not finished, for `PageVisited`. Kept
-    /// past a turn's end, so a completion that comes late or in a replay finds its open and is
-    /// still not recorded (`updates.rs` drops it by its origin).
-    browser_opens: crate::sources::browser::Opens,
+    /// The thread's sources in progress: the browser's opens and the agents' web calls that have
+    /// not finished. Kept past a turn's end, so a completion that comes late or in a replay finds
+    /// its call and is still not recorded (`updates.rs` drops it by its origin).
+    sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
     /// The files put back since the last `TurnStarted`; `None` until first needed, then
