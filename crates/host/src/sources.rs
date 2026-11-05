@@ -18,6 +18,8 @@ pub(crate) mod claude;
 pub(crate) mod codex;
 
 #[cfg(test)]
+mod query_tests;
+#[cfg(test)]
 mod tests;
 
 use clauseo_acp::ToolCall;
