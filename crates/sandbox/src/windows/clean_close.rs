@@ -58,7 +58,7 @@ pub use close::{Closed, Cursor, NotWritten, session_cursor, write_clean_close};
 pub(crate) use inputs::WalkInputs;
 pub use journal::{
     ATTRIBUTE_DIRECTORY, ATTRIBUTE_REPARSE_POINT, Change, Flow, Found, Journal, JournalError,
-    JournalState, Listed, RootFacts, Usn,
+    JournalState, Listed, RootFacts, TreeError, Usn,
 };
 #[cfg(windows)]
 pub use ntfs::NtfsJournal;
@@ -126,6 +126,10 @@ pub enum FullReason {
     Unresolved,
     /// The check was made for another plan than the one applied.
     OtherPlan,
+    /// The journal's record at the cursor isn't the one the record saw there (another USN,
+    /// time or file), or there is none now: the volume went back and has written past the
+    /// cursor since (a restored image).
+    FirstRecordDiffers,
 }
 
 /// A folder a targeted launch walks: below which own root, its parts below it, and how far.

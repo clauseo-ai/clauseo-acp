@@ -25,8 +25,8 @@ use super::inputs::WalkInputs;
 /// The records' folder in the sandbox folder.
 const CLEAN_DIR: &str = "clean";
 const MAGIC: &[u8; 16] = b"CLAUSEO-CLEAN\0\0\0";
-/// The version written, and the only one read.
-pub(super) const VERSION: u32 = 1;
+/// The version written, and the only one read. 2 added each volume's first record.
+pub(super) const VERSION: u32 = 2;
 const ITEM: usize = 17;
 /// The most items a record holds: past this the walk is cheaper than reading it back.
 const MOST_ITEMS: usize = 4_000_000;
@@ -48,7 +48,20 @@ pub(super) struct VolumeMark {
     pub(super) volume: u64,
     pub(super) journal: u64,
     pub(super) cursor: Usn,
+    /// The record at the cursor when the record was written; `None` when there was none yet.
+    /// A launch finds the same one there, or the volume went back and on (a restored image
+    /// that has written past the cursor since).
+    pub(super) first: Option<FirstRecord>,
     pub(super) items: usize,
+}
+
+/// A journal record, as a later launch must find it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FirstRecord {
+    pub(super) usn: Usn,
+    pub(super) time: i64,
+    pub(super) file: u64,
 }
 
 /// The record's JSON part.
@@ -180,7 +193,7 @@ pub(super) fn render(record: &CleanRecord) -> io::Result<Vec<u8>> {
     let header = serde_json::to_vec(&record.header).map_err(io::Error::other)?;
     let len = u32::try_from(header.len()).map_err(io::Error::other)?;
     let count: usize = record.known.iter().map(Known::len).sum();
-    let mut bytes = Vec::with_capacity(24 + header.len() + count * ITEM);
+    let mut bytes = Vec::with_capacity(24 + header.len() + count.saturating_mul(ITEM));
     bytes.extend_from_slice(MAGIC);
     bytes.extend_from_slice(&VERSION.to_le_bytes());
     bytes.extend_from_slice(&len.to_le_bytes());
@@ -212,13 +225,18 @@ pub(super) fn parse(bytes: &[u8]) -> Result<CleanRecord, Unusable> {
     let len = usize::try_from(u32::from_le_bytes(*len)).map_err(|_too_long| bad)?;
     let (header, mut rest) = rest.split_at_checked(len).ok_or(bad)?;
     let header: Header = serde_json::from_slice(header).map_err(|_unparsed| bad)?;
-    let total: usize = header.volumes.iter().map(|v| v.items).sum();
-    if total > MOST_ITEMS || rest.len() != total * ITEM {
+    let total = header
+        .volumes
+        .iter()
+        .try_fold(0_usize, |sum, v| sum.checked_add(v.items))
+        .ok_or(bad)?;
+    if total > MOST_ITEMS || Some(rest.len()) != total.checked_mul(ITEM) {
         return Err(bad);
     }
     let mut known = Vec::with_capacity(header.volumes.len());
     for mark in &header.volumes {
-        let (mine, next) = rest.split_at_checked(mark.items * ITEM).ok_or(bad)?;
+        let size = mark.items.checked_mul(ITEM).ok_or(bad)?;
+        let (mine, next) = rest.split_at_checked(size).ok_or(bad)?;
         rest = next;
         let items = mine
             .as_chunks::<ITEM>()

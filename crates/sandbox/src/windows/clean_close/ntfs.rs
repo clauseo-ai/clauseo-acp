@@ -1,15 +1,18 @@
 //! The change journal on NTFS: [`NtfsJournal`], the [`Journal`] a launch uses on Windows, at the
-//! lawyer's Medium token. Every handle here opens a path as itself, never through a link, and
-//! asks only to read attributes (a folder's listing too, for [`Journal::tree`]).
+//! lawyer's Medium token. Every handle here opens a path as itself, never through a link. The
+//! journal's handles ask only to read attributes; [`Journal::tree`] opens each item relative to
+//! its folder's handle as the walk does (`Object::open_child`).
 //!
 //! The records are read with `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL` (0x903AB) on a handle on the
 //! own root, which needs no administrator rights and gives each record without its name.
-//! Microsoft doesn't document it on Learn. The Windows SDK 10.0.14393.0 `winioctl.h` defines it
-//! under `#if (_WIN32_WINNT >= _WIN32_WINNT_WIN10_RS1)` (Windows 10 1607, build 14393), and SDK
-//! 10.0.10240.0 lacks it:
-//! <https://raw.githubusercontent.com/tpn/winsdk-10/master/Include/10.0.14393.0/um/winioctl.h>
-//! (a mirror of the SDK headers, not a Microsoft page). On an older build the call fails, and
-//! the caller does the full walk.
+//! Microsoft Learn has no page for it. Microsoft's Windows SDK defines it in
+//! `Windows Kits\10\Include\10.0.14393.0\um\winioctl.h` inside the `NTDDI_WIN10_RS1` block
+//! (`#if (_WIN32_WINNT >= _WIN32_WINNT_WIN10_RS1)`: Windows 10 1607, build 14393); the
+//! 10.0.10240.0 SDK's header lacks it. On an older build the call fails, and the caller does the
+//! full walk.
+//!
+//! [`Journal::tree`] also writes a close record (`FSCTL_WRITE_USN_CLOSE_RECORD`) for each item,
+//! so a change after the session end is logged even while another program holds the item open.
 //!
 //! Every doubtful answer is an error, which also means the full walk: a short read, a record
 //! that doesn't fit, a cursor that doesn't advance, a folder that can't be listed.
@@ -26,11 +29,13 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
-    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_UNPRIVILEGED_USN_JOURNAL, READ_USN_JOURNAL_DATA_V1,
-    USN_JOURNAL_DATA_V0, USN_RECORD_V2,
+    FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_UNPRIVILEGED_USN_JOURNAL, FSCTL_WRITE_USN_CLOSE_RECORD,
+    READ_USN_JOURNAL_DATA_V1, USN_JOURNAL_DATA_V0, USN_RECORD_V2,
 };
 
-use super::{Change, Flow, Found, Journal, JournalError, JournalState, Listed, RootFacts, Usn};
+use super::{
+    Change, Flow, Found, Journal, JournalError, JournalState, Listed, RootFacts, TreeError, Usn,
+};
 use crate::windows::acl::object::{Handle, Object, os_error, reparse_refused};
 use crate::windows::writer::{ApplyFailure, FileId};
 
@@ -158,57 +163,65 @@ impl Journal for NtfsJournal {
         }))
     }
 
-    fn tree(&self, root: &Path) -> io::Result<Vec<Listed>> {
-        let top = Object::open_folder(root)?;
+    fn tree(&self, root: &Path) -> Result<Vec<Listed>, TreeError> {
+        let unread = |e: io::Error| TreeError::Unreadable(e.kind());
+        let changed = || TreeError::Unreadable(io::Error::from(ApplyFailure::Changed).kind());
+        let top = Object::open_folder(root).map_err(unread)?;
         if top.name_surrogate() || !top.folder {
-            return Err(ApplyFailure::Changed.into());
+            return Err(changed());
         }
+        close_record(&top)?;
         let mut out = Vec::new();
         let mut folders = vec![top];
         while let Some(folder) = folders.pop() {
-            let parent = own_id(&folder)?;
-            for child in folder.children()? {
-                if !child.folder {
-                    out.push(Listed {
-                        id: child.id,
-                        parent,
-                        folder: false,
-                    });
-                    continue;
-                }
-                let object = match folder.open_child(&child.name, true) {
+            let parent = own_id(&folder).map_err(unread)?;
+            for child in folder.children().map_err(unread)? {
+                let object = match folder.open_child(&child.name, child.folder) {
                     Ok(object) => object,
                     // Gone since the listing: no name to record.
                     Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
                     // A reparse the open refused to pass: not opened as itself, so not listed.
-                    Err(e) if reparse_refused(&e) => return Err(ApplyFailure::Changed.into()),
-                    Err(e) => return Err(e),
+                    Err(e) if reparse_refused(&e) => return Err(changed()),
+                    Err(e) => return Err(unread(e)),
                 };
-                // Another folder under the name since the listing: the set would mix the two.
-                if own_id(&object)? != child.id {
-                    return Err(ApplyFailure::Changed.into());
+                // Another item under the name since the listing: the set would mix the two.
+                if own_id(&object).map_err(unread)? != child.id {
+                    return Err(changed());
                 }
-                if object.name_surrogate() {
-                    out.push(Listed {
-                        id: child.id,
-                        parent,
-                        folder: false,
-                    });
-                    continue;
-                }
-                if !object.folder {
-                    return Err(ApplyFailure::Changed.into());
+                close_record(&object)?;
+                let entered = object.folder && !object.name_surrogate();
+                if child.folder && !object.folder {
+                    return Err(changed());
                 }
                 out.push(Listed {
                     id: child.id,
                     parent,
-                    folder: true,
+                    folder: entered,
                 });
-                folders.push(object);
+                if entered {
+                    folders.push(object);
+                }
             }
         }
         Ok(out)
     }
+}
+
+/// Writes a close record for what `object` is open on (`FSCTL_WRITE_USN_CLOSE_RECORD`), so a
+/// later change of a kind already logged while another program holds it open is logged again.
+fn close_record(object: &Object) -> Result<(), TreeError> {
+    let mut usn = [0_u64; 1];
+    control::<()>(
+        object.handle(),
+        FSCTL_WRITE_USN_CLOSE_RECORD,
+        None,
+        &mut usn,
+    )
+    .map(drop)
+    .map_err(|e| {
+        tracing::debug!(code = ?e.raw_os_error(), "a close record couldn't be written");
+        TreeError::CloseRecord(e.kind())
+    })
 }
 
 /// Opens the own root `root` as itself for the journal's FSCTLs (any handle on the volume will
@@ -309,6 +322,7 @@ fn hand_over(records: &[u8], each: &mut dyn FnMut(&Change) -> Flow) -> Result<Fl
             reason: read_u32(record, offset_of!(USN_RECORD_V2, Reason)).ok_or(invalid)?,
             attributes: read_u32(record, offset_of!(USN_RECORD_V2, FileAttributes))
                 .ok_or(invalid)?,
+            time: read_i64(record, offset_of!(USN_RECORD_V2, TimeStamp)).ok_or(invalid)?,
         };
         if each(&change) == Flow::Stop {
             return Ok(Flow::Stop);

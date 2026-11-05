@@ -8,8 +8,10 @@ use clauseo_protocol::MatterId;
 
 use super::WalkInputs;
 use super::check::{Busy, busy};
-use super::journal::{Journal, Usn};
-use super::record::{self, CleanRecord, FOLDER, Header, Item, Known, ROOT, RootMark, VolumeMark};
+use super::journal::{Flow, Journal, TreeError, Usn};
+use super::record::{
+    self, CleanRecord, FOLDER, FirstRecord, Header, Item, Known, ROOT, RootMark, VolumeMark,
+};
 use crate::Error;
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::Ledger;
@@ -58,6 +60,11 @@ pub enum NotWritten {
     TreeUnreadable,
     /// The record couldn't be written, of this kind.
     WriteFailed(io::ErrorKind),
+    /// A close record couldn't be written for an item in the trees, of this kind: a change to it
+    /// while another program holds it open might not be logged.
+    CloseRecordFailed(io::ErrorKind),
+    /// The journal's record at the cursor couldn't be read, or isn't at the cursor.
+    JournalUnread,
 }
 
 /// The cursor for `matter`'s own trees (its ledger entries, as `repair_after_session` reads
@@ -121,6 +128,41 @@ pub fn write_clean_close(
     }
 }
 
+/// The journal's record at `cursor` on the volume holding `root`: `None` when none was
+/// written since. One that isn't at the cursor, or a read that fails, is
+/// [`NotWritten::JournalUnread`].
+fn first_record(
+    journal: &dyn Journal,
+    root: &std::path::Path,
+    id: u64,
+    cursor: Usn,
+) -> Result<Option<FirstRecord>, NotWritten> {
+    let state = journal
+        .query(root)
+        .map_err(|_unread| NotWritten::JournalUnread)?;
+    if state.id != id || state.next < cursor || state.first > cursor {
+        return Err(NotWritten::JournalUnread);
+    }
+    if state.next == cursor {
+        return Ok(None);
+    }
+    let mut first = None;
+    journal
+        .read(root, id, cursor, state.next, &mut |change| {
+            first = Some(*change);
+            Flow::Stop
+        })
+        .map_err(|_unread| NotWritten::JournalUnread)?;
+    match first {
+        Some(change) if change.usn == cursor => Ok(Some(FirstRecord {
+            usn: change.usn,
+            time: change.time,
+            file: change.file,
+        })),
+        Some(_) | None => Err(NotWritten::JournalUnread),
+    }
+}
+
 fn write(
     data_dir: &std::path::Path,
     ledger: &Ledger,
@@ -167,9 +209,10 @@ fn write(
             .position(|v| v.0 == root.volume)
             .and_then(|at| by_volume.get_mut(at))
             .ok_or(NotWritten::RootsChanged)?;
-        let listed = journal
-            .tree(&root.path)
-            .map_err(|_unread| NotWritten::TreeUnreadable)?;
+        let listed = journal.tree(&root.path).map_err(|error| match error {
+            TreeError::Unreadable(_) => NotWritten::TreeUnreadable,
+            TreeError::CloseRecord(kind) => NotWritten::CloseRecordFailed(kind),
+        })?;
         slot.push(Item {
             id: root.id,
             parent: 0,
@@ -182,17 +225,21 @@ fn write(
         }));
     }
     let known: Vec<Known> = by_volume.into_iter().map(Known::new).collect();
-    let volumes = cursor
-        .volumes
-        .iter()
-        .zip(&known)
-        .map(|(&(volume, journal, cursor), known)| VolumeMark {
+    let mut volumes = Vec::new();
+    for (&(volume, id, at), known) in cursor.volumes.iter().zip(&known) {
+        let root = cursor
+            .roots
+            .iter()
+            .find(|r| r.volume == volume)
+            .ok_or(NotWritten::RootsChanged)?;
+        volumes.push(VolumeMark {
             volume,
-            journal,
-            cursor,
+            journal: id,
+            cursor: at,
+            first: first_record(journal, &root.path, id, at)?,
             items: known.len(),
-        })
-        .collect();
+        });
+    }
     let record = CleanRecord {
         header: Header {
             matter,

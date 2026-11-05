@@ -24,7 +24,7 @@ fn another_version_a_short_file_or_another_matters_record_walks_in_full() {
     let path = record::record_path(&s.data, &s.matter);
     let good = std::fs::read(&path).unwrap();
     let mut other = good.clone();
-    other[16] = 2;
+    other[16] = 9;
     assert_eq!(record::parse(&other), Err(record::Unusable::Version));
     for bad in [
         &good[..good.len() - 1],

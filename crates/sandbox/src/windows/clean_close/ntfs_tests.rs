@@ -247,3 +247,41 @@ fn a_temp_folder_on_the_fixed_system_disk_is_not_removable() {
         "the bus query or the drive type failed at this token: {facts:?}"
     );
 }
+
+/// Round 1: NTFS logs a reason once while any handle is open, so a second DACL edit of a folder
+/// another program (Explorer, say) holds open gets no record of its own. The close records
+/// [`Journal::tree`] writes at session end end that period: the edit after them is logged. The
+/// premise itself (no record without them) is printed, not asserted, for the VM row to read.
+#[test]
+fn a_folder_held_open_is_logged_again_after_the_close_records() {
+    let place = Place::new("journal-held-open");
+    let root = place.dir.dir("root");
+    let sub = place.dir.dir("root/sub");
+    let Some(_) = journal(&root) else {
+        return;
+    };
+    let id = NtfsJournal.root(&sub).unwrap().id.unwrap();
+    let security = |records: &[Change]| {
+        records
+            .iter()
+            .any(|c| c.file == id && c.reason & SECURITY_CHANGE != 0)
+    };
+    // Held open for the whole test, as Explorer holds the folder it shows.
+    let held = crate::windows::acl::object::Object::open_folder(&sub).unwrap();
+    auto_inherit_with(&sub, "D:(A;;FA;;;WD)").unwrap();
+    // Without close records: a second edit while the folder is held open.
+    let before = NtfsJournal.query(&root).unwrap();
+    auto_inherit_with(&sub, "D:(A;;FA;;;BU)").unwrap();
+    let premise = !security(&records_since(&root, before, before.next));
+    println!("a second edit while held open went unlogged: {premise}");
+    // The session end's close records, then the lawyer's edit through another handle.
+    NtfsJournal.tree(&root).unwrap();
+    let cursor = NtfsJournal.query(&root).unwrap();
+    auto_inherit_with(&sub, "D:(A;;FA;;;BA)").unwrap();
+    let records = records_since(&root, cursor, cursor.next);
+    assert!(
+        security(&records),
+        "no security change after the close records: {records:?}"
+    );
+    drop(held);
+}

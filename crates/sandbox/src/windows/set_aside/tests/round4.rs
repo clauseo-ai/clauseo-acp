@@ -47,6 +47,7 @@ fn a_git_differing_only_in_case_from_one_set_aside_is_still_checked_and_recorded
     let scan = Scan {
         items: vec![nested_git(&root, "A", "A"), nested_git(&root, "a", "lower")],
         unscanned: Vec::new(),
+        folders: Vec::new(),
     };
     let lower = id(&root.join("lower/.git"));
     let seen = Snapshot {
@@ -73,6 +74,7 @@ fn a_git_differing_only_in_case_from_one_set_aside_is_still_checked_and_recorded
     let scan = Scan {
         items: vec![nested_git(&root, "A", "A"), nested_git(&root, "a", "lower")],
         unscanned: Vec::new(),
+        folders: Vec::new(),
     };
     let mut moved = Vec::new();
     check(&volume(), &place, &scan, &record, exit(), &mut moved).unwrap();

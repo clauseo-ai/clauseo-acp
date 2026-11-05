@@ -186,3 +186,13 @@ fn the_record_is_gone_even_when_the_launch_then_fails() {
     assert!(l.apply(&check).is_err());
     assert_eq!(l.check().path(), LaunchPath::Full(FullReason::NoRecord));
 }
+
+#[test]
+fn forgetting_the_matter_removes_its_clean_close_record() {
+    let mut l = Launched::new("checked-forget");
+    let path = crate::windows::clean_close::fake_record_path(&l.w.at("data"), &matter_one());
+    assert!(path.is_file());
+    let mut around = around(&l.w);
+    forget_matter(&mut l.ledger, matter_one(), &mut l.acl, &mut around).unwrap();
+    assert!(!path.exists());
+}

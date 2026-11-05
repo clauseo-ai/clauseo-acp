@@ -91,7 +91,15 @@ pub(super) fn read_volume(
     // Items a counted record brought in, and the folder it brought each into.
     let mut new: BTreeMap<u64, (u64, bool)> = BTreeMap::new();
     let mut stop = None;
+    let mut first: Option<Change> = None;
     let mut each = |change: &Change| {
+        if first.is_none() {
+            first = Some(*change);
+            if !same_first(mark, change) {
+                stop = Some(FullReason::FirstRecordDiffers);
+                return Flow::Stop;
+            }
+        }
         match count(change, known, &mut new, &mut touched) {
             Ok(false) => {}
             Ok(true) => {
@@ -119,7 +127,22 @@ pub(super) fn read_volume(
         JournalError::Lost => FullReason::Wrapped,
         JournalError::Failed(_) => FullReason::ReadFailed,
     })?;
+    // A record seen at the cursor at the clean close and none there now: the volume went back.
+    if first.is_none() && mark.first.is_some() {
+        return Err(FullReason::FirstRecordDiffers);
+    }
     Ok(touched)
+}
+
+/// Whether `change`, the first record read from the cursor, is the one the record saw there:
+/// the same USN, time and file; or, when it saw none yet, one that starts at the cursor.
+fn same_first(mark: &VolumeMark, change: &Change) -> bool {
+    match mark.first {
+        Some(seen) => {
+            change.usn == seen.usn && change.time == seen.time && change.file == seen.file
+        }
+        None => change.usn == mark.cursor,
+    }
 }
 
 /// What one record means: `Ok(true)` when it changed something the walks cover, after adding
