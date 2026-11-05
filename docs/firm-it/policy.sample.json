@@ -45,5 +45,13 @@
   "install": {
     "bundle": "D:\\Clauseo\\bundle",
     "registry": "https://npm.firm.example/"
+  },
+  "skills": {
+    "extra": "curated",
+    "curated": ["nda-kit", "lease-kit"],
+    "allow_scripts": false,
+    "enabled": {
+      "nda-kit": "sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
+    }
   }
 }

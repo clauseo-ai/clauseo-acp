@@ -81,6 +81,20 @@
       <string>/Library/Application Support/Clauseo/bundle</string>
       <key>install.registry</key>
       <string>https://npm.firm.example/</string>
+      <key>skills.extra</key>
+      <string>curated</string>
+      <key>skills.curated</key>
+      <array>
+        <string>nda-kit</string>
+        <string>lease-kit</string>
+      </array>
+      <key>skills.allow_scripts</key>
+      <false/>
+      <key>skills.enabled</key>
+      <dict>
+        <key>nda-kit</key>
+        <string>sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4</string>
+      </dict>
     </dict>
   </array>
   <key>PayloadType</key>
