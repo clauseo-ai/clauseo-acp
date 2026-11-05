@@ -106,13 +106,12 @@ junit = { path = "junit.xml" }
 # profiles: keep them equal.
 #   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
 #   - clauseo-mcp connector::handshake::tests::a_relay_that_trickles_bytes_past_the_deadline_is_given_up (Windows only): failed then passed on retry 1 time since 2026-11-05; ejected #475 from the merge queue with its crate untouched; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/42084931250/job/127447448868 (autoquarantine)
-#   - clauseo-sandbox windows::acl::tests::round8::a_strict_launch_on_a_plain_matter_passes_and_leaves_each_child_its_entries_once (Windows only): refused with BroadAllowChild in 2 of 5 Windows groups since #465 (ejected #465 at 17:55Z and #476 at 19:16Z on 2026-11-05); its DACL dump is in run 42090090118; stage C is fixing it
 default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does))'
 # The Windows overrides are their profile's line plus the tests quarantined on Windows
 # only; the hourly auto-quarantine reads and writes all four lines, so keep them.
 [[profile.ci.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-mcp) & test(=connector::handshake::tests::a_relay_that_trickles_bytes_past_the_deadline_is_given_up) | package(clauseo-sandbox) & test(=windows::acl::tests::round8::a_strict_launch_on_a_plain_matter_passes_and_leaves_each_child_its_entries_once))'
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-mcp) & test(=connector::handshake::tests::a_relay_that_trickles_bytes_past_the_deadline_is_given_up))'
 
 # The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
 # ci profile's timeouts and retry, so a fixed one shows as passing.
@@ -122,4 +121,4 @@ failure-output = "immediate-final"
 default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does)'
 [[profile.quarantine.overrides]]
 platform = 'cfg(windows)'
-default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-mcp) & test(=connector::handshake::tests::a_relay_that_trickles_bytes_past_the_deadline_is_given_up) | package(clauseo-sandbox) & test(=windows::acl::tests::round8::a_strict_launch_on_a_plain_matter_passes_and_leaves_each_child_its_entries_once)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-mcp) & test(=connector::handshake::tests::a_relay_that_trickles_bytes_past_the_deadline_is_given_up)'
