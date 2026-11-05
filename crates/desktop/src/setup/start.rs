@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Platform, Snapshot, SystemClock};
@@ -92,6 +92,10 @@ impl SetupBackend for BackendCell {
             }
         })
     }
+
+    fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
+        self.backend.get()?.sign_in_refused(agent)
+    }
 }
 
 /// The two launchers `Agents` starts with, each made by `make` from its options: the install
@@ -110,6 +114,8 @@ pub(crate) struct SetupStart {
     known: BTreeMap<AgentId, AgentInfo>,
     managed: BTreeSet<AgentId>,
     firm: BTreeSet<AgentId>,
+    /// The agents whose endpoint or provider a firm policy sets.
+    firm_policy: BTreeSet<AgentId>,
     blocked: BTreeSet<AgentId>,
     registry: Option<String>,
     bundle: Option<PathBuf>,
@@ -147,7 +153,7 @@ impl SetupStart {
             .filter(|agent| effective.is_locked(&format!("agents.{agent}")))
             .cloned()
             .collect();
-        let firm = known
+        let firm: BTreeSet<AgentId> = known
             .keys()
             .filter(|agent| {
                 effective
@@ -156,12 +162,18 @@ impl SetupStart {
             })
             .cloned()
             .collect();
+        let firm_policy_set = known
+            .keys()
+            .filter(|agent| firm.contains(*agent) && effective.is_locked(&format!("plans.{agent}")))
+            .cloned()
+            .collect();
         let blocked = firm_policy(effective, &SystemFiles, known.keys());
         Self {
             data_dir: effective.data_dir().to_path_buf(),
             known,
             managed,
             firm,
+            firm_policy: firm_policy_set,
             blocked,
             registry: install.registry.clone(),
             bundle: install.bundle.clone(),
@@ -231,7 +243,11 @@ fn run(read: SetupStart, parts: SetupParts) {
         opener: parts.opener,
         events: parts.events,
         known: read.known,
+        signin_gate: Mutex::new(()),
     });
+    for agent in backend.known.keys() {
+        backend.set_firm_policy(agent, read.firm_policy.contains(agent));
+    }
     parts
         .start
         .finish(Arc::clone(&backend) as Arc<dyn SetupBackend>);

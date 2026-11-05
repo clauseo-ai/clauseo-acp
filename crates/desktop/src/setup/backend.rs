@@ -25,27 +25,30 @@
 //!   `internal` and run nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use clauseo_agents::{
-    AgentsEvent, InstallState, Installed, Method, PasteCode, SigninError, SigninState, Source,
+    AgentsEvent, InstallState, Method, PasteCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::{
-    AgentId, AgentKind, CommandOutcome, Count, ErrorCode, HostError, InstallLog, InstallProgress,
-    SetupCommand, SetupEvent, SignInSource,
+    AgentId, AgentKind, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent,
+    SignInSource,
 };
-use clauseo_settings::{AgentLaunch, EntryWrite};
+use clauseo_settings::EntryWrite;
 use futures::{Stream, StreamExt as _};
 
-use super::compose::Compose;
+use super::admit::sign_in_barred;
+use super::compose::{Compose, is_running};
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
 use super::keys::KeyCache;
 use super::{KeyWrite, SetupBackend, SetupEvents, events};
+use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::{Opener, open_url_unconfirmed};
 
+pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::seam::SetupAgents;
 
 /// One agent as the backend knows it from the snapshot and the locations.
@@ -77,6 +80,9 @@ pub(crate) struct AgentsBackend {
     pub(crate) events: Arc<SetupEvents>,
     /// The agents Clauseo sets up, by id.
     pub(crate) known: BTreeMap<AgentId, AgentInfo>,
+    /// Held from a sign-in start's check to its call, and from a key's or an endpoint's end of
+    /// a running sign-in to its cancel, so a start never slips past a key or an endpoint.
+    pub(crate) signin_gate: Mutex<()>,
 }
 
 impl SetupBackend for AgentsBackend {
@@ -91,6 +97,12 @@ impl SetupBackend for AgentsBackend {
                 .await
                 .map(|()| CommandOutcome::Done)
         })
+    }
+
+    fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
+        self.compose
+            .sign_in_bar(agent)
+            .map(|bar| sign_in_barred(agent, bar))
     }
 }
 
@@ -118,7 +130,8 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => self.retry(&agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
-                self.refuse_blocked(&agent)?;
+                let _gate = lock(&self.signin_gate);
+                self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
                 agents
                     .sign_in(&agent, method)
@@ -136,7 +149,8 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
-                self.refuse_blocked(&agent)?;
+                let _gate = lock(&self.signin_gate);
+                self.refuse_start(&agent)?;
                 agents
                     .sign_in(&agent, Method::DeviceCode)
                     .map_err(|error| signin_error(&error))?;
@@ -157,13 +171,15 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseFoundLogin { .. } => {
-                self.refuse_blocked(&agent)?;
+                let _gate = lock(&self.signin_gate);
+                self.refuse_start(&agent)?;
                 agents
                     .use_found_login(&agent)
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDifferentAccount { .. } => {
-                self.refuse_blocked(&agent)?;
+                let _gate = lock(&self.signin_gate);
+                self.refuse_start(&agent)?;
                 agents
                     .use_different_account(&agent)
                     .map_err(|error| signin_error(&error))?;
@@ -177,6 +193,7 @@ impl AgentsBackend {
                 self.refuse_leaving_reused(&agent)?;
                 let then = self.key_trigger(&agent);
                 self.keys.set(&agent, key, key_write, then).await?;
+                self.end_sign_in(&agent);
             }
             SetupCommand::ClearAgentKey { .. } => {
                 let then = self.key_trigger(&agent);
@@ -220,6 +237,9 @@ impl AgentsBackend {
         let firm = url.is_some() || info.provider;
         self.host.set_endpoint(agent.clone(), url).await?;
         self.compose.set_firm(agent, firm);
+        if firm {
+            self.end_sign_in(agent);
+        }
         Ok(())
     }
 
@@ -256,6 +276,50 @@ impl AgentsBackend {
                 ErrorCode::TransportUnauthorized,
                 "the lawyer declined",
             ))
+        }
+    }
+
+    /// The refusal of a sign-in start for `agent`: an unreadable policy, else what bars it
+    /// (`admit::sign_in_bar`: a firm policy's endpoint, a key, an endpoint the lawyer set).
+    fn refuse_start(&self, agent: &AgentId) -> Result<(), HostError> {
+        self.refuse_blocked(agent)?;
+        match self.compose.sign_in_bar(agent) {
+            Some(bar) => Err(sign_in_barred(agent, bar)),
+            None => Ok(()),
+        }
+    }
+
+    /// Ends `agent`'s running sign-in, if one runs, because a key or an endpoint took over:
+    /// `Agents::cancel_sign_in`, the `CancelSignIn` path, with [`Compose::expect_end`] first,
+    /// so the end reaches the windows as the new line and not as a failure.
+    fn end_sign_in(&self, agent: &AgentId) {
+        let _gate = lock(&self.signin_gate);
+        if !self
+            .agents
+            .signin_state(agent)
+            .as_ref()
+            .is_some_and(is_running)
+        {
+            return;
+        }
+        self.compose.expect_end(agent);
+        match self.agents.cancel_sign_in(agent) {
+            Ok(()) => tracing::info!(%agent, "ending a sign-in: a key or an endpoint took over"),
+            Err(error) => {
+                self.compose.no_end(agent);
+                tracing::warn!(%agent, %error, "a sign-in a key or an endpoint took over runs on");
+            }
+        }
+    }
+
+    /// Whether a firm policy sets `agent`'s endpoint or provider: told to [`Compose`], which
+    /// then bars its sign-in with `signin.firm_managed`, and a running sign-in ended. Read at
+    /// start; desktop has no live policy feed yet, so a policy that arrives later takes force
+    /// at the next start, through here too.
+    pub(crate) fn set_firm_policy(&self, agent: &AgentId, managed: bool) {
+        self.compose.set_firm_policy(agent, managed);
+        if managed {
+            self.end_sign_in(agent);
         }
     }
 
@@ -410,79 +474,6 @@ impl FirstRun {
     }
 }
 
-/// The `agents.<id>` entry for `installed` (decision record 0048, "Installed becomes
-/// launchable"): `command` the Node, `args` the adapter's script, and the env: for Claude
-/// `ANTHROPIC_API_KEY` empty, `CLAUDE_CONFIG_DIR` the home and `CLAUDE_SECURESTORAGE_CONFIG_DIR`
-/// empty for a `Reused` login or the home for `Own`; for Codex `CODEX_API_KEY` empty and, on
-/// macOS and Linux, `HOME` the home. `None` when a path is not UTF-8 (settings hold text).
-pub(crate) fn launch(
-    agent: &AgentId,
-    installed: &Installed,
-    home: &Path,
-    source: SignInSource,
-) -> Option<AgentLaunch> {
-    let command = installed.node.to_str()?.to_owned();
-    let script = installed.script.to_str()?.to_owned();
-    let home = home.to_str()?.to_owned();
-    let mut env = BTreeMap::new();
-    match AgentKind::of(agent) {
-        Some(AgentKind::Claude) => {
-            env.insert("ANTHROPIC_API_KEY".to_owned(), String::new());
-            env.insert("CLAUDE_CONFIG_DIR".to_owned(), home.clone());
-            let storage = match source {
-                SignInSource::Reused => String::new(),
-                SignInSource::Own => home,
-            };
-            env.insert("CLAUDE_SECURESTORAGE_CONFIG_DIR".to_owned(), storage);
-        }
-        Some(AgentKind::Codex) => {
-            env.insert("CODEX_API_KEY".to_owned(), String::new());
-            if cfg!(not(windows)) {
-                env.insert("HOME".to_owned(), home);
-            }
-        }
-        None => {}
-    }
-    Some(AgentLaunch {
-        command,
-        args: vec![script],
-        env,
-    })
-}
-
-/// `state` on the wire, with `hosts` for a waiting or failed install; `None` for a state this
-/// version does not know.
-pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<InstallProgress> {
-    Some(match state {
-        InstallState::Missing { download_bytes } => InstallProgress::Missing {
-            download_bytes: Count::clamped(*download_bytes),
-        },
-        InstallState::Waiting { reason, log } => InstallProgress::Waiting {
-            code: ErrorCode::from_str_lossy(reason.code()),
-            hosts: hosts.to_vec(),
-            log: InstallLog::new(log.lines().iter().cloned()),
-        },
-        InstallState::Downloading { received, total } => InstallProgress::Downloading {
-            received: Count::clamped(*received),
-            total: Count::clamped(*total),
-        },
-        InstallState::Installing => InstallProgress::Installing,
-        InstallState::Ready { version } => InstallProgress::Ready {
-            version: version.clone(),
-        },
-        InstallState::Failed(failure) => InstallProgress::Failed {
-            code: ErrorCode::from_str_lossy(failure.kind.code()),
-            need_mb: failure.need_mb.map(Count::clamped),
-            free_mb: failure.free_mb.map(Count::clamped),
-            hosts: hosts.to_vec(),
-            log: InstallLog::new(failure.log.lines().iter().cloned()),
-        },
-        InstallState::Paused => InstallProgress::Paused,
-        InstallState::Managed => InstallProgress::Managed,
-        _ => return None,
-    })
-}
-
 /// The plan login `StartSignIn` asks for: Claude's Claude.ai plan or, with `console`, its
 /// Console account; Codex's browser sign-in (`console` is Claude's alone).
 fn plan_method(agent: &AgentId, console: bool) -> Result<Method, HostError> {
@@ -541,6 +532,7 @@ fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
 }
 
+mod entry;
 mod seam;
 #[cfg(test)]
 mod tests;

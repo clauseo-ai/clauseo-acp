@@ -1,12 +1,13 @@
 //! The backend over `Agents` with every seam recorded (`fakes.rs`): the confirms that run
 //! nothing when declined, the entry written on `Ready`, first run, the replay order,
-//! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, the join under a key
-//! or an endpoint, no key in a log, and the two launchers.
+//! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, no key in a log, and the
+//! two launchers; installs, keys, endpoints and sign-in bars in `tests/`.
 
 mod endpoint;
 mod fakes;
 mod keys;
 mod retry;
+mod signin;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -443,56 +444,4 @@ fn a_refused_s18_call_answers_command_invalid() {
     );
     assert_eq!(answer.unwrap_err().code(), ErrorCode::CommandInvalid);
     assert_eq!(rig.calls(), [("cancel_sign_in", claude())]);
-}
-
-#[test]
-fn a_second_start_sign_in_joins_the_running_one_under_a_key_or_an_endpoint() {
-    for (setting, sent) in [
-        ("set_agent_key", json!({ "key": KEY })),
-        (
-            "set_firm_endpoint",
-            json!({ "url": "https://gateway.firm.example" }),
-        ),
-    ] {
-        let rig = rig(true);
-        let setup = rig.setup();
-        let done = Ok(CommandOutcome::Done);
-        assert_eq!(
-            block_on(setup.run(SETTINGS, command(setting, &claude(), &sent))),
-            done
-        );
-        let start = || command("start_sign_in", &claude(), &json!({}));
-        assert_eq!(block_on(setup.run(MAIN, start())), done);
-        // S18's run starts: its state goes out over the key's or the endpoint's line.
-        let waiting = SigninState::Waiting {
-            since: UNIX_EPOCH,
-            nudge: false,
-        };
-        block_on(
-            rig.backend
-                .pump(futures::stream::iter([AgentsEvent::Signin {
-                    agent: claude(),
-                    state: waiting,
-                }])),
-        );
-        assert_eq!(block_on(setup.run(MAIN, start())), done, "{setting}");
-        let starts = rig
-            .calls()
-            .into_iter()
-            .filter(|(name, _)| *name == "sign_in")
-            .count();
-        assert_eq!(starts, 1, "{setting}: the second start joined, no restart");
-        let mut feed = rig.events.follow();
-        let shown: Vec<SignIn> = setup_events(&mut feed)
-            .into_iter()
-            .filter_map(|event| match event {
-                SetupEvent::SignInChanged { state, .. } => Some(state),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            matches!(shown.as_slice(), [SignIn::Waiting { nudge: false, .. }]),
-            "{setting}: the running state is shown: {shown:?}"
-        );
-    }
 }

@@ -3,8 +3,9 @@
 //! first run and the room's sign-in prompts) and `settings` (`SETTINGS_WINDOW`: UD2's Plans,
 //! which runs its own sign-in too). Any other window may send none. The refusals' codes are
 //! here too, in one place: `transport.unauthorized` for a window or an action not allowed (as
-//! 0048 says; `dispatch` and `query` refuse a window with `command.invalid`), and
-//! `settings.key_stored` for a key `main` may not replace.
+//! 0048 says; `dispatch` and `query` refuse a window with `command.invalid`),
+//! `settings.key_stored` for a key `main` may not replace, and the three refusals of a sign-in
+//! while the agent is on another service ([`sign_in_bar`]).
 
 use clauseo_protocol::{AgentId, ErrorCode, HostError, SetupAction};
 
@@ -91,4 +92,48 @@ pub(crate) fn key_stored(agent: &AgentId) -> HostError {
         ErrorCode::SettingsKeyStored,
         format!("a key is already stored for {agent}; it is changed in Settings"),
     )
+}
+
+/// Why an agent's sign-in may not start from any window (the orchestrator's ruling on 0048):
+/// it is on a service a plan login would not reach. No silent switch, and no sign-in a key or
+/// an endpoint then hides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignInBar {
+    /// A firm endpoint set by policy: `signin.firm_managed`.
+    FirmManaged,
+    /// An API key stored: `signin.key_in_use`.
+    KeyInUse,
+    /// An endpoint set in Settings: `signin.endpoint_in_use`.
+    EndpointInUse,
+}
+
+/// The bar on a sign-in, if any, from what holds: the firm's policy wins, then a key, then an
+/// endpoint the lawyer set.
+pub(crate) fn sign_in_bar(firm_policy: bool, key: bool, endpoint: bool) -> Option<SignInBar> {
+    if firm_policy {
+        Some(SignInBar::FirmManaged)
+    } else if key {
+        Some(SignInBar::KeyInUse)
+    } else if endpoint {
+        Some(SignInBar::EndpointInUse)
+    } else {
+        None
+    }
+}
+
+/// The refusal of `agent`'s sign-in for `bar`: the condition only, never a key, an address or
+/// a host.
+pub(crate) fn sign_in_barred(agent: &AgentId, bar: SignInBar) -> HostError {
+    let (code, why) = match bar {
+        SignInBar::FirmManaged => (
+            ErrorCode::SigninFirmManaged,
+            "a firm endpoint is set by policy",
+        ),
+        SignInBar::KeyInUse => (ErrorCode::SigninKeyInUse, "an API key is stored"),
+        SignInBar::EndpointInUse => (
+            ErrorCode::SigninEndpointInUse,
+            "an endpoint is set in Settings",
+        ),
+    };
+    HostError::new(code, format!("{agent}'s sign-in is refused: {why}"))
 }
