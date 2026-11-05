@@ -58,6 +58,7 @@ mod private_dir;
 #[cfg(windows)]
 mod record;
 mod set_aside;
+pub mod shared_writes;
 pub mod sids;
 #[cfg(test)]
 #[cfg(windows)]

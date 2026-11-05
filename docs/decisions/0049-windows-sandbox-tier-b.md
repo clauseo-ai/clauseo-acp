@@ -328,6 +328,16 @@ PR3b first planned doesn't close this: the creator passes its own DACL, and `C:\
 shared-write-place deny PR and the bypass-traverse spike. A third is to weigh a directory
 watcher that repairs new pool-owned files during a session.
 
+### Shared writable places
+
+A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write
+that every pool user shares: `C:\ProgramData\Microsoft\DeviceSync` and each pool user's own
+`AppData\LocalLow`. `ProgramData\Microsoft\DeviceSync` was one of the channels two hijacked agents
+could use. A deny of writes for `ClauseoSandboxUsers` on each closes both, with no tool
+regressions. The group's deny applies where an allow to the group would not: deny entries are
+matched against the token's normal groups. PR4's elevated set-up applies it after it creates each
+pool user's profile, and uninstall removes it (`shared_writes.rs`).
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

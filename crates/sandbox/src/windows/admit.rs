@@ -60,6 +60,8 @@ pub enum PathKind {
     /// The matter's parent folder, for the files directly in it: denied to every pool user's
     /// reads, folders untouched.
     ParentFiles,
+    /// A place every sandbox user can write (`shared_writes`): denied to the pool group.
+    SharedWrite,
 }
 
 impl fmt::Display for PathKind {
@@ -79,6 +81,7 @@ impl fmt::Display for PathKind {
             PathKind::OtherMatter => "another matter's folder",
             PathKind::Sibling => "a folder beside the matter",
             PathKind::ParentFiles => "the files beside the matter",
+            PathKind::SharedWrite => "a place every sandbox user can write",
         })
     }
 }
