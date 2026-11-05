@@ -60,9 +60,10 @@ The host reaches the plugin through a trait, as it reaches processes through
   `Other`, each with a log line, and any of them fails the stage that was running.
   `ProgressSink::post(received, total)` takes a running total and drops the value when the
   bounded channel is full.
-- `install` is **not** the host's. On install the host shuts down cleanly and its join returns
-  `Exit::Install(downloaded)`; desktop then calls the plugin's `install`, which verifies the
-  bytes again (lands with PR 4 for the host, PR 5 for desktop).
+- `install` is **not** the host's. On install the host shuts down cleanly and
+  `HostHandle::exit` resolves `HostExit::Install(downloaded)` once its thread has stopped;
+  desktop then calls the plugin's `install`, which verifies the bytes again (landed with PR 4
+  for the host; PR 5 for desktop).
 - The plugin's futures run on `tauri::async_runtime` and hand back a
   `futures::channel::oneshot`; dropping the receiver aborts the task. Timeouts come from the
   host's `Clock::after`, so `ManualClock` tests drive them. Progress reaches the actor through a
@@ -142,8 +143,9 @@ All additive under 0002 (no `schema_version` change; none of it is logged). In
   English line is "The update didn't install. Try again." (provisional, Hindi later, in Rohan's
   batch review).
 
-In PR 2 the host answers the four commands with `command.invalid` ("the updater is not wired
-yet") and `GetUpdate` with `managed` by `package` in `auto`, which is what `NoUpdater` will say.
+In PR 2 the host answered the four commands with `command.invalid` ("the updater is not wired
+yet") and `GetUpdate` with `managed` by `package` in `auto`, which is what `NoUpdater` says.
+PR 4 wires them (below, "The host's wiring").
 
 ### The windows' allow-lists
 
@@ -182,7 +184,9 @@ The install takes the quit path:
 2. The "installing <version>" marker (`{ from, to }`) is written to `update.json`
    (`Locations::update_marker()`), off the actor, before the shutdown and so before the install.
 3. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
-   stopped, the store closed. Its exit is `Exit::Install(downloaded)`.
+   stopped, the store closed. Its exit is `HostExit::Install(downloaded)`
+   (`HostHandle::exit`), only when the store closed cleanly; otherwise `Stopped`, desktop just
+   quits, and the next start finds the download again.
 4. Desktop's stopper thread flushes the host log (0047) right after `host_start::stop`.
 5. Desktop saves the counts and the window state.
 6. Desktop calls the plugin's `install`. Windows exits inside it; macOS swaps the `.app` and
@@ -192,8 +196,37 @@ The install takes the quit path:
    at the next start; if NSIS dies after Windows exited, the next launch of the old exe does the
    same. With `to` equal to the running version it reports `updated_from` instead.
 
-Steps 1 to 3, and `read_update_marker`, land with PR 4; steps 4 to 7 with PR 5. S22's crash `Guard::clean_exit`
+Steps 1 to 3, and `read_update_marker`, landed with PR 4; steps 4 to 7 land with PR 5. S22's crash `Guard::clean_exit`
 call before `install` stays a no-op seam until S22 merges.
+
+### The host's wiring (PR 4)
+
+`crates/host/src/actor/update.rs` runs the machine; what the R23 brief left open was decided so:
+
+- **Start.** Start-up reads `update.json` and last run's download on the `clauseo-update` thread
+  and waits for it; the machine starts once the host serves, so an install at start in `auto`
+  never stops a host before `Host::start` has answered. Every later touch of `update.json`
+  (the clear, the marker) runs on that thread in order; the exit waits for the marker.
+- **Last run's download** is the newest `updates/<version>/` folder, of a dotted-number version
+  newer than the running one, holding exactly one file; PR 5's adapter must save it so.
+- **Commands.** `CheckForUpdate`, `InstallUpdate` and `CancelScheduledUpdate` answer `Done` with
+  no receipt, as `InstallBrowser` does: their state lives in memory. `InstallUpdate`'s answer
+  goes out before the host starts to stop. `SetUpdateMode` is checked by the machine, written to
+  `settings.json`, then handed to the machine as the mode the settings hold; it keeps a receipt,
+  counts `setting_changed` and sends `SettingsChanged` as the other settings writes do.
+- **"A turn is running"**, for `after_turn`: a thread has a current turn, a last `TurnEnded` not
+  yet durable, or queued turns that start by themselves. A held queue does not count: it waits
+  for the lawyer and would keep the install waiting for as long as the lawyer leaves it.
+- **The hold under `now`.** Every current turn goes through Stop's path. A send while turns stop
+  is stored queued, whatever its delivery, behind its own thread's turn or alone; none starts.
+  When the install is taken back, each queue moves on as it would have. The machine always
+  hears `TurnsCancelled`, also when no turn was left to cancel.
+- **Timers.** One timer on the host clock; a fire the machine finds early re-arms.
+- **The jitter seed** comes from the clock at start; `HostConfig::with_update_jitter_seed` fixes
+  it for tests, and `with_app_version` gives the app's version (desktop passes its own).
+- **`UpdateChanged`** is not among the app feed's first frames: a window asks `GetUpdate`.
+- **Logs** name a failed step's stage and kind (`network`, `signature`, `io`, `other`), never its
+  text, which may hold a path or a URL (0047).
 
 ### The key's custody
 

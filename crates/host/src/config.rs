@@ -19,6 +19,7 @@ use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
+use crate::update::{NoUpdater, Updater};
 
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
@@ -153,6 +154,7 @@ pub struct HostConfig {
     scan_walk: crate::actor::scan::Walk,
     counts: Option<Counts>,
     search: SearchSeams,
+    update: UpdateSeams,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -178,6 +180,17 @@ pub(crate) struct ConfigParts {
     pub(crate) counts: Option<Counts>,
     /// The search thread's test seams.
     pub(crate) search: SearchSeams,
+    /// The updater and what its machine starts from.
+    pub(crate) update: UpdateSeams,
+}
+
+/// The updater and what its machine starts from (decision record 0037).
+pub(crate) struct UpdateSeams {
+    pub(crate) updater: Arc<dyn Updater>,
+    /// The seed of the check delays; `None` seeds from the clock at start.
+    pub(crate) jitter_seed: Option<u64>,
+    /// The app's version, which `UpdateView::current` shows and the marker compares.
+    pub(crate) app_version: String,
 }
 
 impl HostConfig {
@@ -210,6 +223,12 @@ impl HostConfig {
             scan_walk: crate::actor::scan::os_walk(),
             counts: None,
             search: SearchSeams::default(),
+            update: UpdateSeams {
+                updater: Arc::new(NoUpdater),
+                jitter_seed: None,
+                // Only a caller that knows the app's version (desktop) can do better.
+                app_version: env!("CARGO_PKG_VERSION").to_owned(),
+            },
         }
     }
 
@@ -220,6 +239,28 @@ impl HostConfig {
     /// Without it those commands still change the settings, and `counts_started` reads false.
     pub fn with_counts(mut self, counts: Counts) -> Self {
         self.counts = Some(counts);
+        self
+    }
+
+    /// The updater (default: [`NoUpdater`], managed by a package, so nothing is checked).
+    /// The host checks and downloads through it on its own pool (decision record 0037).
+    pub fn with_updater(mut self, updater: Arc<dyn Updater>) -> Self {
+        self.update.updater = updater;
+        self
+    }
+
+    /// The seed of the updater's check delays (default: one taken from the clock at start), so a
+    /// test with `ManualClock` knows when each check comes.
+    pub fn with_update_jitter_seed(mut self, seed: u64) -> Self {
+        self.update.jitter_seed = Some(seed);
+        self
+    }
+
+    /// The app's version, `0.4.1` (default: this crate's own version, which is not the app's).
+    /// Desktop passes its `tauri.conf.json` version: `GetUpdate` shows it, and the marker of an
+    /// install compares it at the next start.
+    pub fn with_app_version(mut self, version: String) -> Self {
+        self.update.app_version = version;
         self
     }
 
@@ -529,6 +570,7 @@ impl HostConfig {
             scan_walk: self.scan_walk,
             counts: self.counts,
             search: self.search,
+            update: self.update,
         }
     }
 }

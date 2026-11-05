@@ -242,6 +242,8 @@ pub(crate) enum Input {
     BrowserInstall(clauseo_protocol::BrowserInstallState),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
     SkillPack(Box<super::settings::packs::PackRead>),
+    /// The updater's check, download, progress, timer or file thread (`update.rs`).
+    Update(super::update::UpdateInput),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -270,6 +272,7 @@ impl std::fmt::Debug for Input {
             Self::Scan(_) => "Scan",
             Self::BrowserInstall(_) => "BrowserInstall",
             Self::SkillPack(_) => "SkillPack",
+            Self::Update(_) => "Update",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

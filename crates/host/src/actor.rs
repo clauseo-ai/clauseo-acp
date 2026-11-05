@@ -25,7 +25,7 @@ use crate::clock::{Clock, Now};
 use crate::config::{HostConfig, ProfileHook};
 use crate::encode::Encoder;
 use crate::error::Error;
-use crate::handle::{HostHandle, HostJoin};
+use crate::handle::{HostExit, HostHandle, HostJoin};
 use crate::ids::Ids;
 use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
@@ -77,6 +77,8 @@ const REQUEST_CAPACITY: usize = 256;
 /// How the loop ended.
 enum Exit {
     Shutdown(Vec<input::Reply<()>>),
+    /// A shutdown to install this download (`update.rs`).
+    Install(crate::update::Downloaded, Vec<input::Reply<()>>),
     #[cfg(feature = "test-support")]
     Abort(futures::channel::oneshot::Sender<()>),
 }
@@ -103,6 +105,8 @@ pub(crate) struct Actor {
     /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
     /// (`counting.rs`).
     pub(crate) counts: Option<clauseo_counts::Counts>,
+    /// The updater's machine, its tasks, timer and file thread (`update.rs`).
+    pub(crate) update: update::UpdateHost,
     /// What to count once a command's commit is durable, by command (`counting.rs`).
     pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
@@ -206,13 +210,17 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
     let (requests, request_rx) = async_channel::bounded::<Request>(REQUEST_CAPACITY);
     let (internal, internal_rx) = async_channel::unbounded::<Input>();
     let (ready, started) = mpsc::channel::<Result<(), Error>>();
+    let (exit, exited) = futures::channel::oneshot::channel::<HostExit>();
     let post = internal.clone();
     let thread = thread::Builder::new()
         .name(THREAD_NAME.to_owned())
-        .spawn(move || run(config, request_rx, post, internal_rx, ready))
+        .spawn(move || run(config, request_rx, (post, internal_rx), ready, exit))
         .map_err(|error| Error::Internal(format!("starting {THREAD_NAME}: {error}")))?;
     match started.recv() {
-        Ok(Ok(())) => Ok((HostHandle::new(requests, internal), HostJoin::new(thread))),
+        Ok(Ok(())) => Ok((
+            HostHandle::new(requests, internal, exited),
+            HostJoin::new(thread),
+        )),
         Ok(Err(error)) => {
             // The thread closes what it opened and ends; its own result adds nothing.
             let _ended = thread.join();
@@ -231,9 +239,9 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 fn run(
     config: HostConfig,
     requests: async_channel::Receiver<Request>,
-    post: async_channel::Sender<Input>,
-    internal: async_channel::Receiver<Input>,
+    (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
+    exit: futures::channel::oneshot::Sender<HostExit>,
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
@@ -250,7 +258,11 @@ fn run(
         match exit {
             Exit::Shutdown(replies) => {
                 let closed = shutdown::close(actor).await;
-                Ok(Some((closed, replies)))
+                Ok(Some((closed, replies, None)))
+            }
+            Exit::Install(downloaded, replies) => {
+                let closed = shutdown::close(actor).await;
+                Ok(Some((closed, replies, Some(downloaded))))
             }
             #[cfg(feature = "test-support")]
             Exit::Abort(reply) => {
@@ -263,7 +275,18 @@ fn run(
     drop(pool);
     match ended {
         Ok(None) => Ok(()),
-        Ok(Some((closed, replies))) => shutdown::answer(closed, replies),
+        Ok(Some((closed, replies, install))) => {
+            // An install only after a clean close; else desktop just quits, and the next start
+            // finds the download again.
+            let ended = match install {
+                Some(downloaded) if closed.is_ok() => HostExit::Install(downloaded),
+                Some(_) | None => HostExit::Stopped,
+            };
+            let answered = shutdown::answer(closed, replies);
+            // The handles may all be gone; nobody is left to tell.
+            let _gone = exit.send(ended);
+            answered
+        }
         Err(abort_reply) => {
             let _gone = abort_reply.send(());
             Ok(())
@@ -414,6 +437,7 @@ impl Actor {
             Input::Scan(input) => scan::on_input(self, input),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
+            Input::Update(input) => update::on_input(self, input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -424,7 +448,11 @@ impl Actor {
 
     /// Moves start-up to serving, and shutdown to its end, once their work is done.
     fn settle(&mut self) -> Option<Exit> {
-        if !self.work.idle() || turn::busy(self) || browser_install::busy(self) {
+        if !self.work.idle()
+            || turn::busy(self)
+            || browser_install::busy(self)
+            || update::busy(self)
+        {
             return None;
         }
         match std::mem::replace(&mut self.phase, HostPhase::Serving) {
@@ -435,11 +463,15 @@ impl Actor {
                 }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
+                update::serving(self);
                 counting::app_opened(self);
                 None
             }
             HostPhase::Serving => None,
-            HostPhase::Stopping(replies) => Some(Exit::Shutdown(replies)),
+            HostPhase::Stopping(replies) => Some(match update::take_install(self) {
+                Some(downloaded) => Exit::Install(downloaded, replies),
+                None => Exit::Shutdown(replies),
+            }),
         }
     }
 }

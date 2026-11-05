@@ -14,13 +14,16 @@ use clauseo_protocol::{
     HostError, HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq,
     StreamId, ViewEpoch,
 };
+use futures::FutureExt as _;
 use futures::channel::oneshot;
+use futures::future::Shared;
 
 use crate::actor::input::{Input, PlanWrite, Request, SignInRequest};
 use crate::agent::login_link;
 use crate::agent::login_splits::{self, LoginSplits};
 use crate::config::HostConfig;
 use crate::error::Error;
+use crate::update::Downloaded;
 
 mod subscription;
 
@@ -56,12 +59,27 @@ impl Host {
     }
 }
 
+/// How the host thread ended ([`HostHandle::exit`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HostExit {
+    /// It stopped: a shutdown, every handle gone, a failure, or an install whose store did not
+    /// close cleanly.
+    Stopped,
+    /// It stopped to install this download (`InstallUpdate`, decision record 0037): turns
+    /// ended, the store closed and `update.json` written. Desktop calls the updater's install
+    /// after joining the host thread, flushing the log and saving the counts and window state.
+    Install(Downloaded),
+}
+
 /// A caller's way to the host. Cheap to clone and `Send`; every clone reaches the same host.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HostHandle {
     requests: async_channel::Sender<Request>,
     /// The login splits the actor sends (`HostHandle::login_splits`).
     splits: LoginSplits,
+    /// How the host thread ended, once it has.
+    exit: Shared<oneshot::Receiver<HostExit>>,
     /// The actor's internal input channel, for `abort_for_test`.
     #[cfg(feature = "test-support")]
     internal: async_channel::Sender<Input>,
@@ -89,11 +107,20 @@ impl HostJoin {
     }
 }
 
+impl std::fmt::Debug for HostHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostHandle")
+            .field("requests", &self.requests)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HostHandle {
-    /// Wraps the actor's request channel and its internal input channel.
+    /// Wraps the actor's request channel, its internal input channel and the end it reports.
     pub(crate) fn new(
         requests: async_channel::Sender<Request>,
         internal: async_channel::Sender<Input>,
+        exit: oneshot::Receiver<HostExit>,
     ) -> Self {
         #[cfg(not(feature = "test-support"))]
         drop(internal);
@@ -101,6 +128,7 @@ impl HostHandle {
             requests,
             // `Host::start` puts the config's own in.
             splits: login_splits::channel().1,
+            exit: exit.shared(),
             #[cfg(feature = "test-support")]
             internal,
         }
@@ -449,6 +477,13 @@ impl HostHandle {
     /// `internal`.
     pub async fn shutdown(&self) -> Result<(), HostError> {
         self.call(|reply| Request::Shutdown { reply }).await
+    }
+
+    /// How the host thread ended: resolves once it has stopped, its store closed and every
+    /// shutdown call answered. [`HostExit::Install`] when it stopped to install an update, which
+    /// the host does on its own after `InstallUpdate`; desktop waits on this to learn of it.
+    pub async fn exit(&self) -> HostExit {
+        self.exit.clone().await.unwrap_or(HostExit::Stopped)
     }
 
     /// Ends the host thread at once, with no flush and no graceful stop, as a crash would.

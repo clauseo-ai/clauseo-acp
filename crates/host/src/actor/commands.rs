@@ -20,6 +20,7 @@ use super::matters::{PendingMatter, Stage};
 use super::settings::{
     first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
 };
+use super::update::Asked;
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -279,10 +280,14 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::RestartAgent { .. } | HostCommand::Connector(_) => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
-        HostCommand::CheckForUpdate {}
-        | HostCommand::InstallUpdate { .. }
-        | HostCommand::CancelScheduledUpdate {}
-        | HostCommand::SetUpdateMode { .. } => super::update::not_wired(actor, ctx),
+        HostCommand::CheckForUpdate {} => super::update::command(actor, ctx, Asked::Check),
+        HostCommand::InstallUpdate { when } => {
+            super::update::command(actor, ctx, Asked::Install(when));
+        }
+        HostCommand::CancelScheduledUpdate {} => {
+            super::update::command(actor, ctx, Asked::CancelScheduled);
+        }
+        HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
     }
 }
 

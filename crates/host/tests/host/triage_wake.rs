@@ -16,6 +16,7 @@ use crate::observe::Events;
 use crate::settings::{decode, ready, subscribe_app};
 use crate::support::{Dir, FAKE, Running, START_MS, Scenario, matter_with_thread, wait};
 use crate::triage::{row, snooze};
+use crate::update::STANDING_TIMERS;
 
 const MINUTE: Duration = Duration::from_secs(60);
 
@@ -122,7 +123,11 @@ fn a_changed_snooze_rearms_and_a_cleared_one_cancels() {
     host.wait_armed(10 * MINUTE);
     host.ok(snooze(cleared, None));
     host.settle();
-    assert_eq!(host.clock.armed(), 0, "the timer is still armed");
+    assert_eq!(
+        host.clock.armed(),
+        STANDING_TIMERS,
+        "the timer is still armed"
+    );
     host.clock.advance(20 * MINUTE);
     host.settle();
     assert_eq!(wakes(&caught_up(&host, cleared)), 0);
@@ -209,7 +214,11 @@ fn review_a_snooze_that_ended_while_forgotten_wakes_at_import() {
         "past-due snooze {:?} not woken after import",
         Timestamp::new(until).unwrap()
     );
-    assert_eq!(host.clock.armed(), 0, "a timer is still armed");
+    assert_eq!(
+        host.clock.armed(),
+        STANDING_TIMERS,
+        "a timer is still armed"
+    );
     host.shutdown();
 }
 

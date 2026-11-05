@@ -19,14 +19,11 @@ use futures::channel::mpsc;
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the actor runs it from R23 PR 4; only its tests do now"
-    )
-)]
 pub(crate) mod machine;
+mod marker;
+
+pub use marker::read_update_marker;
+pub(crate) use marker::{clear_marker, find_cached, write_marker};
 
 /// Checks for and downloads the next release. `host` holds an `Arc<dyn Updater>`.
 pub trait Updater: Send + Sync {
