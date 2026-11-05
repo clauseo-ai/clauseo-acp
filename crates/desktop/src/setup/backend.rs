@@ -19,10 +19,10 @@
 //!   is installed only through `InstallAgent`'s confirm. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
-//! - **Piece B's.** Leaving a reused login runs 0048's leave order (stop the agents, S18's
-//!   `stop_using_login`, unlink, relaunch), which needs the host calls P4b adds: until then
-//!   `StopUsingLogin`, and a key or an endpoint set while the login is reused, answer
-//!   `internal` and run nothing.
+//! - **Leaving a reused login** (piece B, `leave.rs`): `StopUsingLogin`, `UseDifferentAccount`,
+//!   and a key or an endpoint set while the login is reused run 0048's leave order first. A key
+//!   or an endpoint change holds the agent's limits reads while it is written, then restarts
+//!   the agents and has the limits read the new login.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -38,17 +38,20 @@ use clauseo_protocol::{
 use clauseo_settings::EntryWrite;
 use futures::{Stream, StreamExt as _};
 
-use super::admit::sign_in_barred;
+use super::admit::{key_stored, sign_in_barred};
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
 use super::keys::KeyCache;
+use super::leave::{self, Waiter};
+use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents, events};
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::entry::{launch, progress};
+use self::parts::{FirstRun, checked_endpoint, plan_method};
 pub(crate) use self::seam::SetupAgents;
 
 /// One agent as the backend knows it from the snapshot and the locations.
@@ -83,6 +86,8 @@ pub(crate) struct AgentsBackend {
     /// Held from a sign-in start's check to its call, and from a key's or an endpoint's end of
     /// a running sign-in to its cancel, so a start never slips past a key or an endpoint.
     pub(crate) signin_gate: Mutex<()>,
+    /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
+    pub(crate) wiring: Wiring,
 }
 
 impl SetupBackend for AgentsBackend {
@@ -139,6 +144,7 @@ impl AgentsBackend {
                 self.replaced(&agent);
             }
             SetupCommand::CancelSignIn { .. } => {
+                self.compose.cancelling(&agent);
                 agents
                     .cancel_sign_in(&agent)
                     .map_err(|error| signin_error(&error))?;
@@ -174,14 +180,14 @@ impl AgentsBackend {
                 self.replaced(&agent);
             }
             SetupCommand::UseFoundLogin { .. } => {
-                let _gate = lock(&self.signin_gate);
-                self.refuse_start(&agent)?;
-                agents
-                    .use_found_login(&agent)
-                    .map_err(|error| signin_error(&error))?;
-                self.replaced(&agent);
+                let hold = leave::hold_reads(self, &agent).await;
+                self.use_found(&agent, hold)?;
             }
             SetupCommand::UseDifferentAccount { .. } => {
+                self.refuse_start(&agent)?;
+                if self.reused(&agent) {
+                    leave::leave_reused(self, &agent, None).await?;
+                }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
                 agents
@@ -189,28 +195,66 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
                 self.replaced(&agent);
             }
-            SetupCommand::StopUsingLogin { .. } => return Err(leave_order_missing()),
+            SetupCommand::StopUsingLogin { .. } => {
+                if !self.reused(&agent) {
+                    return Err(invalid(format!(
+                        "{agent}'s login is not one you already had"
+                    )));
+                }
+                leave::leave_reused(self, &agent, None).await?;
+            }
             SetupCommand::FindLogin { .. } => {
                 agents
                     .find_login(&agent)
                     .map_err(|error| signin_error(&error))?;
                 self.replaced(&agent);
             }
-            SetupCommand::SetAgentKey { key, .. } => {
-                self.refuse_blocked(&agent)?;
-                self.refuse_leaving_reused(&agent)?;
-                let then = self.key_trigger(&agent);
-                self.keys.set(&agent, key, key_write, then).await?;
-                self.end_sign_in(&agent);
-            }
+            SetupCommand::SetAgentKey { key, .. } => self.set_key(&agent, key, key_write).await?,
             SetupCommand::ClearAgentKey { .. } => {
+                let hold = leave::hold_reads(self, &agent).await;
                 let then = self.key_trigger(&agent);
-                self.keys.clear(&agent, then).await?;
+                let cleared = self.keys.clear(&agent, then).await;
+                drop(hold);
+                cleared?;
+                leave::restart_for_login(self, &agent).await;
             }
             SetupCommand::SetFirmEndpoint { url, .. } => {
                 self.set_endpoint(&agent, info, url).await?;
             }
         }
+        Ok(())
+    }
+
+    /// `SetAgentKey`: refused while policy blocks the agent, and from `main` while a key is
+    /// there; a reused login is left first (the leave order). The reads are held while the key
+    /// is written, then the agents restart with it and the limits read it.
+    async fn set_key(
+        &self,
+        agent: &AgentId,
+        key: clauseo_protocol::Secret,
+        key_write: KeyWrite,
+    ) -> Result<(), HostError> {
+        self.refuse_blocked(agent)?;
+        // `main`'s first key leaves no login for a key that is there already.
+        if key_write == KeyWrite::OnlyIfAbsent && self.keys.has(agent) {
+            return Err(key_stored(agent));
+        }
+        let left = self.reused(agent);
+        if left {
+            leave::leave_reused(self, agent, None).await?;
+        }
+        let hold = leave::hold_reads(self, agent).await;
+        let then = self.key_trigger(agent);
+        let stored = self.keys.set(agent, key, key_write, then).await;
+        drop(hold);
+        if let Err(error) = stored {
+            if left {
+                leave::restart(self, agent).await;
+            }
+            return Err(error);
+        }
+        self.end_sign_in(agent);
+        leave::restart_for_login(self, agent).await;
         Ok(())
     }
 
@@ -233,21 +277,31 @@ impl AgentsBackend {
             ));
         }
         let url = url.as_deref().map(checked_endpoint).transpose()?;
-        if url.is_some() {
-            self.refuse_leaving_reused(agent)?;
-        }
         let name = info.name.clone();
         self.ask(Ask::Endpoint {
             name,
             url: url.clone(),
         })
         .await?;
+        let left = url.is_some() && self.reused(agent);
+        if left {
+            leave::leave_reused(self, agent, None).await?;
+        }
         let firm = url.is_some() || info.provider;
-        self.host.set_endpoint(agent.clone(), url).await?;
+        let hold = leave::hold_reads(self, agent).await;
+        let set = self.host.set_endpoint(agent.clone(), url).await;
+        drop(hold);
+        if let Err(error) = set {
+            if left {
+                leave::restart(self, agent).await;
+            }
+            return Err(error);
+        }
         self.compose.set_firm(agent, firm);
         if firm {
             self.end_sign_in(agent);
         }
+        leave::restart_for_login(self, agent).await;
         Ok(())
     }
 
@@ -322,7 +376,28 @@ impl AgentsBackend {
     /// end a key or an endpoint was waiting for ([`Compose::expect_end`]) will not come: the
     /// replaced job's report is dropped, and the new job's failure is shown as one.
     fn replaced(&self, agent: &AgentId) {
-        self.compose.no_end(agent);
+        self.compose.replaced(agent);
+    }
+
+    /// `UseFoundLogin`: S18's call, with the reads' `hold` left for the pump, which drops it
+    /// once the call's end is handled (`leave.rs`: on `SignedIn { Reused }`, after
+    /// `set_reused_login(true)` and the entry).
+    fn use_found(
+        &self,
+        agent: &AgentId,
+        hold: Option<super::readers::ReadHold>,
+    ) -> Result<(), HostError> {
+        let _gate = lock(&self.signin_gate);
+        self.refuse_start(agent)?;
+        if let Some(hold) = hold {
+            self.wiring.waiters.put(agent, Waiter::Found(hold));
+        }
+        if let Err(error) = self.agents.use_found_login(agent) {
+            drop(self.wiring.waiters.take(agent));
+            return Err(signin_error(&error));
+        }
+        self.replaced(agent);
+        Ok(())
     }
 
     /// Whether a firm policy sets `agent`'s endpoint or provider: told to [`Compose`], which
@@ -358,15 +433,6 @@ impl AgentsBackend {
         )
     }
 
-    /// `internal` while `agent`'s login is reused: leaving it for a key or an endpoint runs the
-    /// leave order, piece B's.
-    fn refuse_leaving_reused(&self, agent: &AgentId) -> Result<(), HostError> {
-        if self.reused(agent) {
-            return Err(leave_order_missing());
-        }
-        Ok(())
-    }
-
     /// Follows `Agents`' events until they end: installs out as `AgentInstallProgress` (and the
     /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
@@ -385,7 +451,9 @@ impl AgentsBackend {
                         self.agents.install(&first);
                     }
                 }
-                AgentsEvent::Signin { agent, state } => self.compose.signin(&agent, state),
+                AgentsEvent::Signin { agent, state } => {
+                    leave::signin_event(self, &agent, state).await;
+                }
                 AgentsEvent::OpenUrl { agent, url } => {
                     if let Err(error) = open_url_unconfirmed(&*self.opener, &url) {
                         tracing::warn!(%agent, code = error.code().as_str(), "a sign-in page did not open");
@@ -415,7 +483,7 @@ impl AgentsBackend {
             });
         }
         if matches!(state, InstallState::Ready { .. }) {
-            self.write_entry(agent, info).await;
+            self.write_entry(agent).await;
             if checked.insert(agent.clone())
                 && let Err(error) = self.agents.check_status(agent)
             {
@@ -427,11 +495,9 @@ impl AgentsBackend {
         }
     }
 
-    /// Writes `agent`'s `agents.<id>` entry from its install, logging the outcome by code.
-    async fn write_entry(&self, agent: &AgentId, info: &AgentInfo) {
-        let Some(installed) = self.agents.installed(agent) else {
-            return;
-        };
+    /// Writes `agent`'s `agents.<id>` entry from its install, for the login's source as S18
+    /// last said.
+    async fn write_entry(&self, agent: &AgentId) {
         let source = match self.compose.s18(agent) {
             Some(SigninState::SignedIn {
                 source: Source::Reused,
@@ -439,12 +505,31 @@ impl AgentsBackend {
             }) => SignInSource::Reused,
             _ => SignInSource::Own,
         };
+        self.write_entry_as(agent, source).await;
+    }
+
+    /// Writes `agent`'s `agents.<id>` entry from its install for a login of `source`, logging
+    /// the outcome by code; a written entry is what the limits readers read from then on.
+    pub(crate) async fn write_entry_as(&self, agent: &AgentId, source: SignInSource) {
+        let (Some(info), Some(installed)) = (self.known.get(agent), self.agents.installed(agent))
+        else {
+            return;
+        };
         let Some(launch) = launch(agent, &installed, &info.home, source) else {
             tracing::warn!(%agent, "the install's paths are not UTF-8: no entry written");
             return;
         };
-        match self.host.set_agent_launch(agent.clone(), launch).await {
-            Ok(EntryWrite::Written) => tracing::info!(%agent, "agent entry written"),
+        match self
+            .host
+            .set_agent_launch(agent.clone(), launch.clone())
+            .await
+        {
+            Ok(EntryWrite::Written) => {
+                tracing::info!(%agent, "agent entry written");
+                if let Some(kind) = AgentKind::of(agent) {
+                    self.wiring.readers.set_entry(kind, Some(launch));
+                }
+            }
             Ok(EntryWrite::LeftAlone) => {
                 tracing::info!(%agent, "agent entry left alone: it is the lawyer's or the firm's");
             }
@@ -455,89 +540,14 @@ impl AgentsBackend {
     }
 }
 
-/// Which first install states have come in: first run is decided once every agent has one.
-struct FirstRun {
-    waiting: BTreeSet<AgentId>,
-    /// Whether an agent's first state was `Ready` or `Managed`.
-    any_present: bool,
-    decided: bool,
-}
-
-impl FirstRun {
-    fn new(agents: impl IntoIterator<Item = AgentId>) -> Self {
-        Self {
-            waiting: agents.into_iter().collect(),
-            any_present: false,
-            decided: false,
-        }
-    }
-
-    /// Notes `agent`'s `state`; `true` once, when the last first state came in and none was
-    /// `Ready` or `Managed`: first run.
-    fn saw(&mut self, agent: &AgentId, state: &InstallState) -> bool {
-        if self.decided || !self.waiting.remove(agent) {
-            return false;
-        }
-        self.any_present |= matches!(state, InstallState::Ready { .. } | InstallState::Managed);
-        if !self.waiting.is_empty() {
-            return false;
-        }
-        self.decided = true;
-        !self.any_present
-    }
-}
-
-/// The plan login `StartSignIn` asks for: Claude's Claude.ai plan or, with `console`, its
-/// Console account; Codex's browser sign-in (`console` is Claude's alone).
-fn plan_method(agent: &AgentId, console: bool) -> Result<Method, HostError> {
-    match (AgentKind::of(agent), console) {
-        (Some(AgentKind::Claude), false) => Ok(Method::ClaudeAi),
-        (Some(AgentKind::Claude), true) => Ok(Method::Console),
-        (Some(AgentKind::Codex), false) => Ok(Method::Browser),
-        _ => Err(invalid(format!("{agent} has no such sign-in"))),
-    }
-}
-
-/// The endpoint `url` as the confirm shows it and the plan stores it: an address the settings
-/// crate takes (`web_address_ok`: ASCII only, no space, line break, control character, `?`,
-/// `#`, `@` or backslash) that parses as an `https` URL with a host and no user name or
-/// password, else `command.invalid` before any confirm. The message never repeats it.
-fn checked_endpoint(url: &str) -> Result<String, HostError> {
-    if !clauseo_settings::web_address_ok(url) {
-        return Err(invalid(
-            "the endpoint must be an https address of plain characters, with no query or fragment",
-        ));
-    }
-    let parsed = url::Url::parse(url).map_err(|_error| invalid("the endpoint is not a URL"))?;
-    if parsed.scheme() != "https"
-        || parsed.host_str().is_none()
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
-        return Err(invalid(
-            "the endpoint must be an https address with no user name or password",
-        ));
-    }
-    Ok(url.to_owned())
-}
-
 /// The answer to a refused S18 call: `command.invalid`, except a missing home (`internal`).
 /// The text names the agent, never a code or an email.
-fn signin_error(error: &SigninError) -> HostError {
+pub(crate) fn signin_error(error: &SigninError) -> HostError {
     let code = match error {
         SigninError::NoHome(_) => ErrorCode::Internal,
         _ => ErrorCode::CommandInvalid,
     };
     HostError::new(code, error.to_string())
-}
-
-/// The answer to what needs 0048's leave order (R20 P5b piece B adds it); the words name no
-/// plan stage.
-fn leave_order_missing() -> HostError {
-    HostError::new(
-        ErrorCode::Internal,
-        "leaving a login you already had is not available yet in this version of Clauseo",
-    )
 }
 
 /// A `command.invalid` failure with `message`.
@@ -546,6 +556,7 @@ fn invalid(message: impl Into<String>) -> HostError {
 }
 
 mod entry;
+mod parts;
 mod seam;
 #[cfg(test)]
 mod tests;

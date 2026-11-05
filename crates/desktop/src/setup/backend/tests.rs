@@ -6,6 +6,7 @@
 mod endpoint;
 mod fakes;
 mod keys;
+mod leave;
 mod races;
 mod retry;
 mod signin;
@@ -112,10 +113,12 @@ fn an_accepted_install_and_endpoint_run_and_the_endpoint_shows_firm() {
     );
     assert_eq!(
         rig.host.calls(),
-        [HostCall::SetEndpoint(
-            claude(),
-            Some("https://gateway.firm.example".to_owned())
-        )]
+        [
+            HostCall::SetEndpoint(claude(), Some("https://gateway.firm.example".to_owned())),
+            HostCall::RestartAgents(claude()),
+            HostCall::LoginChanged(claude()),
+        ],
+        "the endpoint, then the agents restart with it and the limits read it"
     );
     assert!(matches!(
         setup_events(&mut feed).as_slice(),
@@ -318,16 +321,6 @@ fn sign_out_on_a_reused_login_is_refused_and_runs_no_logout() {
             .run(SETTINGS, command("sign_out", &claude(), &json!({}))),
     );
     assert_eq!(answer.unwrap_err().code(), ErrorCode::CommandInvalid);
-    assert_eq!(rig.calls(), []);
-    let stop = block_on(
-        rig.setup()
-            .run(SETTINGS, command("stop_using_login", &claude(), &json!({}))),
-    );
-    assert_eq!(
-        stop.unwrap_err().code(),
-        ErrorCode::Internal,
-        "piece B's leave order"
-    );
     assert_eq!(rig.calls(), []);
 }
 

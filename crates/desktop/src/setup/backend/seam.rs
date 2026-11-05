@@ -2,7 +2,7 @@
 //! `Agents` implements by forwarding and the tests implement by recording.
 
 use clauseo_agents::{
-    Agents, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    Agents, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
 };
 use clauseo_protocol::AgentId;
 
@@ -34,6 +34,9 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::signin_state`.
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState>;
+    /// `Agents::stop_using_login`: no-reuse (unless `why` is a reason reuse stopped) and the
+    /// home's link removed, in one job, which reports `SignedOut`.
+    fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError>;
 }
 
 impl SetupAgents for Agents {
@@ -75,5 +78,8 @@ impl SetupAgents for Agents {
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         Agents::signin_state(self, agent)
+    }
+    fn stop_using_login(&self, agent: &AgentId, why: Option<Found>) -> Result<(), SigninError> {
+        Agents::stop_using_login(self, agent, why)
     }
 }

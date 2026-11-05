@@ -11,25 +11,36 @@
 //! child's whole environment and `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE` must not reach
 //! one); the install launcher inherits the environment, since an install's specs carry only the
 //! variables they change and Windows needs `SystemRoot` and `PATH`.
+//!
+//! Piece B: the host's side ([`HostSide`]) is built on the host's start thread, before the
+//! host: the key slot the launch hook and the limits readers read, the readers, the reused
+//! logins the login check reads, and the plans snapshot. Once the backend is up a
+//! `clauseo-setup-host` thread follows the host's `SettingsChanged` (each one reads the
+//! settings again, `refresh.rs`) and its login splits (each one runs the leave order).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use clauseo_agents::keys::Keychain;
-use clauseo_agents::{Agents, AgentsConfig, Clock, Platform, Snapshot, SystemClock};
+use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use clauseo_settings::{Effective, Locations, SystemFiles};
+use clauseo_settings::{Effective, Locations};
+use futures::StreamExt as _;
 use futures::channel::oneshot;
-use futures::future::{FutureExt as _, Shared};
+use futures::future::{FutureExt as _, Shared, join};
 
 use super::backend::{AgentInfo, AgentsBackend};
 use super::compose::Compose;
 use super::confirm::SetupConfirm;
-use super::firm_policy::firm_policy;
+use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::keys::KeyCache;
+use super::keys::{KeyCache, KeySlot};
+use super::login_check::ReusedLogins;
+use super::readers::LeaveReaders;
+use super::refresh::SettingsRead;
+use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents};
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
@@ -113,10 +124,7 @@ pub(crate) struct SetupStart {
     data_dir: PathBuf,
     known: BTreeMap<AgentId, AgentInfo>,
     managed: BTreeSet<AgentId>,
-    firm: BTreeSet<AgentId>,
-    /// The agents whose endpoint or provider a firm policy sets.
-    firm_policy: BTreeSet<AgentId>,
-    blocked: BTreeSet<AgentId>,
+    settings: SettingsRead,
     registry: Option<String>,
     bundle: Option<PathBuf>,
 }
@@ -153,28 +161,12 @@ impl SetupStart {
             .filter(|agent| effective.is_locked(&format!("agents.{agent}")))
             .cloned()
             .collect();
-        let firm: BTreeSet<AgentId> = known
-            .keys()
-            .filter(|agent| {
-                effective
-                    .plan(agent.as_str())
-                    .is_some_and(|plan| plan.endpoint.is_some() || plan.provider.is_some())
-            })
-            .cloned()
-            .collect();
-        let firm_policy_set = known
-            .keys()
-            .filter(|agent| firm.contains(*agent) && effective.is_locked(&format!("plans.{agent}")))
-            .cloned()
-            .collect();
-        let blocked = firm_policy(effective, &SystemFiles, known.keys());
+        let settings = SettingsRead::read(effective, known.keys());
         Self {
             data_dir: effective.data_dir().to_path_buf(),
             known,
             managed,
-            firm,
-            firm_policy: firm_policy_set,
-            blocked,
+            settings,
             registry: install.registry.clone(),
             bundle: install.bundle.clone(),
         }
@@ -192,23 +184,39 @@ pub(crate) struct SetupParts {
     pub(crate) home: Option<PathBuf>,
 }
 
+/// What the host's start thread builds for setup before the host starts (piece B).
+pub(crate) struct HostSide {
+    /// Where the keys land once loaded; the launch hook and the readers read it.
+    pub(crate) keys: KeySlot,
+    /// The host's limits readers.
+    pub(crate) readers: Arc<dyn LeaveReaders>,
+    /// The reused logins the host's login check reads.
+    pub(crate) reused: ReusedLogins,
+    /// The launch hook's plans snapshot.
+    pub(crate) plans: Plans,
+    /// Reads the effective settings again, on each `SettingsChanged`.
+    pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
+}
+
 /// Starts the `clauseo-setup` thread: keys, `Agents`, the first states, the cell, the pump.
-pub(crate) fn spawn(read: SetupStart, parts: SetupParts) -> std::io::Result<()> {
+pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std::io::Result<()> {
     let thread = std::thread::Builder::new()
         .name("clauseo-setup".to_owned())
-        .spawn(move || run(read, parts))?;
+        .spawn(move || run(read, parts, side))?;
     // Not joined: it runs as long as `Agents` does.
     drop(thread);
     Ok(())
 }
 
 /// The setup thread's work.
-fn run(read: SetupStart, parts: SetupParts) {
+fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let Some(platform) = Platform::current() else {
         tracing::warn!("no agent installs on this platform: setup answers internal");
         return;
     };
     let keys = Arc::new(KeyCache::load_all(Keychain::os(), read.known.keys()));
+    // Set once, here: nothing else fills the slot.
+    let _set = side.keys.set(Arc::clone(&keys));
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
@@ -229,11 +237,14 @@ fn run(read: SetupStart, parts: SetupParts) {
         keys_available: keys.available(),
     });
     let compose = Arc::new(Compose::new(Arc::clone(&parts.events), clock));
+    let facts = &read.settings;
     for agent in read.known.keys() {
-        compose.set_blocked(agent, read.blocked.contains(agent));
-        compose.set_firm(agent, read.firm.contains(agent));
+        compose.set_blocked(agent, facts.blocked.contains(agent));
+        compose.set_firm(agent, facts.firm.contains(agent));
         compose.set_key(agent, keys.has(agent));
     }
+    let firm_policy = facts.firm_policy.clone();
+    let wiring = Wiring::new(side.readers, side.reused, side.plans, read.settings);
     let backend = Arc::new(AgentsBackend {
         agents: Arc::new(agents),
         keys,
@@ -244,14 +255,67 @@ fn run(read: SetupStart, parts: SetupParts) {
         events: parts.events,
         known: read.known,
         signin_gate: Mutex::new(()),
+        wiring,
     });
     for agent in backend.known.keys() {
-        backend.set_firm_policy(agent, read.firm_policy.contains(agent));
+        backend.set_firm_policy(agent, firm_policy.contains(agent));
     }
     parts
         .start
         .finish(Arc::clone(&backend) as Arc<dyn SetupBackend>);
+    let follower = Arc::clone(&backend);
+    let reread = side.reread;
+    let host_thread = std::thread::Builder::new()
+        .name("clauseo-setup-host".to_owned())
+        .spawn(move || {
+            let settings = follow_settings(&follower, &*reread);
+            futures::executor::block_on(join(settings, follow_splits(&follower)));
+        });
+    if let Err(err) = host_thread {
+        tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
+    }
     futures::executor::block_on(backend.pump(source));
+}
+
+/// Each `SettingsChanged`: the settings read again and taken in, until the host stops.
+async fn follow_settings(backend: &AgentsBackend, reread: &(dyn Fn() -> Effective + Send)) {
+    let mut changes = match backend.host.settings_changes().await {
+        Ok(changes) => changes,
+        Err(error) => {
+            tracing::warn!(
+                code = error.code().as_str(),
+                "settings changes not followed"
+            );
+            return;
+        }
+    };
+    while changes.next().await.is_some() {
+        let read = SettingsRead::read(&reread(), backend.known.keys());
+        super::refresh::apply_settings(backend, read).await;
+    }
+}
+
+/// Each login split the host's check finds: the leave order, with S18's reason, until the host
+/// stops. A leave that fails is logged by its code.
+async fn follow_splits(backend: &AgentsBackend) {
+    let splits = match backend.host.login_splits().await {
+        Ok(splits) => splits,
+        Err(error) => {
+            tracing::warn!(code = error.code().as_str(), "login splits not followed");
+            return;
+        }
+    };
+    while let Ok(split) = splits.recv().await {
+        let why = if split.lawyers_file_gone {
+            Found::ReusedSignedOut
+        } else {
+            Found::CodexLinkSplit
+        };
+        if let Err(error) = super::leave::leave_reused(backend, &split.agent, Some(why)).await {
+            let agent = &split.agent;
+            tracing::warn!(%agent, code = error.code().as_str(), "a split's leave failed");
+        }
+    }
 }
 
 /// The install's proxy from the environment: `HTTPS_PROXY`, else `https_proxy`, when set and

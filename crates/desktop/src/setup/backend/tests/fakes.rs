@@ -7,10 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clauseo_agents::keys::Keychain;
-use clauseo_agents::{Clock, InstallState, Installed, Method, PasteCode, SigninError, SigninState};
-use clauseo_host::AgentsStopped;
-use clauseo_protocol::{AgentId, HostError, SetupCommand, SetupEvent};
+use clauseo_agents::{
+    AgentsEvent, Clock, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+};
+use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
+use futures::channel::mpsc::{UnboundedSender, unbounded};
+use futures::stream::BoxStream;
 use serde_json::json;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents};
@@ -22,10 +26,19 @@ use crate::setup::compose::{Compose, is_running};
 use crate::setup::confirm::{Ask, SetupConfirm};
 use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
+use crate::setup::login_check::ReusedLogins;
+use crate::setup::readers::{LeaveReaders, ReadHold};
+use crate::setup::refresh::SettingsRead;
+use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
+use crate::test_support::block_on;
 
 /// What the fake `Agents` was asked, by name and agent.
 pub(super) type Calls = Arc<Mutex<Vec<(&'static str, AgentId)>>>;
+
+/// Every call to the fake `Agents`, the host and the readers, in one order:
+/// `agents.<call>`, `host.<call>` and `readers.<hold|release|set_entry>`.
+pub(super) type Journal = Arc<Mutex<Vec<String>>>;
 
 /// `Agents` played by a test: each call recorded; states and installs set by the test.
 #[derive(Default)]
@@ -39,11 +52,27 @@ pub(super) struct FakeAgents {
     /// The agents whose job is a sign-in, as S18 reserves it: from a call that starts one until
     /// a call that replaces it, so `cancel_sign_in` finds one before any state is reported.
     pub(super) signing_in: Mutex<BTreeSet<AgentId>>,
+    /// Shared with the host and the readers.
+    pub(super) journal: Journal,
+    /// What S18 reports for a call, by the call's name, sent on `feed` when the call is made.
+    pub(super) answers: Mutex<BTreeMap<&'static str, SigninState>>,
+    /// Where `answers` go: the pump's source while [`Rig::pumped`] runs.
+    pub(super) feed: Mutex<Option<UnboundedSender<AgentsEvent>>>,
 }
 
 impl FakeAgents {
     fn call(&self, name: &'static str, agent: &AgentId) {
         lock(&self.calls).push((name, agent.clone()));
+        lock(&self.journal).push(format!("agents.{name}"));
+        let answer = lock(&self.answers).get(name).cloned();
+        if let (Some(state), Some(feed)) = (answer, &*lock(&self.feed)) {
+            lock(&self.signin).insert(agent.clone(), state.clone());
+            let event = AgentsEvent::Signin {
+                agent: agent.clone(),
+                state,
+            };
+            drop(feed.unbounded_send(event));
+        }
     }
 
     fn answer(&self, name: &'static str, agent: &AgentId) -> Result<(), SigninError> {
@@ -121,6 +150,36 @@ impl SetupAgents for FakeAgents {
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()
     }
+    fn stop_using_login(&self, agent: &AgentId, _why: Option<Found>) -> Result<(), SigninError> {
+        self.reserve("stop_using_login", agent, false)
+    }
+}
+
+/// The limits readers' hold and entries, journaled.
+pub(super) struct FakeReaders {
+    pub(super) journal: Journal,
+    pub(super) entries: Mutex<Vec<(AgentKind, Option<AgentLaunch>)>>,
+}
+
+/// A fake hold: journals its release.
+struct FakeHold(Journal);
+
+impl Drop for FakeHold {
+    fn drop(&mut self) {
+        lock(&self.0).push("readers.release".to_owned());
+    }
+}
+
+impl LeaveReaders for FakeReaders {
+    fn hold(&self, _agent: AgentKind) -> BoxFuture<'static, ReadHold> {
+        lock(&self.journal).push("readers.hold".to_owned());
+        let hold = ReadHold::new(FakeHold(Arc::clone(&self.journal)));
+        Box::pin(std::future::ready(hold))
+    }
+    fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
+        lock(&self.journal).push("readers.set_entry".to_owned());
+        lock(&self.entries).push((agent, launch));
+    }
 }
 
 /// One host call as `RecordingHost` saw it.
@@ -133,6 +192,7 @@ pub(super) enum HostCall {
     SetReusedLogin(AgentId, bool),
     RemoveLoginLinks(AgentId),
     LoginChanged(AgentId),
+    SetLaunchRefused(AgentId, Option<ErrorCode>),
 }
 
 impl std::fmt::Debug for HostCall {
@@ -147,21 +207,43 @@ impl std::fmt::Debug for HostCall {
             Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
             Self::RemoveLoginLinks(agent) => write!(f, "remove_login_links({agent})"),
             Self::LoginChanged(agent) => write!(f, "login_changed({agent})"),
+            Self::SetLaunchRefused(agent, code) => {
+                write!(f, "set_launch_refused({agent}, {code:?})")
+            }
         }
     }
 }
 
-/// The host's Rust-only calls, recorded in order, each answered `Ok`.
-#[derive(Default)]
-pub(super) struct RecordingHost(Mutex<Vec<HostCall>>);
+/// The host's Rust-only calls, recorded in order, each answered `Ok`; `stop_agents` answers
+/// `stopped` (`Exited` unless a test sets `TimedOut`).
+pub(super) struct RecordingHost {
+    calls: Mutex<Vec<HostCall>>,
+    pub(super) journal: Journal,
+    pub(super) stopped: Mutex<AgentsStopped>,
+}
 
 impl RecordingHost {
+    pub(super) fn new(journal: Journal) -> Self {
+        Self {
+            calls: Mutex::default(),
+            journal,
+            stopped: Mutex::new(AgentsStopped::Exited),
+        }
+    }
+
     pub(super) fn calls(&self) -> Vec<HostCall> {
-        lock(&self.0).clone()
+        lock(&self.calls).clone()
+    }
+
+    fn push(&self, call: HostCall) {
+        let name = format!("{call:?}");
+        let name = name.split('(').next().unwrap_or_default();
+        lock(&self.journal).push(format!("host.{name}"));
+        lock(&self.calls).push(call);
     }
 
     fn record(&self, call: HostCall) -> BoxFuture<'_, Result<(), HostError>> {
-        lock(&self.0).push(call);
+        self.push(call);
         Box::pin(std::future::ready(Ok(())))
     }
 }
@@ -172,7 +254,7 @@ impl SetupHost for RecordingHost {
         agent: AgentId,
         launch: AgentLaunch,
     ) -> BoxFuture<'_, Result<EntryWrite, HostError>> {
-        lock(&self.0).push(HostCall::SetAgentLaunch(agent, launch));
+        self.push(HostCall::SetAgentLaunch(agent, launch));
         Box::pin(std::future::ready(Ok(EntryWrite::Written)))
     }
     fn set_endpoint(
@@ -186,8 +268,8 @@ impl SetupHost for RecordingHost {
         self.record(HostCall::RestartAgents(agent))
     }
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
-        lock(&self.0).push(HostCall::StopAgents(agent));
-        Box::pin(std::future::ready(Ok(AgentsStopped::Exited)))
+        self.push(HostCall::StopAgents(agent));
+        Box::pin(std::future::ready(Ok(*lock(&self.stopped))))
     }
     fn set_reused_login(
         &self,
@@ -201,6 +283,25 @@ impl SetupHost for RecordingHost {
     }
     fn login_changed(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
         self.record(HostCall::LoginChanged(agent))
+    }
+    fn set_launch_refused(
+        &self,
+        agent: AgentId,
+        code: Option<ErrorCode>,
+    ) -> BoxFuture<'_, Result<(), HostError>> {
+        self.record(HostCall::SetLaunchRefused(agent, code))
+    }
+    fn login_splits(&self) -> BoxFuture<'_, Result<LoginSplits, HostError>> {
+        Box::pin(std::future::ready(Err(HostError::new(
+            ErrorCode::Internal,
+            "the tests feed no splits",
+        ))))
+    }
+    fn settings_changes(&self) -> BoxFuture<'_, Result<BoxStream<'static, ()>, HostError>> {
+        Box::pin(std::future::ready(Err(HostError::new(
+            ErrorCode::Internal,
+            "the tests apply settings directly",
+        ))))
     }
 }
 
@@ -255,6 +356,8 @@ pub(super) struct Rig {
     pub(super) events: Arc<SetupEvents>,
     /// The memory keychain under the backend's `KeyCache` (clones share it).
     pub(super) keychain: Keychain,
+    pub(super) readers: Arc<FakeReaders>,
+    pub(super) journal: Journal,
 }
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
@@ -276,8 +379,16 @@ pub(super) fn rig_locked(plan_locked: bool) -> Rig {
 }
 
 fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
-    let agents = Arc::new(FakeAgents::default());
-    let host = Arc::new(RecordingHost::default());
+    let journal = Journal::default();
+    let agents = Arc::new(FakeAgents {
+        journal: Arc::clone(&journal),
+        ..FakeAgents::default()
+    });
+    let host = Arc::new(RecordingHost::new(Arc::clone(&journal)));
+    let readers = Arc::new(FakeReaders {
+        journal: Arc::clone(&journal),
+        entries: Mutex::default(),
+    });
     let confirm = Arc::new(FakeConfirm {
         answer: accept,
         asked: Mutex::default(),
@@ -307,6 +418,12 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         events: Arc::clone(&events),
         known,
         signin_gate: Mutex::default(),
+        wiring: Wiring::new(
+            Arc::clone(&readers) as Arc<dyn LeaveReaders>,
+            ReusedLogins::default(),
+            Arc::default(),
+            SettingsRead::default(),
+        ),
     });
     Rig {
         backend,
@@ -316,6 +433,8 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         opener,
         events,
         keychain,
+        readers,
+        journal,
     }
 }
 
@@ -330,6 +449,25 @@ impl Rig {
 
     pub(super) fn calls(&self) -> Vec<(&'static str, AgentId)> {
         lock(&self.agents.calls).clone()
+    }
+
+    /// Runs `work` while the backend's pump reads what the fake `Agents` answers
+    /// (`FakeAgents::answers`), then lets the pump end.
+    pub(super) fn pumped<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let (feed, source) = unbounded();
+        *lock(&self.agents.feed) = Some(feed);
+        let work = async {
+            let out = work.await;
+            lock(&self.agents.feed).take();
+            out
+        };
+        let (out, ()) = block_on(futures::future::join(work, self.backend.pump(source)));
+        out
+    }
+
+    /// The journal so far, and cleared.
+    pub(super) fn journal(&self) -> Vec<String> {
+        std::mem::take(&mut *lock(&self.journal))
     }
 }
 

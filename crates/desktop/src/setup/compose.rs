@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clauseo_agents::{Clock, Found, LoginFrom, SigninState, Source};
+use clauseo_agents::{Clock, Found, LoginFrom, SigninCode, SigninState, Source};
 use clauseo_protocol::{
     AgentId, AgentKind, ErrorCode, FoundLogin, PlanLabel, SetupEvent, SignIn, SignInMethod,
     SignInSource, Timestamp,
@@ -211,6 +211,11 @@ struct Known {
     sent: Option<SignIn>,
     /// Whether the backend is ending the running sign-in for a key or an endpoint.
     ending: bool,
+    /// Whether a job that was being ended was then replaced by a new one before its end came
+    /// in: that end, `Failed { Cancelled }`, may still be on its way from before the new job's
+    /// first state, and is dropped (not shown, and no starting mark ended), so it never shows
+    /// over the new sign-in. The new job's first state ends the watch.
+    stale: bool,
 }
 
 impl Compose {
@@ -228,6 +233,10 @@ impl Compose {
     /// state is unchanged and nothing is sent: a reserved job that was cancelled, or replaced
     /// by a `FindLogin` or a `SignOut`, never reports a running state.
     pub(crate) fn signin(&self, agent: &AgentId, state: SigninState) {
+        if self.stale_end(agent, &state) {
+            tracing::info!(%agent, "a replaced sign-in's late end is dropped");
+            return;
+        }
         if !is_running(&state) {
             self.events.end_start(agent);
         }
@@ -249,6 +258,39 @@ impl Compose {
     /// is refused.
     pub(crate) fn expect_end(&self, agent: &AgentId) {
         lock(&self.agents).entry(agent.clone()).or_default().ending = true;
+    }
+
+    /// `agent`'s job was replaced by a new one (a sign-in, a sign-out or a search). An end
+    /// [`Compose::expect_end`] was waiting for is now a stale one, if it comes at all.
+    pub(crate) fn replaced(&self, agent: &AgentId) {
+        if let Some(known) = lock(&self.agents).get_mut(agent) {
+            known.stale = std::mem::take(&mut known.ending);
+        }
+    }
+
+    /// The lawyer cancels `agent`'s sign-in: its `Failed { Cancelled }` is theirs, never a
+    /// stale one.
+    pub(crate) fn cancelling(&self, agent: &AgentId) {
+        if let Some(known) = lock(&self.agents).get_mut(agent) {
+            known.stale = false;
+        }
+    }
+
+    /// Whether `state` is a replaced job's late end (see `Known::stale`). Any state ends the
+    /// watch: the new job's first one comes after the old job's end, if that came at all.
+    fn stale_end(&self, agent: &AgentId, state: &SigninState) -> bool {
+        let mut agents = lock(&self.agents);
+        let Some(known) = agents.get_mut(agent).filter(|known| known.stale) else {
+            return false;
+        };
+        known.stale = false;
+        matches!(
+            state,
+            SigninState::Failed {
+                code: SigninCode::Cancelled,
+                ..
+            }
+        )
     }
 
     /// Undoes [`Compose::expect_end`].

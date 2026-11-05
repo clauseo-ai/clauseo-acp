@@ -11,7 +11,7 @@ use clauseo_protocol::{CommandOutcome, HostError, SetupEvent, SignIn, SignInMeth
 use futures::channel::mpsc::UnboundedReceiver;
 use serde_json::json;
 
-use super::fakes::{Rig, command, rig, setup_events};
+use super::fakes::{HostCall, Rig, command, rig, setup_events};
 use super::{KEY, MAIN, SETTINGS, claude};
 use crate::bridge::lock;
 use crate::test_support::block_on;
@@ -164,4 +164,84 @@ fn a_start_replaced_by_find_login_or_sign_out_before_it_reports_leaves_no_mark()
         assert_eq!(start(&rig, MAIN), DONE, "{replace}");
         assert_eq!(asked(&rig, "sign_in"), 2, "{replace}: a new start runs");
     }
+}
+
+#[test]
+fn a_firm_policy_endpoint_arriving_in_the_settings_ends_a_running_sign_in_quietly() {
+    use crate::setup::refresh::SettingsRead;
+
+    let rig = rig(true);
+    let mut feed = rig.events.follow();
+    let mut texts = rig.events.follow();
+    assert_eq!(start(&rig, MAIN), DONE);
+    let firm = SettingsRead {
+        firm: [claude()].into(),
+        firm_policy: [claude()].into(),
+        ..SettingsRead::default()
+    };
+    block_on(crate::setup::refresh::apply_settings(
+        &rig.backend,
+        firm.clone(),
+    ));
+    assert_eq!(
+        asked(&rig, "cancel_sign_in"),
+        1,
+        "the running sign-in is ended"
+    );
+    s18(&rig, failed(SigninCode::Cancelled));
+    let shown = shown(&mut feed);
+    assert!(
+        !shown
+            .iter()
+            .any(|state| matches!(state, SignIn::Failed { .. })),
+        "no failure reaches the window: {shown:?}"
+    );
+    let texts: Vec<Arc<str>> = std::iter::from_fn(|| texts.try_recv().ok()).collect();
+    assert!(
+        !texts.iter().any(|text| text.contains("signin.cancelled")),
+        "{texts:?}"
+    );
+    // The same settings again change nothing and cancel nothing more; no launch is refused.
+    block_on(crate::setup::refresh::apply_settings(&rig.backend, firm));
+    assert_eq!(asked(&rig, "cancel_sign_in"), 1);
+    assert!(
+        !rig.host
+            .calls()
+            .iter()
+            .any(|call| matches!(call, HostCall::SetLaunchRefused(..))),
+        "nothing is blocked"
+    );
+}
+
+#[test]
+fn a_cancelled_job_s_late_end_never_shows_over_a_new_sign_in() {
+    let rig = rig(true);
+    assert_eq!(start(&rig, MAIN), DONE);
+    assert_eq!(
+        send(&rig, SETTINGS, "set_agent_key", &json!({ "key": KEY })),
+        DONE
+    );
+    assert_eq!(send(&rig, SETTINGS, "clear_agent_key", &json!({})), DONE);
+    assert_eq!(start(&rig, MAIN), DONE);
+    assert_eq!(asked(&rig, "sign_in"), 2);
+    let mut feed = rig.events.follow();
+    let _replay = shown(&mut feed);
+    // The cancelled job's end, sent before the new job was reserved, comes in late.
+    s18(&rig, failed(SigninCode::Cancelled));
+    assert_eq!(shown(&mut feed), [], "the late end is not shown");
+    assert_eq!(start(&rig, MAIN), DONE);
+    assert_eq!(
+        asked(&rig, "sign_in"),
+        2,
+        "a third start still joins the new sign-in"
+    );
+    let waiting = SigninState::Waiting {
+        since: UNIX_EPOCH,
+        nudge: false,
+    };
+    s18(&rig, waiting);
+    assert!(matches!(
+        shown(&mut feed).last(),
+        Some(SignIn::Waiting { .. })
+    ));
 }

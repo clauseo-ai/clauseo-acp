@@ -23,13 +23,6 @@
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
-# R20 P5b piece A: the host calls and the key read that only piece B makes.
-crates/desktop/src/setup/host_calls.rs SetupHost::restart_agents dead_code
-crates/desktop/src/setup/host_calls.rs SetupHost::stop_agents dead_code
-crates/desktop/src/setup/host_calls.rs SetupHost::set_reused_login dead_code
-crates/desktop/src/setup/host_calls.rs SetupHost::remove_login_links dead_code
-crates/desktop/src/setup/host_calls.rs SetupHost::login_changed dead_code
-crates/desktop/src/setup/keys.rs KeyCache::get dead_code
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open.rs check_document clippy::disallowed_methods
 crates/desktop/src/open/gate.rs now clippy::disallowed_methods
@@ -37,6 +30,10 @@ crates/desktop/src/open/gate.rs now clippy::disallowed_methods
 crates/desktop/src/delete_app_data/ops.rs - clippy::disallowed_methods
 crates/desktop/src/delete_app_data/tests/make.rs - clippy::disallowed_methods
 crates/desktop/src/open/mac_app.rs - unsafe_code
+# R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
+crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
+crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
+crates/desktop/src/setup/readers/tests.rs fake_file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::dir clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::file clippy::disallowed_methods

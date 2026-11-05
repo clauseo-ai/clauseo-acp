@@ -27,6 +27,10 @@ use super::KeyWrite;
 use super::admit::key_stored;
 use crate::bridge::lock;
 
+/// Where the [`KeyCache`] lands once the setup thread has loaded it: the launch hook and the
+/// limits readers are built before, on the host's start thread, and find no key until then.
+pub(crate) type KeySlot = Arc<std::sync::OnceLock<Arc<KeyCache>>>;
+
 /// The keys in memory, by agent.
 type Keys = Arc<Mutex<BTreeMap<AgentId, Zeroizing<String>>>>;
 
@@ -93,11 +97,7 @@ impl KeyCache {
         lock(&self.keys).contains_key(agent)
     }
 
-    /// A copy of `agent`'s key, zeroed when dropped: the launch hook's (piece B).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "R20 P5b piece B's launch hook reads it")
-    )]
+    /// A copy of `agent`'s key, zeroed when dropped: the launch hook's and the limits reads'.
     pub(crate) fn get(&self, agent: &AgentId) -> Option<Zeroizing<String>> {
         lock(&self.keys).get(agent).cloned()
     }

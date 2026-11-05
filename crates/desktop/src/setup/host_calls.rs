@@ -2,18 +2,19 @@
 //! [`SetupHost`], so the backend's tests record them (`RecordingHost` in `tests.rs`) and the
 //! app goes through the bridge's [`HostCell`] ([`CellHost`]).
 //!
-//! R20 P5b piece A calls [`SetupHost::set_agent_launch`] (an install's `Ready`) and
-//! [`SetupHost::set_endpoint`] (`SetFirmEndpoint`). The others are piece B's (the leave order, the
-//! restarts, `LoginChanged`). [`CellHost`] calls through to P4b's (#440) `restart_agents`,
-//! `stop_agents`, `set_reused_login` and `remove_login_links`; this host has no
-//! `login_changed` yet (P4b's follow-up), so [`CellHost`] answers it with `internal` until it
-//! lands.
+//! Piece A calls [`SetupHost::set_agent_launch`] (an install's `Ready`) and
+//! [`SetupHost::set_endpoint`] (`SetFirmEndpoint`); piece B the leave order's calls, the
+//! restarts, `limits_login_changed` (P4d), the launch refusal for an unreadable policy (P4d),
+//! the splits (P4b) and the settings changes, which come from an app subscription.
 
+use std::future::ready;
 use std::sync::Arc;
 
-use clauseo_host::AgentsStopped;
-use clauseo_protocol::{AgentId, ErrorCode, HostError};
+use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, Principal};
 use clauseo_settings::{AgentLaunch, EntryWrite};
+use futures::StreamExt as _;
+use futures::stream::BoxStream;
 
 use crate::dialogs::BoxFuture;
 use crate::host_start::HostCell;
@@ -36,33 +37,43 @@ pub(crate) trait SetupHost: Send + Sync {
     ) -> BoxFuture<'_, Result<(), HostError>>;
 
     /// Stops each live agent of that id not in a turn and resumes the queues held for its
-    /// sign-in (P4b's `restart_agents`). Piece B.
-    #[expect(dead_code, reason = "R20 P5b piece B calls it")]
+    /// sign-in (P4b's `restart_agents`).
     fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>>;
 
     /// Cancels any turn of that id, keeping it held, and stops its live agents (P4b's
     /// `stop_agents`), answering whether they exited or the bounded wait ran out (P4d).
-    /// Piece B: the leave order's first step.
-    #[expect(dead_code, reason = "R20 P5b piece B calls it")]
+    /// The leave order's first step.
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
 
     /// Tells the host whether `agent`'s login is the lawyer's own, reused (P4b's
-    /// `set_reused_login`). Piece B.
-    #[expect(dead_code, reason = "R20 P5b piece B calls it")]
+    /// `set_reused_login`).
     fn set_reused_login(
         &self,
         agent: AgentId,
         reused: bool,
     ) -> BoxFuture<'_, Result<(), HostError>>;
 
-    /// Removes each matter's link to the agent's login (P4b's `remove_login_links`). Piece B.
-    #[expect(dead_code, reason = "R20 P5b piece B calls it")]
+    /// Removes each matter's link to the agent's login (P4b's `remove_login_links`).
     fn remove_login_links(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>>;
 
     /// Has `limits` read the agent's account now, past its back-off (0048's Rust-only
-    /// `LoginChanged`; P4b's follow-up). Piece B.
-    #[expect(dead_code, reason = "R20 P5b piece B calls it")]
+    /// `LoginChanged`; P4b's follow-up).
     fn login_changed(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>>;
+
+    /// Refuses `agent`'s new launches with `code`, or lifts the refusal with `None` (P4d's
+    /// `set_launch_refused`): `signin.policy_unreadable` while its policy blocks it.
+    fn set_launch_refused(
+        &self,
+        agent: AgentId,
+        code: Option<ErrorCode>,
+    ) -> BoxFuture<'_, Result<(), HostError>>;
+
+    /// The splits the host's check finds (P4b's `login_splits`).
+    fn login_splits(&self) -> BoxFuture<'_, Result<LoginSplits, HostError>>;
+
+    /// One item per `SettingsChanged`, the current settings' first, from an app subscription;
+    /// it ends when the host stops.
+    fn settings_changes(&self) -> BoxFuture<'_, Result<BoxStream<'static, ()>, HostError>>;
 }
 
 /// The app's [`SetupHost`]: each call waits for the host's start in the bridge's cell.
@@ -77,13 +88,12 @@ impl CellHost {
     }
 }
 
-/// The answer to a call this host does not have yet (P4b's follow-up adds it): `internal`, naming
-/// the call in words a window may show.
-fn not_in_host(call: &str) -> HostError {
-    HostError::new(
-        ErrorCode::Internal,
-        format!("{call} is not available yet in this version of Clauseo"),
-    )
+/// Whether `json` is a `HostEvent::SettingsChanged` (external tagging, snake case: its one
+/// key comes first), read from the text so the other app events are not decoded.
+fn is_settings_changed(json: &str) -> bool {
+    json.trim_start()
+        .strip_prefix('{')
+        .is_some_and(|rest| rest.trim_start().starts_with("\"settings_changed\""))
 }
 
 impl SetupHost for CellHost {
@@ -141,7 +151,40 @@ impl SetupHost for CellHost {
         Box::pin(async move { self.cell.host().await?.remove_login_links(agent).await })
     }
 
-    fn login_changed(&self, _agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        Box::pin(std::future::ready(Err(not_in_host("limits_login_changed"))))
+    fn login_changed(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move {
+            let Some(kind) = AgentKind::of(&agent) else {
+                return Ok(());
+            };
+            self.cell.host().await?.limits_login_changed(kind).await
+        })
+    }
+
+    fn set_launch_refused(
+        &self,
+        agent: AgentId,
+        code: Option<ErrorCode>,
+    ) -> BoxFuture<'_, Result<(), HostError>> {
+        Box::pin(async move {
+            self.cell
+                .host()
+                .await?
+                .set_launch_refused(agent, code)
+                .await
+        })
+    }
+
+    fn login_splits(&self) -> BoxFuture<'_, Result<LoginSplits, HostError>> {
+        Box::pin(async move { Ok(self.cell.host().await?.login_splits()) })
+    }
+
+    fn settings_changes(&self) -> BoxFuture<'_, Result<BoxStream<'static, ()>, HostError>> {
+        Box::pin(async move {
+            let host = self.cell.host().await?;
+            let events = host.subscribe_app(Principal::LocalDesktop).await?;
+            let changes =
+                events.filter_map(|event| ready(is_settings_changed(event.json()).then_some(())));
+            Ok(changes.boxed())
+        })
     }
 }
