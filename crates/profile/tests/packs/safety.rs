@@ -387,7 +387,10 @@ fn a_thousand_folders_are_refused_quickly_with_one_folder_open_per_level() {
     assert!(took < Duration::from_secs(1), "{took:?}");
     support::remove_dir_all(&scratch.pack("nda-kit")).unwrap();
     scratch.valid("nda-kit", &["a1"]);
-    let nested: Vec<&str> = vec!["d"; 1_100];
+    // 32 levels, far past DEPTH_MAX: deep enough to prove the walk stops at the limit, and short
+    // enough for macOS's 1,024-byte and Windows' 260-character path limits and for
+    // remove_dir_all under a CI runner's open-file limit (one descriptor per level).
+    let nested: Vec<&str> = vec!["d"; 32];
     let deep = scratch
         .pack("nda-kit")
         .join("skills/a1")
