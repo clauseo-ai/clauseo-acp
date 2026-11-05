@@ -68,9 +68,22 @@ fn the_local_reads_go_on_unasked() {
         "NotebookRead",
         "TodoWrite",
         "Task",
+        "ToolSearch",
     ] {
         assert_eq!(guard(&args, tool), (0, String::new()), "{tool}");
     }
+}
+
+/// `ToolSearch` loading `ExitPlanMode`'s schema goes on unasked; `ExitPlanMode` itself still asks,
+/// as in the live run of 2026-11-05 (private `measurements/folder-rights/live-checks.md`).
+#[test]
+fn a_plan_exit_asks_once_not_for_its_tool_search() {
+    let args = forced();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    assert_eq!(guard(&args, "ToolSearch"), (0, String::new()));
+    let (code, output) = guard(&args, "ExitPlanMode");
+    assert_eq!(code, 0);
+    assert!(asked(&output), "{output}");
 }
 
 #[test]

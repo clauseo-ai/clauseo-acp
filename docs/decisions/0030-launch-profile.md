@@ -441,10 +441,12 @@ change from the settings window as `ui` does.
     detail is in `agent/forced_ask.rs` `ASK_RULES`).
   - **The hook:** the guard's entry matches every tool (`*`, MCP tools included) and passes
     `--ask-all`, so the guard answers `ask` for every tool but `Read`, `Glob`, `Grep`, `LS`,
-    `NotebookRead`, `TodoWrite` and `Task`; `WebSearch` and `WebFetch` ask too. The flag is an
-    argument, not a variable, so it never reaches the agent's shell.
+    `NotebookRead`, `TodoWrite`, `Task` and `ToolSearch` (which only loads deferred tools'
+    schemas; added 2026-11-05 after the live run, orchestrator); `WebSearch` and `WebFetch` ask
+    too. The flag is an argument, not a variable, so it never reaches the agent's shell.
   A forced-ask Claude launch with no guard hook to give (no guard program, as when
-  `current_exe` failed, or a path that is not UTF-8) is refused with `agent.launch_failed`.
+  `current_exe` failed, or a path that is not UTF-8) is refused with `agent.guard_missing`
+  (#402; it was `agent.launch_failed` before).
 - **2026-11-05 (orchestrator; accepted risk).** A `PermissionRequest` hook already in the
   lawyer's own settings or plugins can still approve in forced ask: Claude Code runs such hooks
   alongside the SDK's permission callback, and whichever decides first applies. The risk is
