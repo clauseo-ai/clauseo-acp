@@ -55,6 +55,9 @@ pub(super) struct FakeAcl {
     /// Children the lawyer can't open: a strict or hand-back walk over one refuses it, once
     /// for each time it is listed (a set-aside moves it).
     pub(super) shut: Vec<PathBuf>,
+    /// Put before a refused child's path when the walk reports it: `\\?\` for its verbatim
+    /// final path, as the NTFS walk reports it; empty for its plain path.
+    pub(super) prefix: &'static str,
     /// Other names for one file: each key's entries and label live on its value's.
     pub(super) links: BTreeMap<PathBuf, PathBuf>,
 }
@@ -74,13 +77,14 @@ impl FakeAcl {
         (self.file(grant.path()), sid, rights, inherit)
     }
 
-    /// A shut child below `root`, taken off the list.
+    /// A shut child below `root`, taken off the list, as the walk reports it.
     fn shut_below(&mut self, root: &Path) -> Option<PathBuf> {
         let at = self
             .shut
             .iter()
             .position(|c| c.starts_with(root) && c != root)?;
-        Some(self.shut.remove(at))
+        let child = self.shut.remove(at);
+        Some(PathBuf::from(format!("{}{}", self.prefix, child.display())))
     }
 }
 

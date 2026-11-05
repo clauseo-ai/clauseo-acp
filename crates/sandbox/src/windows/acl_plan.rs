@@ -546,6 +546,8 @@ impl Plan<'_> {
 /// Whether `path` is `folder` or under it, by the policy's comparison and also without ASCII
 /// case, as NTFS compares `.claude` with `.Claude`.
 pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
+    let (path, folder) = (plain(path), plain(folder));
+    let (path, folder) = (path.as_path(), folder.as_path());
     if under(path, folder) {
         return true;
     }
@@ -559,6 +561,31 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
             (got, want) => got == want,
         })
     })
+}
+
+/// `path` without the verbatim prefix the final-path calls give (`\\?\C:\m` is `C:\m`, and
+/// `\\?\UNC\server\share` is `\\server\share`), so a path a walk reports compares with the
+/// plain paths the policy holds (S15 `PR3b` round 4). Every comparison of a path from a
+/// final-path call with a policy path goes through it, on both sides. On Windows it is
+/// `dunce::simplified`, which keeps the prefix when the plain form would mean another path
+/// (too long, a reserved name); such a path then matches nothing plain, and refuses. Elsewhere
+/// the prefix is taken off as text, so the tests' stand-in sees the same shapes.
+pub(super) fn plain(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        dunce::simplified(path).to_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            PathBuf::from(format!(r"\\{rest}"))
+        } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+            PathBuf::from(rest)
+        } else {
+            path.to_owned()
+        }
+    }
 }
 
 pub(super) mod targets;
