@@ -15,9 +15,11 @@
     padding: 0 var(--s0-5) 0 var(--s1);
     opacity: 0;
   }
-  /* a conversation's buttons stand over its mark and its title's tail on the hovered row's own tone, opaque so no word
-     shows through; the full title stays the row's tooltip and its accessible name (DESIGN.md: never truncate) */
-  .room-conv-item[data-triage] .room-conv-acts {
+  /* a conversation's buttons, and a done row's Mark as not done, stand over its mark and its title's tail on the hovered
+     row's own tone, opaque so no word shows through; the full title stays the row's tooltip and its accessible name
+     (DESIGN.md: never truncate) */
+  .room-conv-item[data-triage] .room-conv-acts,
+  .room-done .room-conv-acts {
     border-radius: 0 var(--r-small) var(--r-small) 0;
     background: linear-gradient(var(--hover), var(--hover)), var(--tile-hover);
   }
@@ -33,11 +35,6 @@
   }
   .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-mark {
     visibility: hidden;
-  }
-  /* no fade, no clipping (DESIGN.md: never truncate): a done row holds its one button's width at all times, so its
-     words never run under it and nothing moves when it shows */
-  .room-one-act .room-conv {
-    padding-right: calc(var(--size-control-small) + var(--s1));
   }
 
   /* in a row's place: what happened, and Undo */

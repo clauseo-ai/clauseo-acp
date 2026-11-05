@@ -73,6 +73,19 @@ test("the Done fold: its count, its rows once open, and Mark as not done", async
   expect(sent(transport, "mark_thread_done")).toEqual([{ thread: T_OLD.thread, done: false }]);
 });
 
+test("a done row's Mark as not done is in the DOM, named with its title, and Tab reaches it right after the row", async () => {
+  await mount({ lists: lists() });
+  await press(fold()?.querySelector(".room-fold"));
+  const row = fold()?.querySelector<HTMLElement>('[data-testid="done-row"]');
+  const open = row?.querySelector<HTMLElement>(".room-conv");
+  const back = row?.querySelector<HTMLElement>('[data-testid="mark-not-done"]');
+  expect(back?.getAttribute("aria-label")).toBe("Mark as not done, Chronology from the FIR");
+  const order = [
+    ...(rail()?.querySelectorAll<HTMLElement>("button, [href], [tabindex]") ?? []),
+  ].filter((e) => e.tabIndex >= 0 && !e.hasAttribute("disabled"));
+  expect(order.indexOf(back as HTMLElement)).toBe(order.indexOf(open as HTMLElement) + 1);
+});
+
 test("Mark as done: mark_thread_done, the line in the row's place, and Undo sends done false", async () => {
   const transport = await mount({ lists: lists() });
   const row = await arm("Bail conditions");
