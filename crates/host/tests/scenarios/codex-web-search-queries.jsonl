@@ -1,0 +1,10 @@
+{"scenario":"codex-web-search-queries","description":"S26's Codex search of several queries, as codex-acp 2.2.2 sends it live (stage B, 2026-11-05): the start has an empty query, the completed update's rawInput has the first query with ' ...' and all three in action.queries; the record keeps all three","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-ws","title":"Web search","kind":"search","status":"in_progress","rawInput":{"query":"","action":null}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-ws","status":"completed","title":"Web search: site:sci.gov.in Section 138 Negotiable Instruments Act Supreme Court judgment 2026, Supreme Court latest judgment Section 138 NI Act 2025 2026, site:api.sci.gov.in \"Section 138\" \"Negotiable Instruments Act\" 2025","rawInput":{"query":"site:sci.gov.in Section 138 Negotiable Instruments Act Supreme Court judgment 2026 ...","action":{"type":"search","query":null,"queries":["site:sci.gov.in Section 138 Negotiable Instruments Act Supreme Court judgment 2026","Supreme Court latest judgment Section 138 NI Act 2025 2026","site:api.sci.gov.in \"Section 138\" \"Negotiable Instruments Act\" 2025"]}}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The Supreme Court's judgment is linked below."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
