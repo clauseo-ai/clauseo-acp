@@ -185,7 +185,9 @@ The install takes the quit path:
    (`Locations::update_marker()`), off the actor; the shutdown starts only once the write has
    ended on disk, new sends held meanwhile. A write that fails installs nothing (a failed
    install would then report nothing at the next start): the run shows `failed` at the
-   `install` stage, counts it, and new sends run again.
+   `install` stage, counts it, and new sends run again. A quit that overtakes the install while the
+   marker is written installs nothing either: the marker is deleted again, on the same thread
+   behind the write, before the host stops.
 3. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
    stopped, the store closed. Its exit is `HostExit::Install(downloaded)`
    (`HostHandle::exit`), only when the store closed cleanly; otherwise the marker is deleted

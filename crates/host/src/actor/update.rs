@@ -207,7 +207,7 @@ pub(super) fn on_input(actor: &mut Actor, input: UpdateInput) {
             update.files_out = update.files_out.saturating_sub(1);
             match done {
                 files::Done::Read { marker, cached } => update.read = Some((marker, cached)),
-                files::Done::Wrote(written) => feed(actor, Input::MarkerWritten(written)),
+                files::Done::Wrote(written) => marker_written(actor, written),
                 files::Done::Cleared => {}
             }
         }
@@ -237,6 +237,18 @@ pub(super) fn on_input(actor: &mut Actor, input: UpdateInput) {
                 feed(actor, Input::DownloadDone(result));
             }
         }
+    }
+}
+
+/// The install's marker write ended. While the host serves, the machine hears it. Once a quit
+/// has overtaken the install, nothing installs, so a marker that reached the disk is deleted:
+/// the clear queues behind the write on the file thread, and the shutdown waits for it
+/// ([`busy`]). Else the next start would report a failed install and drop the download.
+fn marker_written(actor: &mut Actor, written: bool) {
+    if matches!(actor.phase, HostPhase::Serving) {
+        feed(actor, Input::MarkerWritten(written));
+    } else if written {
+        actor.update.send(files::Job::Clear);
     }
 }
 
