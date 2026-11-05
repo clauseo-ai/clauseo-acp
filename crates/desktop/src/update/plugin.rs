@@ -345,6 +345,9 @@ pub(super) fn failure(error: &PluginError) -> UpdaterError {
             UpdaterError::Signature("the signature names no version".to_owned())
         }
         PluginError::Io(error) => UpdaterError::Io(format!("i/o: {}", error.kind())),
+        PluginError::PreviousAppNotRestored(_) => {
+            UpdaterError::Io("the update failed and the old app was not put back".to_owned())
+        }
         PluginError::Serialization(_) | PluginError::Semver(_) => {
             UpdaterError::Other("the release manifest does not parse".to_owned())
         }
