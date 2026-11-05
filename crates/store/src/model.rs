@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentId, AgentSessionId, BlobHash, BlobRef, CheckpointId, ClientName, CommandId,
-    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, RenameSource, Seq, StreamId,
-    ThreadId, Timestamp,
+    CommandOutcome, Count, Date, Envelope, MatterId, MatterKind, PackList, RenameSource, Seq,
+    StreamId, ThreadId, Timestamp,
 };
 
 use crate::blob::preview;
@@ -175,6 +175,9 @@ pub struct MatterRow {
     /// When `ForgetMatter` took it off the list; `None` while it is on it (schema 2). The row,
     /// its threads, checkpoints and log stay, so the matter can come back.
     pub forgotten: Option<Timestamp>,
+    /// The skill packs it narrows to, once set; `None` takes the global `skills.enabled` list
+    /// (schema 5; `NULL` before). Stored as a JSON array of pack ids.
+    pub skill_packs: Option<PackList>,
 }
 
 /// A thread's summary row.
