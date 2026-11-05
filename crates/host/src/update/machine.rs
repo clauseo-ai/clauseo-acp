@@ -17,6 +17,7 @@
 //! | `scheduled` | `InstallRequested(now)` | as `ready` with `now` |
 //! | `scheduled`, `installing` before its install began | `CancelScheduled` | `ready` |
 //! | `checking`, `downloading` | an error | `failed` |
+//! | `installing`, its marker being written | the write failed | `failed` (stage `install`) |
 //! | any | the install kind, `update.mode: none` or policy says managed | `managed` |
 //!
 //! `installing` to `failed` happens at the next start: the marker `{ from, to }` with `from`
@@ -54,6 +55,8 @@ enum InstallStep {
     None,
     /// `now` with turns running: new sends held, waiting for the cancelled turns to end.
     StoppingTurns,
+    /// The marker is being written, new sends held; `after_answer` counts once it is done.
+    Writing { after_answer: bool },
     /// `BeginInstall` has gone out: nothing takes the install back.
     Begun,
 }
@@ -163,9 +166,13 @@ impl Machine {
         self.timer
     }
 
-    /// Whether new sends are held queued.
+    /// Whether new sends are held queued: while the turns an install stopped end, and while its
+    /// marker is written.
     pub(crate) fn gated(&self) -> bool {
-        self.install == InstallStep::StoppingTurns
+        matches!(
+            self.install,
+            InstallStep::StoppingTurns | InstallStep::Writing { .. }
+        )
     }
 
     /// Who manages updates, when someone else does: policy first (`none` in force), then the
@@ -244,6 +251,7 @@ impl Machine {
                     self.begin_install(false, fx);
                 }
             }
+            Input::MarkerWritten(written) => self.marker_written(written, now, fx),
         }
         Ok(())
     }
@@ -369,24 +377,51 @@ impl Machine {
         }
     }
 
+    /// The marker first: new sends stay held while it is written, and the install begins only
+    /// once it is on disk ([`Self::marker_written`]).
     fn begin_install(&mut self, after_answer: bool, fx: &mut Vec<Effect>) {
-        let Some(downloaded) = self.download.clone() else {
+        let Some(downloaded) = self.download.as_ref() else {
             return;
         };
+        let version = downloaded.version.clone();
         self.state = UpdateState::Installing {
-            version: downloaded.version.clone(),
+            version: version.clone(),
         };
-        self.install = InstallStep::Begun;
+        self.install = InstallStep::Writing { after_answer };
         self.timer = None;
         fx.push(Effect::WriteMarker(UpdateMarker {
             from: self.current.clone(),
-            to: downloaded.version.clone(),
+            to: version,
             state: MarkerState::Installing,
         }));
-        if after_answer {
-            fx.push(Effect::Count(UpdateResult::AfterAnswer));
+    }
+
+    /// The marker's write ended. On disk: the install begins. Not: no install, since a failed
+    /// one would then report nothing at the next start; `failed` at the install stage, counted,
+    /// and new sends run again.
+    fn marker_written(&mut self, written: bool, now: Timestamp, fx: &mut Vec<Effect>) {
+        let InstallStep::Writing { after_answer } = self.install else {
+            return;
+        };
+        let Some(downloaded) = self.download.clone() else {
+            return;
+        };
+        if written {
+            self.install = InstallStep::Begun;
+            if after_answer {
+                fx.push(Effect::Count(UpdateResult::AfterAnswer));
+            }
+            return fx.push(Effect::BeginInstall(downloaded));
         }
-        fx.push(Effect::BeginInstall(downloaded));
+        self.install = InstallStep::None;
+        fx.push(Effect::GateNewTurns(false));
+        self.state = UpdateState::Failed {
+            version: Some(downloaded.version),
+            at: now,
+            stage: FailedStage::Install,
+        };
+        fx.push(Effect::Count(UpdateResult::Failed));
+        timers::arm_interval(self, now, fx);
     }
 
     fn cancel_scheduled(&mut self, fx: &mut Vec<Effect>) -> Result<(), Refusal> {
@@ -416,8 +451,12 @@ impl Machine {
         if mode.mode != UpdateMode::Auto {
             self.install_at_start = false;
         }
-        // The host is already shutting down to install: the new mode applies at the next start.
-        if self.install == InstallStep::Begun {
+        // The host is already shutting down to install, or about to: the new mode applies at the
+        // next start.
+        if matches!(
+            self.install,
+            InstallStep::Writing { .. } | InstallStep::Begun
+        ) {
             return;
         }
         match (was, self.managed_by()) {

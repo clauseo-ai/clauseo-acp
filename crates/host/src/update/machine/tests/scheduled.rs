@@ -27,12 +27,9 @@ fn update_now_while_scheduled_with_turns_running_gates_cancels_and_installs_on_t
     // The running bit dropping is not the cancelled turns' end.
     let (m, fx) = go(&m, Input::TurnsRunning(false), t0());
     assert!(!installs(&fx), "{fx:?}");
-    let (_, fx) = go(&m, Input::TurnsCancelled, t0());
-    let expected = [
-        Effect::WriteMarker(marker(CURRENT, NEXT)),
-        Effect::BeginInstall(downloaded(&o)),
-    ];
-    assert_eq!(fx, expected);
+    let (m, fx) = go(&m, Input::TurnsCancelled, t0());
+    assert_eq!(fx, [Effect::WriteMarker(marker(CURRENT, NEXT))]);
+    assert_eq!(written(&m), [Effect::BeginInstall(downloaded(&o))]);
 }
 
 #[test]
@@ -55,13 +52,10 @@ fn update_now_while_scheduled_with_no_turn_running_installs_at_once() {
     let (mut m, o) = scheduled_with_offer();
     m.turns_running = false;
     let (m, fx) = go(&m, Input::InstallRequested(InstallWhen::Now), t0());
-    let expected = [
-        Effect::WriteMarker(marker(CURRENT, NEXT)),
-        Effect::BeginInstall(downloaded(&o)),
-        Effect::Publish,
-    ];
+    let expected = [Effect::WriteMarker(marker(CURRENT, NEXT)), Effect::Publish];
     assert_eq!(fx, expected);
-    assert!(!m.gated());
+    assert!(m.gated());
+    assert_eq!(written(&m), [Effect::BeginInstall(downloaded(&o))]);
 }
 
 #[test]
