@@ -97,6 +97,11 @@
   .fl-foot-well > .working {
     border-radius: var(--r-field);
   }
+  /* the download bar ends at the Cancel's words: the quiet button's 16 px inset and the row's own 6 px, so the bar's
+     end and Cancel's text end share one line in the gate's well */
+  .working:has(> .working-acts > .fl-install > .fl-bar) {
+    padding-inline-end: calc(var(--s4) + var(--s1-5));
+  }
   .fl-ready {
     @apply text-small-row text-muted;
     min-height: var(--size-control);
@@ -152,6 +157,10 @@
     justify-content: flex-end;
     gap: var(--s1) var(--s2);
   }
+  /* a row of 36 px controls has no text to hide the body's 2 px gap: the divider needs its space below too */
+  .fl-gate-act:has(.fl-gate-input) {
+    padding-bottom: var(--s1);
+  }
   .fl-gate-words {
     @apply text-ui text-primary;
     flex: 1 1 var(--working-text-min);
@@ -163,6 +172,12 @@
   }
   .fl-gate-cancel {
     order: 3;
+  }
+  /* in the device state the act stands three lines tall, so Cancel sits on the code's line: centred on its line box
+     (the code's own line height less the button's, halved, plus the words' 8 px top) */
+  .fl-gate-body[data-state="device"] .fl-gate-cancel {
+    align-self: flex-start;
+    margin-top: calc(var(--s2) + (var(--lh-lead-narrow) * var(--k) - var(--size-control)) / 2);
   }
   .fl-gate-why {
     color: var(--muted);
@@ -198,7 +213,6 @@
   }
   .fl-way {
     color: var(--primary);
-    padding-inline: var(--s2);
   }
   .fl-way-quiet {
     color: var(--muted);

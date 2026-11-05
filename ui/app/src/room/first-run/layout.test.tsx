@@ -51,6 +51,30 @@ test("the gate's quiet buttons wrap their words: the button's nowrap gives way",
   expect(wraps(button("Use an API key or my firm's account"))).toBe(true);
 });
 
+test("the link rows take the message's inset as a utility, which the small button's px-s3 can't beat", async () => {
+  await mountFirstRun({ first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })] });
+  expect(button("Use ChatGPT instead")?.className.split(/\s+/)).toContain("px-s2");
+  expect(button("Use an API key or my firm's account")?.className.split(/\s+/)).toContain("px-s2");
+  expect(rule(".fl-way")).not.toContain("padding");
+});
+
+test("the API key row keeps the same space below it as above: its divider stands clear of the controls", () => {
+  expect(rule(".fl-gate-act:has(.fl-gate-input)")).toContain("padding-bottom: var(--s1)");
+  expect(rule(".fl-gate-body")).toContain("gap: var(--s0-5)");
+});
+
+test("the device code's Cancel sits on the code's line, centred on its line box", () => {
+  const cancel = rule('.fl-gate-body[data-state="device"] .fl-gate-cancel');
+  expect(cancel).toContain("align-self: flex-start");
+  expect(cancel).toContain("var(--lh-lead-narrow) * var(--k) - var(--size-control)");
+});
+
+test("the download bar ends on Cancel's words: the row's end is the quiet button's inset plus its own", () => {
+  expect(rule(".working:has(> .working-acts > .fl-install > .fl-bar)")).toContain(
+    "padding-inline-end: calc(var(--s4) + var(--s1-5))",
+  );
+});
+
 test("the foot keeps the welcome's scrollbar gutter, so the working line shares the button's edge", () => {
   expect(rule(".fl-welcome")).toContain("scrollbar-gutter: stable");
   expect(rule(".fl-foot")).toContain("scrollbar-gutter: stable");
