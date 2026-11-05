@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-pub use async_channel::{RecvError, TryRecvError};
+use async_channel::{RecvError, TryRecvError};
 
 use super::login_link::LoginSplit;
 
