@@ -4,8 +4,8 @@
 //! `codex-acp` ids, and once under the `fake-agent` id, which has no kind and still records.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, PageVia, PageVisited, StopReason, StreamId, ToolCallId, WebResult,
-    WebSearchRecorded,
+    AgentId, DomainEvent, PageVia, PageVisited, StopReason, StreamId, TextOrBlob, ToolCallContent,
+    ToolCallId, WebResult, WebSearchRecorded,
 };
 
 use crate::browser::Sequence;
@@ -131,6 +131,153 @@ fn a_claude_search_is_one_record_with_its_links() {
     events.until_caught_up();
     assert_eq!(searches(&events), logged, "the reopened thread replays it");
     host.shutdown();
+}
+
+/// The 18 links of the live Claude search, in order: the `Links:` array of its `rawOutput`.
+fn live_results() -> Vec<WebResult> {
+    vec![
+        WebResult::new(
+            "Supreme Court judgment digest 1: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026000/cheque-dishonour-complaint-01",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 2: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-02/section-138-cheque-dishonour-judgment-report-1037",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 3: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-03/section-138-cheque-dishonour-judgment-report-1074",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 4: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026003/cheque-dishonour-complaint-04",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 5: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-05/section-138-cheque-dishonour-judgment-report-1148",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 6: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-06/section-138-cheque-dishonour-judgment-report-1185",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 7: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026006/cheque-dishonour-complaint-07",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 8: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-08/section-138-cheque-dishonour-judgment-report-1259",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 9: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-09/section-138-cheque-dishonour-judgment-report-1296",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 10: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026009/cheque-dishonour-complaint-10",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 11: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-11/section-138-cheque-dishonour-judgment-report-1370",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 12: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-12/section-138-cheque-dishonour-judgment-report-1407",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 13: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026012/cheque-dishonour-complaint-13",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 14: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-14/section-138-cheque-dishonour-judgment-report-1481",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 15: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-15/section-138-cheque-dishonour-judgment-report-1518",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 16: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://sci.gov.in/judgments/section-138/2026015/cheque-dishonour-complaint-16",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 17: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-17/section-138-cheque-dishonour-judgment-report-1592",
+        ),
+        WebResult::new(
+            "Supreme Court judgment digest 18: Negotiable Instruments Act, 1881, cheque dishonour and section 138 proceedings in the quarter",
+            "https://www.example.com/digests/negotiable-instruments/quarter-18/section-138-cheque-dishonour-judgment-report-1629",
+        ),
+    ]
+}
+
+/// Stage B's live Claude `WebSearch` (claude-agent-acp 0.89.1): the call starts with no `rawInput`,
+/// its title and `rawInput {query, mode}` come in later updates, and the completed `rawOutput` is
+/// over the inline limit, so it goes to a blob. One record: the query without `mode`, all 18
+/// results in order, and the call's id.
+#[test]
+fn a_live_shaped_claude_search_records_its_query_and_all_results() {
+    let run = one_turn("web_claude_live", CLAUDE, "claude-web-search-live");
+    let logged = searches(&run.events);
+    assert_eq!(logged.len(), 1, "{}", run.events.dump());
+    let search = &logged[0];
+    assert_eq!(
+        search.query,
+        "Supreme Court latest judgment Section 138 Negotiable Instruments Act 2026"
+    );
+    assert_eq!(search.results, live_results(), "{}", run.events.dump());
+    assert_eq!(search.agent, agent(CLAUDE));
+    assert_eq!(search.turn, run.turn);
+    assert_eq!(search.tool_call, started(&run.events, "tc-search"));
+    let blobbed = run.events.events().any(|event| {
+        matches!(event, DomainEvent::ToolCallUpdated(updated)
+        if updated.patch.status == Some(clauseo_protocol::ToolCallStatus::Completed)
+            && updated.patch.content.as_deref().is_some_and(|content| {
+                content.iter().any(|item| matches!(
+                    item,
+                    ToolCallContent::Text { text: TextOrBlob::Blob(_) }
+                ))
+            }))
+    });
+    assert!(
+        blobbed,
+        "the completed result is a blob:\n{}",
+        run.events.dump()
+    );
+    run.host.shutdown();
+}
+
+/// Two `WebSearch` calls in one turn, each shaped as live: two records, one per call, each with
+/// its own query, results and call id.
+#[test]
+fn two_live_claude_searches_in_one_turn_are_two_records() {
+    let run = one_turn(
+        "web_claude_live_twice",
+        CLAUDE,
+        "claude-web-search-live-twice",
+    );
+    let logged = searches(&run.events);
+    assert_eq!(logged.len(), 2, "{}", run.events.dump());
+    assert_eq!(logged[0].query, "section 138 NI Act Supreme Court");
+    assert_eq!(
+        logged[0].results,
+        vec![
+            WebResult::new("Judgment one", "https://sci.gov.in/judgment/one"),
+            WebResult::new("Judgment two", "https://www.example.com/judgment/two"),
+        ]
+    );
+    assert_eq!(logged[0].tool_call, started(&run.events, "tc-first"));
+    assert_eq!(logged[1].query, "section 138 NI Act date of judgment");
+    assert_eq!(
+        logged[1].results,
+        vec![WebResult::new(
+            "Judgment three",
+            "https://sci.gov.in/judgment/three"
+        )]
+    );
+    assert_eq!(logged[1].tool_call, started(&run.events, "tc-second"));
+    assert!(logged.iter().all(|search| search.turn == run.turn));
+    run.host.shutdown();
 }
 
 /// Check 1, Claude `WebSearch` with no parseable `Links:` array: the results are the `Title (url)`
