@@ -120,6 +120,8 @@ pub(crate) enum After {
     Requeued(TurnId),
     /// A queued turn's removal (`TurnEnded { Cancelled }`).
     Removed(TurnId),
+    /// A prompt queued held while `stop_agents` holds its agent (`sign_in.rs`).
+    Held(TurnId),
 }
 
 pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQueue> {
@@ -202,6 +204,9 @@ fn route(
     }
     let running = turn_running(actor, thread);
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
+    if running.is_none() && !queued && super::sign_in::holds(actor, thread) {
+        return sign_in::hold_prompt(actor, ctx, thread, blocks);
+    }
     match (delivery, running) {
         (DeliveryRequest::Queue, None) if !queued => {
             if let Some(queue) = queue(actor, thread) {
@@ -265,7 +270,7 @@ fn append(
         actor,
         ctx,
         thread,
-        ahead,
+        Some(ahead),
         blocks,
         DeliveryRequest::Queue,
         |turn, message, content, queue| {
@@ -289,7 +294,7 @@ fn jump(
         actor,
         ctx,
         thread,
-        running,
+        Some(running),
         blocks,
         delivery,
         |turn, message, content, queue| {
@@ -305,13 +310,14 @@ fn jump(
 }
 
 /// One commit of a new turn's `UserMessage`, its `TurnQueued` behind `ahead` of its own
-/// thread, `SteerResolved { SentNow }` for a steer, and the receipt (`PromptAccepted`). `place`
-/// puts the turn in the queue before the commit is sent (taken out again if it is refused).
+/// thread (behind the thread itself with none), `SteerResolved { SentNow }` for a steer, and the
+/// receipt (`PromptAccepted`). `place` puts the turn in the queue before the commit is sent
+/// (taken out again if it is refused).
 fn log_queued(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
-    ahead: TurnId,
+    ahead: Option<TurnId>,
     blocks: Vec<ContentBlock>,
     delivery: DeliveryRequest,
     place: impl FnOnce(TurnId, MessageId, Vec<ContentBlock>, &mut ThreadQueue) -> After,
@@ -320,7 +326,7 @@ fn log_queued(
     let turn: TurnId = actor.ids.mint(now)?;
     let message: MessageId = actor.ids.mint(now)?;
     let built = build::user_message(turn, message, None, blocks.clone(), delivery.into());
-    let waits = TurnQueued::new(thread, turn, thread, Some(ahead))
+    let waits = TurnQueued::new(thread, turn, thread, ahead)
         .map_err(|error| Error::Internal(error.to_string()))?;
     let outcome = CommandOutcome::PromptAccepted { turn, message };
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
@@ -394,7 +400,11 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             steer::send(actor, thread, *ask);
         }
         (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
-        (After::Appended(turn) | After::Jumped(turn) | After::Requeued(turn), false) => {
+        (After::Held(_), true) => counting::question_sent(actor, thread, Delivery::Queued),
+        (
+            After::Appended(turn) | After::Jumped(turn) | After::Requeued(turn) | After::Held(turn),
+            false,
+        ) => {
             drop_turn(actor, thread, turn);
         }
         (After::Edited { turn, old }, false) => put_content(actor, thread, turn, old),
@@ -425,9 +435,9 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
 }
 
 /// Starts the head when nothing runs, no end or steer is outstanding, and the queue is not
-/// held (a head sent now starts even then).
+/// held (a head sent now starts even then), unless `stop_agents` holds the agent.
 pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
-    if host_stopping(actor) {
+    if host_stopping(actor) || super::sign_in::holds(actor, thread) {
         return;
     }
     let Some(state) = state(actor, thread) else {

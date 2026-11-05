@@ -37,6 +37,7 @@ mod text;
 mod undo;
 mod undo_preview;
 mod updates;
+mod wide;
 mod writer;
 
 use std::collections::VecDeque;
@@ -60,7 +61,6 @@ pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub use launch_checks::PackRequest;
-pub(crate) use launch_checks::RunSweep;
 pub(crate) use out::flush_text;
 pub(crate) use queue::queue_held;
 pub(crate) use restore::{
@@ -69,6 +69,7 @@ pub(crate) use restore::{
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
 pub(crate) use undo_preview::preview_undo;
+pub(crate) use wide::TurnPath;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -304,6 +305,8 @@ enum TimerKind {
     LimitRead(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
+    /// A `stop_agents` wait ran out (`sign_in/stops.rs`); the thread is any of its agent's.
+    StopWait(u64),
 }
 
 /// What a matter job of a turn (a checkpoint, an undo) continues with.
@@ -380,6 +383,7 @@ pub(crate) fn timer(actor: &mut Actor, timer: TurnTimer) {
         TimerKind::Cancel(turn) => cancel::on_cancel_timer(actor, thread, turn),
         TimerKind::LimitRead(turn) => end::on_limit_read_timer(actor, thread, turn),
         TimerKind::Steer(message) => queue::on_steer_timer(actor, thread, message),
+        TimerKind::StopWait(id) => sign_in::stop_timer(actor, id),
     }
 }
 

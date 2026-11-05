@@ -340,9 +340,10 @@ impl HostHandle {
             .await
     }
 
-    /// Stops every live agent of `agent` that is not in a turn, so the next question launches
-    /// with the new login, and resumes, once, each queue held for that agent's sign-in (a turn
-    /// that failed with `agent.auth_required`, or one [`Self::stop_agents`] cancelled). Rust
+    /// Lifts [`Self::stop_agents`]' hold on `agent`, stops every live agent of it that is not in
+    /// a turn, so the next question launches with the new login, and resumes, once, each queue
+    /// held for that agent's sign-in (a turn that failed with `agent.auth_required`, one
+    /// [`Self::stop_agents`] cancelled, or a prompt sent while it held the agent). Rust
     /// only: desktop calls it on `SignedIn` and after a key, endpoint or source change. A
     /// second call resumes nothing more. A lawyer's `ResumeQueue` before it resumes the queue
     /// as usual, and the call then leaves it alone.
@@ -354,9 +355,19 @@ impl HostHandle {
     /// Step 1 of the leave order (decision record 0048, ruling 1): cancels each turn of
     /// `agent` through the Cancel path, puts it back at the head of its queue held for the
     /// sign-in, and stops every live agent of that id, launches being prepared included, so no
-    /// process of it runs while the login link changes. Rust only. [`Self::restart_agents`]
-    /// relaunches and resumes.
-    pub async fn stop_agents(&self, agent: AgentId) -> Result<(), HostError> {
+    /// process of it runs while the login link changes. Rust only.
+    ///
+    /// Answers once every process of the id has exited ([`AgentsStopped::Exited`]), or after
+    /// the bounded wait (10 s, past the shutdown ladder's 7 s) or a process that outlived its
+    /// kill ([`AgentsStopped::TimedOut`]); it never hangs. From then on the id is held, in
+    /// memory only (a host restart clears it): nothing of it launches, and a prompt for it
+    /// queues held for the sign-in, as #408 holds a queue. [`Self::restart_agents`] lifts the
+    /// hold, relaunches and resumes once; desktop calls it too when its leave flow is
+    /// abandoned.
+    ///
+    /// [`AgentsStopped::Exited`]: crate::AgentsStopped::Exited
+    /// [`AgentsStopped::TimedOut`]: crate::AgentsStopped::TimedOut
+    pub async fn stop_agents(&self, agent: AgentId) -> Result<crate::AgentsStopped, HostError> {
         self.call(|reply| Request::SignIn(SignInRequest::Stop { agent, reply }))
             .await
     }

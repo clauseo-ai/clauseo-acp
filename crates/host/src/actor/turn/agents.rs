@@ -149,10 +149,15 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 }
 
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
-/// writes) off the actor first (`launch_checks.rs`).
+/// writes) off the actor first (`launch_checks.rs`). A launch the sign-in refuses fails what
+/// waits for it (`sign_in::launch_refusal`).
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
+        return;
+    }
+    if let Some(refused) = super::sign_in::launch_refusal(actor, thread) {
+        fail_all(actor, thread, waiting, &refused);
         return;
     }
     // A new session attaches after the old one's detach, which a waiting turn still holds.

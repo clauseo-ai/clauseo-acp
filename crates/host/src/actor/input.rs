@@ -15,6 +15,7 @@ use futures::channel::oneshot;
 use super::limits::LimitsInput;
 use super::turn::{RestoreAsk, TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
+use crate::agent::login_link::AgentsStopped;
 use crate::error::Error;
 use crate::handle::{AppSubscription, EventSubscription, Subscription};
 use crate::matter_worker::MatterReply;
@@ -29,7 +30,10 @@ pub(crate) enum SignInRequest {
     /// `HostHandle::restart_agents`.
     Restart { agent: AgentId, reply: Reply<()> },
     /// `HostHandle::stop_agents`.
-    Stop { agent: AgentId, reply: Reply<()> },
+    Stop {
+        agent: AgentId,
+        reply: Reply<AgentsStopped>,
+    },
     /// `HostHandle::set_reused_login`.
     Reused {
         agent: AgentId,

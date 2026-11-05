@@ -77,6 +77,15 @@ pub struct LoginSplit {
     pub lawyers_file_gone: bool,
 }
 
+/// How `HostHandle::stop_agents` ended its wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentsStopped {
+    /// Every process of the agent id exited.
+    Exited,
+    /// The wait ran out first, or a process outlived its kill: it is reaped later.
+    TimedOut,
+}
+
 /// What a launch's check found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Seen {
@@ -108,6 +117,9 @@ pub(crate) struct SignIn {
     pub(crate) reused: BTreeSet<AgentId>,
     /// What each Codex agent's last launch's check found.
     pub(crate) seen: BTreeMap<AgentId, Seen>,
+    /// The agents `HostHandle::stop_agents` holds until `restart_agents`: none of them
+    /// launches, and their prompts queue held. In memory only: a host restart clears it.
+    pub(crate) held: BTreeSet<AgentId>,
 }
 
 impl Default for SignIn {
@@ -120,6 +132,7 @@ impl Default for SignIn {
             receiver,
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
+            held: BTreeSet::new(),
         }
     }
 }
@@ -131,6 +144,7 @@ impl std::fmt::Debug for SignIn {
             .field("again", &self.again.is_some())
             .field("reused", &self.reused)
             .field("seen", &self.seen)
+            .field("held", &self.held)
             .finish_non_exhaustive()
     }
 }

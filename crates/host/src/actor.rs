@@ -126,8 +126,8 @@ pub(crate) struct Actor {
     pub(crate) browser_install: browser_install::BrowserInstall,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
-    /// The start-up sweep of leftover `run/` folders, done by the first launch's prep.
-    pub(crate) run_sweep: turn::RunSweep,
+    /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
+    pub(crate) turn_path: turn::TurnPath,
     pub(crate) refused_folders: Vec<PathBuf>,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
     /// names it the same way).
