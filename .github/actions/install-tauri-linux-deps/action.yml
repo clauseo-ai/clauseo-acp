@@ -11,12 +11,14 @@
 #   which the hosted runners set) and the package list. On a hit they install with `dpkg -i` and no
 #   network: on 2026-11-05 azure.archive.ubuntu.com took 15 to 30 minutes over these ~160 packages
 #   instead of under one, and timed out fast-lane in a merge group (#469). A hit counts only if every
-#   package asked for is then installed; otherwise, and on a miss, apt-get runs as before, downloading
-#   into the cache folder, and the cache is saved right after the install (not at the job's end, so a
-#   job that fails later still leaves it). The files are what this fresh runner lacked, so one key is
-#   one image and one package list.
-# - Where a cache is visible: one saved on main (the nightly run, or apt-deb-cache.yml) to every run;
-#   one saved by a pull request only to that pull request; one saved by a merge group to no one.
+#   package asked for is then installed; otherwise, and on a miss, apt-get runs as before (apt checks
+#   the archive's signatures as it downloads). The files are what this fresh runner lacked, so one key
+#   is one image and one package list.
+# - Who writes an entry: only a run on main started by schedule or workflow_dispatch (ci.yml's nightly,
+#   apt-deb-cache.yml), right after its install, so a job that fails later still leaves it. Pull
+#   requests (forks included) and merge groups only restore, and GitHub lets a run restore only
+#   entries of its own ref and of main, so everything they can restore was written on main. An entry
+#   is never overwritten: a key is written once.
 # - The release workflow passes `cache: "false"`: a release build installs from the Ubuntu archive,
 #   never from a cache entry.
 
@@ -102,7 +104,10 @@ runs:
         fi
 
     - name: Save the downloaded .deb files
-      if: inputs.cache == 'true' && steps.install.outputs.save == 'true'
+      # Only main's scheduled and on-demand runs write entries (see the top of this file).
+      if: >-
+        inputs.cache == 'true' && steps.install.outputs.save == 'true' && github.ref == 'refs/heads/main'
+        && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.key.outputs.dir }}
