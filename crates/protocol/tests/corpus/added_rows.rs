@@ -101,6 +101,13 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (241, 0x55ef_4338_4788_deed),
     ),
     (
+        "added/turn_failed-MatterFolderTooDeep",
+        include_bytes!("added/turn_failed-MatterFolderTooDeep.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderTooDeep.msgpack"),
+        (341, 0xf1bb_746e_5c80_9733),
+        (242, 0x436a_cf6f_c2a5_6dab),
+    ),
+    (
         "added/agent_named",
         include_bytes!("added/agent_named.jsonl"),
         include_bytes!("added/agent_named.msgpack"),

@@ -16,8 +16,8 @@ use clauseo_matters::{
     Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_in,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
-    RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, ErrorCode, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId,
+    MatterPath, RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
@@ -529,6 +529,7 @@ fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
 /// spends the relink whatever it finds; every later open is answered as it is.
 fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, Error> {
     if let Slot::Unopened { id, folder, relink } = slot {
+        refuse_too_deep(folder.as_path())?;
         // Spent by this open whatever it finds: a later open may meet a folder another matter
         // has claimed since the registry was taken.
         let relink = relink.take();
@@ -553,6 +554,21 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
             "a matter job came before the matter was created, imported or opened".to_owned(),
         )),
     }
+}
+
+/// Refuses `folder` when Windows can't start programs in it: `matter.folder_too_deep`, on
+/// Windows only (`clauseo_matters::is_too_deep`). An open checks it before the matter is opened,
+/// and a turn's launch before its agent's home or any session folder is made, so a matter moved
+/// or renamed deeper is refused where it is opened or launched, and stays listed. Its file
+/// system calls: none.
+pub(crate) fn refuse_too_deep(folder: &Path) -> Result<(), Error> {
+    if clauseo_matters::is_too_deep(folder) {
+        return Err(Error::refused(
+            ErrorCode::MatterFolderTooDeep,
+            "the matter's path is too long for Windows to start programs in it",
+        ));
+    }
+    Ok(())
 }
 
 mod checkpoints;

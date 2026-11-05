@@ -1470,6 +1470,8 @@ export type ErrorCode =
 "signin.key_in_use" | 
 /** Sign-in is refused: an endpoint is set in Settings. */
 "signin.endpoint_in_use" | 
+/** The matter folder's path is too long for Windows to start programs in it: move the folder closer to the top of its drive, or choose a higher folder as the matter. */
+"matter.folder_too_deep" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

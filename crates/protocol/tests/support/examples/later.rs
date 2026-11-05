@@ -36,6 +36,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninEndpointInUse,
             "claude-acp's sign-in is refused: an endpoint is set in Settings",
         ),
+        failed(
+            ErrorCode::MatterFolderTooDeep,
+            "too deep for Windows to start programs in",
+        ),
     ]
 }
 

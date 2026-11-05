@@ -46,8 +46,8 @@ impl Matter {
     /// Creates matter `new`: its folder (which must not exist; its parents are made), its
     /// `matter.json`, its git dir and a root `import` checkpoint of the empty folder. Refuses,
     /// before anything is made, a folder that is, holds or sits inside the matters root or a
-    /// refused tree, as import does ([`refuse::check_protected`]; `matter.folder_in_matters_root`
-    /// for the data folder).
+    /// refused tree, or on Windows a path too deep to start programs in, as import does
+    /// ([`refuse::check_protected`]; `matter.folder_in_matters_root` for the data folder).
     pub fn create(settings: Settings, new: NewMatter) -> Result<Self, Error> {
         refuse_marker(new.marker)?;
         refuse::check_protected(&new.folder, &settings)?;

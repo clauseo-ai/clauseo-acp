@@ -328,6 +328,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             job,
             move || {
                 data_folder::refuse_data_folder(&stored, &data)?;
+                // The working folder the agent starts in, as spawn takes it (`session_folder`).
+                crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match codex_home {

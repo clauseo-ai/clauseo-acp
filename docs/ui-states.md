@@ -306,7 +306,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
 | Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
-| Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot` | no |
+| Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot`, `ErrorCode::MatterFolderTooDeep` (Windows) | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked`, `ErrorCode::SettingsRefused`, `ErrorCode::SettingsKeyStored` | no |
 | Agent install (0048) | `ErrorCode::AgentInstallOffline`, `ErrorCode::AgentInstallDiskFull`, `ErrorCode::AgentInstallFailed` | yes |

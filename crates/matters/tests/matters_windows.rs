@@ -2,7 +2,8 @@
 //! folders. A drive root is refused; the probe finds a file with the offline attribute
 //! cloud-only; a file or folder another program holds open without sharing fails a read
 //! with an I/O error, never a finding that the file is missing or unchanged; and a restore's
-//! preview answers with such a file locked, while the restore refuses with it.
+//! preview answers with such a file locked, while the restore refuses with it. A folder whose
+//! path is too deep for Windows to start programs in is refused as `TooDeep`.
 
 #![cfg(windows)]
 #![expect(
@@ -17,6 +18,7 @@ mod windows {
     use std::collections::BTreeSet;
     use std::fs::{File, OpenOptions};
     use std::io::{self, Write};
+    use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::AtomicBool;
@@ -26,7 +28,7 @@ mod windows {
     use clauseo_matters::{
         CheckpointOutcome, DEFAULT_MARKER, Error, Imported, Limits, Matter, MissingReason,
         NewMatter, OsProbe, PlaceholderProbe, Refusal, Restore, RestoreFiles, Retention, Settings,
-        TurnMeta, check_place,
+        TurnMeta, WINDOWS_FOLDER_LIMIT, check_place,
     };
     use clauseo_protocol::{
         CheckpointId, ErrorCode, MatterId, MatterPath, SkippedFile, SkippedFileReason, Timestamp,
@@ -212,6 +214,44 @@ mod windows {
             Error::FolderRefused { reason, .. } => reason,
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    /// A folder `units` UTF-16 units long, made under `base` in names of up to 40 units: the
+    /// path as Windows counts it.
+    fn folder_of_units(base: &Path, units: usize) -> PathBuf {
+        let mut folder = base.to_owned();
+        loop {
+            let used = folder.as_os_str().encode_wide().count();
+            let left = units - used - 1;
+            if left <= 40 {
+                let name = "f".repeat(left);
+                folder.push(&name);
+                std::fs::create_dir_all(&folder).unwrap();
+                return folder;
+            }
+            folder.push("d".repeat(40));
+            std::fs::create_dir_all(&folder).unwrap();
+        }
+    }
+
+    /// A folder over the Windows limit is refused as too deep by the place check, and one at the
+    /// limit or well under it is not. The folders are made under the temp dir; std makes the long
+    /// paths itself.
+    #[test]
+    fn a_folder_too_deep_for_windows_is_refused_as_too_deep() {
+        let dir = TestDir::new("too-deep");
+        let deep = folder_of_units(dir.path(), WINDOWS_FOLDER_LIMIT + 1);
+        assert_eq!(
+            deep.as_os_str().encode_wide().count(),
+            WINDOWS_FOLDER_LIMIT + 1
+        );
+        let err = check_place(&deep, &[]).unwrap_err();
+        assert_eq!(refusal(err), Refusal::TooDeep);
+
+        let at_limit = folder_of_units(dir.path(), WINDOWS_FOLDER_LIMIT);
+        check_place(&at_limit, &[]).unwrap();
+        let short = folder_of_units(dir.path(), 200);
+        check_place(&short, &[]).unwrap();
     }
 
     /// The drive root, plain and in the verbatim form, is refused by the place check as a drive

@@ -209,6 +209,9 @@ error_codes! {
         API key is stored.";
     SigninEndpointInUse = "signin.endpoint_in_use", retryable: false, meaning: "Sign-in is \
         refused: an endpoint is set in Settings.";
+    MatterFolderTooDeep = "matter.folder_too_deep", retryable: false, meaning: "The matter \
+        folder's path is too long for Windows to start programs in it: move the folder closer \
+        to the top of its drive, or choose a higher folder as the matter.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

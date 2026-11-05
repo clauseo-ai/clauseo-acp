@@ -368,6 +368,14 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (folder-rights FR18)"
   },
+  "U3-err-matter.folder_too_deep": {
+    "en": "This matter's folder is too deep for Windows to start programs in it. Move the folder nearer the top of its drive, or choose a higher folder as the matter.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
   "U3-err-matter.folder_no_permissions": {
     "en": "Codex can't work on a drive without file permissions. Move the matter to this computer.",
     "hi": null,

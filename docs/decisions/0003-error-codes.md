@@ -80,6 +80,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_in_matters_root` | The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. | no | host (0022) |
 | `matter.folder_network` | The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
 | `matter.folder_no_permissions` | The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
+| `matter.folder_too_deep` | The matter folder's path is too long for Windows to start programs in it: move the folder closer to the top of its drive, or choose a higher folder as the matter. | no | host (matters' refusal on create, import and the folder query; the host on open and at a launch, on Windows) |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |
 | `transport.too_large` | The message is larger than the transport accepts. | no | transport_ws, desktop |
 | `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, `SetSkillPack`; decision records 0017, 0030, 0036 and 0040) |

@@ -358,6 +358,7 @@ impl RefusalNames {
             }
             Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
             Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
+            Refusal::TooDeep => ErrorCode::MatterFolderTooDeep,
         };
         Error::refused(code, error.to_string())
     }

@@ -1500,7 +1500,8 @@ expression: counts_schema()
         "signin.login_shared",
         "signin.firm_managed",
         "signin.key_in_use",
-        "signin.endpoint_in_use"
+        "signin.endpoint_in_use",
+        "matter.folder_too_deep"
       ],
       "type": "string"
     },
