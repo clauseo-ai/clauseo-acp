@@ -13,21 +13,19 @@
 //! While the queue is held for the sign-in, or `HostHandle::stop_agents` holds the agent
 //! (decision record 0048, P4d), a hold applies ([`applies`]): a prompt sent while nothing runs
 //! queues at the end, held and marked the same way, whatever its delivery (queue, send now, or a
-//! steer with nothing to join), so it is not lost and nothing launches ([`hold_prompt`]); a
-//! prompt that joins the queue keeps it held and marked. Under that hold a lawyer's `ResumeQueue`
-//! or `SendQueuedNow` changes nothing (`commands.rs`). `restart_agents` lifts the hold and
-//! resumes the queue once, through [`resume`].
+//! steer with nothing to join), so it is not lost and nothing launches (`hold.rs`, which an
+//! install's hold shares); a prompt that joins the queue keeps it held and marked. Under
+//! `stop_agents`' hold a lawyer's `ResumeQueue` or `SendQueuedNow` changes nothing
+//! (`commands.rs`). `restart_agents` lifts the hold and resumes the queue once, through
+//! [`resume`].
 
 use clauseo_protocol::TurnQueued;
 use clauseo_protocol::{ContentBlock, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId};
 
 use super::super::super::Actor;
-use super::super::super::commands::CommandCtx;
 use super::super::out::Out;
 use super::super::{Then, host_stopping, lost};
-use super::{
-    After, Queued, drop_turn, log_queued, move_on, queue, refuse_full, sync_held, turn_ahead,
-};
+use super::{After, Queued, drop_turn, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
 
@@ -124,42 +122,6 @@ pub(super) fn applies(actor: &Actor, thread: ThreadId) -> bool {
             let queue = &entry.turn.queue;
             queue.held && queue.sign_in.is_some()
         })
-}
-
-/// A prompt sent while a hold for the sign-in applies and nothing runs, whatever its delivery:
-/// one commit of its `UserMessage { Queue }` and its `TurnQueued` behind the last queued turn
-/// (behind the thread itself when none waits), at the queue's end, and the queue held for the
-/// sign-in, the first turn waiting marked unless one is. Refused with `thread.queue_full` at
-/// the limit.
-pub(super) fn hold_prompt(
-    actor: &mut Actor,
-    ctx: CommandCtx,
-    thread: ThreadId,
-    blocks: Vec<ContentBlock>,
-) -> Result<(), Error> {
-    refuse_full(actor, thread)?;
-    tracing::info!(%thread, "a prompt queues held while its agent's login changes");
-    let ahead = turn_ahead(actor, thread);
-    log_queued(
-        actor,
-        ctx,
-        thread,
-        ahead,
-        blocks,
-        DeliveryRequest::Queue,
-        |turn, message, content, queue| {
-            queue.turns.push_back(Queued {
-                turn,
-                message,
-                content,
-                forced: false,
-            });
-            queue.held = true;
-            let first = queue.turns.front().map_or(turn, |head| head.turn);
-            queue.sign_in.get_or_insert(first);
-            After::Held(turn)
-        },
-    )
 }
 
 /// `restart_agents`' part for `thread`: a queue held for the sign-in moves on, once.

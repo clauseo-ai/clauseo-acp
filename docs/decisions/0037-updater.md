@@ -235,6 +235,9 @@ call before `install` stays a no-op seam until S22 merges.
   is stored queued, whatever its delivery, behind its own thread's turn or alone; none starts.
   When the install is taken back, each queue moves on as it would have. The machine always
   hears `TurnsCancelled`, also when no turn was left to cancel.
+  It is one of a thread's hold reasons with the sign-in's and `stop_agents`' (0048): one held
+  append, each lift removing only its own reason, nothing starting until none is left; with a
+  sign-in's hold too, the prompt queues as the sign-in's does.
 - **Timers.** One timer on the host clock; a fire the machine finds early re-arms.
 - **The jitter seed** comes from the clock at start; `HostConfig::with_update_jitter_seed` fixes
   it for tests, and `with_app_version` gives the app's version (desktop passes its own).
