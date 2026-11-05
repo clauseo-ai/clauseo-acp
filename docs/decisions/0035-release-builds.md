@@ -12,6 +12,10 @@ Windows exe between the link and the bundling, so `tauri-action`, which does bot
 not fit. The release secrets live only in GitHub environments, and no workflow that holds one may run
 for a pull request.
 
+**Signing for the beta.** Rohan, 2026-11-05: Windows ships unsigned for the beta; SignPath (S20a)
+stays deferred until there are users and funding. macOS will be notarised under an individual
+Developer ID.
+
 ## Decision
 
 - **One workflow,** `.github/workflows/release.yml`, started only by a pushed `v*` or `test-v*` tag

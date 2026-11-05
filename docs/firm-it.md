@@ -4,7 +4,8 @@ How to deploy, lock down and support Clauseo on Windows, and on Macs under MDM. 
 source: a file in this repo, a decision record, a test run or a vendor page. When a fact changes, the
 pull request that changes it changes this page too.
 
-Written for Clauseo 0.1.x (2026-11). Nothing here is signed yet: see [section 2](#2-signing).
+Written for Clauseo 0.1.x (2026-11). Nothing here is signed with a publisher certificate yet: see
+[section 2](#2-signing).
 
 ## 1. Which installer
 
@@ -18,6 +19,9 @@ Each release on GitHub ([decision 0035](decisions/0035-release-builds.md), "Arte
 | `Clauseo_<v>_aarch64.dmg`, `Clauseo_<v>_x64.dmg` | Macs (Apple silicon; Intel is tier 2) | `/Applications` |
 | `Clauseo_<v>_amd64.deb`, `Clauseo-<v>-1.x86_64.rpm` | Linux (tier 2). Updates come through your package manager only | |
 | `SHA256SUMS.txt` | The SHA-256 of every file above | |
+
+The install guides for the people at the firm, with each warning and the clicks past it:
+[Windows](install/windows.md) and [macOS](install/macos.md).
 
 Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages, in English only
 (decision 0035, "PR 2"). Seen on Windows Server 2025 (build 26100) on 2026-11-03, with the
@@ -68,13 +72,18 @@ user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
 
 ## 2. Signing
 
-- **Windows: unsigned** until SignPath approves the project. Windows shows "Unknown Publisher" in
-  the download warning and the UAC prompt (seen on the test machine above), SmartScreen may warn,
-  and AppLocker or WDAC publisher rules cannot name Clauseo yet. Once signed, the publisher will be
-  "SignPath Foundation".
-- **macOS: signed ad hoc**, not yet with a Developer ID or notarised, until the Apple developer
-  account exists (decision 0035, "Context"). So there is no Team ID yet for a privacy (PPPC)
-  profile; when there is one, it changes if the Apple account moves to an organisation.
+- **Windows: unsigned for the beta.** There is no code-signing certificate yet; one comes once
+  there are users and funding (Rohan, 2026-11-05, in decision 0035, "Signing for the beta"). Windows
+  shows "Unknown Publisher" in the download warning and the UAC prompt (seen on the test machine
+  above), SmartScreen warns, and AppLocker or WDAC publisher rules cannot name Clauseo. Check the
+  hash instead (below). The clicks past each warning are in [the Windows install
+  guide](install/windows.md).
+- **macOS: signed ad hoc for now**, with no Developer ID and not notarised (decision 0035,
+  "Context"). Release builds will be notarised under an individual Developer ID, "Developer ID
+  Application: Rohan Shiralkar", once it is set up (decision 0035, "Signing for the beta"). Until
+  then Gatekeeper blocks the first open: [the macOS install guide](install/macos.md) has the
+  clicks. There is no Team ID yet for a privacy (PPPC) profile; when there is one, it changes if
+  the Apple account later moves to an organisation.
 - **Check every download** against `SHA256SUMS.txt` from the same release:
   `sha256sum -c SHA256SUMS.txt --ignore-missing` on Linux or macOS (`shasum -a 256 -c` on older
   macOS), or `Get-FileHash .\Clauseo_<v>_x64-machine-setup.exe` in PowerShell and compare by eye.
@@ -86,8 +95,8 @@ user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
 - Allow `%PROGRAMFILES%\Clauseo\*` by **path**. Only administrators can write there, which is why
   firms with these rules need the per-machine installer: they usually block programs in
   user-writable folders such as `%LOCALAPPDATA%`.
-- Do not use **hash** rules: every release changes every hash. **Publisher** rules wait for
-  signing (section 2).
+- Do not use **hash** rules: every release changes every hash. **Publisher** rules cannot name
+  Clauseo while it is unsigned (section 2).
 - Coming (stage D): Clauseo will download Node and the agents into each user's data folder,
   `%LOCALAPPDATA%\ai.clauseo.desktop\`, which default AppLocker rules block. Allow that path, or
   use the IT-installed runtime under Program Files once its policy key lands (`install.bundle`,
@@ -129,6 +138,20 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
 - **Data stays local:** everything Clauseo keeps per user is in `%LOCALAPPDATA%\ai.clauseo.desktop`
   (`crates/settings/src/locations.rs`, `Locations::resolve_for`), never in the roaming profile.
   New matters go in `Documents\Clauseo` unless `matters.default_location` says otherwise.
+- **Keep Clauseo's data folder out of sync roots and roaming profiles** (OneDrive, iCloud Drive,
+  Dropbox, a roaming profile): it holds the agents' logins as plain files, e.g. Codex's
+  `agents\codex-acp\home\auth.json` in it. By default the folder is in none of them; the risk is
+  a folder redirection, or `CLAUSEO_DATA_DIR`, putting it there
+  ([decision 0048](decisions/0048-signin-on-the-wire.md), "Consequences"). Section 5's persistent
+  profile container is a different thing: keep the folder there.
+- **The host log:** `logs\host.log` in the data folder (on a Mac,
+  `~/Library/Application Support/ai.clauseo.desktop/logs/host.log`). At 5 MB it rolls over to
+  `host.1.log`, then `host.2.log`: three files, 15 MB at most. It holds Clauseo's own warnings and
+  errors, and its own start, stop, agent launch and matter open lines, by id and code only: no
+  matter content and no file paths or names. It stays on the machine and is never uploaded. On
+  Windows the uninstaller removes it with the rest of the uninstalling user's data folder when
+  the "Also delete conversations, saved versions and settings" box is ticked; on a Mac it stays
+  with the data folder ([decision 0047](decisions/0047-host-log-file.md)).
 
 ## 5. Citrix and RDS
 
