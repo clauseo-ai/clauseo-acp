@@ -11,9 +11,10 @@
 //! to fetch them. Every other byte of the lock is the snapshot's, so the receipt's `<hash>` is
 //! unchanged. There is no `npm cache add` step (decision 0033, 2026-11-04).
 //!
-//! Every npm run starts through the launcher as `node <npm-cli.js> …`, with `NODE_OPTIONS`
-//! empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global` files as its user
-//! and global config (npm refuses one file for both).
+//! Every npm run starts through the launcher as `node --single-threaded <npm-cli.js> …` (no V8
+//! background tasks, so Node cannot deadlock as it exits: `NODE_SINGLE_THREADED`), with
+//! `NODE_OPTIONS` empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global`
+//! files as its user and global config (npm refuses one file for both).
 //! `npm ci` runs with `--offline --ignore-scripts --no-bin-links --no-audit --no-fund` and
 //! `--allow-file=all` (npm 11 reads `npm_config_allow_file` from the environment the launch
 //! inherits, and `none` there would refuse the `file:` tarballs; npm 10 accepts the flag).
@@ -43,6 +44,13 @@ use crate::write;
 
 /// The longest one npm run may take.
 const NPM_LIMIT: Duration = Duration::from_mins(10);
+/// V8's flag that turns off its background tasks, given to the Node that runs npm before
+/// `npm-cli.js`. Node can deadlock as it exits when a background compile job needs a GC on the
+/// main thread while that thread waits for the job (nodejs/node#54918, open in Node 24): npm has
+/// finished its work, and the process never ends. On a loaded machine about one `npm ci` in a
+/// few thousand did that; with no background tasks there is nothing to wait for. npm does not
+/// need them: its run is short and mostly file work.
+const NODE_SINGLE_THREADED: &str = "--single-threaded";
 /// The flags `npm ci` runs with, besides the common ones.
 const CI_FLAGS: [&str; 6] = [
     "--offline",
@@ -230,7 +238,10 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
     /// Runs `node <npm-cli.js> <args> <common flags>` in `cwd`.
     async fn run(&self, what: &str, args: Vec<OsString>, cwd: &Path) -> Result<(), TryError> {
         let config = &self.job.config;
-        let mut argv = vec![self.cli.as_os_str().to_owned()];
+        let mut argv = vec![
+            OsString::from(NODE_SINGLE_THREADED),
+            self.cli.as_os_str().to_owned(),
+        ];
         argv.extend(args);
         argv.extend(self.common.iter().cloned());
         let refused = |err: clauseo_process::Error| {
