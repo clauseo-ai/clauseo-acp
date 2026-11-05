@@ -26,6 +26,7 @@ import type {
 import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
 import { stamp } from "./clock.ts";
 import { isolated, shownOf } from "./content.ts";
+import { noticeLine } from "./notice-words.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { askedAs, backgroundOf, outcomeOf, runningIn } from "./steer.ts";
 import { LiveSteerMark, RequeuedLine, SteerMarkRow } from "./steer-rows.tsx";
@@ -237,7 +238,9 @@ function AgentContent({ id, entry }: { id: EntryId; entry: AgentContentEntry }) 
   );
 }
 
+/** A host notice in the app's words for its kind; its own text for an agent's, or a kind this version doesn't know. */
 function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
+  const w = useThreadWords();
   return (
     <p
       data-testid="notice"
@@ -246,7 +249,7 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
       className={`${ROW} ${QUIET}`}
       dir="auto"
     >
-      {entry.text}
+      {noticeLine(entry.kind, w) ?? entry.text}
     </p>
   );
 }
