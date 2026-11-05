@@ -4,8 +4,9 @@
 // review gallery can render the id, a shot of its cell by day and by night. A line the gallery has no cell for is
 // listed with "no shot". Rohan reviews these lines in batches, then marks them approved. Under the lines, a Docs section
 // lists the provisional docs in ui/app/doc-approvals.json (--docs <file> points it elsewhere; a missing file means
-// none): each doc's title from its first "# " heading, a link to its last commit on GitHub, and who wrote it in which
-// pull request.
+// none): each doc's title (its "title", or else its first "# " heading), a link to its last commit on GitHub, and who
+// wrote it in which pull request. A doc may also list NSIS LangStrings ("lines": the keys in its .nsh file, and "slots":
+// what each register in their text holds): each is shown inline with its English text (only NSIS is supported so far).
 //
 // The whole page is built in running.next/ (beside running/) and swapped in with two renames once every step has
 // succeeded, so a browser never sees a half-built folder, and a failed run leaves the old page as it was.
@@ -30,7 +31,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build, createServer } from "vite";
-import { docsSection, esc } from "./running-docs.mjs";
+import { docsSection, esc, nsisLines } from "./running-docs.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -84,22 +85,33 @@ const groups = names
   .filter((g) => g.lines.length > 0);
 const lines = groups.flatMap((g) => g.lines);
 
-// The docs: each provisional entry of doc-approvals.json, its title from its first "# " heading and its last commit.
+// The docs: each provisional entry of doc-approvals.json, its title (or its first "# " heading), its LangStrings
+// (from an .nsh file, when it lists "lines") and its last commit.
 const docEntries = existsSync(docsFile)
   ? Object.entries(JSON.parse(readFileSync(docsFile, "utf8")))
   : [];
 const docs = docEntries
   .filter(([, d]) => d.status === "provisional")
   .map(([path, d]) => {
-    const heading = readFileSync(join(repoRoot, path), "utf8")
-      .split("\n")
-      .find((l) => l.startsWith("# "));
-    if (heading === undefined) throw new Error(`${path} has no "# " heading for its title`);
+    const source = readFileSync(join(repoRoot, path), "utf8");
+    let title = d.title;
+    if (title === undefined) {
+      const heading = source.split("\n").find((l) => l.startsWith("# "));
+      if (heading === undefined) throw new Error(`${path} has no "# " heading for its title`);
+      title = heading.slice(2).trim();
+    }
+    let lines;
+    if (d.lines !== undefined) {
+      if (!path.endsWith(".nsh")) {
+        throw new Error(`${path} lists "lines", but only NSIS (.nsh) files are supported so far`);
+      }
+      lines = nsisLines(source, d.lines);
+    }
     const commit = execFileSync("git", ["-C", repoRoot, "log", "-1", "--format=%H", "--", path], {
       encoding: "utf8",
     }).trim();
     if (commit === "") throw new Error(`${path} has no commit in git`);
-    return { path, title: heading.slice(2).trim(), commit, by: d.by, pr: d.pr };
+    return { path, title, commit, by: d.by, pr: d.pr, lines, slots: d.slots };
   });
 
 // The count line, once for the page and the log: the lines, then the docs, with the zero-and-zero text as it was.
@@ -211,6 +223,9 @@ try {
 .running-shot { margin: 0; width: 300px; max-width: 100%; }
 .running-shot figcaption { font-size: 0.8125rem; color: var(--muted); margin-bottom: 4px; }
 .running-noshot { color: var(--muted); font-size: 0.875rem; margin: 0; }
+.running-lines { list-style: none; margin: 0 0 6px; padding: 0; }
+.running-lines li { margin: 0 0 8px; }
+.running-slot { color: var(--muted); font-style: italic; }
 `;
   mkdirSync(join(next, "assets"), { recursive: true });
   writeFileSync(join(next, "assets", "page.css"), PAGE_CSS);

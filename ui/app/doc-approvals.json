@@ -10,5 +10,14 @@
     "at": "2026-11-05",
     "by": "stage F (provisional; Rohan batch review)",
     "pr": 442
+  },
+  "crates/desktop/windows/nsis/English.nsh": {
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "stage F (provisional; Rohan batch review)",
+    "pr": 473,
+    "title": "Messages the Windows uninstaller shows",
+    "lines": ["deleteAppDataFailed", "deleteAppDataKept", "deleteAppDataKeptFailed"],
+    "slots": { "$R9": "the data folder", "$R8": "the folder it kept" }
   }
 }
