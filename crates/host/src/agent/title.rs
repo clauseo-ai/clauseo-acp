@@ -60,8 +60,9 @@ pub(crate) fn clean_title(title: &str) -> Option<CompactString> {
     (!shown.is_empty()).then(|| CompactString::from(shown))
 }
 
-/// Whether `ch` is in [`FORMAT`].
-fn is_format(ch: char) -> bool {
+/// Whether `ch` is in [`FORMAT`]. The sources list's titles, queries and URLs use it too
+/// (`sources.rs`), so every text the host shows from an agent drops the same characters.
+pub(crate) fn is_format(ch: char) -> bool {
     FORMAT
         .iter()
         .any(|&(first, last)| (first..=last).contains(&ch))
