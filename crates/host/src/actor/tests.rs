@@ -122,7 +122,9 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::ThreadsChanged(_)
             | HostEvent::FolderScanned(_)
             | HostEvent::BrowserInstall { .. }
-            | HostEvent::UpdateChanged(_)) => panic!("unexpected {other:?}"),
+            | HostEvent::UpdateChanged(_)
+            | HostEvent::ConnectorsChanged(_)
+            | HostEvent::CaseLawHint { .. }) => panic!("unexpected {other:?}"),
         }
     }
 }

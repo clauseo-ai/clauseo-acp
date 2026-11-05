@@ -333,11 +333,16 @@ source: crates/settings/src/schema/tests.rs
       ]
     },
     "ToolsSettings": {
-      "description": "The `tools` section: Clauseo's own tools. Both keys are security keys: a policy source that\ncannot be read, or a policy value that does not type, locks each `false`.",
+      "description": "The `tools` section: Clauseo's own tools. Every key is a security key: a policy source that\ncannot be read, or a policy value that does not type, locks each `false`.",
       "properties": {
         "browser": {
           "default": "[per OS]",
           "description": "Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on\nWindows until G17 passes.",
+          "type": "boolean"
+        },
+        "connectors": {
+          "default": true,
+          "description": "Whether data connectors (R24's paid case-law connector) may run. On by default, but\nnothing runs until the lawyer adds a connector. A firm turns every connector off here.",
           "type": "boolean"
         },
         "web_search": {
@@ -479,6 +484,7 @@ source: crates/settings/src/schema/tests.rs
       "$ref": "#/$defs/ToolsSettings",
       "default": {
         "browser": "[per OS]",
+        "connectors": true,
         "web_search": true
       },
       "description": "Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart."

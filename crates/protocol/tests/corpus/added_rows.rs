@@ -303,4 +303,18 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (340, 0x1b39_eb0b_cd14_d75e),
         (261, 0xe7a7_3665_057b_8b0c),
     ),
+    (
+        "added/page_visited-CaseLaw",
+        include_bytes!("added/page_visited-CaseLaw.jsonl"),
+        include_bytes!("added/page_visited-CaseLaw.msgpack"),
+        (409, 0x4692_2130_403d_c263),
+        (284, 0xea99_690f_40d4_c092),
+    ),
+    (
+        "added/web_search_recorded-CaseLaw",
+        include_bytes!("added/web_search_recorded-CaseLaw.jsonl"),
+        include_bytes!("added/web_search_recorded-CaseLaw.msgpack"),
+        (524, 0xcc5a_9bdd_1255_eceb),
+        (384, 0x39d1_cb47_9ef5_994a),
+    ),
 ];

@@ -264,7 +264,7 @@ fn an_unknown_value_name_about_mcp_locks_the_list() {
     let (leaves, warnings) = values.into_parts();
     assert_eq!(leaves, []);
     assert_eq!(warnings.len(), 1);
-    // A name about `tools` is about the two tools security keys: both lock off (R21).
+    // A name about `tools` is about every tools security key: each locks off (R21, R24).
     let values = parse(vec![(
         "tools.list".to_owned(),
         RegValue::Sz("{}".to_owned()),
@@ -274,7 +274,8 @@ fn an_unknown_value_name_about_mcp_locks_the_list() {
         leaves,
         [
             Leaf::Refused("tools.web_search".to_owned()),
-            Leaf::Refused("tools.browser".to_owned())
+            Leaf::Refused("tools.browser".to_owned()),
+            Leaf::Refused("tools.connectors".to_owned())
         ]
     );
 }

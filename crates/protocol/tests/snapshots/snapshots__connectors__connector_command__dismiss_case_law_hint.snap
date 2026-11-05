@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "ConnectorCommand::DismissCaseLawHint { matter: matter_id(1), }"
+---
+{
+  "dismiss_case_law_hint": {
+    "matter": "01900000-0000-7000-8000-000000000001"
+  }
+}

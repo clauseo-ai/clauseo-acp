@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "ConnectorCommand::Add { id: \"case-law\".to_owned() }"
+---
+{
+  "add": {
+    "id": "case-law"
+  }
+}

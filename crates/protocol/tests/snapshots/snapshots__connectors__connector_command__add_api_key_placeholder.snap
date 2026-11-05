@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "super::add_api_key(clauseo_protocol::REDACTED_TEXT)"
+---
+{
+  "add_api_key": {
+    "id": "case-law",
+    "key": "[redacted]"
+  }
+}

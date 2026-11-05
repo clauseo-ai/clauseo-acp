@@ -88,6 +88,7 @@ macro_rules! logged_enums {
                 LimitStopReason,
                 MatterKind,
                 PageVia,
+                SearchSource,
                 DoneBy,
                 SnoozeBy,
                 PermissionAbout;

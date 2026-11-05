@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::Connector(super::connectors::add_credits())"
+---
+{
+  "connector": {
+    "add_credits": {
+      "id": "case-law",
+      "pack": "pack_200"
+    }
+  }
+}

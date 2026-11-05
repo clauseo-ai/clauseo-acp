@@ -354,6 +354,7 @@ fn tool_states_round_trip_in_a_header_with_every_reason() {
             "no_proxy",
             "browser_not_installed",
             "too_many_browsers",
+            "no_relay",
         ]
     );
 }

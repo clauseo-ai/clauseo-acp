@@ -218,7 +218,9 @@ fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
             | HostEvent::MattersChanged(_)
             | HostEvent::ThreadsChanged(_)
             | HostEvent::BrowserInstall { .. }
-            | HostEvent::UpdateChanged(_) => {}
+            | HostEvent::UpdateChanged(_)
+            | HostEvent::ConnectorsChanged(_)
+            | HostEvent::CaseLawHint { .. } => {}
             other @ (HostEvent::Patches(_)
             | HostEvent::Events(_)
             | HostEvent::CaughtUp { .. }
@@ -463,7 +465,9 @@ fn import_summary(
             | HostEvent::ThreadsChanged(_)
             | HostEvent::FolderScanned(_)
             | HostEvent::BrowserInstall { .. }
-            | HostEvent::UpdateChanged(_)) => panic!("no matter_created before {other:?}"),
+            | HostEvent::UpdateChanged(_)
+            | HostEvent::ConnectorsChanged(_)
+            | HostEvent::CaseLawHint { .. }) => panic!("no matter_created before {other:?}"),
         }
     }
 }

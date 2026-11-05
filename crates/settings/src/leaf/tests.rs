@@ -307,6 +307,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
         (Leaf::Motion(Motion::Reduce), "ui.motion"),
         (Leaf::WebSearch(false), "tools.web_search"),
         (Leaf::Browser(true), "tools.browser"),
+        (Leaf::Connectors(false), "tools.connectors"),
         (Leaf::UpdateMode(UpdateMode::Notify), "update.mode"),
     ];
     let mut settings = Settings::default();
@@ -325,6 +326,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.motion, Motion::Reduce);
     assert!(!settings.tools.web_search);
     assert!(settings.tools.browser);
+    assert!(!settings.tools.connectors);
     assert_eq!(settings.update.mode, UpdateMode::Notify);
 }
 
@@ -340,6 +342,7 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("automatic"),
         json!("system"),
         json!(true),
+        json!(false),
         json!(false),
         json!(false),
         json!(true),
@@ -377,6 +380,7 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("full"),
         json!(!ToolsSettings::default().web_search),
         json!(!ToolsSettings::default().browser),
+        json!(!ToolsSettings::default().connectors),
         json!(!PrivacySettings::default().counts),
         json!(!PrivacySettings::default().crash_reports),
         json!("none"),

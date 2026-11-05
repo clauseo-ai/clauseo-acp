@@ -1,0 +1,23 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: statuses
+---
+[
+  "not_added",
+  "signing_in",
+  {
+    "out_of_credit": {
+      "pay_url": "https://data.clauseo.chat/pay/rch_02"
+    }
+  },
+  {
+    "out_of_credit": {}
+  },
+  "signed_out",
+  "key_revoked",
+  {
+    "error": {
+      "message": "the sign-in could not be saved"
+    }
+  }
+]

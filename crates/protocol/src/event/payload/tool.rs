@@ -4,14 +4,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::web::{
-    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, cut_chars,
-    logged_url,
+    MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_SEARCH_TOOL_CHARS, MAX_URL_CHARS,
+    MAX_WEB_TITLE_CHARS, cut_chars, logged_url,
 };
 use crate::{
     AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
     ExpiryReason, MatterPath, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
-    PermissionRequestId, Principal, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch,
-    ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    PermissionRequestId, Principal, SearchSource, TextOrBlob, ToolCallContent, ToolCallId,
+    ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -153,6 +153,17 @@ pub struct WebSearchRecorded {
     /// The results, in the order the agent got them; empty when there were none. At most
     /// [`MAX_SEARCH_RESULTS`] of them, kept by [`WebSearchRecorded::new`].
     pub results: Vec<WebResult>,
+    /// Where the search ran (R24). Left out of the JSON for `Web`, which a record without the
+    /// field reads as.
+    #[serde(
+        default = "SearchSource::web",
+        skip_serializing_if = "SearchSource::is_web"
+    )]
+    pub source: SearchSource,
+    /// The connector's tool that ran it, such as `search_law`: at most
+    /// [`MAX_SEARCH_TOOL_CHARS`] characters. Left out when `None`, as for a web search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
 }
 
 impl WebSearchRecorded {
@@ -177,7 +188,18 @@ impl WebSearchRecorded {
                 .take(MAX_SEARCH_RESULTS)
                 .map(|result| WebResult::new(result.title, &result.url))
                 .collect(),
+            source: SearchSource::Web,
+            tool: None,
         }
+    }
+
+    /// The same record, run by `tool` of `source` (the case-law connector's `search_law`):
+    /// `tool` is cut to [`MAX_SEARCH_TOOL_CHARS`] characters.
+    #[must_use]
+    pub fn with_source(mut self, source: SearchSource, tool: Option<&str>) -> Self {
+        self.source = source;
+        self.tool = tool.map(|tool| cut_chars(tool.to_owned(), MAX_SEARCH_TOOL_CHARS));
+        self
     }
 }
 

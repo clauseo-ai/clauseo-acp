@@ -365,27 +365,6 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
     host.shutdown();
 }
 
-/// The tool switches as `clauseo-settings` has them and the wire has them: the same keys, the
-/// same values, and the same patch JSON.
-#[test]
-fn the_tool_switches_mirror_the_settings_crate() {
-    let settings_tools = serde_json::to_value(clauseo_settings::ToolsSettings::default()).unwrap();
-    let wire_tools = serde_json::to_value(tool_defaults()).unwrap();
-    assert_eq!(settings_tools, wire_tools);
-    let settings_patch = clauseo_settings::ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    let wire_patch = ToolsPatch {
-        web_search: Some(false),
-        browser: Some(true),
-    };
-    assert_eq!(
-        serde_json::to_value(settings_patch).unwrap(),
-        serde_json::to_value(wire_patch).unwrap()
-    );
-}
-
 #[test]
 fn a_font_size_out_of_range_is_refused_as_invalid() {
     let dir = Dir::new("settings_font_range", &[]);

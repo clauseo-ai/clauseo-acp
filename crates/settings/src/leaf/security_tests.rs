@@ -15,7 +15,11 @@ fn each_tools_key_is_a_boolean() {
         Ok(Leaf::WebSearch(false))
     );
     assert_eq!(one("tools.browser", json!(true)), Ok(Leaf::Browser(true)));
-    for key in ["tools.web_search", "tools.browser"] {
+    assert_eq!(
+        one("tools.connectors", json!(false)),
+        Ok(Leaf::Connectors(false))
+    );
+    for key in ["tools.web_search", "tools.browser", "tools.connectors"] {
         for value in [json!("yes"), json!(1), json!(null), json!({})] {
             assert!(
                 matches!(&one(key, value.clone()).unwrap_err()[..], [WarningKind::InvalidValue { key: k, .. }] if k == key),
@@ -33,6 +37,7 @@ fn refuse_locks_each_security_key_off() {
         let mut settings = Settings::default();
         settings.tools.web_search = true;
         settings.tools.browser = true;
+        settings.tools.connectors = true;
         settings.privacy.counts = true;
         settings.privacy.crash_reports = true;
         settings.update.mode = UpdateMode::Notify;
@@ -59,6 +64,12 @@ fn refuse_locks_each_security_key_off() {
     assert!(refuse("tools.browser", &mut settings));
     assert!(settings.tools.web_search);
     assert!(!settings.tools.browser);
+
+    // R24: the connectors switch defaults to on, so it locks off, alone.
+    let mut settings = on();
+    assert!(refuse("tools.connectors", &mut settings));
+    assert!(!settings.tools.connectors);
+    assert!(settings.tools.web_search && settings.tools.browser);
 
     // The privacy keys lock off too (0036): counts defaults to on.
     let mut settings = on();
@@ -106,7 +117,7 @@ fn refuse_locks_each_security_key_off() {
     // A prefix ending in `.` refuses every security key under it, and only those.
     let mut settings = on();
     assert!(refuse("tools.", &mut settings));
-    assert!(!settings.tools.web_search && !settings.tools.browser);
+    assert!(!settings.tools.web_search && !settings.tools.browser && !settings.tools.connectors);
     assert_eq!(settings.mcp.servers.len(), 1);
 
     // Any other key, a prefix of no security key, or a prefix without its dot names nothing. A

@@ -299,6 +299,7 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
             "skills.curated",
             "skills.extra",
             "tools.browser",
+            "tools.connectors",
             "tools.web_search",
             "update.mode"
         ]

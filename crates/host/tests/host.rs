@@ -65,6 +65,10 @@ mod codex_plans;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+
+#[cfg(test)]
+#[path = "host/connectors.rs"]
+mod connectors;
 #[cfg(test)]
 #[path = "host/counts.rs"]
 mod counts;

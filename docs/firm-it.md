@@ -199,7 +199,7 @@ shows the policy's value with its choices greyed out and the line "Managed by yo
 of the wrong type for a known key is a warning and **still locks the key, at its default**. A
 source that cannot be read at all (a `policy.json` that does not parse, a registry read that
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
-`tools.browser`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
+`tools.browser`, `tools.connectors`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
 `install.registry` unset, `skills.extra` `off`, `skills.allow_scripts` false, `skills.curated`
 empty, and no `plans.<id>` at all. The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
@@ -255,7 +255,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 |---|---|---|---|---|
 | `matters.default_location` | absolute path | none: `Documents\Clauseo` | `REG_SZ` | `D:\Matters` (one path for every user; no `%VAR%` expansion) |
 | `agents.<id>` | object: `command` (absolute path), `args` (list), `env` (map) | none | `REG_SZ`, JSON | value `agents.claude` = `{"command": "C:\\Program Files\\Firm Tools\\claude-agent-acp.exe", "args": []}`. Replaces the user's whole entry for that agent; never put a secret in `env` |
-| `mcp.servers` | object: server name (1 to 64 of `A-Z a-z 0-9 _ -`) to `command`, `args`, `env`, `enabled` (default false) | empty | `REG_SZ`, JSON | `{"firm-docs": {"command": "C:\\Program Files\\Firm Tools\\firm-docs-mcp.exe", "enabled": true}}`. **Security key.** Replaces the user's whole list; the name `browser` is reserved |
+| `mcp.servers` | object: server name (1 to 64 of `A-Z a-z 0-9 _ -`, never `__` and not ending in `_`) to `command`, `args`, `env`, `enabled` (default false) | empty | `REG_SZ`, JSON | `{"firm-docs": {"command": "C:\\Program Files\\Firm Tools\\firm-docs-mcp.exe", "enabled": true}}`. **Security key.** Replaces the user's whole list; the names `browser` and `case-law` are reserved for Clauseo's own servers, and an entry of either name, in any case, or of a name holding `__` or ending in `_` (Claude would read `case-law_` as `case-law`), is left out with a warning |
 | `ui.theme` | `system`, `light`, `dark` | `system` | `REG_SZ` | `dark` |
 | `ui.font_size` | whole number, 14 to 20 (points) | 16 | `REG_DWORD` | 18 |
 | `ui.density` | `comfortable`, `compact` | `comfortable` | `REG_SZ` | `compact` |
@@ -264,6 +264,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `ui.motion` | `system`, `reduce`, `full` | `system` | `REG_SZ` | `reduce` |
 | `tools.web_search` | boolean | true | `REG_DWORD` 0 or 1 | 0: agents may not search the web or read web pages. **Security key** |
 | `tools.browser` | boolean | true on macOS; false on Windows and Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
+| `tools.connectors` | boolean | true | `REG_DWORD` 0 or 1 | 0: no data connector runs (the paid Indian case-law connector): it is not offered, and agents do not get it. On, nothing runs until a lawyer adds a connector. **Security key** |
 | `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `plans.<id>` | object: `endpoint` (`https` URL with a host; no user name, password, query or fragment), `provider` (`anthropic`, `bedrock`, `vertex`), `env` (map) | none: the plan login | `REG_SZ`, JSON | value `plans.claude-acp` = `{"endpoint": "https://ai-gateway.firm.example/anthropic", "provider": "anthropic"}`. **Security key**: replaces the user's whole plan for that agent; an unreadable source leaves no plan at all. An `env` name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case) is dropped with a warning: keep secrets in your own tools (an AWS profile, Google's application default credentials) |
@@ -312,6 +313,7 @@ allows only the app's own content and its bridge (`app.security.csp` in
 | `api.anthropic.com`, `claude.ai`, `platform.claude.com` | Claude Code, signed in with a Claude plan | While the agent works. An API key needs only `api.anthropic.com` |
 | `api.openai.com`, `chatgpt.com`, `auth.openai.com` | Codex, signed in with ChatGPT | While the agent works. An API key needs only `api.openai.com` |
 | Sites the agent searches and opens | Web search and Clauseo's browser | Only while `tools.web_search` or `tools.browser` is on |
+| `data.clauseo.chat` | Clauseo's optional paid data connectors. The first, case-law, is Indian Kanoon through Clauseo's relay: for each call, the tool name and its arguments (search words, document ids) go to `data.clauseo.chat` with the lawyer's token, and that server sends searches on to Indian Kanoon. Also the sign-in, `pricing.json`, account reads and recharges | Only after a lawyer adds a connector, and only while `tools.connectors` is on. Clauseo makes these calls itself, outside the agent's sandbox; the agent never reaches this host. The host side ships with task R24 |
 
 Opening a downloaded installer also makes Windows check it with SmartScreen
 (`nav.smartscreen.microsoft.com`, `checkappexec.microsoft.com`,
@@ -331,7 +333,6 @@ Coming:
   proxy ([decision 0036](decisions/0036-counts.md), "The desktop").
 - `nodejs.org` and `registry.npmjs.org`: Node and the agents' own downloads (task S17), unless
   `install.bundle` or `install.registry` points at your copy.
-- `data.clauseo.chat`: Clauseo's optional paid data connectors, only for a firm that adds one.
 
 ## Later
 

@@ -237,6 +237,8 @@ impl HostCommand {
             | Self::InstallUpdate { when: _ }
             | Self::CancelScheduledUpdate {} => Ok(()),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
+            // Ids by shape; whether the connector or pack is known, live or added is state.
+            Self::Connector(command) => command.check(),
         }
     }
 }

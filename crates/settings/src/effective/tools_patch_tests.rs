@@ -37,6 +37,7 @@ fn apply_tools_patch_writes_then_sets_memory_and_a_fresh_load_agrees() {
         ToolsSettings {
             web_search: false,
             browser: true,
+            connectors: true,
         }
     );
     assert_eq!(

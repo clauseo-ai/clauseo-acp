@@ -6,6 +6,7 @@ expression: SECURITY_KEYS
   "mcp.servers",
   "tools.web_search",
   "tools.browser",
+  "tools.connectors",
   "privacy.counts",
   "privacy.crash_reports",
   "update.mode",

@@ -4,8 +4,9 @@
 //! constructors apply the caps (`MAX_*`), which the tests of this file pin.
 
 use clauseo_protocol::{
-    AgentId, DomainEvent, MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_URL_CHARS,
-    MAX_WEB_TITLE_CHARS, PageVia, PageVisited, WebResult, WebSearchRecorded,
+    AgentId, DomainEvent, MAX_SEARCH_QUERY_CHARS, MAX_SEARCH_RESULTS, MAX_SEARCH_TOOL_CHARS,
+    MAX_URL_CHARS, MAX_WEB_TITLE_CHARS, PageVia, PageVisited, SearchSource, WebResult,
+    WebSearchRecorded,
 };
 use serde_json::{Value, json};
 
@@ -304,4 +305,58 @@ fn a_constructed_visit_logs_its_url_and_caps_its_title() {
     );
     assert_eq!(visited.url, "https://example.com/a?b=1&token=REDACTED");
     assert_eq!(visited.title.unwrap().chars().count(), 300);
+}
+
+/// R24: a search recorded before `source` and `tool` existed decodes as a web search with no
+/// tool, and writes back without them; a case-law search keeps both, its tool capped.
+#[test]
+fn a_search_without_source_or_tool_decodes_as_a_web_search() {
+    let old = json!({"web_search_recorded": {
+        "turn": "01900000-0000-7000-8000-000000000003",
+        "tool_call": "01900000-0000-7000-8000-000000000004",
+        "agent": "claude-acp",
+        "query": "limitation period",
+        "results": [],
+    }});
+    let event: DomainEvent = serde_json::from_value(old.clone()).unwrap();
+    let DomainEvent::WebSearchRecorded(decoded) = &event else {
+        panic!("{event:?}");
+    };
+    assert_eq!(decoded.source, SearchSource::Web);
+    assert_eq!(decoded.tool, None);
+    assert_eq!(serde_json::to_value(&event).unwrap(), old);
+
+    let long = "t".repeat(MAX_SEARCH_TOOL_CHARS + 5);
+    let DomainEvent::WebSearchRecorded(web) = search(Vec::new()) else {
+        panic!("not a search");
+    };
+    let case_law: DomainEvent = (*web)
+        .with_source(SearchSource::CaseLaw, Some(&long))
+        .into();
+    let json = round_trips(&case_law);
+    assert_eq!(json["web_search_recorded"]["source"], "case_law");
+    assert_eq!(
+        json["web_search_recorded"]["tool"].as_str().map(str::len),
+        Some(MAX_SEARCH_TOOL_CHARS)
+    );
+}
+
+/// A source this version does not know decodes to `Unknown`, keeping the record.
+#[test]
+fn an_unknown_source_decodes_to_unknown() {
+    let event: DomainEvent = serde_json::from_value(json!({"web_search_recorded": {
+        "turn": "01900000-0000-7000-8000-000000000003",
+        "tool_call": "01900000-0000-7000-8000-000000000004",
+        "agent": "claude-acp",
+        "query": "q",
+        "results": [],
+        "source": "statutes",
+        "tool": "find_act",
+    }}))
+    .unwrap();
+    let DomainEvent::WebSearchRecorded(decoded) = event else {
+        panic!("not a search");
+    };
+    assert_eq!(decoded.source, SearchSource::Unknown);
+    assert_eq!(decoded.tool.as_deref(), Some("find_act"));
 }

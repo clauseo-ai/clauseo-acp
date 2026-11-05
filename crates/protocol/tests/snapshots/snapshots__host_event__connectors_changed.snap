@@ -1,0 +1,43 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::ConnectorsChanged(super::connectors::connectors_state(),)"
+---
+{
+  "connectors_changed": {
+    "available": true,
+    "locked": false,
+    "connectors": [
+      {
+        "id": "case-law",
+        "name": "Indian case law",
+        "price_text": "₹236",
+        "packs": [
+          {
+            "pack": "pack_200",
+            "credits": 200,
+            "rupees": "₹236"
+          }
+        ],
+        "recent_spend": {
+          "today_credits": 40,
+          "days": [
+            {
+              "day": "2026-11-04",
+              "credits": 120
+            }
+          ]
+        },
+        "status": {
+          "signed_in": {
+            "balance": {
+              "credits": 1180,
+              "rupees": "₹1,392.40"
+            },
+            "low": false
+          }
+        },
+        "pay_url": "https://data.clauseo.chat/pay/rch_01"
+      }
+    ]
+  }
+}
