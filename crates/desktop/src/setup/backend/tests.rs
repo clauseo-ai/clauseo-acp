@@ -1,11 +1,12 @@
 //! The backend over `Agents` with every seam recorded (`fakes.rs`): the confirms that run
 //! nothing when declined, the entry written on `Ready`, first run, the replay order,
 //! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, no key in a log, and the
-//! two launchers; installs, keys, endpoints and sign-in bars in `tests/`.
+//! two launchers; installs, keys, endpoints, sign-in bars and sign-in races in `tests/`.
 
 mod endpoint;
 mod fakes;
 mod keys;
+mod races;
 mod retry;
 mod signin;
 
@@ -104,7 +105,11 @@ fn an_accepted_install_and_endpoint_run_and_the_endpoint_shows_firm() {
         &json!({ "url": "https://gateway.firm.example" }),
     );
     assert_eq!(block_on(setup.run(SETTINGS, endpoint)), done);
-    assert_eq!(rig.calls(), [("install", claude())]);
+    assert_eq!(
+        rig.calls(),
+        [("install", claude()), ("cancel_sign_in", claude())],
+        "the endpoint cancels whatever sign-in may be reserved"
+    );
     assert_eq!(
         rig.host.calls(),
         [HostCall::SetEndpoint(

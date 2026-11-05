@@ -39,7 +39,7 @@ use clauseo_settings::EntryWrite;
 use futures::{Stream, StreamExt as _};
 
 use super::admit::sign_in_barred;
-use super::compose::{Compose, is_running};
+use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
 use super::keys::KeyCache;
@@ -136,6 +136,7 @@ impl AgentsBackend {
                 agents
                     .sign_in(&agent, method)
                     .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
             }
             SetupCommand::CancelSignIn { .. } => {
                 agents
@@ -154,6 +155,7 @@ impl AgentsBackend {
                 agents
                     .sign_in(&agent, Method::DeviceCode)
                     .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
             }
             SetupCommand::OpenSignInPage { .. } => {
                 if let Some(SigninState::DeviceCode { url, .. }) = agents.signin_state(&agent) {
@@ -169,6 +171,7 @@ impl AgentsBackend {
                 agents
                     .sign_out(&agent)
                     .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
             }
             SetupCommand::UseFoundLogin { .. } => {
                 let _gate = lock(&self.signin_gate);
@@ -176,6 +179,7 @@ impl AgentsBackend {
                 agents
                     .use_found_login(&agent)
                     .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
             }
             SetupCommand::UseDifferentAccount { .. } => {
                 let _gate = lock(&self.signin_gate);
@@ -183,11 +187,15 @@ impl AgentsBackend {
                 agents
                     .use_different_account(&agent)
                     .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
             }
             SetupCommand::StopUsingLogin { .. } => return Err(leave_order_missing()),
-            SetupCommand::FindLogin { .. } => agents
-                .find_login(&agent)
-                .map_err(|error| signin_error(&error))?,
+            SetupCommand::FindLogin { .. } => {
+                agents
+                    .find_login(&agent)
+                    .map_err(|error| signin_error(&error))?;
+                self.replaced(&agent);
+            }
             SetupCommand::SetAgentKey { key, .. } => {
                 self.refuse_blocked(&agent)?;
                 self.refuse_leaving_reused(&agent)?;
@@ -289,27 +297,32 @@ impl AgentsBackend {
         }
     }
 
-    /// Ends `agent`'s running sign-in, if one runs, because a key or an endpoint took over:
-    /// `Agents::cancel_sign_in`, the `CancelSignIn` path, with [`Compose::expect_end`] first,
-    /// so the end reaches the windows as the new line and not as a failure.
+    /// Ends `agent`'s sign-in, if one runs or is reserved, because a key or an endpoint took
+    /// over: always `Agents::cancel_sign_in`, the `CancelSignIn` path, since S18 reserves a
+    /// sign-in's job at once but reports its first state only from the worker, so
+    /// `signin_state` cannot tell a reserved job from none. [`Compose::expect_end`] goes
+    /// first, so the end reaches the windows as the new line and not as a failure; S18's
+    /// `NotRunning` (nothing to end) undoes it and is no error. Then the starting mark goes
+    /// (`SetupEvents::end_start`): the cancelled job may never report.
     fn end_sign_in(&self, agent: &AgentId) {
         let _gate = lock(&self.signin_gate);
-        if !self
-            .agents
-            .signin_state(agent)
-            .as_ref()
-            .is_some_and(is_running)
-        {
-            return;
-        }
         self.compose.expect_end(agent);
         match self.agents.cancel_sign_in(agent) {
             Ok(()) => tracing::info!(%agent, "ending a sign-in: a key or an endpoint took over"),
+            Err(SigninError::NotRunning(_)) => self.compose.no_end(agent),
             Err(error) => {
                 self.compose.no_end(agent);
                 tracing::warn!(%agent, %error, "a sign-in a key or an endpoint took over runs on");
             }
         }
+        self.events.end_start(agent);
+    }
+
+    /// `agent`'s new S18 job (a sign-in, a sign-out or a search) replaced any it had, so an
+    /// end a key or an endpoint was waiting for ([`Compose::expect_end`]) will not come: the
+    /// replaced job's report is dropped, and the new job's failure is shown as one.
+    fn replaced(&self, agent: &AgentId) {
+        self.compose.no_end(agent);
     }
 
     /// Whether a firm policy sets `agent`'s endpoint or provider: told to [`Compose`], which

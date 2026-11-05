@@ -13,8 +13,9 @@
 //!   stored or the lawyer set an endpoint, a sign-in start is refused from every window
 //!   (`signin.firm_managed`, `signin.key_in_use`, `signin.endpoint_in_use`, in that order of
 //!   precedence; `admit::sign_in_bar`), before any join, and a running sign-in is ended when
-//!   one of them takes over. The `starting` mark holds until the sign-in's first running state
-//!   or a failure is published, so two quick starts never reach the backend twice.
+//!   one of them takes over. The `starting` mark holds until a sign-in state is published for
+//!   the agent, S18 reports a resting one, or a key or an endpoint cancels the sign-in, so two
+//!   quick starts never reach the backend twice and a start that ended unreported never sticks.
 //! - **A key from `main`** goes to the backend as [`KeyWrite::OnlyIfAbsent`]: the backend
 //!   checks that no key is stored and stores it in one step, and refuses with
 //!   `settings.key_stored` otherwise, so two quick sends cannot both pass.
@@ -173,10 +174,11 @@ impl Setup {
 
     /// Marks `agent`'s sign-in as starting, unless one runs or is starting: then `None`, and
     /// the caller joins it. The mark is [`SetupEvents`]', so it holds past the backend's answer
-    /// until the sign-in's first running state, or a failure, is published: S18 reports
-    /// `Queued` or `Waiting` later, through its worker and the pump, and a second start in
-    /// between would restart the run. It goes at once when the backend refuses, or the call is
-    /// dropped, unless [`Starting::keep`] was called.
+    /// until a sign-in state is published for `agent`, S18 reports a resting one, or a key or
+    /// an endpoint cancels the sign-in: S18 reports `Queued` or `Waiting` later, through its
+    /// worker and the pump, and a second start in between would restart the run. It goes at
+    /// once when the backend refuses, or the call is dropped, unless [`Starting::keep`] was
+    /// called.
     fn start_sign_in(&self, agent: &AgentId) -> Option<Starting<'_>> {
         self.events.begin_start(agent).then(|| Starting {
             events: &self.events,
@@ -205,8 +207,8 @@ struct Starting<'a> {
 }
 
 impl Starting<'_> {
-    /// The backend took the start: the mark stays until the sign-in's first running state or a
-    /// failure is published.
+    /// The backend took the start: the mark stays until a sign-in state is published, S18
+    /// reports a resting one, or a key or an endpoint cancels the sign-in.
     fn keep(mut self) {
         self.keep = true;
     }

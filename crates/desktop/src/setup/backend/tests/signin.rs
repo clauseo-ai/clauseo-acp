@@ -88,7 +88,11 @@ fn a_key_or_an_endpoint_refuses_every_start_with_its_own_code() {
         let done = block_on(rig.setup().run(SETTINGS, setting));
         assert_eq!(done, Ok(CommandOutcome::Done));
         every_start_refused(&rig, code);
-        assert_eq!(asked(&rig, "cancel_sign_in"), 0, "nothing ran to end");
+        assert_eq!(
+            asked(&rig, "cancel_sign_in"),
+            1,
+            "always asked; S18's NotRunning is no error"
+        );
     }
 }
 

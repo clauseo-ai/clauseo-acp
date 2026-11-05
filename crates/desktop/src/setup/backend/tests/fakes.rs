@@ -1,7 +1,7 @@
 //! The fakes the backend's tests run on: `Agents`, the host's calls, the confirms and the
 //! opener, each recording what it was asked, and the backend over them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -17,7 +17,7 @@ use super::{claude, codex};
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
-use crate::setup::compose::Compose;
+use crate::setup::compose::{Compose, is_running};
 use crate::setup::confirm::{Ask, SetupConfirm};
 use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
@@ -35,6 +35,9 @@ pub(super) struct FakeAgents {
     pub(super) signin: Mutex<BTreeMap<AgentId, SigninState>>,
     /// What every sign-in call answers instead of `Ok`, once set.
     pub(super) refusal: Mutex<Option<SigninError>>,
+    /// The agents whose job is a sign-in, as S18 reserves it: from a call that starts one until
+    /// a call that replaces it, so `cancel_sign_in` finds one before any state is reported.
+    pub(super) signing_in: Mutex<BTreeSet<AgentId>>,
 }
 
 impl FakeAgents {
@@ -45,6 +48,24 @@ impl FakeAgents {
     fn answer(&self, name: &'static str, agent: &AgentId) -> Result<(), SigninError> {
         self.call(name, agent);
         lock(&self.refusal).clone().map_or(Ok(()), Err)
+    }
+
+    /// [`FakeAgents::answer`]; when it is `Ok`, `agent`'s job is now a sign-in or, with
+    /// `signs_in` false, a job that replaced it.
+    fn reserve(
+        &self,
+        name: &'static str,
+        agent: &AgentId,
+        signs_in: bool,
+    ) -> Result<(), SigninError> {
+        self.answer(name, agent)?;
+        let mut signing_in = lock(&self.signing_in);
+        if signs_in {
+            signing_in.insert(agent.clone());
+        } else {
+            signing_in.remove(agent);
+        }
+        Ok(())
     }
 }
 
@@ -66,28 +87,35 @@ impl SetupAgents for FakeAgents {
             Method::DeviceCode => "sign_in_device_code",
             _ => "sign_in",
         };
-        self.answer(name, agent)
+        self.reserve(name, agent, true)
     }
+    /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
-        self.answer("cancel_sign_in", agent)
+        self.answer("cancel_sign_in", agent)?;
+        let running = lock(&self.signin).get(agent).is_some_and(is_running);
+        if running || lock(&self.signing_in).contains(agent) {
+            Ok(())
+        } else {
+            Err(SigninError::NotRunning(agent.clone()))
+        }
     }
     fn paste_code(&self, agent: &AgentId, _code: PasteCode) -> Result<(), SigninError> {
         self.answer("paste_code", agent)
     }
     fn sign_out(&self, agent: &AgentId) -> Result<(), SigninError> {
-        self.answer("sign_out", agent)
+        self.reserve("sign_out", agent, false)
     }
     fn check_status(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.answer("check_status", agent)
     }
     fn find_login(&self, agent: &AgentId) -> Result<(), SigninError> {
-        self.answer("find_login", agent)
+        self.reserve("find_login", agent, false)
     }
     fn use_found_login(&self, agent: &AgentId) -> Result<(), SigninError> {
-        self.answer("use_found_login", agent)
+        self.reserve("use_found_login", agent, true)
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
-        self.answer("use_different_account", agent)
+        self.reserve("use_different_account", agent, true)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()

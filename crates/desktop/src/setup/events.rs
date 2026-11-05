@@ -42,8 +42,8 @@ struct AgentLatest {
     sign_in: Option<Arc<str>>,
     /// Whether that sign-in state is a running one: `Queued`, `Waiting` or `DeviceCode`.
     running: bool,
-    /// Whether a `StartSignIn` went to the backend and no running state or failure has been
-    /// published since (`Setup::start_sign_in`).
+    /// Whether a `StartSignIn` went to the backend and no sign-in state has been published, nor
+    /// a resting one heard from S18, since (`Setup::start_sign_in`).
     starting: bool,
 }
 
@@ -63,11 +63,13 @@ impl SetupEvents {
             Slot::Install(agent) => {
                 latest.agents.entry(agent).or_default().install = Some(Arc::clone(&text));
             }
-            Slot::SignIn(agent, running, failed) => {
+            Slot::SignIn(agent, running) => {
                 let entry = latest.agents.entry(agent).or_default();
                 entry.sign_in = Some(Arc::clone(&text));
                 entry.running = running;
-                entry.starting &= !(running || failed);
+                // A running state is the start's, now joined through `running`; any other is a
+                // resting one, which ends the start (it failed, was cancelled or replaced).
+                entry.starting = false;
             }
         }
         latest
@@ -117,8 +119,9 @@ impl SetupEvents {
     }
 
     /// Marks `agent`'s sign-in as starting and answers `true`, unless one runs or is starting
-    /// (`false`: join it). The mark goes when a running state or a failure is published for
-    /// `agent`, or with [`SetupEvents::end_start`]; checked and set under the one lock.
+    /// (`false`: join it). The mark goes when any sign-in state is published for `agent` (a
+    /// running one is then joined through it; a resting one ends the start), or with
+    /// [`SetupEvents::end_start`]; checked and set under the one lock.
     pub(crate) fn begin_start(&self, agent: &AgentId) -> bool {
         let mut latest = lock(&self.state);
         let entry = latest.agents.entry(agent.clone()).or_default();
@@ -129,7 +132,9 @@ impl SetupEvents {
         true
     }
 
-    /// Removes `agent`'s starting mark: the backend refused the start, or the call was dropped.
+    /// Removes `agent`'s starting mark: the backend refused the start, the call was dropped, S18
+    /// reported a resting state the composer did not send on (`Compose::signin`), or a key or
+    /// an endpoint cancelled the sign-in (`AgentsBackend::end_sign_in`).
     pub(crate) fn end_start(&self, agent: &AgentId) {
         if let Some(entry) = lock(&self.state).agents.get_mut(agent) {
             entry.starting = false;
@@ -147,8 +152,8 @@ pub(crate) fn note(agent: &AgentId, code: &'static str) {
 enum Slot {
     Info,
     Install(AgentId),
-    /// The agent, whether the state is a running one, and whether it is `Failed`.
-    SignIn(AgentId, bool, bool),
+    /// The agent, and whether the state is a running one.
+    SignIn(AgentId, bool),
 }
 
 impl Slot {
@@ -162,7 +167,6 @@ impl Slot {
                     state,
                     SignIn::Queued | SignIn::Waiting { .. } | SignIn::DeviceCode { .. }
                 ),
-                matches!(state, SignIn::Failed { .. }),
             ),
         }
     }
