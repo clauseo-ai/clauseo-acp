@@ -1,7 +1,7 @@
-//! N1: the protected names below the matter's root that the walks find, recorded at launch and
+//! N1: the protected names below the matter's root that the scan finds, recorded at launch and
 //! set aside when new or changed, each at its own path in the pass's folder.
 
-use super::{aside, exit, exit_as, found, launch, launch_as, none, record, volume, world};
+use super::{aside, exit, exit_as, launch, launch_as, none, record, volume, world};
 use crate::windows::set_aside::Reason;
 use crate::windows::write::rename_new;
 
@@ -19,8 +19,7 @@ fn a_lawyer_folder_renamed_to_a_nested_git_after_launch_is_set_aside_with_its_ho
     );
 
     rename_new(&root.join("Precedents"), &root.join("sub/.git")).unwrap();
-    let walked = found(&root, &["sub/.git"]);
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
 
     assert_eq!(moved.len(), 1, "{moved:?}");
     assert_eq!(moved[0].from, root.join("sub/.git"));
@@ -39,13 +38,11 @@ fn a_nested_git_replaced_since_launch_is_set_aside_as_changed() {
     let (w, root, data) = world("aside-nested-changed");
     w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
     w.dir.file("matter/drafts/hooks/pre-commit", "#!/bin/sh\n");
-    let walked = found(&root, &["sub/.git"]);
-    launch_as(&volume(), &root, &data, "s1", &walked, launch()).unwrap();
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
 
     rename_new(&root.join("sub/.git"), &root.join("sub/old-git")).unwrap();
     rename_new(&root.join("drafts"), &root.join("sub/.git")).unwrap();
-    let walked = found(&root, &["sub/.git"]);
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
 
     let seen: Vec<_> = moved.iter().map(|e| (e.from.clone(), e.reason)).collect();
     assert_eq!(seen, [(root.join("sub/.git"), Reason::Changed)]);
@@ -53,19 +50,18 @@ fn a_nested_git_replaced_since_launch_is_set_aside_as_changed() {
     assert!(root.join("sub/old-git/HEAD").is_file());
 }
 
-/// N1: a nested name the record has and the walk no longer finds is dropped from the record,
+/// N1: a nested name the record has and the scan no longer finds is dropped from the record,
 /// and nothing is moved for it.
 #[test]
 fn a_nested_git_gone_since_launch_is_dropped_from_the_record() {
     let (w, root, data) = world("aside-nested-gone");
     w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
-    let walked = found(&root, &["sub/.git"]);
-    launch_as(&volume(), &root, &data, "s1", &walked, launch()).unwrap();
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
     assert!(record(&data).names.contains_key("sub/.git"));
 
     rename_new(&root.join("sub/.git"), &root.join("sub/git-old")).unwrap();
     assert_eq!(
-        exit_as(&volume(), &root, &data, "s1", &[], exit()).unwrap(),
+        exit_as(&volume(), &root, &data, "s1", exit()).unwrap(),
         none()
     );
 
@@ -85,10 +81,10 @@ fn nested_names_are_set_aside_at_their_own_paths_and_never_clash() {
     w.dir.file("matter/b/.mcp.json", "{}");
     w.dir.file("matter/b/c/.claude/settings.json", "{}");
 
-    let walked = found(&root, &["a/.git", "b/.mcp.json", "b/c/.claude", "b/c/.git"]);
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
 
-    let names: Vec<_> = moved.iter().map(|e| e.to.clone()).collect();
+    let mut names: Vec<_> = moved.iter().map(|e| e.to.clone()).collect();
+    names.sort();
     let expect: Vec<_> = ["a/.git", "b/.mcp.json", "b/c/.claude", "b/c/.git"]
         .iter()
         .map(|rel| aside(&data, exit(), rel))
@@ -99,18 +95,16 @@ fn nested_names_are_set_aside_at_their_own_paths_and_never_clash() {
     assert!(expect[3].join("hooks/post-merge").is_file());
 }
 
-/// N1: a found name outside the matter's root is ignored, and a root `.git` both the walk and
-/// the root's names cover is one entry, moved once.
+/// N1: a `.git` outside the matter is never scanned or moved, and a root `.git` is one entry,
+/// moved once.
 #[test]
-fn a_found_name_outside_the_matter_is_ignored_and_one_at_the_root_is_one_entry() {
+fn a_git_outside_the_matter_is_left_and_one_at_the_root_is_one_entry() {
     let (w, root, data) = world("aside-nested-root");
     let outside = w.dir.file("elsewhere/.git/HEAD", "ref: refs/heads/main\n");
     launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
     w.dir.file("matter/.git/hooks/post-checkout", "#!/bin/sh\n");
 
-    let mut walked = found(&root, &[".git"]);
-    walked.extend(found(&w.canonical("elsewhere"), &[".git"]));
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
 
     let seen: Vec<_> = moved.iter().map(|e| (e.from.clone(), e.reason)).collect();
     assert_eq!(seen, [(root.join(".git"), Reason::New)]);
@@ -126,8 +120,7 @@ fn a_nested_name_inside_a_folder_set_aside_goes_with_it() {
     w.dir
         .file("matter/.claude/x/.git/HEAD", "ref: refs/heads/main\n");
 
-    let walked = found(&root, &[".claude", ".claude/x/.git"]);
-    let moved = exit_as(&volume(), &root, &data, "s1", &walked, exit()).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
 
     let moved_from: Vec<_> = moved.iter().map(|e| e.from.clone()).collect();
     assert_eq!(moved_from, [root.join(".claude")]);

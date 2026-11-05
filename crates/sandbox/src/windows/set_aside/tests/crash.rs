@@ -1,6 +1,7 @@
 //! N10: a crash during a move, settled on the next load so every item in a pass's folder has a
 //! finished manifest entry; and N11: a set-aside that can't happen refuses, naming the item.
 
+use std::ffi::OsStr;
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
@@ -8,6 +9,7 @@ use std::path::Path;
 use super::{after, before, exit, exit_as, launch, list, none, record, volume, world};
 use crate::windows::set_aside::files::{FileId, Place};
 use crate::windows::set_aside::run::{self, Refused, Volume};
+use crate::windows::set_aside::scan::Listed;
 use crate::windows::set_aside::{Reason, SetAsideFailure};
 use crate::windows::test_world::matter_one;
 
@@ -29,6 +31,24 @@ struct Stopping<V> {
 }
 
 impl<V: Volume> Volume for Stopping<V> {
+    type Folder = V::Folder;
+
+    fn open_root(&self, root: &Path) -> io::Result<V::Folder> {
+        self.inner.open_root(root)
+    }
+
+    fn open_folder(&self, folder: &V::Folder, name: &OsStr) -> io::Result<V::Folder> {
+        self.inner.open_folder(folder, name)
+    }
+
+    fn list(&self, folder: &V::Folder) -> io::Result<Vec<Listed>> {
+        self.inner.list(folder)
+    }
+
+    fn probe(&self, folder: &V::Folder, name: &OsStr) -> io::Result<Option<FileId>> {
+        self.inner.probe(folder, name)
+    }
+
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
         self.inner.file_id(path)
     }
@@ -75,7 +95,7 @@ fn stopping(stop: Stop) -> Stopping<impl Volume> {
 /// The after-session pass of session `s1` through a volume that crashes as `stop` says.
 fn crash_at_exit(root: &Path, data: &Path, stop: Stop) {
     let crashed = catch_unwind(AssertUnwindSafe(|| {
-        exit_as(&stopping(stop), root, data, "s1", &[], exit())
+        exit_as(&stopping(stop), root, data, "s1", exit())
     }));
     assert!(crashed.is_err(), "the pass died");
 }
@@ -144,14 +164,7 @@ fn a_set_aside_that_cant_happen_refuses_naming_the_item() {
         before(&root, &data, launch()).unwrap();
         w.dir.file("matter/.claude/settings.json", "{}");
 
-        let refused = exit_as(
-            &stopping(Stop::Fail(failure)),
-            &root,
-            &data,
-            "s1",
-            &[],
-            exit(),
-        );
+        let refused = exit_as(&stopping(Stop::Fail(failure)), &root, &data, "s1", exit());
         let at = root.join(".claude");
         let named = Refused {
             failure,

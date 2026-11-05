@@ -18,19 +18,6 @@ pub enum Reach {
     FilesOnly,
 }
 
-/// A protected name a walk met (`.git`, `.claude` or `.mcp.json`, at any depth, links
-/// included and not followed), with its file ID: what the set-aside records at launch and
-/// compares when the agent exits (S15 `PR3b` round 2, N1).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Found {
-    /// Its path, in the form of the walk's root joined with each name below it.
-    pub path: PathBuf,
-    /// Its volume's serial number.
-    pub volume: u64,
-    /// Its 128-bit file ID (`FileIdInfo`).
-    pub id: [u8; 16],
-}
-
 /// What a write did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Added {
@@ -167,9 +154,7 @@ pub trait AclWriter {
     fn present(&mut self, grant: &Grant) -> io::Result<bool>;
     /// Works out each file and folder below `root` from its parent's inheritable entries and
     /// the Low label, as far as `reach`, writing what changed. Skips junctions, symbolic links
-    /// and files with more than one link. With `strict`, holds each child to [`Strict`]. Every
-    /// walk records the protected names below `root` for [`AclWriter::found`], even one that
-    /// fails partway.
+    /// and files with more than one link. With `strict`, holds each child to [`Strict`].
     fn propagate(
         &mut self,
         root: &Path,
@@ -183,9 +168,6 @@ pub trait AclWriter {
     /// to write is the file `expected` names (one file ID, compared on that same handle): the
     /// credential link's write (L5, N8).
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure>;
-    /// The protected names ([`Found`]) the walks since the last call met. Taking them clears
-    /// them.
-    fn found(&mut self) -> Vec<Found>;
     /// The child the last failed walk refused, when it was one (for the lawyer to see; never
     /// logged). Taking it clears it.
     fn refused_at(&mut self) -> Option<PathBuf>;

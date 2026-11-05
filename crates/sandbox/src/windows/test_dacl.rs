@@ -104,3 +104,45 @@ impl Drop for Local {
         unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
     }
 }
+
+/// Removes `SeBackupPrivilege`, `SeRestorePrivilege` and `SeTakeOwnershipPrivilege` from this
+/// test process's token, so an elevated admin token opens files as the lawyer's Medium token
+/// would: with them, a backup-intent open gets past a DACL that shuts the owner out. nextest
+/// runs each test in its own process. A token without them is left as it is.
+#[cfg(test)]
+pub(crate) fn drop_privileges() {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_REMOVED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::w;
+
+    let mut token = HANDLE::default();
+    // SAFETY: a pseudo-handle and a live out-pointer; the handle is closed below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
+        .unwrap();
+    for name in [
+        w!("SeBackupPrivilege"),
+        w!("SeRestorePrivilege"),
+        w!("SeTakeOwnershipPrivilege"),
+    ] {
+        let mut luid = LUID::default();
+        // SAFETY: a NUL-terminated literal and a live out-pointer.
+        unsafe { LookupPrivilegeValueW(None, name, &raw mut luid) }.unwrap();
+        let privileges = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_REMOVED,
+            }],
+        };
+        // SAFETY: the token was opened to adjust; `privileges` lives for the call. A token
+        // without the privilege succeeds with "not all assigned", which is what is wanted.
+        unsafe { AdjustTokenPrivileges(token, false, Some(&raw const privileges), 0, None, None) }
+            .unwrap();
+    }
+    // SAFETY: the token was opened above and is closed once, here.
+    unsafe { CloseHandle(token) }.unwrap();
+}

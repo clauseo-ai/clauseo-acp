@@ -6,7 +6,7 @@ use crate::windows::acl_bytes::{ALLOWED, CONTAINER_INHERIT, INHERITED, OBJECT_IN
 use crate::windows::acl_plan::{LOW_LABEL_SID, Rights};
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{Place, grant, has, protected};
-use crate::windows::test_dacl::{auto_inherit_with, protect_with};
+use crate::windows::test_dacl::{auto_inherit_with, drop_privileges, protect_with};
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::{Label, Strict};
@@ -474,47 +474,6 @@ fn own(path: &Path) {
         .unwrap()
         .set(OWNER_SECURITY_INFORMATION, &descriptor)
         .unwrap();
-}
-
-/// Removes `SeBackupPrivilege`, `SeRestorePrivilege` and `SeTakeOwnershipPrivilege` from this
-/// test process's token, so an elevated admin token opens files as the lawyer's Medium token
-/// would: with them, a backup-intent open gets past a DACL that shuts the owner out. nextest
-/// runs each test in its own process. A token without them is left as it is.
-fn drop_privileges() {
-    use windows::Win32::Foundation::LUID;
-    use windows::Win32::Security::{
-        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_REMOVED,
-        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
-    };
-    use windows::core::w;
-
-    let mut token = HANDLE::default();
-    // SAFETY: a pseudo-handle and a live out-pointer; the handle is closed by `Handle`.
-    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
-        .unwrap();
-    let token = Handle(token);
-    for name in [
-        w!("SeBackupPrivilege"),
-        w!("SeRestorePrivilege"),
-        w!("SeTakeOwnershipPrivilege"),
-    ] {
-        let mut luid = LUID::default();
-        // SAFETY: a NUL-terminated literal and a live out-pointer.
-        unsafe { LookupPrivilegeValueW(None, name, &raw mut luid) }.unwrap();
-        let privileges = TOKEN_PRIVILEGES {
-            PrivilegeCount: 1,
-            Privileges: [LUID_AND_ATTRIBUTES {
-                Luid: luid,
-                Attributes: SE_PRIVILEGE_REMOVED,
-            }],
-        };
-        // SAFETY: the token was opened to adjust; `privileges` lives for the call. A token
-        // without the privilege succeeds with "not all assigned", which is what is wanted.
-        unsafe {
-            AdjustTokenPrivileges(token.0, false, Some(&raw const privileges), 0, None, None)
-        }
-        .unwrap();
-    }
 }
 
 /// Whether `path`'s DACL is marked auto-inherited (`SE_DACL_AUTO_INHERITED`).

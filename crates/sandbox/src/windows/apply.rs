@@ -19,8 +19,7 @@
 //!    walk over a tree that carries a deny is strict ([`Strict`]): a child a pool user owns that
 //!    would beat the inherited deny is repaired, one the lawyer owns refuses the launch, and one
 //!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) if it is inside the
-//!    launch's own matter, state or notes tree, and refuses it anywhere else (`walk.rs`). The
-//!    protected names the walks of the matter's own tree met are kept for the set-aside (N1).
+//!    launch's own matter, state or notes tree, and refuses it anywhere else (`walk.rs`).
 //! 5. Only then are the entries marked `applied`.
 //! 6. Only after all that succeeds does a folder that is now a registered matter lose the
 //!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
@@ -31,6 +30,11 @@
 //! another entry names it, the trees are walked again so the inherited copies go too, and the
 //! entries whose permission entry is gone are dropped. An entry whose removal fails stays
 //! `pending` for [`forget_matter`] or the next start's [`reconcile`].
+//!
+//! The set-aside (`set_aside.rs`) runs beside this, not on its results: PR6 calls its
+//! `before_launch` first and then [`apply`]; when the agent exits, [`repair_after_session`]
+//! and then its `after_session`. The set-aside scans the matter itself, so a refused `apply`
+//! or repair never skips its check.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -42,7 +46,7 @@ use super::admit::{FolderList, PathKind};
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::fence::RegisteredMatter;
 use super::ledger::{EntryId, EntryState, Ledger, is_our_label};
-use super::writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Walked};
+use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
 use crate::Error;
 
 mod back;
@@ -50,7 +54,7 @@ mod lift;
 mod walk;
 
 pub use back::{forget_matter, reconcile};
-use walk::{OWN_KINDS, Refused, Walk, clearing, inside_any, own_roots, roots_of, strict_for};
+use walk::{OWN_KINDS, Refused, Walk, clearing, inside_any, own_roots, strict_for};
 use walk::{strict_of, walks};
 
 /// What [`apply`] did.
@@ -63,21 +67,6 @@ pub struct Applied {
     pub lifted: usize,
     /// What the walks saw.
     pub walked: Walked,
-    /// The protected names (`.git`, `.claude`, `.mcp.json` at any depth) this launch's walks
-    /// of its own matter tree met, with their file IDs. PR6 passes them to the set-aside's
-    /// `before_launch`, which records them so `after_session` can set aside what changed (N1).
-    pub found: Vec<Found>,
-}
-
-/// What [`repair_after_session`] did.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Repaired {
-    /// What the walks saw.
-    pub walked: Walked,
-    /// The protected names the walks of the matter's own tree met, with their file IDs. PR6
-    /// passes them to the set-aside's `after_session`, which sets aside what is new or changed
-    /// since launch (N1).
-    pub found: Vec<Found>,
 }
 
 /// What a launch needs from around the matter besides the permission writes: the gate's folder
@@ -117,7 +106,6 @@ pub fn apply(
         written: run.written.len(),
         lifted,
         walked: run.walked,
-        found: run.found.into_iter().collect(),
     })
 }
 
@@ -127,8 +115,6 @@ struct Run {
     /// Indexes into the plan's grants whose entry this run wrote.
     written: Vec<usize>,
     walked: Walked,
-    /// The protected names met inside the plan's own matter folder.
-    found: BTreeSet<Found>,
 }
 
 /// Steps 1 to 5 of [`apply`], rolled back on a failure.
@@ -247,12 +233,9 @@ fn write_all(
     }
     let strict = strict_for(plan);
     let own = own_roots(plan);
-    let matter = roots_of(plan, &[PathKind::Matter]);
     let unwalked = |i: usize| {
         run.written.contains(&i) || plan.entries().get(i).is_some_and(|id| pending.contains(id))
     };
-    // N1: nothing an earlier walk met comes in.
-    drop(acl.found());
     for walk in walks(plan, unwalked) {
         let Walk {
             root,
@@ -265,9 +248,6 @@ fn write_all(
             acl.propagate(root, *reach, strict)
         })?;
         run.walked.add(seen);
-        let met = acl.found().into_iter();
-        run.found
-            .extend(met.filter(|found| inside_any(&found.path, &matter)));
     }
     ledger
         .mark_walked(plan.entries())
@@ -295,18 +275,18 @@ fn ours(
     })
 }
 
-/// When `matter`'s agent exits (PR6's launcher calls this beside the set-aside's
-/// `after_session`): its matter, state and notes trees walked strictly again, so what the agent
-/// made open to other matters' agents during the session is repaired now rather than at the next
-/// launch (the review's M5). Children the lawyer can't open in those trees are set aside as at
-/// launch. Returns the protected names the walks of the matter's own tree met, for the
-/// set-aside's `after_session` (N1).
+/// When `matter`'s agent exits: its matter, state and notes trees walked strictly again, so
+/// what the agent made open to other matters' agents during the session is repaired now rather
+/// than at the next launch (the review's M5). Children the lawyer can't open in those trees are
+/// set aside as at launch. Returns what the walks saw. PR6's launcher calls this first and the
+/// set-aside's `after_session` after it, whatever this returns: the set-aside scans the matter
+/// itself, so a refused repair (past the walk's set-aside cap, say) never skips its check.
 pub fn repair_after_session(
     ledger: &Ledger,
     matter: clauseo_protocol::MatterId,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
-) -> Result<Repaired, Error> {
+) -> Result<Walked, Error> {
     let entries = ledger.matter_entries(matter);
     let strict = strict_of(&entries);
     let roots: BTreeSet<(PathBuf, PathKind)> = entries
@@ -315,24 +295,14 @@ pub fn repair_after_session(
         .map(|e| (e.path.clone(), e.kind))
         .collect();
     let own: Vec<PathBuf> = roots.iter().map(|(root, _)| root.clone()).collect();
-    let matter_roots: Vec<PathBuf> = roots
-        .iter()
-        .filter(|(_, kind)| *kind == PathKind::Matter)
-        .map(|(root, _)| root.clone())
-        .collect();
-    let mut done = Repaired::default();
-    let mut found: BTreeSet<Found> = BTreeSet::new();
-    drop(acl.found());
+    let mut done = Walked::default();
     for (root, kind) in &roots {
         let walked = clearing(acl, around, &own, *kind, |acl| {
             acl.propagate(root, Reach::Tree, Some(&strict))
         })
         .map_err(Refused::error)?;
-        done.walked.add(walked);
-        let met = acl.found().into_iter();
-        found.extend(met.filter(|f| inside_any(&f.path, &matter_roots)));
+        done.add(walked);
     }
-    done.found = found.into_iter().collect();
     Ok(done)
 }
 

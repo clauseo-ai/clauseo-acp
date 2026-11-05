@@ -1,30 +1,6 @@
-//! What the walk decides about one child before it touches it (S15 `PR3b` round 2): whether its
-//! name is one the set-aside protects (N1), which writes it needs and in what order (N13), and
-//! which of them its handle has no right for (N3). Pure, so it is tested on every OS.
-
-/// The names the set-aside protects at any depth below a matter (N1).
-pub(crate) const PROTECTED_NAMES: [&str; 3] = [".git", ".claude", ".mcp.json"];
-
-/// Whether `name`, one path part as UTF-16, is one of [`PROTECTED_NAMES`], ignoring ASCII case
-/// (NTFS folds the case of these names for every lookup).
-pub(crate) fn protected_name(name: &[u16]) -> bool {
-    PROTECTED_NAMES.iter().any(|protected| {
-        protected.len() == name.len()
-            && protected
-                .bytes()
-                .zip(name)
-                .all(|(want, &got)| u16::from(want) == ascii_lower(got))
-    })
-}
-
-/// `unit` with an ASCII capital lowered; anything else as it is.
-fn ascii_lower(unit: u16) -> u16 {
-    if (u16::from(b'A')..=u16::from(b'Z')).contains(&unit) {
-        unit + 32
-    } else {
-        unit
-    }
-}
+//! What the walk decides about one child before it touches it (S15 `PR3b` round 2): which writes
+//! it needs and in what order (N13), and which of them its handle has no right for (N3). Pure, so
+//! it is tested on every OS.
 
 /// One write on a child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -13,11 +13,12 @@ use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
     reserved, sids, trusted,
 };
-use crate::windows::writer::{Found, Label};
+use crate::windows::writer::Label;
 
 mod fake;
 mod review;
 mod round2;
+mod round3;
 
 use fake::{Around, FakeAcl, Key, key};
 

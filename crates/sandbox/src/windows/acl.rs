@@ -39,7 +39,7 @@ use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
 use super::record::current_user_sid;
-use super::writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Strict, Walked};
+use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
 use walk::Mode;
 
@@ -59,8 +59,6 @@ pub struct NtfsAcl {
     token: Handle,
     /// The child the last failed walk refused, when it was one.
     refused: Option<PathBuf>,
-    /// The protected names the walks met since [`AclWriter::found`] last took them.
-    found: Vec<Found>,
 }
 
 impl NtfsAcl {
@@ -74,15 +72,13 @@ impl NtfsAcl {
         Ok(NtfsAcl {
             token: Handle(token),
             refused: None,
-            found: Vec::new(),
         })
     }
 
-    /// Runs the walk in `mode`, keeping the child it refused for [`AclWriter::refused_at`] and
-    /// the protected names it met, even when it fails, for [`AclWriter::found`].
+    /// Runs the walk in `mode`, keeping the child it refused for [`AclWriter::refused_at`].
     fn run(&mut self, root: &Path, reach: Reach, mode: Mode<'_>) -> Result<Walked, ApplyFailure> {
         self.refused = None;
-        walk::walk(&self.token, &mut self.found, root, reach, mode).map_err(|(failure, at)| {
+        walk::walk(&self.token, root, reach, mode).map_err(|(failure, at)| {
             self.refused = at.map(|wide| PathBuf::from(OsString::from_wide(&wide)));
             failure
         })
@@ -172,14 +168,6 @@ impl AclWriter for NtfsAcl {
 
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
         write(grant, Some(expected))
-    }
-
-    /// Sorted, each name once: a launch walks some trees more than once.
-    fn found(&mut self) -> Vec<Found> {
-        let mut found = std::mem::take(&mut self.found);
-        found.sort();
-        found.dedup();
-        found
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {

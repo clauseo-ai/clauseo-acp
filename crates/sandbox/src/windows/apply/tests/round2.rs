@@ -6,15 +6,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use super::*;
 use crate::windows::acl_plan::LOW_LABEL_SID;
 
-/// A protected name at `path`, as a walk reports it.
-fn met(path: PathBuf) -> Found {
-    Found {
-        path,
-        volume: 1,
-        id: [7; 16],
-    }
-}
-
 /// A third matter, for the cross-matter cases.
 fn matter_three() -> MatterId {
     "01890a5d-ac96-774b-8cce-b302099a8059".parse().unwrap()
@@ -414,24 +405,4 @@ fn a_matter_whose_walk_down_replacement_failed_keeps_its_deny() {
     };
     assert!(deny_of(matter_one()), "matter one still lists its deny");
     assert!(!deny_of(matter_two()), "matter two's was replaced");
-}
-
-/// N1: the launch and the repair after the session hand back the protected names their walks
-/// met in the matter's own tree, and nothing an earlier walk or another tree met.
-#[test]
-fn the_launch_and_the_repair_give_the_protected_names_met_in_the_matter_tree() {
-    let w = world("r2-n1", &[]);
-    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
-    let matter = w.canonical("matter");
-    acl.found = vec![met(matter.join("stale/.git"))];
-    let inside = vec![met(matter.join(".git")), met(matter.join("sub/.claude"))];
-    acl.meets = inside.clone();
-    acl.meets.push(met(w.canonical("sib1").join(".git")));
-    let mut plan = launch_plan(&w, &["sib1"]);
-    let applied = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
-    assert_eq!(applied.found, inside);
-
-    acl.found = vec![met(matter.join("stale/.git"))];
-    let repaired = repair_after_session(&ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
-    assert_eq!(repaired.found, inside);
 }

@@ -1,18 +1,64 @@
 //! The tests' stand-in for NTFS on other OSes: inode numbers for file IDs, the owner's uid,
-//! and renames that refuse a taken name and a symbolic link on the way.
+//! renames that refuse a taken name and a symbolic link on the way, and a scan by path that
+//! never follows a symbolic link (names match exactly, the stand-in's rule).
 
+use std::ffi::OsStr;
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::super::SetAsideFailure;
 use super::super::files::FileId;
 use super::super::run::Volume;
+use super::super::scan::{Kind, Listed};
 use crate::windows::write::{make_sandbox_dir, rename_new};
 
 pub(super) struct Posix;
 
+/// `path` as a folder to scan: one, not a link, and one this process may list, as NTFS's
+/// open to list it would check.
+fn listable(path: PathBuf) -> io::Result<PathBuf> {
+    let meta = std::fs::symlink_metadata(&path)?;
+    if !meta.is_dir() {
+        return Err(io::Error::other("not a folder, or a link"));
+    }
+    std::fs::read_dir(&path)?;
+    Ok(path)
+}
+
 impl Volume for Posix {
+    type Folder = PathBuf;
+
+    fn open_root(&self, root: &Path) -> io::Result<PathBuf> {
+        listable(root.to_owned())
+    }
+
+    fn open_folder(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
+        listable(folder.join(name))
+    }
+
+    fn list(&self, folder: &PathBuf) -> io::Result<Vec<Listed>> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(folder)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let kind = if kind.is_symlink() {
+                Kind::Link
+            } else if kind.is_dir() {
+                Kind::Folder
+            } else {
+                Kind::Other
+            };
+            let name = entry.file_name();
+            out.push(Listed { name, kind });
+        }
+        Ok(out)
+    }
+
+    fn probe(&self, folder: &PathBuf, name: &OsStr) -> io::Result<Option<FileId>> {
+        self.file_id(&folder.join(name))
+    }
+
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
         match std::fs::symlink_metadata(path) {
             Ok(meta) => Ok(Some(FileId {

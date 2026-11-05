@@ -23,14 +23,16 @@
 //!   needs from around the matter as [`Surroundings`]. The writes go through [`AclWriter`]:
 //!   `NtfsAcl` on Windows (`acl.rs`, after Codex's ACL code; `PROVENANCE.md`), whose
 //!   descriptors and entries are edited as bytes in `acl_bytes.rs`.
-//! - The set-aside (`set_aside.rs`): each protected name at the matter's root, and every
-//!   `.git`, `.claude` and `.mcp.json` below it that the walks found ([`Found`]), recorded by
-//!   file ID at launch (`before_launch`, after `apply`), and every one new or changed set aside
-//!   when the agent exits (`after_session`, after `repair_after_session`, or the next launch's
-//!   check while any session of the matter is open), whoever owns it, into
+//! - The set-aside (`set_aside.rs`): each protected name at the matter's root, every `.git`,
+//!   `.claude` and `.mcp.json` below it, and every link in the matter tree, found by its own
+//!   read-only scan and recorded by file ID at launch (`before_launch`, before `apply`), and
+//!   every one new or changed set aside when the agent exits (`after_session`, after
+//!   `repair_after_session` whatever it returned, or the next launch's check while any session
+//!   of the matter is open), whoever owns it, into
 //!   `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\` at its own path below the matter,
 //!   each entry in a manifest ([`SetAsideEntry`]) that `list_set_aside` shows and
-//!   `restore_set_aside` undoes.
+//!   `restore_set_aside` undoes. A pass returns [`SetAsideChecked`]: what moved, and the
+//!   folders its scan couldn't open or list.
 //!
 //! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
 //! no Windows call, so they build and are tested on every OS; the folder check, the registry and
@@ -84,9 +86,7 @@ pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use apply::fence_registered;
-pub use apply::{
-    Applied, Repaired, Surroundings, apply, forget_matter, reconcile, repair_after_session,
-};
+pub use apply::{Applied, Surroundings, apply, forget_matter, reconcile, repair_after_session};
 #[cfg(windows)]
 pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
@@ -96,12 +96,14 @@ pub use folder::folder_support;
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
-pub use set_aside::{Entry as SetAsideEntry, Reason as SetAsideReason, SetAsideFailure};
+pub use set_aside::{
+    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason, SetAsideFailure,
+};
 #[cfg(windows)]
 pub use set_aside::{
     after_session, before_launch, list_set_aside, restore_set_aside, set_aside_path,
 };
-pub use writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Strict, Walked};
+pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

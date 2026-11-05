@@ -1,180 +1,72 @@
-//! The check by change: each protected name now (those at the matter's root, read through the
-//! [`Volume`], and the nested ones a walk found), compared with the record, and what is new or
-//! changed set aside, each at its own path below the matter's root (N1).
+//! The check by change: each protected name and link the scan found, compared with the record,
+//! and what is new or changed set aside, each at its own path below the matter's root (N1, R2).
 
-use std::collections::BTreeMap;
 use std::io;
-use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
-use super::files::{FileId, Place, Record, io_failure};
+use super::files::{FileId, Place, Record, Snapshot};
 use super::moves::set_aside;
-use super::run::{Refused, Seen, Volume};
+use super::run::{Refused, Volume};
+use super::scan::{Item, Kept, Now, Scan, inside, same};
 use super::{Entry, Reason, SetAsideFailure};
-use crate::PROTECTED_NAMES;
 
-/// Also checked at the root: hooks in a `.git` the agent made would run in the lawyer's own git.
-const ALSO: [&str; 1] = [".git"];
-
-/// Each protected name checked at the matter's root.
-fn root_names() -> impl Iterator<Item = &'static str> {
-    PROTECTED_NAMES.iter().chain(&ALSO).copied()
-}
-
-/// What is at a protected name now.
-#[derive(Debug, Clone, Copy)]
-enum Now {
-    /// Nothing.
-    Absent,
-    /// The file or folder with this ID.
-    At(FileId),
-    /// Something whose ID the lawyer can't read: its permissions shut the lawyer out.
-    Shut,
-    /// Its ID couldn't be read, or its path isn't text.
-    Failed(SetAsideFailure),
-}
-
-/// One protected name: where it is, the folders it is in below the root, and what is there.
-#[derive(Debug, Clone)]
-struct Name {
-    path: PathBuf,
-    within: Vec<String>,
-    now: Now,
-    /// One of the root's names, read through the volume rather than found by the walk.
-    at_root: bool,
-}
-
-/// Each protected name now, by its path below `seen.root` with its parts joined by `/`: each
-/// one at the root, read through `volume`, then each one the walk found below the root. A found
-/// one outside the root is ignored, and one at the root that the root's names cover is one
-/// entry. Ordered so a folder comes before what is inside it.
-fn names(volume: &impl Volume, seen: &Seen<'_>) -> BTreeMap<String, Name> {
-    let mut names = BTreeMap::new();
-    for name in root_names() {
-        let path = seen.root.join(name);
-        let now = match volume.file_id(&path) {
-            Ok(None) => Now::Absent,
-            Ok(Some(id)) => Now::At(id),
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Now::Shut,
-            Err(error) => Now::Failed(io_failure(&error)),
-        };
-        let within = Vec::new();
-        let at_root = true;
-        let name_now = Name {
-            path,
-            within,
-            now,
-            at_root,
-        };
-        names.insert(name.to_owned(), name_now);
-    }
-    for found in seen.found {
-        let id = FileId {
-            volume: found.volume,
-            id: found.id,
-        };
-        let (key, within, now) = match below(seen.root, &found.path) {
-            Below::Outside => {
-                tracing::debug!("a protected name found outside the matter's root is ignored");
-                continue;
-            }
-            Below::Parts(mut parts) => {
-                let key = parts.join("/");
-                parts.pop();
-                (key, parts, Now::At(id))
-            }
-            Below::NotText => {
-                let key = found.path.to_string_lossy().into_owned();
-                let failed = Now::Failed(SetAsideFailure::Io(io::ErrorKind::InvalidData));
-                (key, Vec::new(), failed)
-            }
-        };
-        if root_names().any(|root| root.eq_ignore_ascii_case(&key)) {
-            continue;
-        }
-        let path = found.path.clone();
-        let at_root = false;
-        let name = Name {
-            path,
-            within,
-            now,
-            at_root,
-        };
-        names.insert(key, name);
-    }
-    names
-}
-
-/// Where a found path is, against the matter's root.
-enum Below {
-    /// Not below the root.
-    Outside,
-    /// Below it, by these parts.
-    Parts(Vec<String>),
-    /// Below it, but a part isn't text, so it can't be recorded: it refuses, naming it.
-    NotText,
-}
-
-/// Where `path` is against `root`.
-fn below(root: &Path, path: &Path) -> Below {
-    let Ok(rest) = path.strip_prefix(root) else {
-        return Below::Outside;
-    };
-    let mut parts = Vec::new();
-    for part in rest.components() {
-        let Component::Normal(part) = part else {
-            return Below::Outside;
-        };
-        let Some(text) = part.to_str() else {
-            return Below::NotText;
-        };
-        parts.push(text.to_owned());
-    }
-    if parts.is_empty() {
-        Below::Outside
-    } else {
-        Below::Parts(parts)
+/// What the record holds for `item`: its file ID at the last pass, or `None` when the record
+/// lacks it (or holds it as absent). Keys are matched as [`same`] matches them.
+fn recorded(record: &Record, item: &Item) -> Option<FileId> {
+    match item.kept {
+        Kept::Root | Kept::Nested => record
+            .names
+            .iter()
+            .find(|(key, _)| same(key, &item.key))
+            .and_then(|(_, id)| *id),
+        Kept::Link => record
+            .links
+            .iter()
+            .find(|(key, _)| same(key, &item.key))
+            .map(|(_, id)| *id),
     }
 }
 
-/// Sets aside each protected name that is there now with another file ID than `record` holds
-/// for it, or that `record` lacks (or holds as absent). One whose ID can't be read for want of
-/// permission is set aside as one the lawyer can't open; one already gone is passed over, and
-/// so is what is inside a folder this pass set aside. Every name is tried; the first failure is
-/// returned after, naming its item.
+/// Sets aside each protected name and link the scan found there now with another file ID than
+/// `record` holds for it, or that `record` lacks (or holds as absent). One whose ID can't be
+/// read for want of permission is set aside as one the lawyer can't open; one already gone is
+/// passed over, and so is what is inside a folder this pass set aside. A link is moved as
+/// itself, never followed. Every item is tried; the first failure is returned after, naming its
+/// item. Returns the keys set aside, or gone before they could be, for [`snapshot`].
 pub(super) fn check(
     volume: &impl Volume,
     place: &Place,
-    seen: &Seen<'_>,
+    scan: &Scan,
     record: &Record,
     now: SystemTime,
     moved: &mut Vec<Entry>,
-) -> Result<(), Refused> {
+) -> Result<Vec<String>, Refused> {
     let mut first = None;
-    let mut aside: Vec<PathBuf> = Vec::new();
-    for (key, name) in names(volume, seen) {
-        if aside.iter().any(|folder| name.path.starts_with(folder)) {
+    let mut aside: Vec<String> = Vec::new();
+    for item in &scan.items {
+        if aside.iter().any(|folder| inside(&item.key, folder)) {
             continue;
         }
-        let was = record.names.get(&key).copied().flatten();
-        let reason = match name.now {
+        let was = recorded(record, item);
+        let reason = match item.now {
             Now::Absent => continue,
             Now::At(id) if was == Some(id) => continue,
             Now::At(_) if was.is_none() => Reason::New,
             Now::At(_) => Reason::Changed,
             Now::Shut => Reason::LawyerCantOpen,
             Now::Failed(failure) => {
-                first.get_or_insert(Refused::at(failure, &name.path));
+                first.get_or_insert(Refused::at(failure, &item.path));
                 continue;
             }
         };
-        match set_aside(volume, place, &name.path, &name.within, reason, now) {
+        match set_aside(volume, place, &item.path, &item.within, reason, now) {
             Ok(entry) => {
-                aside.push(name.path);
+                aside.push(item.key.clone());
                 moved.push(entry);
             }
             Err(refused) if refused.failure == SetAsideFailure::Gone => {
-                tracing::debug!("a protected name went before it could be set aside");
+                tracing::debug!("a protected name or link went before it could be set aside");
+                aside.push(item.key.clone());
             }
             Err(refused) => {
                 first.get_or_insert(refused);
@@ -184,35 +76,38 @@ pub(super) fn check(
     if !moved.is_empty() {
         tracing::info!(
             count = moved.len(),
-            "changed protected names were set aside"
+            "changed protected names and links were set aside"
         );
     }
-    first.map_or(Ok(()), Err)
+    first.map_or(Ok(aside), Err)
 }
 
-/// Each protected name now and its file ID, `None` for a name at the root that is absent (the
-/// root's names are read afresh); a found name that `moved` set aside, or that was inside
-/// one, is left out. A name whose ID can't be read refuses, naming it.
-pub(super) fn snapshot(
-    volume: &impl Volume,
-    seen: &Seen<'_>,
-    moved: &[Entry],
-) -> Result<BTreeMap<String, Option<FileId>>, Refused> {
-    let mut record = BTreeMap::new();
-    for (key, name) in names(volume, seen) {
-        if !name.at_root && moved.iter().any(|entry| name.path.starts_with(&entry.from)) {
-            continue;
-        }
-        let id = match name.now {
-            Now::Absent => None,
-            Now::At(id) => Some(id),
-            Now::Shut => {
-                let failure = SetAsideFailure::Io(io::ErrorKind::PermissionDenied);
-                return Err(Refused::at(failure, &name.path));
+/// What the record holds after a pass: each item the scan found and its file ID, with `None`
+/// for a name at the root that is absent, was set aside or went; any other item set aside or
+/// gone (`aside`), or inside one, is left out. A name in a folder the scan couldn't list isn't
+/// recorded, so the next pass treats it as new. An item whose ID couldn't be read refuses,
+/// naming it.
+pub(super) fn snapshot(scan: &Scan, aside: &[String]) -> Result<Snapshot, Refused> {
+    let mut seen = Snapshot::default();
+    for item in &scan.items {
+        let gone = aside.iter().any(|folder| inside(&item.key, folder));
+        match (item.kept, gone, item.now) {
+            (Kept::Root, true, _) | (Kept::Root, false, Now::Absent) => {
+                seen.names.insert(item.key.clone(), None);
             }
-            Now::Failed(failure) => return Err(Refused::at(failure, &name.path)),
-        };
-        record.insert(key, id);
+            (_, true, _) | (_, false, Now::Absent) => {}
+            (Kept::Root | Kept::Nested, false, Now::At(id)) => {
+                seen.names.insert(item.key.clone(), Some(id));
+            }
+            (Kept::Link, false, Now::At(id)) => {
+                seen.links.insert(item.key.clone(), id);
+            }
+            (_, false, Now::Shut) => {
+                let failure = SetAsideFailure::Io(io::ErrorKind::PermissionDenied);
+                return Err(Refused::at(failure, &item.path));
+            }
+            (_, false, Now::Failed(failure)) => return Err(Refused::at(failure, &item.path)),
+        }
     }
-    Ok(record)
+    Ok(seen)
 }

@@ -3,6 +3,7 @@
 //! call, so it builds and is tested on every OS.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
@@ -12,12 +13,31 @@ use clauseo_protocol::MatterId;
 use super::check::{check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{load, set_aside};
-use super::{Entry, Reason, SetAsideFailure};
-use crate::windows::Found;
+use super::scan::{Listed, scan};
+use super::{Checked, Entry, Reason, SetAsideFailure};
 
 /// The file-system calls the set-aside makes: NTFS on Windows (`ntfs.rs`), and the tests'
 /// stand-in elsewhere.
 pub(super) trait Volume {
+    /// A folder the scan opened, as itself, to probe and list.
+    type Folder;
+
+    /// Opens the matter's folder `root` as itself, to list it; a link there, or a final path
+    /// other than `root`, is an error.
+    fn open_root(&self, root: &Path) -> io::Result<Self::Folder>;
+
+    /// Opens the folder `name` in `folder` relative to it, as itself, to list it; one that is
+    /// a link now is an error.
+    fn open_folder(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<Self::Folder>;
+
+    /// The names in `folder`, without `.` and `..`, and what each is.
+    fn list(&self, folder: &Self::Folder) -> io::Result<Vec<Listed>>;
+
+    /// The file ID of what opening `name` relative to `folder` opens, as itself and never
+    /// what a link names, with the least access that reads it; `None` when nothing is there.
+    /// On NTFS the open ignores case as NTFS does, so this is what git and Claude would open.
+    fn probe(&self, folder: &Self::Folder, name: &OsStr) -> io::Result<Option<FileId>>;
+
     /// The file ID of `path` itself, never what a link at it names; `None` when nothing is
     /// there.
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>>;
@@ -47,15 +67,6 @@ pub(super) trait Volume {
         name: &str,
         to: &Path,
     ) -> Result<(), SetAsideFailure>;
-}
-
-/// What a pass looks at: the matter's folder, and the protected names a walk found in it.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct Seen<'a> {
-    /// The matter's folder, as the policy holds it.
-    pub(super) root: &'a Path,
-    /// The `.git`, `.claude` and `.mcp.json` the walk met, at any depth.
-    pub(super) found: &'a [Found],
 }
 
 /// Why a pass failed, and the item it failed on, when it was one (N11).
@@ -91,56 +102,81 @@ impl From<SetAsideFailure> for Refused {
     }
 }
 
-/// See [`super::before_launch`].
+/// See [`super::before_launch`]. The scan runs before the matter's lock is taken, so a long
+/// scan never holds up another session's pass; anything that pass moves meanwhile is gone
+/// here, and passed over.
 pub(super) fn before_launch(
     volume: &impl Volume,
-    seen: &Seen<'_>,
+    root: &Path,
     data_dir: &Path,
     matter: &MatterId,
     session: &str,
+    running: &[&str],
     now: SystemTime,
-) -> Result<Vec<Entry>, Refused> {
+) -> Result<Checked, Refused> {
+    let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
     let mut moved = Vec::new();
-    let mut sessions = match place.read_record()? {
-        Some(record) if !record.sessions.is_empty() => {
+    let mut aside = Vec::new();
+    let mut sessions = BTreeSet::new();
+    if let Some(record) = place.read_record()? {
+        if !record.sessions.is_empty() {
             tracing::info!(
                 open = record.sessions.len(),
                 "a session of this matter is open; checking its protected names"
             );
-            check(volume, &place, seen, &record, now, &mut moved)?;
-            record.sessions
+            aside = check(volume, &place, &found, &record, now, &mut moved)?;
         }
-        Some(record) => record.sessions,
-        None => BTreeSet::new(),
-    };
+        let (still, crashed): (BTreeSet<String>, BTreeSet<String>) = record
+            .sessions
+            .into_iter()
+            .partition(|open| running.contains(&open.as_str()));
+        if !crashed.is_empty() {
+            tracing::info!(
+                crashed = crashed.len(),
+                "sessions no longer running were checked and are closed"
+            );
+        }
+        sessions = still;
+    }
     sessions.insert(session.to_owned());
-    let names = snapshot(volume, seen, &moved)?;
-    place.write_record(&Record::new(*matter, sessions, names))?;
-    Ok(moved)
+    let seen = snapshot(&found, &aside)?;
+    place.write_record(&Record::new(*matter, sessions, seen))?;
+    Ok(Checked {
+        moved,
+        unscanned: found.unscanned,
+    })
 }
 
 /// See [`super::after_session`]. No record at all is [`SetAsideFailure::Record`]: there is
-/// nothing to tell a change by.
+/// nothing to tell a change by. The scan runs before the lock is taken, as at launch.
 pub(super) fn after_session(
     volume: &impl Volume,
-    seen: &Seen<'_>,
+    root: &Path,
     data_dir: &Path,
     matter: &MatterId,
     session: &str,
     now: SystemTime,
-) -> Result<Vec<Entry>, Refused> {
+) -> Result<Checked, Refused> {
+    let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
     let record = place.read_record()?.ok_or(SetAsideFailure::Record)?;
     let mut moved = Vec::new();
-    check(volume, &place, seen, &record, now, &mut moved)?;
+    let aside = check(volume, &place, &found, &record, now, &mut moved)?;
     let mut sessions = record.sessions;
-    sessions.remove(session);
-    let names = snapshot(volume, seen, &moved)?;
-    place.write_record(&Record::new(*matter, sessions, names))?;
-    Ok(moved)
+    if found.unscanned.is_empty() {
+        sessions.remove(session);
+    } else {
+        tracing::warn!("the scan was partial; the session stays open, so the next launch checks");
+    }
+    let seen = snapshot(&found, &aside)?;
+    place.write_record(&Record::new(*matter, sessions, seen))?;
+    Ok(Checked {
+        moved,
+        unscanned: found.unscanned,
+    })
 }
 
 /// See [`super::set_aside_path`]: the item under its own name in the pass's folder.
