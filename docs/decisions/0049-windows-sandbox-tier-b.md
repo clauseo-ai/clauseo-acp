@@ -146,19 +146,29 @@ build 26100):
     provide the elevated clean-up for this: take ownership with admin rights, then hand back.
   - The credential link's allow is read and write of the file's data only (`0x12008f`, no
     `DELETE`); it lands on the lawyer's real credentials file.
-  - **Set-aside.** `apply`'s launch walk, and `repair_after_session`'s walk when the agent exits,
-    report every `.git`, `.claude` and `.mcp.json` they meet at any depth in the matter, links
-    included and not followed, with its file ID. PR6's launcher passes them on: after `apply`, to
-    `before_launch`, which records them with each protected name at the matter's root
-    (`PROTECTED_NAMES` and `.git`); after `repair_after_session`, to `after_session`. Every one
-    that is new or whose file ID changed is set aside, whoever owns it, so a lawyer folder the
-    agent renamed to `.git` or `sub\.git`, or a lawyer file it hard-linked as `CLAUDE.md`, is
-    caught. Matters' agents run in parallel, and so may two sessions of one matter: the record
-    holds the set of open sessions, every `after_session` checks, and `before_launch` checks
-    whenever a session is open, so a session that didn't end cleanly is checked at the next
-    launch (its id stays, and every later pass keeps checking). A protected name a live session
-    makes may be set aside when another session of its matter starts, and one the lawyer changes
-    during a session is set aside too (both accepted). Items go to
+  - **Set-aside.** The set-aside scans the matter tree itself, through handles, never following
+    a link; the scan writes nothing and has no cap, so nothing the agent does to the ACL walk or
+    the repair switches it off. In each folder it probes each protected name (at the root
+    `PROTECTED_NAMES` and `.git`; at every depth `.git`, `.claude` and `.mcp.json`) by opening
+    it relative to the folder's handle, case-insensitively as the file system decides, so a
+    name counts exactly when git or Claude would open it; it records what the probe opened by
+    file ID. It also records every junction and symbolic link in the tree by the link's own file
+    ID, whatever its name. Names and paths are compared with `CompareStringOrdinal`, ignoring
+    case. PR6's launcher calls `before_launch` before `apply`, and `after_session` when the
+    agent exits, independently of `repair_after_session`'s result. Every protected name or link
+    that is new or whose file ID changed is set aside, whoever owns it, a link moved as itself and
+    never followed: so a lawyer folder the agent renamed to `.git` or `sub\.git`, a lawyer file
+    it hard-linked as `CLAUDE.md`, or a junction it made to a folder holding a `.git`, is caught.
+    A scan that can't list a folder still sets aside what it found, names the folder in its
+    result, and keeps the session open; names inside a folder it couldn't list at launch aren't
+    recorded, so they count as new later. Matters' agents run in parallel, and so may two
+    sessions of one matter: the record holds the set of open sessions, every `after_session`
+    checks, and `before_launch` checks first whenever a session is open. `before_launch` is told
+    which sessions of the matter are still running; every other open session crashed, and is
+    dropped once that check has run. PR5 and PR6 call `before_launch` only once a crashed
+    session's job object is closed (kill-on-close), so its agent is dead. A protected name a live
+    session makes may be set aside when another session of its matter starts, and one the lawyer
+    changes during a session is set aside too (both accepted). Items go to
     `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\`, under the item's path below the matter,
     the protected folder the agent can't write, opened part by part by handle without following a
     link and renamed with `NtSetInformationFile`, never over an existing name. A manifest entry
