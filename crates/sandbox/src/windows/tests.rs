@@ -174,3 +174,58 @@ fn drive_and_rest(path: &Path) -> (&str, &str) {
 fn protect_with(path: &Path, sddl: &str) {
     test_dacl::protect_with(path, sddl).unwrap();
 }
+
+// Tier B's records: the registry read moved here from the desktop's check (#317), this user's
+// SID, the OS facts and the set-up state on a runner that was never set up.
+
+#[test]
+fn the_registry_read_tells_missing_wrong_type_and_a_string_apart() {
+    use windows::core::w;
+
+    use super::RecordError;
+    use super::record::read_string;
+
+    let missing = read_string(w!("SOFTWARE\\Clauseo\\NoSuchKeyForTests"), w!("UserSid"));
+    assert!(matches!(missing, Ok(None)), "{missing:?}");
+    // Values every Windows has: ProductName is a REG_SZ, InstallDate a REG_DWORD.
+    let version = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let name = read_string(version, w!("ProductName"));
+    assert!(
+        matches!(&name, Ok(Some(text)) if text.starts_with("Windows")),
+        "{name:?}"
+    );
+    let missing_value = read_string(version, w!("NoSuchValueForTests"));
+    assert!(matches!(missing_value, Ok(None)), "{missing_value:?}");
+    let dword = read_string(version, w!("InstallDate"));
+    assert!(matches!(dword, Err(RecordError::WrongType)), "{dword:?}");
+    // REG_EXPAND_SZ is refused unexpanded: without RRF_NOEXPAND it would come back expanded, e.g.
+    // `C:\Program Files`, and the environment (which the agent controls) would choose the text.
+    let expand = read_string(
+        w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion"),
+        w!("ProgramFilesPath"),
+    );
+    assert!(matches!(expand, Err(RecordError::WrongType)), "{expand:?}");
+    // The real record: a CI runner has none, a developer's machine may.
+    let record = super::sandbox_user_sid();
+    assert!(record.is_ok(), "{record:?}");
+}
+
+#[test]
+fn this_users_sid_is_a_canonical_account_sid() {
+    let user = super::record::current_user_sid().unwrap();
+    assert!(user.as_str().starts_with("S-1-5-"), "{user}");
+}
+
+#[test]
+fn the_runner_is_a_supported_windows() {
+    let os = super::os_facts();
+    assert!(!os.arm64, "{os:?}");
+    let build = os.build.unwrap();
+    assert!(build >= crate::detect::FIRST_BUILD, "{build}");
+}
+
+#[test]
+fn a_data_folder_without_a_marker_needs_set_up() {
+    let temp = TempDir::new("setup-state");
+    assert_eq!(super::setup_state(temp.path()), crate::SetupState::Needed);
+}

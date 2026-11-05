@@ -71,8 +71,12 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # GetFinalPathNameByHandleW, GetVolumePathNameW, GetDriveTypeW (DRIVE_REMOTE), the volume's
 # FILE_PERSISTENT_ACLS flag, GetFileSecurityW and AccessCheck on a duplicated token
 # (GetCurrentProcess and OpenProcessToken from Win32_System_Threading), and the test's SDDL and
-# SetNamedSecurityInfoW.
+# SetNamedSecurityInfoW. Tier B's records (src/windows/{record,detect}.rs): RegGetValueW for the
+# sandbox user record and the build number (System_Registry), the token's user and
+# ConvertSidToStringSidW, and IsWow64Process2's machine type (System_SystemInformation);
+# serde_json reads and writes matters.json and setup.json.
 [target.'cfg(windows)'.dependencies]
+serde_json = { workspace = true }
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Win32_Foundation",
@@ -81,6 +85,8 @@ windows = { workspace = true, features = [
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
+  "Win32_System_Registry",
+  "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
   "Win32_System_Threading",
   "Win32_System_WindowsProgramming",

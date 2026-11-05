@@ -1,28 +1,25 @@
-//! Windows: reads this process's token and S15's sandbox user record; `signals.rs` decides. The
-//! agent sandbox runs the agent in an `AppContainer`, under a restricted token (restricting
-//! SIDs) or as its own local sandbox user (ADR 0038, tier B).
-#![expect(unsafe_code, reason = "FFI to the Win32 token, SID and registry calls")]
+//! Windows: reads this process's token and S15's sandbox user record (through `clauseo-sandbox`);
+//! `signals.rs` decides. The agent sandbox runs the agent in an `AppContainer`, under a
+//! restricted token (restricting SIDs) or as its own local sandbox user (ADR 0038 and 0049,
+//! tier B).
+#![expect(unsafe_code, reason = "FFI to the Win32 token and SID calls")]
 
 #[cfg(test)]
 mod tests;
 
 use std::io;
 
+use clauseo_sandbox::windows::RecordError;
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-    ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, HLOCAL, LocalFree,
-    WIN32_ERROR,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, LocalFree,
 };
 use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows::Win32::Security::{
     EqualSid, GetTokenInformation, PSID, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
     TOKEN_USER, TokenIsAppContainer, TokenRestrictedSids, TokenUser,
 };
-use windows::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
-};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows::core::{HRESULT, HSTRING, PCWSTR, w};
+use windows::core::{HRESULT, HSTRING};
 
 use super::signals::{self, Failure};
 
@@ -35,81 +32,17 @@ pub(super) fn sandboxed() -> io::Result<bool> {
     signals::decide(Token::open(), sandbox_user_sid)
 }
 
-/// The SID of S15's sandbox user on this machine, as S15's elevated set-up records it:
-/// `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid`, a `REG_SZ`, in the 64-bit view, readable by
-/// everyone. `Ok(None)` when the key or the value is missing (no sandbox user here). The only
-/// place that names the record: when S15 lands it moves into `clauseo-sandbox`
-/// (`windows::sandbox_user_sid()`), beside the code that writes it.
+/// The SID of S15's sandbox user on this machine, from the record S15's set-up writes, read by
+/// `clauseo_sandbox::windows::sandbox_user_sid` beside the code that writes it. `Ok(None)` when
+/// there is no record. A refused read is [`Failure::Denied`], a value that is not a `REG_SZ`
+/// [`Failure::WrongType`], one that is not UTF-16 [`Failure::NotASid`].
 pub(super) fn sandbox_user_sid() -> Result<Option<String>, Failure> {
-    read_string(w!("SOFTWARE\\Clauseo\\Sandbox"), w!("UserSid"))
-}
-
-/// The `REG_SZ` `value` of `HKLM\<subkey>`, read in the 64-bit view (`RRF_SUBKEY_WOW6464KEY`,
-/// `RegGetValueW`'s `KEY_WOW64_64KEY`). Missing key or value: `Ok(None)`. Another type, a
-/// `REG_EXPAND_SZ` included (refused unexpanded, `RRF_NOEXPAND`): [`Failure::WrongType`]. Refused:
-/// [`Failure::Denied`]. Not UTF-16: [`Failure::NotASid`].
-fn read_string(subkey: PCWSTR, value: PCWSTR) -> Result<Option<String>, Failure> {
-    let flags = RRF_RT_REG_SZ | RRF_NOEXPAND | RRF_SUBKEY_WOW6464KEY;
-    let mut size = 0u32;
-    // SAFETY: the key and value names are NUL-terminated literals; no data pointer asks only for
-    // the size, written to `size`.
-    let found = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey,
-            value,
-            flags,
-            None,
-            None,
-            Some(&raw mut size),
-        )
-    };
-    if !present(found)? {
-        return Ok(None);
-    }
-    let units = usize::try_from(size)
-        .map_err(|error| Failure::Other(io::Error::other(error)))?
-        .div_ceil(2)
-        .max(1);
-    let mut buffer = vec![0u16; units];
-    let mut written = u32::try_from(size_of_val(buffer.as_slice()))
-        .map_err(|error| Failure::Other(io::Error::other(error)))?;
-    // SAFETY: `buffer` is live, writable and `written` bytes long for the call.
-    let read = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey,
-            value,
-            flags,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&raw mut written),
-        )
-    };
-    if !present(read)? {
-        return Ok(None);
-    }
-    let units = usize::try_from(written / 2).map_or(0, |n| n.min(buffer.len()));
-    let text = buffer.get(..units).unwrap_or_default();
-    let text = text.split(|unit| *unit == 0).next().unwrap_or_default();
-    String::from_utf16(text)
-        .map(Some)
-        .map_err(|_not_utf16| Failure::NotASid)
-}
-
-/// What a `RegGetValueW` result means: `Ok(true)` read, `Ok(false)` missing. Every code but
-/// these five is [`Failure::Other`] (for example `ERROR_MORE_DATA` when the value grew between
-/// the two reads, or `ERROR_NOT_ENOUGH_MEMORY`).
-fn present(code: WIN32_ERROR) -> Result<bool, Failure> {
-    match code {
-        ERROR_SUCCESS => Ok(true),
-        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(false),
-        ERROR_ACCESS_DENIED => Err(Failure::Denied),
-        ERROR_UNSUPPORTED_TYPE => Err(Failure::WrongType),
-        other => Err(Failure::Other(io::Error::from_raw_os_error(
-            i32::try_from(other.0).unwrap_or(i32::MAX),
-        ))),
-    }
+    clauseo_sandbox::windows::sandbox_user_sid().map_err(|error| match error {
+        RecordError::Denied => Failure::Denied,
+        RecordError::WrongType => Failure::WrongType,
+        RecordError::NotText => Failure::NotASid,
+        RecordError::Other(error) => Failure::Other(error),
+    })
 }
 
 /// A Win32 error as a [`Failure`]: [`Failure::Denied`] for `ERROR_ACCESS_DENIED`.

@@ -132,6 +132,8 @@ crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
 # The folder check (src/windows.rs): its Win32 calls, and its test's DACL setup.
 crates/sandbox/src/windows.rs - unsafe_code
 crates/sandbox/src/windows/test_dacl.rs - unsafe_code
+crates/sandbox/src/windows/record.rs - unsafe_code
+crates/sandbox/src/windows/detect.rs - unsafe_code
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.
@@ -249,6 +251,7 @@ fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods
 crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
 crates/sandbox/src/test_support.rs - clippy::disallowed_methods
 crates/sandbox/src/browser_dir/write.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/write.rs - clippy::disallowed_methods
 crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
 crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
