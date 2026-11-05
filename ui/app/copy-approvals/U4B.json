@@ -1,0 +1,138 @@
+{
+  "U4B-01": {
+    "en": "Send",
+    "hi": "भेजें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-02": {
+    "en": "Don't answer",
+    "hi": "उत्तर न दें",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-03": {
+    "en": "Other",
+    "hi": "अन्य",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-04": {
+    "en": "Required",
+    "hi": "आवश्यक",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-05": {
+    "en": "Answer this question.",
+    "hi": "इस प्रश्न का उत्तर दें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-06": {
+    "en": "This answer doesn't fit the question.",
+    "hi": "यह उत्तर प्रश्न से मेल नहीं खाता।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-07": {
+    "en": "Choose an answer to send, or 'Don't answer' to go on without one.",
+    "hi": "भेजने के लिए कोई उत्तर चुनें, या बिना उत्तर के आगे बढ़ने के लिए 'उत्तर न दें' चुनें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-08": {
+    "en": "This question can't be shown here. Choose 'Don't answer', or Stop the answer.",
+    "hi": "यह प्रश्न यहाँ नहीं दिखाया जा सकता। 'उत्तर न दें' चुनें, या उत्तर रोकें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-09": {
+    "en": "Use {n} characters or fewer.",
+    "hi": "{n} या उससे कम अक्षर लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-10": {
+    "en": "Use 1 character or fewer.",
+    "hi": "1 या उससे कम अक्षर लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-11": {
+    "en": "Use at least {n} characters.",
+    "hi": "कम से कम {n} अक्षर लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-13": {
+    "en": "Choose up to {n}.",
+    "hi": "अधिकतम {n} चुनें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-14": {
+    "en": "Choose at least {n}.",
+    "hi": "कम से कम {n} चुनें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-15": {
+    "en": "Use a number from {min} to {max}.",
+    "hi": "{min} से {max} तक की कोई संख्या लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-16": {
+    "en": "Use {min} or more.",
+    "hi": "{min} या उससे बड़ी संख्या लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-17": {
+    "en": "Use {max} or less.",
+    "hi": "{max} या उससे छोटी संख्या लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  },
+  "U4B-18": {
+    "en": "Use a whole number.",
+    "hi": "पूर्ण संख्या लिखें।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator"
+  }
+}

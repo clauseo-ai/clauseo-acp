@@ -1,0 +1,290 @@
+{
+  "UET-01": {
+    "en": "{tool}: {state}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-09": {
+    "en": "Web search",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-10": {
+    "en": "Browser",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-11": {
+    "en": "On",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-12": {
+    "en": "Can't search on this login",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-13": {
+    "en": "In Settings",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-14": {
+    "en": "Managed by firm",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-15": {
+    "en": "Open Settings",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-18": {
+    "en": "Not available yet",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-19": {
+    "en": "Too many browsers open",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-20": {
+    "en": "Needs Chrome",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-21": {
+    "en": "From Google, once. Needs 1 GB free.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-22": {
+    "en": "Download Chrome",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-23": {
+    "en": "Install Chrome to use it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-24": {
+    "en": "{done} of {total} MB",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-25": {
+    "en": "Unpacking",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-26": {
+    "en": "Ready for new conversations",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-27": {
+    "en": "Needs 1 GB free",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-28": {
+    "en": "Network blocked it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-29": {
+    "en": "File didn't match",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-30": {
+    "en": "Download failed",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-31": {
+    "en": "Try again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-33": {
+    "en": "Changes apply to new conversations.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-34": {
+    "en": "Connection dropped",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-35": {
+    "en": "Couldn't unpack",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-37": {
+    "en": "Download stopped",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-38": {
+    "en": "{tool}: {state}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-39": {
+    "en": "on",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-40": {
+    "en": "off, {reason}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-41": {
+    "en": "Off",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-42": {
+    "en": "200 MB",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-43": {
+    "en": "The browser comes with your next conversation.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  }
+}
