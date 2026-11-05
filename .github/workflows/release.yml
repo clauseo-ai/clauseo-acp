@@ -357,6 +357,31 @@ jobs:
               "${config[@]}" --config release/sidecars.generated.json -- --locked
           fi
 
+      # Only a test run's e2e build may hold the throwaway test key (crates/desktop/release/
+      # updater-test.pub). Every other run's app binary, as linked and before anything bundles,
+      # signs or uploads it (the macOS .app's main executable is this file), holds none of it: not
+      # the file's base64 text, its RW... key line or its key id (B142942ACEC5F521), in ASCII or
+      # UTF-16 (the NULs are dropped first). This scan, not the desktop tests, is the control.
+      - name: The app binary holds no form of the test updater key
+        if: env.MODE != 'test'
+        run: |
+          set -euo pipefail
+          file=$(tr -d '\r\n' < crates/desktop/release/updater-test.pub)
+          decoded=$(printf '%s' "$file" | base64 -d)
+          id=$(printf '%s\n' "$decoded" | sed -n 1p | awk '{ print $NF }')
+          key=$(printf '%s\n' "$decoded" | sed -n 2p | tr -d '\r')
+          [ "${#id}" = 16 ] && [ "${key#RW}" != "$key" ] || { echo "::error::updater-test.pub is not a minisign public key"; exit 1; }
+          exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
+          [ -f "$exe" ] || { echo "::error::no app binary at $exe"; exit 1; }
+          for form in "$file" "$key" "$id"; do
+            found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$form") || [ $? -eq 1 ]
+            if [ "$found" != 0 ]; then
+              echo "::error::$exe holds the test updater key"
+              exit 1
+            fi
+          done
+          echo "$exe holds no form of the test updater key"
+
       # A dry run's updater key: made here, with a random password, and gone with the runner.
       - name: Make a throwaway updater key (dry run)
         if: matrix.signs && env.MODE == 'dry'

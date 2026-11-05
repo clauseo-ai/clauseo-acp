@@ -263,8 +263,14 @@ install; what the brief left open was decided so:
   real endpoint: `E2E_FAKE_UPDATE=<version>` (a fake, installed per user, that offers that
   version at once, finishes its download at once with no file, and is never installed: the app
   just exits), else `E2E_UPDATE_ENDPOINT` with the test key, else none. The test key is
-  compiled into the `e2e` build alone (`TRUSTS_TEST_KEY`), and two tests fail if a release
-  config or a non-`e2e` build trusts it.
+  compiled into the `e2e` build alone (`TRUSTS_TEST_KEY`). Three layers keep it there. A
+  desktop test fails if any file of the crate (tests aside) holds the key in any form or a piece
+  of its path, except the key's file and the one `include_str!` line in `choice.rs`, directly
+  under `#[cfg(feature = "e2e")]`. A second fails if the non-`e2e` test binary holds the key,
+  but the linker drops code only `run()` reaches, so that covers only what the tests reach. The
+  real control is `release.yml`'s scan of each shipped app binary before it is signed or
+  uploaded (0035, "No test key in a shipped binary"), which fails a release or dry run that
+  holds the key.
 - **The plugin** is reached through `UpdaterBuilder`, with a 30 s connect and a 60 s read
   timeout (the host sets no deadline on a check or a download). A release that has no installer
   for this platform (`TargetNotFound`) is no update, not a failure. An error reaches the host

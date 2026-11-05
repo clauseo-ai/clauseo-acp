@@ -47,6 +47,13 @@ Developer ID.
   third-party build scripts run. Only the macOS legs of `build` take an environment, since only they
   sign there. `.github/scripts/latest-json.test.mjs` fails on a pull request trigger, an unpinned
   action, a job without `permissions:` or a secret outside a step, and runs in CI's fast lane.
+- **No test key in a shipped binary.** In every `build` leg of a run that is not `test` (so
+  release and dry runs), the step right after `tauri build`, before anything bundles, signs or
+  uploads, scans the app binary as linked (`Clauseo.exe`, or `Clauseo`, which becomes the
+  `.app`'s main executable) for the throwaway test key (`updater-test.pub`): its base64 text,
+  its `RW…` key line and its key id, in ASCII or UTF-16 (NULs dropped first). A hit fails the
+  leg with `::error::` naming the file. A `test` run builds `e2e`, which holds the key on
+  purpose. The desktop tests' own checks (0037) cover only the source text and the test binary.
 - **Artefacts by tier.** Tier 1, which must build: `Clauseo_<v>_aarch64.dmg` and
   `Clauseo_<v>_aarch64.app.tar.gz` (`macos-15`), `Clauseo_<v>_x64-setup.exe` and
   `Clauseo_<v>_x64-machine-setup.exe` (`windows-2025`). Tier 2, `continue-on-error`, named in the
