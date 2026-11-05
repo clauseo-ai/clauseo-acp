@@ -6,12 +6,15 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
+#[cfg(unix)]
 use std::time::Duration;
 
 use clauseo_host::AgentsStopped;
 use clauseo_protocol::{AgentId, DomainEvent, MatterId, StopReason, StreamId, ThreadId, TurnId};
+#[cfg(unix)]
 use futures::future::{Either, select};
 
 use crate::codex::Recording;
@@ -26,6 +29,7 @@ const ASKED: &str = "Look at the matter.";
 const WHILE_HELD: &str = "Sent while held.";
 
 /// `stop_agents`' bounded wait (`STOP_WAIT` in the host's `turn/sign_in/stops.rs`).
+#[cfg(unix)]
 const STOP_WAIT: Duration = Duration::from_secs(10);
 
 /// The fake agent's id.
