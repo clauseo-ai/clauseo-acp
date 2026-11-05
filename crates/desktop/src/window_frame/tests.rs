@@ -206,11 +206,11 @@ fn main_and_settings_grant_the_drag_permissions_and_frame_the_caption_ones_on_wi
     let (frame, core) = core_permissions("capabilities/frame.json", &["main", "settings"]);
     assert_eq!(core, set(CAPTION_PERMISSIONS), "capabilities/frame.json");
     assert_eq!(frame["platforms"], json!(["windows", "linux"]));
-    // main and settings are in the context; grant_caption_commands adds frame at setup.
+    // main, settings and counts are in the context; grant_caption_commands adds frame at setup.
     let config: Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
     assert_eq!(
         config["app"]["security"]["capabilities"],
-        json!(["main", "settings"])
+        json!(["main", "settings", "counts"])
     );
     for permission in DRAG_PERMISSIONS.iter().chain(CAPTION_PERMISSIONS) {
         // One command each, of the window plugin: no default set, no scope, nothing that sets a
@@ -221,8 +221,12 @@ fn main_and_settings_grant_the_drag_permissions_and_frame_the_caption_ones_on_wi
             "{permission}"
         );
     }
-    // The e2e and marks capabilities stay command-only.
-    for file in ["capabilities/e2e.json", "capabilities/marks.json"] {
+    // The e2e, marks and counts capabilities stay command-only.
+    for file in [
+        "capabilities/e2e.json",
+        "capabilities/marks.json",
+        "capabilities/counts.json",
+    ] {
         assert!(!read(file).contains("core:"), "{file}");
     }
 }

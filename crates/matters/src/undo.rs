@@ -4,9 +4,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChoice, MatterPath};
+use clauseo_protocol::{
+    ChangeKind, CheckpointId, CheckpointKind, ContentId, FileChoice, MatterPath,
+};
 
 use crate::checkpoint::{Core, SizedFile, Spec};
+use crate::diff::content_id;
 use crate::history::{HistoryStore, Oid};
 use crate::no_download::NoDownload;
 use crate::stat::{EntryState, Stat, find_by_path};
@@ -84,7 +87,9 @@ enum Current {
     Unread,
 }
 
-/// See [`crate::Matter::edited_since`].
+/// See [`crate::Matter::edited_since`]. The paths an undo of the step would touch are those of
+/// [`step`], each with its content in `after` as the step's diff reports it, so only the
+/// subtrees the step changed are read: never a listing of the whole matter.
 pub(crate) fn edited_since(
     core: &mut Core,
     folder: &Path,
@@ -92,22 +97,33 @@ pub(crate) fn edited_since(
     before: CheckpointId,
     after: CheckpointId,
 ) -> Result<Vec<MatterPath>, Error> {
-    let steps = step(core, folder, settings, before, after)?;
-    let after_files = core.files_of(after)?;
+    let changes = core.changes_between(before, after)?;
     let mut edited = Vec::new();
     let mut names = Names::default();
     let guard = NoDownload::begin(settings.probe.as_ref());
-    for step in &steps {
-        for op in &step.ops {
-            let then = find(&after_files, op.path().as_str()).map(|file| file.blob);
-            let now = current(core, &mut names, folder, settings, op.path(), &guard)?;
+    for change in &changes {
+        let path = change.path();
+        // Each path undoing the change writes or deletes, with what `after` holds there.
+        let targets: Vec<(&MatterPath, Option<&ContentId>)> = match change.change() {
+            ChangeKind::Added | ChangeKind::Modified => vec![(path, change.after())],
+            // As in `step`: a deletion whose file is back but over the cap or cloud-only is
+            // never undone.
+            ChangeKind::Deleted if now_skipped(&mut names, folder, settings, path)? => continue,
+            ChangeKind::Deleted => vec![(path, None)],
+            ChangeKind::Renamed { from } => vec![(path, change.after()), (from, None)],
+            ChangeKind::Unknown { .. } => {
+                return Err(Error::history("undo", "a change of an unknown kind"));
+            }
+        };
+        for (target, then) in targets {
+            let now = current(core, &mut names, folder, settings, target, &guard)?;
             let same = match (now, then) {
                 (Current::Missing, None) | (Current::Unread, _) => true,
-                (Current::Blob(now), Some(then)) => now == then,
+                (Current::Blob(now), Some(then)) => content_id(now)? == *then,
                 (Current::Missing, Some(_)) | (Current::Blob(_), None) => false,
             };
             if !same {
-                edited.push(step.path.clone());
+                edited.push(path.clone());
                 break;
             }
         }

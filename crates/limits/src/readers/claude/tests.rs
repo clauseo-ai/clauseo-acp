@@ -1,12 +1,14 @@
 //! The helper's line, from the fixtures and from hand-made edge cases, to the exact outcome.
 
+mod prepare;
+
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, BillingProvider, Finite,
     LimitSource, LimitWindow, PlanLabel, Timestamp, UnavailableReason, WindowKind,
 };
 
 use super::{Answer, answer, clean, looks_like_email};
-use crate::{ReadFailure, ReadOutcome};
+use crate::{AccountRead, ReadFailure, ReadOutcome};
 
 /// 2026-11-02T18:00:00Z.
 const NOV_2_1800: i64 = 1_793_642_400_000;
@@ -26,6 +28,7 @@ fn limits(line: &str) -> AccountLimits {
         Answer::Outcome(ReadOutcome::Usage {
             limits,
             reached: None,
+            account_read: AccountRead::Read,
         }) => limits,
         other => panic!("not usage: {other:?}"),
     }
@@ -113,6 +116,27 @@ fn max_has_its_windows_one_model_window_and_extra_usage_on() {
             at_limit: AtLimitBehaviour::ExtraUsage { enabled: true },
             source: fresh(),
         }
+    );
+}
+
+#[test]
+fn a_recorded_pro_line_reads_pro_with_its_session_and_weekly_windows() {
+    let limits = limits(include_str!("../../../fixtures/recorded/claude/pro.jsonl"));
+    assert_eq!(limits.account, AccountRef("test@example.com".to_owned()));
+    assert_eq!(limits.plan, Some(PlanLabel("Claude Pro".to_owned())));
+    assert_eq!(limits.billing, Billing::Plan);
+    assert_eq!(limits.source, fresh());
+    let shape: Vec<(&str, WindowKind)> = limits
+        .windows
+        .iter()
+        .map(|window| (window.id.as_str(), window.kind))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("five_hour", WindowKind::Session),
+            ("seven_day", WindowKind::Weekly)
+        ]
     );
 }
 

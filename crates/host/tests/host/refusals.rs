@@ -9,7 +9,6 @@ use clauseo_protocol::{
 };
 
 use crate::support::{Dir, Running, wait};
-#[cfg(unix)]
 use crate::write;
 
 /// Imports `folder` as `name`.
@@ -172,6 +171,50 @@ fn clauseos_data_folder_is_folder_in_matters_root() {
     host.shutdown();
 }
 
+/// A new folder inside Clauseo's data folder is refused as an import of the same folder is
+/// (`matter.folder_in_matters_root`), and nothing is made: no folder, no matter.
+#[test]
+fn a_new_folder_inside_clauseos_data_folder_is_folder_in_matters_root() {
+    let dir = Dir::new("refuse_new_in_data", &[]);
+    let host = dir.start(0);
+    let parent = dir.data().join("work");
+    write::create_dir_all(&parent);
+    let parent_ref = host.folder_ref(&parent);
+    let matters = || host.matters().len();
+    let listed = matters();
+    let error = host.refused(
+        HostCommand::CreateMatter {
+            name: Title::new("Appeal").unwrap(),
+            source: MatterSource::NewFolder { folder: parent_ref },
+            client: None,
+            next_date: None,
+        },
+        ErrorCode::MatterFolderInMattersRoot,
+    );
+    assert_eq!(error.matter(), None, "{error}");
+    assert!(!parent.join("Appeal").exists(), "no folder was made");
+    assert_eq!(matters(), listed, "no matter was listed");
+    host.shutdown();
+}
+
+/// A new folder beside the data folder, under the home folder, is made as before.
+#[test]
+fn a_new_folder_outside_the_data_folder_is_made() {
+    let dir = Dir::new("create_new_outside_data", &[]);
+    let parent = dir.folder("Matters", &[]);
+    let host = dir.start(0);
+    let parent_ref = host.folder_ref(&parent);
+    let created = host.ok(HostCommand::CreateMatter {
+        name: Title::new("Appeal").unwrap(),
+        source: MatterSource::NewFolder { folder: parent_ref },
+        client: None,
+        next_date: None,
+    });
+    assert!(matches!(created, CommandOutcome::MatterCreated { .. }));
+    assert!(parent.join("Appeal/.clauseo/matter.json").is_file());
+    host.shutdown();
+}
+
 #[test]
 fn a_missing_folder_is_still_folder_missing() {
     let dir = Dir::new("refuse_missing", &[]);
@@ -198,5 +241,45 @@ fn a_marker_naming_a_matter_this_install_never_had_names_no_matter() {
             .iter()
             .all(|summary| summary.matter != foreign)
     );
+    host.shutdown();
+}
+
+/// "New matter" on a folder that is already this install's matter, picked by another spelling
+/// of its path (as `Z:\n1` and `\\server\share\n1` on Windows): the import is refused with
+/// `matter.folder_is_matter` naming that matter, and nothing is made: no second matter on the
+/// list, no second history, the folder's `matter.json` unchanged.
+#[cfg(unix)]
+#[test]
+fn a_matters_folder_by_another_spelling_is_folder_is_matter_and_makes_nothing() {
+    let dir = Dir::new("refuse_is_matter_spelled", &[]);
+    let folder = dir.folder("Smith v Jones", &[("a.txt", "x\n")]);
+    let parent = folder.parent().unwrap().to_owned();
+    let link = parent.join("Alias");
+    write::symlink(&folder, &link);
+    let host = dir.start(0);
+    let matter = imported(&host, &folder);
+    let marker = std::fs::read(folder.join(".clauseo/matter.json")).unwrap();
+    let histories = || {
+        std::fs::read_dir(dir.data().join("matters"))
+            .unwrap()
+            .count()
+    };
+    let made = histories();
+    let listed = host.matters().len();
+    for (case, path) in [
+        ("through a symlink", link),
+        ("with `..`", folder.join("..").join("Smith v Jones")),
+        ("with `.`", parent.join(".").join("Smith v Jones").join(".")),
+    ] {
+        let error = refused(&host, &path, ErrorCode::MatterFolderIsMatter);
+        assert_eq!(error.matter(), Some(matter), "{case}: {error}");
+        assert_eq!(host.matters().len(), listed, "{case}: no second matter");
+        assert_eq!(histories(), made, "{case}: no second history");
+        assert_eq!(
+            std::fs::read(folder.join(".clauseo/matter.json")).unwrap(),
+            marker,
+            "{case}: matter.json unchanged"
+        );
+    }
     host.shutdown();
 }

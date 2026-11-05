@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::Subscription;
-use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_limits::{AccountRead, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
     CommandOutcome, Finite, Freshness, HostCommand, HostEvent, LimitSource, LimitWindow,
@@ -188,6 +188,7 @@ pub(crate) fn usage(agent: AgentKind, used: f64, resets_at: Option<Timestamp>) -
     ReadOutcome::Usage {
         limits: plan(agent, used, resets_at),
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 
@@ -233,7 +234,7 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
     let dir = Dir::new(
         "start_shows_stored_limits_stale_and_reads_each_agent",
         &[
-            (CLAUDE, Scenario::Bundled("limit-warning")),
+            (CLAUDE, Scenario::Bundled("claude-limit-warning")),
             (CODEX, Scenario::Bundled("codex-handshake")),
         ],
     );
@@ -289,7 +290,7 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
 fn live_warning_publishes_the_limits_and_a_near_meter() {
     let dir = Dir::new(
         "live_warning_publishes_the_limits_and_a_near_meter",
-        &[(CLAUDE, Scenario::Bundled("limit-warning"))],
+        &[(CLAUDE, Scenario::Bundled("claude-limit-warning"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -349,10 +350,11 @@ fn codex_turn_end_reads_at_most_once_a_minute() {
 }
 
 #[test]
-fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
+fn claude_turn_end_with_no_live_signal_reads_once_the_last_read_is_two_minutes_old() {
+    // `claude-prompt-stream` sends no `_claude/rateLimit`, so the 2-minute rule applies.
     let dir = Dir::new(
-        "claude_turn_end_reads_once_the_last_read_is_ten_minutes_old",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        "claude_turn_end_with_no_live_signal_reads_once_the_last_read_is_two_minutes_old",
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -365,13 +367,13 @@ fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
     turn(&host, first);
     assert_eq!(reads.count(AgentKind::Claude), 1, "the last read is new");
 
-    host.clock.advance(10 * MINUTE);
+    host.clock.advance(2 * MINUTE);
     let second = host.create_thread(matter, CLAUDE);
     turn(&host, second);
     assert_eq!(
         reads.count(AgentKind::Claude),
         2,
-        "the last read is ten minutes old"
+        "the last read is two minutes old"
     );
     host.shutdown();
 }
@@ -380,7 +382,7 @@ fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
 fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     let dir = Dir::new(
         "refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -432,7 +434,7 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
 fn refresh_waits_for_a_pending_permission() {
     let dir = Dir::new(
         "refresh_waits_for_a_pending_permission",
-        &[(CLAUDE, Scenario::Bundled("permission-kinds"))],
+        &[(CLAUDE, Scenario::Bundled("claude-permission-kinds"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -475,7 +477,7 @@ fn refresh_waits_for_a_pending_permission() {
 fn deadlines_run_only_with_a_subscriber() {
     let dir = Dir::new(
         "deadlines_run_only_with_a_subscriber",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let mut stored = plan(AgentKind::Claude, 40.0, Some(at(1800)));
     stored.source = LimitSource::Fresh {

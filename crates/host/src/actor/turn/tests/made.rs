@@ -1,0 +1,269 @@
+//! A "New matter" whose record fails after its worker made the matter on disk (stage B saw it
+//! with `store.io`): the folder's `matter.json` and the matter's history are taken back before
+//! the command is answered with the store's own error, so a retry on the same folder makes the
+//! matter instead of finding the folder "already a matter".
+
+use std::path::Path;
+
+use clauseo_protocol::{
+    CommandOutcome, DomainEvent, ErrorCode, FolderRefId, FolderSupportKind, HostCommand,
+    MatterSource, Title,
+};
+
+use super::rig::Rig;
+use crate::agent::folder_support::{Answer, CheckSource};
+use crate::error::Error;
+use crate::pipeline::tests::support::TempDir;
+
+/// The folder ref of `folder`, as `register_folder` mints one.
+fn folder_ref(rig: &mut Rig, folder: &Path) -> FolderRefId {
+    let now = rig.actor.now().wall;
+    let id: FolderRefId = rig.actor.ids.mint(now).unwrap();
+    rig.actor.folders.insert(id, folder.to_owned());
+    id
+}
+
+fn create(source: MatterSource) -> HostCommand {
+    HostCommand::CreateMatter {
+        name: Title::new("Smith v Jones").unwrap(),
+        source,
+        client: None,
+        next_date: None,
+    }
+}
+
+/// Makes the folder check answer `network` for the next create, whatever its folder.
+fn folder_check_says_network(rig: &mut Rig) {
+    rig.actor.folder_check = CheckSource::Fixed(Answer::Known(Some(FolderSupportKind::Network)));
+}
+
+/// The matters' histories under the data folder.
+fn histories(rig: &Rig) -> usize {
+    std::fs::read_dir(rig.actor.effective.data_dir().join("matters"))
+        .unwrap()
+        .count()
+}
+
+/// The store refuses the next commit that creates a matter: `fail` gives it a second receipt for
+/// the command of a thread made first.
+fn store_refuses_the_next_matter(rig: &mut Rig) {
+    let _thread = rig.thread();
+    rig.fail(1, |event| matches!(event, DomainEvent::MatterCreated(_)));
+}
+
+#[test]
+fn an_import_whose_record_fails_leaves_nothing_and_imports_again() {
+    let mut rig = Rig::start("made-import", "");
+    let papers = TempDir::new("made-import-papers");
+    let folder = papers.path().join("Smith v Jones");
+    crate::write::create_dir_all(&folder.join(".clauseo")).unwrap();
+    crate::write::write_file(&folder.join(".clauseo/notes.txt"), b"kept").unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"Clause 4\n").unwrap();
+    let (listed, made) = (rig.actor.matters.len(), histories(&rig));
+    let source = MatterSource::ExistingFolder {
+        folder: folder_ref(&mut rig, &folder),
+    };
+
+    store_refuses_the_next_matter(&mut rig);
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    // The store's own error, as the fault makes it (a duplicate receipt, `internal`).
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert_eq!(error.code(), ErrorCode::Internal, "{error}");
+    assert!(
+        !folder.join(".clauseo/matter.json").exists(),
+        "no marker left"
+    );
+    assert_eq!(
+        std::fs::read(folder.join(".clauseo/notes.txt")).unwrap(),
+        b"kept",
+        "the .clauseo that was there stays"
+    );
+    assert_eq!(histories(&rig), made, "no history left");
+    assert_eq!(rig.actor.matters.len(), listed);
+    assert!(rig.actor.made.is_empty() && rig.actor.claims.is_empty());
+
+    let answer = rig.dispatch(11, create(source)).unwrap();
+    let CommandOutcome::MatterCreated { matter } = answer else {
+        panic!("{answer:?}");
+    };
+    assert!(rig.actor.matters[&matter].worker.is_some());
+    assert!(folder.join(".clauseo/matter.json").exists());
+    assert_eq!(histories(&rig), made + 1);
+    rig.finish();
+}
+
+#[test]
+fn a_new_folder_whose_record_fails_is_removed_and_made_again() {
+    let mut rig = Rig::start("made-create", "");
+    let papers = TempDir::new("made-create-papers");
+    let made = histories(&rig);
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+
+    store_refuses_the_next_matter(&mut rig);
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    // The store's own error, as the fault makes it (a duplicate receipt, `internal`).
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert_eq!(error.code(), ErrorCode::Internal, "{error}");
+    assert!(
+        !papers.path().join("Smith v Jones").exists(),
+        "the new folder is gone"
+    );
+    assert_eq!(histories(&rig), made, "no history left");
+
+    let answer = rig.dispatch(11, create(source)).unwrap();
+    assert!(
+        matches!(answer, CommandOutcome::MatterCreated { .. }),
+        "{answer:?}"
+    );
+    assert!(
+        papers
+            .path()
+            .join("Smith v Jones/.clauseo/matter.json")
+            .exists()
+    );
+    rig.finish();
+}
+
+/// A commit that could not be sent (the store never had it): the matter is discarded and the
+/// folder imports again.
+#[test]
+fn an_import_whose_commit_cannot_be_sent_leaves_nothing_and_imports_again() {
+    let mut rig = Rig::start("made-send", "");
+    let papers = TempDir::new("made-send-papers");
+    let folder = papers.path().join("Smith v Jones");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"Clause 4\n").unwrap();
+    let made = histories(&rig);
+    let source = MatterSource::ExistingFolder {
+        folder: folder_ref(&mut rig, &folder),
+    };
+
+    rig.actor.failed_sends = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Closed), "{error:?}");
+    assert!(!folder.join(".clauseo").exists(), "no marker left");
+    assert_eq!(histories(&rig), made, "no history left");
+    assert!(rig.actor.made.is_empty() && rig.actor.claims.is_empty());
+
+    let answer = rig.dispatch(11, create(source)).unwrap();
+    assert!(
+        matches!(answer, CommandOutcome::MatterCreated { .. }),
+        "{answer:?}"
+    );
+    rig.finish();
+}
+
+/// A commit the store made whose reply was lost: the outcome is unknown, so the store is asked;
+/// it holds the row, so the marker and the history are kept and the command gets the error.
+#[test]
+fn a_stored_matter_whose_reply_was_lost_is_kept() {
+    let mut rig = Rig::start("made-lost", "");
+    let papers = TempDir::new("made-lost-papers");
+    let folder = papers.path().join("Smith v Jones");
+    crate::write::create_dir_all(&folder).unwrap();
+    crate::write::write_file(&folder.join("brief.txt"), b"Clause 4\n").unwrap();
+    let made = histories(&rig);
+    let source = MatterSource::ExistingFolder {
+        folder: folder_ref(&mut rig, &folder),
+    };
+
+    rig.actor.lost_replies = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert!(
+        folder.join(".clauseo/matter.json").exists(),
+        "the marker is kept"
+    );
+    assert_eq!(histories(&rig), made + 1, "the history is kept");
+    assert!(rig.actor.made.is_empty() && rig.actor.claims.is_empty());
+    let store = rig.actor.store.clone();
+    let rows = rig.run(async move { store.matters().await }).unwrap();
+    let path = folder.to_string_lossy();
+    assert!(
+        rows.iter().any(|row| row.folder_path == path),
+        "the row is stored"
+    );
+    rig.finish();
+}
+
+/// A new folder's create that succeeds keeps the folder check's answer for its row.
+#[test]
+fn a_created_matter_keeps_its_folder_answer() {
+    let mut rig = Rig::start("made-answer", "");
+    let papers = TempDir::new("made-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    let answer = rig.dispatch(10, create(source)).unwrap();
+    let CommandOutcome::MatterCreated { matter } = answer else {
+        panic!("{answer:?}");
+    };
+    assert_eq!(
+        rig.actor.folder_supports.get(&matter),
+        Some(&FolderSupportKind::Network)
+    );
+    rig.finish();
+}
+
+/// A create whose store refuses its commit leaves no folder answer in memory.
+#[test]
+fn a_create_the_store_refuses_leaves_no_folder_answer() {
+    let mut rig = Rig::start("made-refused-answer", "");
+    let papers = TempDir::new("made-refused-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    store_refuses_the_next_matter(&mut rig);
+    assert!(rig.dispatch(10, create(source)).is_err());
+    assert!(rig.actor.folder_supports.is_empty());
+    rig.finish();
+}
+
+/// A create whose commit cannot be sent leaves no folder answer in memory.
+#[test]
+fn a_create_whose_commit_cannot_be_sent_leaves_no_folder_answer() {
+    let mut rig = Rig::start("made-unsent-answer", "");
+    let papers = TempDir::new("made-unsent-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    rig.actor.failed_sends = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Closed), "{error:?}");
+    assert!(rig.actor.folder_supports.is_empty());
+    rig.finish();
+}
+
+/// A create whose store reply is lost, but whose row is stored, keeps the matter and its
+/// folder answer.
+#[test]
+fn a_stored_matter_whose_reply_was_lost_keeps_its_folder_answer() {
+    let mut rig = Rig::start("made-lost-answer", "");
+    let papers = TempDir::new("made-lost-answer-papers");
+    let source = MatterSource::NewFolder {
+        folder: folder_ref(&mut rig, papers.path()),
+    };
+    folder_check_says_network(&mut rig);
+
+    rig.actor.lost_replies = 1;
+    let error = rig.dispatch(10, create(source)).unwrap_err();
+    assert!(matches!(error, Error::Store(_)), "{error:?}");
+    assert!(
+        papers
+            .path()
+            .join("Smith v Jones/.clauseo/matter.json")
+            .exists(),
+        "the marker is kept"
+    );
+    let supports: Vec<_> = rig.actor.folder_supports.values().copied().collect();
+    assert_eq!(supports, [FolderSupportKind::Network]);
+    rig.finish();
+}

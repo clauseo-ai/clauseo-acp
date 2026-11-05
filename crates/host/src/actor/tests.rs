@@ -17,6 +17,8 @@ use futures::StreamExt;
 use futures::executor::block_on;
 use uuid::Uuid;
 
+use super::Actor;
+use crate::pipeline::Draft;
 use crate::pipeline::tests::support::TempDir;
 use crate::{
     EventSubscription, Host, HostConfig, HostHandle, HostJoin, ManualClock, SequentialIds,
@@ -28,8 +30,14 @@ fn start(dir: &Path, run: u16) -> (HostHandle, HostJoin) {
     // OS (`/usr/bin/true` is not on Windows). Nothing here launches it.
     let command = dir.join("agent");
     let settings = serde_json::json!({ "agents": { "fake-agent": { "command": command } } });
-    crate::write::write_file(&dir.join("settings.json"), settings.to_string().as_bytes()).unwrap();
-    let effective = Effective::load(&Locations::under_root(dir), &SystemFiles, &[]);
+    // The data folder is `dir/data` (`Locations::under_home`): new matters go outside it.
+    crate::write::create_dir_all(&dir.join("data")).unwrap();
+    crate::write::write_file(
+        &dir.join("data").join("settings.json"),
+        settings.to_string().as_bytes(),
+    )
+    .unwrap();
+    let effective = Effective::load(&Locations::under_home(dir), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.join("home")));
     let config = HostConfig::new(effective, Arc::new(launcher))
         .with_clock(Arc::new(ManualClock::new(
@@ -57,11 +65,15 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Entries(_)
         | QueryResult::FileChanges(_)
         | QueryResult::RestorePreview(_)
+        | QueryResult::UndoPreview(_)
         | QueryResult::Blob(_)
         | QueryResult::Settings(_)
         | QueryResult::Papers { .. }
         | QueryResult::Agents(_)
-        | QueryResult::DefaultLocation(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::DefaultLocation(_)
+        | QueryResult::Search(_)
+        | QueryResult::FolderSupport(_)
+        | QueryResult::Update(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -106,7 +118,10 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::LimitsViewChanged(_)
             | HostEvent::SettingsChanged(_)
             | HostEvent::MattersChanged(_)
-            | HostEvent::ThreadsChanged(_)) => panic!("unexpected {other:?}"),
+            | HostEvent::ThreadsChanged(_)
+            | HostEvent::FolderScanned(_)
+            | HostEvent::BrowserInstall { .. }
+            | HostEvent::UpdateChanged(_)) => panic!("unexpected {other:?}"),
         }
     }
 }
@@ -175,6 +190,7 @@ fn start_command_subscribe_shutdown_restart() {
     let rename = HostCommand::RenameThread {
         thread,
         title: Title::new("Lease review").unwrap(),
+        placeholder: false,
     };
     assert_eq!(
         block_on(host.dispatch(envelope(2, rename))).unwrap(),
@@ -267,8 +283,9 @@ fn a_second_start_is_locked_and_abort_frees_the_folder() {
     let dir = TempDir::new("actor-lock");
     let (host, _join) = start(dir.path(), 0);
     let settings = b"{}";
-    crate::write::write_file(&dir.path().join("settings.json"), settings).unwrap();
-    let effective = Effective::load(&Locations::under_root(dir.path()), &SystemFiles, &[]);
+    crate::write::create_dir_all(&dir.path().join("data")).unwrap();
+    crate::write::write_file(&dir.path().join("data").join("settings.json"), settings).unwrap();
+    let effective = Effective::load(&Locations::under_home(dir.path()), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new());
     let second = Host::start(HostConfig::new(effective, Arc::new(launcher))).unwrap_err();
     assert_eq!(second.code(), ErrorCode::StoreLocked);
@@ -297,7 +314,9 @@ fn schema_1_snapshot(events: &[Envelope]) -> Vec<u8> {
 fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again() {
     let dir = TempDir::new("actor-old-snapshot");
     block_on(async {
-        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        let data = dir.path().join("data");
+        crate::write::create_dir_all(&data).unwrap();
+        let store = Store::open(StoreOptions::new(&data)).await.unwrap();
         for commit in fixtures::reopen_20k(schema_1_snapshot, 1) {
             store.commit(commit).await.unwrap();
         }
@@ -346,7 +365,9 @@ fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again()
     // The whole-log fold was 20,000 events, past SNAPSHOT_EVERY_EVENTS: the load wrote a
     // snapshot of this schema at the head, and it decodes with the same times.
     block_on(async {
-        let store = Store::open(StoreOptions::new(dir.path())).await.unwrap();
+        let store = Store::open(StoreOptions::new(dir.path().join("data")))
+            .await
+            .unwrap();
         let reopen = store
             .reopen(fixtures::stream(), REDUCER_SCHEMA_VERSION)
             .await
@@ -367,4 +388,23 @@ fn a_schema_1_snapshot_is_passed_over_and_the_log_folded_and_snapshotted_again()
         assert_eq!(ts, event_time(order));
         store.close().await.unwrap();
     });
+}
+
+impl Actor {
+    /// Gives `draft` a receipt the store refuses when [`Actor::fault`] picks it.
+    pub(super) fn with_fault(&mut self, mut draft: Draft) -> Draft {
+        let ts = self.clock.now().wall;
+        if let Some(fault) = self.fault.as_mut()
+            && let Some(command_id) = fault(draft.events())
+        {
+            draft.receipt(clauseo_store::Receipt {
+                command_id,
+                stream: None,
+                payload_hash: [0; 32],
+                result: CommandOutcome::Done,
+                ts,
+            });
+        }
+        draft
+    }
 }

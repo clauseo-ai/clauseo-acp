@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentCapabilities, AgentId, AgentSessionId, AvailableCommand, CompactString, CompactionStatus,
-    ConfigOption, Cost, Count, DetachReason, MatterId, NoticeLevel, PlanEntry, RenameSource,
-    TextOrBlob,
+    ConfigOption, Cost, Count, DetachReason, DoneBy, MatterId, NoticeLevel, PlanEntry,
+    RenameSource, SnoozeBy, TextOrBlob, Timestamp,
 };
 
 /// A thread was created in a matter: the first event of its stream.
@@ -37,6 +37,34 @@ pub struct ThreadRenamed {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct ThreadArchived {}
+
+/// The thread's snooze was set or cleared: by the lawyer until `until`, or cleared by hand
+/// (`until` left out), or cleared by the host when its time came (`by: expired`). The reducer
+/// keeps it as [`HeaderEntry::snoozed_until`](crate::HeaderEntry); the view needs no clock,
+/// since the host logs the wake. A later lawyer's message, permission request, elicitation,
+/// limit stop, failed or ended turn clears it too.
+/// JSON: `{"thread_snoozed": {"until": 1760000000000, "by": "lawyer"}}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ThreadSnoozed {
+    /// When the snooze ends; left out when the snooze was cleared.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub until: Option<Timestamp>,
+    /// Who set or cleared it.
+    pub by: SnoozeBy,
+}
+
+/// The thread was marked done (`done: true`) or not done. The reducer keeps it as
+/// [`HeaderEntry::done`](crate::HeaderEntry); the same events that clear a snooze clear it.
+/// JSON: `{"thread_done": {"done": true, "by": "morning_sweep"}}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ThreadDone {
+    /// Done, or no longer done.
+    pub done: bool,
+    /// Who marked it.
+    pub by: DoneBy,
+}
 
 /// An agent session started or was loaded for the thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

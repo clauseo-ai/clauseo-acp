@@ -3,7 +3,7 @@
 //! to no stream, starting with the settings as they are.
 //! The mirror test holds the wire types to `clauseo-settings`, key for key and value for value.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_host::{AppSubscription, EncodedEvent};
 use clauseo_protocol::{
@@ -14,10 +14,11 @@ use clauseo_protocol::{
 use futures::{FutureExt, StreamExt};
 use serde_json::Value;
 
+use crate::privacy::privacy_defaults;
 use crate::support::{Dir, FAKE, Running, Scenario, command_id, matter_with_thread, wait};
 
 /// The settings `GetSettings` gives.
-fn settings(host: &Running) -> SettingsView {
+pub(crate) fn settings(host: &Running) -> SettingsView {
     match host.query(HostQuery::GetSettings).unwrap() {
         QueryResult::Settings(view) => view,
         other => panic!("GetSettings answered {other:?}"),
@@ -99,7 +100,9 @@ fn get_settings_gives_the_defaults_and_no_locked_key() {
         SettingsView {
             ui: defaults(),
             tools: tool_defaults(),
+            privacy: privacy_defaults(),
             locked: Vec::new(),
+            plans: BTreeMap::new(),
         }
     );
     host.shutdown();
@@ -164,7 +167,9 @@ fn a_patch_reaches_every_app_subscriber_and_no_stream() {
             motion: Motion::Reduce,
         },
         tools: tool_defaults(),
+        privacy: privacy_defaults(),
         locked: Vec::new(),
+        plans: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();
@@ -275,7 +280,9 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
             web_search: false,
             browser: before.tools.browser,
         },
+        privacy: privacy_defaults(),
         locked: Vec::new(),
+        plans: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();

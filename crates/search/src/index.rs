@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
-use clauseo_protocol::{MatterId, Seq, ThreadId, Timestamp};
+use clauseo_protocol::{MatterId, Seq, StreamId, ThreadId, Timestamp};
 use rusqlite::{Connection, ToSql, Transaction, params};
 
+use crate::normal::normalise;
 use crate::query::{self, Page, Progress, Query};
 use crate::{EntryKind, Error, Kind, OpenState, open};
 
@@ -173,6 +174,24 @@ impl SearchIndex {
         query::run(&self.conn, query, self.progress)
     }
 
+    /// Every stream's watermark: the last `seq` of it that the index reflects, as
+    /// [`Batch::set_watermark`] wrote it. A stream text that does not read is skipped.
+    pub fn watermarks(&self) -> Result<Vec<(StreamId, Seq)>, Error> {
+        let mut statement = self.conn.prepare("SELECT stream, seq FROM watermarks")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut marks = Vec::new();
+        for row in rows {
+            let (stream, seq) = row?;
+            let seq = u64::try_from(seq).ok().and_then(|seq| Seq::new(seq).ok());
+            if let (Ok(stream), Some(seq)) = (stream.parse::<StreamId>(), seq) {
+                marks.push((stream, seq));
+            }
+        }
+        Ok(marks)
+    }
+
     /// A handle that interrupts this index's running query from another thread.
     pub fn interrupter(&self) -> Interrupter {
         Interrupter(self.conn.get_interrupt_handle())
@@ -212,7 +231,7 @@ impl Batch<'_> {
             at,
             archived,
         };
-        self.insert(&row, text)
+        self.insert(&row, &stored(text))
     }
 
     /// [`SearchIndex::put_thread_title`], inside the batch.
@@ -226,11 +245,11 @@ impl Batch<'_> {
         let thread_text = thread.to_string();
         self.delete_rows("thread = ?1 AND kind = 2", &[&thread_text])?;
         let archived = self.ensure_thread(matter, &thread_text)?;
-        let title = clean(title);
-        let stored = (!title.trim().is_empty()).then_some(title.as_str());
+        let title = stored(title);
+        let kept = (!title.trim().is_empty()).then_some(title.as_str());
         self.tx
             .prepare_cached("UPDATE threads SET title = ?2 WHERE thread = ?1")?
-            .execute(params![thread_text, stored])?;
+            .execute(params![thread_text, kept])?;
         let row = Row {
             kind: Kind::ThreadTitle,
             matter,
@@ -252,7 +271,7 @@ impl Batch<'_> {
     ) -> Result<(), Error> {
         let matter_text = matter.to_string();
         self.delete_rows("matter = ?1 AND kind = 1", &[&matter_text])?;
-        let title = clean(title);
+        let title = stored(title);
         if title.trim().is_empty() {
             self.tx
                 .prepare_cached("DELETE FROM matters WHERE matter = ?1")?
@@ -286,6 +305,8 @@ impl Batch<'_> {
     ) -> Result<(), Error> {
         self.delete_rows("matter = ?1 AND kind = 6", &[&matter.to_string()])?;
         for path in paths {
+            // The path column keeps the name as given, the bytes the host opens files by; the
+            // indexed text is the normalised name.
             let path = clean(path.as_ref());
             let row = Row {
                 kind: Kind::FileName,
@@ -296,7 +317,7 @@ impl Batch<'_> {
                 at,
                 archived: false,
             };
-            self.insert(&row, &path)?;
+            self.insert(&row, &stored(&path))?;
         }
         Ok(())
     }
@@ -358,6 +379,28 @@ impl Batch<'_> {
         Ok(())
     }
 
+    /// Records that the index reflects `stream` up to `seq`, in the same transaction as the
+    /// batch's rows; `None` forgets the stream's watermark.
+    pub fn set_watermark(&mut self, stream: StreamId, seq: Option<Seq>) -> Result<(), Error> {
+        let stream = stream.to_string();
+        match seq {
+            Some(seq) => {
+                self.tx
+                    .prepare_cached(
+                        "INSERT INTO watermarks(stream, seq) VALUES (?1, ?2)
+                         ON CONFLICT(stream) DO UPDATE SET seq = excluded.seq",
+                    )?
+                    .execute(params![stream, seq_sql(seq)?])?;
+            }
+            None => {
+                self.tx
+                    .prepare_cached("DELETE FROM watermarks WHERE stream = ?1")?
+                    .execute([stream])?;
+            }
+        }
+        Ok(())
+    }
+
     /// Counts one conversation toward the rebuild's progress when the batch commits.
     pub fn conversation_done(&mut self) {
         self.done = self.done.saturating_add(1);
@@ -392,9 +435,9 @@ impl Batch<'_> {
         Ok(())
     }
 
-    /// Inserts one row and indexes `body`; text with no characters is not stored.
+    /// Inserts one row and indexes `body`, which is already [`stored`]; text with no characters
+    /// is not stored.
     fn insert(&self, row: &Row<'_>, body: &str) -> Result<(), Error> {
-        let body = clean(body);
         if body.trim().is_empty() {
             return Ok(());
         }
@@ -435,6 +478,11 @@ struct Row<'a> {
 /// `text` without the two snippet markers, U+0002 and U+0003.
 fn clean(text: &str) -> String {
     text.replace(['\u{2}', '\u{3}'], "")
+}
+
+/// The text as the index keeps it and the query meets it: [`clean`] and then [`normalise`].
+fn stored(text: &str) -> String {
+    normalise(&clean(text))
 }
 
 fn seq_sql(seq: Seq) -> Result<i64, Error> {

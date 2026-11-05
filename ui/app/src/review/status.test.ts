@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { wordsOf } from "@clauseo/components/lib/words-core.ts";
+import { wordsOver } from "@clauseo/components/lib/words-core.ts";
 import { ERROR_WORDS } from "@clauseo/components/lib/words-errors.ts";
 import { currentOf, type Entry } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
@@ -8,6 +8,7 @@ import {
   laterIds,
   laterLine,
   malformedIds,
+  mergeApprovals,
   parseApprovals,
   pending,
   staleIds,
@@ -118,6 +119,7 @@ test("U3's ids are written as they are: one per error code but U3-07's, and the 
     "U3-48",
     "U3-49",
     "U3-50",
+    "U3-51",
   ]);
   expect(REGISTRY.find((e) => e.id === "U3-48")?.words.key).toBe("Reset not given.");
 });
@@ -142,7 +144,7 @@ const HEARING = {
 } as const;
 
 const entriesOf = (hi: Record<keyof typeof HEARING, string | null>): Entry[] => {
-  const say = wordsOf<keyof typeof HEARING>(hi);
+  const say = wordsOver<keyof typeof HEARING>(() => hi);
   return (Object.keys(hi) as (keyof typeof HEARING)[]).map((key, i) => ({
     id: `T9-0${i + 1}`,
     words: {
@@ -212,4 +214,100 @@ test("an approval with hi: null needs hi_status later, and hi_status only goes w
   expect(parseApprovals({ "T9-02": { en: "a", hi: null, hi_status: "later", ...at } })).toEqual({
     "T9-02": { en: "a", hi: null, hi_status: "later", ...at },
   });
+});
+
+// provisional: words that follow DESIGN.md, in use before Rohan's batch review.
+const provisional = (en: string, hi: string | null): Approval => ({
+  en,
+  hi,
+  status: "provisional",
+  at: "2026-11-04",
+  by: "app track",
+});
+
+test("a provisional entry whose text is current is provisional, and the gate lets it through", () => {
+  expect(statusOf({ en: "Matters", hi: null }, provisional("Matters", null))).toBe("provisional");
+  const rows = REGISTRY.map(currentOf);
+  const [first] = rows;
+  const some: Record<string, Approval> = { ...seedApprovals() };
+  if (first !== undefined) some[first.id] = provisional(first.en, first.hi);
+  expect(pending(rows, parseApprovals(some))).toEqual([]);
+});
+
+test("a provisional entry whose text has moved since is changed, and fails the gate", () => {
+  expect(statusOf({ en: "Matter", hi: null }, provisional("Matters", null))).toBe("changed");
+  const rows = REGISTRY.map(currentOf);
+  const [first] = rows;
+  const some: Record<string, Approval> = { ...seedApprovals() };
+  if (first !== undefined) some[first.id] = provisional(`${first.en}!`, first.hi);
+  expect(pending(rows, some)).toEqual([{ id: first?.id, status: "changed" }]);
+});
+
+test("an unknown status is refused", () => {
+  for (const status of ["ok", "pending", "Provisional", undefined])
+    expect(() => parseApprovals({ "U1-01": { ...provisional("a", "b"), status } })).toThrow(
+      /U1-01/,
+    );
+});
+
+test("a provisional entry needs en, hi (null allowed), at as a date and by", () => {
+  const ok = provisional("a", null);
+  expect(parseApprovals({ "U1-01": ok })).toEqual({ "U1-01": ok });
+  expect(parseApprovals({ "U1-01": provisional("a", "ब") })).toEqual({
+    "U1-01": provisional("a", "ब"),
+  });
+  expect(parseApprovals({ "U1-01": { ...ok, hi_status: "later" } })["U1-01"]?.hi).toBeNull();
+  for (const field of ["en", "hi", "at", "by"] as const) {
+    const { [field]: _, ...missing } = ok;
+    expect(() => parseApprovals({ "U1-01": missing }), field).toThrow(/U1-01/);
+  }
+  for (const at of ["4 Nov", "2026-11-31", "2026-1-04", ""])
+    expect(() => parseApprovals({ "U1-01": { ...ok, at } }), at).toThrow(/U1-01/);
+  expect(() => parseApprovals({ "U1-01": { ...ok, by: " " } })).toThrow(/U1-01/);
+  expect(() => parseApprovals({ "U1-01": { ...ok, hi: "ब", hi_status: "later" } })).toThrow(
+    /U1-01/,
+  );
+});
+
+test("the loader merges the folder's files into one map", () => {
+  const merged = mergeApprovals({
+    "../../copy-approvals/U1.json": { "U1-01": approved("Matters", "मामले") },
+    "../../copy-approvals/U3.json": {
+      "U3-01": approved("Stopped", null),
+      "U3-02": provisional("Sign in again.", null),
+    },
+  });
+  expect(merged).toEqual({
+    "U1-01": approved("Matters", "मामले"),
+    "U3-01": approved("Stopped", null),
+    "U3-02": provisional("Sign in again.", null),
+  });
+});
+
+test("the loader refuses an id in two files, naming both", () => {
+  expect(() =>
+    mergeApprovals({
+      "copy-approvals/U1.json": { "U1-01": approved("Matters", "मामले") },
+      "copy-approvals/other.json": { "U1-01": approved("Matters", "मामले") },
+    }),
+  ).toThrow(
+    "copy approvals: U1-01 is in both copy-approvals/U1.json and copy-approvals/other.json",
+  );
+});
+
+test("the loader parses each file strictly, naming the file", () => {
+  expect(() =>
+    mergeApprovals({
+      "copy-approvals/U1.json": { "U1-01": { en: "Matters", status: "approved" } },
+    }),
+  ).toThrow("copy-approvals/U1.json: U1-01 needs");
+  expect(() => mergeApprovals({ "copy-approvals/U1.json": [] })).toThrow(
+    "copy-approvals/U1.json must be an object",
+  );
+});
+
+test("an empty folder is no approvals, so every string is new", () => {
+  expect(mergeApprovals({})).toEqual({});
+  const rows = REGISTRY.map(currentOf);
+  expect(pending(rows, mergeApprovals({})).every((r) => r.status === "new")).toBe(true);
 });

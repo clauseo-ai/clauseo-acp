@@ -3,7 +3,7 @@
 // answers the agent offers, in ACP's kind order. Enter allows once, Cmd or Ctrl with Enter allows for this matter,
 // Escape declines; the keys act from the empty composer, from the page or from inside the prompt, without taking the
 // composer's focus. Once answered, the prompt folds to one line that says what was decided.
-import { useCallback, useEffect, useId, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
 import { useDisplay } from "../lib/display.ts";
@@ -38,6 +38,7 @@ export function PermissionPrompt({
   offered = OFFERED,
   question,
   title,
+  reason,
   kept = true,
   done,
   confirming = false,
@@ -59,6 +60,8 @@ export function PermissionPrompt({
   question?: string;
   /** The agent's own words for what it wants to do, beneath the question. */
   title?: string | null;
+  /** Why it asks, in a few words, under the title: a matter folder Clauseo can't fence (the app's folder rights). */
+  reason?: ReactNode;
   /** Whether "Every change is kept." shows. */
   kept?: boolean;
   /** Whether the tool call finished; left out, the folded line names the paper as before. */
@@ -185,7 +188,11 @@ export function PermissionPrompt({
       : w.th("Clauseo wants to save a new version of {paper}.", { paper }));
   const shown = ANSWER_ORDER.filter((a) => offered.includes(a));
   const firstAllow = shown.find((a) => a === "once" || a === "always");
-  const described = [title ? `${id}-title` : null, kept ? `${id}-kept` : null].filter(Boolean);
+  const described = [
+    title ? `${id}-title` : null,
+    reason ? `${id}-reason` : null,
+    kept ? `${id}-kept` : null,
+  ].filter(Boolean);
   const keysOn = keys && !busy && !confirming;
   const shortcut = (a: PermissionAnswer) =>
     a === "once" ? "Enter" : a === "always" ? (mac ? "Meta+Enter" : "Control+Enter") : "Escape";
@@ -220,6 +227,14 @@ export function PermissionPrompt({
           id={`${id}-title`}
         >
           <bdi>{title}</bdi>
+        </p>
+      ) : null}
+      {reason ? (
+        <p
+          className="perm-reason text-small text-quiet mt-(--s0-5) pl-(--perm-indent)"
+          id={`${id}-reason`}
+        >
+          {reason}
         </p>
       ) : null}
       {kept ? (

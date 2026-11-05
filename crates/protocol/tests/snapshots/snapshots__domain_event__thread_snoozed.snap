@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"thread_snoozed\")"
+---
+{
+  "thread_snoozed": {
+    "until": 1760086400000,
+    "by": "lawyer"
+  }
+}

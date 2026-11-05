@@ -16,11 +16,13 @@
 //!
 //! # Interface
 //!
-//! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
+//! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one, and
+//!   [`Matter::discard`] undoes a create or import the host could not record;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
 //!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does,
-//!   and [`check_place`] runs import's place check (drive root, refused list) alone;
+//!   and [`check_place`] runs import's place check (drive root, refused list) alone, and
+//!   [`check_protected`] its protected-tree check (matters root, refused trees);
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
 //!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
@@ -35,7 +37,10 @@
 //!   as an agent names it, resolved into the folder by [`matter_path_in`];
 //!   [`held_open_beside`] takes the parent folder's owner files from a caller that listed it,
 //!   and [`OwnersBeside`] tells it, with no file-system call, which names to ask about.
-//!   The host asks them before letting an agent write a file.
+//!   The host asks them before letting an agent write a file. An owner file a crashed Word left
+//!   is passed over by the stale rule (`locks/stale.rs`) on macOS and Windows.
+//! - With the `test-support` feature, [`test_support::pretend_word_running_since_epoch`], for
+//!   tests that plant an owner file and need it held through the stale rule.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - [`scan_folder`]: the folder scan before a matter, by the import's walk and rules, with
 //!   running counts and the file reached ([`ScanProgress`]) and its totals ([`FolderScan`],
@@ -84,14 +89,19 @@
 //!   compares as the OS's file system does: byte for byte on Linux, ignoring case on Windows,
 //!   and case and Unicode form on macOS (decision 0007, Unicode names).
 //! - The API is synchronous; writes take `&mut Matter`. The writer lock, the turn queue and the
-//!   "turn running" check are the host's. No clock is read and no id is minted here.
+//!   "turn running" check are the host's. No clock is read and no id is minted here. A walk
+//!   with the folder (checkpoint, import, preview, compare) that finds files gone after it
+//!   listed them sleeps up to 300 ms in all on the calling thread before taking them as
+//!   deleted (`checkpoint/walk_folder.rs`), so callers keep it off any thread that must stay
+//!   responsive (the host runs it on its matter thread).
 //!
 //! # Depends on
 //!
 //! `protocol` (ids, `FileChange`, `SkippedFile`, error codes), `gix` (features `index`,
 //! `revision`, `sha1`), `serde` and `serde_json` (`matter.json`), `tracing`, `dunce`; `nix` on
-//! macOS for the sync calls and `statfs` (features `fs`, `mount`); `windows`
-//! (`Win32_Storage_FileSystem`) on Windows to hide `.clauseo` and to tell a network drive.
+//! macOS for the sync calls, `statfs` and the stale rule's `F_GETLK` (features `fs`, `mount`);
+//! `windows` (`Win32_Storage_FileSystem`) on Windows to hide `.clauseo` and to tell a network
+//! drive; `process` on macOS and Windows for the running Word processes (the stale rule).
 //!
 //! # Start reading
 //!
@@ -127,6 +137,8 @@ mod scan;
 mod stat;
 #[cfg(test)]
 mod test_dir;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 mod trailers;
 mod types;
 mod undo;
@@ -143,7 +155,7 @@ pub use matter::Matter;
 pub use papers::{Paper, PaperList};
 pub use place::{Place, place};
 pub use probe::{OsProbe, PlaceholderProbe};
-pub use refuse::{check_place, same_or_nested};
+pub use refuse::{check_place, check_protected, same_or_nested};
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,

@@ -225,6 +225,8 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
         status: read.status,
         queue_held: super::turn::queue_held(actor, thread.row.id),
         seen: seen(thread),
+        snoozed_until: read.header.and_then(|header| header.snoozed_until),
+        done: read.header.is_some_and(|header| header.done),
         last_stop: thread.last_stop.map(|stop| LastStop {
             reason: stop.reason,
             at: stop.at,
@@ -279,6 +281,9 @@ fn matter_row(
             .get(&row.id)
             .copied()
             .unwrap_or(FolderState::Found),
+        // As the folder check last answered at the create or an agent launch
+        // (`agent/folder_support.rs`): read from memory, never checked here.
+        folder_support: actor.folder_supports.get(&row.id).copied(),
     }
 }
 
@@ -339,6 +344,7 @@ pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
             continue;
         };
         actor.lists.touch_thread(thread);
+        actor.triage.committed(&envelope.event);
         if let DomainEvent::TurnEnded(ended) = &envelope.event
             && let Some(entry) = actor.threads.get_mut(&thread)
         {

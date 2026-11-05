@@ -1,22 +1,27 @@
-use super::{KEYS, Leaf, RESERVED_MCP_SERVER, Raw, SECURITY_KEYS, agent_id, refuse, typed};
+//! Typing one value: each fixed key, an agent, unknown keys, a repeated key, `Leaf::key` and
+//! `Leaf::apply`, the samples every `KEYS` row needs, and the security keys' snapshot. The
+//! `mcp.servers` list is in `mcp_tests.rs`, `refuse` and the `tools` switches in
+//! `security_tests.rs`.
+
+use super::{KEYS, Leaf, Raw, SECURITY_KEYS, agent_id, typed};
 use crate::policy::kind_of;
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
-    ToolsSettings,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, PrivacySettings,
+    Settings, Theme, ToolsSettings, UpdateMode,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-fn origin() -> Origin {
+pub(super) fn origin() -> Origin {
     Origin::Store {
         name: "test".to_owned(),
     }
 }
 
 /// Types one value: the leaf, or the warnings.
-fn one(key: &str, value: Value) -> Result<Leaf, Vec<WarningKind>> {
+pub(super) fn one(key: &str, value: Value) -> Result<Leaf, Vec<WarningKind>> {
     let mut warnings = Vec::new();
     let raw = Raw {
         key: key.to_owned(),
@@ -35,7 +40,7 @@ fn one(key: &str, value: Value) -> Result<Leaf, Vec<WarningKind>> {
     }
 }
 
-fn invalid(key: &str, message: &str) -> Vec<WarningKind> {
+pub(super) fn invalid(key: &str, message: &str) -> Vec<WarningKind> {
     vec![WarningKind::InvalidValue {
         key: key.to_owned(),
         message: message.to_owned(),
@@ -179,7 +184,13 @@ fn an_agent_needs_an_absolute_command_and_warns_on_fields_it_does_not_know() {
 
 #[test]
 fn unknown_keys_are_warnings() {
-    for key in ["ui.colour", "agents.", "agents", "matters", "update.mode"] {
+    for key in [
+        "ui.colour",
+        "agents.",
+        "agents",
+        "matters",
+        "update.channel",
+    ] {
         assert_eq!(
             one(key, json!(1)),
             Err(vec![WarningKind::UnknownKey {
@@ -188,6 +199,24 @@ fn unknown_keys_are_warnings() {
             "{key}"
         );
     }
+}
+
+#[test]
+fn the_update_mode_is_auto_notify_or_none() {
+    for (text, mode) in [
+        ("auto", UpdateMode::Auto),
+        ("notify", UpdateMode::Notify),
+        ("none", UpdateMode::None),
+    ] {
+        assert_eq!(one("update.mode", json!(text)), Ok(Leaf::UpdateMode(mode)));
+    }
+    assert_eq!(
+        one("update.mode", json!("off")),
+        Err(invalid(
+            "update.mode",
+            "unknown variant `off`, expected one of `auto`, `notify`, `none`"
+        ))
+    );
 }
 
 fn theme_raws(themes: &[&str]) -> Vec<Raw> {
@@ -278,6 +307,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
         (Leaf::Motion(Motion::Reduce), "ui.motion"),
         (Leaf::WebSearch(false), "tools.web_search"),
         (Leaf::Browser(true), "tools.browser"),
+        (Leaf::UpdateMode(UpdateMode::Notify), "update.mode"),
     ];
     let mut settings = Settings::default();
     for (leaf, key) in leaves {
@@ -295,6 +325,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
     assert_eq!(settings.ui.motion, Motion::Reduce);
     assert!(!settings.tools.web_search);
     assert!(settings.tools.browser);
+    assert_eq!(settings.update.mode, UpdateMode::Notify);
 }
 
 #[test]
@@ -310,6 +341,11 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("system"),
         json!(true),
         json!(false),
+        json!(false),
+        json!(true),
+        json!("notify"),
+        json!(abs_str("bundle")),
+        json!("https://npm.firm.example"),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -337,6 +373,11 @@ fn a_refused_key_goes_back_to_its_default() {
         json!("full"),
         json!(!ToolsSettings::default().web_search),
         json!(!ToolsSettings::default().browser),
+        json!(!PrivacySettings::default().counts),
+        json!(!PrivacySettings::default().crash_reports),
+        json!("none"),
+        json!(abs_str("bundle")),
+        json!("https://npm.firm.example"),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {
@@ -371,215 +412,6 @@ fn a_refused_key_goes_back_to_its_default() {
 }
 
 #[test]
-fn mcp_servers_type_entry_by_entry() {
-    let command = abs_str("bin/s");
-    let mut value = json!({
-            "ok": {"command": command, "args": ["-v"], "env": {"A": "1"}, "enabled": true, "url": "x"},
-            "off_by-default_9": {"command": command},
-            "relative": {"command": "server"},
-            "no-command": {"args": []},
-            "enabled-not-bool": {"command": command, "enabled": "yes"},
-            "": {"command": command},
-            "has space": {"command": command},
-            "é": {"command": command},
-    });
-    for length in [64, 65] {
-        value["a".repeat(length)] = json!({"command": command});
-    }
-    let mut warnings = Vec::new();
-    let raw = Raw {
-        key: "mcp.servers".to_owned(),
-        value,
-        origin: origin(),
-    };
-    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
-    let Some(Leaf::McpServers(servers)) = leaves.first() else {
-        panic!("{leaves:?}");
-    };
-    assert_eq!(
-        servers.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["a".repeat(64).as_str(), "off_by-default_9", "ok"]
-    );
-    assert_eq!(
-        servers.get("ok"),
-        Some(&McpServerLaunch {
-            command,
-            args: vec!["-v".to_owned()],
-            env: BTreeMap::from([("A".to_owned(), "1".to_owned())]),
-            enabled: true,
-        })
-    );
-    assert!(!servers.get("off_by-default_9").unwrap().enabled);
-    let mut keys: Vec<String> = warnings
-        .into_iter()
-        .map(|warning| match warning.kind {
-            WarningKind::InvalidValue { key, .. } | WarningKind::UnknownKey { key } => key,
-            other => panic!("{other:?}"),
-        })
-        .collect();
-    keys.sort();
-    let mut expected: Vec<String> = [
-        "",
-        "a".repeat(65).as_str(),
-        "enabled-not-bool",
-        "has space",
-        "no-command",
-        "ok.url",
-        "relative",
-        "é",
-    ]
-    .iter()
-    .map(|name| format!("mcp.servers.{name}"))
-    .collect();
-    expected.sort();
-    assert_eq!(keys, expected);
-}
-
-#[test]
-fn an_mcp_list_that_is_not_an_object_is_refused() {
-    for value in [json!([]), json!("all"), json!(null)] {
-        assert_eq!(
-            one("mcp.servers", value.clone()),
-            Err(invalid(
-                "mcp.servers",
-                "it must be an object from server name to server"
-            )),
-            "{value}"
-        );
-    }
-    let mut settings = Settings::default();
-    settings.mcp.servers.insert(
-        "s".to_owned(),
-        serde_json::from_value(json!({"command": abs_str("s")})).unwrap(),
-    );
-    Leaf::Refused("mcp.servers".to_owned()).apply(&mut settings);
-    assert!(settings.mcp.servers.is_empty());
-}
-
-#[test]
-fn each_tools_key_is_a_boolean() {
-    assert_eq!(
-        one("tools.web_search", json!(false)),
-        Ok(Leaf::WebSearch(false))
-    );
-    assert_eq!(one("tools.browser", json!(true)), Ok(Leaf::Browser(true)));
-    for key in ["tools.web_search", "tools.browser"] {
-        for value in [json!("yes"), json!(1), json!(null), json!({})] {
-            assert!(
-                matches!(&one(key, value.clone()).unwrap_err()[..], [WarningKind::InvalidValue { key: k, .. }] if k == key),
-                "{key}: {value}"
-            );
-        }
-    }
-}
-
-#[test]
 fn the_security_keys() {
     insta::assert_json_snapshot!("security_keys", SECURITY_KEYS);
-}
-
-// A security key fails closed: refused, it is locked off, not at its default, which for both
-// tools keys can be on (R21).
-#[test]
-fn refuse_locks_each_security_key_off() {
-    let on = || {
-        let mut settings = Settings::default();
-        settings.tools.web_search = true;
-        settings.tools.browser = true;
-        settings.mcp.servers.insert(
-            "s".to_owned(),
-            serde_json::from_value(json!({"command": abs_str("s"), "enabled": true})).unwrap(),
-        );
-        settings
-    };
-    let mut settings = on();
-    assert!(refuse("tools.web_search", &mut settings));
-    assert!(!settings.tools.web_search);
-    assert!(settings.tools.browser);
-    assert_eq!(settings.mcp.servers.len(), 1);
-
-    let mut settings = on();
-    assert!(refuse("tools.browser", &mut settings));
-    assert!(settings.tools.web_search);
-    assert!(!settings.tools.browser);
-
-    let mut settings = on();
-    assert!(refuse("mcp.servers", &mut settings));
-    assert!(settings.mcp.servers.is_empty());
-    assert!(settings.tools.web_search && settings.tools.browser);
-
-    // A prefix ending in `.` refuses every security key under it, and only those.
-    let mut settings = on();
-    assert!(refuse("tools.", &mut settings));
-    assert!(!settings.tools.web_search && !settings.tools.browser);
-    assert_eq!(settings.mcp.servers.len(), 1);
-
-    // Any other key, a prefix of no security key, or a prefix without its dot names nothing.
-    for key in [
-        "ui.theme",
-        "agents.x",
-        "plans.",
-        "tools",
-        "tool.",
-        "tools.web",
-    ] {
-        let mut settings = on();
-        assert!(!refuse(key, &mut settings), "{key}");
-        assert_eq!(settings, on(), "{key}");
-    }
-}
-
-#[test]
-fn a_policy_refusal_locks_a_security_key_off_and_any_other_at_its_default() {
-    let mut settings = Settings::default();
-    settings.tools.web_search = true;
-    settings.tools.browser = true;
-    settings.ui.theme = Theme::Dark;
-    for key in ["tools.web_search", "tools.browser", "ui.theme"] {
-        Leaf::Refused(key.to_owned()).apply_policy(&mut settings);
-    }
-    assert!(!settings.tools.web_search);
-    assert!(!settings.tools.browser);
-    assert_eq!(settings.ui.theme, Theme::default());
-    // A value from policy applies as any value does.
-    Leaf::WebSearch(true).apply_policy(&mut settings);
-    assert!(settings.tools.web_search);
-}
-
-#[test]
-fn the_reserved_mcp_server_name_is_left_out_and_the_rest_load() {
-    assert_eq!(RESERVED_MCP_SERVER, "browser");
-    let command = abs_str("bin/s");
-    let value = json!({
-        "browser": {"command": command, "enabled": true},
-        "Browser": {"command": command, "enabled": true},
-        "clauseo": {"command": command, "enabled": true},
-        "other": {"command": command},
-    });
-    let mut warnings = Vec::new();
-    let raw = Raw {
-        key: "mcp.servers".to_owned(),
-        value,
-        origin: origin(),
-    };
-    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
-    let Some(Leaf::McpServers(servers)) = leaves.first() else {
-        panic!("{leaves:?}");
-    };
-    assert_eq!(
-        servers.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["clauseo", "other"]
-    );
-    let mut keys: Vec<String> = warnings
-        .into_iter()
-        .map(|warning| match warning.kind {
-            WarningKind::InvalidValue { key, message } => {
-                assert!(message.contains("browser is reserved"), "{message}");
-                key
-            }
-            other => panic!("{other:?}"),
-        })
-        .collect();
-    keys.sort();
-    assert_eq!(keys, ["mcp.servers.Browser", "mcp.servers.browser"]);
 }

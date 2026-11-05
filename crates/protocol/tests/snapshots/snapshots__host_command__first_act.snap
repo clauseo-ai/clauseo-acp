@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::FirstAct { counts: true }"
+---
+{
+  "first_act": {
+    "counts": true
+  }
+}

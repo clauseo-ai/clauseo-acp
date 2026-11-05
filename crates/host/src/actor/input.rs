@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandId, CommandOutcome, Cursor, Envelope, FileRefId, FolderRefId,
-    HostQuery, MatterId, Principal, QueryResult, Seq, StreamId, ThreadId, ViewEpoch,
+    HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
+    ThreadId, ViewEpoch,
 };
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
@@ -37,6 +38,13 @@ pub(crate) enum Request {
         principal: Principal,
         query: HostQuery,
         reply: Reply<QueryResult>,
+    },
+    /// A search from `window`, superseded by a newer one from the same window.
+    Search {
+        principal: Principal,
+        window: String,
+        request: SearchRequest,
+        reply: Reply<SearchAnswer>,
     },
     Subscribe {
         principal: Principal,
@@ -110,6 +118,8 @@ pub(crate) enum MatterTag {
     Query(Reply<QueryResult>),
     /// A `ListPapers` query, answered with the listing.
     Papers(Reply<QueryResult>),
+    /// The discard of a matter made on disk whose commit failed (`matters/made.rs`).
+    Discard,
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.
@@ -135,6 +145,11 @@ pub(crate) enum Input {
         id: SubId,
         result: Result<Vec<Envelope>, clauseo_store::Error>,
     },
+    /// Whether the store holds the row of a made matter whose commit failed (`matters/made.rs`).
+    MadeRow {
+        matter: MatterId,
+        result: Result<bool, clauseo_store::Error>,
+    },
     /// A matter worker's reply.
     Matter {
         matter: MatterId,
@@ -147,6 +162,8 @@ pub(crate) enum Input {
     Agent { thread: ThreadId, input: AgentInput },
     /// A turn timer fired.
     Timer(TurnTimer),
+    /// The snooze timer armed with `generation` fired (`triage/wake.rs`).
+    SnoozeWake { generation: u64 },
     /// A turn task's result: an agent call or a log read.
     Turn(TurnInput),
     /// A subscription drained its channel after the actor found it full.
@@ -162,6 +179,10 @@ pub(crate) enum Input {
     /// What a `ListMatters` read of each matter's folder found, after it answered: the matter,
     /// the folder path its row had when the read began, and the state.
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
+    /// A folder scan's thread or throttle timer.
+    Scan(super::scan::ScanInput),
+    /// Where the Chrome for Testing download stands, from its thread.
+    BrowserInstall(clauseo_protocol::BrowserInstallState),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -174,10 +195,12 @@ impl std::fmt::Debug for Input {
             Self::Reopened { .. } => "Reopened",
             Self::Receipt { .. } => "Receipt",
             Self::EventPage { .. } => "EventPage",
+            Self::MadeRow { .. } => "MadeRow",
             Self::Matter { .. } => "Matter",
             Self::Snapshot(_) => "Snapshot",
             Self::Agent { .. } => "Agent",
             Self::Timer(_) => "Timer",
+            Self::SnoozeWake { .. } => "SnoozeWake",
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",
@@ -185,6 +208,8 @@ impl std::fmt::Debug for Input {
             Self::AppUnsubscribed { .. } => "AppUnsubscribed",
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
+            Self::Scan(_) => "Scan",
+            Self::BrowserInstall(_) => "BrowserInstall",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

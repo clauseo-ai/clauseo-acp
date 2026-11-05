@@ -107,4 +107,22 @@ export const U6F: Entry[] = [
     screen: "room/composer",
     render: nameless("agent.unsupported_version"),
   },
+  {
+    id: "U6F-13",
+    words: errorWords("Clauseo can't start ChatGPT safely here. Reinstall Clauseo."),
+    screen: "room/composer",
+    render: refused("agent.guard_missing", "codex-acp"),
+  },
+  {
+    id: "U6F-14",
+    words: errorWords("Clauseo can't start {name} safely here. Reinstall Clauseo."),
+    screen: "room/composer",
+    render: refused("agent.guard_missing", "gemini"),
+  },
+  {
+    id: "U6F-15",
+    words: errorWords("Clauseo can't start the AI safely here. Reinstall Clauseo."),
+    screen: "room/composer",
+    render: nameless("agent.guard_missing"),
+  },
 ];

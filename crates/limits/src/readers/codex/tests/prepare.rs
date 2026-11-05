@@ -82,6 +82,10 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         "skills.bundled.enabled=false",
         "-c",
         "skills.include_instructions=false",
+        "-c",
+        "cli_auth_credentials_store=\"file\"",
+        "-c",
+        "shell_environment_policy.ignore_default_excludes=false",
     ]
     .map(OsString::from);
     let mut args = vec![codex_js.into_os_string()];
@@ -119,6 +123,32 @@ fn codex_launch(scratch: &Scratch) -> AgentLaunch {
         args: vec![script.to_string_lossy().into_owned()],
         env: BTreeMap::new(),
     }
+}
+
+/// The reader's child gets the host's drops: no inherited `GIT_*` or Codex dropped name, with
+/// `PATH` kept.
+#[test]
+fn the_spec_leaves_out_git_and_codexs_dropped_names() {
+    let scratch = Scratch::new("codex-prepare-drops");
+    let launch = codex_launch(&scratch);
+    let inherited = [
+        ("APP_SERVER_LOGS", "/tmp/logs"),
+        ("GIT_DIR", "/elsewhere/.git"),
+        ("PATH", "/usr/bin"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let run_dir = scratch.path("data/limits/run");
+    let home = scratch.dir("data/codex-home");
+    let Prepared::Spec(spec) = prepare(&launch, &run_dir, &home, inherited.into_iter()).unwrap()
+    else {
+        panic!("no spec");
+    };
+    let names: Vec<&OsStr> = spec.env().keys().map(OsString::as_os_str).collect();
+    assert_eq!(names, ["CODEX_HOME", "PATH"].map(OsStr::new));
+    assert_eq!(
+        spec.env().get(OsStr::new("PATH")),
+        Some(&OsString::from("/usr/bin"))
+    );
 }
 
 #[test]

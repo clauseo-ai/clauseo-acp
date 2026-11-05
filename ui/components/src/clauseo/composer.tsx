@@ -20,16 +20,16 @@ import { useThreadWords } from "../lib/words-thread.ts";
 import { rt } from "../lib/words-room.ts";
 import type { Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
-import { mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
+import { insertedOnly, mayTakeFocus, pressOwn, replaceAll } from "./composer-edit.ts";
 import { sendsOnEnter } from "./composer-keys.ts";
 import type { MenuShown } from "./composer-menu.tsx";
 import { useRoom } from "./room-scope.ts";
 import { PaperChips } from "./paper-chips.tsx";
 import { Say } from "./say.tsx";
-import { StatusLine, type PlanChoice, type ReadyHint } from "./status-line.tsx";
+import { StatusLine, type PlanChoice, type ReadyHint, type ToolsSegment } from "./status-line.tsx";
 import { WorkingLine, WorkingSaid, WorkingTime, type WorkingState } from "./working-line.tsx";
 
-export type { PlanChoice, ReadyHint } from "./status-line.tsx";
+export type { PlanChoice, ReadyHint, ToolsSegment } from "./status-line.tsx";
 
 /** One of the agent's commands, as ACP's `available_commands_update` lists it and the session's header carries it
  * (`HeaderEntry.commands`, passed as it is): its name without the slash, what it does, and a hint for its input. */
@@ -127,6 +127,8 @@ export type ComposerProps<V extends string = string> = {
   papers?: readonly QuestionPaper[];
   onRemovePaper?: (id: string) => void;
   choice?: PlanChoice<V>;
+  /** The tool line on the status line, after the plan; none by default. */
+  tools?: ToolsSegment | null;
   /** Keys the field passes on first, before its own Enter. True when one was taken, and its default is prevented.
    * While an input method composes it hears nothing: every key is the input method's then. */
   onKeyCommand?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
@@ -177,6 +179,9 @@ export type ComposerProps<V extends string = string> = {
 /** The composer: the status line or the working line, then a field set into the work's surface, Add papers as a
  * quiet icon button, the lawyer's own words at 17 on 26 at 600, and Ask, or Stop while Clauseo works; then the
  * room's line under it, with the lock. */
+/** How long typing pauses before a field only grown as words went in is fitted whole (ms). */
+const SETTLE_MS = 400;
+
 export function Composer<V extends string = string>({
   took,
   plan,
@@ -191,6 +196,7 @@ export function Composer<V extends string = string>({
   papers = [],
   onRemovePaper,
   choice,
+  tools = null,
   onKeyCommand,
   id = "ask",
   gate,
@@ -222,7 +228,10 @@ export function Composer<V extends string = string>({
   const clearAfter = useRef<string | null>(null);
   // a fill asked for while an input method composed: put in at the composition's end, if the field is empty then
   const fillAfter = useRef<string | null>(null);
-  const fitRef = useRef<() => void>(() => {});
+  // fits the field to its words; `grow` after an input event, when words only put in can only keep or grow it
+  const fitRef = useRef<(grow?: boolean) => void>(() => {});
+  // the words as the field was last fitted to them
+  const fitted = useRef(initial);
   // the menu's chunk is asked for as the field is first focused with commands to list, with what the field held
   // then, so a `/` typed before it lands is read as it lands; the chunk reads it once
   const [armed, setArmed] = useState<HTMLTextAreaElement | null>(null);
@@ -262,16 +271,41 @@ export function Composer<V extends string = string>({
   useLayoutEffect(() => {
     const a = area.current;
     if (a === null) return;
-    const fit = () => {
+    // the one line's height, as the last whole fit measured it
+    let one = 0;
+    // each style written only when it changes: a write of the same value still restyles the field in some engines
+    const set = (height: string, scrolls: boolean) => {
+      if (a.style.height !== height) a.style.height = height;
+      const overflow = scrolls ? "" : "hidden";
+      if (a.style.overflowY !== overflow) a.style.overflowY = overflow;
+      if (!scrolls && a.scrollTop !== 0) a.scrollTop = 0;
+    };
+    // a whole fit once typing pauses, after fits that only grew the field
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const fit = (grow = false) => {
+      clearTimeout(settle);
+      settle = undefined;
+      const was = fitted.current;
+      fitted.current = a.value;
+      // words only put in, as plain typing does: the field can only keep its height or grow, which its own scroll
+      // height shows with no collapse. Collapsing it to measure, as the whole fit does, laid out the room's column
+      // twice and repainted the thread above on every keystroke (Chromium trace, #117 L). A mark that joins a
+      // conjunct can narrow a line enough to lose one, which a scroll height never shows: so once typing pauses, a
+      // field taller than one line is fitted whole
+      if (grow && one > 0 && insertedOnly(was, a.value)) {
+        const h = a.scrollHeight;
+        if (h > a.clientHeight + (a.style.height === "" ? 4 : 0))
+          set(`${Math.min(h, one * 6)}px`, h > one * 6);
+        if (a.style.height !== "") settle = setTimeout(() => fit(), SETTLE_MS);
+        return;
+      }
       a.style.height = "";
-      const one = a.clientHeight;
+      one = a.clientHeight;
       const cap = one * 6;
-      if (a.scrollHeight > one + 4) a.style.height = `${Math.min(a.scrollHeight, cap)}px`;
+      const h = a.scrollHeight;
       // only words past the six lines scroll; short of them the field draws no scroll arrows. A Devanagari line can
       // measure a few px over the one line, inside the slack above, and WebView2 drew arrows on an empty field
-      const scrolls = a.scrollHeight > cap;
-      a.style.overflowY = scrolls ? "" : "hidden";
-      if (!scrolls) a.scrollTop = 0;
+      set(h > one + 4 ? `${Math.min(h, cap)}px` : "", h > cap);
     };
     fitRef.current = fit;
     fit();
@@ -288,14 +322,17 @@ export function Composer<V extends string = string>({
       fit();
     });
     ro.observe(a);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      clearTimeout(settle);
+    };
   }, [lang, textSize]);
   // after every change to the words, typed, composed, undone or set through the handle: fit the field to them, say
   // whether it holds any, and tell the room
-  const changed = () => {
+  const changed = (typed = false) => {
     const a = area.current;
     if (a === null) return;
-    fitRef.current();
+    fitRef.current(typed);
     tokenSync.current?.();
     setEmpty(a.value.trim() === "");
     onInput?.(a.value);
@@ -364,6 +401,9 @@ export function Composer<V extends string = string>({
     ro.observe(form);
     return () => ro.disconnect();
   }, [room]);
+  // the status line: what the last answer took, the plan, the hint, the plan choice or the tool line
+  const said = took !== null || plan !== "" || hint !== null;
+  const status = said || choice !== undefined || tools !== null;
   return (
     <form
       ref={room.nodes.slot("composer")}
@@ -388,9 +428,7 @@ export function Composer<V extends string = string>({
       )}
       {acts}
       {/* a status line with nothing to say isn't drawn: no time yet, no plan, no choice and no hint */}
-      {(took !== null || plan !== "" || choice !== undefined || hint !== null) && (
-        <StatusLine took={took} plan={plan} hint={hint} choice={choice} hidden={working !== null} />
-      )}
+      {status && <StatusLine {...{ took, plan, hint, choice, tools }} hidden={working !== null} />}
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
         {/* what assistive technology hears of the working line: one status region, mounted as long as the composer
@@ -443,7 +481,7 @@ export function Composer<V extends string = string>({
               held.current = e.currentTarget.value;
               setArmed(e.currentTarget);
             }}
-            onInput={changed}
+            onInput={() => changed(true)}
             onCompositionStart={() => {
               composing.current = true;
             }}

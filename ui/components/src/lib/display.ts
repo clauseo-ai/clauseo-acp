@@ -13,6 +13,8 @@
 
 import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
+import { late } from "./late.ts";
+import { hindiLoaded, loadHindi } from "./words-core.ts";
 
 export type Theme = "day" | "night";
 export type Render = "full" | "lite";
@@ -67,12 +69,48 @@ const canTransition = (d: Display) =>
   !document.hidden &&
   typeof document.startViewTransition === "function";
 
+const same = (a: Display, b: Display) =>
+  a.theme === b.theme &&
+  a.render === b.render &&
+  a.motion === b.motion &&
+  a.lang === b.lang &&
+  a.textSize === b.textSize &&
+  a.platform === b.platform;
+
+/** The Hindi display waiting for its words (words-core.ts's loadHindi), or null. Only the latest call's waits. */
+let waiting: Display | null = null;
+
 /** Moves the page to a display. The state lands first; a cross-fade only decorates it, and a timer, never an
- * animation's promise, settles what follows. Under reduced motion and in lite every change lands at once. */
+ * animation's promise, settles what follows. Under reduced motion and in lite every change lands at once.
+ * The first move to Hindi loads the Hindi words first: until they are in the page keeps its language, with the rest of
+ * the display moved at once, so it never shows a blank or an English key under lang="hi". A later call overtakes the
+ * wait; a load that fails leaves the page in its language, and the next move to Hindi tries again. */
 export function showDisplay(next: Display): void {
-  const prev = current;
   // the first switch to Hindi starts its faces
   if (next.lang === "hi") startHindiFaces();
+  if (next.lang === "hi" && !hindiLoaded()) {
+    waiting = next;
+    const now = { ...next, lang: current.lang };
+    if (!same(now, current)) moveTo(now);
+    late(loadHindi()).then(
+      () => {
+        if (waiting !== next) return;
+        waiting = null;
+        moveTo(next);
+      },
+      (error: unknown) => {
+        if (waiting === next) waiting = null;
+        console.warn(`the Hindi words did not load: ${String(error)}`);
+      },
+    );
+    return;
+  }
+  waiting = null;
+  moveTo(next);
+}
+
+function moveTo(next: Display): void {
+  const prev = current;
   const update = () => {
     current = next;
     setAttributes(next);
@@ -161,12 +199,32 @@ function startHindiFaces(): void {
   ]).then(checkMetrics, () => {});
 }
 
-/** Shows the first display without a transition, and starts Hindi's faces if it is in Hindi. Call once, before the
- * first render. */
+/** Shows the first display without a transition, and starts Hindi's faces if it is in Hindi, and its words if they
+ * are not in yet. Call once, before the first render, and render through whenWordsReady. */
 export function startDisplay(first: Display): void {
   current = first;
+  waiting = null;
   setAttributes(first);
-  if (first.lang === "hi") startHindiFaces();
+  if (first.lang === "hi") {
+    startHindiFaces();
+    if (!hindiLoaded()) void late(loadHindi()).catch(() => {});
+  }
+}
+
+/** Runs `mount`, the page's first render, once the first display's words are in: at once for English, or for Hindi
+ * with its words already in; else when the Hindi chunk startDisplay started lands, so a Hindi page never shows English
+ * first. Should the chunk fail to load, the page starts in English rather than not at all. */
+export function whenWordsReady(mount: () => void): void {
+  if (current.lang !== "hi" || hindiLoaded()) {
+    mount();
+    return;
+  }
+  loadHindi().then(mount, (error: unknown) => {
+    console.warn(`the Hindi words did not load; the page starts in English: ${String(error)}`);
+    current = { ...current, lang: "en" };
+    setAttributes(current);
+    mount();
+  });
 }
 
 const subscribe = (listener: () => void) => {

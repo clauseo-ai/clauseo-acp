@@ -7,9 +7,12 @@ import { expect, test } from "vitest";
 const roots = ["../ui/", "../icons/", "../clauseo/", "../markdown/"].map(
   (p) => new URL(p, import.meta.url),
 );
-/** The renderer's test data (the hostile corpus, the spec fixtures) is Markdown, where [text](url) is a link, not a class,
- * and its tests' shared code (hostile-dom-fixture.tsx) queries the DOM, where [id] is a selector. */
-const MARKDOWN_DATA = /^(?:hostile-cases\.ts|[\w-]+-fixture\.tsx?)$/;
+/** The renderer's test data (the hostile corpus) is Markdown, where [text](url) is a link, not a class. */
+const MARKDOWN_DATA = /^hostile-cases\.ts$/;
+/** Tests' shared code (the spec fixtures, hostile-dom-fixture.tsx, composer-mention-fixture.tsx) is test code, as a .test
+ * file is: it queries the DOM, where [id] is a selector. It ships in nothing, so no file the scan reads may import one. */
+const FIXTURE = /(?:^|\/)[\w-]+-fixture\.tsx?$/;
+const IMPORTS_FIXTURE = /from\s+["'][^"']*-fixture(?:\.tsx?)?["']/;
 
 /** Rules on the code itself. */
 const CODE: [string, RegExp][] = [
@@ -46,10 +49,12 @@ test("no raw colours, arbitrary values or style attributes in the controls, icon
   let scanned = 0;
   for (const root of roots) {
     for (const file of readdirSync(root, { recursive: true })) {
-      if (!/\.(tsx?|css)$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
+      if (!/\.(tsx?|css)$/.test(file) || /\.test\.tsx?$/.test(file) || FIXTURE.test(file)) continue;
       if (root.pathname.endsWith("/markdown/") && MARKDOWN_DATA.test(file)) continue;
       scanned++;
-      for (const f of scan(readFileSync(new URL(file, root), "utf8"))) found.push(`${file}:${f}`);
+      const text = readFileSync(new URL(file, root), "utf8");
+      if (IMPORTS_FIXTURE.test(text)) found.push(`${file}: imports a test fixture`);
+      for (const f of scan(text)) found.push(`${file}:${f}`);
     }
   }
   expect(scanned).toBeGreaterThan(10);

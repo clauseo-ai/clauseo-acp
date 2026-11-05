@@ -349,4 +349,4 @@ fn refused(agent: &'static str, path: &Path, what: &str) -> Error {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

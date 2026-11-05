@@ -1,0 +1,12 @@
+{"scenario":"hindi-answer-two-messages","description":"Claude-shaped, as hindi-answer, but the answer is two agent messages: an English working sentence (its own messageId) and then the Hindi answer (another messageId), with no tool call. The test's answer must have a newline between the two messages, so the working sentence does not run into the Hindi","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]},"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"default","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"note":"The test's first SetConfigOption starts the session and asks for the model by its id.","expect":{"method":"session/set_config_option","as":"model","params":{"sessionId":"sess-1","configId":"model","value":"claude-haiku-5-5"}}}
+{"respond":{"to":"model","result":{"configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"claude-haiku-5-5","options":[{"value":"default","name":"Default (recommended)"},{"value":"claude-haiku-5-5","name":"Haiku 5.5"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-work-1","content":{"type":"text","text":"Let me check the papers for the planted fact."}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"किरायेदार श्रीमती सुरेखा भार्गव हैं। उन्"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"होंने ₹3,47,215 की जमानत राशि जमा की, और किरायानामा 17 मार्च 2024 को हुआ। यह जानकारी kirayanama.pdf और patra.docx में मिली।"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

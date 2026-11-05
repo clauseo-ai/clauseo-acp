@@ -1,14 +1,19 @@
-// The copy review's status logic: how each registered string stands against ui/app/copy-approvals.json. The page
-// shows it, and `pnpm copy:check` (copy-gate.check.ts) fails while any string is not approved.
+// The copy review's status logic: how each registered string stands against the approvals in ui/app/copy-approvals/
+// (one JSON file per brief, merged by approvals.ts). The page shows it, and `pnpm copy:check` (copy-gate.check.ts)
+// fails while any string is neither approved nor provisional.
 
-/** One approval in copy-approvals.json, by string id: the text approved (or asked to change) and when. A string
+/** One approval in ui/app/copy-approvals/, by string id: the text approved (or asked to change) and when. A string
  * whose words have no Hindi yet is approved with "hi": null and "hi_status": "later", the approval covering its English
- * alone; once its words gain Hindi, that Hindi waits for an approval of its own. */
+ * alone; once its words gain Hindi, that Hindi waits for an approval of its own.
+ *
+ * provisional: words that follow DESIGN.md and the word list, added without waiting for Rohan, who reviews them in
+ * batches on the running page (scripts/copy-running.mjs). A provisional entry names when it was added (at, a date)
+ * and by whom (by: a thread or "app track"); its Hindi may be null without "hi_status". */
 export type Approval = {
   en: string;
   hi: string | null;
   hi_status?: "later";
-  status: "approved" | "change";
+  status: "approved" | "change" | "provisional";
   note?: string;
   at: string;
   by?: string;
@@ -16,13 +21,18 @@ export type Approval = {
 
 export type Approvals = Readonly<Record<string, Approval>>;
 
-/** approved: the approval's text is the current text; changed: the text moved since the approval or the change asked
- * for; change: a change was asked for and the text hasn't moved yet; new: no approval yet. */
-export type Status = "approved" | "changed" | "change" | "new";
+/** approved: the approval's text is the current text; provisional: the provisional entry's text is the current text,
+ * not yet seen by Rohan; changed: the text moved since the approval, the provisional entry or the change asked for;
+ * change: a change was asked for and the text hasn't moved yet; new: no approval yet. */
+export type Status = "approved" | "provisional" | "changed" | "change" | "new";
+
+/** The statuses copy:check lets through. */
+export const PASSING: readonly Status[] = ["approved", "provisional"];
 
 /** The page's names for each status (dev tooling, English only). */
 export const STATUS_NAMES: Readonly<Record<Status, string>> = {
   approved: "Approved",
+  provisional: "Provisional, not yet seen by Rohan",
   changed: "Changed since approval",
   change: "Change requested",
   new: "New",
@@ -40,17 +50,17 @@ export function statusOf(
   const same = approval.en === current.en && approval.hi === current.hi;
   // a change asked for on text that has moved since is changed: the new text waits for a look
   if (!same) return "changed";
-  return approval.status === "change" ? "change" : "approved";
+  return approval.status;
 }
 
-/** Every string that is not approved, in registry order, with its status. */
+/** Every string that is neither approved nor provisional, in registry order, with its status. */
 export function pending(
   rows: readonly Current[],
   approvals: Approvals,
 ): { id: string; status: Status }[] {
   return rows
     .map((row) => ({ id: row.id, status: statusOf(row, approvals[row.id]) }))
-    .filter((row) => row.status !== "approved");
+    .filter((row) => !PASSING.includes(row.status));
 }
 
 /** The ids of strings whose words have no Hindi yet, in registry order. */
@@ -87,27 +97,69 @@ export function malformedIds(rows: readonly Pick<Current, "id">[]): string[] {
   return rows.map((r) => r.id).filter((id) => !ID.test(id));
 }
 
-/** Checks copy-approvals.json's shape: an object of id to approval. Throws naming the first bad entry. */
-export function parseApprovals(json: unknown): Approvals {
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A calendar date as YYYY-MM-DD: "2026-11-04", not "2026-11-31" nor "4 Nov". */
+const isDate = (v: unknown): boolean =>
+  typeof v === "string" &&
+  DATE.test(v) &&
+  new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+
+const isEntry = (a: unknown): boolean => {
+  if (typeof a !== "object" || a === null || Array.isArray(a)) return false;
+  const e = a as Record<string, unknown>;
+  const common =
+    typeof e.en === "string" &&
+    (e.note === undefined || typeof e.note === "string") &&
+    (e.by === undefined || typeof e.by === "string");
+  if (!common) return false;
+  if (e.status === "provisional")
+    return (
+      // Hindi may be null (with or without hi_status: later); hi_status only goes with null Hindi
+      (typeof e.hi === "string"
+        ? e.hi_status === undefined
+        : e.hi === null && (e.hi_status === undefined || e.hi_status === "later")) &&
+      isDate(e.at) &&
+      typeof e.by === "string" &&
+      e.by.trim() !== ""
+    );
+  return (
+    (typeof e.hi === "string"
+      ? e.hi_status === undefined
+      : e.hi === null && e.hi_status === "later") &&
+    (e.status === "approved" || e.status === "change") &&
+    typeof e.at === "string"
+  );
+};
+
+/** Checks one approvals file's shape: an object of id to approval. Throws naming the file and the first bad entry. */
+export function parseApprovals(json: unknown, file = "copy-approvals"): Approvals {
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
-    throw new Error("copy-approvals.json must be an object of id to approval");
+    throw new Error(`${file} must be an object of id to approval`);
   }
   for (const [id, a] of Object.entries(json)) {
-    const ok =
-      typeof a === "object" &&
-      a !== null &&
-      typeof a.en === "string" &&
-      (typeof a.hi === "string"
-        ? a.hi_status === undefined
-        : a.hi === null && a.hi_status === "later") &&
-      (a.status === "approved" || a.status === "change") &&
-      typeof a.at === "string" &&
-      (a.note === undefined || typeof a.note === "string") &&
-      (a.by === undefined || typeof a.by === "string");
-    if (!ok)
+    if (!isEntry(a))
       throw new Error(
-        `copy-approvals.json: ${id} needs en, hi (or "hi": null with "hi_status": "later"), status ("approved" or "change") and at`,
+        `${file}: ${id} needs en, hi (or "hi": null with "hi_status": "later"), status ("approved" or "change") and at; ` +
+          `or, with "status": "provisional", en, hi (null allowed), at (a date, YYYY-MM-DD) and by (a thread or "app track")`,
       );
   }
   return json as Approvals;
+}
+
+/** Merges the approvals folder's files, each parsed strictly, keyed by file path (as import.meta.glob gives them, or
+ * a node script reads them). An id in two files throws naming both. An empty folder is no approvals. */
+export function mergeApprovals(files: Readonly<Record<string, unknown>>): Approvals {
+  const merged: Record<string, Approval> = {};
+  const from = new Map<string, string>();
+  for (const file of Object.keys(files).sort()) {
+    for (const [id, a] of Object.entries(parseApprovals(files[file], file))) {
+      const first = from.get(id);
+      if (first !== undefined)
+        throw new Error(`copy approvals: ${id} is in both ${first} and ${file}; keep it in one`);
+      from.set(id, file);
+      merged[id] = a;
+    }
+  }
+  return merged;
 }

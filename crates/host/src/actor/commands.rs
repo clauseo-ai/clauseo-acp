@@ -6,18 +6,19 @@
 //! A refused command stores no receipt. A failed commit answers with the stream's first
 //! failure.
 
+mod to_turn;
+
 use clauseo_protocol::{
-    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostError,
-    MatterId, Principal, RenameSource, StreamId, ThreadArchived, ThreadCreated, ThreadId,
-    ThreadRenamed, Timestamp, ValidatedCommand,
+    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, MatterId,
+    Principal, StreamId, ThreadArchived, ThreadCreated, ThreadId, ThreadRenamed, Timestamp, Title,
+    ValidatedCommand,
 };
 use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
-use super::matters::PendingMatter;
-use super::settings::set_tool_settings;
-use super::turn::TurnCommand;
-use super::{Actor, MatterEntry, Tag, ThreadEntry, turn};
+use super::matters::{PendingMatter, Stage};
+use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
+use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
 use crate::principal::{Access, authorize};
@@ -182,14 +183,12 @@ pub(crate) fn finish_command(
     let Some(first) = waiters.next() else {
         return;
     };
-    // A refusal keeps all it carries, `HostError::matter` included.
-    let shared = result.as_ref().map(|outcome| *outcome).map_err(|error| {
-        if let Error::Refused(refusal) = error {
-            refusal.clone()
-        } else {
-            HostError::new(error.code(), error.to_string())
-        }
-    });
+    // A refusal keeps all it carries, `HostError::matter` included, and a matter's
+    // `file_locked` its files.
+    let shared = result
+        .as_ref()
+        .map(|outcome| *outcome)
+        .map_err(Error::to_wire);
     let _gone = first.send(result);
     for waiter in waiters {
         let _gone = waiter.send(shared.clone().map_err(Error::Refused));
@@ -230,93 +229,52 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::relocate::relocate_matter(actor, ctx, matter, folder);
         }
         HostCommand::MarkSeen { thread } => super::seen::mark_seen(actor, ctx, thread),
+        HostCommand::SnoozeThread { thread, until } => triage::snooze(actor, ctx, thread, until),
+        HostCommand::MarkThreadDone { thread, done } => triage::mark_done(actor, ctx, thread, done),
+        HostCommand::SweepDone { day_start } => triage::sweep_done(actor, ctx, day_start),
         HostCommand::CreateThread { matter, agent } => {
-            let done = create_thread(actor, ctx, matter, agent);
-            if let Err(error) = done {
+            if let Err(error) = create_thread(actor, ctx, matter, agent) {
                 actor.finish_command(ctx.id, Err(error));
             }
         }
-        HostCommand::RenameThread { thread, title } => {
-            let title = clauseo_protocol::CompactString::from(title.as_str());
-            thread_command(actor, ctx, thread, ThreadChange::Rename(title));
-        }
+        HostCommand::RenameThread { .. } => title_source::rename_thread(actor, ctx, command),
         HostCommand::ArchiveThread { thread } => {
             thread_command(actor, ctx, thread, ThreadChange::Archive);
         }
-        HostCommand::SendPrompt {
-            thread,
-            content,
-            delivery,
-        } => turn_command(
-            actor,
-            ctx,
-            thread,
-            TurnCommand::SendPrompt { content, delivery },
-        ),
-        HostCommand::Cancel { thread } => turn_command(actor, ctx, thread, TurnCommand::Cancel),
-        HostCommand::AnswerPermission {
-            thread,
-            request,
-            option_id,
-        } => {
-            let command = TurnCommand::AnswerPermission { request, option_id };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::AnswerElicitation {
-            thread,
-            elicitation,
-            response,
-        } => {
-            let command = TurnCommand::AnswerElicitation {
-                elicitation,
-                response,
-            };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::SetConfigOption {
-            thread,
-            option_id,
-            value,
-        } => {
-            let command = TurnCommand::SetConfigOption { option_id, value };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::SetMode { thread, mode_id } => {
-            turn_command(actor, ctx, thread, TurnCommand::SetMode { mode_id });
-        }
-        HostCommand::UndoStep {
-            thread,
-            turn,
-            files,
-        } => turn_command(actor, ctx, thread, TurnCommand::UndoStep { turn, files }),
+        command @ (HostCommand::SendPrompt { .. }
+        | HostCommand::Cancel { .. }
+        | HostCommand::AnswerPermission { .. }
+        | HostCommand::AnswerElicitation { .. }
+        | HostCommand::SetConfigOption { .. }
+        | HostCommand::SetMode { .. }
+        | HostCommand::UndoStep { .. }
+        | HostCommand::EditQueuedPrompt { .. }
+        | HostCommand::RemoveQueuedPrompt { .. }
+        | HostCommand::SendQueuedNow { .. }
+        | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
         HostCommand::RestoreVersion {
             matter,
             checkpoint,
             scope,
         } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
-        HostCommand::SetUiSettings { patch } => {
-            super::settings::set_ui_settings(actor, ctx, &patch);
-        }
+        HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
+        HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
+        HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
+        HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),
+        HostCommand::FirstAct { counts } => first_act(actor, ctx, counts),
         // No receipt and no event: a repeated id asks the model again, under its read rules.
         HostCommand::RefreshLimits { agent, why } => {
             super::limits::refresh(actor, agent, why);
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
-        HostCommand::EditQueuedPrompt { thread, turn, text } => {
-            let command = TurnCommand::EditQueuedPrompt { turn, text };
-            turn_command(actor, ctx, thread, command);
-        }
-        HostCommand::RemoveQueuedPrompt { thread, turn } => {
-            turn_command(actor, ctx, thread, TurnCommand::RemoveQueuedPrompt { turn });
-        }
-        HostCommand::SendQueuedNow { thread, turn } => {
-            turn_command(actor, ctx, thread, TurnCommand::SendQueuedNow { turn });
-        }
-        HostCommand::ResumeQueue { thread } => {
-            turn_command(actor, ctx, thread, TurnCommand::ResumeQueue);
-        }
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
+        HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
+        HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
+        HostCommand::CheckForUpdate {}
+        | HostCommand::InstallUpdate { .. }
+        | HostCommand::CancelScheduledUpdate {}
+        | HostCommand::SetUpdateMode { .. } => super::update::not_wired(actor, ctx),
     }
 }
 
@@ -324,14 +282,6 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
     actor.finish_command(ctx.id, Err(refusal));
-}
-
-/// A turn command for a known thread goes to the turn path; an unknown one is refused.
-fn turn_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, command: TurnCommand) {
-    match listed_thread(actor, thread) {
-        Ok(_) => turn::command(actor, ctx, thread, command),
-        Err(error) => actor.finish_command(ctx.id, Err(error)),
-    }
 }
 
 /// A command's commit returned.
@@ -342,9 +292,14 @@ pub(super) fn command_committed(
     after: AfterCommand,
     outcome: Result<(), &Failure>,
 ) {
+    super::counting::committed(actor, id, outcome.is_ok());
     match (after, outcome) {
-        (AfterCommand::Matter(entry), Ok(())) => {
-            actor.matters.insert(entry.row.id, *entry);
+        (AfterCommand::Matter(entry), Ok(())) => super::matters::recorded(actor, *entry),
+        (AfterCommand::Matter(entry), Err(failure)) => {
+            let error = Error::Store(failure.error.clone());
+            // Answered once the store is asked for the row (`matters/made.rs`).
+            let matter = entry.row.id;
+            return super::matters::discard(actor, Some(id), matter, error, Stage::Store);
         }
         (AfterCommand::Thread(entry), Ok(())) => {
             actor.threads.insert(entry.row.id, *entry);
@@ -368,7 +323,6 @@ pub(super) fn command_committed(
         }
         (
             AfterCommand::Nothing
-            | AfterCommand::Matter(_)
             | AfterCommand::Thread(_)
             | AfterCommand::Row { .. }
             | AfterCommand::MatterRow { .. },
@@ -441,7 +395,9 @@ fn create_thread(
         id: thread,
         matter,
         agent: agent.clone(),
+        // `CreateThread` takes no title, so the new row has neither a title nor a source.
         title: None,
+        title_source: None,
         acp_session_id: None,
         archived: false,
         created: now.wall,
@@ -481,7 +437,12 @@ fn create_thread(
 
 /// `RenameThread` and `ArchiveThread`: the thread's stream is loaded first, so its header
 /// stays current for `ListThreads`.
-fn thread_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, change: ThreadChange) {
+pub(super) fn thread_command(
+    actor: &mut Actor,
+    ctx: &CommandCtx,
+    thread: ThreadId,
+    change: ThreadChange,
+) {
     if let Err(error) = listed_thread(actor, thread) {
         actor.finish_command(ctx.id, Err(error));
         return;
@@ -518,12 +479,17 @@ fn change_thread(
     let mut row = before.clone();
     row.updated = now.wall;
     let event = match change {
-        ThreadChange::Rename(title) => {
-            row.title = Some(title.to_string());
-            Some(DomainEvent::ThreadRenamed(ThreadRenamed {
-                title,
-                by: RenameSource::Lawyer,
-            }))
+        ThreadChange::Rename(title, placeholder) => {
+            let by = title_source::rename_source(placeholder);
+            if title_source::title_may_change(before.title_source, before.title.is_some(), by) {
+                row.title = Some(title.to_string());
+                row.title_source = Some(by);
+                let title = clauseo_protocol::CompactString::from(title.as_str());
+                Some(DomainEvent::ThreadRenamed(ThreadRenamed { title, by }))
+            } else {
+                tracing::debug!(%thread, ?by, "a rename does not replace the thread's title");
+                None
+            }
         }
         ThreadChange::Archive if before.archived => None,
         ThreadChange::Archive => {
@@ -568,8 +534,9 @@ fn change_thread(
 
 /// What `RenameThread` or `ArchiveThread` changes.
 #[derive(Debug)]
-enum ThreadChange {
-    Rename(clauseo_protocol::CompactString),
+pub(super) enum ThreadChange {
+    /// The title, and whether it is the app's first-words placeholder (else the lawyer typed it).
+    Rename(Title, bool),
     Archive,
 }
 

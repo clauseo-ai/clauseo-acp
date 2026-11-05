@@ -69,7 +69,7 @@ impl Drop for Temp {
             && let Err(err) = std::fs::remove_file(&temp)
             && err.kind() != io::ErrorKind::NotFound
         {
-            tracing::warn!(path = %temp.display(), error = %err, "temp file left behind");
+            tracing::warn!(error = %err, "temp file left behind");
         }
     }
 }

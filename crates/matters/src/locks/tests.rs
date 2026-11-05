@@ -1,6 +1,11 @@
 use clauseo_protocol::MatterPath;
+use unicode_normalization::UnicodeNormalization;
 
-use super::{HeldOpen, held_open, locked, owner_names};
+use std::cell::Cell;
+
+use super::{
+    HeldOpen, fold_name, held_by_code, held_open, locked, owner_in_another_form, owner_names,
+};
 use crate::test_dir::TestDir;
 use crate::write;
 
@@ -138,4 +143,156 @@ fn nfd_owner_file_found_by_nfc_name() {
         drop(write::create_new(&root.join(name)).unwrap());
     }
     assert_eq!(locked(root, &[path(document)]), [path(document)]);
+}
+
+/// `ऱानून.docx` as NFC (U+0931 …) and as NFD (U+0930 U+093C …), in that order. The nukta letter
+/// sits in the first characters, so the owner names cut from the two forms differ. (`क़` is not
+/// used: U+0958 is a composition exclusion, so its NFC form is the decomposed one.)
+fn nukta_names() -> (String, String) {
+    let composed = "\u{931}\u{93e}\u{928}\u{942}\u{928}.docx";
+    (composed.nfc().collect(), composed.nfd().collect())
+}
+
+/// `~$` and the NFD name without its base letter: the owner name Word makes when the cut lands
+/// after the base letter, so it starts with a lone combining mark. It is in the decomposed
+/// name's owner names and in none of the composed name's, as [`fold_name`] folds them.
+fn owner_only_in_decomposed(composed: &str, decomposed: &str) -> String {
+    let owner = String::from("~$\u{93c}\u{93e}\u{928}\u{942}\u{928}.docx");
+    assert!(owner_names(decomposed).contains(&owner));
+    assert!(
+        !owner_names(composed)
+            .iter()
+            .any(|name| fold_name(name) == owner)
+    );
+    owner
+}
+
+/// An Office owner file cut from the decomposed (NFD) name is found for the composed (NFC) name,
+/// through the decomposed form that `owner_in_another_form` builds from it. The owner file is
+/// given, not on disk (the folder is empty), so the match comes from the names alone.
+#[test]
+fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_composed_name() {
+    let dir = TestDir::new("locks-decomposed-owner");
+    let (composed, decomposed) = nukta_names();
+    assert_ne!(composed, decomposed);
+    assert_ne!(owner_names(&composed), owner_names(&decomposed));
+    let owner = owner_only_in_decomposed(&composed, &decomposed);
+    assert_eq!(
+        owner_in_another_form(dir.path(), &composed, Some(std::slice::from_ref(&owner))),
+        Some(owner)
+    );
+}
+
+/// The same through the other direction: the decomposed name is the name as written, and the
+/// owner file cut from it is found for that name. Its owner names come from the loop over the
+/// name as written and its decomposed form, not from the composed name's list.
+#[test]
+fn an_owner_file_cut_from_the_decomposed_name_is_found_for_the_decomposed_name() {
+    let dir = TestDir::new("locks-decomposed-written");
+    let (composed, decomposed) = nukta_names();
+    let owner = owner_only_in_decomposed(&composed, &decomposed);
+    assert_eq!(
+        owner_in_another_form(dir.path(), &decomposed, Some(std::slice::from_ref(&owner))),
+        Some(owner)
+    );
+}
+
+/// A Windows rename or delete that failed with an access denied (5), a sharing violation (32)
+/// or a lock violation (33) is a file held open only when the target is held at that moment:
+/// 5 is also a plain permission denial, and 32 or 33 can come from our own temp file. Any other
+/// code, or none, never is, and does not ask.
+#[test]
+fn a_write_failure_is_held_by_its_code_only_when_the_target_is_held() {
+    let asked = Cell::new(0);
+    let held = |answer: bool| {
+        let asked = &asked;
+        move || {
+            asked.set(asked.get() + 1);
+            answer
+        }
+    };
+    for code in [5, 32, 33] {
+        assert!(held_by_code(Some(code), held(true)), "{code}, held");
+        assert!(!held_by_code(Some(code), held(false)), "{code}, not held");
+    }
+    assert_eq!(asked.get(), 6, "5, 32 and 33 ask once each time");
+    for other in [
+        None,
+        Some(0),
+        Some(2),
+        Some(3),
+        Some(13),
+        Some(112),
+        Some(1224),
+    ] {
+        assert!(!held_by_code(other, held(true)), "{other:?}");
+    }
+    assert_eq!(asked.get(), 6, "no other code asks");
+}
+
+/// Off Windows an open file never stops a rename or delete, so no write failure is a held file,
+/// whatever its code (5 is `EIO` on Linux and macOS, 32 `EPIPE`).
+#[cfg(not(windows))]
+#[test]
+fn off_windows_no_write_failure_is_held() {
+    for code in [5, 32, 33] {
+        let err = std::io::Error::from_raw_os_error(code);
+        assert!(!super::held_at_write(&err, || true), "{code}");
+    }
+}
+
+/// The pretend Word of `test_support` (which every `TestDir` turns on) feeds the stale rule a
+/// Word started at the epoch, so an owner file a test makes stays held through the real rule;
+/// with no Word running instead (an empty listing), the same owner file, document free on a
+/// local volume, is stale. Both the macOS and Windows rules.
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn the_pretend_word_keeps_an_owner_file_held_and_without_it_the_owner_file_is_stale() {
+    use super::stale::{self, Decision};
+    let dir = TestDir::new("locks-pretend-word");
+    let root = dir.path();
+    for name in ["Invoice.docx", "~$nvoice.docx"] {
+        drop(write::create_new(&root.join(name)).unwrap());
+    }
+    let document = root.join("Invoice.docx");
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, || Some(Vec::new())),
+        Decision::Stale
+    );
+    assert_eq!(
+        stale::word_starts(),
+        Some(vec![std::time::SystemTime::UNIX_EPOCH])
+    );
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, stale::word_starts),
+        Decision::Held
+    );
+    assert_eq!(
+        stale::decide(root, "~$nvoice.docx", &document, || None),
+        Decision::QueryFailed
+    );
+    assert_eq!(
+        held_open(root, &path("Invoice.docx")),
+        Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
+    );
+}
+
+/// Linux has no Word and no stale rule: an owner file is held, whatever runs, as before it.
+#[cfg(not(any(target_os = "macos", windows)))]
+#[test]
+fn off_macos_and_windows_an_owner_file_is_never_stale() {
+    let dir = TestDir::new("locks-never-stale");
+    let root = dir.path();
+    for name in ["Invoice.docx", "~$nvoice.docx"] {
+        drop(write::create_new(&root.join(name)).unwrap());
+    }
+    assert!(!super::stale::is_stale(
+        root,
+        "~$nvoice.docx",
+        &root.join("Invoice.docx")
+    ));
+    assert_eq!(
+        held_open(root, &path("Invoice.docx")),
+        Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
+    );
 }

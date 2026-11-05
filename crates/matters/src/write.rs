@@ -100,6 +100,21 @@ pub(crate) fn open_exclusive(path: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).share_mode(0).open(path)
 }
 
+/// Windows, tests only: opens `path` as Word holds a document it has open, for reading and
+/// writing, sharing reads only (`FILE_SHARE_READ`): no one may delete it or rename over it
+/// until the handle drops.
+#[cfg(all(test, windows))]
+pub(crate) fn open_as_word(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `FILE_SHARE_READ`.
+    const SHARE_READ: u32 = 0x1;
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(SHARE_READ)
+        .open(path)
+}
+
 /// `FILE_ATTRIBUTE_HIDDEN`.
 #[cfg(any(windows, test))]
 const HIDDEN: u32 = 0x2;
@@ -141,7 +156,7 @@ pub(crate) fn hide_dir(dir: &Path) {
             if HIDE_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 tracing::debug!(path = %dir.display(), error = %err, "folder not hidden");
             } else {
-                tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+                tracing::warn!(error = %err, "folder not hidden");
             }
         }
     }
@@ -252,7 +267,7 @@ impl Drop for Staged {
         if let Some(temp) = self.temp.take()
             && let Err(err) = remove_file(&temp)
         {
-            tracing::warn!(path = %temp.display(), error = %err, "temp file left behind");
+            tracing::warn!(error = %err, "temp file left behind");
         }
     }
 }

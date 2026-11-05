@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, MatterId};
 use serde_json::{Map, Value, json};
 
 use super::{
@@ -26,6 +26,8 @@ fn switches() -> Value {
         "features": {"apps": false, "plugins": false, "skill_mcp_dependency_install": false},
         "cloud": {"skills": {"enabled": false}},
         "skills": {"bundled": {"enabled": false}, "include_instructions": false},
+        "cli_auth_credentials_store": "file",
+        "shell_environment_policy": {"ignore_default_excludes": false},
     })
 }
 
@@ -105,7 +107,7 @@ fn merge_add_only_extends_arrays_and_keeps_what_is_there() {
 fn config_nests_every_limits_override() {
     let built = Value::Object(config(&BTreeMap::new(), Map::new(), None));
     assert_eq!(built, pinned());
-    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 6);
+    assert_eq!(clauseo_limits::CODEX_OVERRIDES.len(), 8);
 }
 
 /// On Windows Codex gets the unelevated sandbox, without which codex 0.162.1 makes
@@ -399,12 +401,22 @@ fn prepare_launch_checks_then_makes_the_home() {
     write::create_dir_all(&data).unwrap();
     let matter = root.join("matter");
     write::create_dir_all(&matter.join(".codex")).unwrap();
-    let error = prepare_launch(&matter, &data, &home_in(&data)).unwrap_err();
+    let id = MatterId::new(uuid::Uuid::from_u128(
+        0x0190_0000_0000_7000_8000_0000_0000_0001,
+    ))
+    .unwrap();
+    let check = crate::agent::folder_support::FolderCheck {
+        matter: Some(id),
+        source: crate::agent::folder_support::CheckSource::Windows,
+    };
+    let error = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap_err();
     assert_eq!(error.code(), ErrorCode::MatterCodexFolder);
     assert!(!data.join("agents").exists());
     write::remove_dir_all(&matter.join(".codex")).unwrap();
-    let folder = prepare_launch(&matter, &data, &home_in(&data)).unwrap();
+    let (folder, support) = prepare_launch(&check, &matter, &data, &home_in(&data)).unwrap();
     assert_eq!(folder, dunce::canonicalize(&matter).unwrap());
+    // A folder the test made is fine on Windows, and off Windows nothing is checked.
+    assert_eq!(support, crate::agent::folder_support::Answer::Known(None));
     assert!(home_in(&data).join("config.toml").is_file());
     write::remove_dir_all(&root).unwrap();
 }
@@ -429,6 +441,8 @@ fn home_config_holds_only_the_switches() {
             "cloud.skills.enabled = false",
             "skills.bundled.enabled = false",
             "skills.include_instructions = false",
+            "cli_auth_credentials_store = \"file\"",
+            "shell_environment_policy.ignore_default_excludes = false",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");

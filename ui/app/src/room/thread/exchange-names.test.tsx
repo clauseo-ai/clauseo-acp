@@ -5,7 +5,7 @@
 // would share the names: the later one's sections go unnamed, so they are no landmarks and axe's landmark-unique passes.
 import axe from "axe-core";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentText,
   header,
@@ -20,17 +20,23 @@ import { clockTime } from "./clock.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 const T1 = TURN;
 const T2: TurnId = uuid(2, 4);
 const T3: TurnId = uuid(3, 4);
-/** Today on the local clock, at the minute given past 4 pm. */
-const pm = (minute: number) => new Date(new Date().setHours(16, minute, 0, 0)).getTime();
+/** NOW's day, at the minute given past 4 pm. */
+const pm = (minute: number) => NOW - 60 * 60_000 + minute * 60_000;
 
 const ask = (order: number, n: number, text: string, turn: TurnId, ts: number): ViewEntry => ({
   user_message: { ...userMessage(order, n, text).user_message!, turn, ts },

@@ -22,7 +22,7 @@
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 use futures::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
@@ -63,6 +63,10 @@ pub(crate) const MAX_LINES_IN_FLIGHT: usize = 64;
 /// with `unstable_protocol_v2` off, as this crate builds it. With that feature on, the SDK drops
 /// a notification that comes before `initialize` (`jsonrpc/protocol_compat.rs`), which would
 /// leave it counted; recheck this before turning the feature on or bumping the SDK.
+///
+/// It also keeps what [`ReadProgress`] reads: how many times a read of the agent's stdout found
+/// it empty, whether the last read did (or the stdout ended), and the waker of a read that waits,
+/// which [`ReadProgress::mark`] wakes.
 #[derive(Debug, Default)]
 pub(crate) struct Gate {
     /// How many events are waiting for room.
@@ -71,6 +75,12 @@ pub(crate) struct Gate {
     in_flight: AtomicUsize,
     /// The line reader, when it waits for the gate.
     reader: AtomicWaker,
+    /// How many reads of the agent's stdout found it empty, plus one for its end.
+    waits: AtomicU64,
+    /// The last read of the agent's stdout found it empty, or the stdout ended.
+    idle: AtomicBool,
+    /// The read of the agent's stdout that waits, when one does.
+    stdout: AtomicWaker,
 }
 
 impl Gate {
@@ -106,6 +116,31 @@ impl Gate {
             && self.in_flight.load(Ordering::Acquire) < MAX_LINES_IN_FLIGHT
     }
 
+    /// A read of the agent's stdout found it empty and waits, to be woken by `waker` too.
+    fn stdout_waits(&self, waker: &std::task::Waker) {
+        self.stdout.register(waker);
+        self.stdout_empty();
+    }
+
+    /// A read of the agent's stdout found it empty.
+    fn stdout_empty(&self) {
+        self.waits.fetch_add(1, Ordering::AcqRel);
+        self.idle.store(true, Ordering::Release);
+    }
+
+    /// A read of the agent's stdout gave bytes (or an error, which ends the stream next).
+    fn stdout_read(&self) {
+        // Checked first, so the hot path only reads.
+        if self.idle.load(Ordering::Relaxed) {
+            self.idle.store(false, Ordering::Release);
+        }
+    }
+
+    /// The agent's stdout ended, or its reader is gone: nothing more is read.
+    fn stdout_ended(&self) {
+        self.stdout_empty();
+    }
+
     /// Ready when no event waits for room and fewer than [`MAX_LINES_IN_FLIGHT`] counted lines
     /// wait for the handler.
     fn poll_open(&self, cx: &mut Context<'_>) -> Poll<()> {
@@ -118,6 +153,80 @@ impl Gate {
         } else {
             Poll::Pending
         }
+    }
+}
+
+/// A point in the line reader's progress, from [`ReadProgress::mark`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadMark(u64);
+
+/// What the line reader has read of the agent's stdout, for a host that must know whether all
+/// the agent wrote before it exited has reached the event channel. From
+/// [`AcpClient::read_progress`](crate::AcpClient::read_progress); holding it keeps no part of
+/// the connection alive.
+#[derive(Debug, Clone)]
+pub struct ReadProgress(pub(crate) Arc<Gate>);
+
+impl ReadProgress {
+    /// The reader's progress now. Taken once the agent has exited, everything it wrote is in
+    /// its stdout pipe or already read. A read that waits is woken to read again, so a reader
+    /// that found the pipe empty before the mark finds it so again after it (or reads what came
+    /// since) once the [`Driver`](crate::Driver) runs, and nothing else has to wake it.
+    pub fn mark(&self) -> ReadMark {
+        let mark = ReadMark(self.0.waits.load(Ordering::Acquire));
+        self.0.stdout.wake();
+        mark
+    }
+
+    /// Whether everything in the agent's stdout at `mark` has been read and every
+    /// `session/update` and malformed line of it is in the event channel: since `mark`, a read
+    /// found the stdout empty with no read after it, or the stdout ended; and no such line waits
+    /// between the reader and the event channel. Read it on the thread that runs the
+    /// [`Driver`](crate::Driver), so the reader does not move while it is read.
+    ///
+    /// Exact where a read waits only on an empty pipe, as `async-process`'s stdout does on
+    /// Unix. On Windows that stdout is read by a thread, so a read can wait while the thread
+    /// still holds bytes, and this can say `true` early.
+    ///
+    /// Only `session/update`s and malformed lines are counted ([`Gate`]): an agent request,
+    /// response or other notification read but not yet handled does not hold this back. A host
+    /// waits for a call's answer separately.
+    pub fn drained_since(&self, mark: ReadMark) -> bool {
+        let gate = &self.0;
+        gate.idle.load(Ordering::Acquire)
+            && gate.waits.load(Ordering::Acquire) > mark.0
+            && gate.in_flight.load(Ordering::Acquire) == 0
+            && gate.blocked.load(Ordering::Acquire) == 0
+    }
+}
+
+/// The agent's stdout as the [`LineSplitter`] reads it, telling the [`Gate`] about each read
+/// that finds it empty, each that gives bytes, and its end (or this reader's drop).
+struct Watched<R> {
+    reader: R,
+    gate: Arc<Gate>,
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for Watched<R> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let read = Pin::new(&mut this.reader).poll_read(cx, buf);
+        match &read {
+            Poll::Pending => this.gate.stdout_waits(cx.waker()),
+            Poll::Ready(Ok(0)) if !buf.is_empty() => this.gate.stdout_ended(),
+            Poll::Ready(_) => this.gate.stdout_read(),
+        }
+        read
+    }
+}
+
+impl<R> Drop for Watched<R> {
+    fn drop(&mut self) {
+        self.gate.stdout_ended();
     }
 }
 
@@ -199,6 +308,10 @@ pub(crate) fn incoming<R>(
 where
     R: AsyncRead + Send + Unpin + 'static,
 {
+    let reader = Watched {
+        reader,
+        gate: Arc::clone(&shared.gate),
+    };
     let splitter = LineSplitter::new(reader);
     futures::stream::unfold(Some((splitter, shared)), |state| async move {
         let (mut splitter, shared) = state?;

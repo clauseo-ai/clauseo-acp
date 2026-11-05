@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { frame } from "./words-frame.ts";
 import { ui } from "./words-ui.ts";
-import { LANGUAGE_NAMES, PREVIEW_PAPERS, settingsWords, st } from "./words-settings.ts";
+import { LANGUAGE_NAMES, PREVIEW_PAPERS, st } from "./words-settings.ts";
+import { settingsWords } from "./words-settings.hi.ts";
 
 test("the sections and their lines say the design's words in both languages", () => {
   expect(
@@ -17,7 +18,8 @@ test("the sections and their lines say the design's words in both languages", ()
     "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
   );
   expect(st("hi", "How Clauseo looks on this computer.")).toBe("इस कंप्यूटर पर Clauseo कैसा दिखे।");
-  expect(st("hi", "Managed by your organisation")).toBe("आपके संगठन द्वारा प्रबंधित");
+  // hi: later, so the Hindi window shows the English
+  expect(st("hi", "Managed by firm")).toBe("Managed by firm");
   expect(LANGUAGE_NAMES).toEqual({ en: "English", hi: "हिन्दी" });
 });
 
@@ -31,6 +33,13 @@ test("appearance's preview says the design's line, and its papers keep their fil
     "Board minutes",
     "Legal notice",
   ]);
+});
+
+test("privacy's design lines keep the design's Hindi; it says nothing of Indian Kanoon or anonymous counts", () => {
+  expect(st("hi", "Privacy")).toBe("निजता");
+  expect(st("hi", "To {name}, on your plan", { name: "Claude" })).toBe("Claude को, आपके प्लान से");
+  for (const left of ["To Indian Kanoon", "To Clauseo", "Anonymous counts", "Send crash reports"])
+    expect(Object.keys(settingsWords)).not.toContain(left);
 });
 
 test("the side's notes fill their slots in both languages", () => {
@@ -80,6 +89,7 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
   for (const [en, hi] of Object.entries(settingsWords)) {
     if (hi === null) continue; // hi: later, no Hindi yet
     expect(hi, en).not.toMatch(/पेंसिल|स्याही|चरण|कदम|मैं|[\u0966-\u096F]/);
+    if (hi === null) continue; // hi: later, no Hindi yet
     if (en.endsWith(".")) expect(hi, en).toMatch(/।$/);
     else expect(hi, en).not.toMatch(/[।.]$/);
     // a slot in English is a slot in Hindi
@@ -90,8 +100,10 @@ test("each Hindi sentence ends with the danda, and no banned word or Devanagari 
 });
 
 test("only the sections built so far bring their strings: no later section's name or line is here", () => {
-  const src = readFileSync(new URL("./words-settings.ts", import.meta.url), "utf8");
-  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates", "Privacy"])
+  const src = ["./words-settings.ts", "./words-settings.hi.ts"]
+    .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
+    .join("\n");
+  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates"])
     expect(Object.keys(settingsWords), later).not.toContain(later);
   // the design's facts (its version and date) stay in the design
   expect(src).not.toMatch(/3\.0\.4|October/);

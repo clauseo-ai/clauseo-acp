@@ -54,6 +54,13 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
+/// Unix: makes `path` executable by its owner, as a test's fake `npm` must be.
+#[cfg(unix)]
+pub(crate) fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 /// Makes `path` a file of `len` bytes with `File::set_len`: sparse where the file system
 /// allows, so a file over the size cap costs no disk.
 pub(crate) fn sized(path: &Path, len: u64) {

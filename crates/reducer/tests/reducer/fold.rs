@@ -4,9 +4,9 @@
 use clauseo_protocol::{
     AgentId, AgentNamed, AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock,
     Count, DetachReason, DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, PageVia,
-    PageVisited, QueuedPromptEdited, StepUndone, TextKind, TextOrBlob, ThreadStatus, Timestamp,
-    ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind,
-    TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
+    PageVisited, QueuedPromptEdited, RenameSource, StepUndone, TextKind, TextOrBlob, ThreadRenamed,
+    ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus,
+    ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry, WebResult, WebSearchRecorded,
 };
 use clauseo_reducer::{Anomaly, Error, StreamState, ViewChange, apply, view_snapshot};
 
@@ -163,10 +163,11 @@ fn without_seq(state: &StreamState) -> serde_json::Value {
     value
 }
 
-/// The web events are logged only: each one leaves the state as it was but for its `seq`, and
-/// the view as it was, so the reducer's state equals what it was before the event.
+/// A web record for a tool call the thread does not hold is ignored: each one leaves the state as
+/// it was but for its `seq`, and the view as it was, with no anomaly. The records for a call
+/// that does exist are in `web.rs`.
 #[test]
-fn web_events_change_no_state() {
+fn web_events_for_an_unknown_call_change_no_state() {
     let (mut log, mut state) = created(6);
     let turn = start_turn(&mut log, "Find the limitation period.").unwrap();
     catch_up(&log, &mut state);
@@ -444,6 +445,25 @@ fn no_patch_for_unchanged_entry() {
     );
     let again = push(&mut log, &mut state, tool_diff(tool_call, 1).unwrap());
     assert!(again.changes.is_empty() && again.anomalies.is_empty());
+}
+
+/// A placeholder rename folds like the lawyer's or the agent's: the header takes the title.
+/// The reducer reads no precedence; the host decides which title is sent.
+#[test]
+fn a_placeholder_rename_sets_the_header_title() {
+    let (mut log, mut state) = created(5);
+    let placeholder = ThreadRenamed {
+        title: short("Draft the SPA"),
+        by: RenameSource::Placeholder,
+    };
+    let out = push(&mut log, &mut state, placeholder);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert!(matches!(
+        first_upsert(&out.changes),
+        ViewEntry::Header(header) if header.title.as_deref() == Some("Draft the SPA")
+    ));
+    let header = state.as_thread().unwrap().header().unwrap();
+    assert_eq!(header.title.as_deref(), Some("Draft the SPA"));
 }
 
 /// The agent's own name the header holds.

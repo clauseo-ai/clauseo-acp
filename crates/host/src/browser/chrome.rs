@@ -70,9 +70,20 @@ impl Platform {
         }
     }
 
+    /// Chrome for Testing's name for this platform in its version list and its zip
+    /// (`chrome-<name>.zip`), or `None` where Clauseo downloads no Chrome for Testing.
+    pub fn cft_name(self) -> Option<&'static str> {
+        match self {
+            Self::MacArm64 => Some("mac-arm64"),
+            Self::MacX64 => Some("mac-x64"),
+            Self::WindowsX64 => Some("win64"),
+            Self::WindowsArm64 | Self::Linux | Self::Other => None,
+        }
+    }
+
     /// The Chrome for Testing binary inside one download's folder, as the zip lays it out, or
     /// `None` where Clauseo uses no Chrome for Testing.
-    fn cft_binary(self) -> Option<PathBuf> {
+    pub(crate) fn cft_binary(self) -> Option<PathBuf> {
         let mac = |folder: &str| {
             Path::new(folder)
                 .join("Google Chrome for Testing.app")
@@ -222,7 +233,7 @@ fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
 }
 
 /// A dotted version, such as `131.0.6778.85`, as numbers to compare; `None` when it is not one.
-fn version(text: &str) -> Option<Vec<u64>> {
+pub(crate) fn version(text: &str) -> Option<Vec<u64>> {
     text.split('.')
         .map(|part| {
             (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentTextEntry, AppendTarget, AtLimitBehaviour, Billing,
     Cursor, ErrorCode, HostError, HostEvent, LimitSource, MessageId, PatchBatch, Seq, StreamId,
@@ -141,7 +143,7 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 const RESERVED: [&str; 3] = ["fragment", "stream_failed", "timed"];
 
 /// The number of `HostEvent` variants [`variant`] names.
-const VARIANTS: usize = 8;
+const VARIANTS: usize = 11;
 
 /// Each `HostEvent` variant's place. A new variant fails to compile here, so it gets a place, a
 /// sample in the test below, and its key checked against [`RESERVED`].
@@ -155,6 +157,9 @@ fn variant(event: &HostEvent) -> usize {
         HostEvent::LimitsViewChanged(_) => 5,
         HostEvent::MattersChanged(_) => 6,
         HostEvent::ThreadsChanged(_) => 7,
+        HostEvent::FolderScanned(_) => 8,
+        HostEvent::BrowserInstall { .. } => 9,
+        HostEvent::UpdateChanged(_) => 10,
     }
 }
 
@@ -196,7 +201,13 @@ fn no_host_event_kind_takes_a_reserved_key() {
                 web_search: true,
                 browser: false,
             },
+            privacy: clauseo_protocol::PrivacySettings {
+                counts: true,
+                crash_reports: false,
+                counts_started: false,
+            },
             locked: Vec::new(),
+            plans: BTreeMap::new(),
         }),
         HostEvent::MattersChanged(clauseo_protocol::MattersChanged {
             matters: Vec::new(),
@@ -208,6 +219,26 @@ fn no_host_event_kind_takes_a_reserved_key() {
             threads: Vec::new(),
             removed: Vec::new(),
             all: true,
+        }),
+        HostEvent::FolderScanned(clauseo_protocol::FolderScanned {
+            folder: clauseo_protocol::FolderRefId::new(v7()).unwrap(),
+            files: 0,
+            bytes: clauseo_protocol::Count::ZERO,
+            now_reading: None,
+            place: clauseo_protocol::FolderPlace::Local,
+            cloud_only: 0,
+            done: true,
+            cancelled: false,
+        }),
+        HostEvent::BrowserInstall {
+            state: clauseo_protocol::BrowserInstallState::Unpacking,
+        },
+        HostEvent::UpdateChanged(clauseo_protocol::UpdateView {
+            current: "0.4.0".to_owned(),
+            state: clauseo_protocol::UpdateState::Idle,
+            mode: clauseo_protocol::UpdateMode::Auto,
+            checked_at: None,
+            updated_from: None,
         }),
     ];
     let mut places: Vec<usize> = samples.iter().map(variant).collect();

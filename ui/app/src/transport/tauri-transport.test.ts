@@ -314,6 +314,32 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 1 }]);
   });
 
+  test("matters_changed and threads_changed reach the app listeners, no stream subscriber, and are acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const matters = { matters: [], removed: ["m-1"], all: false };
+    const threads = { matter: "m-2", threads: [], removed: [], all: true };
+    send({ matters_changed: matters });
+    send({ threads_changed: threads });
+    expect(heard).toEqual([{ matters_changed: matters }, { threads_changed: threads }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 2 }]);
+  });
+
+  test("browser_install reaches the app listeners, no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const state = { downloading: { bytes: 64_400_000, total: 200_000_000 } };
+    send({ browser_install: { state } });
+    expect(heard).toEqual([{ browser_install: { state } }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];
@@ -355,5 +381,20 @@ describe("TauriTransport", () => {
     expect(t.kind).toBe("null");
     expect(pageTransport()).toBe(t);
     await expect(t.query("list_matters")).rejects.toMatchObject({ code: "internal" });
+  });
+});
+
+// UD1: R20's setup wire is a stub until stage D's P5 brings desktop's `setup` command and stream arm: no event ever
+// arrives, so the first run holds nothing back, and a setup command does nothing. count_ui (S21) is on the wire already.
+test("the setup wire is a stub: onSetup hears nothing, setup does nothing, and countUi invokes count_ui", async () => {
+  const t = new TauriTransport({ warn: () => {}, nextFrame: () => {} });
+  t.onSetup()();
+  await settle();
+  await expect(t.setup()).resolves.toBeUndefined();
+  expect(invoked.map((c) => c.command)).not.toContain("setup");
+  await t.countUi({ onboarding_step: { step: "welcome_shown" } });
+  expect(invoked.at(-1)).toEqual({
+    command: "count_ui",
+    args: { event: { onboarding_step: { step: "welcome_shown" } } },
   });
 });

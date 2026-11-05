@@ -17,7 +17,7 @@ const atLocal = (h: number, m: number) => {
 };
 const QUESTION: ViewEntry = (() => {
   const asked = userMessage(5, 1, "What does the lease say about notice to the bank?");
-  return { user_message: { ...asked.user_message!, ts: atLocal(16, 31) } };
+  return { user_message: { ...asked.user_message!, ts: atLocal(16, 24) } };
 })();
 const ANSWER = agentText(90, 1, "Clause nine needs thirty days' written notice to the bank.");
 const ENDED = step(91, { ts: atLocal(16, 32) });
@@ -61,9 +61,21 @@ const LONG_NAME = paper(
   "Written statement of respondent no. 2 to the complaint, final copy (12).pdf",
 );
 
+/** The host's stamps on a frame's calls, in order: a minute apart from the question's, each taking 40 seconds; none
+ * finished while it runs or waits. The opened rows' clock column shows them. */
+const timed = (calls: ViewEntry[]): ViewEntry[] =>
+  calls.map((e, i) => {
+    const c = e.tool_call!;
+    const started_at = atLocal(16, 24) + i * 60_000;
+    const ends = c.status !== "pending" && c.status !== "in_progress";
+    return {
+      tool_call: { ...c, started_at, ...(ends ? { finished_at: started_at + 40_000 } : {}) },
+    };
+  });
+
 /** The settled thread with these calls before the answer; `open` presses the group's line. */
 function settled(calls: ViewEntry[], open: boolean) {
-  const host = () => threadHost({ entries: [QUESTION, ...calls, ANSWER, ENDED] });
+  const host = () => threadHost({ entries: [QUESTION, ...timed(calls), ANSWER, ENDED] });
   return open
     ? () => <RoomClicking host={host} clicks={['[data-testid="step-group"] button']} />
     : () => <RoomOver host={host} />;
@@ -71,7 +83,7 @@ function settled(calls: ViewEntry[], open: boolean) {
 
 /** The running thread, its newest call in hand: the live group's line and the working line say it. */
 const running = (calls: ViewEntry[]) => () => (
-  <RoomOver host={() => threadHost({ entries: [QUESTION, ...calls], status: "running" })} />
+  <RoomOver host={() => threadHost({ entries: [QUESTION, ...timed(calls)], status: "running" })} />
 );
 
 const folded = (id: string, key: StepKey, calls: ViewEntry[]): Entry => ({

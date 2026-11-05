@@ -5,25 +5,15 @@
 // As in words.ts the English is the key, the exact string on screen. The Hindi is a specialist's draft, waiting for a
 // Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script.
 import type { Lang } from "./display.ts";
-import { wordsOf, type Hindi } from "./words-core.ts";
+import { wordsOf } from "./words-core.ts";
 import type { ErrorCode } from "./words-errors.ts";
+import type { HI } from "./words-startup.hi.ts";
 
 /** The codes a failed start brings to the window (H18). */
 export type StartupCode = Extract<
   ErrorCode,
   "store.newer_version" | "store.corrupt" | "store.disk_full" | "store.io"
 >;
-
-const HI = {
-  "Clauseo couldn't open. A newer version of Clauseo saved its data, so this version can't read it. Your papers stay in their folders.":
-    "Clauseo नहीं खुल सका। इसका डेटा Clauseo के नए संस्करण ने सहेजा है, इसलिए यह संस्करण उसे पढ़ नहीं सकता। आपके दस्तावेज़ अपने फ़ोल्डरों में ही हैं।",
-  "Clauseo couldn't open. Its saved data doesn't read back. Your papers stay in their folders.":
-    "Clauseo नहीं खुल सका। इसका सहेजा गया डेटा वापस नहीं पढ़ा जा रहा। आपके दस्तावेज़ अपने फ़ोल्डरों में ही हैं।",
-  "Clauseo couldn't open. The computer's disk is full. Free some space, then open Clauseo again.":
-    "Clauseo नहीं खुल सका। कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर Clauseo दोबारा खोलें।",
-  "Clauseo couldn't open. It couldn't read or write its data. Open Clauseo again.":
-    "Clauseo नहीं खुल सका। यह अपना डेटा पढ़ या लिख नहीं सका। Clauseo दोबारा खोलें।",
-} as const;
 
 /** Every start-up line, in English. */
 export type StartupKey = keyof typeof HI;
@@ -40,11 +30,8 @@ export const STARTUP_WORDS: Record<StartupCode, StartupKey> = {
 };
 
 /** A start-up line in the language. */
-export const startup = wordsOf<StartupKey>(HI);
+export const startup = wordsOf("startup");
 
 /** A start-up code's line in the language. */
 export const startupWords = (lang: Lang, code: StartupCode): string =>
   startup(lang, STARTUP_WORDS[code]);
-
-/** Every key, for the banned-words screen in the tests. */
-export const startupWordList: Hindi<StartupKey> = HI;

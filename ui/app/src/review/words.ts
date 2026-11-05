@@ -1,14 +1,23 @@
 // Where a registered string lives: its words file and English key, and its current text in either language, looked
 // up from that file, so the page and the gate always compare against what the app shows.
+// the Hindi words in at once, as the app has them once its lazy chunk lands: each ref reads its Hindi when made
+import "@clauseo/components/lib/words-hi.ts";
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { errorHindi, errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { errorSentence, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { errorHindi } from "@clauseo/components/lib/words-errors.hi.ts";
+import { fw, type FindKey } from "@clauseo/components/lib/words-find.ts";
+import { fr, type FolderKey } from "@clauseo/components/lib/words-folder.ts";
+import { frc, type FolderCardKey } from "@clauseo/components/lib/words-folder-card.ts";
+import { tw, type TriageKey } from "@clauseo/components/lib/words-triage.ts";
+import { twl, type TriageLateKey } from "@clauseo/components/lib/words-triage-late.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
 import { limThread, type LimitThreadKey } from "@clauseo/components/lib/words-limits-thread.ts";
 import { pc, type PlanCardKey } from "@clauseo/components/lib/words-plan-card.ts";
 import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
-import { roomHindi, rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
+import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
+import { roomHindi } from "@clauseo/components/lib/words-room.hi.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
 import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
@@ -44,6 +53,29 @@ export const frameWords = (key: FrameKey): WordsRef => ({
   key,
   text: (lang) => frame(lang, key),
   later: frame.hi[key] === null,
+});
+
+export const findWords = (key: FindKey): WordsRef => ({
+  file: "lib/words-find.ts",
+  key,
+  text: (lang) => fw(lang, key),
+  later: fw.hi[key] === null,
+});
+
+/** A string of snooze and Done drawn with the rail (words-triage.ts, U16b). */
+export const triageWords = (key: TriageKey): WordsRef => ({
+  file: "lib/words-triage.ts",
+  key,
+  text: (lang) => tw(lang, key),
+  later: tw.hi[key] === null,
+});
+
+/** A string of snooze and Done that opens later (words-triage-late.ts, U16b). */
+export const triageLateWords = (key: TriageLateKey): WordsRef => ({
+  file: "lib/words-triage-late.ts",
+  key,
+  text: (lang) => twl(lang, key),
+  later: twl.hi[key] === null,
 });
 
 export const roomWords = (key: RoomKey): WordsRef => ({
@@ -163,4 +195,18 @@ export const settingsWords = (key: SettingsKey): WordsRef => ({
   key,
   text: (lang) => st(lang, key),
   later: st.hi[key] === null,
+});
+
+export const folderWords = (key: FolderKey): WordsRef => ({
+  file: "lib/words-folder.ts",
+  key,
+  text: (lang) => fr(lang, key),
+  later: fr.hi[key] === null,
+});
+
+export const folderCardWords = (key: FolderCardKey): WordsRef => ({
+  file: "lib/words-folder-card.ts",
+  key,
+  text: (lang) => frc(lang, key),
+  later: frc.hi[key] === null,
 });

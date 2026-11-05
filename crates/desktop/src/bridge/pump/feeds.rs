@@ -60,6 +60,8 @@ impl AppEvents {
     pub(in crate::bridge) fn carries(self, feed: Feed, json: &str) -> bool {
         match (feed, self) {
             (_, Self::All) | (Feed::Limits, Self::SettingsAndLimits) => true,
+            // `update_changed` (0037) joins here in R23 PR 5, with a feed restart that reads
+            // `GetUpdate` as it reads `GetSettings`; until then only main carries it.
             (Feed::App, Self::SettingsAndLimits) => json.starts_with(r#"{"settings_changed":"#),
             (_, Self::Nothing) => false,
         }

@@ -135,6 +135,55 @@ export function RoomFocusing({ host, focus }: { host: () => FakeTransport; focus
   );
 }
 
+/** The room inside its view store, the element with test id `press` pressed once it shows, then, once the control with
+ * test id `focus` shows and the popup the press opened has taken the focus it takes on open, that control focused as
+ * the keyboard focuses it: for a tooltip on a control inside a popover, such as the tool line's Open Settings. */
+export function RoomPressFocusing({
+  host,
+  press,
+  focus,
+}: {
+  host: () => FakeTransport;
+  press: string;
+  focus: string;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let pressed = false;
+    let focused = false;
+    const tap = () => {
+      if (!pressed) {
+        const trigger = box.current?.querySelector<HTMLElement>(`[data-testid="${press}"]`);
+        if (trigger === null || trigger === undefined) return;
+        pressed = true;
+        trigger.click();
+        return;
+      }
+      const target = document.querySelector<HTMLElement>(`[data-testid="${focus}"]`);
+      const at = document.activeElement;
+      // the popup takes the focus on open: focusing before that would lose it to the popup
+      if (focused || target === null || at === null || at === document.body) return;
+      if (at.matches(`[data-testid="${press}"]`)) return;
+      focused = true;
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      target.focus();
+    };
+    const tick = setInterval(tap, 100);
+    const watch = new MutationObserver(tap);
+    watch.observe(document.body, { subtree: true, childList: true });
+    tap();
+    return () => {
+      clearInterval(tick);
+      watch.disconnect();
+    };
+  }, [press, focus]);
+  return (
+    <div ref={box} className="contents">
+      <RoomOver host={host} />
+    </div>
+  );
+}
+
 /** The room inside its view store, and the controls `clicks` names (CSS selectors, in order), each pressed once it
  * shows and isn't waiting: for a state some presses in, such as Versions open, a version chosen and its Restore. The
  * selectors read the whole document, as a dialog stands outside the room. */
@@ -207,4 +256,20 @@ export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: r
     })();
   }, [steps]);
   return <Room transport={transport} />;
+}
+
+/** The room over `host`, Find typed into with `words`, then its first conversation found pressed once it shows: Find
+ * answers after its debounce, later than RoomAfter's next step would press. */
+export function RoomFound({ host, words }: { host: () => FakeTransport; words: string }) {
+  useEffect(() => {
+    const poll = setInterval(() => {
+      const row = document.querySelector<HTMLElement>('[data-testid="find-conversation"]');
+      if (row === null) return;
+      clearInterval(poll);
+      row.click();
+    }, 50);
+    return () => clearInterval(poll);
+  }, []);
+  const [steps] = useState(() => [{ find: words }]);
+  return <RoomAfter host={host} steps={steps} />;
 }

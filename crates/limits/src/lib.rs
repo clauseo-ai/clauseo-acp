@@ -19,11 +19,15 @@
 //! # Interface
 //!
 //! - [`Limits`]: `new`, `input`, `view`, `next_deadline`, `next_read_at`,
-//!   `at_limit(agent, now)`; with [`Input`], [`Action`], [`LiveSignal`], [`LiveStatus`] and
-//!   [`LimitHit`].
+//!   `at_limit(agent, now)`; with [`Input`] (`Input::LoginChanged` reads past the back-off,
+//!   Rust only), [`Action`], [`LiveSignal`], [`LiveStatus`] and [`LimitHit`].
 //! - [`ReadLimits`], [`ReadOutcome`], [`ReadFailure`], and [`ProcessReaders`], which reads over a
 //!   `process::Launcher` and a `process::Timer`. A refused settings path or a failed file step
-//!   comes back as `ReadFailure::LaunchFailed` with its text.
+//!   comes back as `ReadFailure::LaunchFailed` with its text. `ProcessReaders::with_launch_env`
+//!   adds the agent's stored API key to each read; `ProcessReaders::hold` keeps an agent's
+//!   reads off while its login changes, until its [`HoldGuard`] drops (decision record 0048).
+//! - [`claude_plan`] and [`codex_plan`]: the plan names `AccountLimits.plan` uses, for desktop's
+//!   sign-in line.
 //! - [`CODEX_OVERRIDES`]: the `-c` overrides the Codex reader passes `app-server`, which R15's
 //!   `CODEX_CONFIG` for codex-acp reuses.
 //! - Hidden, for G16's live tests only (`tests/live.rs`): `ProcessReaders::with_stdout_tap` and
@@ -38,7 +42,8 @@
 //! # Invariants
 //!
 //! - Clauseo never reads a credential: no `auth.json`, no `.credentials.json`, no keychain, no
-//!   token. An `AccountRef` is an email the agent reports, or a fixed ref by billing.
+//!   token. A stored key reaches a read only through the caller's `with_launch_env`. An
+//!   `AccountRef` is an email the agent reports, or a fixed ref by billing.
 //! - The model starts no timer and no retry: the host waits for [`Limits::next_deadline`].
 //! - Every helper and app-server line is untrusted: size caps, unknown fields ignored, no panic.
 //! - Files change only through `write.rs`, and only inside the adapter's install folder and
@@ -72,4 +77,7 @@ pub use policy::{Action, Input, Limits};
 #[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub use readers::StdoutTap;
-pub use readers::{CODEX_OVERRIDES, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};
+pub use readers::{
+    AccountRead, CODEX_OVERRIDES, HoldGuard, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome,
+};
+pub use words::{claude_plan, codex_plan};

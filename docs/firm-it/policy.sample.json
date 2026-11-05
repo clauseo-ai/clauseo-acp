@@ -1,0 +1,49 @@
+{
+  "matters": {
+    "default_location": "D:\\Matters"
+  },
+  "agents": {
+    "claude": {
+      "command": "C:\\Program Files\\Firm Tools\\claude-agent-acp.exe",
+      "args": [],
+      "env": {}
+    }
+  },
+  "mcp": {
+    "servers": {
+      "firm-docs": {
+        "command": "C:\\Program Files\\Firm Tools\\firm-docs-mcp.exe",
+        "args": ["--read-only"],
+        "env": {},
+        "enabled": true
+      }
+    }
+  },
+  "ui": {
+    "theme": "dark",
+    "font_size": 16,
+    "density": "comfortable",
+    "language": "en",
+    "lite": "automatic",
+    "motion": "system"
+  },
+  "tools": {
+    "web_search": true,
+    "browser": false
+  },
+  "privacy": {
+    "counts": false,
+    "crash_reports": false
+  },
+  "plans": {
+    "claude-acp": {
+      "endpoint": "https://ai-gateway.firm.example/anthropic",
+      "provider": "anthropic",
+      "env": {}
+    }
+  },
+  "install": {
+    "bundle": "D:\\Clauseo\\bundle",
+    "registry": "https://npm.firm.example/"
+  }
+}

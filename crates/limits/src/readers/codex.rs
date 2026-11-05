@@ -1,6 +1,5 @@
-//! Codex's reader: `codex app-server` started from codex-acp's install, one `initialize`, one
-//! `account/read` and, for a `ChatGPT` sign-in, one `account/rateLimits/read`, mapped to
-//! `AccountLimits`.
+//! Codex's reader: `codex app-server` started from codex-acp's install, one `initialize`, then
+//! `account/read` and `account/rateLimits/read` sent together, mapped to `AccountLimits`.
 //!
 //! The app-server runs with Clauseo's own `CODEX_HOME`, forced last over any inherited or settings
 //! variable of that name (#160), so it never reads the user's `~/.codex`, and with #160's four
@@ -11,6 +10,7 @@ mod map;
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_codex_appserver::{
@@ -21,9 +21,10 @@ use clauseo_process::{LaunchSpec, Launcher, Timer};
 use clauseo_protocol::AgentKind;
 use clauseo_settings::AgentLaunch;
 use futures::future::join;
+use futures::future::{Either, select};
 use futures::{AsyncRead, AsyncWrite};
 
-use super::env::spec_env;
+use super::env::{CODEX_DROPPED, spec_env};
 use super::paths;
 use super::run::{Ran, Stdout, run};
 use super::tap::{StdoutTap, tapped};
@@ -33,6 +34,11 @@ pub(crate) use map::outcome;
 
 /// How long a read may take before its tree is killed.
 pub(crate) const LIMIT: Duration = Duration::from_secs(10);
+/// How long `account/read` may trail a good `account/rateLimits/read` before the read goes on
+/// without it. Codex 0.162.1's `account/read` runs workspace routing discovery for a `ChatGPT`
+/// sign-in (`GET .../wham/accounts/check`, a hard-coded 15 s timeout, no config, cached only in
+/// the process), which stalled 2 reads in 20 on G16's Windows VM; the limits never wait on it.
+pub(crate) const ACCOUNT_GRACE: Duration = Duration::from_millis(500);
 /// The variable that names Codex's home.
 const CODEX_HOME: &str = "CODEX_HOME";
 /// The `-c` overrides the Codex reader runs `app-server` with, before its subcommand, one per
@@ -53,26 +59,36 @@ const CODEX_HOME: &str = "CODEX_HOME";
 /// returns no thread context and `:417` adds no turn fragment without it, and
 /// `ext/skills/src/world_state_catalogs.rs:400-402` renders no catalog.
 ///
+/// R20 adds two (decision record 0048): `cli_auth_credentials_store="file"`, so a Codex sign-in
+/// keeps its login in `CODEX_HOME/auth.json`, where S18's link rules apply, never in the OS
+/// keyring; and `shell_environment_policy.ignore_default_excludes=false`, which keeps Codex's
+/// default exclusion of variables whose names hold `KEY`, `SECRET` or `TOKEN` from its shell
+/// tools, so a stored `CODEX_API_KEY` does not reach a command the model runs (believed; G7 row
+/// 15 checks it at 0.162.1).
+///
 /// G16's probe of 0.162.1 (#203) found that app-server, with no login, no thread and even an empty
 /// home, starts a git sync of `github.com/openai/plugins` into the home at start-up, because
 /// plugins are on by default. `features.plugins=false` stops it; nothing the home's config names
 /// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The others cost
 /// nothing.
-pub const CODEX_OVERRIDES: [&str; 6] = [
+pub const CODEX_OVERRIDES: [&str; 8] = [
     "features.apps=false",
     "features.plugins=false",
     "features.skill_mcp_dependency_install=false",
     "cloud.skills.enabled=false",
     "skills.bundled.enabled=false",
     "skills.include_instructions=false",
+    "cli_auth_credentials_store=\"file\"",
+    "shell_environment_policy.ignore_default_excludes=false",
 ];
 
 /// What the app-server answered.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Answers {
-    /// `account/read`'s response.
-    pub(crate) account: GetAccountResponse,
-    /// `account/rateLimits/read`'s response; asked only for a `ChatGPT` sign-in.
+    /// `account/read`'s response; `None` when it trailed good limits by more than
+    /// [`ACCOUNT_GRACE`] or failed beside them (a `ChatGPT` sign-in whose email went unread).
+    pub(crate) account: Option<GetAccountResponse>,
+    /// `account/rateLimits/read`'s response; kept only for a `ChatGPT` sign-in.
     pub(crate) limits: Option<GetAccountRateLimitsResponse>,
 }
 
@@ -109,7 +125,7 @@ pub(crate) async fn read<T: Timer>(
         timer,
         LIMIT,
         |stdin, stdout| async move {
-            let talked = talk(stdin, tapped(stdout, AgentKind::Codex, tap)).await;
+            let talked = talk(stdin, tapped(stdout, AgentKind::Codex, tap), timer).await;
             let rest: Stdout = Box::new(futures::io::empty());
             (talked, rest)
         },
@@ -177,7 +193,7 @@ pub(crate) fn prepare(
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
-    let env = spec_env(&launch.env, inherited, Some(forced));
+    let env = spec_env(&launch.env, inherited, Some(forced), &CODEX_DROPPED);
     let mut args = vec![codex_js.into_os_string()];
     for set in CODEX_OVERRIDES {
         args.extend([OsString::from("-c"), OsString::from(set)]);
@@ -189,29 +205,89 @@ pub(crate) fn prepare(
 }
 
 /// The talk over the app-server's stdin and stdout: `initialize` (which sends `initialized`),
-/// `account/read`, and for a `ChatGPT` sign-in `account/rateLimits/read` without reset-credit
-/// details. The driver runs beside the calls; once they end the client is dropped, so the driver
+/// then `account/read` and `account/rateLimits/read` (without reset-credit details) on the wire
+/// together. The driver runs beside the calls; once they end the client is dropped, so the driver
 /// closes stdin and ends, and the app-server exits. Notifications are dropped unread.
-pub(crate) async fn talk<W, R>(stdin: W, stdout: R) -> Talked
+///
+/// Pipelined so a slow `account/read` cannot hold up the limits (see [`ACCOUNT_GRACE`]):
+/// - `account/read` first and good: as before, the limits are awaited only for a `ChatGPT`
+///   sign-in, and their error fails the talk;
+/// - limits first and good (a `ChatGPT` sign-in): `account/read` gets [`ACCOUNT_GRACE`]; late or
+///   failed, the answers go without it;
+/// - limits failed (signed out, API key, Bedrock, which skip discovery): `account/read` is awaited
+///   and decides, and the limits' error fails the talk only for a `ChatGPT` sign-in;
+/// - `account/read` failed: good limits stand without it, else its error fails the talk.
+///
+/// Errors are told apart by which call failed, never by their text.
+pub(crate) async fn talk<W, R, T>(stdin: W, stdout: R, timer: &T) -> Talked
 where
     W: AsyncWrite + Send + Unpin + 'static,
     R: AsyncRead + Send + Unpin + 'static,
+    T: Timer,
 {
     let (client, notifications, driver) = connect(stdin, stdout);
     drop(notifications);
     let calls = async move {
         client.initialize(ClientInfo::clauseo()).await?;
-        let account = client.account().await?;
-        let limits = if matches!(account.account, Some(Account::Chatgpt(_))) {
-            let params = GetAccountRateLimitsParams {
-                exclude_reset_credit_details: Some(true),
-                ..GetAccountRateLimitsParams::default()
-            };
-            Some(client.rate_limits(params).await?)
-        } else {
-            None
+        let params = GetAccountRateLimitsParams {
+            exclude_reset_credit_details: Some(true),
+            ..GetAccountRateLimitsParams::default()
         };
-        Ok::<_, AppServerError>(Answers { account, limits })
+        // `select` polls `account/read` first, so it goes on the wire first, then the limits.
+        let account = pin!(client.account());
+        let limits = pin!(client.rate_limits(params));
+        let answers = match select(account, limits).await {
+            Either::Left((Ok(account), limits)) => {
+                let limits = if is_chatgpt(&account) {
+                    Some(limits.await?)
+                } else {
+                    None
+                };
+                Answers {
+                    account: Some(account),
+                    limits,
+                }
+            }
+            Either::Left((Err(err), limits)) => match limits.await {
+                Ok(limits) => without_account(limits),
+                Err(_) => return Err(err),
+            },
+            Either::Right((Ok(limits), account)) => {
+                match select(account, pin!(timer.after(ACCOUNT_GRACE))).await {
+                    Either::Left((Ok(account), _)) => {
+                        let limits = is_chatgpt(&account).then_some(limits);
+                        Answers {
+                            account: Some(account),
+                            limits,
+                        }
+                    }
+                    Either::Left((Err(err), _)) => {
+                        tracing::debug!(
+                            error = %err.code().as_str(),
+                            "account/read failed beside good limits; the read goes on without it"
+                        );
+                        without_account(limits)
+                    }
+                    Either::Right(((), _)) => {
+                        tracing::debug!(
+                            "account/read trailed the limits; the read goes on without it"
+                        );
+                        without_account(limits)
+                    }
+                }
+            }
+            Either::Right((Err(err), account)) => {
+                let account = account.await?;
+                if is_chatgpt(&account) {
+                    return Err(err);
+                }
+                Answers {
+                    account: Some(account),
+                    limits: None,
+                }
+            }
+        };
+        Ok::<_, AppServerError>(answers)
     };
     let (driven, answered) = join(driver, calls).await;
     if let Err(err) = driven {
@@ -220,6 +296,19 @@ where
     match answered {
         Ok(answers) => Talked::Answered(Box::new(answers)),
         Err(err) => Talked::Failed(err),
+    }
+}
+
+/// Whether `account` is a `ChatGPT` sign-in.
+fn is_chatgpt(account: &GetAccountResponse) -> bool {
+    matches!(account.account, Some(Account::Chatgpt(_)))
+}
+
+/// Good limits without `account/read`'s answer.
+fn without_account(limits: GetAccountRateLimitsResponse) -> Answers {
+    Answers {
+        account: None,
+        limits: Some(limits),
     }
 }
 

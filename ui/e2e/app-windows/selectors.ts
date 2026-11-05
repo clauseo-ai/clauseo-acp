@@ -34,6 +34,16 @@ export const ids = {
   newConversation: "new-conversation",
   /** The rail's find field (shown once there is a matter to find). */
   find: "find",
+  /**
+   * The rail's Needs you group (U16a): its `section`, under Pinned and above the date groups, holding the
+   * matterRow of every matter a conversation of which waits on the lawyer, has an answer ready or failed.
+   */
+  railNeedsYou: "rail-needs-you",
+  /** Matters / Recent under the find field; each side is `rail-switch-matters` or `rail-switch-recent`. */
+  railSwitch: "rail-switch",
+  /** Recent's list, and each of its rows: a conversation of any matter, with `data-conversation`. */
+  railRecent: "rail-recent",
+  recentRow: "recent-row",
   /** Matters on the toolbar, which opens and folds the rail below 1200 px. */
   railToggle: "rail-toggle",
   /** The toolbar's title: the open matter's name. */
@@ -160,6 +170,17 @@ export const ids = {
   steerMark: "steer-mark",
   /** Where a steered message went, with `data-outcome` ("requeued" or "sent_now"). */
   steerOutcome: "steer-outcome",
+  /** The status line's tool line, after the plan: the conversation's tools as glyphs, named in words (aria-label),
+   * which opens the popover. */
+  toolLine: "tool-line",
+  /** The tool line's popover. */
+  toolPopover: "tool-popover",
+  /** One tool's row in the popover, with `data-tool` ("web_search" or "browser"). */
+  toolRow: "tool-row",
+  /** A tool's On or Off chip in its row. */
+  toolRowChip: "tool-row-chip",
+  /** Why a tool is off, in a few words, under its name; none while it is on. */
+  toolRowReason: "tool-row-reason",
 } as const;
 
 /** The settings window's page: the last part of its URL path (crates/desktop's settings window). */
@@ -223,6 +244,19 @@ export function window(page: Page) {
      */
     conversationPlan: (row: Locator): Locator => row.locator(".room-conv-plan"),
     newConversation: id(ids.newConversation),
+    /** The rail's Needs you group. */
+    needsYou: id(ids.railNeedsYou),
+    /** The row of the matter named `name` in Needs you. */
+    needsYouRow: (name: string): Locator =>
+      id(ids.railNeedsYou).getByTestId(ids.matterRow).filter({ hasText: name }),
+    /**
+     * A Needs-you row's conversation line: the title of the conversation behind its status (the row's
+     * `.room-matter-where`; a part's class, not a test id, like folderLine).
+     */
+    matterWhere: (row: Locator): Locator => row.locator(".room-matter-where"),
+    /** Matters / Recent's Recent side. */
+    railRecentSide: id(`${ids.railSwitch}-recent`),
+    recentRows: id(ids.recentRow),
     /** The rail's find field. */
     findMatter: id(ids.find),
     /**
@@ -246,6 +280,16 @@ export function window(page: Page) {
      * part's class, not a test id, like folderLine).
      */
     statusPlan: page.locator(".room-status-plan"),
+    /** The tool line, once its popover's chunk is in (before, its glyphs stand with no test id). */
+    toolLine: id(ids.toolLine),
+    toolPopover: id(ids.toolPopover),
+    /** The popover's row for `tool`, "web_search" or "browser". */
+    toolRow: (tool: "web_search" | "browser"): Locator =>
+      page.locator(`[data-testid="${ids.toolRow}"][data-tool="${tool}"]`),
+    /** A tool row's On or Off chip. */
+    toolRowChip: (row: Locator): Locator => row.getByTestId(ids.toolRowChip),
+    /** A tool row's reason, when off. */
+    toolRowReason: (row: Locator): Locator => row.getByTestId(ids.toolRowReason),
     error: id(ids.error),
     composer: id(ids.composer),
     send: id(ids.send),

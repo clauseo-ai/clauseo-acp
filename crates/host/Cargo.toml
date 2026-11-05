@@ -25,6 +25,15 @@ clauseo-settings = { path = "../settings" }
 clauseo-limits = { path = "../limits" }
 # The launch profile's placeholders and skill writes (decision record 0030).
 clauseo-profile = { path = "../profile" }
+# The anonymous usage counts' call sites and the privacy switches (decision record 0036).
+clauseo-counts = { path = "../counts" }
+clauseo-search = { path = "../search" }
+# The browser's per-session socket folder and loopback port claims, and the start-up sweep
+# (decision record 0029, stage C's `BrowserSocketDir` and `ports`), and the Windows folder check
+# of a matter folder (src/agent/folder_support.rs).
+clauseo-sandbox = { path = "../sandbox" }
+# Random agent-browser session names on Windows (`browser/session.rs`).
+getrandom = { workspace = true }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.
@@ -32,6 +41,8 @@ futures = { workspace = true, features = ["executor"] }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
+# The log file (log_file.rs, decision record 0047): the formatter, the registry and the filter.
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 thiserror = { workspace = true }
 # The matter folder check on a prompt's file (std's canonicalize is banned in clippy.toml).
 dunce = { workspace = true }
@@ -40,15 +51,43 @@ sha2 = { workspace = true }
 # The pre-write guard's name check composes names (NFC) on macOS, as APFS compares them.
 unicode-normalization = { workspace = true }
 
+# The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
+# The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
+# (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
+# (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Security_Cryptography",
+  "Win32_Security_WinTrust",
+  "Win32_Storage_FileSystem",
+  "Win32_System_SystemInformation",
+] }
+
 [dev-dependencies]
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
 clauseo-host = { path = ".", features = ["test-support"] }
 clauseo-fake_agent = { path = "../fake_agent" }
+# `pretend_word_running_since_epoch`: the tests' owner files stay held through the stale rule.
+clauseo-matters = { path = "../matters", features = ["test-support"] }
+# `running` and `kill`: the cancel tests watch the processes the agent started.
+clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-profile = { path = "../profile", features = ["test-support"] }
 # The reopen bench's fixture.
 clauseo-store = { path = "../store", features = ["test-support"] }
 proptest = { workspace = true }
+# The Word round trip test's reads of a .docx: its zip entry and the document's XML.
+flate2 = { workspace = true }
+quick-xml = { workspace = true }
+# The search test that checks an aborted host closed search.sqlite (no connection left open).
+rusqlite = { workspace = true }
 criterion = { workspace = true }
+
+# The host's Windows folder-check tests give a folder a protected DACL (`windows::test_dacl`).
+[target.'cfg(windows)'.dev-dependencies]
+clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 
 [[bench]]
 name = "reopen"

@@ -126,6 +126,7 @@ fn sent_layer_leads_and_rolls_back() {
                 tool_call: Some(id(10)),
                 options: vec![option()],
                 deliverable: Deliverable::Live,
+                about: None,
             }),
             DomainEvent::ElicitationRequested(ElicitationRequested {
                 elicitation,
@@ -167,6 +168,7 @@ fn sent_layer_leads_and_rolls_back() {
                 tool_call: None,
                 options: vec![option()],
                 deliverable: Deliverable::Live,
+                about: None,
             }),
             DomainEvent::PermissionResolved(PermissionResolved {
                 request,

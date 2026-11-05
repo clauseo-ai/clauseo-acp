@@ -21,6 +21,7 @@ with recordings from real accounts and marks each row `recorded`.
 | `claude/missing-scope.json` | A subscription with `rate_limits_available: false`: `Unavailable { MissingScope }`, no windows | `rate_limits_available` doc ("missing profile scope") | synthetic |
 | `claude/method-missing.json` | `ok:false`, `stage: usage`, `missing: true`: `MethodMissing` | helper line contract | synthetic |
 | `claude/init-failed.json` | `ok:false`, `stage: init`, `missing: false`: `Exited { code: Some(0), stderr_tail }`; the line's own `message` is never used | helper line contract | synthetic |
+| `recorded/claude/pro.jsonl` | Claude Pro: one live `ok:true` line from G16's `claude_pro` read, redacted (2026-11-04, main c704a42a; claude-agent-acp 0.89.1 with `@anthropic-ai/claude-agent-sdk` 0.3.293, as pinned in `tests/live/package-lock.json`): `five_hour` and `seven_day` windows, `extra_usage` off. Decoded by `readers/claude/tests.rs` | G16 live read | recorded |
 
 ## Codex
 
@@ -38,7 +39,7 @@ reader over in-memory pipes. All are synthetic, written from `crates/codex_appse
 | `codex/plus.json` | Plus: `primary` 300 and `secondary` 10080, and `rateLimitsByLimitId` with a `codex` bucket and a `codex_spark` model bucket whose numbers (and `rate_limit_reached`) differ; the rows and `reached` come from `codex` | `GetAccountRateLimitsResponse`, `RateLimitSnapshot` (rate_limits.rs; v2/GetAccountRateLimitsResponse.json) | synthetic |
 | `codex/free.json` | Free: one `primary` window of 43200 minutes, "Monthly limit" | as above | synthetic |
 | `codex/free-no-duration.json` | Free with no `windowDurationMins` and no `limitId`: the single view, "Monthly limit" by the Free and Go fallback | as above | synthetic |
-| `codex/go.json` | Go: `primary` of 40320 minutes (28 days), `email: null` (ref `plan`) | `ChatgptAccount` (account.rs; v2/GetAccountResponse.json) and as above | synthetic |
+| `codex/go.json` | Go: `primary` of 43200 minutes (30 days), as two live G16 reads answered (main be0fd35a and main 80bf0b34, 2026-11-04), `email: null` (ref `plan`) | `ChatgptAccount` (account.rs; v2/GetAccountResponse.json) and as above | synthetic |
 | `codex/api-key.json` | `apiKey`: pay as you go via `OpenAi`, ref `api-key`, no rate-limit call | `Account` (account.rs; v2/GetAccountResponse.json) | synthetic |
 | `codex/bedrock.json` | `amazonBedrock`: pay as you go via Bedrock, ref `bedrock` | as above | synthetic |
 | `codex/signed-out.json` | `account: null`: `SignedOut`, no rate-limit call | `GetAccountResponse` | synthetic |
@@ -47,6 +48,7 @@ reader over in-memory pipes. All are synthetic, written from `crates/codex_appse
 | `codex/spend-cap.json` | `workspace_owner_usage_limit_reached`: `WorkspaceSpendCap` | `RateLimitReachedType` | synthetic |
 | `codex/spend-control.json` | `spendControlReached: true` with no reached type: `WorkspaceSpendCap` | `RateLimitSnapshot.spendControlReached`, `SpendControlLimitSnapshot` | synthetic |
 | `codex/plan-window.json` | `rate_limit_reached`: `PlanWindow` | `RateLimitReachedType` | synthetic |
+| `recorded/codex/plus.jsonl` | ChatGPT Plus: the raw app-server stdout of G16's `codex_plus` read, redacted, one JSON-RPC line per message (`initialize`, `account/read`, `account/rateLimits/read`, and the notifications the reader drops) (2026-11-04, main c704a42a; codex-acp 2.2.2, `@openai/codex` 0.162.1, as pinned in `tests/live/package-lock.json`). Decoded by `readers/codex/tests/talk.rs` | G16 live read | recorded |
 
 ## Checks for G16's recordings
 
@@ -60,8 +62,8 @@ each one, runs the secret check (`cargo nextest run -p clauseo-limits -E
 'test(fixtures_are_redacted)'` once the file is in place), and only then copies it by hand into
 `recorded/<agent>/<name>` beside a row in the table above whose Kind is `recorded`, saying which
 login kind and which pinned versions (`tests/live/package.json`) it came from. Where a recording
-shows S13's schema is wrong, the same PR fixes `src/` and the synthetic fixture it replaces. No
-recording exists yet, so there is no `recorded/` folder.
+shows S13's schema is wrong, the same PR fixes `src/` and the synthetic fixture it replaces.
+These two are the first recordings: `recorded/claude/pro.jsonl` and `recorded/codex/plus.jsonl`.
 
 `fixtures_are_redacted` (`tests/fixtures.rs`) runs over this whole folder, recursively, on every
 test run, with the rules at the top of `tests/fixtures/check.rs`: no email outside `example.com`

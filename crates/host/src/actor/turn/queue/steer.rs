@@ -26,6 +26,7 @@ use super::super::{
 use super::{After, Queued, command_tag, drop_turn, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// How long a steer waits for the agent's answer, from the end of the turn it was sent into,
 /// before it moves to a new turn.
@@ -52,6 +53,13 @@ pub(crate) struct Ask {
 pub(crate) struct Steered {
     message: MessageId,
     result: Result<SteerResult, clauseo_acp::Error>,
+}
+
+impl Steered {
+    /// The steer came back `Closed`: the agent's connection is gone.
+    pub(in crate::actor::turn) fn closed(&self) -> bool {
+        matches!(self.result, Err(clauseo_acp::Error::Closed))
+    }
 }
 
 /// The running turn a steer can join: its prompt is in flight, it is not cancelled, and its
@@ -170,7 +178,7 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
         Ok(SteerResult::Injected) => {
             let logged = injected(actor, thread, &ask);
             if let Err(error) = logged {
-                tracing::warn!(%thread, %error, "an injected steer was not logged");
+                tracing::warn!(%thread, error = %Cause(&error), "an injected steer was not logged");
             }
         }
         Ok(SteerResult::StartedNewTurn) => {
@@ -180,7 +188,7 @@ pub(in super::super) fn on_steered(actor: &mut Actor, thread: ThreadId, steered:
         }
         Ok(SteerResult::PromptRequired | SteerResult::Failed) => requeue(actor, thread, ask),
         Err(error) => {
-            tracing::warn!(%thread, %error, "a steer failed; it goes next");
+            tracing::warn!(%thread, error = %Cause(&error), "a steer failed; it goes next");
             requeue(actor, thread, ask);
         }
     }
@@ -281,7 +289,11 @@ fn requeue(actor: &mut Actor, thread: ThreadId, ask: Ask) {
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             if let Err(error) = loaded.and_then(|()| log_requeue(actor, thread, ask)) {
-                tracing::warn!(%thread, %error, "a steer was not moved to a new turn");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "a steer was not moved to a new turn"
+                );
             }
             move_on(actor, thread);
             sync_held(actor, thread);

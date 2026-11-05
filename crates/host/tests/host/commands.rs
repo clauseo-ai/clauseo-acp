@@ -1,5 +1,5 @@
 //! Commands: receipts, unknown ids, ids from another matter, a prompt's file outside its
-//! matter, undo with its note.
+//! matter, undo with its note, and an undo refused for a file open in Word.
 
 use clauseo_protocol::{
     AgentId, CheckpointKind, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice,
@@ -10,7 +10,7 @@ use clauseo_protocol::{
 use crate::support::{
     Dir, FAKE, Scenario, command_id, foreign_uuid, matter_with_thread, send_prompt, wait,
 };
-use crate::versions;
+use crate::{versions, write};
 
 #[test]
 fn command_id_repeat_and_conflict() {
@@ -245,4 +245,42 @@ fn undo_step_and_note_reach_agent() {
     );
     host.shutdown();
     versions::assert_every_checkpoint_has_its_row(&dir, matter, &logged);
+}
+
+/// An undo of a step whose file Word has open (its owner file `~$a.txt` beside it) is refused
+/// with `matter.file_locked`, and the answer names the file in `HostError.files`, not in its
+/// message: undo has no preview, so the app learns the file to close only from the error.
+#[test]
+fn an_undo_refused_for_a_file_open_in_word_names_it() {
+    let dir = Dir::new(
+        "an_undo_refused_for_a_file_open_in_word_names_it",
+        &[(FAKE, Scenario::Local("undo-note"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, folder) =
+        matter_with_thread(&dir, &host, "m", &[("brief.txt", "Clause 4 draft\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Write a note.");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    write::write(&folder.join("notes/~$a.txt"), b"owner file: open in Word");
+
+    let note = MatterPath::new("notes/a.txt").unwrap();
+    let error = host
+        .dispatch(HostCommand::UndoStep {
+            thread,
+            turn: first,
+            files: vec![FileDecision {
+                path: note.clone(),
+                choice: FileChoice::Undo,
+            }],
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFileLocked, "{error}");
+    assert_eq!(error.files(), [note]);
+    assert!(!error.message().contains("a.txt"), "{}", error.message());
+    assert!(
+        folder.join("notes/a.txt").exists(),
+        "the refused undo wrote"
+    );
+    host.shutdown();
 }

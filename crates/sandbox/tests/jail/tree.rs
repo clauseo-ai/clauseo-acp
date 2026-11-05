@@ -63,7 +63,7 @@ fn shutdown_ends_the_jailed_tree() {
     }
     let timer = ManualTimer::new();
     let (outcome, pumped, ()) = async_io::block_on(async {
-        futures::join!(handle.shutdown(&timer), stderr.drain(), async {
+        futures::join!(handle.shutdown(&timer, None), stderr.drain(), async {
             // Stdin closed and nothing exited: the 2 s wait ends and SIGTERM goes to the group.
             timer.next_armed().await;
             assert!(timer.fire());

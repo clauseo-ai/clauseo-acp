@@ -56,11 +56,14 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
     root. Folders compare without regard to case or separator.
   - An agent with no kind (`fake-agent`) gets the servers and nothing kind-specific.
 - **The `browser` entry.** Command `clauseo-mcp`; arguments `browser-guard --agent-browser
-  <agent-browser> --cwd {browser_dir} -- mcp --tools core`; exactly four variables:
+  <agent-browser> --cwd {browser_dir} --cdp-port {cdp_port} -- mcp --tools core`, with
+  `--daemon-port {daemon_port}` after `--cdp-port` on Windows; five variables:
   `AGENT_BROWSER_CONFIG` (static), `AGENT_BROWSER_PROXY=http://127.0.0.1:{proxy_port}`,
-  `AGENT_BROWSER_SESSION={session_id}` and `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}`.
-  S27's guard derives the download, socket, screenshot, `HOME`, `TMPDIR` or `TEMP` and proxy
-  variables from `--cwd` and the proxy value, so the entry carries none of them. The guard's
+  `AGENT_BROWSER_SESSION={session_id}`, `AGENT_BROWSER_EXECUTABLE_PATH={browser_executable}` and
+  `AGENT_BROWSER_STREAM_PORT={stream_port}`, and on macOS and Linux a sixth,
+  `AGENT_BROWSER_SOCKET_DIR={socket_dir}` (S27's ports-and-socket PR, 0029). S27's guard derives
+  the download, screenshot, `HOME`, `TMPDIR` or `TEMP`, Windows socket and proxy variables from
+  `--cwd` and the proxy value, so the entry carries none of them. The guard's
   `--cwd` is the session's browser state folder, never the matter folder.
 - **Placeholders, and the host's contract** (`placeholders.rs`, the one home of the token
   strings and of `fill`, both public, documented API). The host depends on `profile` and calls
@@ -68,7 +71,10 @@ The host thread set the conditions the profile must keep: Claude keeps `settingS
   the host's row in `ARCHITECTURE.md`.
   - Instructions: `{work_folder}` and `{matter_notes}` (R22). An unfillable one is a host bug:
     the host fails the launch with `agent.launch_failed`, naming the token.
-  - `browser`: `{browser_dir}`, `{proxy_port}`, `{session_id}`, `{browser_executable}`.
+  - `browser`: `{browser_dir}`, `{proxy_port}`, `{session_id}`, `{browser_executable}`,
+    `{socket_dir}` (macOS and Linux), `{stream_port}`, `{cdp_port}` and `{daemon_port}`
+    (Windows), the last four from the session's claims (0029); an unfillable one of those
+    drops the entry with `BrowserNotInstalled`.
     `{browser_dir}` is one whole token, `<data>/run/<session id>/browser`, which the host joins
     with the platform's separators and fills with a `dunce`-simplified path (no `\\?\` prefix),
     so a Windows path never mixes separators. The
@@ -408,6 +414,93 @@ change from the settings window as `ui` does.
   `actor/turn/profile_loads.rs`). A change reaches the next session started. A session already
   running keeps its tools: its header keeps what it held (`actor/header_tools.rs`), and nothing
   re-reads the switches mid-session.
+
+### Forced ask in an unprotected matter
+
+- **2026-11-04 (Rohan; private `folder-rights.md`, decision 3).** A Claude session in a matter
+  whose folder is on a network drive or a drive without file permissions (the Windows folder
+  check, `agent/folder_support.rs`, answers `network` or `no_permissions` at that launch,
+  `session/load` included) runs in forced ask until the sandbox can fence such a folder. Codex
+  is refused there. A check that fails (an io error) is unknown and fails closed for Claude:
+  forced ask, `check_failed` on the matter's row (2026-11-05, orchestrator; nothing before),
+  and Codex not refused (its own sandbox applies). The host enforces four layers
+  (`agent/forced_ask.rs`):
+  - **Modes:** `SetMode` takes only `default` and `plan` (any other id is `command.invalid`),
+    and so does `SetConfigOption` for claude-agent-acp's `mode` option, which sets the mode
+    too; a mode the agent moves to itself is switched back to `default`.
+  - **Options:** a permission request loses its `allow_always` options and the plan exit's
+    options that switch to a skipping mode (`exit-plan-auto`, `exit-plan-accept-edits` and the
+    rest, claude-agent-acp 0.89.1 `permissions/options/shared.js`); an answer naming one is
+    refused.
+  - **No `allowedTools`, and ask rules:** not the host's web rules, not the profile hook's. The
+    flag settings carry `permissions.ask` rules for `Bash`, `PowerShell`, `Edit`, `Write`,
+    `MultiEdit`, `NotebookEdit`, `WebFetch`, `WebSearch` and `mcp__*`, and
+    `sandbox.autoAllowBashIfSandboxed: false`: if the hook fails, times out or is blocked, Claude
+    Code 2.1.293 checks deny rules, then ask rules, then allow rules over every source, so the
+    lawyer's own `allow` rules no longer approve unasked (read from the CLI binary; the
+    detail is in `agent/forced_ask.rs` `ASK_RULES`).
+  - **The hook:** the guard's entry matches every tool (`*`, MCP tools included) and passes
+    `--ask-all`, so the guard answers `ask` for every tool but `Read`, `Glob`, `Grep`, `LS`,
+    `NotebookRead`, `TodoWrite`, `Task` and `ToolSearch` (which only loads deferred tools'
+    schemas; added 2026-11-05 after the live run, orchestrator); `WebSearch` and `WebFetch` ask
+    too. The flag is an argument, not a variable, so it never reaches the agent's shell.
+  A forced-ask Claude launch with no guard hook to give (no guard program, as when
+  `current_exe` failed, or a path that is not UTF-8) is refused with `agent.guard_missing`
+  (#402; it was `agent.launch_failed` before).
+- **2026-11-05 (orchestrator; accepted risk).** A `PermissionRequest` hook already in the
+  lawyer's own settings or plugins can still approve in forced ask: Claude Code runs such hooks
+  alongside the SDK's permission callback, and whichever decides first applies. The risk is
+  accepted because only something the lawyer or their IT already installed can do it; the agent
+  cannot install one without a yes. Keeping user hooks out was not possible in Claude Code
+  2.1.293 with claude-agent-acp 0.89.1:
+  - `settingSources: []` breaks the login (a live run on the Mac mini, 2026-11-02; commit
+    `45b2a5a4`, `agent/loads.rs` `CLAUDE_SETTING_SOURCES`);
+  - `disableAllHooks` drops Clauseo's guard hook too: when the merged settings set it, the CLI
+    keeps only managed (policy) hooks, and the guard is in the flag settings;
+  - the adapter refuses `hooks` in `_meta` (`acp-agent.js`, its option table marks `hooks:
+    false`), so the guard cannot become a programmatic hook.
+- **2026-11-05 (orchestrator; the row and the New matter dialog).** A failed check shows on the
+  matter's row as `check_failed` (`FolderSupportKind::CheckFailed`) at the create, the import
+  and each launch whose check failed; a missing folder is a failed check too, and the app shows
+  the missing folder first. Only the row's value changes: Codex's refusal and forced ask still
+  decide from the check's own answer. `HostQuery::FolderSupport { source }` takes the
+  `MatterSource` the New matter dialog will send in `CreateMatter` and runs the same check of
+  the place that create would use, before the matter exists: an existing folder; a new
+  folder's parent, canonicalised as create does; the default location, or its nearest folder
+  that exists before the first matter makes it. It answers `QueryResult::FolderSupport` with
+  the row's values (`PickedFolderSupport::support`, left out for a fine folder: the wire has no
+  `null`). First it refuses, with create's codes, what create refuses before its matter is
+  made (`actor/matters/picked.rs`): for an existing folder the import's place check
+  (`check_place`: drive root, home, system and data folders) and its registry check (another
+  matter's folder), then its protected-tree check (`clauseo_matters::check_protected`: inside
+  the data folder or the matters root), all run before anything is made; for a new folder
+  or the default location nothing, since create's other checks need the new folder's name. A
+  refused folder never reaches the check. An unknown ref is `command.invalid`, and the bridge
+  takes only refs this run's picker issued, as for `CreateMatter`. All of it runs off the actor
+  and waits 5 s (`PREPARE_WAIT`); a check that doesn't answer by then, or whose thread fails,
+  answers `check_failed`, never an error: `agent.launch_failed` reads as a broken thread in the
+  app. No log line names the folder (`actor/query/folder_support.rs`).
+
+### The model across mode changes
+
+- **2026-11-05 (measured by stage C on win-01, claude-agent-acp 0.89.1; private
+  `measurements/folder-rights/live-checks/mode-model.md`, PR #385).** With Haiku chosen,
+  entering plan mode moves the session to Sonnet, and leaving plan moves it back to Haiku. This
+  happens whichever way the mode is set: `session/set_mode plan` or `default`,
+  `SetConfigOption` for the `mode` option, and forced ask's switch back to `default` after a
+  plan exit. The answer to the mode call doesn't show the move: `session/set_mode` answers
+  `{}`, and `set_config_option` still lists `model: haiku`. The `config_option_update`
+  notifications do show it, and the next prompt runs on the model they name.
+- **Decision (2026-11-05, orchestrator).** The host lets Claude Code pick its plan-mode model
+  and doesn't set the lawyer's model back after a mode change. The thread records the model
+  in use, because the host logs each `config_option_update` as `ConfigOptionsReplaced`
+  (`actor/turn/updates.rs`). The app's composer has no model picker yet. The model option is
+  received but not shown, so a lawyer can't choose Haiku in Clauseo today. When a model picker
+  is built, a provisional line goes beside it for Rohan's batch: "Claude may use a stronger
+  model while it plans."
+- **Rejected:** holding the chosen model in every mode by watching `config_option_update` and
+  setting the model back. Plans would run on the weaker model, and setting it back could fight
+  the adapter if the adapter re-applies its plan model.
 
 ### Deviations from the brief (PR-A)
 

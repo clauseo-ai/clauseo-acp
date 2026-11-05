@@ -264,7 +264,7 @@ test("Word holding the file: close it in Word, and Try again", async () => {
   const onTryAgain = vi.fn();
   await show(
     <RestoreDialog
-      ask={{ kind: "word", file: "Draft reply.docx" }}
+      ask={{ kind: "word", files: ["Draft reply.docx"] }}
       waiting={null}
       onClose={() => {}}
       onChoice={() => {}}
@@ -275,8 +275,30 @@ test("Word holding the file: close it in Word, and Try again", async () => {
   expect(one('[role="dialog"]').textContent).toContain(
     "Close 'Draft reply.docx' in Word to restore it.",
   );
+  expect(one('[role="dialog"]').textContent).toContain(
+    "If it isn't open in Word, close Word and try again.",
+  );
   await click(one(".ver-try"));
   expect(onTryAgain).toHaveBeenCalledTimes(1);
+});
+
+test("Word holding two files: close them in Word, both named in one line", async () => {
+  await show(
+    <RestoreDialog
+      ask={{ kind: "word", files: ["Draft reply.docx", "Lease.docx"] }}
+      waiting={null}
+      onClose={() => {}}
+      onChoice={() => {}}
+      onRestore={() => {}}
+      onTryAgain={() => {}}
+    />,
+  );
+  expect(one('[role="dialog"]').textContent).toContain(
+    "Close 'Draft reply.docx' and 'Lease.docx' in Word to restore it.",
+  );
+  expect(one('[role="dialog"]').textContent).toContain(
+    "If they aren't open in Word, close Word and try again.",
+  );
 });
 
 test("undoing a change asks about each paper changed again since, Undo anyway or Keep current", async () => {

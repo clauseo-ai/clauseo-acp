@@ -14,6 +14,13 @@
 //! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
 //! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
 //! note on stderr, so the agent never gets half a JSON message.
+//!
+//! After each line it relays, the stdout pump checks the port files (`port_file.rs`): the stream
+//! server's on every OS and the daemon's on Windows, for the session's whole life. A listener on
+//! any other port ends agent-browser and the guard exits 1. On Windows agent-browser runs in a
+//! Job Object the guard owns (`job.rs`), so that end, and the guard's own exit, take its
+//! detached daemon and Chrome too. On Unix the end kills the direct child only: the daemon
+//! leaves the process group (`setsid`) and lives until its idle timeout (G17 item 6).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -29,6 +36,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
+use super::port_file::{Expected, Status};
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
 /// How long the guard waits for the close reply before closing the child's stdin anyway.
@@ -57,6 +65,8 @@ enum Event {
     AgentEnded,
     /// The reply to the close request arrived.
     CloseAnswered,
+    /// A listener is not on its claimed port; the reason.
+    PortRefused(String),
 }
 
 /// How the relay ended.
@@ -66,6 +76,9 @@ pub(crate) enum Outcome {
     Exited(i32),
     /// The child wrote a line over [`CHILD_MAX_LINE_BYTES`] and was killed.
     ChildLineTooLong,
+    /// A port file named another port, or could not be trusted, and agent-browser was ended
+    /// (its whole job on Windows). The reason.
+    PortRefused(String),
 }
 
 /// What [`wait_for_end`] saw.
@@ -73,21 +86,35 @@ enum End {
     ChildEnded,
     ChildOversize,
     ExitTimedOut,
+    PortRefused(String),
 }
 
-/// Starts agent-browser and relays until it exits.
+/// Starts agent-browser and relays until it exits, checking each of `port_checks` after every
+/// relayed line.
 pub(crate) fn run(
     program: &Path,
     args: &[OsString],
     cwd: &Path,
     env: &BTreeMap<String, OsString>,
+    port_checks: Vec<Expected>,
 ) -> io::Result<Outcome> {
-    let mut child = spawn_child(program, args, cwd, env)?;
+    // On Windows in its job, which ends what is left of the tree when `run` returns.
+    #[cfg(windows)]
+    let mut child = {
+        let mut child = spawn_child(program, args, cwd, env)?;
+        let job = super::job::Job::adopt(&mut child)?;
+        Tree { child, job }
+    };
+    #[cfg(not(windows))]
+    let mut child = Tree {
+        child: spawn_child(program, args, cwd, env)?,
+    };
     let stdout = child
+        .child
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("the child's stdout is not piped"))?;
-    let to_child: ToChild = Arc::new(Mutex::new(child.stdin.take()));
+    let to_child: ToChild = Arc::new(Mutex::new(child.child.stdin.take()));
     let out: Out = Arc::new(Mutex::new(io::stdout()));
     let closing = Arc::new(AtomicBool::new(false));
     let (events, inbox) = mpsc::channel();
@@ -95,7 +122,13 @@ pub(crate) fn run(
     let child_pump = {
         let (out, closing, events) = (Arc::clone(&out), Arc::clone(&closing), events.clone());
         thread::spawn(move || {
-            let end = pump_child(BufReader::new(stdout), &out, &closing, &events);
+            let end = pump_child(
+                BufReader::new(stdout),
+                &out,
+                &closing,
+                &events,
+                &port_checks,
+            );
             send(&events, end);
         })
     };
@@ -113,11 +146,15 @@ pub(crate) fn run(
             if child_pump.join().is_err() {
                 return Err(io::Error::other("the stdout relay thread panicked"));
             }
-            Ok(Outcome::Exited(child.wait()?.code().unwrap_or(1)))
+            Ok(Outcome::Exited(child.child.wait()?.code().unwrap_or(1)))
         }
         End::ChildOversize => {
             stop(&mut child)?;
             Ok(Outcome::ChildLineTooLong)
+        }
+        End::PortRefused(reason) => {
+            stop(&mut child)?;
+            Ok(Outcome::PortRefused(reason))
         }
         End::ExitTimedOut => {
             note(&format!(
@@ -129,9 +166,22 @@ pub(crate) fn run(
     }
 }
 
-/// Kills the child (it may have exited already) and reaps it. The stdout pump is not joined:
-/// a grandchild could still hold the pipe open.
-fn stop(child: &mut Child) -> io::Result<std::process::ExitStatus> {
+/// agent-browser, and on Windows the job that holds it and all it starts.
+struct Tree {
+    child: Child,
+    #[cfg(windows)]
+    job: super::job::Job,
+}
+
+/// Ends agent-browser and reaps it: on Windows the whole job (its daemon and Chrome too), on
+/// Unix the child alone (it may have exited already). The stdout pump is not joined: a
+/// grandchild could still hold the pipe open.
+fn stop(tree: &mut Tree) -> io::Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    if !tree.job.kill() {
+        note("Windows refused to end agent-browser's job; killing agent-browser alone");
+    }
+    let child = &mut tree.child;
     if child.try_wait()?.is_none() {
         // It may exit between the two calls; `wait` below reaps it either way.
         drop(child.kill());
@@ -173,6 +223,7 @@ fn wait_for_end(inbox: &mpsc::Receiver<Event>, to_child: &ToChild) -> End {
         match event {
             Event::ChildEnded => return End::ChildEnded,
             Event::ChildOversize => return End::ChildOversize,
+            Event::PortRefused(reason) => return End::PortRefused(reason),
             Event::AgentEnded => {
                 if phase == Phase::Running {
                     phase = Phase::Closing;
@@ -211,18 +262,21 @@ fn spawn_child(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
+        // Suspended until it is in its job (`job.rs`).
+        command.creation_flags(CREATE_NO_WINDOW | super::job::START_SUSPENDED);
     }
     command.spawn()
 }
 
-/// Child to agent: each whole line as read, the reply to the close request excepted. Returns
-/// the event that ends it: [`Event::ChildEnded`] or [`Event::ChildOversize`].
+/// Child to agent: each whole line as read, the reply to the close request excepted. After
+/// each line, every one of `port_checks`. Returns the event that ends it:
+/// [`Event::ChildEnded`], [`Event::ChildOversize`] or [`Event::PortRefused`].
 fn pump_child(
     mut stdout: impl BufRead,
     out: &Out,
     closing: &AtomicBool,
     events: &mpsc::Sender<Event>,
+    port_checks: &[Expected],
 ) -> Event {
     let mut line = Vec::new();
     // Once the agent stops reading, the child's output is still drained so it never blocks.
@@ -249,7 +303,19 @@ fn pump_child(
         if agent_reads && emit(out, &line).is_err() {
             agent_reads = false;
         }
+        if let Some(reason) = refusal(port_checks) {
+            return Event::PortRefused(reason);
+        }
     }
+}
+
+/// The first refusal among `checks`, each read now; none while every file is missing, empty or
+/// on its claimed port. Never stops checking: a match now says nothing about the next line.
+pub(crate) fn refusal(checks: &[Expected]) -> Option<String> {
+    checks.iter().find_map(|check| match check.check() {
+        Status::Pending | Status::Matches => None,
+        Status::Refused(reason) => Some(reason),
+    })
 }
 
 /// One line on the guard's stderr. Diagnostics only; a failed write has nowhere to go.
@@ -394,6 +460,9 @@ fn send(events: &mpsc::Sender<Event>, event: Event) {
     // The receiver goes only when the guard is returning; nothing waits for this event then.
     if events.send(event).is_err() {}
 }
+
+#[cfg(test)]
+mod port_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,152 @@
+{
+  "UEP-06": {
+    "en": "Anthropic lists Brave Search as its web search subprocessor.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-07": {
+    "en": "On the web",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-08": {
+    "en": "Web search",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-10": {
+    "en": "Browser",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-14": {
+    "en": "To the websites Clauseo visits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-15": {
+    "en": "Websites see Clauseo's visits, as they see any browser's.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-16": {
+    "en": "Not available yet",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-18": {
+    "en": "Search the web and read pages.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-19": {
+    "en": "Runs on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-20": {
+    "en": "Changes apply to new conversations.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-21": {
+    "en": "More about Brave Search",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-22": {
+    "en": "About websites",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-23": {
+    "en": "Questions, the papers' parts they need, web searches.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-24": {
+    "en": "Managed by firm",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-04",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UEP-01": {
+    "en": "Privacy",
+    "hi": "निजता",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-03": {
+    "en": "What leaves this computer",
+    "hi": "इस कंप्यूटर से क्या बाहर जाता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  },
+  "UEP-04": {
+    "en": "To {name}, on your plan",
+    "hi": "{name} को, आपके प्लान से",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design",
+    "note": "the design's approved words and Hindi (design/03-system words-settings.ts, privacy)"
+  }
+}

@@ -21,6 +21,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
+use crate::counts::{CountsState, UiCount};
 use crate::frame::Frame;
 use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, RevealTarget};
 use crate::picked::PickedFolder;
@@ -28,7 +29,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 14] = [
+pub(crate) const COMMANDS: [&str; 15] = [
     "dispatch",
     "query",
     "open_stream",
@@ -43,6 +44,7 @@ pub(crate) const COMMANDS: [&str; 14] = [
     "open_file",
     "reveal",
     "open_settings",
+    "count_ui",
 ];
 
 /// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
@@ -95,7 +97,8 @@ pub(crate) struct DisplayInfo {
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
 /// `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
-/// window, everything but `SetUiSettings` and `SetToolSettings`.
+/// window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and
+/// `RefreshLimits`; from `main`, `SetToolSettings` and `SetPrivacySettings`.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn dispatch<R: Runtime>(
@@ -299,6 +302,21 @@ pub(crate) async fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), H
             format!("the settings window did not open: {error}"),
         )
     })
+}
+
+/// Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
+/// alone, by its own capability (`capabilities/counts.json`). The counts open before the host
+/// starts, so it waits for the host's start, whatever its outcome; it never fails.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn count_ui(
+    bridge: State<'_, Bridge>,
+    counts: State<'_, CountsState>,
+    event: UiCount,
+) -> Result<(), HostError> {
+    let _started = bridge.host().await;
+    counts.count(event);
+    Ok(())
 }
 
 #[cfg(test)]

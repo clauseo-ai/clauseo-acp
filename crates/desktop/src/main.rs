@@ -3,13 +3,14 @@
 // No console window next to the app in Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use clauseo_desktop::{AppStages, Launched, SystemProbe, launch};
+
 fn main() -> tauri::Result<()> {
-    // The pre-write guard hook (`pre_write_guard.rs`): before Tauri, logging or settings.
-    if clauseo_desktop::guard_requested(std::env::args_os().nth(1).as_deref()) {
-        let args: Vec<std::ffi::OsString> = std::env::args_os().skip(2).collect();
-        let code =
-            clauseo_host::pre_write_guard::run(&args, std::io::stdin().lock(), std::io::stderr());
-        std::process::exit(code);
+    // First: the pre-write guard, else the agent sandbox check, before Tauri, logging or
+    // settings (`jailed.rs`).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    match launch(&args, &SystemProbe, &mut std::io::stderr(), &mut AppStages) {
+        Launched::Exit(code) => std::process::exit(code),
+        Launched::App(result) => result,
     }
-    clauseo_desktop::run()
 }

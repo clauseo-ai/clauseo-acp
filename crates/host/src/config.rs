@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_acp::McpServer;
+use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
 use clauseo_profile::{SkillWrite, SkillsWritten};
@@ -14,10 +15,12 @@ use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
 
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
 use crate::ids::{IdSource, RandomV7};
+use crate::search::SearchSeams;
 
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
@@ -127,6 +130,15 @@ pub(crate) struct LaunchWiring {
     pub(crate) chrome_roots: Option<ChromeRoots>,
     /// The browser slots: the limit from the machine's memory, and the sessions holding one.
     pub(crate) browser_slots: BrowserSlots,
+    /// macOS and Linux: where the browser socket folders go and the start-up sweep looks;
+    /// `None` is `/tmp`. Tests pass a folder of their own.
+    #[cfg(unix)]
+    pub(crate) browser_socket_root: Option<PathBuf>,
+    /// The environment an agent's spec starts from, in place of the host's own
+    /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
+    pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
+    /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
+    pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
 }
 
 impl Default for LaunchWiring {
@@ -137,6 +149,10 @@ impl Default for LaunchWiring {
             browser_executable: None,
             chrome_roots: None,
             browser_slots: BrowserSlots::new(None),
+            #[cfg(unix)]
+            browser_socket_root: None,
+            inherited_env: None,
+            install_tools: None,
         }
     }
 }
@@ -149,7 +165,10 @@ impl std::fmt::Debug for LaunchWiring {
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
             .field("browser_slots", &self.browser_slots)
-            .finish()
+            // Names and values stay out: the environment holds secrets.
+            .field("inherited_env", &self.inherited_env.is_some())
+            .field("install_tools", &self.install_tools.is_some())
+            .finish_non_exhaustive()
     }
 }
 
@@ -181,9 +200,13 @@ pub struct HostConfig {
     managed_mcp: PathBuf,
     app_capacity: usize,
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    folder_check: crate::agent::folder_support::CheckSource,
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
+    scan_walk: crate::actor::scan::Walk,
+    counts: Option<Counts>,
+    search: SearchSeams,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -199,15 +222,28 @@ pub(crate) struct ConfigParts {
     pub(crate) managed_mcp: PathBuf,
     pub(crate) app_capacity: usize,
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     pub(crate) pre_write_guard: Option<PathBuf>,
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
+    pub(crate) scan_walk: crate::actor::scan::Walk,
+    /// The usage counts a caller set; `None` counts nothing.
+    pub(crate) counts: Option<Counts>,
+    /// The search thread's test seams.
+    pub(crate) search: SearchSeams,
 }
 
 impl HostConfig {
     /// A config with the settings, the launcher that starts agents, and every default: no
     /// profile, no refused folders, the OS's home folder, the system clock and random ids.
+    ///
+    /// The launcher must clear the environment (`SpawnOptions::clear_env`, or a launcher that
+    /// always does, such as the sandbox's): an agent's spec is its whole environment, the host's
+    /// own minus the variables no agent may get (`GIT_*`, `SSH_*`, `NO_BROWSER`,
+    /// `CLAUDE_CODE_REMOTE`, and Codex's dropped names), and a launcher that lets the child
+    /// inherit the host's environment gives every dropped variable back. The plan readers'
+    /// specs (`clauseo_limits`) also carry the inherited environment, minus the same drops.
     pub fn new(effective: Effective, launcher: Arc<dyn Launcher>) -> Self {
         Self {
             effective,
@@ -221,10 +257,24 @@ impl HostConfig {
             app_capacity: SUBSCRIPTION_CAPACITY,
             managed_mcp: crate::agent::loads::managed_mcp_path(),
             codex_hooks: None,
+            folder_check: crate::agent::folder_support::CheckSource::default(),
             pre_write_guard: None,
             limits_reader: None,
             wiring: LaunchWiring::default(),
+            scan_walk: crate::actor::scan::os_walk(),
+            counts: None,
+            search: SearchSeams::default(),
         }
+    }
+
+    /// The anonymous usage counts (default: none, and nothing is counted). The desktop opens
+    /// them (`Counts::open`, with `privacy.counts` after policy and whether the first act has
+    /// happened) and passes a clone here; the host bumps its call sites' events into it and turns
+    /// it on, off or started for `SetPrivacySettings` and `FirstAct` (decision record 0036).
+    /// Without it those commands still change the settings, and `counts_started` reads false.
+    pub fn with_counts(mut self, counts: Counts) -> Self {
+        self.counts = Some(counts);
+        self
     }
 
     /// The profile hook (default: [`NoProfile`]).
@@ -288,11 +338,43 @@ impl HostConfig {
         self
     }
 
+    /// The environment every agent's spec starts from, in place of the host's own, for tests
+    /// that check what reaches the child without changing this process's environment.
+    #[cfg(feature = "test-support")]
+    pub fn with_inherited_env(mut self, env: Vec<(OsString, OsString)>) -> Self {
+        self.wiring.inherited_env = Some(env);
+        self
+    }
+
+    /// The launcher agents and plan readers start with, for a caller's tests that launch
+    /// through it (desktop checks that its app config's launcher clears the environment).
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn launcher(&self) -> Arc<dyn Launcher> {
+        Arc::clone(&self.launcher)
+    }
+
     /// A Chrome every session's browser entry runs (`{browser_executable}`), in place of the
     /// launch prep's search (`browser::chrome::find`), for tests. `None` keeps the search.
     #[cfg(feature = "test-support")]
     pub fn with_browser_executable(mut self, chrome: Option<PathBuf>) -> Self {
         self.wiring.browser_executable = chrome;
+        self
+    }
+
+    /// macOS and Linux: the folder the browser socket folders go in, and the start-up sweep of
+    /// stale ones looks in, in place of `/tmp`, for tests.
+    #[cfg(all(unix, feature = "test-support"))]
+    pub fn with_browser_socket_root(mut self, root: PathBuf) -> Self {
+        self.wiring.browser_socket_root = Some(root);
+        self
+    }
+
+    /// The tools the Chrome for Testing download uses (default: `SystemTools`: curl, ditto or
+    /// tar, and the OS's signature check), for tests that run it without the network.
+    #[cfg(feature = "test-support")]
+    pub fn with_browser_install_tools(mut self, tools: Arc<dyn InstallTools>) -> Self {
+        self.wiring.install_tools = Some(tools);
         self
     }
 
@@ -365,6 +447,32 @@ impl HostConfig {
         self
     }
 
+    /// A fixed answer for every launch's folder check (`agent/folder_support.rs`) in place of
+    /// the Windows check, so tests of what follows from it (Codex refused, Claude's forced ask)
+    /// run on every OS. `None` is a fine folder. `HostQuery::FolderSupport` answers from it
+    /// too; matter creation still runs the real check.
+    #[cfg(feature = "test-support")]
+    pub fn with_folder_support(
+        mut self,
+        kind: Option<clauseo_protocol::FolderSupportKind>,
+    ) -> Self {
+        self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
+            crate::agent::folder_support::Answer::Known(kind),
+        );
+        self
+    }
+
+    /// A failed folder check for every launch (an io error on Windows), as
+    /// [`Self::with_folder_support`] fixes an answer: Claude fails closed into forced ask, Codex
+    /// is not refused, the row shows `check_failed`.
+    #[cfg(feature = "test-support")]
+    pub fn with_folder_check_failed(mut self) -> Self {
+        self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
+            crate::agent::folder_support::Answer::Failed,
+        );
+        self
+    }
+
     /// The profile hook set, for tests of a caller's wiring (`crates/desktop`'s `with_profile`).
     #[cfg(feature = "test-support")]
     pub fn profile_hook(&self) -> &dyn ProfileHook {
@@ -375,6 +483,35 @@ impl HostConfig {
     #[cfg(feature = "test-support")]
     pub fn agent_path_prepend(&self) -> Option<&std::path::Path> {
         self.wiring.path_prepend.as_deref()
+    }
+
+    /// The walk folder scans run instead of `clauseo_matters::scan_folder`, for tests that
+    /// step a scan by hand.
+    #[cfg(test)]
+    pub(crate) fn with_scan_walk(mut self, walk: crate::actor::scan::Walk) -> Self {
+        self.scan_walk = walk;
+        self
+    }
+
+    /// The capacity of the commit channel to the search thread (default 1,024), for tests
+    /// that make it lag and catch up from the store.
+    #[cfg(feature = "test-support")]
+    pub fn with_search_channel_capacity(mut self, capacity: usize) -> Self {
+        self.search.capacity = capacity.max(1);
+        self
+    }
+
+    /// Holds that stop the search thread: `rebuild` before each conversation of a rebuild,
+    /// `query` before each search runs, each until released.
+    #[cfg(feature = "test-support")]
+    pub fn with_search_holds(
+        mut self,
+        rebuild: Option<crate::SearchHold>,
+        query: Option<crate::SearchHold>,
+    ) -> Self {
+        self.search.rebuild_hold = rebuild;
+        self.search.query_hold = query;
+        self
     }
 
     /// Takes the config apart.
@@ -391,9 +528,13 @@ impl HostConfig {
             app_capacity: self.app_capacity,
             managed_mcp: self.managed_mcp,
             codex_hooks: self.codex_hooks,
+            folder_check: self.folder_check,
             pre_write_guard: self.pre_write_guard,
             limits_reader: self.limits_reader,
             wiring: self.wiring,
+            scan_walk: self.scan_walk,
+            counts: self.counts,
+            search: self.search,
         }
     }
 }

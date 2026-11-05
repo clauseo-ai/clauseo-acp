@@ -1,7 +1,9 @@
-// H7, H8 and R15 over the desktop host: the room's SettingsHost (host-next.ts) from the transport's `query`, `dispatch`
-// and app feed (`onAppEvent`), its PapersHost from `query`'s `list_papers`, and its AgentsHost from `query`'s
-// `list_agents`. The room keeps its own spellings; this file is the one place they meet the wire's: lite's "full" and
-// "lite" are the wire's "off" and "on", motion's "reduced" is "reduce", and the text size is a number on the wire.
+// H7, H8, R15 and H3 to H6 over the desktop host: the room's SettingsHost (host-next.ts, the tool switches included) from the transport's `query`,
+// `dispatch` and app feed (`onAppEvent`), its PapersHost from `query`'s `list_papers`, its AgentsHost from `query`'s
+// `list_agents`, its MattersHost from `list_matters`, `list_threads` and the matters' commands, and its AppHost from
+// the app feed's `matters_changed` and `threads_changed`. The room keeps its own spellings; this file is the one place
+// they meet the wire's: lite's "full" and "lite" are the wire's "off" and "on", motion's "reduced" is "reduce", the text
+// size is a number on the wire, and a matter's details the wire leaves out read as its binding says (`roomMatterOf`).
 import { DEFAULT_DISPLAY, TEXT_SIZES, type TextSize } from "@clauseo/components/lib/display.ts";
 import {
   internalError,
@@ -10,7 +12,10 @@ import {
   type HostTransport,
 } from "../transport/host-transport.ts";
 import type {
+  CommandOutcome,
+  HostEvent,
   Lite,
+  MatterSummary,
   Motion,
   SettingsView,
   UiPatch,
@@ -18,6 +23,12 @@ import type {
 } from "../transport/protocol.ts";
 import type {
   AgentsHost,
+  AppEvent,
+  AppHost,
+  MatterInfo,
+  MattersCommand,
+  MattersHost,
+  NextOutcome,
   Papers,
   PapersHost,
   Settings,
@@ -54,6 +65,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
       lite: LITE_BACK[ui.lite],
       motion: MOTION_BACK[ui.motion],
     },
+    tools: view.tools,
     locked: view.locked,
   };
 }
@@ -103,6 +115,12 @@ export function wireSettingsHost(source: WireSettingsSource): SettingsHost {
         command: { set_ui_settings: { patch: wirePatchOf(patch) } },
       });
     },
+    async setToolSettings(patch) {
+      await source.dispatch({
+        command_id: crypto.randomUUID(),
+        command: { set_tool_settings: { patch } },
+      });
+    },
     onSettingsChanged(listener) {
       listeners.add(listener);
       openFeed();
@@ -136,6 +154,95 @@ export function wireAgentsHost(source: Pick<HostTransport, "query">): AgentsHost
       if (!("agents" in answer) || answer.agents === undefined)
         throw internalError("list_agents answered something else");
       return answer.agents;
+    },
+  };
+}
+
+/** A matter row as the room reads it: each detail the wire may leave out as its binding says a missing one reads
+ * (unpinned, idle, its folder found); a folder state from a newer host that this one doesn't know reads as found too,
+ * so the row offers no Locate folder it can't explain. */
+export function roomMatterOf(m: MatterSummary): MatterInfo {
+  const { pinned, status, folder_state, ...rest } = m;
+  return {
+    ...rest,
+    pinned: pinned ?? false,
+    status: status ?? "idle",
+    folder_state: folder_state === "missing" ? "missing" : "found",
+  };
+}
+
+/** A matters command's name: its one key. */
+const commandName = (command: MattersCommand): string => Object.keys(command)[0] ?? "command";
+
+/** A matters command's outcome as the room's: create_matter's `matter_created`, every other's `done`. */
+function outcomeOf(name: string, outcome: CommandOutcome): NextOutcome {
+  if (name === "create_matter") {
+    if (typeof outcome === "object" && outcome.matter_created !== undefined)
+      return { matter_created: outcome.matter_created };
+  } else if (outcome === "done") return outcome;
+  throw internalError(`${name} answered something else`);
+}
+
+/** The room's MattersHost over the desktop host: `"list_matters"` answered with `matters`, `{"list_threads": {"matter":
+ * ...}}` with `threads`, and each matters command through `dispatch` with a fresh id. */
+export function wireMattersHost(source: Pick<HostTransport, "query" | "dispatch">): MattersHost {
+  return {
+    async listMatters() {
+      const answer = await source.query("list_matters");
+      if (!("matters" in answer) || answer.matters === undefined)
+        throw internalError("list_matters answered something else");
+      return answer.matters.map(roomMatterOf);
+    },
+    async listThreads(matter) {
+      const answer = await source.query({ list_threads: { matter } });
+      if (!("threads" in answer) || answer.threads === undefined)
+        throw internalError("list_threads answered something else");
+      return answer.threads;
+    },
+    async command(command) {
+      const outcome = await source.dispatch({ command_id: crypto.randomUUID(), command });
+      return outcomeOf(commandName(command), outcome);
+    },
+  };
+}
+
+/** The app feed's event as the room's AppEvent: `matters_changed` with its rows read as the room reads them,
+ * `threads_changed` as it came; null for the rest (settings_changed is wireSettingsHost's). */
+function appEventOf(event: HostEvent): AppEvent | null {
+  if (event.matters_changed !== undefined) {
+    const { matters, removed, all } = event.matters_changed;
+    return { matters_changed: { matters: matters.map(roomMatterOf), removed, all } };
+  }
+  if (event.threads_changed !== undefined) return { threads_changed: event.threads_changed };
+  if (event.browser_install !== undefined) return { browser_install: event.browser_install };
+  return null;
+}
+
+/** The room's AppHost over the desktop host's app feed. One feed serves every `subscribeApp` listener; it is held while
+ * any listens. The host's first frames on a subscription are the whole lists (`all: true`), so no change falls before
+ * the first read. */
+export function wireAppHost(source: AppFeedSource): AppHost {
+  const listeners = new Set<(event: AppEvent) => void>();
+  let feed: AppFeed | null = null;
+  return {
+    subscribeApp(listener) {
+      listeners.add(listener);
+      if (feed === null) {
+        const opened = source.onAppEvent((wire) => {
+          const event = appEventOf(wire);
+          if (event === null) return;
+          for (const heard of listeners) heard(event);
+        });
+        feed = opened;
+        // refused: keep the listener; the transport subscribes again when its channel reopens
+        opened.ready.catch(() => {});
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size > 0 || feed === null) return;
+        feed.stop();
+        feed = null;
+      };
     },
   };
 }

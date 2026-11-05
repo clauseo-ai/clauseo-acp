@@ -1,0 +1,165 @@
+/* Snooze and Done on the rail (U16b): a conversation's two buttons at its line's end, the line left in a row's place,
+   the snooze picker, the folds (the Snoozed shelf and the Done fold) and their open rows. After matters.css, whose
+   rows these sit on. */
+@layer components {
+  /* the two buttons stand at the row's end in the width held for them, hidden until the pointer or the focus is on the
+     row, or its menu is open. Nothing moves when they show: no padding or width changes */
+  .room-conv-acts {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s0-5);
+    padding-right: var(--s0-5);
+    opacity: 0;
+  }
+  .room-conv-item:hover .room-conv-acts,
+  .room-conv-item:focus-within .room-conv-acts,
+  .room-conv-acts:has([data-popup-open]) {
+    opacity: 1;
+  }
+  .room-conv-item:has(.room-conv-acts):is(:hover, :focus-within) .room-conv-mark {
+    visibility: hidden;
+  }
+  /* no fade, no clipping (DESIGN.md: never truncate): the buttons' width is held for them at all times, so the words
+     never run under them and nothing moves when they show. A conversation's status mark is too narrow a slot for its
+     two buttons, so the width is held beside it; a shelf row and a done row have no trailing slot to give, so theirs
+     is held for their one button */
+  .room-conv-item[data-triage] .room-conv {
+    padding-right: calc(2 * var(--size-control-small) + var(--s1));
+  }
+  .room-one-act :is(.room-conv, .room-shelf-row) {
+    padding-right: calc(var(--size-control-small) + var(--s1));
+  }
+
+  /* in a row's place: what happened, and Undo */
+  .room-line {
+    @apply text-small text-muted;
+    padding: var(--s1) var(--s2);
+    unicode-bidi: isolate;
+  }
+  .room-matters > li > .room-line,
+  .room-house-head > .room-line {
+    padding: var(--s1-5) var(--s3);
+  }
+  .room-line-undo {
+    @apply text-small font-chip text-primary;
+    /* its focus ring clears the letters */
+    padding: 0 var(--s1);
+    text-decoration: underline;
+    text-underline-offset: var(--ins-offset);
+    border-radius: var(--r-small);
+  }
+
+  /* the snooze picker: the system's own field, then Snooze and Cancel */
+  .room-picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1);
+    padding: var(--s1) var(--s2);
+  }
+  .room-picker-field {
+    @apply text-small text-primary;
+    min-width: 0;
+    flex: 1 1 100%;
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-small);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 var(--hairline) var(--divide-mid);
+    color-scheme: light dark;
+  }
+  .room-picker-acts {
+    display: flex;
+    gap: var(--s1);
+  }
+
+  /* a fold's heading: the chevron, its name, and its count at the end */
+  .room-shelf {
+    display: flex;
+    flex-direction: column;
+  }
+  .room-fold-head {
+    margin: 0;
+  }
+  .room-fold {
+    @apply text-small text-quiet is-hover:text-primary;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-height: var(--size-control-small);
+    padding: 0 var(--s3);
+    border-radius: var(--r-small);
+    text-align: left;
+  }
+  .room-done .room-fold {
+    padding: 0 var(--s2);
+  }
+  .room-fold-icon {
+    flex: none;
+    transition: transform var(--dur-quick) var(--ease-arrive);
+  }
+  .room-fold[aria-expanded="true"] .room-fold-icon {
+    transform: rotate(90deg);
+  }
+  .room-fold-name {
+    flex: 1 1 auto;
+  }
+  .room-fold-count {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .room-fold-line {
+    @apply text-small text-quiet;
+    padding: 0 var(--s3) 0 calc(var(--s3) + var(--size-icon-line) + var(--s1-5));
+  }
+  /* an explanation's info icon, on the least target */
+  .room-info {
+    display: inline-grid;
+    place-items: center;
+    width: var(--size-target);
+    height: var(--size-target);
+    color: var(--quiet);
+    border-radius: var(--r-round);
+    @apply is-hover:text-primary;
+  }
+  .room-fold-info {
+    padding: var(--s0-5) var(--s3);
+  }
+  .room-done .room-fold-info {
+    padding: var(--s0-5) var(--s2);
+  }
+
+  /* the open shelf's rows: the title, its matter or "Whole matter", and when it comes back */
+  .room-shelf-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+    margin-top: var(--s1);
+  }
+  .room-shelf-row {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    @apply is-hover:bg-hover is-active:bg-press;
+  }
+  .room-shelf-until {
+    @apply text-small text-muted;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+  }
+  .room-shelf-until > svg {
+    margin-top: var(--s0-5);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .room-fold-icon {
+      transition: none;
+    }
+  }
+}

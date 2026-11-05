@@ -1,14 +1,16 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`,
-//! `ListAgents`, `GetDefaultLocation`), a
+//! `ListAgents`, `GetDefaultLocation`, `GetUpdate`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
 //! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
-//! (`papers.rs`).
+//! (`papers.rs`), and `PreviewUndo` reads the thread's log and then asks the matter's worker
+//! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
+//! (`query/folder_support.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
     AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, FolderState, HostQuery, MatterId,
-    Principal, QueryResult, StreamId, ViewEntry,
+    Principal, QueryResult, RestorePreview, StreamId, UndoPreview, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -22,8 +24,11 @@ use futures::task::LocalSpawnExt;
 
 use crate::blob_read;
 use crate::error::Error;
-use crate::matter_worker::MatterJob;
+use crate::log_file::Cause;
+use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
+
+mod folder_support;
 
 /// Answers one query.
 pub(super) fn query(
@@ -98,6 +103,19 @@ pub(super) fn query(
             };
             matter_query(actor, matter, vec![checkpoint], job, reply);
         }
+        HostQuery::PreviewUndo { thread, turn } => {
+            super::turn::preview_undo(actor, thread, turn, reply);
+        }
+        HostQuery::Search(ref request) => actor.search.query(
+            crate::search::QUERY_WINDOW,
+            request.clone(),
+            Box::new(move |answer| {
+                let _gone = reply.send(answer.map(QueryResult::Search));
+            }),
+        ),
+        HostQuery::FolderSupport { ref source } => {
+            folder_support::folder_support(actor, source, reply);
+        }
         HostQuery::GetDefaultLocation => {
             let display = super::rail::folder_display(
                 actor.effective.default_matters_dir(),
@@ -108,9 +126,10 @@ pub(super) fn query(
             let _gone = reply.send(Ok(answer));
         }
         HostQuery::GetSettings => {
-            let view = super::settings::view(&actor.effective);
+            let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
+        HostQuery::GetUpdate => super::update::answer(reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -179,7 +198,9 @@ fn matter_query(
                 // closed.
                 Ok(worker) => match worker.send(job, MatterTag::Query(reply)) {
                     Ok(()) => actor.work.matter_jobs += 1,
-                    Err(error) => tracing::warn!(%matter, %error, "a query was not sent"),
+                    Err(error) => {
+                        tracing::warn!(%matter, error = %Cause(&error), "a query was not sent");
+                    }
                 },
                 Err(error) => {
                     let _gone = reply.send(Err(error));
@@ -188,6 +209,39 @@ fn matter_query(
             actor.release(stream);
         }),
     );
+}
+
+/// The answer to a query R8 answered (`MatterTag::Query`): `CompareVersions`,
+/// `PreviewRestore`, `PreviewUndo`.
+pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
+    match reply {
+        MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
+        MatterReply::Previewed(result) => result.map(|plan| {
+            let plan = *plan;
+            QueryResult::RestorePreview(RestorePreview {
+                changes: plan.writes,
+                added_since: plan.added_since,
+                kept: plan.kept,
+                locked: plan.locked,
+            })
+        }),
+        MatterReply::EditedSince(result) => {
+            result.map(|edited_since| QueryResult::UndoPreview(UndoPreview { edited_since }))
+        }
+        other @ (MatterReply::Created(_)
+        | MatterReply::Imported(_)
+        | MatterReply::Opened(_)
+        | MatterReply::BeforeTurn(_)
+        | MatterReply::AfterTurn(_)
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Located(_)
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_)) => Err(Error::Internal(format!(
+            "a query answered with another job's reply: {other:?}"
+        ))),
+    }
 }
 
 /// `ListMatters`: the summaries from memory (`rail.rs`), each folder's state read off the actor
@@ -238,6 +292,23 @@ pub(super) fn on_folder_states(actor: &mut Actor, states: Vec<(MatterId, String,
         changed |= before.unwrap_or(FolderState::Found) != state;
     }
     if changed {
+        actor.lists.touch_all();
+    }
+}
+
+/// The folder check (`agent/folder_support.rs`) of `matter` answered `support` off the actor,
+/// at its create or at an agent launch: keep it for the matter's row (`None`, a fine folder, as
+/// no entry), and compare every row at the next flush when it changed.
+pub(crate) fn on_folder_support(
+    actor: &mut Actor,
+    matter: MatterId,
+    support: Option<clauseo_protocol::FolderSupportKind>,
+) {
+    let before = match support {
+        Some(kind) => actor.folder_supports.insert(matter, kind),
+        None => actor.folder_supports.remove(&matter),
+    };
+    if before != support {
         actor.lists.touch_all();
     }
 }

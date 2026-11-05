@@ -1,0 +1,10 @@
+{"scenario":"codex-deny-ends-turn","description":"Codex's deny (private #361, seen with codex-acp 2.2.2): a command request whose only reject option is cancel; the client must answer cancel, and the agent ends prompt 1 cancelled with no session/cancel; then prompt 2 runs to end_turn","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"I need to write a file outside the matter. "}}}}
+{"note":"The command request in codex-acp's shape (codex-permission.jsonl's perm-2), with cancel its only reject option, as the Mac mini row saw it.","request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"call-printf","title":"printf 'ok' > ../outside-2.txt","kind":"execute","status":"pending"},"options":[{"optionId":"allow_once","name":"Yes, proceed","kind":"allow_once"},{"optionId":"allow_for_session","name":"Yes, and don't ask again for this command","kind":"allow_always"},{"optionId":"cancel","name":"No, and tell Codex what to do differently","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"cancel"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Working inside the matter instead. "}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

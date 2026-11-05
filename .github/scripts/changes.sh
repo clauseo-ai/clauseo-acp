@@ -21,12 +21,12 @@
 # pattern below; a new top-level file or folder needs a rule, or it runs everything.
 #
 # APP_CRATES is clauseo-desktop and every crate it reaches through path dependencies,
-# dev-dependencies included (fake_agent). changes-test.sh recomputes that closure from
-# crates/*/Cargo.toml and fails when this list differs.
+# dev-dependencies included (fake_agent; agents, limits' dev-dependency). changes-test.sh
+# recomputes that closure from crates/*/Cargo.toml and fails when this list differs.
 
 set -euo pipefail
 
-APP_CRATES="desktop host protocol settings process fake_agent reducer store matters acp limits codex_appserver profile"
+APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver profile agents counts sandbox"
 
 nl=$'\n'
 rust=false app=false ui=false product=false product_also=false unknown=""
@@ -75,6 +75,8 @@ classify() {
     ui/components/src/clauseo/shell.css | ui/components/src/clauseo/room-toolbar.tsx) ui=true app=true rust=true ;;
     ui/components/src/clauseo/responsive.css | ui/components/src/styles/tokens-colour.css) ui=true app=true rust=true ;;
     ui/app/src/review/registry-h11.tsx) ui=true app=true rust=true ;;
+    # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
+    ui/e2e/app-windows | ui/e2e/app-windows/*) ui=true app=true rust=true ;;
     # A crate's assets are built into it (include_str!), Markdown too, so they are not prose.
     crates/*/assets/*) crate_path "$p" ;;
     # Prose. The fast lane still runs and checks it (links, typos, the docs rules).

@@ -1,6 +1,5 @@
 ---
 source: crates/settings/src/schema/tests.rs
-assertion_line: 16
 ---
 {
   "$defs": {
@@ -54,6 +53,28 @@ assertion_line: 16
       "maximum": 20,
       "minimum": 14,
       "type": "integer"
+    },
+    "InstallSettings": {
+      "description": "The `install` section: where agent installs come from in a firm. Both keys are security\nkeys: a policy source that cannot be read leaves both unset, so installs use the pinned\npublic hosts with their integrity checks.",
+      "properties": {
+        "bundle": {
+          "default": null,
+          "description": "An offline bundle folder, as an absolute path. Unset by default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registry": {
+          "default": null,
+          "description": "A firm npm mirror: an `https` URL with a host, and no user name, password, query or\nfragment. Unset by default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "Language": {
       "description": "The app's language: one the app has words for.",
@@ -172,6 +193,73 @@ assertion_line: 16
         }
       ]
     },
+    "Plan": {
+      "description": "One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan\nlogin. A security key: a policy source that cannot be read leaves no plan at all, so no\nendpoint the lawyer chose stands in for the firm's (decision record 0048).",
+      "properties": {
+        "endpoint": {
+          "description": "The firm's gateway: an `https` URL with a host, and no user name, password, query or\nfragment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra variables for the agent. A name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD`,\nin any case, is refused: secrets stay with IT's own tools and the OS keychain.",
+          "type": "object"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanProvider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whose service the plan uses."
+        }
+      },
+      "type": "object"
+    },
+    "PlanProvider": {
+      "description": "Whose service a firm plan uses.",
+      "oneOf": [
+        {
+          "const": "anthropic",
+          "description": "Anthropic's API, or a gateway that speaks it.",
+          "type": "string"
+        },
+        {
+          "const": "bedrock",
+          "description": "Amazon Bedrock.",
+          "type": "string"
+        },
+        {
+          "const": "vertex",
+          "description": "Google Vertex AI.",
+          "type": "string"
+        }
+      ]
+    },
+    "PrivacySettings": {
+      "description": "The `privacy` section: the anonymous usage counts and crash reports (decision record 0036).\nBoth keys are privacy keys: a policy can only turn them off. A policy `true` is ignored with a\nwarning and locks nothing; a policy `false`, a policy value that does not type, and a policy\nsource that cannot be read each lock the key `false`.",
+      "properties": {
+        "counts": {
+          "default": true,
+          "description": "Whether Clauseo keeps and sends its anonymous usage counts. On by default; nothing is\nkept or sent before the lawyer's first act.",
+          "type": "boolean"
+        },
+        "crash_reports": {
+          "default": false,
+          "description": "Whether Clauseo sends crash reports. Off by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -243,6 +331,37 @@ assertion_line: 16
         }
       },
       "type": "object"
+    },
+    "UpdateMode": {
+      "description": "When Clauseo installs an update. The app writes only `auto` and `notify`; `none` comes from\npolicy, or a hand-edited `settings.json`.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Download in the background, and install at the next start or when the lawyer says.",
+          "type": "string"
+        },
+        {
+          "const": "notify",
+          "description": "Download, and install only when the lawyer says.",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "Never check: the firm updates Clauseo itself.",
+          "type": "string"
+        }
+      ]
+    },
+    "UpdateSettings": {
+      "description": "The `update` section. `update.mode` is a security key: a policy may set any of its values,\nwhich locks it, and a policy source that cannot be read, or a policy value that does not\ntype, locks it `none`.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/UpdateMode",
+          "default": "auto",
+          "description": "When Clauseo installs an update. `auto` by default."
+        }
+      },
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -255,6 +374,14 @@ assertion_line: 16
       "default": {},
       "description": "The agents Clauseo can launch, by id. Empty by default.",
       "type": "object"
+    },
+    "install": {
+      "$ref": "#/$defs/InstallSettings",
+      "default": {
+        "bundle": null,
+        "registry": null
+      },
+      "description": "Where agent installs come from in a firm (decision record 0048)."
     },
     "matters": {
       "$ref": "#/$defs/MattersSettings",
@@ -269,6 +396,22 @@ assertion_line: 16
         "servers": {}
       },
       "description": "The MCP servers a lawyer can turn on for their agents' sessions."
+    },
+    "plans": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Plan"
+      },
+      "default": {},
+      "description": "Each agent's firm plan, by agent id (decision record 0048). Empty by default.",
+      "type": "object"
+    },
+    "privacy": {
+      "$ref": "#/$defs/PrivacySettings",
+      "default": {
+        "counts": true,
+        "crash_reports": false
+      },
+      "description": "What Clauseo may count and send about its own use (decision record 0036)."
     },
     "tools": {
       "$ref": "#/$defs/ToolsSettings",
@@ -289,6 +432,13 @@ assertion_line: 16
         "theme": "system"
       },
       "description": "How the app looks. The webview changes these only through a `UiPatch`."
+    },
+    "update": {
+      "$ref": "#/$defs/UpdateSettings",
+      "default": {
+        "mode": "auto"
+      },
+      "description": "How Clauseo updates itself (task R23)."
     }
   },
   "title": "Settings",

@@ -6,6 +6,7 @@ use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
 use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings};
+use crate::agent::folder_support::CheckSource;
 use crate::sent::TurnPaths;
 use crate::write;
 
@@ -44,13 +45,16 @@ fn create_then_checkpoints_on_the_matter_thread() {
     let root_checkpoint = CheckpointId::new(v7(1)).unwrap();
     worker
         .send(
-            MatterJob::Create(NewMatter {
-                id: MatterId::new(v7(2)).unwrap(),
-                folder: folder.clone(),
-                created_at: at,
-                marker: DEFAULT_MARKER,
-                checkpoint: root_checkpoint,
-            }),
+            MatterJob::Create {
+                new: NewMatter {
+                    id: MatterId::new(v7(2)).unwrap(),
+                    folder: folder.clone(),
+                    created_at: at,
+                    marker: DEFAULT_MARKER,
+                    checkpoint: root_checkpoint,
+                },
+                check: CheckSource::Windows,
+            },
             1,
         )
         .unwrap();
@@ -207,7 +211,14 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
         marker: DEFAULT_MARKER,
         checkpoint: CheckpointId::new(v7(1)).unwrap(),
     };
-    made.send(MatterJob::Create(new), 0).unwrap();
+    made.send(
+        MatterJob::Create {
+            new,
+            check: CheckSource::Windows,
+        },
+        0,
+    )
+    .unwrap();
     assert!(matches!(
         replies.recv().unwrap(),
         MatterReply::Created(Ok(_))

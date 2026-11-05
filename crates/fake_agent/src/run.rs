@@ -1,7 +1,7 @@
 //! Plays a scenario over stdin and stdout, one step at a time, waiting only for client lines.
 
 mod client;
-mod effects;
+pub(crate) mod effects;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -165,8 +165,12 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
             }
             StepKind::Stderr { line, repeat } => effects::stderr_step(line, *repeat)
                 .map_err(|e| Stop::Fail(at.clone(), format!("write to stderr failed: {e}")))?,
-            StepKind::SpawnChild { pid_file } => {
-                effects::spawn_child(pid_file).map_err(|m| Stop::Fail(at.clone(), m))?;
+            StepKind::SpawnChild {
+                pid_file,
+                own_group,
+            } => {
+                effects::spawn_child(pid_file, *own_group)
+                    .map_err(|m| Stop::Fail(at.clone(), m))?;
             }
             StepKind::Exit { code } => {
                 self.out

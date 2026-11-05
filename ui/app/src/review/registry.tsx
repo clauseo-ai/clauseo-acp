@@ -1,22 +1,31 @@
 // Every string the copy review shows, one entry each. A brief that adds or changes a string adds its entry here: the
 // next free id for the brief ("U1-04"), the words file and English key (words.ts's helpers), the screen, the state
 // that shows it (the real screen over a scripted host, built in the render function), and, where the default desktop
-// window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals.json.
+// window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals/, one file per brief.
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { H11 } from "./registry-h11.tsx";
 import { U4 } from "./registry-u4.tsx";
+import { U4B } from "./registry-u4b.tsx";
 import { U10 } from "./registry-u10.tsx";
 import { U11 } from "./registry-u11.tsx";
 import { U12 } from "./registry-u12.tsx";
+import { WEB_SETTINGS } from "./registry-web-settings.tsx";
+import { U16A_RAIL } from "./registry-u16a-rail.tsx";
+import { U16A_FIND } from "./registry-u16a-find.tsx";
+import { ARCHIVED } from "./registry-archived.tsx";
 import { U8 } from "./registry-u8.tsx";
 import { U9 } from "./registry-u9.tsx";
 import { U6 } from "./registry-u6.tsx";
 import { U7 } from "./registry-u7.tsx";
 import { C117 } from "./registry-c117.tsx";
 import { U6F } from "./registry-u6f.tsx";
+import { ME } from "./registry-me.tsx";
 import { UTC } from "./registry-utc.tsx";
+import { WEB_SOURCES } from "./registry-web-sources.tsx";
+import { UET } from "./registry-uet.tsx";
+import { UD1 } from "./registry-ud1.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -43,6 +52,8 @@ import type { NextErrorCode } from "../room/host-next.ts";
 import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
+import { U16B } from "./registry-u16b.tsx";
+import { FOLDER_RIGHTS } from "./registry-folder-rights.tsx";
 
 /* ---------- U3: the live thread's states ---------- */
 
@@ -262,6 +273,14 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(-2, 9, 0))] }),
   },
+  {
+    id: "U3-51",
+    words: threadWords(
+      "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+    ),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "not_allowed" })] }),
+  },
 ];
 
 /* ---------- U2: the rail and matters ---------- */
@@ -332,9 +351,14 @@ export const REGISTRY: readonly Entry[] = [
   ...U3,
   ...ERRORS,
   ...U4,
+  ...U4B,
   ...U10,
   ...U11,
   ...U12,
+  ...WEB_SETTINGS,
+  ...U16A_RAIL,
+  ...U16A_FIND,
+  ...ARCHIVED,
   ...U8,
   ...U9,
   ...H11,
@@ -343,6 +367,10 @@ export const REGISTRY: readonly Entry[] = [
   ...UTC,
   ...C117,
   ...U6F,
+  ...WEB_SOURCES,
+  ...UET,
+  ...ME,
+  ...UD1,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),
@@ -535,4 +563,6 @@ export const REGISTRY: readonly Entry[] = [
     screen: "matters/new-matter",
     render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
   },
+  ...U16B,
+  ...FOLDER_RIGHTS,
 ];

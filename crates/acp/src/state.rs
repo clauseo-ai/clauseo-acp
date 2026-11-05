@@ -17,7 +17,7 @@ use crate::types::AuthMethod;
 /// Shared by the line reader, the inbound handler, the command loop and every `AcpClient`.
 pub(crate) struct Shared {
     events: async_channel::Sender<AcpEvent>,
-    pub(crate) gate: Gate,
+    pub(crate) gate: Arc<Gate>,
     frame_tap: Option<async_channel::Sender<RawFrame>>,
     frames_dropped: Arc<AtomicU64>,
     /// Wakes the command loop to end the connection with [`Shared::fatal`].
@@ -36,7 +36,7 @@ impl Shared {
     ) -> Self {
         Self {
             events,
-            gate: Gate::default(),
+            gate: Arc::default(),
             frame_tap,
             frames_dropped,
             stop,

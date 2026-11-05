@@ -11,6 +11,11 @@ export function stopLine(step: StepEntry): StopLine | null {
   switch (step.stop) {
     case "cancelled":
       return { kind: "thread", key: "You stopped the answer. The answer so far is kept." };
+    case "not_allowed":
+      return {
+        kind: "thread",
+        key: "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+      };
     case "max_tokens":
     case "max_turn_requests":
       return { kind: "thread", key: "The answer stopped at its limit, before it finished." };

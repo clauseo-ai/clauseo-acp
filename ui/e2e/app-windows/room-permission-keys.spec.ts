@@ -36,7 +36,7 @@ async function answered(card: Locator, kind: string): Promise<void> {
 }
 
 test.describe("permission-kinds", () => {
-  test.use({ scenario: "permission-kinds" });
+  test.use({ scenario: "claude-permission-kinds" });
 
   test("the keys answer from an empty composer, never over its words", async ({ app }) => {
     const w = window(app.page);
@@ -87,7 +87,7 @@ const ASKING = "Lease review";
 const OTHER = "Share purchase";
 
 test.describe("permission-cancelled", () => {
-  test.use({ scenario: "permission-cancelled" });
+  test.use({ scenario: "claude-permission-cancelled" });
 
   test("a left matter's row says it waits; Stop leaves the card without buttons", async ({
     app,

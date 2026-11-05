@@ -111,10 +111,15 @@ pub fn agent_text(window: &ViewWindow, message: MessageId) -> Option<String> {
 
 /// A `TurnEnded` of `turn`, cancelled (no usage, no checkpoint), pushed and applied.
 pub fn cancel(log: &mut Log, state: &mut StreamState, turn: TurnId) -> Applied {
+    end_with(log, state, turn, StopReason::Cancelled)
+}
+
+/// A `TurnEnded` of `turn` with `stop` (no usage, no checkpoint), pushed and applied.
+pub fn end_with(log: &mut Log, state: &mut StreamState, turn: TurnId, stop: StopReason) -> Applied {
     let checkpoint = log.fresh().unwrap();
     let mut ended = turn_ended(turn, checkpoint).unwrap();
     if let DomainEvent::TurnEnded(event) = &mut ended {
-        event.stop = StopReason::Cancelled;
+        event.stop = stop;
         event.checkpoint_after = None;
         event.usage = None;
     }

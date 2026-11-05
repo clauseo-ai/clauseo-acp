@@ -43,7 +43,7 @@ pub(crate) fn generate() -> String {
 
     let mut steps = vec![
         json!({"scenario": "scoreboard", "description": DESCRIPTION, "on_stdin_close": "exit"}),
-        json!({"include": "handshake.jsonl"}),
+        json!({"include": "claude-handshake.jsonl"}),
         json!({"expect": {"method": "session/prompt", "as": "p1",
             "params": {"sessionId": "sess-1"}}}),
     ];
@@ -337,7 +337,7 @@ fn scoreboard_has_the_brief_shape() {
             .as_str()
             .is_some_and(|d| !d.is_empty())
     );
-    assert_eq!(lines[1], json!({"include": "handshake.jsonl"}));
+    assert_eq!(lines[1], json!({"include": "claude-handshake.jsonl"}));
     let expect_prompt = json!({"expect": {"method": "session/prompt", "as": "p1",
         "params": {"sessionId": "sess-1"}}});
     assert_eq!(lines[2], expect_prompt);
@@ -475,7 +475,7 @@ fn scoreboard_answer_is_a_memo_of_the_brief_size() {
 fn scoreboard_plays_over_stdio() {
     let dir = Scratch::new("scoreboard_plays_over_stdio");
     let mut agent = Agent::start("scoreboard", dir.path());
-    agent.handshake(&dir.cwd());
+    agent.claude_handshake(&dir.cwd());
     agent.send(&prompt(2, "Review the master services agreement"));
     let mut answer = String::new();
     let mut chunks = 0;

@@ -515,49 +515,7 @@ describe("finding a matter", () => {
   });
 });
 
-describe("Settings at the rail's foot", () => {
-  test("with onSettings, Settings is a button that calls it, with the shortcut named and its test id", async () => {
-    let pressed = 0;
-    await mount(
-      <Rail
-        open
-        groups={[]}
-        onSettings={() => (pressed += 1)}
-        testIds={{ settings: "open-settings" }}
-      />,
-    );
-    const button = document.querySelector<HTMLButtonElement>("button.room-settings");
-    expect(button?.dataset["testid"]).toBe("open-settings");
-    expect(button?.type).toBe("button");
-    expect(txt(button)).toBe("Settings");
-    expect(button?.title).toBe("⌘,");
-    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Meta+Comma");
-    expect(document.querySelector("a.room-settings")).toBeNull();
-    await act(async () => button?.click());
-    expect(pressed).toBe(1);
-  });
-
-  test("off the Mac the shortcut is Ctrl+,", async () => {
-    showDisplay({ ...DEFAULT_DISPLAY, platform: "windows", motion: "reduced" });
-    await mount(<Rail open groups={[]} onSettings={() => {}} />);
-    const button = document.querySelector<HTMLButtonElement>("button.room-settings");
-    expect(button?.title).toBe("Ctrl+,");
-    expect(button?.getAttribute("aria-keyshortcuts")).toBe("Control+Comma");
-  });
-
-  test("with only settings it stays a link, and with neither the foot has no Settings", async () => {
-    await mount(<Rail open groups={[]} settings="#settings" />);
-    expect(document.querySelector("a.room-settings")?.getAttribute("href")).toBe("#settings");
-    expect(document.querySelector("button.room-settings")).toBeNull();
-    await act(async () => root?.unmount());
-    host?.remove();
-    await mount(<Rail open groups={[]} scratch={{}} />);
-    expect(document.querySelector(".room-settings")).toBeNull();
-    expect(document.querySelector(".room-rail-foot")).toBeNull();
-  });
-});
-
-test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question", async () => {
+test("a conversation's status ends its line as the matters' icon, on a yellow disc only for a question or a permission", async () => {
   await mount(
     <Rail
       open
@@ -574,6 +532,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
                 { id: "c", title: "Limitation", agent: "Claude", state: "ready" },
                 { id: "d", title: "Annexures", agent: "Claude", state: "stopped", at: "4:31 pm" },
                 { id: "e", title: "Dates", agent: "Claude", state: "waiting", behind: "Plaint" },
+                { id: "f", title: "Inspection", agent: "Claude", state: "permission" },
               ],
             },
           ],
@@ -588,6 +547,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
     ["c", IconAnswerReady, false],
     ["d", IconStop, false],
     ["e", IconChecking, false],
+    ["f", IconNeedsPermission, true],
   ] as const;
   for (const [id, Icon, waits] of cases) {
     const mark = conv(id)?.querySelector(".room-mark");
@@ -597,4 +557,7 @@ test("a conversation's status ends its line as the matters' icon, on a yellow di
   }
   // the words still reach assistive technology
   expect(txt(conv("d"))).toContain("Stopped at 4:31 pm");
+  // a permission's words, as every state's but a question's, only in the tooltip and the accessible name
+  expect(conv("f")?.querySelector(".room-conv-ask")).toBeNull();
+  expect(txt(conv("f"))).toContain("Needs your permission");
 });

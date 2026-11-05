@@ -1,4 +1,4 @@
-// fake_agent `prompt-stream` for one turn, then the app is closed through its window and started
+// fake_agent `claude-prompt-stream` for one turn, then the app is closed through its window and started
 // again on the same data folder: it reopens the newest-created matter and its newest thread,
 // and the turn shows as it did. No agent is needed to show it, so the second launch
 // sends fake_agent nothing.
@@ -8,7 +8,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
 import { window } from "./selectors.ts";
 
-test.use({ scenario: "prompt-stream" });
+test.use({ scenario: "claude-prompt-stream" });
 
 const PROMPT = "Summarise the indemnity clause";
 const ANSWER = "The clause caps liability at the fees paid in the last twelve months.";

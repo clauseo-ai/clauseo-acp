@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { DEFAULT_DISPLAY, showDisplay, type Lang } from "../lib/display.ts";
-import { readerEnglish, readerHindi } from "../lib/words-reader.ts";
+import { readerEnglish, readerHindi } from "../lib/words-reader.hi.ts";
 import { IkUnavailable, LookupGuard, ResearchResults } from "./ik.tsx";
 import { JudgmentPane, IndexPane } from "./judgment-pane.tsx";
 import { IndexReader, JudgmentReader } from "./judgment-reader.tsx";

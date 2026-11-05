@@ -180,9 +180,14 @@ impl Setup {
         let setup = Setup { root };
         write::create_dir_all(&setup.data()).unwrap();
         Setup::file(&setup.script(), "");
-        Setup::file(&under(&setup.install(), SDK), SDK_PACKAGE);
-        Setup::file(&under(&setup.install(), SDK_ENTRY), "");
+        Setup::sdk(&setup.install());
         setup
+    }
+
+    /// The fake SDK under `install`: its `package.json` and its entry.
+    pub(crate) fn sdk(install: &Path) {
+        Setup::file(&under(install, SDK), SDK_PACKAGE);
+        Setup::file(&under(install, SDK_ENTRY), "");
     }
 
     pub(crate) fn install(&self) -> PathBuf {
@@ -298,12 +303,22 @@ impl Setup {
         names
     }
 
-    /// The env a spec should carry, by the case rule: inherited minus what settings names in
-    /// any case, then the settings variables.
+    /// The env a spec should carry, by the case rule: inherited minus the variables no reader
+    /// gets (`GIT_*`, `SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `readers/env.rs`) and what
+    /// settings names in any case, then the settings variables.
     pub(crate) fn expected_env() -> BTreeMap<OsString, OsString> {
         let mut env: BTreeMap<OsString, OsString> = std::env::vars_os()
             .filter(|(name, _)| {
-                !name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")
+                let bytes = name.as_encoded_bytes();
+                let prefixed = ["GIT_", "SSH_"].iter().any(|prefix| {
+                    bytes
+                        .get(..prefix.len())
+                        .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
+                });
+                !prefixed
+                    && !name.eq_ignore_ascii_case("NO_BROWSER")
+                    && !name.eq_ignore_ascii_case("CLAUDE_CODE_REMOTE")
+                    && !name.eq_ignore_ascii_case("ANTHROPIC_API_KEY")
                     && !name.eq_ignore_ascii_case(INHERITED)
             })
             .collect();

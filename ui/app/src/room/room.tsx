@@ -54,26 +54,42 @@ import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
 import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
+import { AllThreads } from "./all-threads.ts";
+import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
-import { NewMatter } from "./new-matter.tsx";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
+import { unprotectedFolder } from "./folder-support.ts";
 import { RoomRail } from "./rail.tsx";
 import { useSettingsKey } from "./settings-key.ts";
+import { useFindKey } from "./find-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { clockOf } from "./when.ts";
+import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
+import { ToolLineContext } from "./tool-line-context.ts";
+import { hasSetup } from "./first-run/hold.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
   late(import("./retried-line.tsx")).then((m) => ({ default: m.RetriedLine })),
+);
+
+/** New matter's dialog, loaded the first time it opens, or before that when its button is hovered or focused. */
+const loadNewMatter = () => late(import("./new-matter.tsx"));
+const NewMatter = lazy(() => loadNewMatter().then((m) => ({ default: m.NewMatter })));
+const preloadNewMatter = () => void loadNewMatter();
+
+/** UD1's first run: its screen with no matter yet, and its hold on the composer, where the host has the setup wire. */
+const FirstRun = lazy(() =>
+  late(import("./first-run/first-run.tsx")).then((m) => ({ default: m.FirstRun })),
 );
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
@@ -119,10 +135,14 @@ function useTransportStandIns(transport: HostTransport): StandIns {
 }
 
 /** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
- * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. */
-const railWaits = (view: MattersView): boolean =>
-  [...view.status].some(
-    ([id, s]) => id !== view.open?.matter && (s.state === "question" || s.state === "permission"),
+ * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. A snoozed or done conversation's wait
+ * doesn't count (U16b, triage.ts's handWaits). */
+const railWaits = (view: MattersView, threads: AllThreads): boolean =>
+  handWaits(
+    view.status,
+    view.open?.matter ?? null,
+    threads.view().lists,
+    Math.max(view.now, threads.view().now),
   );
 
 /** A file's name, the last part of its path in the matter folder. */
@@ -167,6 +187,8 @@ function RoomFrame({
   const { nodes } = room;
   const [railOpen, setRailOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  // the dialog mounts with its first opening and stays mounted, so it keeps its closing and its state as before
+  const [newMounted, setNewMounted] = useState(false);
   const newMatter = useRef<HTMLButtonElement>(null);
   const railToggle = useRef<HTMLButtonElement>(null);
   // a matter made from the folded rail folds it, so focus goes back to Matters, not to New matter's hidden button
@@ -182,15 +204,23 @@ function RoomFrame({
   const [matters] = useState(() => new Matters(transport, store));
   // each conversation's composer draft, kept here, above Work's key, so it outlives a visit to another conversation
   const [drafts] = useState<Drafts>(() => new Map());
+  const [folderShut] = useState(() => new Set<MatterId>());
   const [conversations] = useState(() => new Conversations(transport, store, matters, drafts));
   useEffect(() => matters.start(), [matters]);
   useEffect(() => conversations.start(), [conversations]);
+  // every matter's threads, for the rail's Needs you and Recent
+  const [threads] = useState(() => new AllThreads(matters.next));
+  useEffect(() => threads.start(), [threads]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
+  const waiting = () => railWaits(view, threads);
+  const waits = useSyncExternalStore(threads.subscribe, waiting, waiting);
   const talks = useSyncExternalStore(
     conversations.subscribe,
     conversations.view,
     conversations.view,
   );
+  // a Find result's jump to an entry ends once another conversation opens
+  useJumpFollows(talks.thread, talks.drafting);
   const link = useMemo(
     () => ({
       thread: talks.thread,
@@ -216,6 +246,12 @@ function RoomFrame({
     [talks.drafting, talks.options, talks.agent, conversations],
   );
   const open = view.open;
+  const setup = hasSetup(transport);
+  const welcome =
+    setup &&
+    view.phase === "ready" &&
+    open === null &&
+    view.matters.every((m) => m.kind === "scratch");
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed);
@@ -236,6 +272,11 @@ function RoomFrame({
     if (!railOpen) return;
     setRailOpen(false);
     railToggle.current?.focus();
+  };
+  // a matter made or opened from New matter folds the rail, and the dialog's focus goes back to Matters if it was open
+  const foldForNew = () => {
+    madeFolded.current = railOpen;
+    setRailOpen(false);
   };
   // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
   // composing key is its own
@@ -277,6 +318,10 @@ function RoomFrame({
       : () => void quietly("open_settings", open.call(transport));
   });
   useSettingsKey(openSettings, mac);
+  // Find's key focuses the rail's Find from anywhere in the room, a folded rail opened first
+  const [findField] = useState(() => () => document.getElementById(room.id("find")));
+  const [openRail] = useState(() => () => setRailOpen(true));
+  useFindKey(findField, openRail, mac);
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -293,6 +338,12 @@ function RoomFrame({
       ? undefined
       : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
+  // the tool line's room: the plan's name its words use, Settings, and the transport whose Chrome download it offers
+  // (browser-install.ts, made by the line's chunk once it is in)
+  const toolRoom = useMemo(
+    () => ({ plan: planOfOpen ?? "", openSettings, transport }),
+    [planOfOpen, openSettings, transport],
+  );
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
@@ -313,7 +364,8 @@ function RoomFrame({
       ? scratch
         ? w.t("Scratch matter")
         : open.name
-      : view.phase === "ready"
+      : // the first screen stands with no title: the rail says "No matters yet" (design, welcome.tsx)
+        view.phase === "ready" && !welcome
         ? frame(w.lang, "No matters yet")
         : "";
   return (
@@ -327,6 +379,7 @@ function RoomFrame({
         caption={caption}
         nativeLights={controls !== null}
         search={false}
+        unprotected={unprotectedFolder(open?.folder_support)}
         versions={open !== null}
         {...versions.toolbar}
         plan={null}
@@ -349,22 +402,26 @@ function RoomFrame({
           if (versions.open) versions.close();
           setRailOpen((open) => !open);
         }}
-        railWaits={railWaits(view)}
+        railWaits={waits}
         railRef={railToggle}
         testIds={{ title: "matter", rail: "rail-toggle" }}
       />
       {/* Matters opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
       {versions.rail ?? (
         <RoomRail
+          transport={transport}
           matters={matters}
           view={view}
           conversations={conversations}
           talks={talks}
+          threads={threads}
           open={railOpen}
           onNewMatter={() => {
             madeFolded.current = false;
+            setNewMounted(true);
             setNewOpen(true);
           }}
+          onNewMatterPreload={preloadNewMatter}
           onMoved={fold}
           onConversation={() => setRailOpen(false)}
           onStartNew={versions.close}
@@ -373,19 +430,33 @@ function RoomFrame({
           onSettings={openSettings}
         />
       )}
-      <NewMatter
-        matters={matters}
-        detailed={view.detailed}
-        open={newOpen}
-        onOpenChange={setNewOpen}
-        onMade={() => {
-          madeFolded.current = railOpen;
-          setRailOpen(false);
-        }}
-        finalFocus={newFocus}
-      />
+      {newMounted && (
+        <Suspense fallback={null}>
+          <NewMatter
+            matters={matters}
+            detailed={view.detailed}
+            open={newOpen}
+            onOpenChange={setNewOpen}
+            onMade={foldForNew}
+            onOpened={foldForNew}
+            finalFocus={newFocus}
+          />
+        </Suspense>
+      )}
       <main className="room-centre" ref={nodes.slot("centre")}>
-        {open !== null && view.folderMissing ? (
+        {setup && (
+          <Suspense fallback={null}>
+            <FirstRun
+              transport={transport}
+              matters={matters}
+              conversations={conversations}
+              talks={talks}
+              zone={view.zone}
+              welcome={welcome}
+            />
+          </Suspense>
+        )}
+        {welcome ? null : open !== null && view.folderMissing ? (
           // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
           <>
             <MovedFolder
@@ -429,19 +500,23 @@ function RoomFrame({
             <MarkdownHostContext value={answers}>
               <WordOpenContext value={word}>
                 <AgentPlanContext value={agentPlan}>
-                  <Work
-                    key={talks.open ?? open?.matter ?? "none"}
-                    transport={transport}
-                    matter={open}
-                    drafts={drafts}
-                    draftKey={talks.open}
-                    conversation={link}
-                    choice={choice}
-                    plan={plan}
-                    focus={talks.focus?.n ?? null}
-                    onThread={matters.onThread}
-                    conversations={conversations}
-                  />
+                  <ToolLineContext value={toolRoom}>
+                    <Work
+                      key={talks.open ?? open?.matter ?? "none"}
+                      transport={transport}
+                      matter={open}
+                      drafts={drafts}
+                      draftKey={talks.open}
+                      conversation={link}
+                      choice={choice}
+                      plan={plan}
+                      focus={talks.focus?.n ?? null}
+                      archived={talks.archived}
+                      onThread={matters.onThread}
+                      conversations={conversations}
+                      folderShut={folderShut}
+                    />
+                  </ToolLineContext>
                 </AgentPlanContext>
               </WordOpenContext>
             </MarkdownHostContext>

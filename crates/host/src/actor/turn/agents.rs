@@ -1,5 +1,6 @@
 //! A thread's agent: its launch (step 2: launch, `initialize`, `session/load` or `session/new`,
-//! the attach commit), the work that waits for its session, and its end.
+//! the attach commit) and the work that waits for its session. Its stop and its end are in
+//! `agents/ended.rs`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,23 +9,27 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue, DetachReason,
-    ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
+    MessageId, PermissionRequestId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
 use super::launch_checks::{self, Prepared};
-use super::out::Out;
 use super::{
-    AgentReply, End, Then, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state,
-    steps, updates,
+    AgentReply, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state, steps,
 };
-use crate::agent::{self, AgentLink, Ended, StopStep};
+use crate::agent::{self, AgentLink};
 use crate::error::Error;
+use crate::log_file::{Cause, LIFECYCLE};
 use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
+
+mod ended;
+
+use ended::{StopCause, stop_closed};
+pub(super) use ended::{log_detach, on_ended, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -46,6 +51,9 @@ pub(super) enum Stage {
     Loading,
     /// Its session is attached.
     Attached,
+    /// It was attached and a call to it came back `Closed`, so `Ended` is due: work that comes
+    /// first (Windows reports an exit late) waits for a new agent (`stop_closed`).
+    Closed,
     /// The shutdown ladder runs; `Ended` follows.
     Stopping,
 }
@@ -63,9 +71,8 @@ pub(super) struct Agent {
     after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
-    /// It is being stopped to start again in its matter's new folder: its detach is
-    /// `Restarting`.
-    restarting: bool,
+    /// Why it is being stopped, which picks the detach a stop logs.
+    stop_cause: StopCause,
     /// The attached session.
     pub(super) session: Option<AgentSessionId>,
     pub(super) rate: RateCap<RatedUpdate>,
@@ -85,11 +92,21 @@ pub(super) struct Agent {
     pub(super) replay: Option<SentView>,
     /// Replayed updates, held until the session is attached.
     pub(super) replayed: Vec<AcpEvent>,
-    /// A Codex session's checks run before its attach: every update is held with the replayed
-    /// ones meanwhile, so none is logged before `AgentSessionAttached`.
+    /// A Codex session's checks, or a Claude session's switch to Clauseo's mode, run before its
+    /// attach: every update is held with the replayed ones meanwhile, so none is logged before
+    /// `AgentSessionAttached`.
     pub(super) preparing: bool,
     /// What a Codex agent's launch recorded; `None` for any other agent.
     pub(super) codex: Option<CodexAgent>,
+    /// The programs of the MCP servers its session was given: a cancelled turn's sweep leaves
+    /// a process running one of them (`agent/leftovers.rs`).
+    pub(super) mcp_commands: Vec<PathBuf>,
+    /// A Claude agent whose launch's folder check found a network drive or a drive without
+    /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
+    pub(super) forced_ask: bool,
+    /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
+    /// (`agent/plan_note.rs`); `None` for any other agent.
+    pub(super) plan_notes: Option<PathBuf>,
 }
 
 /// What a Codex agent's launch recorded.
@@ -117,6 +134,10 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
             None => start(actor, thread, vec![waiting]),
         },
         Some(agent) => match agent.stage {
+            // Its connection is gone (a call came back `Closed`, or its stdout ended while
+            // idle): the work waits for a new agent (`stop_closed`).
+            Stage::Closed => stop_closed(agent, waiting),
+            Stage::Attached if agent.link.closed() => stop_closed(agent, waiting),
             Stage::Attached => run_waiting(actor, thread, waiting),
             Stage::Initializing | Stage::Loading => agent.waiting.push(waiting),
             Stage::Stopping => agent.after_stop.push(waiting),
@@ -146,7 +167,14 @@ pub(super) fn launch_now(
     waiting: Vec<Waiting>,
     prepared: Prepared,
 ) {
-    let (link, folder, codex) = match launch(actor, thread, prepared) {
+    // Only a Claude launch has a folder answer without a Codex preparation.
+    let forced_ask =
+        prepared.codex.is_none() && prepared.folder.is_some_and(agent::forced_ask::applies);
+    if forced_ask {
+        let matter = prepared.run.key.matter;
+        tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
+    }
+    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared) {
         Ok(launched) => launched,
         Err(error) => {
             fail_all(actor, thread, waiting, &error);
@@ -158,7 +186,17 @@ pub(super) fn launch_now(
     call(actor, thread, id, async move {
         AgentReply::Initialized(client.initialize().await)
     });
-    tracing::debug!(%thread, pid = link.pid(), "agent launched");
+    let agent_id = actor
+        .check_thread(thread)
+        .map(|entry| entry.row.agent.clone())
+        .ok();
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        agent = agent_id.as_ref().map(clauseo_protocol::AgentId::as_str),
+        pid = link.pid(),
+        "agent launched"
+    );
     let agent = Agent {
         id,
         link,
@@ -167,7 +205,7 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         folder,
-        restarting: false,
+        stop_cause: StopCause::Asked,
         session: None,
         rate: RateCap::new(),
         rate_armed: false,
@@ -181,6 +219,9 @@ pub(super) fn launch_now(
         replayed: Vec::new(),
         preparing: false,
         codex,
+        mcp_commands: Vec::new(),
+        forced_ask,
+        plan_notes,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -193,8 +234,9 @@ pub(super) fn next_agent_id() -> u64 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// What a launch gives: the link, the folder it runs in, and what a Codex launch recorded.
-type Launched = (AgentLink, PathBuf, Option<CodexAgent>);
+/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, and a
+/// Claude launch's plans folder.
+type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
@@ -227,16 +269,23 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     } else {
         &[]
     };
-    let inherited = std::env::vars_os();
+    let inherited: Vec<_> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None => std::env::vars_os().collect(),
+    };
     let spec = agent::launch_spec(
         settings,
         hook,
         forced,
         dropped,
-        inherited,
+        inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
     )?;
+    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
+    let plan_notes = claude
+        .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
+        .flatten();
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -249,7 +298,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         Arc::clone(&actor.clock),
         post,
     )?;
-    Ok((link, folder, codex))
+    Ok((link, folder, codex, plan_notes))
 }
 
 /// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
@@ -298,7 +347,7 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
     agent.link.stop();
     agent.stage = Stage::Stopping;
-    agent.restarting = true;
+    agent.stop_cause = StopCause::Restarting;
     let waiting = std::mem::take(&mut agent.waiting);
     agent.after_stop.extend(waiting);
     agent.after_stop.push(Waiting::Turn(turn));
@@ -329,6 +378,26 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
     let same = state(actor, thread)
         .and_then(|state| state.agent.as_deref())
         .is_some_and(|agent| agent.id == id);
+    let closed = matches!(
+        &reply,
+        AgentReply::Prompt {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        } | AgentReply::Config {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        } | AgentReply::Mode {
+            result: Err(clauseo_acp::Error::Closed),
+            ..
+        }
+    ) || matches!(&reply, AgentReply::Steer(steered) if steered.closed());
+    if same
+        && closed
+        && let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage == Stage::Attached
+    {
+        agent.stage = Stage::Closed;
+    }
     match reply {
         AgentReply::Prompt { turn, result } => end::on_prompt_done(actor, thread, turn, result),
         AgentReply::Config { ctx, result } => {
@@ -341,6 +410,9 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
+        AgentReply::ModeReset(result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
         | AgentReply::Prepared { .. }
@@ -371,7 +443,7 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         } => {
             tracing::warn!(
                 %thread,
-                %error,
+                error = %Cause(&error),
                 "session/load or session/resume failed; starting a new session"
             );
             // The old session's replay belongs to no session the new one knows.
@@ -389,21 +461,51 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         fail_waiting(actor, thread, &waiting, &lost("the agent"));
         return;
     };
-    let (id, client) = (agent.id, agent.link.client.clone());
+    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
     let Some(session) = agent.session.clone() else {
         fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
         return;
     };
     match waiting {
         Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
+        Waiting::Config(ctx, option, value)
+            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
+        {
+            let error = Error::refused(
+                ErrorCode::CommandInvalid,
+                format!(
+                    "config option {option} sets the mode, and this matter's folder is \
+                     unprotected: only \"default\" and \"plan\" may be set"
+                ),
+            );
+            actor.finish_command(ctx.id, Err(error));
+        }
         Waiting::Config(ctx, option, value) => call(actor, thread, id, async move {
             let result = client.set_config_option(&session, option, value).await;
             AgentReply::Config { ctx, result }
         }),
+        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
+            let error = Error::refused(
+                ErrorCode::CommandInvalid,
+                format!(
+                    "mode {mode} would approve changes without asking, and this matter's folder \
+                     is unprotected: only \"default\" and \"plan\" may be set"
+                ),
+            );
+            actor.finish_command(ctx.id, Err(error));
+        }
         Waiting::Mode(ctx, mode) => call(actor, thread, id, async move {
             let result = client.set_mode(&session, mode.clone()).await;
             AgentReply::Mode { ctx, mode, result }
         }),
+    }
+}
+
+/// The choice id `value` names, for a select option; `None` for a boolean.
+fn select(value: &ConfigValue) -> Option<&str> {
+    match value {
+        ConfigValue::Select(choice) => Some(choice.as_str()),
+        ConfigValue::Boolean(_) => None,
     }
 }
 
@@ -429,120 +531,11 @@ pub(super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) 
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    tracing::warn!(%thread, %error, "the agent did not start");
+    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
     agent.link.stop();
     agent.stage = Stage::Stopping;
     let waiting = std::mem::take(&mut agent.waiting);
     for item in waiting {
         fail_waiting(actor, thread, &item, error);
-    }
-}
-
-/// Stops `thread`'s agent with the shutdown ladder; `Ended` follows.
-pub(super) fn stop(actor: &mut Actor, thread: ThreadId) {
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
-        return;
-    };
-    if agent.stage == Stage::Stopping {
-        return;
-    }
-    agent.link.stop();
-    agent.stage = Stage::Stopping;
-    let waiting = std::mem::take(&mut agent.waiting);
-    for item in waiting {
-        fail_waiting(actor, thread, &item, &Error::Closed);
-    }
-}
-
-/// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
-/// agent for work that came while it stopped.
-pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
-    // Updates the rate cap holds came before the exit, while the turn is still live.
-    updates::flush_rate(actor, thread);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
-        return;
-    };
-    // Its pending questions went with it.
-    super::super::limits::asking_changed(actor);
-    launch_checks::remove_run(actor, thread);
-    let Agent {
-        session,
-        waiting,
-        after_stop,
-        restarting,
-        ..
-    } = *agent;
-    let reason = match ended {
-        Ended::Exited(reason) => reason,
-        Ended::Stopped { step, report } => {
-            if step == StopStep::Unresponsive {
-                tracing::warn!(%thread, ?report, "the agent did not exit after its kill");
-            }
-            if restarting {
-                DetachReason::Restarting
-            } else {
-                DetachReason::Closed
-            }
-        }
-    };
-    let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
-    for item in waiting {
-        fail_waiting(actor, thread, &item, &exited);
-    }
-    let detach = session.is_some().then_some(reason);
-    let phase = current(actor, thread).map(|current| (current.phase, current.cancelled));
-    match (phase, detach) {
-        (Some((TurnPhase::Prompting, cancelled)), detach) => {
-            let end = if cancelled {
-                End::cancelled(detach)
-            } else {
-                End::failed(ErrorCode::AgentExited, None, detach)
-            };
-            end::end_turn(actor, thread, end);
-        }
-        (Some((TurnPhase::FallbackStop, _)), detach) => {
-            if let Some(reason) = detach {
-                log_detach(actor, thread, reason);
-            }
-            end::end_turn(actor, thread, End::cancelled(None));
-        }
-        (Some((TurnPhase::Ending, _)), Some(reason)) => {
-            // Logged after the turn's `TurnEnded`, which is still to come.
-            if let Some(current) = current(actor, thread) {
-                match &mut current.end {
-                    Some(end) => end.detach = Some(reason),
-                    None => {
-                        current.end = Some(End::failed(ErrorCode::AgentExited, None, Some(reason)));
-                    }
-                }
-            }
-        }
-        (
-            Some((TurnPhase::Queued | TurnPhase::Checkpointing | TurnPhase::Starting, _)),
-            Some(reason),
-        ) => {
-            // The turn ends when it reaches its prompt and finds no agent; the detach goes
-            // after its `TurnEnded`.
-            if let Some(current) = current(actor, thread) {
-                current.detach = Some(reason);
-            }
-        }
-        (_, Some(reason)) => log_detach(actor, thread, reason),
-        (_, None) => {}
-    }
-    if !after_stop.is_empty() {
-        start(actor, thread, after_stop);
-    }
-    actor.release(StreamId::Thread(thread));
-}
-
-/// Logs `AgentSessionDetached { reason }`.
-pub(super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: DetachReason) {
-    let sent = Out::new(actor, thread, None).and_then(|mut out| {
-        out.push(actor, AgentSessionDetached { reason })?;
-        out.send(actor, Then::Nothing)
-    });
-    if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "the detach was not logged");
     }
 }

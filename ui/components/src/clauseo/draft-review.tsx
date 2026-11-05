@@ -317,6 +317,9 @@ export function WordLockDialog({
               )}
             </Say>
           </Base.Title>
+          <p className={dialogBody}>
+            <Say>{w.r("If it isn't open in Word, close Word and try again.")}</Say>
+          </p>
           <Base.Description className={dialogBody}>
             <Say>{w.r("Word holds the file while it is open. Nothing has changed yet.")}</Say>
           </Base.Description>

@@ -1,8 +1,10 @@
 import { expect, test } from "vitest";
 import { clock } from "./words.ts";
-import { lim, limitWords } from "./words-limits.ts";
-import { limitThreadWords } from "./words-limits-thread.ts";
-import { pc, planCardWords } from "./words-plan-card.ts";
+import { lim } from "./words-limits.ts";
+import { limitWords } from "./words-limits.hi.ts";
+import { limitThreadWords } from "./words-limits-thread.hi.ts";
+import { pc } from "./words-plan-card.ts";
+import { planCardWords } from "./words-plan-card.hi.ts";
 
 const ALL = { ...limitWords, ...limitThreadWords, ...planCardWords };
 

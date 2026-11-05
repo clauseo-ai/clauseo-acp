@@ -193,17 +193,28 @@ impl ProfileHook for Hook {
     }
 }
 
-/// The `browser` entry as `clauseo_profile::servers::browser` builds it.
+/// The file the test entry names as both sidecars, `clauseo-mcp` and agent-browser: this test
+/// binary, so the launch prep's sidecar check finds them.
+pub(crate) fn sidecar() -> PathBuf {
+    std::env::current_exe().unwrap()
+}
+
+/// The `browser` entry as `clauseo_profile::servers::browser` builds it, with the tokens every
+/// OS's entry holds: `{socket_dir}` (macOS and Linux) and `{daemon_port}` (Windows) are left
+/// to the tests that need them, so one scenario serves every OS.
 pub(crate) fn browser_server() -> McpServer {
+    let agent_browser = path_text(&sidecar());
     McpServer::Stdio {
         name: "browser".to_owned(),
-        command: std::env::temp_dir().join("clauseo-mcp"),
+        command: sidecar(),
         args: [
             "browser-guard",
             "--agent-browser",
-            "/app/agent-browser",
+            agent_browser.as_str(),
             "--cwd",
             "{browser_dir}",
+            "--cdp-port",
+            "{cdp_port}",
             "--",
             "mcp",
             "--tools",
@@ -228,36 +239,52 @@ pub(crate) fn browser_server() -> McpServer {
                 "AGENT_BROWSER_EXECUTABLE_PATH".to_owned(),
                 "{browser_executable}".to_owned(),
             ),
+            (
+                "AGENT_BROWSER_STREAM_PORT".to_owned(),
+                "{stream_port}".to_owned(),
+            ),
         ],
     }
 }
 
 /// The `browser` entry `session/new` carries once filled, with the proxy on 8123 and Chrome at
-/// `/chrome`, for a template.
+/// `/chrome`, for a template. The claimed ports differ per run, so they match any value, and so
+/// does the session name on Windows: there it is the name the host drew for agent-browser's
+/// daemon port (`browser::session`, tested there), not the session's id.
 pub(crate) fn filled_browser() -> Value {
+    let session = if cfg!(windows) {
+        "{{any}}"
+    } else {
+        "@SESSION@"
+    };
     json!({"name": "browser", "command": "{{any}}",
-    "args": ["browser-guard", "--agent-browser", "/app/agent-browser", "--cwd", "@BROWSER@",
-        "--", "mcp", "--tools", "core"],
+    "args": ["browser-guard", "--agent-browser", path_text(&sidecar()), "--cwd", "@BROWSER@",
+        "--cdp-port", "{{any}}", "--", "mcp", "--tools", "core"],
     "env": [
         {"name": "AGENT_BROWSER_CONFIG", "value": "/cfg/agent-browser.json"},
         {"name": "AGENT_BROWSER_PROXY", "value": "http://127.0.0.1:8123"},
-        {"name": "AGENT_BROWSER_SESSION", "value": "@SESSION@"},
+        {"name": "AGENT_BROWSER_SESSION", "value": session},
         {"name": "AGENT_BROWSER_EXECUTABLE_PATH", "value": "/chrome"},
+        {"name": "AGENT_BROWSER_STREAM_PORT", "value": "{{any}}"},
     ]})
 }
 
 /// A generic agent's scenario: `initialize`, `method` (`session/new` or `session/load` of
-/// `sess-1`) matching `params` with `off` off, one prompt.
+/// `sess-1`) matching `params` with `off` off, one prompt. The answer carries claude-agent-acp
+/// 0.89.1's modes, in `default`, as a Claude agent's launch requires (`claude-handshake`).
 pub(crate) fn agent_lines(name: &str, method: &str, params: &Value, off: &[&str]) -> String {
     let label = if method == "session/new" {
         "new"
     } else {
         "load"
     };
+    let modes = json!({"currentModeId": "default", "availableModes": [
+        {"id": "default", "name": "Manual"}, {"id": "acceptEdits", "name": "Accept edits"},
+        {"id": "plan", "name": "Plan"}, {"id": "auto", "name": "Auto"}]});
     let respond = if method == "session/new" {
-        json!({"sessionId": "sess-1"})
+        json!({"sessionId": "sess-1", "modes": modes})
     } else {
-        json!({})
+        json!({"modes": modes})
     };
     [
         json!({"scenario": name, "description": "a launch profile test", "on_stdin_close": "exit"}),

@@ -8,10 +8,11 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeLevel, PermissionChoice,
-    PermissionOption, PermissionRequestId, PlanEntry, Principal, RestoreScope, Seq, SkippedFile,
-    SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
-    ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage,
+    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeLevel, PageVia,
+    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
+    RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
+    Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -56,6 +57,16 @@ pub struct HeaderEntry {
     /// compares equal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolState>,
+    /// When the lawyer's snooze ends, from the last `ThreadSnoozed` not cleared since (by
+    /// `until` left out, which the host logs when the time comes, or by a waking event: the
+    /// lawyer's message, a permission request, an elicitation, a limit stop, a failed or ended
+    /// turn). Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub snoozed_until: Option<Timestamp>,
+    /// Whether the thread is marked done, from the last `ThreadDone` not cleared since by a
+    /// waking event (the same ones as for `snoozed_until`). Missing reads as `false`.
+    #[serde(default)]
+    pub done: bool,
     /// The agent's current mode, if it reported one.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<String>))]
@@ -195,6 +206,13 @@ pub struct ToolCallEntry {
     /// instructions in the reducer bench; boxed, 0.4%).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub background: Option<Box<BackgroundMark>>,
+    /// The web this call ran or opened (0041): its search and its pages, from the log's
+    /// `WebSearchRecorded` and `PageVisited`, matched by `tool_call`. Missing and `None` both mean
+    /// no web records, so a call without any is written as before. Boxed: most calls have none,
+    /// and a tool call entry is copied on every update (as `background`; CI's reducer-bench
+    /// measures the cost).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub web: Option<Box<ToolCallWeb>>,
 }
 
 /// A tool call that carried on in the background while its turn answered a steered message.
@@ -206,6 +224,44 @@ pub struct BackgroundMark {
     /// When it finished: the `ts` of the update that gave it a final status; `None` until then.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub finished_at: Option<Timestamp>,
+}
+
+/// What the web did for a tool call (0041): the search it ran and the pages it opened.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ToolCallWeb {
+    /// The search the call ran, if it ran one. A later search record for the same call replaces
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub search: Option<ToolCallSearch>,
+    /// The pages it opened, in the order the log has them. Every record is kept, so a page opened
+    /// twice is listed twice; the reducer keeps the first 50 and ignores the rest.
+    pub pages: Vec<ToolCallPage>,
+}
+
+/// A web search a tool call ran: its query and the results the agent got, in their order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ToolCallSearch {
+    /// The query text, as the `WebSearchRecorded` event has it.
+    pub query: String,
+    /// The results, as the `WebSearchRecorded` event has them: the event's own type, with its caps
+    /// applied by its constructor.
+    pub results: Vec<WebResult>,
+}
+
+/// A page a tool call opened: its address, its title when the agent reported one, and how it was
+/// opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ToolCallPage {
+    /// The page's address, as the `PageVisited` event has it (after the log's URL rule).
+    pub url: String,
+    /// The page's title, when the agent reported one. Left out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
+    /// How the page was opened. An unknown value decodes as `PageVia::Unknown`.
+    pub via: PageVia,
 }
 
 /// Where a permission request or an elicitation stands.
@@ -252,6 +308,9 @@ pub struct PermissionEntry {
     pub deliverable: Deliverable,
     /// Where it stands.
     pub state: PermissionState,
+    /// What the request is about when the host can tell (`PermissionRequested::about`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub about: Option<PermissionAbout>,
     /// When it was answered or cancelled (display only; the `PermissionResolved` envelope's
     /// `ts`). `None` while pending and after it expired.
     #[serde(skip_serializing_if = "Option::is_none", default)]

@@ -1,7 +1,12 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use super::{Os, Source, build, is_local_file, is_loopback_proxy, is_session, socket_dir};
+use super::{Os, Source, build, is_local_file, is_loopback_proxy, is_session, port_of};
+
+/// The `--cdp-port` the tests pass.
+const CDP: u16 = 61_101;
+/// The socket folder the tests' host made.
+const SOCKET: &str = "/tmp/clauseo-ab-0123456789abcdef";
 
 /// Absolute by this platform's rules, so the same tests run on every OS.
 fn abs(name: &str) -> String {
@@ -21,17 +26,27 @@ fn existing_file() -> String {
         .to_owned()
 }
 
-fn required() -> Vec<(&'static str, String)> {
-    vec![
+/// The variables the host sets for `os`, valid: the socket folder on Unix only.
+fn required(os: Os) -> Vec<(&'static str, String)> {
+    let mut vars = vec![
         ("AGENT_BROWSER_CONFIG", existing_file()),
         ("AGENT_BROWSER_PROXY", "http://127.0.0.1:8080".to_owned()),
         ("AGENT_BROWSER_EXECUTABLE_PATH", existing_file()),
         ("AGENT_BROWSER_SESSION", "s-1_A".to_owned()),
-    ]
+    ];
+    if os == Os::Unix {
+        vars.push(("AGENT_BROWSER_SOCKET_DIR", SOCKET.to_owned()));
+    }
+    vars.push(("AGENT_BROWSER_STREAM_PORT", "61100".to_owned()));
+    vars
 }
 
 fn source_with(extra: &[(&str, &str)], drop: &str) -> Source {
-    let required = required();
+    source_for(Os::Unix, extra, drop)
+}
+
+fn source_for(os: Os, extra: &[(&str, &str)], drop: &str) -> Source {
+    let required = required(os);
     let mut pairs: Vec<(&str, &str)> = required
         .iter()
         .filter(|(name, _)| *name != drop)
@@ -88,20 +103,58 @@ fn session_is_short_and_plain() {
     assert!(!is_session(OsStr::new(&"x".repeat(65))));
 }
 
+/// The Unix socket folder is absolute by Unix's rule, a leading `/`, on whatever OS models
+/// Unix: the same verdicts on a Windows machine as on a Unix one.
+#[test]
+fn the_unix_socket_folder_is_absolute_by_unixs_rule() {
+    assert!(super::is_unix_absolute(OsStr::new(
+        "/tmp/clauseo-ab-0123456789abcdef"
+    )));
+    for bad in ["", "tmp/clauseo-ab-x", "./tmp", "clauseo-ab-x"] {
+        assert!(!super::is_unix_absolute(OsStr::new(bad)), "{bad:?}");
+    }
+}
+
+#[test]
+fn ports_are_1024_to_65535_in_plain_decimal() {
+    for good in ["1024", "8080", "61100", "65535"] {
+        assert!(port_of(OsStr::new(good)).is_some(), "{good}");
+    }
+    for bad in [
+        "", "0", "1", "80", "1023", "65536", "99999", "100000", "01024", "+1024", "-1", " 1024",
+        "1024 ", "1e4", "x",
+    ] {
+        assert_eq!(port_of(OsStr::new(bad)), None, "{bad:?}");
+    }
+}
+
 #[test]
 fn each_required_variable_missing_is_named() {
-    for (name, _) in required() {
-        let error = build(&source_with(&[], name), Os::CURRENT, Path::new(&abs("cwd")))
-            .unwrap_err()
-            .to_string();
-        assert_eq!(error, format!("{name} is not set; the host sets it"));
+    for os in [Os::Unix, Os::Windows] {
+        for (name, _) in required(os) {
+            let error = build(&source_for(os, &[], name), os, Path::new(&abs("cwd")), CDP)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                error,
+                format!("{name} is not set; the host sets it"),
+                "{os:?}"
+            );
+        }
     }
+    // Windows keeps `<cwd>\run`: no socket folder is asked of the host.
+    let windows = required(Os::Windows);
+    assert!(
+        windows
+            .iter()
+            .all(|(name, _)| *name != "AGENT_BROWSER_SOCKET_DIR")
+    );
 }
 
 #[test]
 fn each_required_variable_invalid_is_named() {
     let cwd = abs("cwd");
-    let cases: [(&str, &str, &str); 7] = [
+    let cases: [(&str, &str, &str); 12] = [
         (
             "AGENT_BROWSER_CONFIG",
             "relative/agent-browser.json",
@@ -133,10 +186,31 @@ fn each_required_variable_invalid_is_named() {
             "must be exactly http://127.0.0.1:<port>",
         ),
         ("AGENT_BROWSER_SESSION", "../x", "must be 1 to 64 of"),
+        (
+            "AGENT_BROWSER_SOCKET_DIR",
+            "tmp/clauseo-ab-x",
+            "must be an absolute path",
+        ),
+        ("AGENT_BROWSER_SOCKET_DIR", "", "must be an absolute path"),
+        (
+            "AGENT_BROWSER_STREAM_PORT",
+            "80",
+            "must be a port from 1024 to 65535 with no leading zero",
+        ),
+        (
+            "AGENT_BROWSER_STREAM_PORT",
+            "065000",
+            "must be a port from 1024 to 65535",
+        ),
+        (
+            "AGENT_BROWSER_STREAM_PORT",
+            "65536",
+            "must be a port from 1024 to 65535",
+        ),
     ];
     for (name, bad, words) in cases {
         let source = source_with(&[(name, bad)], name);
-        let error = build(&source, Os::CURRENT, Path::new(&cwd))
+        let error = build(&source, Os::Unix, Path::new(&cwd), CDP)
             .unwrap_err()
             .to_string();
         assert!(error.starts_with(&format!("{name} {words}")), "{error}");
@@ -161,7 +235,7 @@ fn unix_map_is_exactly_the_allow_list() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Unix, cwd).unwrap();
+    let env = build(&source, Os::Unix, cwd, CDP).unwrap();
     let mut names: Vec<&str> = env.keys().map(String::as_str).collect();
     names.sort_unstable();
     assert_eq!(
@@ -179,6 +253,7 @@ fn unix_map_is_exactly_the_allow_list() {
             "AGENT_BROWSER_SCREENSHOT_DIR",
             "AGENT_BROWSER_SESSION",
             "AGENT_BROWSER_SOCKET_DIR",
+            "AGENT_BROWSER_STREAM_PORT",
             "ALL_PROXY",
             "HOME",
             "HTTPS_PROXY",
@@ -191,16 +266,14 @@ fn unix_map_is_exactly_the_allow_list() {
             "https_proxy",
         ]
     );
-    assert_eq!(
-        get(&env, "AGENT_BROWSER_SOCKET_DIR"),
-        "/tmp/clauseo-ab-s-1_A"
-    );
+    assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
+    assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100");
     assert_eq!(get(&env, "HTTP_PROXY"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "http_proxy"), "http://127.0.0.1:8080");
     assert_eq!(get(&env, "AGENT_BROWSER_IDLE_TIMEOUT_MS"), "600000");
     assert_eq!(
         get(&env, "AGENT_BROWSER_ARGS"),
-        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port=61101"
     );
     assert_eq!(get(&env, "LANG"), "en_IN.UTF-8");
     assert_eq!(get(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
@@ -213,7 +286,8 @@ fn unix_map_is_exactly_the_allow_list() {
 
 #[test]
 fn windows_names_match_without_case_and_appear_once() {
-    let source = source_with(
+    let source = source_for(
+        Os::Windows,
         &[
             ("SYSTEMROOT", r"D:\Win"),
             ("SystemRoot", r"E:\Other"),
@@ -226,7 +300,7 @@ fn windows_names_match_without_case_and_appear_once() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Windows, cwd).unwrap();
+    let env = build(&source, Os::Windows, cwd, CDP).unwrap();
     // The first match in the OS's order wins, under the allow-list's spelling.
     assert_eq!(get(&env, "SystemRoot"), r"D:\Win");
     assert_eq!(get(&env, "ComSpec"), r"D:\Win\system32\cmd.exe");
@@ -261,30 +335,52 @@ fn windows_names_match_without_case_and_appear_once() {
 
 #[test]
 fn windows_path_falls_back_to_c_windows() {
-    let env = build(&source_with(&[], ""), Os::Windows, Path::new("/s")).unwrap();
+    let env = build(
+        &source_for(Os::Windows, &[], ""),
+        Os::Windows,
+        Path::new("/s"),
+        CDP,
+    )
+    .unwrap();
     assert_eq!(get(&env, "PATH"), r"C:\Windows\System32;C:\Windows");
     assert_eq!(get(&env, "SystemRoot"), r"C:\Windows");
 }
 
 #[test]
-fn the_unix_socket_folder_is_short_and_windows_keeps_cwd_run() {
+fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
     let cwd = Path::new("/state/browser");
-    assert_eq!(
-        socket_dir(Os::Unix, cwd, "s-1"),
-        Path::new("/tmp/clauseo-ab-s-1")
+    let env = build(&source_with(&[], ""), Os::Unix, cwd, CDP).unwrap();
+    assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
+    // On Windows a socket folder in the guard's environment is ignored.
+    let windows = source_for(
+        Os::Windows,
+        &[("AGENT_BROWSER_SOCKET_DIR", r"C:\elsewhere")],
+        "",
     );
-    let session = format!("0123456789abcdef{}", "z".repeat(48));
-    assert_eq!(
-        socket_dir(Os::Unix, cwd, &session),
-        Path::new("/tmp/clauseo-ab-0123456789abcdef")
-    );
-    assert_eq!(socket_dir(Os::Windows, cwd, &session), cwd.join("run"));
-    let env = build(&source_with(&[], ""), Os::Windows, cwd).unwrap();
+    let env = build(&windows, Os::Windows, cwd, CDP).unwrap();
     assert_eq!(
         &env["AGENT_BROWSER_SOCKET_DIR"],
         cwd.join("run").as_os_str()
     );
     assert!(!env.contains_key("AGENT_BROWSER_NAMESPACE"));
+}
+
+#[test]
+fn the_stream_port_and_the_cdp_argument_pass_through_on_both() {
+    let cwd = Path::new("/state/browser");
+    for os in [Os::Unix, Os::Windows] {
+        let env = build(&source_for(os, &[], ""), os, cwd, 1024).unwrap();
+        assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100", "{os:?}");
+        let args: Vec<&str> = get(&env, "AGENT_BROWSER_ARGS").split('\n').collect();
+        assert_eq!(
+            args,
+            [
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                "--remote-debugging-port=1024"
+            ],
+            "{os:?}"
+        );
+    }
 }
 
 #[test]

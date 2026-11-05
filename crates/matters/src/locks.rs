@@ -9,6 +9,7 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 use crate::refuse::{Fold, keys_by};
 
 mod beside;
+pub(crate) mod stale;
 
 pub use beside::OwnersBeside;
 
@@ -26,9 +27,14 @@ pub enum HeldOpen {
 /// exact name and then, for a name that is not all ASCII, in any Unicode form
 /// ([`owner_in_another_form`]); on Windows also a sharing or lock violation when it exists and
 /// is opened with no sharing. A missing file with no owner file, and any other error, is `None`.
+/// An owner file the stale rule passes over ([`stale::is_stale`]: on macOS no Word running, no
+/// lock on the document and a local APFS or HFS+ volume; on Windows a no-share open that
+/// succeeds and no Word running; never on Linux) does not count, so
+/// one a crashed Word left blocks nothing; the next owner file found is checked the same way.
 /// One `symlink_metadata` per owner name (at most three), a `read_dir` of the parent for a
-/// non-ASCII name none of them finds (at most [`MAX_LISTED`] entries; an owner file past them,
-/// or a listing that fails, is not found: it fails open, as any other error does), and on
+/// non-ASCII name none of them finds or all of them are stale (at most [`MAX_LISTED`] entries;
+/// an owner file past them, or a listing that fails, is not found: it fails open, as any other
+/// error does), the stale rule's queries for each owner file found on macOS and Windows, and on
 /// Windows one open. The rule undo and restore refuse by.
 pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
     held_open_by(folder, path, None)
@@ -46,6 +52,16 @@ pub fn held_open_beside(
     held_open_by(folder, path, Some(owner_files))
 }
 
+/// Windows' `ERROR_ACCESS_DENIED`.
+#[cfg(any(windows, test))]
+const ACCESS_DENIED: i32 = 5;
+/// Windows' `ERROR_SHARING_VIOLATION`.
+#[cfg(any(windows, test))]
+const SHARING_VIOLATION: i32 = 32;
+/// Windows' `ERROR_LOCK_VIOLATION`.
+#[cfg(any(windows, test))]
+const LOCK_VIOLATION: i32 = 33;
+
 /// The most entries the lookup by another Unicode form reads from one folder.
 const MAX_LISTED: usize = 20_000;
 
@@ -58,27 +74,77 @@ fn held_open_by(folder: &Path, path: &MatterPath, given: Option<&[String]>) -> O
     let (Some(parent), Some(name)) = (absolute.parent(), path.as_str().rsplit('/').next()) else {
         return None;
     };
-    if let Some(owner) = owner_names(name)
+    let exact = owner_names(name)
         .into_iter()
-        .find(|owner| parent.join(owner).symlink_metadata().is_ok())
-    {
-        return Some(HeldOpen::OwnerFile(owner));
+        .filter(|owner| parent.join(owner).symlink_metadata().is_ok());
+    for owner in exact {
+        if !stale::is_stale(parent, &owner, &absolute) {
+            return Some(HeldOpen::OwnerFile(owner));
+        }
     }
-    if let Some(owner) = owner_in_another_form(parent, name, given) {
+    if let Some(owner) = owner_in_another_form(parent, name, given)
+        && !stale::is_stale(parent, &owner, &absolute)
+    {
         return Some(HeldOpen::OwnerFile(owner));
     }
     #[cfg(windows)]
     {
-        /// `ERROR_SHARING_VIOLATION` and `ERROR_LOCK_VIOLATION`.
-        const SHARING_VIOLATION: i32 = 32;
-        const LOCK_VIOLATION: i32 = 33;
         if let Err(err) = crate::write::open_exclusive(&absolute)
-            && matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+            && held_at_read(&err)
         {
             return Some(HeldOpen::SharingViolation);
         }
     }
     None
+}
+
+/// Whether opening or reading a matter file failed with `err` because another program holds
+/// it: on Windows a sharing violation (32: open with no sharing, as Word may hold a document) or
+/// a lock violation (33: a locked range), the codes [`held_open`]'s no-share open goes by.
+/// Elsewhere `false`: an open file never stops a read on macOS or Linux, and the same numbers
+/// are other errors there (32 is `EPIPE` on Linux).
+pub(crate) fn held_at_read(err: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = err;
+        false
+    }
+}
+
+/// Whether a rename or delete of a matter file that failed with `err` failed because another
+/// program holds the file, so the failure is `matter.file_locked` and not an I/O failure. Only on
+/// Windows, by [`held_by_code`]; `held` asks [`held_open`] for the target at that moment, and
+/// is called only for an access denied, a sharing violation or a lock violation. Elsewhere
+/// `false`: an open file never stops a rename or delete on macOS or Linux.
+pub(crate) fn held_at_write(err: &std::io::Error, held: impl FnOnce() -> bool) -> bool {
+    #[cfg(windows)]
+    {
+        held_by_code(err.raw_os_error(), held)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (err, held);
+        false
+    }
+}
+
+/// [`held_at_write`] by the Windows error code: `ERROR_ACCESS_DENIED` (5),
+/// `ERROR_SHARING_VIOLATION` (32) and `ERROR_LOCK_VIOLATION` (33) only when `held` says the
+/// target is held open now (an owner file beside it, or a no-share open that fails). Each has
+/// another cause where "close it in Word" would be wrong: 5 is also a real permission denial (a
+/// folder without write access), and 32 or 33 on a rename can come from the source, our own
+/// temp file (an antivirus scanning it). Any other code, or none, is not, and `held` is not
+/// asked. Plain arithmetic, so tested on every OS.
+#[cfg(any(windows, test))]
+pub(crate) fn held_by_code(code: Option<i32>, held: impl FnOnce() -> bool) -> bool {
+    matches!(
+        code,
+        Some(ACCESS_DENIED | SHARING_VIOLATION | LOCK_VIOLATION)
+    ) && held()
 }
 
 /// [`held_open`] for a path as an agent names it: absolute, or relative to `folder` (the

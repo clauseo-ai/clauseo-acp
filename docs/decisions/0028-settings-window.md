@@ -49,9 +49,10 @@ beside `main`, so on Windows and Linux it gets the caption buttons' four. Not gr
 `open_settings`, and the e2e and marks commands. `tauri.conf.json` names `main` and `settings`.
 
 **What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings`,
-`SetToolSettings` (0030, "Tool switches over the wire") and `RefreshLimits`, and `query` only
-`GetSettings` (`Bridge::admit`, `Bridge::query`, keyed on the calling webview's label); everything
-else is `command.invalid` before the host sees it. A window of any other label is refused every
+`SetToolSettings` (0030, "Tool switches over the wire"), `SetPrivacySettings` (0036),
+`RefreshLimits`, `SetUpdateMode` (0037) and `CheckForUpdate` (0037), and `query` only
+`GetSettings` and `GetUpdate` (0037) (`Bridge::admit`, `Bridge::query`, keyed on the calling
+webview's label); everything else is `command.invalid` before the host sees it. A window of any other label is refused every
 command and read. Of the app feed (`subscribe_app`), whose first frames carry the whole matter
 and thread lists since 0023, a window other than `main` gets `settings_changed` alone: the
 bridge drops every other app event before it is sent or counted toward acks (`AppEvents` in

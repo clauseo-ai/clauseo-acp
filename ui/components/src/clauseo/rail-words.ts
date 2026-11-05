@@ -15,7 +15,8 @@ import type { Lang } from "../lib/display.ts";
  *   the reset or ask the other plan, it waits on the lawyer's hand and takes court yellow; pausedSet, once Continue
  *   is chosen, is concrete with its time;
  * - limit: the plan's limit reached, until the reset if the plan gave one, muted, with no choice asked for;
- * - moved: its folder isn't where it was, said in concrete, with Locate folder in the room and in its menu. */
+ * - moved: its folder isn't where it was, said in concrete, with Locate folder in the room and in its menu;
+ * - failed: an answer failed and its conversation isn't seen yet, its time said loud, its mark in concrete. */
 export type MatterState =
   | "idle"
   | "working"
@@ -26,10 +27,26 @@ export type MatterState =
   | "paused"
   | "pausedSet"
   | "limit"
-  | "moved";
+  | "moved"
+  | "failed";
 
-/** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer. */
-export type ConversationState = "idle" | "working" | "question" | "ready" | "stopped" | "waiting";
+/** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer;
+ * question and permission, as a matter's: it waits on the lawyer's hand. */
+export type ConversationState =
+  | "idle"
+  | "working"
+  | "question"
+  | "permission"
+  | "ready"
+  | "stopped"
+  | "waiting"
+  | "failed";
+
+/** A failed answer's words: today's time, or another day's with its day. */
+const failed = (lang: Lang, time: string, day: string) =>
+  day === ""
+    ? frame(lang, "Failed at {time}", { time })
+    : frame(lang, "Failed on {day} at {time}", { day, time });
 
 /** A clock time that holds together on its line: "4:32 pm" never breaks before "pm". */
 const held = (lang: Lang, at: string) => clock(lang, at).replace(/ (am|pm)$/, "\u00a0$1");
@@ -75,17 +92,21 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
         : lim(lang, "Limit reached until {day} {time}", { day, time });
     case "moved":
       return mt(lang, "Folder moved");
+    case "failed":
+      return failed(lang, time, day);
     case "idle":
       return null;
   }
 }
 
-/** A conversation's status line's words, in the language. `behind` is the title it waits behind. */
+/** A conversation's status line's words, in the language. `behind` is the title it waits behind; `day`, a failure's
+ * day when it isn't today. */
 export function conversationStatus(
   lang: Lang,
   state: ConversationState,
   at: string,
   behind = "",
+  day = "",
 ): string | null {
   const time = held(lang, at);
   switch (state) {
@@ -95,12 +116,16 @@ export function conversationStatus(
         : frame(lang, "Answering. Expected by {time}", { time });
     case "question":
       return frame(lang, "A question for you");
+    case "permission":
+      return frame(lang, "Needs your permission");
     case "ready":
       return frame(lang, "Answer ready");
     case "stopped":
       return frame(lang, "Stopped at {time}", { time });
     case "waiting":
       return mt(lang, "Waiting for '{title}'", { title: behind });
+    case "failed":
+      return failed(lang, time, day);
     case "idle":
       return null;
   }

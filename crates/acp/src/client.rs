@@ -12,6 +12,7 @@ use futures::channel::oneshot;
 
 use crate::Error;
 use crate::event::PendingKey;
+use crate::line::{Gate, ReadProgress};
 use crate::types::{AgentInfo, LoadSession, NewSession, PromptEnd, SessionStart, SteerResult};
 
 /// Where a command's answer goes.
@@ -97,17 +98,25 @@ pub(crate) enum Command {
 pub struct AcpClient {
     commands: async_channel::Sender<Command>,
     frames_dropped: Arc<AtomicU64>,
+    gate: Arc<Gate>,
 }
 
 impl AcpClient {
     pub(crate) fn new(
         commands: async_channel::Sender<Command>,
         frames_dropped: Arc<AtomicU64>,
+        gate: Arc<Gate>,
     ) -> Self {
         Self {
             commands,
             frames_dropped,
+            gate,
         }
+    }
+
+    /// What the line reader has read of the agent's stdout ([`ReadProgress`]).
+    pub fn read_progress(&self) -> ReadProgress {
+        ReadProgress(Arc::clone(&self.gate))
     }
 
     async fn call<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, Error> {

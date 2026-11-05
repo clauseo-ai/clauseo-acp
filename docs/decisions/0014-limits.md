@@ -26,7 +26,9 @@ an id becomes a kind.
 `input(Input, now) -> Vec<Action>`, `view(now)`, `next_deadline()`, `next_read_at(agent)` and
 `at_limit(agent, now)`. Four shapes differ from the task brief's sketch. `host` (R16) passes the
 first three through and calls the fourth:
-- `ReadOutcome::Usage { limits, reached: Option<LimitStopReason> }`. `reached` carries Codex's
+- `ReadOutcome::Usage { limits, reached: Option<LimitStopReason>, account_read }`. `account_read`
+  (`AccountRead::Read` or `NotRead`) says whether the vendor's account answer named the ref
+  (amended 2026-11-04, below). `reached` carries Codex's
   `rateLimitReachedType` and `spendControlReached`, which `AccountLimits` has no field for. It is
   model state until the next good read, so a restart forgets it, as it forgets the rejected flag.
   Claude always gives `None`.
@@ -84,7 +86,8 @@ gives.
 **Refresh.** One read per agent at start, and cached values become `Stale { Aged }`
 (`NotApplicable` stays). A focus, or a meter or the settings page opening, reads when the last read
 started 5 minutes ago or more. A turn end reads after 10 minutes for Claude and 60 seconds for
-Codex. `TurnEnded { read_now: true }` and `TryAgain` read at once. Every age counts from the start
+Codex (Claude's 10 minutes became 2 for a turn with no live signal; see the note of
+2026-11-04 under Status). `TurnEnded { read_now: true }` and `TryAgain` read at once. Every age counts from the start
 of the agent's last read, whatever its outcome, so a failed read is not retried on every focus.
 At most one read is in flight per account. None starts while that agent has a permission or
 elicitation pending; one asked for then starts when the question is answered. While anyone
@@ -148,8 +151,9 @@ looks like one. Otherwise it is a fixed ref: `api-key`, `bedrock`, `vertex`, or 
 never a key or a token.
 
 **Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
-client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
-`account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
+client: `initialize` (then `initialized`), then `account/read` and
+`account/rateLimits/read { excludeResetCreditDetails: true }` sent together (amended
+2026-11-04, below); the limits count only for a ChatGPT account. Then it drops the client, which
 closes stdin. It runs `codex.js` with `-c` overrides before `app-server`, one per category #160
 turns off: `features.apps=false`, `features.plugins=false`,
 `features.skill_mcp_dependency_install=false` and `cloud.skills.enabled=false` (#203,
@@ -185,10 +189,12 @@ same walk. Otherwise Node would climb to a parent `node_modules` and run some ot
 npm install, where the SDK sits nested under the adapter, is refused for the same reason. The install folder and its parents may be symlinks.
 In practice an npm-installed adapter passes, since npm puts real files under `node_modules`. A
 pnpm or linked install puts symlinks on that path, so it reads as "no limits" until stage D's
-`agents` owns the install. A reader's environment is the inherited one, minus every name the
-agent's settings `env` names (ignoring ASCII case), then the settings variables, as
-`crates/host/src/agent/spec.rs` builds an agent's. The inherited secrets are in the spec, so
-`process` redacts them from the stderr tail. The Codex reader then sets `CODEX_HOME` to the
+`agents` owns the install. A reader's spec env is the inherited one, minus every name the agent's
+settings `env` names (ignoring ASCII case) and minus the host's drops: `GIT_*`, `SSH_*`,
+`NO_BROWSER`, `CLAUDE_CODE_REMOTE`, plus Codex's dropped names for the Codex reader. Then come the
+settings variables, as `crates/host/src/agent/spec.rs` builds an agent's. The map is the child's
+**whole** environment, because desktop's launcher clears. The inherited secrets are in the spec,
+so `process` redacts them from the stderr tail. The Codex reader then sets `CODEX_HOME` to the
 Clauseo-owned home, after removing every other spelling of that name. codex-acp merges the user's
 `~/.codex/config.toml` (MCP servers, plugins, hooks, rules) unless `CODEX_HOME` points elsewhere,
 so Clauseo owns one and Codex signs in separately inside Clauseo (#160). The reader never reads
@@ -212,6 +218,29 @@ and this record together.
 ## Status
 
 proposed
+
+2026-11-04: a Claude turn end that no live `_claude/rateLimit` signal came before reads when
+the last read started 2 minutes ago or more; one that a live signal came before keeps 10 minutes.
+On real Claude Pro accounts claude-agent-acp sent the signal in 1 turn of 8, so most turns left
+numbers up to 10 minutes old shown as fresh. The model has no turn-start input, so "during the
+turn" means since the agent's last turn end. Codex stays at 60 seconds; `read_now`, the focus,
+"try again" and reset rules, one read in flight per agent, and no read while a question is
+pending are unchanged.
+
+Amended 2026-11-04 (G16, windows-x64): codex 0.162.1's `account/read` runs workspace routing
+discovery for a ChatGPT login, `GET {chatgpt_base_url}/wham/accounts/check` under a hard-coded
+15 s timeout, with no config key, env var or param to turn it off or shorten it, cached only in the
+app-server's memory, so every read pays it. That is upstream behaviour; on G16's Windows VM 2 reads
+in 20 stalled on it. Clauseo works around it: the Codex reader sends `account/read` and
+`account/rateLimits/read` together after `initialize` (the limits never use the routing), and
+once good limits are in, `account/read` gets a 500 ms grace (`ACCOUNT_GRACE`). Late or failed,
+the read is the ChatGPT outcome from the limits alone: the snapshot's plan, the `plan` ref, and
+`AccountRead::NotRead`. When the limits fail (signed out, API key, Bedrock, which skip discovery)
+the reader waits for `account/read` and classifies by it, never by an error's text. The merge
+keeps the last email it held for a `NotRead` read when the identity matches: a plan account then
+and now with the same named plan; otherwise the ref is `plan`. An `account/read` that says
+`email: null` is `Read` and is never filled from before. One app-server per read, and the 10 s
+limit, are unchanged.
 
 ## Date
 

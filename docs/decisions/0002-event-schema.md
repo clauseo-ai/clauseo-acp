@@ -92,8 +92,10 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | Kind | Payload | Emitted by | Logged | Stream |
 |---|---|---|---|---|
 | `thread_created` | matter, agent, title? | host | yes | T |
-| `thread_renamed` | title, by (lawyer or agent) | host, acp | yes | T |
+| `thread_renamed` | title, by (lawyer, agent or placeholder) | host, acp | yes | T |
 | `thread_archived` | nothing (`{}`) | host | yes | T |
+| `thread_snoozed` | until? (cleared when absent), by (`SnoozeBy`: lawyer, or expired when the host wakes it at its time) (0045) | host | yes | T |
+| `thread_done` | done, by (`DoneBy`: lawyer or morning_sweep) (0045) | host | yes | T |
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
@@ -108,7 +110,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
 | `web_search_recorded` | turn, tool_call, agent (`AgentId`), query (cap 1,000 chars), results (`WebResult`s, at most 50, may be empty) | acp | yes | T |
 | `page_visited` | turn, tool_call, url, title?, via (`PageVia`) | acp | yes | T |
-| `permission_requested` | request, tool_call?, options, deliverable | acp | yes | T |
+| `permission_requested` | request, tool_call?, options, deliverable, about? (`PermissionAbout`) | acp | yes | T |
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
@@ -233,6 +235,21 @@ not move it). Both come from committed envelopes, so a replay gives the same tim
 additive for the log, and `started_at` is required in a view entry, so `REDUCER_SCHEMA_VERSION` goes
 from 5 to 6: old snapshots are passed over and each thread's log is folded once at its next reopen,
 as for the bump above.
+
+The rail's triage (0045) folds `thread_snoozed` into `HeaderEntry.snoozed_until` (an absent
+`until` clears it) and `thread_done` into `HeaderEntry.done`, and a waking event (`user_message`,
+`permission_requested`, `elicitation_requested`, `turn_stopped_at_limit`, `turn_failed`,
+`turn_ended`) clears both. Both fields are additive (missing reads as `None`, `false`), and
+`ThreadSummary` carries them too. `REDUCER_SCHEMA_VERSION` goes from 6 to 7, after the tool call
+times' 5 to 6: old snapshots are passed over and each thread's log is folded once at its next
+reopen, as for the bumps above.
+
+Tool calls carry their web (0041; no event changes, the fold does). `ToolCallEntry.web` (a boxed
+`ToolCallWeb`, left out when none) holds the call's `WebSearchRecorded` as `search` and its
+`PageVisited` events as `pages`, matched by `tool_call`; a record for a call the thread does not hold
+is ignored, and the reducer keeps at most 50 pages per call. The new view types are additive, and
+`REDUCER_SCHEMA_VERSION` goes from 7 to 8, after the triage's 6 to 7: old snapshots are passed over
+and each thread's log is folded once at its next reopen, as for the bumps above.
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same
@@ -486,7 +503,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
@@ -598,10 +615,10 @@ A new kind:
 5. Its row in the kind table under Kinds above, Logged `yes` and Stream `T` or `M`, in `KINDS`
    order: `kind_table_matches_record` (tests/events/rules.rs).
 6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/` and
-   its row in `ADDED_AFTER_V1` in `tests/corpus.rs`. The ignored `write_the_added_pairs` writes
-   the pair from step 3's example into `target/tmp/corpus-added/` and prints the `mv` commands
-   and the row; `tests/corpus/v1/README.md` (Adding a kind or a variant after v1) gives the
-   command: `the_known_kinds_are_v1_and_the_added_ones`.
+   its row in `ADDED_AFTER_V1` in `tests/corpus/added_rows.rs`. The ignored
+   `write_the_added_pairs` writes the pair from step 3's example into `target/tmp/corpus-added/`
+   and prints the `mv` commands and the row; `tests/corpus/v1/README.md` (Adding a kind or a
+   variant after v1) gives the command: `the_known_kinds_are_v1_and_the_added_ones`.
 
 A new variant of an open enum:
 

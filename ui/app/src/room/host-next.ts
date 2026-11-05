@@ -2,10 +2,11 @@
 // settings, the matters' rows: H5's details and statuses, H3's moved folders, H4's app events, H6's thread marks and
 // H20's default location. Their wire shapes as the briefs give them (names in WIRE), and NextHost: one optional part
 // per host row, which a transport may give. FakeTransport does, from scripted answers; TauriTransport gives settings,
-// papers and agents, over the desktop host's wire (host-wire.ts). The room asks for them only through `nextHostOf`, so
-// as each row lands, the swap to the generated bindings touches this file and host-wire.ts alone. Without papers the
-// wall shows its surface only; without settings they live in localStorage (display-store.ts); without matters the
-// rail lists today's matters with no details; without agents the composer offers no plan choice.
+// papers, agents, matters and the app events over the desktop host's wire (host-wire.ts). The room asks for them only
+// through `nextHostOf`, so as each row lands, the swap to the generated bindings touches this file and host-wire.ts
+// alone. Without papers the wall shows its surface only; without settings they live in localStorage
+// (display-store.ts); without matters the rail lists today's matters with no details; without agents the composer
+// offers no plan choice.
 import type { TextSize } from "@clauseo/components/lib/display.ts";
 import type { AppFeedSource, HostTransport } from "../transport/host-transport.ts";
 import type {
@@ -16,14 +17,24 @@ import type {
   MatterId,
   MatterSource,
   MatterSummary,
+  MattersChanged,
   MessageId,
   QueryResult,
-  StopReason,
   ThreadId,
   ThreadSummary,
+  BrowserInstallState,
+  ThreadsChanged,
   Timestamp,
+  ToolsPatch,
+  ToolsSettingsView,
 } from "../transport/protocol.ts";
-import { wireAgentsHost, wirePapersHost, wireSettingsHost } from "./host-wire.ts";
+import {
+  wireAgentsHost,
+  wireAppHost,
+  wireMattersHost,
+  wirePapersHost,
+  wireSettingsHost,
+} from "./host-wire.ts";
 
 /* ---------- H8: a matter's papers ---------- */
 
@@ -56,7 +67,14 @@ export type UiSettings = {
 };
 
 /** `get_settings`'s answer, and what `settings_changed` carries: the settings, and the keys a policy locks. */
-export type Settings = { ui: UiSettings; locked: string[] };
+export type Settings = {
+  ui: UiSettings;
+  locked: string[];
+  /** The tools' switches in force (`tools.web_search`, `tools.browser`), as SettingsView carries them. Absent only
+   * without a host (the settings then live in localStorage, and nothing would apply the switches), or from a fake that
+   * leaves them out; Privacy's switches show only with them. */
+  tools?: ToolsSettingsView;
+};
 
 /* ---------- H3, H5, H20: a matter's details ---------- */
 
@@ -85,15 +103,14 @@ export type MatterDetails = {
   folder_display?: string;
 };
 
-/** A matter in `list_matters`'s answer and in `matters_changed`. */
+/** A matter in `list_matters`'s answer and in `matters_changed`: the wire's MatterSummary with each detail it may leave
+ * out filled as the binding says a missing one reads (host-wire.ts's `roomMatterOf`). */
 export type MatterInfo = MatterSummary & MatterDetails;
 
-/** H6: a thread in `list_threads`'s answer, with whether its last answer was seen and how its last turn ended. */
-export type ThreadInfo = ThreadSummary & {
-  seen: boolean;
-  last_stop?: { reason: StopReason; at: Timestamp };
-  last_activity?: Timestamp;
-};
+/** H6: a thread in `list_threads`'s answer, with whether its last answer was seen and how its last turn ended: the
+ * generated ThreadSummary. A missing `seen` (an older host's answer) reads as true, so it never says an answer is
+ * ready (conversation-status.ts asks for `seen === false`). */
+export type ThreadInfo = ThreadSummary;
 
 /* ---------- R15: the agents ---------- */
 
@@ -162,6 +179,7 @@ export type RetryCommand = { retry_from: { thread: ThreadId; message: MessageId 
  * retry. */
 export type NextCommand =
   | { set_ui_settings: { patch: Partial<UiSettings> } }
+  | { set_tool_settings: { patch: ToolsPatch } }
   | MattersCommand
   | RetryCommand;
 /** What a command did: `"done"`, create_matter's `{"matter_created": {"matter": ...}}`, or retry_from's
@@ -175,26 +193,28 @@ export type NextOutcome =
 export type NextEvent = { settings_changed: Settings };
 
 /** H4 and H6: a matter's threads that changed, those taken off its list, and whether `threads` is its whole list (the
- * first frames after the app subscription are each matter's whole list; later ones carry only what changed). */
-export type ThreadsChanged = {
-  matter: MatterId;
-  threads: ThreadInfo[];
-  removed: ThreadId[];
-  all: boolean;
-};
+ * first frames after the app subscription are each matter's whole list; later ones carry only what changed). The
+ * generated ThreadsChanged. */
+export type { ThreadsChanged };
 
-/** H4: the app's events, to every window: the matters as they now are, a matter's threads that changed, and matters
- * taken off the list (an addition the root didn't list). */
+/** H4: the matter rows that changed and the matters that left the list, or with `all` the whole list (and `removed`
+ * empty): the generated MattersChanged, its rows as the room reads them. */
+export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterInfo[] };
+
+/** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
+ * and the Chrome download's state (browser-install.ts). */
 export type AppEvent =
-  | { matters_changed: { matters: MatterInfo[] } }
+  | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
-  | { matters_removed: { matters: MatterId[] } };
+  | { browser_install: { state: BrowserInstallState } };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
 export const WIRE = {
   listPapers: "list_papers",
   getSettings: "get_settings",
   setUiSettings: "set_ui_settings",
+  /** HostCommand::SetToolSettings; only the settings window sends it, the main window's host refuses it. */
+  setToolSettings: "set_tool_settings",
   settingsChanged: "settings_changed",
   listMatters: "list_matters",
   listThreads: "list_threads",
@@ -210,7 +230,6 @@ export const WIRE = {
   matterCreated: "matter_created",
   mattersChanged: "matters_changed",
   threadsChanged: "threads_changed",
-  mattersRemoved: "matters_removed",
 } as const;
 
 /** H8: a matter's papers. */
@@ -222,6 +241,8 @@ export interface PapersHost {
 export interface SettingsHost {
   getSettings(): Promise<Settings>;
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
+  /** The tools' switches: only the keys that change, refused whole with `settings.locked` when one is locked. */
+  setToolSettings(patch: ToolsPatch): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
 }
@@ -281,7 +302,7 @@ export type NextHost = {
 /** One part of NextHost: a host row. */
 export type NextPart = keyof NextHost;
 
-/** No part at all: today's desktop host. */
+/** No part at all: a transport with no app feed (NullTransport). */
 export const NO_NEXT: NextHost = {
   papers: null,
   settings: null,
@@ -305,9 +326,10 @@ const hasAppFeed = (transport: object): transport is AppFeedSource =>
   typeof (transport as Partial<AppFeedSource>).onAppEvent === "function";
 
 /** The calls the room needs beyond today's host, each part null where the transport's host lacks it. A NextHostSource
- * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings, papers and
- * agents over the wire and nothing else, since the desktop host has no H4, H5, H6 or H20 yet. The one place the room
- * asks for them. */
+ * (FakeTransport) gives its scripted parts; a transport with the app feed (TauriTransport) gives settings, papers,
+ * agents, matters (H3, H5, H6) and the app events (H4) over the wire. Not the rest: the desktop host refuses
+ * restart_agent and has no retry_from, and the default location stays off so Create picks the parent folder, as today.
+ * The one place the room asks for them. */
 export function nextHostOf(transport: HostTransport): NextHost {
   if (isSource(transport)) return transport.nextHost();
   if (hasAppFeed(transport))
@@ -316,6 +338,8 @@ export function nextHostOf(transport: HostTransport): NextHost {
       settings: wireSettingsHost(transport),
       papers: wirePapersHost(transport),
       agents: wireAgentsHost(transport),
+      matters: wireMattersHost(transport),
+      app: wireAppHost(transport),
     };
   return NO_NEXT;
 }

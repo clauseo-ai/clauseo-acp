@@ -2,7 +2,7 @@
 // look, and when the composer warns: a session window at 95% used, or the agent's own warning under 75%.
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   AgentLimitsView,
   Freshness,
@@ -10,17 +10,31 @@ import type {
   LimitWindowView,
   MeterTone,
 } from "../../transport/protocol.ts";
-import { bandOf, lookOf, meterLine, planLine, shareLeft, warningKey } from "./plan-model.ts";
+import {
+  bandOf,
+  forgetShownResets,
+  lookOf,
+  meterLine,
+  planLine,
+  shareLeft,
+  warningKey,
+} from "./plan-model.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { warningWords } from "../thread/warning-words.ts";
 
-const today = (h: number, m: number) => {
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d.getTime();
-};
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  forgetShownResets();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const MIDNIGHT = NOW - 17 * 3_600_000; // the start of NOW's day
+const today = (h: number, m: number) => MIDNIGHT + h * 3_600_000 + m * 60_000;
 const RESET = today(18, 10);
-const NOW = today(12, 0);
 
 /** The host's tone for a share, as `limits` gives it without an agent's warning. */
 const toneOf = (used: number): MeterTone =>
@@ -236,5 +250,21 @@ describe("the warning", () => {
 
   test("never for an account billed by use", () => {
     expect(warningKey(entry(99, { billing: "pay_as_you_go" }))).toBe("");
+  });
+});
+
+describe("the reset the line shows", () => {
+  const status = (resets_at: number) =>
+    planLine("en", "claude", entry(30, { meter: meter(30, { resets_at }) }), NOW)?.status;
+
+  test("two reads 100 ms apart across a minute's edge show the same minute", () => {
+    const edge = today(18, 10) - 50; // 6:09:59.950 pm, then 6:10:00.050 pm
+    expect(status(edge)).toBe("Plenty left until the 6:09 pm reset");
+    expect(status(edge + 100)).toBe("Plenty left until the 6:09 pm reset");
+  });
+
+  test("a reset that moves five minutes shows the new time", () => {
+    expect(status(RESET)).toBe("Plenty left until the 6:10 pm reset");
+    expect(status(RESET + 5 * 60_000)).toBe("Plenty left until the 6:15 pm reset");
   });
 });

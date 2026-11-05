@@ -16,6 +16,7 @@ mod cancel;
 mod close;
 mod end;
 mod failure;
+mod forced_mode;
 mod inputs;
 mod known;
 mod launch_checks;
@@ -31,6 +32,7 @@ mod state;
 mod steps;
 mod text;
 mod undo;
+mod undo_preview;
 mod updates;
 mod writer;
 
@@ -61,6 +63,7 @@ pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
 pub(crate) use route::{TurnCommand, command};
+pub(crate) use undo_preview::preview_undo;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -151,6 +154,10 @@ struct Current {
     phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
+    /// The lawyer's last permission answer in the turn was a reject kind and no Stop came
+    /// after it: the agent's own `Cancelled` then ends the turn `NotAllowed` (Codex's only
+    /// reject option ends the turn). Another answer or a Stop clears it.
+    refused: bool,
     /// The first limit signal of the turn.
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
@@ -161,6 +168,9 @@ struct Current {
     prompt_call: Option<AbortHandle>,
     /// The cancel fallback timer.
     cancel_timer: Option<AbortHandle>,
+    /// The agent's descendants listed as the prompt went out, filled in by the prompt's task:
+    /// a cancelled turn ends what is new since (`agent/leftovers.rs`).
+    before_prompt: Option<BeforePrompt>,
     /// How the turn ends, once known.
     end: Option<End>,
     /// The turn failed on the host's side; it ends `Failed` with this `TurnFailed`.
@@ -173,7 +183,16 @@ struct Current {
     detach: Option<DetachReason>,
     /// A Codex prompt failed with a JSON-RPC error: the turn's end waits for a limits read.
     limit_read: Option<end::LimitRead>,
+    /// When it became the current turn, on the host's monotonic clock: the usage counts'
+    /// `answer_ended.took` runs from here to `end::finish`.
+    started: std::time::Duration,
+    /// When its first answer text came, on the same clock: `answer_ended.first_words`.
+    first_words: Option<std::time::Duration>,
 }
+
+/// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is
+/// taken, and when it failed.
+type BeforePrompt = std::rc::Rc<std::cell::RefCell<Option<clauseo_process::Snapshot>>>;
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +309,19 @@ enum JobKind {
     Permission(Box<asks::HeldOpenCheck>),
 }
 
+impl JobKind {
+    /// The variant's name, for the log: its fields can hold paths.
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Before(_) => "Before",
+            Self::After(_) => "After",
+            Self::Reconcile(_) => "Reconcile",
+            Self::Undo(_) => "Undo",
+            Self::Permission(_) => "Permission",
+        }
+    }
+}
+
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
 pub(crate) fn agent_input(actor: &mut Actor, thread: ThreadId, input: AgentInput) {
     match input {
@@ -317,6 +349,9 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             LogFor::Replay => session::on_replay_log(actor, thread, result),
             LogFor::Reconcile => reconcile::on_log(actor, thread, result),
             LogFor::Undo(ask) => undo::on_log(actor, thread, *ask, result),
+            LogFor::PreviewUndo { turn, reply } => {
+                undo_preview::on_log(actor, thread, turn, reply, result);
+            }
         },
     }
 }
@@ -361,8 +396,8 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
         }
         (kind, reply) => {
             tracing::error!(
-                ?kind,
-                ?reply,
+                kind = kind.name(),
+                reply = reply.name(),
                 "a matter job answered with another job's reply"
             );
         }
@@ -375,7 +410,10 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
 pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Failure>) {
     let TurnTag { thread, then } = tag;
     match (then, outcome) {
-        (Then::Launch(turn), Ok(())) => steps::on_accepted(actor, thread, turn),
+        (Then::Launch(turn), Ok(())) => {
+            super::counting::question_sent(actor, thread, clauseo_counts::schema::Delivery::Now);
+            steps::on_accepted(actor, thread, turn);
+        }
         (Then::Launch(turn), Err(_)) => steps::on_refused(actor, thread, turn),
         (Then::Started(turn), Ok(())) => steps::on_started(actor, thread, turn),
         (Then::Closing(turn), Ok(())) => failure::on_closed(actor, thread, turn),

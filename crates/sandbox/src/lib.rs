@@ -11,7 +11,9 @@
 //! - The walk of the matter ([`scan_matter`], [`scan_links`]): links that lead outside it and
 //!   every `.git`, one walk per launch, and the link rule budget ([`LINK_RULES_MAX`],
 //!   [`Policy::link_folders`]).
-//! - Tier detection ([`detect`], cached; [`probe`], uncached): [`Tier`] and [`NoSandbox`].
+//! - Tier detection ([`detect`], the OS's part cached; [`probe`], uncached): [`Tier`] and
+//!   [`NoSandbox`].
+//! - The set-up seam ([`SandboxSetup`], [`SetupState`], [`SetupError`]) and [`SetAside`].
 //! - The denial types every stage C task uses ([`Denial`], [`Access`], [`PathClass`],
 //!   [`HostRefusal`], [`Reachability`]), the per-launch [`DenialSink`], and the rate cap
 //!   ([`CappedSink`]: at most [`DENIALS_PER_WINDOW`] per [`DENIAL_WINDOW`], the excess folded
@@ -22,9 +24,17 @@
 //!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
 //!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
 //!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
-//!   which no bind or claim of this process hands out again until the claim drops.
+//!   which no bind or claim of this process hands out again until the claim drops (on macOS
+//!   and Linux a dropped claim's port is retired, never handed out again).
 //! - Unix: the browser's socket folder ([`BrowserSocketDir`]), `/tmp/clauseo-ab-<id>`, made
 //!   by the host for one launch, removed on drop, and swept at host start.
+//! - Windows: the folder check (`windows::folder_support`), which says whether a folder can
+//!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`. Tier B's
+//!   records (S15), in `<data_dir>\sandbox\` under a protected DACL: matter SIDs in
+//!   `matters.json` (`windows::matters`), the set-up marker `setup.json` (`windows::marker`),
+//!   the machine's sandbox user and owner records (`windows::sandbox_user_sid`, which the
+//!   desktop's start-up check reads, and `windows::sandbox_owner_sid`), and the set-up state they
+//!   give (`windows::setup_state`).
 //!
 //! # Interface
 //!
@@ -42,9 +52,14 @@
 //!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
 //!   which also lists every `.git` and the folders `.git` files name.
-//! - [`detect`] and [`probe`] return a [`Detection`]: tier A on macOS when Seatbelt applies a
-//!   profile, C with [`NoSandbox::NotBuilt`] on Windows until S15, C with
+//! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
+//!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
+//!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
+//!   C with the state's reason otherwise ([`NoSandbox::NeedsSetUp`] with no `setup`); C with
 //!   [`NoSandbox::UnsupportedOs`] elsewhere.
+//! - Windows: `windows::matters::matter_sid``(data_dir, matter)` gives a matter's SID, made and
+//!   saved at its first call (`windows::matters::MatterSids`, `windows::sids::Reserved`);
+//!   `windows::marker::read`, `write` and `state_of`; `windows::setup_state`.
 //! - [`DenialSink`]: `denied` for each denial, `upstream` for the proxy's reachability. `Arc` of
 //!   a sink is a sink. [`CappedSink::new`] wraps one on the real clock, [`CappedSink::with_clock`]
 //!   on any [`Clock`]; [`CappedSink::tick`] delivers a held count from the owner's timer.
@@ -93,8 +108,12 @@
 //! - Time is an input: the rate cap reads only its [`Clock`]; [`SystemClock::new`] is the one
 //!   read of the real clock. A sink gets every denial that passes the cap, with no dedupe; the
 //!   cap calls the inner sink with no lock held.
-//! - Detection runs its probe at most once per process. The probe and the watcher's
-//!   `/usr/bin/log stream` are the only processes this crate starts outside a launcher.
+//! - Detection runs its OS probe at most once per process; Windows' set-up state is read on
+//!   every call, never cached. The probe and the watcher's `/usr/bin/log stream` are the only
+//!   processes this crate starts outside a launcher.
+//! - A matter's SID is random, made once, never given to another matter, and never removed here;
+//!   `matters.json` and `setup.json` change only by whole-file atomic replacement, and a
+//!   `matters.json` that can't be read is refused, never rewritten.
 //! - The proxy decides by host name and never looks inside TLS; it connects only to addresses
 //!   it checked, never resolving a name twice; its token never reaches a log, a `Debug` or the
 //!   upstream.
@@ -108,7 +127,8 @@
 //! `subtle`; on macOS, for the watcher, `async-process` (`log stream`) and `serde_json` (its
 //! lines); on Unix, `rustix` (the open-file limit, and the browser socket folder's effective
 //! user id, lock file and `flock`); on Windows, `socket2` and `windows` (the proxy's
-//! listeners).
+//! listeners, the folder check, the registry and token reads) and `serde_json` (tier B's
+//! records).
 //!
 //! # Start reading
 //!
@@ -134,8 +154,25 @@ mod macos;
 mod policy;
 pub mod ports;
 pub mod proxy;
+mod setup;
 #[cfg(test)]
 mod test_support;
+#[cfg(windows)]
+pub mod windows;
+// Tier B's record files are plain files, so their tests run on every OS: elsewhere they compile
+// for tests alone, at the crate root, where `super::` names the same siblings as in `windows`.
+#[cfg(all(test, not(windows)))]
+#[path = "windows/marker.rs"]
+pub mod marker;
+#[cfg(all(test, not(windows)))]
+#[path = "windows/matters.rs"]
+pub mod matters;
+#[cfg(all(test, not(windows)))]
+#[path = "windows/sids.rs"]
+pub mod sids;
+#[cfg(all(test, not(windows)))]
+#[path = "windows/write.rs"]
+mod write;
 
 #[cfg(unix)]
 pub use browser_dir::BrowserSocketDir;
@@ -143,7 +180,7 @@ pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
     PathClass, Reachability, SystemClock,
 };
-pub use detect::{Detection, NoSandbox, Tier, detect, probe};
+pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 #[cfg(target_os = "macos")]
@@ -158,3 +195,4 @@ pub use proxy::{
     Allowlist, Exchange, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route, Upstream,
     Verdict, builtin_allowlist, start_proxy, upstream_for,
 };
+pub use setup::{SandboxSetup, SetAside, SetupError, SetupState};

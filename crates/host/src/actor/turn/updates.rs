@@ -11,13 +11,14 @@ use clauseo_protocol::{
 };
 use clauseo_store::BlobIn;
 
-use super::super::Actor;
+use super::super::{Actor, title_source};
 use super::agents::{Agent, Stage};
 use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, asks, current, lost, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::rate::{Admitted, RatedUpdate};
 
 /// Where an update belongs.
@@ -131,8 +132,21 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             signal,
         } => asks::on_limit(actor, thread, &session, origin, &signal),
         AcpEvent::Warning { session, warning } => {
-            tracing::warn!(%thread, ?session, ?warning, "the agent sent something unreadable");
+            let warning = warning_kind(&warning);
+            tracing::warn!(%thread, ?session, warning, "the agent sent something unreadable");
         }
+    }
+}
+
+/// A warning's kind, for the log: its fields hold what the agent sent.
+const fn warning_kind(warning: &clauseo_acp::ProtocolWarning) -> &'static str {
+    use clauseo_acp::ProtocolWarning as W;
+    match warning {
+        W::MalformedLine { .. } => "malformed_line",
+        W::UnknownUpdate { .. } => "unknown_update",
+        W::InvalidUpdate { .. } => "invalid_update",
+        W::UnknownLimitStatus { .. } => "unknown_limit_status",
+        W::SessionFailure { .. } => "session_failure",
     }
 }
 
@@ -188,7 +202,7 @@ fn on_update(
         | AgentUpdate::CompactionSummaryChunk { .. }) => plain(actor, thread, update),
     };
     if let Err(error) = done {
-        tracing::warn!(%thread, %error, "an agent update was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an agent update was not logged");
     }
 }
 
@@ -398,7 +412,10 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
     let event: DomainEvent = match update {
         AgentUpdate::Plan(entries) => PlanReplaced { entries }.into(),
         AgentUpdate::Commands(commands) => CommandsAvailable { commands }.into(),
-        AgentUpdate::CurrentMode { mode_id } => ModeChanged { mode_id }.into(),
+        AgentUpdate::CurrentMode { mode_id } => {
+            super::forced_mode::reset_if_forced(actor, thread, &mode_id);
+            ModeChanged { mode_id }.into()
+        }
         AgentUpdate::ConfigOptions(options) => ConfigOptionsReplaced { options }.into(),
         AgentUpdate::Usage { used, size, cost } => UsageUpdated {
             context_used: Some(used),
@@ -424,7 +441,7 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         AgentUpdate::CompactionEnded { acp_id, completed } => {
             let summary = agent(actor, thread).and_then(|agent| agent.compaction.remove(&acp_id));
             if !completed {
-                tracing::warn!(%thread, %acp_id, "a compaction failed or was cancelled");
+                tracing::warn!(%thread, "a compaction failed or was cancelled");
                 return Ok(());
             }
             let built = build::compaction_changed(CompactionStatus::Completed, summary);
@@ -437,7 +454,9 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
     commit(actor, thread, [event], Vec::new())
 }
 
-/// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title.
+/// A session title: `ThreadRenamed { by: Agent }` and the row, when it is a valid title the
+/// thread takes (see `title_source`). A title the thread already has from the agent makes no
+/// event, so the replay Codex sends on load adds nothing.
 fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> Result<(), Error> {
     let Some(title) = title else {
         tracing::debug!(%thread, "the agent cleared its session title");
@@ -450,6 +469,16 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
             return Ok(());
         }
     };
+    let entry = actor.threads.get(&thread).ok_or_else(|| lost("a thread"))?;
+    let (source, has_title) = (entry.row.title_source, entry.row.title.is_some());
+    if !title_source::title_may_change(source, has_title, RenameSource::Agent) {
+        // No event came between the chunks, so the message run goes on.
+        tracing::debug!(%thread, "the agent's title does not replace the thread's title");
+        return Ok(());
+    }
+    if source == Some(RenameSource::Agent) && entry.row.title.as_deref() == Some(title.as_str()) {
+        return Ok(());
+    }
     let mut out = Out::new(actor, thread, None)?;
     out.push(
         actor,
@@ -464,6 +493,7 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
         .get_mut(&thread)
         .ok_or_else(|| lost("a thread"))?;
     entry.row.title = Some(title.as_str().to_owned());
+    entry.row.title_source = Some(RenameSource::Agent);
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
     out.send(actor, Then::Nothing)?;

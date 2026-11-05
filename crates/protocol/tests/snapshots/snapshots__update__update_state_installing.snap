@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 32
+expression: "UpdateState::Installing { version: \"0.4.1\".to_owned(), }"
+---
+{
+  "installing": {
+    "version": "0.4.1"
+  }
+}

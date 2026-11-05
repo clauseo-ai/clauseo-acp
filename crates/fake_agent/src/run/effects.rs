@@ -16,12 +16,13 @@ pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
 }
 
 /// Sleeps for `duration`: the `--pace-ms` pause between updates, for the speed scoreboard's
-/// session only. Scenarios themselves stay timer-free.
+/// session only, and the `FAKE_SIGNIN=ok-after:<ms>` wait of a sign-in mode (`signin.rs`).
+/// Scenarios themselves stay timer-free.
 #[expect(
     clippy::disallowed_methods,
-    reason = "--pace-ms paces the speed scoreboard's session; scenarios stay timer-free"
+    reason = "a fake pauses for --pace-ms or ok-after; scenarios stay timer-free"
 )]
-pub(super) fn pause(duration: Duration) {
+pub(crate) fn pause(duration: Duration) {
     std::thread::sleep(duration);
 }
 
@@ -73,11 +74,11 @@ fn make_parent(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Starts `fake_agent --hold` with null stdio, writes its PID to `pid_file` (relative to the
-/// process folder, the agent's working directory, not the session `cwd`), then writes
-/// `fake_agent: child <pid>` to stderr.
-pub(super) fn spawn_child(pid_file: &str) -> Result<(), String> {
-    let pid = start_hold().map_err(|e| format!("spawn_child: {e}"))?;
+/// Starts `fake_agent --hold` with null stdio (with `own_group`, in a process group of its own
+/// on Unix), writes its PID to `pid_file` (relative to the process folder, the agent's working
+/// directory, not the session `cwd`), then writes `fake_agent: child <pid>` to stderr.
+pub(super) fn spawn_child(pid_file: &str, own_group: bool) -> Result<(), String> {
+    let pid = start_hold(own_group).map_err(|e| format!("spawn_child: {e}"))?;
     crate::write::write(pid_file, format!("{pid}\n"))
         .map_err(|e| format!("spawn_child: write {pid_file}: {e}"))?;
     write_stderr(&diagnostic(format_args!("child {pid}")))
@@ -88,13 +89,23 @@ pub(super) fn spawn_child(pid_file: &str) -> Result<(), String> {
     clippy::disallowed_methods,
     reason = "the one process fake_agent starts: the grandchild S7's tree-kill tests need"
 )]
-fn start_hold() -> std::io::Result<u32> {
-    let child = std::process::Command::new(std::env::current_exe()?)
+fn start_hold(own_group: bool) -> std::io::Result<u32> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command
         .arg("--hold")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+        .stderr(std::process::Stdio::null());
+    // Out of the agent's process group, as Codex starts each command in a session of its own:
+    // a signal to the agent's group no longer reaches it. Windows has no groups: the child stays
+    // in the agent's job, as a Codex command does.
+    #[cfg(unix)]
+    if own_group {
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    }
+    #[cfg(not(unix))]
+    let _: bool = own_group;
+    let child = command.spawn()?;
     // Never waited for: the grandchild must outlive this process until a test kills it.
     Ok(child.id())
 }

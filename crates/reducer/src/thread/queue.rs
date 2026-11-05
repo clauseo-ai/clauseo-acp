@@ -199,7 +199,7 @@ pub(crate) fn set_queue_held(state: &mut ThreadState, held: bool) -> Option<View
     if !set(&mut header.queue_held, held) {
         return None;
     }
-    Some(ViewChange::Upsert(Box::new(ViewEntry::Header(
+    Some(ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(
         header.clone(),
-    ))))
+    )))))
 }

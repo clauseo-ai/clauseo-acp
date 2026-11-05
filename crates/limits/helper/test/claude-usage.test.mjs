@@ -2,7 +2,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,9 +36,11 @@ function setup() {
   };
 }
 
-// Runs the helper with a scratch environment: PATH plus the given variables only.
-function run(env = {}) {
+// Runs the helper with a scratch environment: PATH plus the given variables only. `before(fx)` runs
+// after the folders are made and before the helper starts.
+function run(env = {}, before = () => {}) {
   const fx = setup();
+  before(fx);
   const result = spawnSync(process.execPath, [join(fx.install, "clauseo-claude-usage.mjs")], {
     cwd: fx.work,
     timeout: 10_000,
@@ -84,6 +86,24 @@ test("query() gets exactly the locked-down options; the usage call skips behavio
     ["initializationResult", USAGE_METHOD, "close"],
   );
   assert.deepEqual(calls[1].args, [{ skipBehaviors: true }]);
+});
+
+test("a .claude/settings.json in the run folder (Vertex env) is not read: query() gets the same options, cwd is the run folder", () => {
+  const vertex = {
+    env: {
+      CLAUDE_CODE_USE_VERTEX: "1",
+      ANTHROPIC_VERTEX_PROJECT_ID: "clauseo-g16-not-a-project",
+      CLOUD_ML_REGION: "us-east5",
+    },
+  };
+  const result = run({ STUB_MODE: "ok" }, (fx) => {
+    mkdirSync(join(fx.work, ".claude"));
+    writeFileSync(join(fx.work, ".claude", "settings.json"), JSON.stringify(vertex));
+  });
+  assert.equal(oneLine(result).ok, true);
+  const recorded = JSON.parse(readFileSync(result.fx.optionsOut, "utf8"));
+  assert.deepEqual(recorded.options, expectedOptions(realpathSync(result.fx.work)));
+  assert.deepEqual(recorded.options.settingSources, []);
 });
 
 test("CLAUDE_CODE_EXECUTABLE set: pathToClaudeCodeExecutable is that path", () => {

@@ -52,6 +52,24 @@ expression: "entry(\"tool_call\")"
     "finished_at": 1760000005000,
     "background": {
       "steer": "01900000-0000-7000-8000-000000000009"
+    },
+    "web": {
+      "search": {
+        "query": "limitation period contract",
+        "results": [
+          {
+            "title": "Limitation Act 1980",
+            "url": "https://example.com/a"
+          }
+        ]
+      },
+      "pages": [
+        {
+          "url": "https://example.com/a",
+          "title": "Limitation Act 1980",
+          "via": "browser"
+        }
+      ]
     }
   }
 }

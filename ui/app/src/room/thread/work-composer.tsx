@@ -31,6 +31,7 @@ import {
   type Mentions,
   type PlanChoice,
   type SlashCommand,
+  type ToolsSegment,
 } from "@clauseo/components/clauseo/composer.tsx";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -53,6 +54,7 @@ import { pausedLine, type Paused } from "./limit-words.ts";
 import { pickFull, queueFullLine } from "./composer-queue.ts";
 import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
+import { useHold } from "../first-run/hold.ts";
 import type { AskHow, Drafts } from "./session.ts";
 
 export function WorkComposer({
@@ -61,6 +63,7 @@ export function WorkComposer({
   draftKey,
   choice,
   plan = "",
+  tools = null,
   commands,
   mentions,
   disabled,
@@ -90,6 +93,8 @@ export function WorkComposer({
   choice?: PlanChoice | undefined;
   /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
   plan?: string;
+  /** The tool line after the plan, from the open thread's header's tools (tool-line.tsx); null for none. */
+  tools?: ToolsSegment | null;
   /** The agent's commands for the `/` menu, from the open thread's header; [] before there are any. */
   commands: readonly SlashCommand[];
   /** The matter's papers for the `@` menu; none with no matter open, or without H8. */
@@ -135,7 +140,14 @@ export function WorkComposer({
   // the paused line's time against this render's clock (U12)
   const now = useNow();
   const agentPlan = useAgentPlan();
+  // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
+  const hold = useHold(transport);
+  const gated = hold?.gate !== undefined;
   const field = useRef<ComposerHandle>(null);
+  // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
+  // its turn stopped before the answer cleared the field (the refill below)
+  const asking = useRef<string | null>(null);
+  const held = useRef<string | null>(null);
   useImperativeHandle(
     ref,
     () => ({
@@ -198,7 +210,7 @@ export function WorkComposer({
   // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
   // the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || asked.trim() === "") return;
+    if (disabled || gated || asked.trim() === "") return;
     if (busy) {
       queue(asked);
       return;
@@ -215,13 +227,17 @@ export function WorkComposer({
     send(asked, { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
-    if (disabled || asked.trim() === "") return;
+    if (disabled || gated || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
     // the papers the field's tokens mention as it goes, read with its words, sent with them however they go
     const files = (field.current?.mentioned() ?? []).map((m) => m.id);
+    if (how === undefined) asking.current = asked;
     void onAsk(asked, files.length === 0 ? how : { ...how, files }).then((ok) => {
+      if (how === undefined) asking.current = null;
+      const back = held.current;
+      held.current = null;
       if (!ok) return;
       // pressed on the hint's Send now or Queue, which sit outside the field's row: the focus goes back to the field
       // first, so the clear is one step Cmd/Ctrl+Z takes back, and not lost with the hint as it goes
@@ -233,6 +249,8 @@ export function WorkComposer({
       // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
       // gone to another conversation while the question went
       if (draftKey !== null && drafts.get(draftKey) === asked) drafts.delete(draftKey);
+      // its turn already stopped (refill below): the question comes back into the field just emptied
+      if (back !== null) field.current?.fill(back);
     });
   };
   // U7's Queue: the field's words, sent as Ask sends them (send_prompt with no `delivery`, the wire's queue)
@@ -257,13 +275,19 @@ export function WorkComposer({
   );
   const steerField = () => send(field.current?.text() ?? "", { behind: true, delivery: "steer" });
   // the stopped question, once per break, and only into an empty field: words typed since keep their place, and fill
-  // never moves the lawyer's focus or breaks a composition
+  // never moves the lawyer's focus or breaks a composition. The host's answer to send_prompt and the turn over the
+  // stream come back two ways, in either order: an agent that exits at once can stop the turn while the field still
+  // holds the question, before the answer clears it. Then the question waits for that clear and comes back after it
   const refilled = useRef<EntryId | null>(null);
   const refillKey = refill?.key ?? null;
   const refillText = refill?.text ?? "";
   useEffect(() => {
     if (refillKey === null || refilled.current === refillKey) return;
     refilled.current = refillKey;
+    if (asking.current === refillText && field.current?.text() === refillText) {
+      held.current = refillText;
+      return;
+    }
     field.current?.fill(refillText);
   }, [refillKey, refillText]);
   const waitTitle = wait?.title ?? mt(w.lang, "New conversation");
@@ -329,12 +353,15 @@ export function WorkComposer({
       // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
       notice={paused === null ? <LimitWarning /> : null}
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
-      plan={plan}
+      // under the gate the plan is the gate's to name: the status line says nothing of it
+      plan={gated ? "" : plan}
+      tools={tools}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       commands={commands}
       mentions={mentions}
-      working={line?.state ?? null}
+      working={line?.state ?? hold?.working ?? null}
+      {...(gated ? { gate: hold?.gate } : {})}
       opening
       busy={busy}
       onStop={onStop}
@@ -385,7 +412,7 @@ export function WorkComposer({
         </>
       }
       disabled={disabled}
-      line={false}
+      line={hold?.line ?? false}
       testIds={{
         field: "composer",
         ask: "send",

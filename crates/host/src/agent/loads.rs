@@ -52,6 +52,25 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 /// live). claude.ai connectors stay off too, since [`CLAUDE_AI_MCP_VAR`] is still `false`.
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
+/// The permission mode Clauseo runs every Claude session in: Claude Code's `default` ("Manual":
+/// ask before each change). The window cannot pick another mode yet (the desktop bridge refuses
+/// `SetMode`), so this is Clauseo's choice at every session start. Its cost: a mode the
+/// lawyer reached inside a session (accept edits, from a plan-exit option) goes back to
+/// `default` when the session is next loaded, the safer side. Re-applying the thread's last
+/// logged mode instead cannot tell such a choice from a mode the user's settings started a
+/// session in: both are logged as `ModeChanged`.
+///
+/// claude-agent-acp 0.89.1 starts a session in the mode it reads itself: an explicit one (only
+/// its own re-creations pass one), else a resumed transcript's, else `permissions.defaultMode`
+/// from the user's, the folder's and managed settings (`acp-agent.js:7215-7219`,
+/// `session-mode.js:22-35`). Its `SettingsManager` calls the SDK's `resolveSettings({cwd})`,
+/// which never sees the `--settings` flag (`settings.js`), and it forces the SDK option
+/// `permissionMode` over `_meta.claudeCode.options` (`acp-agent.js:7338`; `:388` lists the key
+/// as the adapter's own). So neither `_meta` route can set it: the host sends
+/// `session/set_mode` with this mode before the first prompt when the session started in
+/// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
+pub(crate) const CLAUDE_MODE: &str = "default";
+
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.
 pub(crate) const CLAUDE_AI_MCP_VAR: &str = "ENABLE_CLAUDEAI_MCP_SERVERS";
 
@@ -84,7 +103,6 @@ pub(crate) fn managed_mcp_path() -> PathBuf {
 pub(crate) fn mcp_control(managed: &Path) -> McpControl {
     if std::fs::metadata(managed).is_ok() {
         tracing::warn!(
-            path = %managed.display(),
             "an enterprise managed-mcp.json is present: the firm controls MCP on this machine, \
              so the session gets no MCP servers and no strict MCP config"
         );
@@ -99,9 +117,17 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// value at `claudeCode`, `options` or `env` that is not an object is replaced.
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
-/// - `claudeCode.options.extraArgs`: `setting-sources` taken out, in both forms the SDK turns
-///   into a flag (`{"setting-sources": "…"}` and `{"setting-sources=…": null}`), since an extra
-///   flag goes after the SDK's own `--setting-sources` and would win.
+/// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
+///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
+///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
+///   resumed transcript's `bypassPermissions` is rejected, falling back to the settings'
+///   `defaultMode`, which may be `acceptEdits` (`acp-agent.js:7212-7219`,
+///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
+///   then starts in (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
+///   start, since `_meta` cannot set it.
+/// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
+///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
+///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
@@ -129,6 +155,7 @@ pub(crate) fn session_meta(
     let mut env = take_object(&mut options, "env");
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     options.insert("env".to_owned(), Value::Object(env));
+    options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
     let (strict, sources) = match control {
         McpControl::Clauseo => (true, CLAUDE_SETTING_SOURCES),
         McpControl::Managed => (false, CLAUDE_MANAGED_SETTING_SOURCES),
@@ -136,6 +163,7 @@ pub(crate) fn session_meta(
     if let Some(Value::Object(extra)) = options.get_mut("extraArgs") {
         extra.retain(|flag, _| {
             let taken_out = is_flag(flag, SETTING_SOURCES_FLAG)
+                || MODE_FLAGS.iter().any(|name| is_flag(flag, name))
                 || (control == McpControl::Managed
                     && MANAGED_MCP_FLAGS.iter().any(|name| is_flag(flag, name)));
             !taken_out
@@ -147,7 +175,7 @@ pub(crate) fn session_meta(
     if let Some(keys) = keys {
         profile::claude_options(&mut options, keys);
     }
-    if let Some(entry) = guard.and_then(|guard| guard_entry(guard.program, guard.matter)) {
+    if let Some(entry) = guard.and_then(guard_entry) {
         let mut settings = take_object(&mut options, "settings");
         let mut hooks = take_object(&mut settings, "hooks");
         let mut pre_tool_use = match hooks.remove("PreToolUse") {
@@ -172,8 +200,20 @@ fn is_flag(flag: &str, name: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
 }
 
+/// The claude-agent-acp option that, `false`, keeps `bypassPermissions` out of a session.
+pub(crate) const ALLOW_BYPASS_OPTION: &str = "allowDangerouslySkipPermissions";
+
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";
+
+/// The Claude Code flags that set the permission mode or allow bypass. An extra flag goes after
+/// the SDK's own `--permission-mode`, so it would win over [`CLAUDE_MODE`] and over
+/// [`ALLOW_BYPASS_OPTION`].
+const MODE_FLAGS: [&str; 3] = [
+    "permission-mode",
+    "dangerously-skip-permissions",
+    "allow-dangerously-skip-permissions",
+];
 
 /// The flags that make Claude Code refuse to start while `managed-mcp.json` is present: a
 /// server config, and strict MCP config.
@@ -187,6 +227,9 @@ pub(crate) struct GuardHook<'a> {
     pub(crate) program: &'a Path,
     /// The session's matter folder, passed as `--matter`.
     pub(crate) matter: &'a Path,
+    /// Forced ask (`agent/forced_ask.rs`): the hook runs before every tool, with
+    /// [`ASK_ALL_FLAG`](crate::agent::forced_ask::ASK_ALL_FLAG) after the folder.
+    pub(crate) ask_all: bool,
 }
 
 /// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
@@ -199,7 +242,8 @@ pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash|P
 pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 
 /// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
-/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools.
+/// (`crate::pre_write_guard`) and `--matter <matter>` before each of [`GUARD_MATCHER`]'s tools;
+/// with `ask_all`, before every tool (MCP tools included) and with `--ask-all` last.
 /// The matter folder goes as an argument because the hook input's `cwd` follows the agent's
 /// `cd`. `None`, with a warning, when `program` or `matter` is no UTF-8 string: JSON cannot
 /// carry it, and a lossy copy could run another program or guard another folder.
@@ -216,29 +260,51 @@ pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
 /// adapter, so that needs an adapter downgrade.
 ///
 /// [`pre_write_guard::FLAG`]: crate::pre_write_guard::FLAG
-pub(crate) fn guard_entry(program: &Path, matter: &Path) -> Option<Value> {
+pub(crate) fn guard_entry(guard: GuardHook<'_>) -> Option<Value> {
+    let GuardHook {
+        program,
+        matter,
+        ask_all,
+    } = guard;
     let (Some(command), Some(matter)) = (program.to_str(), matter.to_str()) else {
         tracing::warn!(
-            program = %program.display(),
-            matter = %matter.display(),
             "the pre-write guard's program or matter path is not UTF-8: no guard hook goes to \
              the agent"
         );
         return None;
     };
+    let mut args = vec![
+        crate::pre_write_guard::FLAG,
+        crate::pre_write_guard::MATTER_FLAG,
+        matter,
+    ];
+    let matcher = if ask_all {
+        args.push(crate::agent::forced_ask::ASK_ALL_FLAG);
+        crate::agent::forced_ask::EVERY_TOOL
+    } else {
+        GUARD_MATCHER
+    };
     Some(serde_json::json!({
-        "matcher": GUARD_MATCHER,
+        "matcher": matcher,
         "hooks": [{
             "type": "command",
             "command": command,
-            "args": [
-                crate::pre_write_guard::FLAG,
-                crate::pre_write_guard::MATTER_FLAG,
-                matter,
-            ],
+            "args": args,
             "timeout": GUARD_TIMEOUT_SECONDS,
         }],
     }))
+}
+
+/// Why `guard` gives no [`guard_entry`], as a kind fit for a log line (no path): `no_program`
+/// when the host has no guard program (`HostConfig::with_pre_write_guard` unset, as when
+/// `current_exe` failed), `program_not_utf8` or `matter_not_utf8`. `None` when it gives one.
+pub(crate) fn guard_missing(guard: Option<GuardHook<'_>>) -> Option<&'static str> {
+    match guard {
+        None => Some("no_program"),
+        Some(guard) if guard.program.to_str().is_none() => Some("program_not_utf8"),
+        Some(guard) if guard.matter.to_str().is_none() => Some("matter_not_utf8"),
+        Some(_) => None,
+    }
 }
 
 /// The object at `key`, taken out of `map`; empty when it is missing or not an object.

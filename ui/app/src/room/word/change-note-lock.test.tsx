@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// U3's direct Undo meeting a lock, over FakeTransport: an undo of one Word document refused with matter.file_locked
-// names it in Word's lines under the change note; any other lock shows the error map's line; Try again, in Undo's
+// U3's direct Undo meeting a lock, over FakeTransport: an undo refused with matter.file_locked names the Word documents
+// the host names as held (one, or two or more in one line) in Word's lines under the change note; any other lock shows
+// the error map's line; Try again, in Undo's
 // place, sends the same undo_step with a new command_id; focus goes to Try again as the lines come and back to Undo,
 // or the note, as they go; and axe finds nothing on the lock's lines.
 import { readFileSync } from "node:fs";
@@ -80,6 +81,7 @@ test("an undo of one .docx refused with the lock names it in Word's lines, with 
   expect(lock()?.getAttribute("role")).toBe("alert");
   expect(lines()).toEqual([
     "Close '\u2068Reply.docx\u2069' in Word to undo the change.",
+    "If it isn't open in Word, close Word and try again.",
     "Word holds the file while it is open. Nothing has changed yet.",
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
@@ -95,14 +97,44 @@ test("in Hindi the lines are Versions' own, with the file's name isolated", asyn
   const file = "\u2068Reply.docx\u2069";
   expect(lines()).toEqual([
     vt("hi", "Close '{file}' in Word to undo the change.", { file }),
+    vt("hi", "If it isn't open in Word, close Word and try again."),
     vt("hi", "Word holds the file while it is open. Nothing has changed yet."),
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe(vt("hi", "Try again"));
 });
 
+test("an undo of three files refused naming one .docx names only that one, in Word's lines", async () => {
+  h = await noteOf(["a/Lease.docx", "b/Notice.docx", "c/brief.txt"], () => ({
+    ...LOCKED,
+    files: ["a/Lease.docx"],
+  }));
+  await press(h, "undo");
+  expect(lines()).toEqual([
+    "Close '\u2068Lease.docx\u2069' in Word to undo the change.",
+    "If it isn't open in Word, close Word and try again.",
+    "Word holds the file while it is open. Nothing has changed yet.",
+  ]);
+  expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
+});
+
+test("an undo refused naming two Word documents names both, in one line of Word's", async () => {
+  h = await noteOf(["a/Lease.docx", "b/Notice.docx", "c/brief.txt"], () => ({
+    ...LOCKED,
+    files: ["a/Lease.docx", "b/Notice.docx"],
+  }));
+  await press(h, "undo");
+  expect(lines()).toEqual([
+    "Close '\u2068Lease.docx\u2069' and '\u2068Notice.docx\u2069' in Word to undo the change.",
+    "If they aren't open in Word, close Word and try again.",
+    "Word holds the file while it is open. Nothing has changed yet.",
+  ]);
+  expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
+  expect(h.one("undo")).toBeNull();
+});
+
 for (const [name, paths] of [
-  ["two files", ["Notice.docx", "Reply.docx"]],
   ["one .txt", ["brief.txt"]],
+  ["two files, one .txt", ["Notice.docx", "brief.txt"]],
 ] as const) {
   test(`an undo of ${name} refused with the lock shows the error map's line, with Try again`, async () => {
     h = await noteOf([...paths], () => LOCKED);
@@ -159,6 +191,7 @@ test("a Try again refused with the lock again keeps the lines; refused otherwise
   await press(h, "undo");
   await press(h, "word-lock-retry");
   expect(lines()[0]).toBe("Close '\u2068Reply.docx\u2069' in Word to undo the change.");
+  expect(lines()[1]).toBe("If it isn't open in Word, close Word and try again.");
   expect(h.sent("undo_step")).toHaveLength(2);
   refusal = { code: "store.io", message: "x", retryable: true };
   await press(h, "word-lock-retry");

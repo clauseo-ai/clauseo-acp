@@ -65,6 +65,19 @@ fn another_format_or_tokenizer_needs_a_rebuild_and_is_emptied() {
 }
 
 #[test]
+fn an_index_of_the_previous_format_needs_a_rebuild() {
+    // Format 1 was the index before the text was normalised: its rows are not searched again.
+    let dir = TestDir::new("open-previous-format");
+    let mut index = index(&dir);
+    answer(&mut index, 1, 1, 1, "stored before normalisation");
+    drop(index);
+    set_meta(&dir, "format", "1");
+    let (index, state) = SearchIndex::open(dir.path()).unwrap();
+    assert!(state.needs_rebuild);
+    assert_eq!(count(&index, "stored ", Mode::Ranked), 0);
+}
+
+#[test]
 fn a_file_that_is_not_a_database_needs_a_rebuild() {
     let dir = TestDir::new("open-garbage");
     write::write(&dir.path().join(FILE_NAME), &[0x5a; 8192]);
@@ -126,4 +139,33 @@ fn a_rebuild_reports_conversations_done_of_total() {
     index.finish_rebuild().unwrap();
     assert_eq!(index.progress(), None);
     assert_eq!(find(&index, "rebuilt ", Mode::Ranked).indexing, None);
+}
+
+#[test]
+fn watermarks_land_with_their_rows_and_a_failed_batch_keeps_neither() {
+    use clauseo_protocol::StreamId;
+
+    use crate::common::{seq, thread};
+    let dir = TestDir::new("open-watermarks");
+    let mut index = index(&dir);
+    let stream = StreamId::Thread(thread(1));
+    index
+        .batch(|b| {
+            b.set_watermark(stream, Some(seq(7)))?;
+            Ok(())
+        })
+        .unwrap();
+    let failed: Result<(), clauseo_search::Error> = index.batch(|b| {
+        b.set_watermark(stream, Some(seq(9)))?;
+        Err(clauseo_search::Error::Corrupt("stop".into()))
+    });
+    assert!(failed.is_err());
+    assert_eq!(index.watermarks().unwrap(), vec![(stream, seq(7))]);
+    drop(index);
+    let (index, state) = SearchIndex::open(dir.path()).unwrap();
+    assert!(!state.needs_rebuild);
+    assert_eq!(index.watermarks().unwrap(), vec![(stream, seq(7))]);
+    let mut index = index;
+    index.batch(|b| b.set_watermark(stream, None)).unwrap();
+    assert_eq!(index.watermarks().unwrap().len(), 0);
 }

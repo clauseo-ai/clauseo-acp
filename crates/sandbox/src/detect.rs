@@ -1,13 +1,19 @@
-//! Tier detection: how strong a jail this machine gives, found once and cached.
+//! Tier detection: how strong a jail this machine gives. What the OS can give is probed once
+//! and cached; on Windows, whether tier B is set up is read on every call (D6), so a set-up that
+//! finishes shows without a restart.
 
 use std::sync::OnceLock;
 
 use serde::Serialize;
 
+use crate::SandboxSetup;
+#[cfg(any(windows, test))]
+use crate::SetupState;
+
 /// The protection tier (synthesis §2.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Tier {
-    /// An OS jail: Seatbelt on macOS (and MXC on Windows, S15).
+    /// An OS jail: Seatbelt on macOS (and MXC on Windows, S15a).
     A,
     /// The Windows sandbox user (S15).
     B,
@@ -15,18 +21,25 @@ pub enum Tier {
     C,
 }
 
-/// Why there is no jail (tier C). S15 adds the Windows set-up causes; R17 maps each to
-/// `NotProtectedCause`.
+/// Why there is no jail (tier C). R17 maps each to `NotProtectedCause`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum NoSandbox {
-    /// This OS has no jail in Clauseo (Linux stays tier C, shared ruling 6).
+    /// This OS has no jail in Clauseo (Linux stays tier C, shared ruling 6), or this Windows
+    /// has none: ARM64, or a build before Windows 10 22H2.
     UnsupportedOs,
-    /// The jail for this OS is not built yet (Windows until S15).
+    /// The jail for this OS is not built yet. Nothing gives it since S15; kept for the wire.
     NotBuilt,
     /// The jail's probe failed; what it said.
     ProbeFailed(String),
+    /// Windows: the sandbox user is not set up for this user, or an older Clauseo set it up.
+    NeedsSetUp,
+    /// Windows: the set-up's prompt was declined.
+    SetUpRefused,
+    /// Windows: the set-up failed, its records can't be read, or another Windows user owns it
+    /// (D5); what happened.
+    SetUpFailed(String),
 }
 
 /// What [`detect`] found.
@@ -47,29 +60,93 @@ impl Detection {
     }
 }
 
-/// The tier of this machine, probed on the first call and cached for the process (the host
-/// calls it at start). [`probe`] runs the probe again, uncached.
-pub fn detect() -> Detection {
-    static DETECTED: OnceLock<Detection> = OnceLock::new();
-    DETECTED.get_or_init(probe).clone()
+/// The reason [`SetupState::SetUpByOtherUser`] gives, in [`NoSandbox::SetUpFailed`].
+pub const SET_UP_BY_OTHER_USER: &str = "set up by another Windows user";
+
+/// The tier of this machine. The OS's part is probed on the first call and cached for the
+/// process. macOS: the Seatbelt probe, as [`probe`] describes; `setup` is never asked. Windows:
+/// the OS's part (architecture and build) is cached, then `setup`'s
+/// [`state`](SandboxSetup::state) is read on every call: tier B only when it is
+/// [`SetupState::Ready`], else C with its reason; no `setup` is C with
+/// [`NoSandbox::NeedsSetUp`]. Others: C with [`NoSandbox::UnsupportedOs`].
+pub fn detect(setup: Option<&dyn SandboxSetup>) -> Detection {
+    #[cfg(windows)]
+    {
+        static OS: OnceLock<OsFacts> = OnceLock::new();
+        decide(OS.get_or_init(crate::windows::os_facts), setup)
+    }
+    #[cfg(not(windows))]
+    {
+        static DETECTED: OnceLock<Detection> = OnceLock::new();
+        let _ = setup;
+        DETECTED.get_or_init(|| probe(None)).clone()
+    }
 }
 
 /// The probe behind [`detect`], uncached. macOS: tier A when `/usr/bin/sandbox-exec` runs
 /// `/usr/bin/true` under `(version 1)(allow default)` and it exits 0, else C with
-/// [`NoSandbox::ProbeFailed`]. Windows: C with [`NoSandbox::NotBuilt`]. Others: C with
-/// [`NoSandbox::UnsupportedOs`].
-pub fn probe() -> Detection {
+/// [`NoSandbox::ProbeFailed`]; `setup` is never asked. Windows: as [`detect`], with the OS read
+/// again. Others: C with [`NoSandbox::UnsupportedOs`].
+pub fn probe(setup: Option<&dyn SandboxSetup>) -> Detection {
     #[cfg(target_os = "macos")]
     {
+        let _ = setup;
         seatbelt::probe(std::path::Path::new(seatbelt::SANDBOX_EXEC))
     }
     #[cfg(windows)]
     {
-        Detection::none(NoSandbox::NotBuilt)
+        decide(&crate::windows::os_facts(), setup)
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
+        let _ = setup;
         Detection::none(NoSandbox::UnsupportedOs)
+    }
+}
+
+/// What Windows can give, found once per process: the machine's own architecture (an x64 build
+/// under ARM64's emulation still sees ARM64) and the build number.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OsFacts {
+    /// The machine is ARM64, which stays tier C until one exists to test on (G6 row 13).
+    pub(crate) arm64: bool,
+    /// `CurrentBuildNumber`; why it could not be read.
+    pub(crate) build: Result<u32, String>,
+}
+
+/// Windows 10 22H2's build; tier B needs it or later.
+#[cfg(any(windows, test))]
+pub(crate) const FIRST_BUILD: u32 = 19045;
+
+/// The Windows tier from the cached OS facts and the set-up's live state. ARM64 and builds
+/// before [`FIRST_BUILD`] are C with [`NoSandbox::UnsupportedOs`] whatever the set-up says, and a
+/// build that can't be read is C with [`NoSandbox::ProbeFailed`]. Tier A (S15a's MXC probe) is
+/// not built, so the rest is tier B when the state is [`SetupState::Ready`] and C otherwise.
+#[cfg(any(windows, test))]
+fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
+    if os.arm64 {
+        return Detection::none(NoSandbox::UnsupportedOs);
+    }
+    match &os.build {
+        Ok(build) if *build < FIRST_BUILD => return Detection::none(NoSandbox::UnsupportedOs),
+        Ok(_) => {}
+        Err(why) => return Detection::none(NoSandbox::ProbeFailed(why.clone())),
+    }
+    let Some(setup) = setup else {
+        return Detection::none(NoSandbox::NeedsSetUp);
+    };
+    match setup.state() {
+        SetupState::Ready => Detection {
+            tier: Tier::B,
+            reason: None,
+        },
+        SetupState::Needed | SetupState::Outdated { .. } => Detection::none(NoSandbox::NeedsSetUp),
+        SetupState::Refused => Detection::none(NoSandbox::SetUpRefused),
+        SetupState::Failed(why) => Detection::none(NoSandbox::SetUpFailed(why)),
+        SetupState::SetUpByOtherUser => {
+            Detection::none(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned()))
+        }
     }
 }
 
@@ -153,36 +230,4 @@ mod seatbelt {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detection_is_cached_and_matches_the_probe() {
-        assert_eq!(detect(), probe());
-        assert_eq!(detect(), detect());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_is_tier_a() {
-        assert_eq!(
-            probe(),
-            Detection {
-                tier: Tier::A,
-                reason: None
-            }
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_is_not_built_yet() {
-        assert_eq!(probe(), Detection::none(NoSandbox::NotBuilt));
-    }
-
-    #[cfg(not(any(target_os = "macos", windows)))]
-    #[test]
-    fn other_systems_are_unsupported() {
-        assert_eq!(probe(), Detection::none(NoSandbox::UnsupportedOs));
-    }
-}
+mod tests;

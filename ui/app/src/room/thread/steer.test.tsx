@@ -8,7 +8,7 @@
 import { act, createElement, memo, Profiler, type ProfilerOnRenderCallback } from "react";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentText,
   append,
@@ -45,18 +45,24 @@ vi.mock("./rows.tsx", async (load) => {
 });
 
 let h: Harness | null = null;
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   rowCommits.clear();
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 const T1 = TURN;
 const T2: TurnId = uuid(2, 4);
 const T3: TurnId = uuid(3, 4);
-/** Today, 4:31 pm on the local clock, and a minute on. */
-const AT = new Date(new Date().setHours(16, 31, 0, 0)).getTime();
+/** 4:31 pm on NOW's day, and a minute on. */
+const AT = NOW - 29 * 60_000;
 const LATER = AT + 60_000;
 
 /** A user message of turn `turn`, with any of H9's fields. */

@@ -1,21 +1,23 @@
 //! The talk over in-memory pipes, against an app-server the test plays line by line with the
-//! fixtures: the requests sent, the answers mapped, and stdin closed at the end.
+//! fixtures: the requests sent, the answers mapped, and stdin closed at the end. The grace
+//! `account/read` gets runs on a `ManualTimer` the test fires, so nothing sleeps.
 
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use clauseo_codex_appserver::Error as AppServerError;
-use clauseo_protocol::BillingProvider;
+use clauseo_process::ManualTimer;
+use clauseo_protocol::{AccountRef, Billing, BillingProvider, PlanLabel, WindowKind};
 use futures::channel::mpsc;
 use futures::executor::block_on;
 use futures::future::join;
 use futures::{AsyncRead, AsyncWrite, StreamExt as _};
 use serde_json::{Value, json};
 
-use super::{answers, fixture, pay_as_you_go, plus_outcome};
-use crate::ReadOutcome;
-use crate::readers::codex::{Talked, outcome, talk};
+use super::{answers, fixture, pay_as_you_go, plus_outcome, plus_unread_outcome};
+use crate::readers::codex::{ACCOUNT_GRACE, Talked, outcome, talk};
+use crate::{AccountRead, ReadOutcome};
 
 /// The app-server's stdin: each write is one message (the client writes a line at once).
 struct Stdin(mpsc::UnboundedSender<Vec<u8>>);
@@ -104,6 +106,20 @@ impl Server {
         self.send(&json!({"id": request["id"], "result": result}));
     }
 
+    fn fail(&self, request: &Value, code: i64, message: &str) {
+        self.send(&json!({"id": request["id"], "error": {"code": code, "message": message}}));
+    }
+
+    /// Reads `account/read` then `account/rateLimits/read`, both written before any answer, and
+    /// checks their params.
+    async fn both_requests(&mut self) -> (Value, Value) {
+        let account = self.request("account/read").await;
+        assert_eq!(account["params"], json!({}));
+        let limits = self.request("account/rateLimits/read").await;
+        assert_eq!(limits["params"], json!({"excludeResetCreditDetails": true}));
+        (account, limits)
+    }
+
     /// Plays `initialize` and expects `initialized` after it.
     async fn handshake(&mut self) {
         let init = self.request("initialize").await;
@@ -138,30 +154,134 @@ fn answered(talked: Talked) -> ReadOutcome {
     }
 }
 
+/// The error codex 0.162.1's `account/read` gives when workspace routing discovery times out.
+const DISCOVERY_TIMED_OUT: &str = "workspace routing discovery timed out";
+
+fn plus() -> Value {
+    fixture(include_str!("../../../../fixtures/codex/plus.json"))
+}
+
 #[test]
-fn a_chatgpt_account_reads_its_limits_without_reset_credit_details() {
-    let fixture = fixture(include_str!("../../../../fixtures/codex/plus.json"));
+fn both_requests_are_on_the_wire_before_either_answer() {
+    let fixture = plus();
     let (stdin, stdout, mut server) = pipes();
+    let timer = ManualTimer::new();
     let script = async {
         server.handshake().await;
-        let account = server.request("account/read").await;
-        assert_eq!(account["params"], json!({}));
+        // Nothing has been answered yet: both requests came regardless.
+        let (account, limits) = server.both_requests().await;
+        assert_ne!(account["id"], limits["id"]);
         server.respond(&account, &fixture["accountRead"]);
-        let limits = server.request("account/rateLimits/read").await;
-        assert_eq!(limits["params"], json!({"excludeResetCreditDetails": true}));
         server.respond(&limits, &fixture["rateLimitsRead"]);
         server.read_end().await;
     };
-    let (talked, ()) = block_on(join(talk(stdin, stdout), script));
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
+    assert!(matches!(talked, Talked::Answered(_)), "{talked:?}");
+}
+
+#[test]
+fn a_chatgpt_account_reads_its_limits_without_reset_credit_details() {
+    let fixture = plus();
+    let (stdin, stdout, mut server) = pipes();
+    let timer = ManualTimer::new();
+    let script = async {
+        server.handshake().await;
+        let (account, limits) = server.both_requests().await;
+        server.respond(&account, &fixture["accountRead"]);
+        server.respond(&limits, &fixture["rateLimitsRead"]);
+        server.read_end().await;
+    };
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
     let Talked::Answered(got) = &talked else {
         panic!("no answers: {talked:?}");
     };
     assert_eq!(**got, answers(&fixture));
     assert_eq!(answered(talked), plus_outcome());
+    assert_eq!(timer.fired(), 0);
 }
 
 #[test]
-fn api_key_and_signed_out_accounts_ask_no_rate_limits() {
+fn limits_first_then_account_read_within_the_grace_is_the_same_outcome() {
+    let fixture = plus();
+    let (stdin, stdout, mut server) = pipes();
+    let timer = ManualTimer::new();
+    let script = async {
+        server.handshake().await;
+        let (account, limits) = server.both_requests().await;
+        server.respond(&limits, &fixture["rateLimitsRead"]);
+        server.respond(&account, &fixture["accountRead"]);
+        server.read_end().await;
+    };
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
+    assert_eq!(answered(talked), plus_outcome());
+    assert_eq!(timer.fired(), 0);
+}
+
+#[test]
+fn a_late_account_read_gives_the_limits_alone_after_the_grace() {
+    let fixture = plus();
+    let (stdin, stdout, mut server) = pipes();
+    let timer = ManualTimer::new();
+    let script = async {
+        server.handshake().await;
+        let (account, limits) = server.both_requests().await;
+        server.respond(&limits, &fixture["rateLimitsRead"]);
+        // The limits are in: the only wait the talk arms is the grace, and once it passes the
+        // talk ends without `account/read`'s answer, so the read takes the limits' time plus the
+        // grace, not discovery's.
+        assert_eq!(timer.next_armed().await, ACCOUNT_GRACE);
+        assert!(timer.fire());
+        server.read_end().await;
+        // `account` is never answered: discovery is still running when the talk ends.
+        assert_eq!(account["method"], "account/read");
+    };
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
+    assert_eq!(timer.armed(), 1);
+    assert_eq!(ACCOUNT_GRACE, std::time::Duration::from_millis(500));
+    let outcome = answered(talked);
+    assert_eq!(outcome, plus_unread_outcome());
+    let ReadOutcome::Usage { limits, .. } = outcome else {
+        unreachable!()
+    };
+    assert_eq!(limits.account.0, "plan");
+    assert_eq!(
+        limits.plan.as_ref().map(|plan| plan.0.as_str()),
+        Some("ChatGPT Plus")
+    );
+    assert_eq!(limits.windows.len(), 2);
+}
+
+#[test]
+fn account_read_failing_on_discovery_gives_the_limits_alone() {
+    // Either order: the error before the limits, and after them inside the grace.
+    for error_first in [true, false] {
+        let fixture = plus();
+        let (stdin, stdout, mut server) = pipes();
+        let timer = ManualTimer::new();
+        let script = async {
+            server.handshake().await;
+            let (account, limits) = server.both_requests().await;
+            if error_first {
+                server.fail(&account, -32603, DISCOVERY_TIMED_OUT);
+                server.respond(&limits, &fixture["rateLimitsRead"]);
+            } else {
+                server.respond(&limits, &fixture["rateLimitsRead"]);
+                server.fail(&account, -32603, DISCOVERY_TIMED_OUT);
+            }
+            server.read_end().await;
+        };
+        let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
+        assert_eq!(
+            answered(talked),
+            plus_unread_outcome(),
+            "error first: {error_first}"
+        );
+        assert_eq!(timer.fired(), 0);
+    }
+}
+
+#[test]
+fn api_key_and_signed_out_accounts_are_classified_by_account_read() {
     for (text, expected) in [
         (
             include_str!("../../../../fixtures/codex/api-key.json"),
@@ -172,17 +292,48 @@ fn api_key_and_signed_out_accounts_ask_no_rate_limits() {
             ReadOutcome::SignedOut,
         ),
     ] {
-        let fixture = fixture(text);
-        let (stdin, stdout, mut server) = pipes();
-        let script = async {
-            server.handshake().await;
-            let account = server.request("account/read").await;
-            server.respond(&account, &fixture["accountRead"]);
-            server.read_end().await;
-        };
-        let (talked, ()) = block_on(join(talk(stdin, stdout), script));
-        assert_eq!(answered(talked), expected);
+        // The limits' refusal before `account/read`, and after it.
+        for refusal_first in [true, false] {
+            let fixture = fixture(text);
+            let (stdin, stdout, mut server) = pipes();
+            let timer = ManualTimer::new();
+            let script = async {
+                server.handshake().await;
+                let (account, limits) = server.both_requests().await;
+                if refusal_first {
+                    server.fail(&limits, -32600, "codex account authentication required");
+                    server.respond(&account, &fixture["accountRead"]);
+                } else {
+                    server.respond(&account, &fixture["accountRead"]);
+                }
+                server.read_end().await;
+            };
+            let (talked, ()) = block_on(join(talk(stdin, stdout, &timer), script));
+            assert_eq!(answered(talked), expected);
+            assert_eq!(timer.armed(), 0);
+        }
     }
+}
+
+#[test]
+fn a_chatgpt_account_whose_limits_fail_fails_the_talk() {
+    let fixture = plus();
+    let (stdin, stdout, mut server) = pipes();
+    let script = async {
+        server.handshake().await;
+        let (account, limits) = server.both_requests().await;
+        server.fail(&limits, -32000, "usage endpoint failed");
+        server.respond(&account, &fixture["accountRead"]);
+        server.read_end().await;
+    };
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &ManualTimer::new()), script));
+    assert!(
+        matches!(
+            talked,
+            Talked::Failed(AppServerError::Rpc { code: -32000, .. })
+        ),
+        "{talked:?}"
+    );
 }
 
 #[test]
@@ -190,12 +341,13 @@ fn an_error_answer_fails_the_talk_and_still_closes_stdin() {
     let (stdin, stdout, mut server) = pipes();
     let script = async {
         server.handshake().await;
-        let account = server.request("account/read").await;
+        let (account, limits) = server.both_requests().await;
         let message = format!("token sk{}", "-x");
-        server.send(&json!({"id": account["id"], "error": {"code": -32000, "message": message}}));
+        server.fail(&account, -32000, &message);
+        server.fail(&limits, -32600, "refused");
         server.read_end().await;
     };
-    let (talked, ()) = block_on(join(talk(stdin, stdout), script));
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &ManualTimer::new()), script));
     assert!(
         matches!(
             talked,
@@ -212,9 +364,64 @@ fn stdout_ending_before_an_answer_is_closed() {
         let _init = server.request("initialize").await;
         drop(server.stdout);
     };
-    let (talked, ()) = block_on(join(talk(stdin, stdout), script));
+    let (talked, ()) = block_on(join(talk(stdin, stdout, &ManualTimer::new()), script));
     assert!(
         matches!(talked, Talked::Failed(AppServerError::Closed)),
         "{talked:?}"
+    );
+}
+
+/// Plays a recorded app-server stdout line by line: a response goes out only once the reader has
+/// sent the request with its id, as the app-server answers, and the other lines go out at once.
+async fn replay(server: &mut Server, recorded: &str) {
+    for line in recorded.lines() {
+        let message: Value = serde_json::from_str(line).unwrap();
+        if message.get("result").is_some() {
+            loop {
+                let sent = server.read().await;
+                if sent["id"] == message["id"] {
+                    break;
+                }
+            }
+        }
+        server
+            .stdout
+            .unbounded_send(format!("{line}\n").into_bytes())
+            .unwrap();
+    }
+    server.read_end().await;
+}
+
+#[test]
+fn a_recorded_plus_session_decodes_to_plus_limits() {
+    let recorded = include_str!("../../../../fixtures/recorded/codex/plus.jsonl");
+    let (stdin, stdout, mut server) = pipes();
+    let timer = ManualTimer::new();
+    let (talked, ()) = block_on(join(
+        talk(stdin, stdout, &timer),
+        replay(&mut server, recorded),
+    ));
+    let ReadOutcome::Usage {
+        limits,
+        reached: None,
+        account_read: AccountRead::Read,
+    } = answered(talked)
+    else {
+        panic!("not usage with no reached type");
+    };
+    assert_eq!(limits.account, AccountRef("test@example.com".to_owned()));
+    assert_eq!(limits.plan, Some(PlanLabel("ChatGPT Plus".to_owned())));
+    assert_eq!(limits.billing, Billing::Plan);
+    let shape: Vec<(WindowKind, Option<u32>)> = limits
+        .windows
+        .iter()
+        .map(|window| (window.kind, window.duration_mins))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (WindowKind::Session, Some(300)),
+            (WindowKind::Weekly, Some(10080))
+        ]
     );
 }

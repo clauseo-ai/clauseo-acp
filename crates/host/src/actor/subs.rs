@@ -24,6 +24,7 @@ use super::streams::StreamSlot;
 use crate::encode::EncodedEvent;
 use crate::error::Error;
 use crate::handle::{EventSubscription, Sink, Subscription};
+use crate::log_file::Cause;
 use crate::principal::{Access, authorize};
 
 /// One view subscriber of a loaded stream.
@@ -254,7 +255,11 @@ pub(super) fn on_event_page(
             .filter(|envelope| Some(envelope.seq) > delivered && Some(envelope.seq) <= head)
             .collect(),
         Err(error) => {
-            tracing::warn!(%stream, %error, "an event subscription could not read the store");
+            tracing::warn!(
+                %stream,
+                error = %Cause(&error),
+                "an event subscription could not read the store"
+            );
             subs.remove(index);
             return;
         }
@@ -352,7 +357,9 @@ pub(super) fn on_drained(actor: &mut Actor, stream: StreamId, id: SubId) {
                     sub.lagged = false;
                     sub.offer(&reset);
                 }
-                Err(error) => tracing::error!(%stream, %error, "a reset did not encode"),
+                Err(error) => {
+                    tracing::error!(%stream, error = %Cause(&error), "a reset did not encode");
+                }
             }
         }
         return;

@@ -12,7 +12,7 @@ use super::{
 use crate::error::Error;
 use crate::write::scratch::Scratch;
 
-const CLAUDE_SCRIPT: &str =
+pub(crate) const CLAUDE_SCRIPT: &str =
     "install/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
 const CODEX_SCRIPT: &str = "install/node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 const CLAUDE_SDK: &str = "install/node_modules/@anthropic-ai/claude-agent-sdk/package.json";
@@ -40,7 +40,7 @@ fn launch(script: &Path) -> AgentLaunch {
 }
 
 /// The SDK under `scratch`'s install folder: its `package.json` and its entry, `sdk.mjs`.
-fn sdk(scratch: &Scratch) {
+pub(crate) fn sdk(scratch: &Scratch) {
     scratch.file(CLAUDE_SDK, SDK_PACKAGE);
     scratch.file(&format!("{SDK_DIR}/sdk.mjs"), "");
 }

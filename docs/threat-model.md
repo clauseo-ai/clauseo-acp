@@ -172,8 +172,14 @@ lawyer's documents somewhere.
   to its matter by the jail's port rule
 - `built`: Loopback ports for the browser are claimed per session (`ports::claim_port`, and
   `claim_port_at` for agent-browser's Windows daemon port) in a process-wide registry, so no two
-  launches of this host get the same port; gap: another process can take a claimed port before
-  the browser binds it, and the launch then fails with no fallback
+  launches of this host get the same port. On macOS and Linux a port is retired once its claim
+  or listener ends, never handed to a later launch of the same host process, since a jailed
+  child that called `setsid` outlives the tree kill with its jail's rule for that port. Gaps: the
+  retired set is in memory, so after a host restart a survivor of the last run can meet a later
+  launch on its old port; and another process, such as another user's host, can bind a claimed
+  port before the browser does (it binds at its first tool call), and the agent's jail then
+  reaches that listener. S15's listener rule closes the second on Windows; on macOS both are
+  residual risks
 - `built`: Before the allowlist it refuses an IP literal that is not public and `localhost` or
   any name under it, on both listeners, so no allowlist entry lets one through
 - `built`: After DNS it refuses a host if any address is loopback, private, link-local, shared,

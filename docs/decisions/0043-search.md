@@ -39,7 +39,26 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   way, `ना` gives false hits through `न`, prefixes mean nothing, and Devanagari queries run about
   3× slower. With `M*`, words stay whole: `न्यायालय` and the prefix `अनु*` match, a fragment does
   not. `remove_diacritics 2` still folds Latin accents, and punctuation is dropped, so the phrase
-  `"2019 5 scc 1"` matches `(2019) 5 SCC 1`.
+  `"2019 5 scc 1"` matches `(2019) 5 SCC 1`. It keeps the Devanagari marks: a test pins that a
+  vowel sign (`कि`, `कु`), the anusvara, the virama and the nukta each tell a word apart from the
+  word without it, so none is folded away.
+- **Normalisation.** One function, `normalise`, is applied to every text the index stores (prompts,
+  answers, tool titles, conversation and matter titles, file names) and to the query text before
+  the FTS5 query is built. It is Unicode NFC, with ZERO WIDTH NON-JOINER (U+200C) and ZERO WIDTH
+  JOINER (U+200D) removed first. NFC decomposes the nukta letters U+0958–095F into their base and
+  U+093C, and composes U+0929, U+0931 and U+0934, so a nukta letter is one word in either
+  encoding. The joiners are format characters, which the tokenizer treats as separators: a word
+  typed without its joiner (`क्षेत्र`) would not match the stored word with one (`क्‍षेत्र`), so
+  removing them makes both the same word. Snippets therefore show the normalised text: NFC, and
+  without the joiners, so an explicit half form renders as its unjoined letters, and an emoji's
+  joined sequence shows as its parts. A file's `path` keeps the name as it was put, since the host
+  opens files by the bytes it gave (the matter path is compared byte for byte); only the indexed
+  text (`body`) is normalised.
+- **Digits.** Stored text keeps the digits it was written with. A query term (a word, or a phrase
+  or citation run) with digits in either script matches both spellings: `138` finds `१३८` and
+  the other way round, and `धारा 138` finds `धारा १३८` (`("धारा 138" OR "धारा १३८")`). A Devanagari
+  number counts as a number in a citation run, so `धारा १३८` is a phrase. The rule is wider than
+  a word of only digits: a term with digits in either script gets both spellings.
 - **The file.** `search.sqlite` (with `-wal` and `-shm`) in the data folder beside
   `state.sqlite`. It is derived, outside 0006's frozen schema, and left out of backups and exports.
   It holds a plain-text copy of conversations, so it gets the store's protection: created with mode
@@ -72,8 +91,9 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
 - **Results.** A page carries the hits, a cursor for the next page, the mode and a rebuild's
   progress (`done` of `total` conversations). A hit carries its kind, matter, thread, entry, path,
   time, the matter's and conversation's titles, and its snippet as segments (`text`, `hit`), at most
-  32 tokens and 240 characters. A match marks its whole token, a prefix match included. Segments
-  rather than offsets: the app never maps between UTF-8 and UTF-16.
+  32 tokens and 240 characters, all of the normalised text (see Normalisation). A match marks its
+  whole token, a prefix match included. Segments rather than offsets: the app never maps between
+  UTF-8 and UTF-16.
 - **Paging.** Newest first pages by rowid. Ranked pages are offsets into the window, pinned to the
   newest rowid and the time of the first page, so rows that arrive meanwhile do not shift them. A
   cursor travels as text (base64url of a small versioned record with an FNV-1a check of the
@@ -85,6 +105,46 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   reported as needing a rebuild. Nothing is migrated. The host reopens threads through the store
   and the reducer, so entries are assembled as the views assemble them, inserts in time order and ends with an `optimize`. At 5,000 conversations the FTS
   part takes 12–13 s, measured; the whole rebuild is estimated at 30–60 s.
+- **The host's wiring.** A `clauseo-search` thread owns the index; the actor never touches it.
+  At the end of applying each returned commit the actor `try_send`s the commit's envelopes on a
+  bounded channel (1,024 commits) and never waits; when it is full the actor sets a lagged flag
+  and the thread reads every stream whose head is past its watermark from the store. A
+  watermark (table `watermarks`, the last `seq` of each stream the index reflects) is written in
+  the same transaction as the rows it covers, so the thread only ever indexes durable events and
+  a crash replays at most what the last transaction did not cover. A commit that does not follow
+  on from its stream's watermark makes the thread read that stream from the store too. Each
+  thread's fold (prompt and tool-call orders, each turn's entries, the text of running turns'
+  answers) is kept for the 64 most recently touched threads and folded again from the log
+  otherwise. An answer is assembled as the reducer assembles an agent message (its
+  `TextAppended` chunks in seq order, the first chunk's kind and seq), tested against the
+  reducer. A steer's prompt follows the turn its `SteerResolved` names, as the reducer moves it,
+  so an undo takes exactly that turn's prompts; a queued prompt taken back before it was sent
+  (`RemoveQueuedPrompt`, a turn that ends cancelled without starting) leaves the index. A thread
+  whose matter is forgotten writes nothing, even when the fold only learns its matter then.
+  File names are listed from the matter's history (`Matter::files_at`) at each
+  `CheckpointRecorded`, `OutsideEdits` and `VersionRestored`, on the search thread: a checkpoint
+  follows every change of files, so the listing replaces the per-change deltas. A reopen and
+  listing of a matter of 10,000 files and 1,000 checkpoints took 38 ms (11.5 ms on a matter
+  already open), measured on the review's request. `ForgetMatter`
+  deletes the matter's rows (a forgotten matter must not show in search); importing it again
+  indexes its streams from the whole log.
+- **Rebuilds in place.** The crate has no build-beside-and-rename step, so a rebuild runs in the
+  emptied `search.sqlite` and a search meanwhile answers from what is indexed so far, with
+  `indexing: { done, total }` in conversations. The thread walks every matter's stream, then
+  every conversation least recently active first, so the newest conversations get the highest
+  row ids (newest first pages by row id); rows within a conversation keep their time order. The
+  host serves at once: the index opens and rebuilds on its own thread, and searches are answered
+  between two conversations of the rebuild.
+- **The query.** `HostQuery::Search` (or `HostHandle::search`, which names the window) answers
+  `QueryResult::Search`: a `SearchPage` or `Cancelled`. The host picks newest first while the
+  query's last character is not whitespace and ranked otherwise; a cursor that does not decode
+  gives the first page. A hit carries its entry's `order` in the conversation's view, which
+  `PageEntries` pages by (the index keys rows by it; it holds no entry ids). A newer
+  `generation` from the same window interrupts that window's running query, answers its queued
+  older ones `Cancelled`, and an older one that finishes late is answered `Cancelled` instead of
+  its page. The desktop sends the window's label and its page's `open_stream` number, so a
+  reloaded page counts its generations afresh; only the main window may search (the settings
+  window reads `GetSettings` alone, 0028).
 - **Release one answers.** Tool titles are indexed at a low weight and can be filtered by kind.
   Thoughts are out, with kind 8 reserved. Undone steps' rows are dropped. Hinglish matches exact
   spellings; spelling variants and matching across scripts need transliteration, a later design.
@@ -113,7 +173,11 @@ matter: 24–37 ms, or 1.4–1.6 s with secure-delete.
   writer.
 - It costs about 66 MB per 1,000 conversations, mostly the text copy kept for snippets. Keeping
   `items.body` compressed and building snippets in Rust is the lever if that matters.
-- Any change to the format or the tokenizer bumps `FORMAT` and triggers a rebuild.
+- Any change to the format or the tokenizer bumps `FORMAT` and triggers a rebuild. Format 2
+  (normalised text, see Normalisation): an index of format 1 reopens as needing a rebuild, and
+  the host rebuilds it from the log.
+- The normalisation is one step on every write and every query. It costs what NFC costs on a
+  few kilobytes of text per entry; the perf test records the typing numbers.
 - A new event that adds, changes or removes searchable text must reach the index; any new delete
   command must delete index rows.
 - Text of a running turn is not found until the turn ends; a file dropped into the folder is found

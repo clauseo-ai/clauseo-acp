@@ -133,7 +133,7 @@ fn check_step<'a>(
             relative(from, SESSION_CWD).map_err(|m| at.load_error(m))?;
             relative(to, SESSION_CWD).map_err(|m| at.load_error(m))?;
         }
-        StepKind::SpawnChild { pid_file } => {
+        StepKind::SpawnChild { pid_file, .. } => {
             relative(pid_file, PROCESS_FOLDER).map_err(|m| at.load_error(m))?;
         }
         StepKind::SendLine(text) => {

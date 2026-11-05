@@ -10,27 +10,41 @@
 //! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
 //!   keys, and the registry calls any other value name unknown;
 //! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
-//!   in `reset`, which a value that does not type puts the key back at its default
-//!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
+//!   in `reset` (`leaf/reset.rs`), which a value that does not type puts the key back at its
+//!   default (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no
+//!   arm);
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`, and its name in `UiPatch::keys`) and in
 //!   `Settings::apply_ui_patch`. Two tests in `ui/tests.rs` fail when `keys()` misses a `ui`
 //!   key or differs from the names the writer saves: `the_keys_are_the_names_the_writer_saves`
 //!   and `the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`;
-//! - for a key that decides what an agent can reach, its name in [`SECURITY_KEYS`] and its
-//!   arm in [`refuse`], which sets the value it is locked at when its policy is unknown.
+//! - for a key that decides what an agent can reach, or what Clauseo sends off the machine, its
+//!   name in [`SECURITY_KEYS`] (a section of entries by id, as `plans.`, ends in `.`) and its
+//!   arm in [`refuse`] (`leaf/reset.rs`), which sets the value it is locked at when its policy
+//!   is unknown;
+//! - for a key a policy may only turn off, its name in [`OFF_ONLY_KEYS`] (`Effective::load`
+//!   ignores a policy `true` for it, with a warning).
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
 
 #[cfg(test)]
+mod mcp_tests;
+mod misnamed;
+mod reset;
+#[cfg(test)]
+mod security_tests;
+#[cfg(test)]
 mod tests;
 
+pub(crate) use misnamed::typed_policy;
+
+use crate::plans::{self, plan_id};
 use crate::policy::{Kind, kind_of};
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Settings, Theme,
-    ToolsSettings,
+    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings, Theme,
+    UpdateMode,
 };
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
@@ -38,9 +52,13 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
-/// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 10] = [
+pub(crate) use reset::refuse;
+use reset::reset;
+
+/// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
+/// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
+/// holds this to the schema.
+pub(crate) const KEYS: [(&str, Kind); 15] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -51,13 +69,36 @@ pub(crate) const KEYS: [(&str, Kind); 10] = [
     ("ui.motion", Kind::String),
     ("tools.web_search", Kind::Boolean),
     ("tools.browser", Kind::Boolean),
+    ("privacy.counts", Kind::Boolean),
+    ("privacy.crash_reports", Kind::Boolean),
+    ("update.mode", Kind::String),
+    ("install.bundle", Kind::String),
+    ("install.registry", Kind::String),
 ];
 
-/// The keys that decide what an agent can reach. A policy source that cannot be read locks each
-/// off with [`refuse`] (ADR 0009, R21): its value there is unknown, and the user's must not stand
-/// in. Off is not always the default: both `tools` keys default to on, and locking them at their
-/// default would fail open.
-pub(crate) const SECURITY_KEYS: [&str; 3] = ["mcp.servers", "tools.web_search", "tools.browser"];
+/// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
+/// fetches and runs. A policy source that cannot be read locks each off with [`refuse`] (ADR
+/// 0009, R21; the `privacy` keys, decision record 0036; `update.mode` at `none`, R23): its value
+/// there is unknown, and the user's must not stand in. Off is not always the default: both
+/// `tools` keys, `privacy.counts` and `update.mode` default to on, and locking them at their
+/// default would fail open. `plans.` stands for every `plans.<id>` (decision record 0048):
+/// locked, no plan stands, so no endpoint the lawyer chose does.
+pub(crate) const SECURITY_KEYS: [&str; 9] = [
+    "mcp.servers",
+    "tools.web_search",
+    "tools.browser",
+    "privacy.counts",
+    "privacy.crash_reports",
+    "update.mode",
+    "install.bundle",
+    "install.registry",
+    "plans.",
+];
+
+/// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
+/// ignored with a warning and does not lock it, so the lawyer's own switch stands. A policy
+/// `false` locks it, as any policy value does.
+pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_reports"];
 
 /// The MCP server name Clauseo keeps for its own browser tool. An `mcp.servers` entry of this
 /// name, in any case, in `settings.json` or a policy, is left out with a warning; the host adds its
@@ -96,8 +137,14 @@ pub(crate) enum Leaf {
     Motion(Motion),
     WebSearch(bool),
     Browser(bool),
+    Counts(bool),
+    CrashReports(bool),
+    UpdateMode(UpdateMode),
+    Plan(String, Plan),
+    Bundle(Option<PathBuf>),
+    Registry(Option<String>),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
-    /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
+    /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
     /// [`Leaf::apply_policy`], which locks a security key off rather than at its default.
     Refused(String),
@@ -121,15 +168,23 @@ pub(crate) fn typed(
     warnings: &mut Vec<Warning>,
 ) -> Vec<Leaf> {
     let mut leaves = Vec::with_capacity(raws.len());
+    let mut plans_seen = 0;
     for raw in raws {
         let mut kinds = Vec::new();
+        plans_seen += usize::from(raw.key.starts_with("plans."));
         match Leaf::parse(&raw.key, raw.value, &mut kinds) {
             Ok(leaf) => leaves.push(leaf),
             Err(kind) => {
                 if kind_of(&raw.key).is_some() {
                     leaves.push(Leaf::Refused(raw.key.clone()));
                 }
-                kinds.push(kind);
+                // A `plans.` key that is no plan's can be pasted text: shown by its place.
+                kinds.push(match kind {
+                    WarningKind::UnknownKey { key } => WarningKind::UnknownKey {
+                        key: plans::shown_plan_key(&key, plans_seen),
+                    },
+                    other => other,
+                });
             }
         }
         warnings.extend(kinds.into_iter().map(|kind| Warning {
@@ -139,141 +194,6 @@ pub(crate) fn typed(
     }
     leaves.extend(refused.into_iter().map(Leaf::Refused));
     keep_last(leaves, Leaf::key)
-}
-
-/// [`typed`] for a policy source that lists its own keys (`policy.json` and the registry; macOS
-/// managed preferences are read key by key, by exact name, so they use [`typed`]). A
-/// security-relevant key is also refused, so locked off (ADR 0009, [`refuse`]), when the source
-/// names its topic in a form this version cannot read: its section that is not an object
-/// (`"mcp": "off"`), or any unknown key whose name holds the section's name in any case
-/// (`"mcp.servers"` at the top of `policy.json`, `"MCP"`, `"mcpServers"`, `mcp.Servers`,
-/// `mcp_servers`). What the firm meant there is unknown, so the user's value must not stand in.
-/// Each such key gets one warning naming the shape that sets it. An unrelated unknown key, and an
-/// entry left out inside a valid list, only warn.
-pub(crate) fn typed_policy(
-    raws: Vec<Raw>,
-    mut refused: Vec<String>,
-    warnings: &mut Vec<Warning>,
-) -> Vec<Leaf> {
-    for (key, origin, found) in security_keys_misnamed(&raws, warnings) {
-        warnings.push(Warning {
-            origin,
-            kind: WarningKind::InvalidValue {
-                key: key.to_owned(),
-                message: format!(
-                    "the policy names {found}, which this version cannot read, so {key} is \
-                     locked off; set it as {}",
-                    right_shape(key)
-                ),
-            },
-        });
-        refused.push(key.to_owned());
-    }
-    typed(raws, refused, warnings)
-}
-
-/// How a policy sets the security-relevant `key`, for the warning of a misnamed one.
-fn right_shape(key: &str) -> String {
-    let (section, name) = key.split_once('.').unwrap_or((key, ""));
-    format!(r#"{{"{section}": {{"{name}": {{...}}}}}} in policy.json, or the registry value {key}"#)
-}
-
-/// Each security-relevant key that `raws` or `warnings` name in a form that does not set it,
-/// once, with where and how it was first named.
-///
-/// A name refuses only the keys it could stand for ([`could_stand_for`]): `tools.websearch`
-/// refuses `tools.web_search`, not `tools.browser`. A name that could stand for any key of its
-/// section (`"tools": "off"`, `tools.brwser`) refuses each, except a sibling the same source
-/// sets validly by its exact name, which keeps its value. A source that cannot be read at all
-/// still locks every key off (`effective.rs`).
-fn security_keys_misnamed(
-    raws: &[Raw],
-    warnings: &[Warning],
-) -> Vec<(&'static str, Origin, String)> {
-    let mut found = Vec::new();
-    for key in SECURITY_KEYS {
-        let section = key.split('.').next().unwrap_or(key);
-        // An unknown name about the key's topic, other than an agent's key. This runs before
-        // `typed`, so a bad entry inside a valid list (`mcp.servers.<name>`) is not reported
-        // yet and stays a warning that drops that entry; a name the firm wrote as
-        // `mcp.servers.<name>` itself, at the top level, inside the section or as a registry
-        // value, does lock.
-        let about = |name: &str| {
-            kind_of(name).is_none()
-                && !name.starts_with("agents.")
-                && name.to_ascii_lowercase().contains(section)
-                && could_stand_for(name, key, raws)
-        };
-        let from_raws = raws
-            .iter()
-            .find(|raw| about(&raw.key))
-            .map(|raw| (raw.origin.clone(), raw.key.clone()));
-        let from_warnings = || {
-            warnings.iter().find_map(|warning| match &warning.kind {
-                WarningKind::UnknownKey { key: name } if about(name) || name == key => {
-                    Some((warning.origin.clone(), name.clone()))
-                }
-                WarningKind::InvalidValue { key: name, .. }
-                    if (name == section && !set_validly(raws, key)) || about(name) =>
-                {
-                    Some((warning.origin.clone(), name.clone()))
-                }
-                WarningKind::UnknownKey { .. }
-                | WarningKind::InvalidValue { .. }
-                | WarningKind::Unreadable { .. }
-                | WarningKind::Syntax { .. }
-                | WarningKind::RelativeAgentCommand { .. } => None,
-            })
-        };
-        if let Some((origin, name)) = from_raws.or_else(from_warnings) {
-            found.push((key, origin, format!("`{name}`")));
-        }
-    }
-    found
-}
-
-/// Whether the unknown `name`, which holds `key`'s section, could stand for the security key
-/// `key`. What the name holds beyond the section, in any case and with no punctuation, is
-/// matched against each key of the section: it stands for the keys whose words it holds
-/// (`websearch`, `Web-Search`, `web` for `tools.web_search`). One that matches no key of
-/// the section, or holds nothing beyond it, could stand for any of them, except a sibling
-/// [`set_validly`] by `raws`. A section with one security key (`mcp`) is always it.
-fn could_stand_for(name: &str, key: &str, raws: &[Raw]) -> bool {
-    let section = key.split('.').next().unwrap_or(key);
-    let siblings: Vec<&str> = SECURITY_KEYS
-        .into_iter()
-        .filter(|other| other.split('.').next() == Some(section))
-        .collect();
-    if siblings.len() < 2 {
-        return true;
-    }
-    let rest: String = name
-        .to_ascii_lowercase()
-        .replacen(section, "", 1)
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .collect();
-    let holds = |other: &str| {
-        !rest.is_empty()
-            && other
-                .split_once('.')
-                .map_or("", |(_, leaf)| leaf)
-                .split('_')
-                .any(|word| !word.is_empty() && rest.contains(word))
-    };
-    if siblings.iter().any(|other| holds(other)) {
-        holds(key)
-    } else {
-        !set_validly(raws, key)
-    }
-}
-
-/// Whether `raws` set `key` by its exact name, the last time to a value that types.
-fn set_validly(raws: &[Raw], key: &str) -> bool {
-    raws.iter()
-        .rev()
-        .find(|raw| raw.key == key)
-        .is_some_and(|raw| Leaf::parse(key, raw.value.clone(), &mut Vec::new()).is_ok())
 }
 
 /// The last item of each key, in the order those last items came. A source that sets a key
@@ -315,9 +235,15 @@ impl Leaf {
             "ui.motion" => typed_value(key, value).map(Leaf::Motion),
             "tools.web_search" => typed_value(key, value).map(Leaf::WebSearch),
             "tools.browser" => typed_value(key, value).map(Leaf::Browser),
-            _ => match agent_id(key) {
-                Some(id) => agent(key, id, value, unknown),
-                None => Err(WarningKind::UnknownKey {
+            "privacy.counts" => typed_value(key, value).map(Leaf::Counts),
+            "privacy.crash_reports" => typed_value(key, value).map(Leaf::CrashReports),
+            "update.mode" => typed_value(key, value).map(Leaf::UpdateMode),
+            "install.bundle" => plans::bundle(key, value).map(Leaf::Bundle),
+            "install.registry" => plans::registry(key, value).map(Leaf::Registry),
+            _ => match (agent_id(key), plan_id(key)) {
+                (Some(id), _) => agent(key, id, value, unknown),
+                (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
+                (None, None) => Err(WarningKind::UnknownKey {
                     key: key.to_owned(),
                 }),
             },
@@ -338,6 +264,12 @@ impl Leaf {
             Leaf::Motion(_) => "ui.motion".to_owned(),
             Leaf::WebSearch(_) => "tools.web_search".to_owned(),
             Leaf::Browser(_) => "tools.browser".to_owned(),
+            Leaf::Counts(_) => "privacy.counts".to_owned(),
+            Leaf::CrashReports(_) => "privacy.crash_reports".to_owned(),
+            Leaf::UpdateMode(_) => "update.mode".to_owned(),
+            Leaf::Plan(id, _) => format!("plans.{id}"),
+            Leaf::Bundle(_) => "install.bundle".to_owned(),
+            Leaf::Registry(_) => "install.registry".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -347,8 +279,16 @@ impl Leaf {
         !matches!(self, Leaf::Refused(_))
     }
 
-    /// Writes the value into `settings`, replacing what was there. An agent replaces the whole
-    /// entry for its id.
+    /// Whether this turns on a key a policy may only turn off ([`OFF_ONLY_KEYS`]): a policy
+    /// value that `Effective::load` ignores, with a warning, and does not lock.
+    pub(crate) fn turns_on_an_off_only_key(&self) -> bool {
+        let on = matches!(self, Leaf::Counts(true) | Leaf::CrashReports(true));
+        debug_assert!(!on || OFF_ONLY_KEYS.contains(&self.key().as_str()));
+        on
+    }
+
+    /// Writes the value into `settings`, replacing what was there. An agent or a plan replaces
+    /// the whole entry for its id.
     pub(crate) fn apply(self, settings: &mut Settings) {
         match self {
             Leaf::DefaultLocation(path) => settings.matters.default_location = path,
@@ -364,6 +304,14 @@ impl Leaf {
             Leaf::Motion(motion) => settings.ui.motion = motion,
             Leaf::WebSearch(on) => settings.tools.web_search = on,
             Leaf::Browser(on) => settings.tools.browser = on,
+            Leaf::Counts(on) => settings.privacy.counts = on,
+            Leaf::CrashReports(on) => settings.privacy.crash_reports = on,
+            Leaf::UpdateMode(mode) => settings.update.mode = mode,
+            Leaf::Plan(id, plan) => {
+                settings.plans.insert(id, plan);
+            }
+            Leaf::Bundle(path) => settings.install.bundle = path,
+            Leaf::Registry(url) => settings.install.registry = url,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
@@ -374,50 +322,6 @@ impl Leaf {
         match self {
             Leaf::Refused(key) if refuse(&key, settings) => {}
             leaf => leaf.apply(settings),
-        }
-    }
-}
-
-/// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
-/// `tools` key `false`. Kept apart from [`reset`], which restores the default, since a security
-/// key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in `.`
-/// (`tools.`) that names every security key under it; stage C adds keys under `plans.`.
-/// Returns whether `key` named any security key; when it did not, nothing changes.
-pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
-    let named = |security: &str| match key.strip_suffix('.') {
-        Some(_) => security.starts_with(key),
-        None => security == key,
-    };
-    let mut any = false;
-    for security in SECURITY_KEYS.into_iter().filter(|security| named(security)) {
-        any = true;
-        match security {
-            "mcp.servers" => settings.mcp.servers.clear(),
-            "tools.web_search" => settings.tools.web_search = false,
-            "tools.browser" => settings.tools.browser = false,
-            other => unreachable!("security key {other} has no refused value"),
-        }
-    }
-    any
-}
-
-/// Puts the setting `key` back to its default; for `agents.<id>`, drops that agent.
-fn reset(key: &str, settings: &mut Settings) {
-    match key {
-        "matters.default_location" => settings.matters.default_location = None,
-        "mcp.servers" => settings.mcp.servers.clear(),
-        "ui.theme" => settings.ui.theme = Theme::default(),
-        "ui.font_size" => settings.ui.font_size = FontSize::default(),
-        "ui.density" => settings.ui.density = Density::default(),
-        "ui.language" => settings.ui.language = Language::default(),
-        "ui.lite" => settings.ui.lite = Lite::default(),
-        "ui.motion" => settings.ui.motion = Motion::default(),
-        "tools.web_search" => settings.tools.web_search = ToolsSettings::default().web_search,
-        "tools.browser" => settings.tools.browser = ToolsSettings::default().browser,
-        _ => {
-            if let Some(id) = agent_id(key) {
-                settings.agents.remove(id);
-            }
         }
     }
 }

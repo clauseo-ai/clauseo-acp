@@ -38,7 +38,9 @@ use crate::snapshot::SnapshotWorker;
 
 mod app;
 mod app_lists;
+mod browser_install;
 mod commands;
+pub(crate) mod counting;
 mod folder_state;
 pub(crate) mod header_tools;
 pub(crate) mod input;
@@ -50,6 +52,7 @@ mod papers;
 mod query;
 mod rail;
 mod relocate;
+pub(crate) mod scan;
 mod seen;
 mod settings;
 mod shutdown;
@@ -57,7 +60,10 @@ mod startup;
 mod state;
 mod streams;
 mod subs;
+mod title_source;
+mod triage;
 pub(crate) mod turn;
+mod update;
 
 use commands::PendingCommand;
 use input::{Input, MatterTag, Request};
@@ -87,10 +93,18 @@ pub(crate) struct Actor {
     pub(crate) pipeline: Pipeline<Tag>,
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
+    /// The search thread (`search.rs`): each returned commit goes to it, and searches.
+    pub(crate) search: crate::search::Search,
     /// The settings. Only the actor touches them, so it is the one lock their writes need:
-    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, and `SetToolSettings`
-    /// `Effective::apply_tools_patch`, one command at a time.
+    /// `SetUiSettings` runs `Effective::apply_ui_patch` here, `SetToolSettings`
+    /// `Effective::apply_tools_patch` and `SetPrivacySettings` `Effective::apply_privacy_patch`,
+    /// one command at a time.
     pub(crate) effective: Effective,
+    /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
+    /// (`counting.rs`).
+    pub(crate) counts: Option<clauseo_counts::Counts>,
+    /// What to count once a command's commit is durable, by command (`counting.rs`).
+    pub(crate) count_on_commit: BTreeMap<clauseo_protocol::CommandId, counting::OnCommit>,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// Called at each session start, for the `_meta` of `session/new` and `session/load`, and
     /// at each launch, for the agent's variables (`agent/loads.rs`).
@@ -100,10 +114,14 @@ pub(crate) struct Actor {
     /// The Codex hooks object a test set (`HostConfig::with_codex_hooks`); read only through
     /// the codex hooks seam, `turn::agents::codex_hooks`.
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Where each launch's folder check answers from (`agent/folder_support.rs`).
+    pub(crate) folder_check: crate::agent::folder_support::CheckSource,
     /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
     pub(crate) pre_write_guard: Option<std::path::PathBuf>,
     /// The proxy, stetdoc's folder and the browser inputs (`HostConfig::with_egress_proxy`).
     pub(crate) wiring: crate::config::LaunchWiring,
+    /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
+    pub(crate) browser_install: browser_install::BrowserInstall,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The start-up sweep of leftover `run/` folders, done by the first launch's prep.
@@ -136,6 +154,8 @@ pub(crate) struct Actor {
     pub(crate) app_subs: Vec<app::AppSub>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
+    /// The rail's triage: streams it holds loaded and the snooze timer (`triage.rs`).
+    pub(crate) triage: triage::Triage,
     /// The matter and thread rows last sent to the app subscribers, and what changed since.
     pub(crate) lists: app_lists::Lists,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
@@ -147,6 +167,12 @@ pub(crate) struct Actor {
     /// subscribers (`app_lists.rs`): in memory only, never logged. A matter with none reads
     /// `found`; a relocate and a forget drop its entry.
     pub(crate) folder_states: BTreeMap<MatterId, clauseo_protocol::FolderState>,
+    /// Each matter's last folder check, for its row; in memory only. None: fine or unchecked.
+    pub(crate) folder_supports: BTreeMap<MatterId, clauseo_protocol::FolderSupportKind>,
+    /// The folder scans whose thread has not ended (`scan.rs`).
+    pub(crate) scans: scan::Scans,
+    /// The walk each scan runs: `clauseo_matters::scan_folder`, or a test's stand-in.
+    pub(crate) scan_walk: scan::Walk,
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
     pub(crate) files: papers::FileRefs,
@@ -155,10 +181,20 @@ pub(crate) struct Actor {
     pub(crate) phase: HostPhase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
+    /// The workers of matters made on disk whose commit has not returned, and of those being
+    /// discarded because it failed (`matters/made.rs`), by matter.
+    pub(crate) made: BTreeMap<MatterId, matters::Made>,
     /// Picks commits for the store to refuse (tests): given a commit's events, a command id the
     /// store already holds. The commit then carries a receipt with it: `DuplicateCommand`.
     #[cfg(test)]
     pub(crate) fault: Option<Fault>,
+    /// How many of the next stored commits are reported as failed (`Closed`) though stored
+    /// (tests): a reply lost on its way back.
+    #[cfg(test)]
+    pub(crate) lost_replies: usize,
+    /// How many of the next commits fail to send (tests), as with the store's feeder gone.
+    #[cfg(test)]
+    pub(crate) failed_sends: usize,
 }
 
 /// See [`Actor::fault`].
@@ -260,6 +296,7 @@ async fn main_loop(
         match inputs.next().await {
             Some(Next::Request(request)) => {
                 actor.on_request(request);
+                triage::tick(actor);
                 app_lists::flush(actor);
             }
             // Every handle is gone (the internal channel never ends: the actor holds a sender).
@@ -268,6 +305,7 @@ async fn main_loop(
             Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
             Some(Next::Input(input)) => {
                 actor.on_input(input);
+                triage::tick(actor);
                 app_lists::flush(actor);
             }
         }
@@ -363,6 +401,11 @@ impl Actor {
     /// Sends `draft` with `tag` and folds its events into the sent views of loaded streams.
     pub(crate) fn send_commit(&mut self, draft: Draft, tag: Tag) -> Result<Ticket, Error> {
         #[cfg(test)]
+        if self.failed_sends > 0 {
+            self.failed_sends -= 1;
+            return Err(Error::Closed);
+        }
+        #[cfg(test)]
         let draft = self.with_fault(draft);
         let ticket = self.pipeline.send(draft, tag, &self.feeder)?;
         self.work.commits += 1;
@@ -378,24 +421,6 @@ impl Actor {
             }
         }
         Ok(ticket)
-    }
-
-    /// Gives `draft` a receipt the store refuses when [`Actor::fault`] picks it.
-    #[cfg(test)]
-    fn with_fault(&mut self, mut draft: Draft) -> Draft {
-        let ts = self.clock.now().wall;
-        if let Some(fault) = self.fault.as_mut()
-            && let Some(command_id) = fault(draft.events())
-        {
-            draft.receipt(clauseo_store::Receipt {
-                command_id,
-                stream: None,
-                payload_hash: [0; 32],
-                result: CommandOutcome::Done,
-                ts,
-            });
-        }
-        draft
     }
 
     /// One request from a handle.
@@ -416,6 +441,23 @@ impl Actor {
                 query,
                 reply,
             } => query::query(self, &principal, &query, reply),
+            Request::Search {
+                principal,
+                window,
+                request,
+                reply,
+            } => match authorize(&principal, Access::Query) {
+                Ok(()) => self.search.query(
+                    &window,
+                    request,
+                    Box::new(move |answer| {
+                        let _gone = reply.send(answer);
+                    }),
+                ),
+                Err(error) => {
+                    let _gone = reply.send(Err(error));
+                }
+            },
             Request::Subscribe {
                 principal,
                 stream,
@@ -494,6 +536,7 @@ impl Actor {
             Input::EventPage { stream, id, result } => {
                 subs::on_event_page(self, stream, id, result);
             }
+            Input::MadeRow { matter, result } => matters::row_checked(self, matter, result),
             Input::Matter { matter, tag, reply } => {
                 matters::on_matter_reply(self, matter, tag, reply);
             }
@@ -506,7 +549,10 @@ impl Actor {
             Input::AppDrained { id } => app::on_drained(self, id),
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
+            Input::SnoozeWake { generation } => triage::on_wake(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
+            Input::Scan(input) => scan::on_input(self, input),
+            Input::BrowserInstall(state) => browser_install::on_state(self, state),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
@@ -517,7 +563,7 @@ impl Actor {
 
     /// Moves start-up to serving, and shutdown to its end, once their work is done.
     fn settle(&mut self) -> Option<Exit> {
-        if !self.work.idle() || turn::busy(self) {
+        if !self.work.idle() || turn::busy(self) || browser_install::busy(self) {
             return None;
         }
         match std::mem::replace(&mut self.phase, HostPhase::Serving) {
@@ -528,6 +574,7 @@ impl Actor {
                 }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
+                counting::app_opened(self);
                 None
             }
             HostPhase::Serving => None,

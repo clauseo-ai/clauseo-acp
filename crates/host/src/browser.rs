@@ -1,13 +1,16 @@
 //! The browser's host side (S27, decision record 0029): which Chrome a session runs
 //! ([`chrome`]), how many run at once and the limits each gets ([`limits`]), the sites every
 //! matter's allowlist starts from ([`seed_sites`]) and the background hosts the proxy denies
-//! ([`deny_hosts`]), and where Chrome runs ([`BrowserLaunch`]). The `browser` entry itself is
+//! ([`deny_hosts`]), each session's loopback ports and socket folder ([`session`]), and where
+//! Chrome runs ([`BrowserLaunch`]). The `browser` entry itself is
 //! filled in `agent/loads/browser.rs`; the pages it opens are recorded in `sources/browser.rs`.
 
 pub mod chrome;
 pub mod deny_hosts;
+pub mod install;
 pub mod limits;
 pub mod seed_sites;
+pub(crate) mod session;
 
 /// The app-wide folder under the data folder that holds agent-browser's config file.
 pub const CONFIG_DIR: &str = "browser";

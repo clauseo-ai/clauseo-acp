@@ -34,6 +34,22 @@ crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
+# The machine's total memory (src/machine_memory.rs): sysctlbyname on macOS, GlobalMemoryStatusEx
+# on Windows. Each module's FFI call, under its own #![expect].
+crates/desktop/src/machine_memory.rs mac unsafe_code
+crates/desktop/src/machine_memory.rs win unsafe_code
+# The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
+# clauseo-counts takes time as an input.
+crates/desktop/src/counts.rs now clippy::disallowed_methods
+# The usage counts' canary test (tests/canary.rs, S21): its scratch folder and the papers planted in
+# it, the one end-to-end session, kept in one function so each step's canary reads in order, and
+# the child process of its own binary that runs that session in an environment holding the canary.
+crates/desktop/tests/canary.rs session_in_a_planted_environment clippy::too_many_lines
+crates/desktop/tests/canary.rs run_child clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::new clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::dir clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::write clippy::disallowed_methods
+crates/desktop/tests/canary/support.rs Scratch::drop clippy::disallowed_methods
 # R13: the speed scoreboard's e2e and marks builds (never in release), and build.rs's cleanup of
 # the permission files tauri-build wrote for them.
 crates/desktop/build.rs remove_permissions clippy::disallowed_methods
@@ -51,6 +67,10 @@ crates/desktop/src/window_frame/geometry.rs physical clippy::cast_possible_trunc
 crates/desktop/src/window_frame/windows.rs - unsafe_code
 # S20 PR 2: the WebView2 dialog's Win32 module (TaskDialogIndirect, ShellExecuteW, DPI, COM).
 crates/desktop/src/webview2/windows.rs - unsafe_code
+crates/desktop/src/jailed/windows.rs - unsafe_code
+crates/desktop/src/jailed/macos.rs - unsafe_code
+crates/desktop/tests/jailed_windows.rs - unsafe_code
+crates/desktop/tests/jailed_macos.rs run clippy::disallowed_methods
 xtask/src/clock.rs timed clippy::disallowed_methods
 xtask/src/output.rs Printer::put clippy::let_underscore_must_use
 xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps
@@ -92,6 +112,9 @@ crates/fake_agent/src/run/effects.rs pause clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs Agent::start_args clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
 
+# Added by S18: the sign-in fake's Claude login, which runs the BROWSER command it is given.
+crates/fake_agent/src/signin.rs open_browser clippy::disallowed_methods
+
 # Added by R7: store's write module (the lock file and the private database file), the one
 # BlobRef::new that cannot fail, the test-support fixture's fixed values, the tests' write
 # module, the benches' scratch folder, and the two benches' unwraps.
@@ -106,6 +129,12 @@ crates/store/benches/commit.rs - clippy::unwrap_used
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
+# The folder check (src/windows.rs): its Win32 calls, and its test's DACL setup.
+crates/sandbox/src/windows.rs - unsafe_code
+crates/sandbox/src/windows/test_dacl.rs - unsafe_code
+crates/sandbox/src/windows/record.rs - unsafe_code
+crates/sandbox/src/windows/detect.rs - unsafe_code
+crates/sandbox/src/windows/private_dir.rs - unsafe_code
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
 # tests' write module (each test's folder, damaged files), and the measurement's clock.
@@ -119,6 +148,7 @@ crates/matters/src/write.rs - clippy::disallowed_methods
 crates/matters/tests/matters/support.rs - clippy::disallowed_methods
 crates/matters/src/walk/tests.rs symlink clippy::disallowed_methods
 crates/matters/benches/common/mod.rs fs_setup clippy::disallowed_methods
+crates/matters/src/checkpoint/walk_folder.rs pause clippy::disallowed_methods
 crates/matters/src/fsync.rs sync_dir clippy::unnecessary_wraps
 crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
@@ -132,6 +162,11 @@ crates/matters/tests/matters_windows.rs - clippy::disallowed_methods
 # clauseo-acp: its stdio tests' write module (each run's own folder).
 crates/acp/tests/stdio/write.rs - clippy::disallowed_methods
 
+# Added by S21: counts' write module (the first-act marker and the counts folder) and its tests'
+# write module (their scratch folder and planted files).
+crates/counts/src/write.rs - clippy::disallowed_methods
+crates/counts/tests/counts/write.rs - clippy::disallowed_methods
+
 # Added by R6: the reducer state's one large variant, the reducer bench's one line on systems
 # without Valgrind, and its setup's failure.
 crates/reducer/src/state.rs StreamState clippy::large_enum_variant
@@ -141,6 +176,8 @@ crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 # clauseo-process: its Windows Job Object calls, its pipe tests' write module (each run's own
 # folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
+# Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
+crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
@@ -215,6 +252,8 @@ fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods
 crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
 crates/sandbox/src/test_support.rs - clippy::disallowed_methods
 crates/sandbox/src/browser_dir/write.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/write.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/tests.rs a_junction_named_sandbox_is_refused clippy::disallowed_methods
 crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
 crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
@@ -227,6 +266,8 @@ crates/mcp/src/main.rs main clippy::print_stderr
 crates/mcp/src/write.rs - clippy::disallowed_methods
 crates/mcp/src/browser_guard/relay.rs spawn_child clippy::disallowed_methods
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
+crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
+crates/mcp/src/browser_guard/job.rs - unsafe_code
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs run clippy::disallowed_methods
 crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
@@ -237,14 +278,44 @@ crates/profile/tests/skills/write.rs - clippy::disallowed_methods
 crates/sandbox/src/proxy/server.rs accept clippy::infinite_loop
 crates/sandbox/src/ports.rs imp::exclusive unsafe_code
 crates/sandbox/examples/proxy.rs open_log clippy::disallowed_methods
+crates/sandbox/examples/folder_support.rs measure clippy::disallowed_methods
 # R21 PR-B: the agent's PATH split once to put stetdoc's folder first.
 crates/host/src/agent/spec.rs prepend_path clippy::disallowed_methods
 
 # S27's by-hand browser smoke test: it starts the guard, writes its own folder and waits on the wall clock.
 crates/host/tests/browser_smoke/mcp.rs - clippy::disallowed_methods
 crates/host/tests/browser_smoke/scratch.rs - clippy::disallowed_methods
+crates/host/src/actor/turn/tests/closed.rs closed_answer_then_prompt clippy::disallowed_methods
 
 # Added by the matters Windows tests (#139 follow-up): a blob test's symlink, not read through,
 # and a durable test's handle that holds a file open without delete sharing.
 crates/matters/src/history/blob/windows_tests.rs symlink clippy::disallowed_methods
 crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_methods
+# S17: clauseo-agents' write module, its one clock, the user-Node search, free disk space and
+# the Windows proxy registry read.
+crates/agents/src/write.rs - clippy::disallowed_methods
+crates/agents/tests/install/write.rs - clippy::disallowed_methods
+crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
+crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
+crates/agents/src/write/extract.rs - clippy::disallowed_methods
+crates/agents/src/write/extract.rs set_exec clippy::unnecessary_wraps
+crates/agents/src/write.rs make_private clippy::unnecessary_wraps
+crates/agents/src/signin/claude.rs url_file clippy::unnecessary_wraps
+crates/agents/src/worker/signin.rs shim_script clippy::unnecessary_wraps
+crates/agents/src/node.rs candidates clippy::disallowed_methods
+crates/agents/src/disk.rs free_at unsafe_code
+crates/agents/src/sysproxy/windows.rs - unsafe_code
+crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
+crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
+crates/agents/src/testing/trace.rs trace clippy::disallowed_methods
+crates/agents/src/testing/trace.rs trace clippy::print_stderr
+crates/agents/src/testing/trace.rs instant clippy::disallowed_methods
+crates/agents/examples/install.rs mb clippy::cast_precision_loss
+# R20: an agent's API key cleared where Linux has no keychain, so it always succeeds there.
+crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
+# S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle).
+crates/agents/src/fileid.rs file_id unsafe_code
+# S18: the Codex callback port is a test's own only under test-support; outside it self goes unused.
+crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
+# The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
+crates/host/src/browser/install/windows.rs - unsafe_code

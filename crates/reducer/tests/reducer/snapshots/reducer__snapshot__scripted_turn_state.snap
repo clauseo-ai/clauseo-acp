@@ -16,6 +16,7 @@ expression: fold(&scripted_turn().unwrap())
       "status": "idle",
       "queue_held": false,
       "steer_joins_turn": true,
+      "done": false,
       "config_options": [],
       "commands": [],
       "plan": [

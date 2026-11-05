@@ -9,9 +9,9 @@ use crate::web::{
 };
 use crate::{
     AgentId, CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
-    ExpiryReason, MatterPath, PageVia, PermissionChoice, PermissionOption, PermissionRequestId,
-    Principal, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind,
-    ToolLocation, TurnId,
+    ExpiryReason, MatterPath, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
+    PermissionRequestId, Principal, TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch,
+    ToolCallStatus, ToolKind, ToolLocation, TurnId,
 };
 
 /// A tool call the agent reported.
@@ -71,6 +71,10 @@ pub struct PermissionRequested {
     pub options: Vec<PermissionOption>,
     /// Whether an answer can reach the agent.
     pub deliverable: Deliverable,
+    /// What the request is about when the host can tell; `agent_plan`: the agent saving its
+    /// own plan note in its own config folder, not one of the lawyer's files.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub about: Option<PermissionAbout>,
 }
 
 /// A permission request was answered; the first valid answer wins.

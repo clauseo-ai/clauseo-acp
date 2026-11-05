@@ -224,3 +224,56 @@ fn clauseo_hidden_again_on_open() {
     drop(fx.open(&fx.folder).unwrap());
     assert!(hidden(&fx.file(".clauseo")));
 }
+
+/// `discard` undoes an import the host could not record: the history and `matter.json` go, a
+/// `.clauseo` that was there before stays with what it holds, the papers are untouched, and the
+/// folder imports again as a new matter.
+#[test]
+fn discard_undoes_an_import_and_keeps_what_was_there() {
+    let fx = Fixture::new("discard-import");
+    fx.write("a.txt", "a");
+    fx.write(".clauseo/notes.txt", "kept");
+    fx.import().discard().unwrap();
+    assert!(!fx.home().exists());
+    assert!(!fx.exists(".clauseo/matter.json"));
+    assert_eq!(fx.read(".clauseo/notes.txt"), b"kept");
+    assert_eq!(names(&fx.folder), set(&[".clauseo", "a.txt"]));
+    assert_eq!(fx.read("a.txt"), b"a");
+    let again = fx.import();
+    assert_eq!(again.last_checkpoint(), Some(cid(1)));
+
+    // A `.clauseo` the import made goes with its `matter.json`.
+    let bare = Fixture::new("discard-import-bare");
+    bare.write("a.txt", "a");
+    bare.import().discard().unwrap();
+    assert_eq!(names(&bare.folder), set(&["a.txt"]));
+    assert!(!bare.home().exists());
+}
+
+/// `discard` undoes a create: the folder it made goes while empty, and stays with a file put in
+/// it since; an opened matter is never discarded.
+#[test]
+fn discard_undoes_a_create_and_refuses_an_opened_matter() {
+    let fx = Fixture::new("discard-create");
+    Matter::create(fx.settings(), fx.new_matter())
+        .unwrap()
+        .discard()
+        .unwrap();
+    assert!(!fx.folder.exists());
+    assert!(!fx.home().exists());
+    Matter::create(fx.settings(), fx.new_matter()).unwrap();
+
+    let kept = Fixture::new("discard-create-kept");
+    let matter = Matter::create(kept.settings(), kept.new_matter()).unwrap();
+    kept.write("brief.txt", "x");
+    matter.discard().unwrap();
+    assert_eq!(names(&kept.folder), set(&["brief.txt"]));
+
+    let opened = Fixture::new("discard-opened");
+    drop(Matter::create(opened.settings(), opened.new_matter()).unwrap());
+    let matter = Matter::open(opened.settings(), matter_id(1), &opened.folder).unwrap();
+    let err = matter.discard().unwrap_err();
+    assert!(matches!(err, Error::History { .. }), "{err:?}");
+    assert!(opened.home().exists());
+    assert!(opened.exists(".clauseo/matter.json"));
+}

@@ -14,6 +14,7 @@ use super::Actor;
 use super::input::{MatterTag, Reply};
 use super::matters::matter_worker;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 
 /// The files the host has handed out ids for, both ways, kept in host memory for its run.
@@ -57,7 +58,9 @@ pub(super) fn list(actor: &mut Actor, matter: MatterId, reply: Reply<QueryResult
         Ok(()) => actor.work.matter_jobs += 1,
         // The reply went with the job, and dropping it answers the caller that the host is
         // gone.
-        Err(error) => tracing::warn!(%matter, %error, "a matter's worker refused a listing"),
+        Err(error) => {
+            tracing::warn!(%matter, error = %Cause(&error), "a matter's worker refused a listing");
+        }
     }
 }
 
@@ -79,8 +82,10 @@ pub(super) fn answer(
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
         | MatterReply::Located(_)
-        | MatterReply::HeldOpen(_) => Err(Error::Internal(
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's listing got another job's reply".to_owned(),
         )),
     };

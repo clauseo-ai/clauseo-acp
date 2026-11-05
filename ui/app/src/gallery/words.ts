@@ -1,7 +1,7 @@
 // The gallery's own sample words: labels for showing the controls in a realistic state, which no part uses. English
 // is the key and Hindi the value, from the design's approved words, so the gallery can show the controls in Hindi.
 // They live here, not in ui/components' words files, so the shipped words hold only what the parts use.
-import { wordsOf, type Slots } from "@clauseo/components/lib/words-core.ts";
+import { wordsOver, type Slots } from "@clauseo/components/lib/words-core.ts";
 import type { FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { useUiWords, type UiKey } from "@clauseo/components/lib/words-ui.ts";
 
@@ -41,7 +41,7 @@ const HI = {
 } as const;
 
 type GalleryKey = keyof typeof HI;
-const gallery = wordsOf<GalleryKey>(HI);
+const gallery = wordsOver<GalleryKey>(() => HI);
 const isGallery = (key: string): key is GalleryKey => Object.hasOwn(HI, key);
 
 /** The controls' words, as useUiWords gives them, with the gallery's samples beside them. */

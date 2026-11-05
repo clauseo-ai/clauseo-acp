@@ -1,4 +1,4 @@
-// The list of registered strings: by default those not approved, each with its id, status and words file and key,
+// The list of registered strings: by default those not approved (provisional ones among them, marked as such), each with its id, status and words file and key,
 // and its state in English and Hindi, by day and by night.
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import { useState } from "react";
@@ -17,6 +17,9 @@ const ROWS = REGISTRY.map((entry) => {
     status: statusOf(current, APPROVALS[entry.id]),
   };
 });
+
+/** What the line naming the approval's date and author says, by its status. */
+const ASKED = { approved: "Approved", provisional: "Added", change: "Asked" } as const;
 
 /** The platforms the frames can show: the window's chrome and its places follow it. */
 const PLATFORMS: { value: Platform; label: string }[] = [
@@ -39,6 +42,7 @@ export function ReviewList() {
     globalThis.history.replaceState(null, "", url);
   };
   const waiting = ROWS.filter((r) => r.status !== "approved");
+  const provisional = waiting.filter((r) => r.status === "provisional").length;
   const shown = all ? ROWS : waiting;
   return (
     <main className="review-page">
@@ -47,7 +51,7 @@ export function ReviewList() {
         <p className="review-count">
           {waiting.length === 0
             ? `Nothing is waiting for review. All ${ROWS.length} strings are approved.`
-            : `${waiting.length} of ${ROWS.length} strings wait for review.`}
+            : `${waiting.length} of ${ROWS.length} strings wait for review${provisional === 0 ? "" : `, ${provisional} of them provisional`}.`}
         </p>
         <div className="review-controls">
           <div className="review-segments" role="group" aria-label="Platform">
@@ -124,7 +128,7 @@ function Item({
         )}
         {approval !== undefined && (
           <>
-            <dt>{approval.status === "change" ? "Asked" : "Approved"}</dt>
+            <dt>{ASKED[approval.status]}</dt>
             <dd>
               {approval.at}
               {approval.by === undefined ? "" : ` by ${approval.by}`}

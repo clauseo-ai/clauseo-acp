@@ -11,9 +11,9 @@
 use clauseo_protocol::{
     AgentId, ChangeKind, CheckpointId, CompactString, ContentBlock, ContentId, Count, Delivery,
     DomainEvent, Envelope, EventId, FileChange, FilesChanged, MatterId, MatterKind, MatterPath,
-    MessageId, Seq, StopReason, StreamId, TextAppended, TextKind, ThreadCreated, ThreadId,
-    Timestamp, ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated,
-    ToolKind, TurnEnded, TurnId, TurnStarted, UserMessage,
+    MessageId, RenameSource, Seq, StopReason, StreamId, TextAppended, TextKind, ThreadCreated,
+    ThreadId, Timestamp, ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallStatus,
+    ToolCallUpdated, ToolKind, TurnEnded, TurnId, TurnStarted, UserMessage,
 };
 
 use crate::{Commit, MatterRow, SnapshotIn, ThreadRow};
@@ -113,6 +113,7 @@ pub fn thread_row() -> ThreadRow {
         matter: matter(),
         agent: AgentId::new("claude-acp").expect("a valid agent id"),
         title: Some("Fixture thread".to_owned()),
+        title_source: Some(RenameSource::Lawyer),
         acp_session_id: None,
         archived: false,
         created: time(0),

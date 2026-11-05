@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 // The step group's parts: the icon pass's glyph for each tool kind (other for the rest, the break for a failure), the line a real button that
 // opens and folds the rows with aria-expanded, a failure on the line, and a row's paper with its folder on hover.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
@@ -259,4 +262,48 @@ test("live, a step waiting on the lawyer leads the line with the permission's sh
     host.remove();
   }
   host = root = null;
+});
+
+test("a row's clock time leads it in a <time>, in the work list's quiet clock column, its digits tabular (steps.css); none when the caller gives none", () => {
+  const row = (time?: { text: string; iso: string } | null) => {
+    const el = document.createElement("ol");
+    el.innerHTML = renderToStaticMarkup(
+      <StepRow
+        id="tool_call:1"
+        toolCall="1"
+        status="completed"
+        kind="read"
+        text="Read Lease.pdf."
+        hover={null}
+        mark={null}
+        {...(time === undefined ? {} : { time })}
+      />,
+    );
+    return el.querySelector("li")!;
+  };
+  const timed = row({ text: "4:32 pm", iso: "2026-11-04T11:02:00.000Z" });
+  const time = timed.firstElementChild;
+  expect(time?.tagName).toBe("TIME");
+  expect(time?.className).toBe("step-row-time");
+  expect(time?.getAttribute("datetime")).toBe("2026-11-04T11:02:00.000Z");
+  expect(time?.textContent).toBe("4:32 pm");
+  expect(row(null).querySelector("time")).toBeNull();
+  expect(row().querySelector("time")).toBeNull();
+  // the class carries the tabular figures in the first column, quiet; the rows share the columns, the clock's held
+  // at --work-at-w even when empty, so a running row's words stand where a finished row's do
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "steps.css"), "utf8");
+  const ruleOf = (sel: string) =>
+    new RegExp(`${sel.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+  const timeRule = ruleOf(".step-row-time");
+  expect(timeRule).toMatch(/font-variant-numeric:\s*tabular-nums/);
+  expect(timeRule).toMatch(/white-space:\s*nowrap/);
+  expect(timeRule).toMatch(/grid-column:\s*1;/);
+  expect(timeRule).toMatch(/color:\s*var\(--quiet\)/);
+  const rows = ruleOf(".step-group-rows");
+  expect(rows).toMatch(/--step-at:\s*calc\(var\(--work-at-w\)/);
+  expect(rows).toMatch(
+    /grid-template-columns:\s*minmax\(var\(--step-at\), auto\) auto minmax\(0, 1fr\)/,
+  );
+  expect(ruleOf(".step-row")).toMatch(/grid-template-columns:\s*subgrid/);
+  expect(ruleOf(".step-row-text")).toMatch(/grid-column:\s*3;/);
 });

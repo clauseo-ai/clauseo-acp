@@ -1,0 +1,14 @@
+{"scenario":"permission-last-answer","description":"Two turns, each ended cancelled by the agent with no session/cancel. Prompt 1: the client must answer perm-1 reject-always, then perm-2 allow-once. Prompt 2: perm-3 allow-once, then perm-4 reject-always","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-edit-1","title":"Edit brief.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"reject-always"}}}}
+{"request":{"id":"perm-2","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-read-1","title":"Read notes.txt","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"expect_response":{"id":"perm-2","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-3","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-read-2","title":"Read notes.txt","kind":"read","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"expect_response":{"id":"perm-3","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}
+{"request":{"id":"perm-4","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-edit-2","title":"Edit brief.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"expect_response":{"id":"perm-4","result":{"outcome":{"outcome":"selected","optionId":"reject-always"}}}}
+{"respond":{"to":"p2","result":{"stopReason":"cancelled"}}}

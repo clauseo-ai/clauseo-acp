@@ -12,6 +12,7 @@ expression: "entry(\"header\")"
     "status": "idle",
     "queue_held": true,
     "steer_joins_turn": true,
+    "done": false,
     "mode_id": "plan",
     "config_options": [],
     "commands": [],

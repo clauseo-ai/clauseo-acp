@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"thread_done\")"
+---
+{
+  "thread_done": {
+    "done": true,
+    "by": "morning_sweep"
+  }
+}

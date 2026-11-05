@@ -38,7 +38,8 @@ import {
   at,
   nameOf,
 } from "./versions-fixture.ts";
-import { VERSION_WORDS, edgeDialogWords, vt } from "../lib/words-versions.ts";
+import { edgeDialogWords, vt } from "../lib/words-versions.ts";
+import { VERSION_WORDS } from "../lib/words-versions.hi.ts";
 
 const now = HISTORY[HISTORY.length - 1];
 if (now === undefined) throw new Error("no history");

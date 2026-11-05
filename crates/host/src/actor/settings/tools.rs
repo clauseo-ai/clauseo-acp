@@ -39,7 +39,7 @@ fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &ToolsPatch) -> Result<(), 
     actor.effective.apply_tools_patch(&SystemFiles, &patch)?;
     // An empty patch writes nothing, so nothing changed to tell anyone about.
     if patch != settings::ToolsPatch::default() {
-        let changed = HostEvent::SettingsChanged(super::view(&actor.effective));
+        let changed = HostEvent::SettingsChanged(super::view(actor));
         super::super::app::publish(actor, &changed);
     }
     super::receipt(actor, ctx)

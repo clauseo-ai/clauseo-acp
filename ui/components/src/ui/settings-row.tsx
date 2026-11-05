@@ -1,6 +1,6 @@
 import { Field } from "@base-ui/react/field";
 import { Fieldset } from "@base-ui/react/fieldset";
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
 import { Checkbox } from "./checkbox.tsx";
@@ -18,6 +18,8 @@ export function SettingRow({
   checked,
   onCheckedChange,
   disabled = false,
+  managed,
+  icon,
   className,
 }: {
   control: "switch" | "checkbox";
@@ -26,6 +28,11 @@ export function SettingRow({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
+  /** Optional: a further line under the note that describes the control too, such as who manages a locked one. */
+  managed?: string | undefined;
+  /** Optional: a glyph that leads the row, on the label's line, such as a tool's with its state on it. Hidden from
+   * assistive technology; the label and the control name it. */
+  icon?: ReactNode;
   className?: string;
 }) {
   const props = { checked, onCheckedChange, disabled };
@@ -43,6 +50,11 @@ export function SettingRow({
           <Checkbox {...props} />
         </span>
       )}
+      {icon !== undefined && (
+        <span className="flex flex-none items-center self-start h-ui-line" data-part="icon">
+          {icon}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <Field.Label className={settingLabel}>
           <Mixed>{label}</Mixed>
@@ -50,6 +62,11 @@ export function SettingRow({
         <Field.Description className={settingNote}>
           <Mixed>{note}</Mixed>
         </Field.Description>
+        {managed !== undefined && (
+          <Field.Description className={settingNote} data-testid="managed">
+            <Mixed>{managed}</Mixed>
+          </Field.Description>
+        )}
       </div>
       {control === "switch" && <Switch {...props} />}
     </Field.Root>

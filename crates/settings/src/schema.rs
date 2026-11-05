@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 5] = ["matters", "agents", "mcp", "ui", "tools"];
+pub(crate) const SECTIONS: [&str; 9] = [
+    "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install",
+];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
@@ -34,6 +36,14 @@ pub struct Settings {
     pub ui: UiSettings,
     /// Clauseo's own tools an agent may use. Read at start-up; a change applies after a restart.
     pub tools: ToolsSettings,
+    /// What Clauseo may count and send about its own use (decision record 0036).
+    pub privacy: PrivacySettings,
+    /// How Clauseo updates itself (task R23).
+    pub update: UpdateSettings,
+    /// Each agent's firm plan, by agent id (decision record 0048). Empty by default.
+    pub plans: BTreeMap<String, Plan>,
+    /// Where agent installs come from in a firm (decision record 0048).
+    pub install: InstallSettings,
 }
 
 /// The `matters` section.
@@ -56,6 +66,49 @@ pub struct AgentLaunch {
     /// Variables added to its environment. Never a secret: keys go in the OS keychain.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+}
+
+/// One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan
+/// login. A security key: a policy source that cannot be read leaves no plan at all, so no
+/// endpoint the lawyer chose stands in for the firm's (decision record 0048).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Plan {
+    /// The firm's gateway: an `https` URL with a host, and no user name, password, query or
+    /// fragment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Whose service the plan uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<PlanProvider>,
+    /// Extra variables for the agent. A name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD`,
+    /// in any case, is refused: secrets stay with IT's own tools and the OS keychain.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+}
+
+/// Whose service a firm plan uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanProvider {
+    /// Anthropic's API, or a gateway that speaks it.
+    Anthropic,
+    /// Amazon Bedrock.
+    Bedrock,
+    /// Google Vertex AI.
+    Vertex,
+}
+
+/// The `install` section: where agent installs come from in a firm. Both keys are security
+/// keys: a policy source that cannot be read leaves both unset, so installs use the pinned
+/// public hosts with their integrity checks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct InstallSettings {
+    /// An offline bundle folder, as an absolute path. Unset by default.
+    pub bundle: Option<PathBuf>,
+    /// A firm npm mirror: an `https` URL with a host, and no user name, password, query or
+    /// fragment. Unset by default.
+    pub registry: Option<String>,
 }
 
 /// The `mcp` section.
@@ -105,6 +158,53 @@ impl Default for ToolsSettings {
             browser: cfg!(target_os = "macos"),
         }
     }
+}
+
+/// The `privacy` section: the anonymous usage counts and crash reports (decision record 0036).
+/// Both keys are privacy keys: a policy can only turn them off. A policy `true` is ignored with a
+/// warning and locks nothing; a policy `false`, a policy value that does not type, and a policy
+/// source that cannot be read each lock the key `false`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct PrivacySettings {
+    /// Whether Clauseo keeps and sends its anonymous usage counts. On by default; nothing is
+    /// kept or sent before the lawyer's first act.
+    pub counts: bool,
+    /// Whether Clauseo sends crash reports. Off by default.
+    pub crash_reports: bool,
+}
+
+impl Default for PrivacySettings {
+    fn default() -> Self {
+        PrivacySettings {
+            counts: true,
+            crash_reports: false,
+        }
+    }
+}
+
+/// The `update` section. `update.mode` is a security key: a policy may set any of its values,
+/// which locks it, and a policy source that cannot be read, or a policy value that does not
+/// type, locks it `none`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// When Clauseo installs an update. `auto` by default.
+    pub mode: UpdateMode,
+}
+
+/// When Clauseo installs an update. The app writes only `auto` and `notify`; `none` comes from
+/// policy, or a hand-edited `settings.json`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// Download in the background, and install at the next start or when the lawyer says.
+    #[default]
+    Auto,
+    /// Download, and install only when the lawyer says.
+    Notify,
+    /// Never check: the firm updates Clauseo itself.
+    None,
 }
 
 /// The `ui` section. Design may change these values before M4 without a decision record.

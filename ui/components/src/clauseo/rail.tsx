@@ -3,6 +3,7 @@
 // dates come in as props.
 import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Button } from "../ui/button.tsx";
+import { Kbd } from "../ui/kbd.tsx";
 import { searchBoxOpen, searchInput } from "../ui/recipes.ts";
 import { IconNewMatter, IconScratchMatter, IconSearch } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
@@ -20,7 +21,11 @@ import { MatterRow, type MatterRowProps } from "./rail-matter.tsx";
 export type { MatterRowProps, MatterState } from "./rail-matter.tsx";
 export { MatterRow };
 
-export type RailGroup = { when: string; matters: readonly MatterRowProps[] };
+/** A menu's popup: it stands outside the rail on the page, and focus going into it hasn't left the rail. */
+const MENU = '*[role="menu"]';
+
+/** A group of rows under its heading; testId goes on its section. */
+export type RailGroup = { when: string; matters: readonly MatterRowProps[]; testId?: string };
 
 /** A matter the rail can find: its row, with its client and case number. */
 export type FindableRow = MatterRowProps & { client: string; caseNo: string };
@@ -61,6 +66,19 @@ export type RailFind = {
   /** What the search covers, so its label and its no-match line promise only that: names alone, names and clients,
    * or, left out, names, clients and case numbers. */
   covers?: "name" | "nameClient";
+  /** Optional: Find searching inside (U16a). Given it, the field reads "Find", shows its key (⌘K, Ctrl+K), and while
+   * words are in it the list is what this draws: the room's results, which take the matching matters found here. */
+  results?: (search: FindSearch) => ReactNode;
+  /** Optional: the field hovered or focused, before anything is typed: the room loads its results then. */
+  onPreload?: () => void;
+};
+
+/** What Find's results are drawn from: the words in the field, the matters matched here by name, client or case
+ * number (their rows ready to open, each leaving Find), and the leave itself, for a result the room opens. */
+export type FindSearch = {
+  query: string;
+  matching: readonly MatterRowProps[];
+  leave: () => void;
 };
 
 /** Find's label and the line under no match, for what it covers. */
@@ -86,6 +104,9 @@ function findWords(lang: "en" | "hi", covers: RailFind["covers"]) {
 
 function FindField({
   label,
+  placeholder,
+  keys,
+  onPreload,
   testId,
   query,
   onQuery,
@@ -95,6 +116,10 @@ function FindField({
   onFirst,
 }: {
   label: string;
+  placeholder: string;
+  /** Find's key, shown in the empty field and named to assistive technology; none where the room has no key. */
+  keys?: { cap: string; aria: string } | undefined;
+  onPreload?: (() => void) | undefined;
   testId: string | undefined;
   query: string;
   onQuery: (q: string) => void;
@@ -104,10 +129,9 @@ function FindField({
   onDone: () => void;
   onFirst: () => void;
 }) {
-  const w = useWords();
   const room = useRoom();
   return (
-    <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")}>
+    <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")} onPointerEnter={onPreload}>
       <IconSearch size={16} />
       <span className="sr-only">{label}</span>
       <input
@@ -115,11 +139,15 @@ function FindField({
         type="search"
         autoComplete="off"
         className={searchInput}
-        placeholder={mt(w.lang, "Find a matter")}
+        placeholder={placeholder}
+        aria-keyshortcuts={keys?.aria}
         data-testid={testId}
         value={query}
         onChange={(e) => onQuery(e.target.value)}
-        onFocus={onOpen}
+        onFocus={() => {
+          onPreload?.();
+          onOpen();
+        }}
         onBlur={onClose}
         onKeyDown={(e) => {
           // Escape clears the words and keeps focus here; on an empty field the date groups come back and the key goes
@@ -136,6 +164,7 @@ function FindField({
           }
         }}
       />
+      {keys !== undefined && query === "" && <Kbd className="room-find-key">{keys.cap}</Kbd>}
     </label>
   );
 }
@@ -149,6 +178,7 @@ export function Rail({
   pinned = [],
   open,
   onNewMatter,
+  onNewMatterPreload,
   find,
   scratch,
   settings,
@@ -159,12 +189,19 @@ export function Rail({
   newMatterRef,
   empty = true,
   onEscape,
+  aside,
+  list,
+  onHover,
+  shelf,
+  onFocusMove,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
   open: boolean;
   /** New matter, pressed. */
   onNewMatter?: () => void;
+  /** Optional: New matter hovered or focused, before it is pressed (the room loads its dialog then). */
+  onNewMatterPreload?: () => void;
   find?: RailFind;
   /** The scratch matter: whether it's the room, and its row pressed. Left out, the foot has no scratch row. */
   scratch?: { current?: boolean; onOpen?: () => void };
@@ -188,6 +225,17 @@ export function Rail({
   testIds?: { newMatter?: string; scratch?: string; find?: string; settings?: string };
   /** Optional: New matter's button, so a dialog it opens can give focus back to it on close. */
   newMatterRef?: Ref<HTMLButtonElement>;
+  /** Optional: what stands under Find on the head (Matters / Recent), hidden while Find has the focus or words. */
+  aside?: ReactNode;
+  /** Optional: a list in the groups' place (Recent), while Find has neither the focus nor words. */
+  list?: ReactNode;
+  /** Optional: the pointer came over the rail (true) or left it (false). */
+  onHover?: (over: boolean) => void;
+  /** Optional (U16b): the Snoozed shelf, at the foot of the groups, above Scratch matter. */
+  shelf?: ReactNode;
+  /** Optional (U16b): the focus came into the rail (true), or left it (false), for another control on the page
+   * (`elsewhere`) or for none; going into one of its menus is not leaving. */
+  onFocusMove?: (inside: boolean, elsewhere: boolean) => void;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -298,6 +346,14 @@ export function Rail({
               },
             ];
   const words = findWords(w.lang, find?.covers);
+  // searching inside: the room's results stand in the matching matters' place while words are in the field
+  const inside = find?.results !== undefined && finding && query.trim() !== "";
+  const findKeys =
+    find?.results === undefined
+      ? undefined
+      : platform === "mac"
+        ? { cap: "⌘K", aria: "Meta+K" }
+        : { cap: "Ctrl+K", aria: "Control+K" };
   const scratchRow = scratch !== undefined && (
     <div className="room-scratch">
       <button
@@ -323,11 +379,24 @@ export function Rail({
       id={room.id("rail")}
       aria-label={label === undefined ? w.t("Matters") : `${w.t("Matters")}, ${label}`}
       data-open={open ? "" : undefined}
+      onPointerEnter={onHover === undefined ? undefined : () => onHover(true)}
+      onPointerLeave={onHover === undefined ? undefined : () => onHover(false)}
       onPointerDownCapture={() => {
         pressing.current = true;
       }}
       onPointerUp={() => {
         pressing.current = false;
+      }}
+      onFocus={onFocusMove === undefined ? undefined : () => onFocusMove(true, false)}
+      onBlur={(e) => {
+        const to = e.relatedTarget;
+        const element = to instanceof Element;
+        if (
+          onFocusMove === undefined ||
+          (element && (nav.current?.contains(to) === true || to.closest(MENU) !== null))
+        )
+          return;
+        onFocusMove(false, element);
       }}
       onKeyDown={(e) => {
         // a menu's popup sits outside the rail on the page, though inside it in React: its Escape is its own
@@ -345,6 +414,8 @@ export function Rail({
           kind="tone"
           className="w-full flex-none justify-start px-s3 text-muted is-hover:text-primary"
           onClick={onNewMatter}
+          onPointerEnter={onNewMatterPreload}
+          onFocus={onNewMatterPreload}
           {...(newMatterRef === undefined ? {} : { ref: newMatterRef })}
           {...(testIds?.newMatter === undefined ? {} : { "data-testid": testIds.newMatter })}
         >
@@ -353,7 +424,10 @@ export function Rail({
         </Button>
         {find !== undefined && (
           <FindField
-            label={words.label}
+            label={find.results === undefined ? words.label : mt(w.lang, "Find")}
+            placeholder={mt(w.lang, find.results === undefined ? "Find a matter" : "Find")}
+            keys={findKeys}
+            onPreload={find.onPreload}
             testId={testIds?.find}
             query={query}
             onQuery={(q) => {
@@ -367,13 +441,28 @@ export function Rail({
             }}
             onDone={() => setFinding(false)}
             onFirst={() => {
+              if (inside) {
+                nav.current?.querySelector<HTMLElement>(".room-find-results button")?.click();
+                return;
+              }
               const first = shown === "none" ? undefined : shown[0]?.matters[0];
               first?.onOpen?.();
             }}
           />
         )}
+        {!finding && aside}
       </div>
-      {shown !== "none" && shown.length === 0 ? (
+      {inside && find?.results !== undefined ? (
+        <div className="room-groups room-groups-find room-find-results" data-finding="">
+          {find.results({
+            query,
+            matching: shown === "none" ? [] : (shown[0]?.matters ?? []),
+            leave,
+          })}
+        </div>
+      ) : list !== undefined && !finding ? (
+        list
+      ) : shown !== "none" && shown.length === 0 && (finding || shelf === undefined) ? (
         empty && <NoMatters />
       ) : shown === "none" ? (
         <div className="room-find-none" role="status">
@@ -390,7 +479,7 @@ export function Rail({
           data-finding={finding ? "" : undefined}
         >
           {shown.map((g) => (
-            <section key={g.when}>
+            <section key={g.when} data-testid={g.testId}>
               <Heading level={2} depth={1} className="room-when">
                 {g.when}
               </Heading>
@@ -401,6 +490,7 @@ export function Rail({
               </ul>
             </section>
           ))}
+          {!finding && shelf}
         </div>
       )}
       {/* with Settings, the scratch matter and Settings stand on the rail's foot, always in view as the list scrolls */}

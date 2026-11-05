@@ -100,7 +100,7 @@ pub fn with_stetdoc(stetdoc: Option<SkillSource>) -> (Vec<SkillSource>, Vec<Prof
             (skills, Vec::new())
         }
         Err(error) => {
-            tracing::warn!(%error, "the built-in legal skills are left out");
+            tracing::warn!(error = %error.log_text(), "the built-in legal skills are left out");
             (skills, vec![error])
         }
     }

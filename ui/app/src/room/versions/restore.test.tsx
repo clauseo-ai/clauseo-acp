@@ -18,8 +18,11 @@ import {
 } from "./testing.ts";
 
 let h: VersionsHarness | null = null;
+// a fixed instant half an hour after the fixtures' NOON: the rows' "today" depends on it
+const NOW = NOON + 30 * 60_000;
 beforeEach(() => {
-  vi.setSystemTime(NOON + 30 * 60_000);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
 });
 afterEach(async () => {
   await h?.unmount();
@@ -201,6 +204,7 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toHaveLength(1);
   expect(dialog()?.textContent).toContain("Close '\u2068notes.docx\u2069' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("If it isn't open in Word, close Word and try again.");
   expect(h.one("dialog-try-again")).not.toBeNull();
   expect(h.one("dialog-confirm")).toBeNull();
   // the dialog says which file Word holds; the band under it doesn't add the general line

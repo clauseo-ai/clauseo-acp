@@ -13,6 +13,18 @@
   z-index: 4;
   background: var(--ground);
 }
+/* a dialog's scrim (z-30) covers the window, but not its caption buttons: window chrome answers the first press while a
+   dialog is open. A sticky toolbar is a stacking context, which would keep the caption under the scrim, so for as long
+   as a dialog stands the toolbar is only relatively placed, and the caption rises above the scrim. The toolbar's other
+   parts stay under it, dimmed as the rest of the window is. */
+:root:has([data-dialog-plane]) .room-top {
+  position: relative;
+  z-index: auto;
+}
+:root:has([data-dialog-plane]) .room-caption {
+  position: relative;
+  z-index: 31;
+}
 /* a window under the least height squeezes its columns, which scroll themselves, rather than scrolling the document and
    the toolbar with it */
 :root[data-frame="own"] .room-window {
@@ -245,7 +257,8 @@
     flex-wrap: wrap;
     row-gap: 0;
   }
-  .room-status-plan {
+  .room-status-plan,
+  .room-status-tools {
     flex: 0 1 auto;
     min-width: 0;
     white-space: normal;

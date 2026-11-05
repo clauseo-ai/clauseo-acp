@@ -26,6 +26,20 @@ slow-timeout = { period = "10s", terminate-after = 16 }
 filter = 'package(clauseo-desktop) & test(/^(bridge::tests|host_start::tests|settings_window::tests|commands::tests|test_support)::/)'
 slow-timeout = { period = "10s", terminate-after = 16 }
 
+# The agents install tests are the first in the run to touch the disk and start processes
+# (node --version, npm ci): they start about 2 to 20 s into it, right after the test build. On
+# the Windows runner something stalls them all at once early in some runs and frees them all at
+# the same instant: in run 41840642164 (merge group, 4 slots all install tests) from 14:12:25 to
+# 14:15:56, so 11 tests passed 30 s on both tries; in runs 41766104932, 41779592803, 41784225212
+# and 41839450755 for 25 to 55 s, one retry each. low_disk_is_disk_full_before_any_request, which
+# makes no request and runs no npm, was among them; the same tests take 0.1 to 4.4 s on a good
+# Windows run (41834252183). It is the issue #83 shape, so the store's 160 s bound applies. Each
+# test's stderr names its phases with UTC times (`testing::trace`), so a timeout shows where the
+# time went.
+[[profile.default.overrides]]
+filter = 'package(clauseo-agents) & binary(install)'
+slow-timeout = { period = "10s", terminate-after = 16 }
+
 # G16's live tests read real accounts: the Claude reader's own 25 s and the Codex reader's 10 s
 # timeouts, plus Node's and the vendor CLI's start-up, overrun 30 s; 90 s still ends a hung read.
 [[profile.default.overrides]]
@@ -38,6 +52,36 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# host's window-specs test launches the host and fake_agent once for every scenario the window's
+# e2e specs play, one after another, so it grows with each new spec: about 2.3 s on Linux and
+# macOS, 15 s on the Windows x64 runner, and past 30 s on both tries on Windows ARM64 (merge
+# group run 41827767038, for #352). 90 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-host) & binary(host) & test(/^e2e_scenarios::/)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# counts' compile-fail test runs trybuild, which checks the crate and its dev-dependencies (the
+# windows crate, protocol, settings, proptest) in a target folder of its own before it compiles
+# each case. On the Windows runner that alone took 16 s and the whole test passed 30 s (PR #259,
+# run 41608436654, both tries); a cold local run on Linux took 215 s. 240 s still ends a hung one.
+# That build is a full cargo build, which takes every core it can get, so the test runs alone:
+# in the merge-group run 41712908024 on Windows it overlapped host's relaunch tests, which are
+# sensitive to timing, and starved them of CPU until both failed at relaunch.rs:97 on both tries.
+[[profile.default.overrides]]
+filter = 'package(clauseo-counts) & binary(closed)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+threads-required = "num-cpus"
+
+# xtask's buildtime tests that run real cargo builds in a fresh worktree or target folder: a few
+# seconds on Linux, but on the loaded Windows runner four of them passed 30 s on both tries and
+# ejected #350's merge group (run 41871459180), as they had flaked on 11-03; core_io's clippy test,
+# which runs clippy on a planted crate, passed 30 s on both tries on Windows x64 in #379's run
+# (job 126782296836). Slow by design, not flaky, so a longer bound instead of quarantine; 120 s
+# still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(xtask) & (test(/^buildtime::(worktree|profile)::tests::/) | test(/^checks::core_io::tests::clippy::/))'
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
 # once under the runner's load does not eject a pull request from the merge queue. Flakes are still
@@ -46,3 +90,29 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 retries = 1
 failure-output = "immediate-final"
 junit = { path = "junit.xml" }
+
+# Quarantine: tests that failed and then passed on their retry, or ejected a merge group they had
+# nothing to do with, are left out of the ci profile (pull requests, merge groups, main's push and
+# the pre-push hook's CI mode) until their owner fixes them; the nightly `quarantine` job in ci.yml
+# still runs them (profile quarantine below), so it shows when one is fixed. Each entry names its
+# tracking issue; an entry comes out in the fix's pull request. The same expression is in both
+# profiles: keep them equal.
+#   - agents install tests, on Windows only: stall all at once on the loaded runner, 11 timed out
+#     on Windows x64 in run 41840642164 (stage D's #366 gives them 160 s)
+#   - xtask::bin/xtask process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does: failed then passed on retry 1 time since 2026-11-04; first https://github.com/clauseo-ai/clauseo-acp/actions/runs/41912294482/job/126862999903 (autoquarantine)
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does))'
+# On Windows the agents install tests too (their stalls are the Windows runner's; Linux and macOS
+# keep gating them while their crate changes).
+[[profile.ci.overrides]]
+platform = 'cfg(windows)'
+default-filter = 'not (package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install))'
+
+# The quarantined tests alone (see profile ci), run nightly by ci.yml's `quarantine` job, with the
+# ci profile's timeouts and retry, so a fixed one shows as passing.
+[profile.quarantine]
+retries = 1
+failure-output = "immediate-final"
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does)'
+[[profile.quarantine.overrides]]
+platform = 'cfg(windows)'
+default-filter = 'package(xtask) & binary(xtask) & test(=process::tests::tree::a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does) | package(clauseo-agents) & binary(install)'

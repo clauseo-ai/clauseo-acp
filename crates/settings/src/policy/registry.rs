@@ -2,10 +2,11 @@
 //! as Intune's Settings Catalog and ADMX push them.
 //!
 //! `REG_DWORD` is a number, or a boolean (0 or 1) where the setting is one. `REG_SZ` is a string,
-//! or JSON text where the setting is an object (`agents.<id>`, `mcp.servers`). `REG_MULTI_SZ` is
-//! a list of strings. Value names are compared without case, as Windows does (`UI.Theme` is
-//! `ui.theme`); an agent id keeps the case it is written in. A known key's value of another
-//! type gets a warning and locks the key at its default; an unknown value name is only a warning.
+//! or JSON text where the setting is an object (`agents.<id>`, `plans.<id>`, `mcp.servers`).
+//! `REG_MULTI_SZ` is a list of strings. Value names are compared without case, as Windows does
+//! (`UI.Theme` is `ui.theme`); an agent or plan id keeps the case it is written in. A known key's
+//! value of another type gets a warning and locks the key at its default; an unknown value name is
+//! only a warning.
 
 #[cfg(test)]
 mod tests;
@@ -61,8 +62,10 @@ pub(crate) fn raw_values(
     let mut raws = Vec::with_capacity(values.len());
     let mut refused = Vec::new();
     let mut warnings = Vec::new();
+    let mut plans_seen = 0;
     for (name, value) in values {
         let key = canonical(name);
+        plans_seen += usize::from(key.starts_with("plans."));
         let converted = match kinds(&key) {
             Some(kind) => json_value(kind, value),
             None => Err(None),
@@ -80,7 +83,10 @@ pub(crate) fn raw_values(
                         refused.push(key.clone());
                         WarningKind::InvalidValue { key, message }
                     }
-                    None => WarningKind::UnknownKey { key },
+                    // A `plans.` name that is no plan's can be pasted text: shown by place.
+                    None => WarningKind::UnknownKey {
+                        key: crate::plans::shown_plan_key(&key, plans_seen),
+                    },
                 },
             }),
         }
@@ -89,8 +95,9 @@ pub(crate) fn raw_values(
 }
 
 /// The dotted key a value name stands for. Windows compares value names without case, so a name
-/// that matches a key but for case is that key. `agents.` matches without case too, but the id
-/// after it keeps its case, since ids are case-sensitive. Any other name is kept as written.
+/// that matches a key but for case is that key. `agents.` and `plans.` match without case too,
+/// but the id after either keeps its case, since ids are case-sensitive. Any other name is kept
+/// as written.
 fn canonical(name: String) -> String {
     if let Some(&(key, _)) = leaf::KEYS
         .iter()
@@ -98,14 +105,18 @@ fn canonical(name: String) -> String {
     {
         return key.to_owned();
     }
-    match (name.get(..AGENTS.len()), name.get(AGENTS.len()..)) {
-        (Some(prefix), Some(id)) if prefix.eq_ignore_ascii_case(AGENTS) => format!("{AGENTS}{id}"),
-        _ => name,
+    for section in BY_ID {
+        if let (Some(prefix), Some(id)) = (name.get(..section.len()), name.get(section.len()..))
+            && prefix.eq_ignore_ascii_case(section)
+        {
+            return format!("{section}{id}");
+        }
     }
+    name
 }
 
-/// The prefix of an agent's key.
-const AGENTS: &str = "agents.";
+/// The prefixes of the keys whose entries go by id: an agent's and a plan's.
+const BY_ID: [&str; 2] = ["agents.", "plans."];
 
 /// The JSON value a registry value stands for, or why it stands for none.
 fn json_value(kind: Kind, value: RegValue) -> Result<Value, Option<String>> {

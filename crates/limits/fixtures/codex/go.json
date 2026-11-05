@@ -13,7 +13,7 @@
       "planType": "go",
       "primary": {
         "usedPercent": 15,
-        "windowDurationMins": 40320,
+        "windowDurationMins": 43200,
         "resetsAt": 1795000000
       }
     }

@@ -4,7 +4,7 @@
 // break with no line; with H10 faked, Restart for the codes it mends, hidden during a turn, dispatching restart_agent.
 import { brk } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   agentText,
   header,
@@ -19,11 +19,18 @@ import type { ErrorCode, ViewEntry } from "../transport/protocol.ts";
 import { stamp } from "./thread/clock.ts";
 import { defaultOutcome, mountRoom, summary, type Harness, type Script } from "./thread/harness.ts";
 
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+
 let h: Harness | null = null;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   document.body.replaceChildren();
+  vi.useRealTimers();
 });
 
 const QUESTION = "Summarise the notice to the bank.";
@@ -55,7 +62,7 @@ async function asked(script: Script = {}, agent?: string, name?: string): Promis
   return room;
 }
 
-const failed = (failure: ErrorCode, ts = Date.now(), agent?: string, name?: string) => [
+const failed = (failure: ErrorCode, ts = NOW, agent?: string, name?: string) => [
   upsert(step(9, { stop: "failed", failure, ts })),
   upsert(status(failure === "agent.exited" ? "agent_exited" : "idle", agent, name)),
 ];
@@ -71,7 +78,7 @@ test("Claude stopping mid-answer: the stopped line with its time and no Restart,
     },
   });
   expect(field().value).toBe("");
-  const ts = Date.now();
+  const ts = NOW;
   h.deliver(failed("agent.exited", ts));
   await h.settle();
   const line = h.one("agent-stopped");
@@ -113,7 +120,7 @@ test("a relaunch that fails before its turn starts: the second question stays, i
   h.deliver([upsert(again), upsert(status("starting"))]);
   await h.settle();
   h.deliver([
-    upsert(step(11, { turn: second, stop: "failed", failure: "agent.exited", ts: Date.now() })),
+    upsert(step(11, { turn: second, stop: "failed", failure: "agent.exited", ts: NOW })),
     upsert(status("idle")),
   ]);
   await h.settle();
@@ -283,7 +290,7 @@ test("a break this window didn't ask for, with the header's flip a batch before 
   // nothing stands for a moment: the region stays, empty
   expect(regions()).toEqual([region]);
   expect(region?.textContent).toBe("");
-  h.deliver([upsert(step(9, { stop: "failed", failure: "agent.exited", ts: Date.now() }))]);
+  h.deliver([upsert(step(9, { stop: "failed", failure: "agent.exited", ts: NOW }))]);
   await h.settle();
   expect(h.one("agent-stopped")).not.toBeNull();
   expect(regions()).toEqual([region]);
@@ -315,7 +322,7 @@ test.each([
       { threads: [{ ...summary(), agent }], next: H10, display: { language } },
       agent,
     );
-    h.deliver(failed("agent.launch_failed", Date.now(), agent));
+    h.deliver(failed("agent.launch_failed", NOW, agent));
     await h.settle();
     // the working line, with Restart, and the step's row in the thread
     expect(h.one("agent-stopped")?.textContent).toContain(said);
@@ -330,7 +337,7 @@ test.each([
 ] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
   const agent = "codex-acp";
   h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
-  h.deliver(failed(code, Date.now(), agent));
+  h.deliver(failed(code, NOW, agent));
   await h.settle();
   expect(h.one("turn-stopped")?.textContent).toContain(said);
 });
@@ -343,7 +350,7 @@ test("a thread whose header names its agent: the line says the agent's own name,
     "my-agent",
     "Gemini CLI",
   );
-  h.deliver(failed("agent.launch_failed", Date.now(), "my-agent", "Gemini CLI"));
+  h.deliver(failed("agent.launch_failed", NOW, "my-agent", "Gemini CLI"));
   await h.settle();
   expect(h.one("agent-stopped")?.textContent).toContain(
     "Gemini CLI didn't start. Your question is kept.",
@@ -355,7 +362,7 @@ test("a thread whose header names its agent: the line says the agent's own name,
 
 test("a thread whose header has no agent_name: the line says the settings id, as before", async () => {
   h = await asked({ threads: [{ ...summary(), agent: "my-agent" }], next: H10 }, "my-agent");
-  h.deliver(failed("agent.launch_failed", Date.now(), "my-agent"));
+  h.deliver(failed("agent.launch_failed", NOW, "my-agent"));
   await h.settle();
   expect(h.one("agent-stopped")?.textContent).toContain(
     "my-agent didn't start. Your question is kept.",

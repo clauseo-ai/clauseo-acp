@@ -11,8 +11,9 @@ use crate::{Error, write};
 pub const FILE_NAME: &str = "search.sqlite";
 
 /// The index format. Any change to the schema, the tokenizer or what a column means bumps it;
-/// an index of another format is emptied and rebuilt, never migrated.
-pub const FORMAT: u32 = 1;
+/// an index of another format is emptied and rebuilt, never migrated. Format 2 stores the text
+/// normalised (NFC, zero-width joiners removed); format 1 stored it as given.
+pub const FORMAT: u32 = 2;
 
 /// The FTS5 tokenizer. `M*` keeps combining marks (Devanagari vowel signs and the virama) inside
 /// words; `remove_diacritics 2` folds Latin accents.
@@ -52,6 +53,7 @@ CREATE TABLE threads (
   archived INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX threads_matter ON threads(matter);
+CREATE TABLE watermarks (stream TEXT PRIMARY KEY, seq INTEGER NOT NULL);
 ";
 
 /// Opens the index in `folder`, or creates it empty; the flag is `needs_rebuild`.

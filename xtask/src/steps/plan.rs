@@ -65,6 +65,36 @@ pub(crate) fn plan(
     steps
 }
 
+/// Why the test steps are skipped under `check --no-tests`: the summary prints
+/// `(skipped: --no-tests)`.
+const NO_TESTS: &str = "--no-tests";
+
+/// The steps that run tests, in plan order: vitest, playwright-unit, nextest, nextest-specta and
+/// doctest. Every other step formats, lints, typechecks or builds.
+pub(crate) const TEST_STEPS: [&str; 5] = [
+    "vitest",
+    "playwright-unit",
+    "nextest",
+    SPECTA_NAME,
+    DOCTEST_NAME,
+];
+
+/// `plan`'s steps for `check --no-tests`: each test step in `TEST_STEPS` that would run is
+/// skipped with `--no-tests` as the reason. A test step the plan already skips keeps its own
+/// reason, and every other step is left as it is, so `--quick` and `--skip-ui` combine with it.
+pub(crate) fn without_tests(steps: Vec<Step>) -> Vec<Step> {
+    steps
+        .into_iter()
+        .map(|step| match step {
+            Step::Tool(tool) if TEST_STEPS.contains(&tool.name) => Step::Skipped {
+                name: tool.name,
+                reason: NO_TESTS,
+            },
+            other => other,
+        })
+        .collect()
+}
+
 fn skipped(name: &'static str) -> Step {
     Step::Skipped {
         name,

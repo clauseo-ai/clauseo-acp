@@ -59,7 +59,7 @@ test("find filters the rows and Enter opens the first", async ({ app }) => {
 });
 
 test.describe("a matter left while its turn runs", () => {
-  test.use({ scenario: "cancel-unanswered" });
+  test.use({ scenario: "claude-cancel-unanswered" });
 
   test("says Answering. on its row, and its turn can still be cancelled", async ({ app }) => {
     const w = window(app.page);

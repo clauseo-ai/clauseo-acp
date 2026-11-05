@@ -14,6 +14,7 @@ use super::input::Input;
 use super::subs::ViewSub;
 use super::{Actor, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::pipeline::{Draft, Failure, Ticket};
 use crate::sent::SentView;
 use crate::view::StreamView;
@@ -125,7 +126,11 @@ pub(super) fn on_reopened(
         Ok(Folded::State { state, tail }) => finish_load(actor, stream, *state, &tail),
         Err(failure) => {
             if let Some(StreamSlot::Loading(loading)) = actor.streams.remove(&stream) {
-                tracing::warn!(%stream, ?failure, "could not load a stream");
+                tracing::warn!(
+                    %stream,
+                    error = %Cause(&failure.to_error()),
+                    "could not load a stream"
+                );
                 for waiter in loading.waiters {
                     waiter(actor, Err(failure.to_error()));
                 }
@@ -179,6 +184,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     }
     // The queue's held flag is the host's, never in the log or a snapshot.
     if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread_mut()) {
+        actor.triage.loaded();
         let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_held(actor, thread));
     }
     let loaded = Box::new(Loaded {
@@ -212,7 +218,7 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
         return;
     }
     if let StreamId::Thread(thread) = stream
-        && turn::keeps_loaded(actor, thread)
+        && (turn::keeps_loaded(actor, thread) || super::triage::holds(actor, thread))
     {
         return;
     }
@@ -241,6 +247,15 @@ pub(super) fn on_committed(
     result: Result<Committed, clauseo_store::Error>,
 ) {
     actor.work.commits = actor.work.commits.saturating_sub(1);
+    // Tests: a stored commit reported as failed (`Actor::lost_replies`).
+    #[cfg(test)]
+    let result = match result {
+        Ok(_) if actor.lost_replies > 0 => {
+            actor.lost_replies -= 1;
+            Err(clauseo_store::Error::Closed)
+        }
+        result => result,
+    };
     let completed = actor.pipeline.on_result(ticket, result);
     let mut touched: Vec<StreamId> = Vec::new();
     // Every commit that returned `Ok` is folded first, then the sent views of drained streams
@@ -255,7 +270,7 @@ pub(super) fn on_committed(
             }
             Err(failure) => {
                 if failure.first {
-                    tracing::warn!(error = %failure.error, "a commit failed");
+                    tracing::warn!(error = %Cause(&failure.error), "a commit failed");
                 }
                 continuations.push((done.tag, Err(failure)));
             }
@@ -290,11 +305,12 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
         Tag::Scratch(entry) => super::matters::scratch_committed(actor, *entry, outcome),
         Tag::Snapshot => {
             if let Err(failure) = outcome {
-                tracing::warn!(error = %failure.error, "a snapshot was not stored");
+                tracing::warn!(error = %Cause(&failure.error), "a snapshot was not stored");
             }
         }
         Tag::Turn(tag) => turn::committed(actor, tag, outcome),
         Tag::Restore(matter) => turn::restore_committed(actor, matter, outcome.is_ok()),
+        Tag::Wake => super::triage::wake_committed(actor, outcome),
     }
 }
 
@@ -317,7 +333,11 @@ fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<S
                 let encoded = match changes_of(loaded, stream, envelopes, &mut actor.encoder) {
                     Ok(encoded) => encoded,
                     Err(error) => {
-                        tracing::error!(%stream, %error, "view changes did not encode");
+                        tracing::error!(
+                            %stream,
+                            error = %Cause(&error),
+                            "view changes did not encode"
+                        );
                         Vec::new()
                     }
                 };
@@ -337,6 +357,8 @@ fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<S
             None => {}
         }
     }
+    // The search thread takes the durable events too; the actor never waits for it.
+    actor.search.offer(&envelopes);
     // The batch is built once per stream; a commit of one stream hands over its own.
     if let [stream] = streams.as_slice() {
         super::subs::deliver_events(actor, *stream, envelopes);
@@ -360,7 +382,7 @@ pub(super) fn on_snapshot(actor: &mut Actor, snapshot: SnapshotIn) {
     let mut draft = Draft::new();
     draft.snapshot(snapshot);
     if let Err(error) = actor.send_commit(draft, Tag::Snapshot) {
-        tracing::warn!(%error, "a snapshot was not sent");
+        tracing::warn!(error = %Cause(&error), "a snapshot was not sent");
     }
 }
 
@@ -423,7 +445,9 @@ fn take_snapshot(
     match Snapshot::of(&loaded.state).to_bytes() {
         Ok(bytes) => match snapshots.submit(stream, seq, bytes) {
             Ok(()) => work.snapshots += 1,
-            Err(error) => tracing::warn!(%stream, %error, "the snapshot thread is gone"),
+            Err(error) => {
+                tracing::warn!(%stream, error = %Cause(&error), "the snapshot thread is gone");
+            }
         },
         Err(error) => tracing::warn!(%stream, %error, "a snapshot did not encode"),
     }

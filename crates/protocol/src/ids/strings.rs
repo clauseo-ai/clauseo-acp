@@ -77,6 +77,18 @@ fn check_agent_id(value: &str) -> Result<(), &'static str> {
     }
 }
 
+/// The most characters in an [`EnvName`].
+const MAX_ENV_NAME_CHARS: usize = 255;
+
+fn check_env_name(value: &str) -> Result<(), &'static str> {
+    let allowed = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    if (1..=MAX_ENV_NAME_CHARS).contains(&value.len()) && value.bytes().all(allowed) {
+        Ok(())
+    } else {
+        Err("expected 1 to 255 characters of [A-Za-z0-9_]")
+    }
+}
+
 /// The most characters in a [`ContentId`].
 const MAX_CONTENT_ID_CHARS: usize = 64;
 
@@ -150,6 +162,11 @@ checked_string! {
     /// A registry id for an agent (`claude-acp`, `codex-acp`; `fake-agent` in tests): 1 to 64
     /// characters of `[a-z0-9-]`.
     pub struct AgentId(check_agent_id);
+}
+checked_string! {
+    /// An environment variable's name, never its value (decision record 0048): 1 to 255
+    /// characters of `[A-Za-z0-9_]`, so no `NAME=value` text fits in one.
+    pub struct EnvName(check_env_name);
 }
 checked_string! {
     /// An id the agent chose and a command names back: a permission option's id, a config

@@ -10,6 +10,7 @@ import type {
   AvailableCommand,
   CommandOutcome,
   ErrorCode,
+  FolderSupportKind,
   LimitsView,
   MatterSummary,
   ThreadStatus,
@@ -22,7 +23,7 @@ import {
   type NextHostError,
   type PaperSummary,
 } from "../room/host-next.ts";
-import { detailed, fakeNext, railStates } from "../room/fake-next.ts";
+import { detailed, fakeNext, railStates, railThreads } from "../room/fake-next.ts";
 
 /** A matter as filed, for states that show one. */
 export const MATTER: MatterSummary = {
@@ -74,6 +75,8 @@ export type ThreadState = {
   commands?: AvailableCommand[];
   /** undo_step is refused with this code: a Word document held open is matter.file_locked (U9). */
   undoRefused?: ErrorCode;
+  /** With undoRefused matter.file_locked, the files the host names as held (its `files`, U9). */
+  undoLocked?: string[];
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
   /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
@@ -82,6 +85,8 @@ export type ThreadState = {
   /** The plan's limits the channel carries, as `limits_view_changed` sends them (U12): the toolbar's plan, its card,
    * the composer's warning. */
   limits?: LimitsView;
+  /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
+  folder?: FolderSupportKind;
 };
 
 const refusal = (code: ErrorCode) => ({
@@ -120,7 +125,12 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.agent = agent;
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
-      if (query === "list_matters") return { matters: [MATTER] };
+      if (query === "list_matters")
+        return {
+          matters: [
+            state.folder === undefined ? MATTER : { ...MATTER, folder_support: state.folder },
+          ],
+        };
       if (typeof query === "object" && query.list_threads !== undefined)
         return {
           threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
@@ -134,7 +144,9 @@ export function threadHost(state: ThreadState): FakeTransport {
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
       if (command.undo_step !== undefined && state.undoRefused !== undefined)
-        throw refusal(state.undoRefused);
+        throw state.undoLocked === undefined
+          ? refusal(state.undoRefused)
+          : { ...refusal(state.undoRefused), files: state.undoLocked };
       return "done";
     },
     subscribe: (stream) =>
@@ -186,12 +198,30 @@ export const scratchHost = (): FakeTransport =>
 
 /** A NextHost whose matters show every rail state, in every date group, one pinned (room/fake-next.ts). */
 export const railHost = (): FakeTransport =>
-  new FakeTransport({ next: fakeNext({ matters: () => railStates(MATTER, SCRATCH, Date.now()) }) });
+  new FakeTransport({
+    next: fakeNext({
+      matters: () => railStates(MATTER, SCRATCH, Date.now()),
+      // Needs you and Recent (U16a): every matter's threads, as the host's first frames give them
+      frames: true,
+      threads: railThreads(MATTER, SCRATCH, Date.now()),
+    }),
+  });
 
 /** A host that refuses create_matter with `code`, its picker giving `display`. With `next`, a NextHost with the
- * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. */
-export function refusingHost(code: NextErrorCode, display = "", next = false): FakeTransport {
-  const refusal: NextHostError = { code, message: "a detail for logs", retryable: false };
+ * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. `matter` is
+ * the refusal's matter (HostError.matter), for matter.folder_is_matter. */
+export function refusingHost(
+  code: NextErrorCode,
+  display = "",
+  next = false,
+  matter?: string,
+): FakeTransport {
+  const refusal: NextHostError = {
+    code,
+    message: "a detail for logs",
+    retryable: false,
+    ...(matter === undefined ? {} : { matter }),
+  };
   const refuse = () => {
     throw refusal;
   };

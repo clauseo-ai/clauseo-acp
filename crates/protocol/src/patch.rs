@@ -14,8 +14,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountLimits, Cursor, EntryId, Envelope, HeaderEntry, LimitsView, MatterHeaderEntry,
-    MattersChanged, MessageId, Seq, SettingsView, StreamId, ThreadsChanged, ViewEntry, ViewEpoch,
+    AccountLimits, BrowserInstallState, Cursor, EntryId, Envelope, FolderScanned, HeaderEntry,
+    LimitsView, MatterHeaderEntry, MattersChanged, MessageId, Seq, SettingsView, StreamId,
+    ThreadsChanged, UpdateView, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -142,6 +143,14 @@ pub enum HostEvent {
     /// The display settings changed: the whole view after the change. App-wide, never part of
     /// a stream: it reaches app subscribers only.
     SettingsChanged(SettingsView),
+    /// Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
+    /// App-wide, never logged and in no stream: it reaches app subscribers only, as each state
+    /// happens. Every app catch-up (a new, lagged or resubscribed subscriber) carries the latest
+    /// one: the running download's last step, or the last download's end until the next starts.
+    BrowserInstall {
+        /// Where it stands.
+        state: BrowserInstallState,
+    },
     /// Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
     /// it reaches app subscribers only.
     MattersChanged(MattersChanged),
@@ -149,6 +158,12 @@ pub enum HostEvent {
     /// list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
     /// it has open.
     ThreadsChanged(ThreadsChanged),
+    /// How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
+    /// stream: it reaches app subscribers only.
+    FolderScanned(FolderScanned),
+    /// The updater's state changed: the whole view after the change (decision record 0037).
+    /// App-wide, never part of a stream: it reaches app subscribers only.
+    UpdateChanged(UpdateView),
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

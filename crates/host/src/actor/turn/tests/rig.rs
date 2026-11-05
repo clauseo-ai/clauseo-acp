@@ -3,6 +3,7 @@
 //! `fake_agent` scenario written into the folder. A test can hold inputs back (a commit's
 //! result, an agent's end) to put the actor in the order it wants.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -59,7 +60,16 @@ impl Rig {
     pub(super) fn start(test: &str, steps: &str) -> Self {
         let dir = TempDir::new(test);
         let root = dir.path();
-        Self::prepare(root, test, steps);
+        Self::prepare(root, test, steps, None);
+        Self::open(dir, 0, None)
+    }
+
+    /// [`Rig::start`], with the agent run as `/bin/sh -c script fake_agent <scenario>`, so
+    /// `script` sees the agent as `$0` and the scenario as `$1`.
+    #[cfg(unix)]
+    pub(super) fn start_wrapped(test: &str, steps: &str, script: &str) -> Self {
+        let dir = TempDir::new(test);
+        Self::prepare(dir.path(), test, steps, Some(script));
         Self::open(dir, 0, None)
     }
 
@@ -84,7 +94,7 @@ impl Rig {
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
-    fn prepare(root: &std::path::Path, test: &str, steps: &str) {
+    fn prepare(root: &std::path::Path, test: &str, steps: &str, wrap: Option<&str>) {
         crate::write::create_dir_all(&root.join("home")).unwrap();
         let scenario = root.join(format!("{test}.jsonl"));
         let header = format!(
@@ -93,19 +103,31 @@ impl Rig {
         let text = format!("{header}{HANDSHAKE}{steps}");
         crate::write::write_file(&scenario, text.as_bytes()).unwrap();
         let bin = clauseo_fake_agent::bin_path().expect("run cargo build -p clauseo-fake_agent");
+        let (bin, scenario) = (bin.display().to_string(), scenario.display().to_string());
+        let (command, args) = match wrap {
+            None => (bin, vec!["--scenario".to_owned(), scenario]),
+            Some(script) => (
+                "/bin/sh".to_owned(),
+                vec!["-c".to_owned(), script.to_owned(), bin, scenario],
+            ),
+        };
         let settings = serde_json::json!({ "agents": { "fake-agent": {
-            "command": bin.display().to_string(),
-            "args": ["--scenario", scenario.display().to_string()],
+            "command": command,
+            "args": args,
         }}});
-        crate::write::write_file(&root.join("settings.json"), settings.to_string().as_bytes())
-            .unwrap();
+        crate::write::create_dir_all(&root.join("data")).unwrap();
+        crate::write::write_file(
+            &root.join("data").join("settings.json"),
+            settings.to_string().as_bytes(),
+        )
+        .unwrap();
     }
 
     /// The host on the data folder `dir`, started and serving, with the start-up read
     /// `failing` names failing.
     fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
         let root = dir.path();
-        let effective = Effective::load(&Locations::under_root(root), &SystemFiles, &[]);
+        let effective = Effective::load(&Locations::under_home(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let config = HostConfig::new(effective, Arc::new(launcher))
@@ -185,6 +207,24 @@ impl Rig {
         panic!("never reached {what}");
     }
 
+    /// Runs the host's tasks (an agent's, a call's), handling no input, until `done` ends,
+    /// under the watchdog.
+    pub(super) fn run_tasks_until<T>(&mut self, what: &str, done: impl Future<Output = T>) -> T {
+        let waited = self.pool.run_until(async {
+            let done = std::pin::pin!(done);
+            match futures::future::select(done, async_io::Timer::after(WATCHDOG)).await {
+                Either::Left((done, _)) => Some(done),
+                Either::Right(_) => None,
+            }
+        });
+        waited.unwrap_or_else(|| panic!("never reached {what} in {WATCHDOG:?}"))
+    }
+
+    /// Runs the host's tasks, handling no input, until none can go on.
+    pub(super) fn run_tasks_until_stalled(&mut self) {
+        self.pool.run_until_stalled();
+    }
+
     /// Handles inputs until `hold` picks one, which is held back.
     pub(super) fn hold_next(&mut self, what: &str, mut hold: impl FnMut(&Actor, &Input) -> bool) {
         for _ in 0..100_000 {
@@ -209,6 +249,11 @@ impl Rig {
         for input in std::mem::take(&mut self.held) {
             self.actor.on_input(input);
         }
+    }
+
+    /// Runs `future` (a store read) on the rig's pool.
+    pub(super) fn run<T>(&mut self, future: impl std::future::Future<Output = T>) -> T {
+        self.pool.run_until(future)
     }
 
     /// Handles inputs until no commit is in flight.
@@ -292,7 +337,8 @@ impl Rig {
         let now = self.actor.now().wall;
         let turn: TurnId = self.actor.ids.mint(now).unwrap();
         let message = self.actor.ids.mint(now).unwrap();
-        let mut current = Current::new(turn, message, Vec::new());
+        let started = self.actor.now().mono;
+        let mut current = Current::new(turn, message, Vec::new(), started);
         current.phase = phase;
         self.actor.threads.get_mut(&thread).unwrap().turn.current = Some(Box::new(current));
         let stream = StreamId::Thread(thread);

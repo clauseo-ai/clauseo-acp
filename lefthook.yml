@@ -17,9 +17,9 @@ pre-commit:
     oxlint-components: { root: "ui/components/", glob: "**/*.{ts,tsx,js,mjs,cjs}", run: "for f in {staged_files}; do set -- \"$@\" \"components/$f\"; done; pnpm -C ../app run lint:types \"$@\"" }
 pre-push:
   commands:
-    # CI mode, as fast-lane runs it, so a clippy warning fails the push as it fails CI (#210). CI mode
-    # also gives nextest the ci profile (one retry; a test that passes only on it shows as FLAKY) and
-    # runs the ui steps even where pnpm is missing. `CI=0 git push` runs the check in local mode.
+    # CI mode, as fast-lane runs it, so a clippy warning fails the push as it fails CI (#210). No tests
+    # run here (`--no-tests`, #378): CI and the merge queue run them. CI mode also runs the ui steps
+    # even where pnpm is missing. `CI=0 git push` runs the check in local mode.
     # A push of deletes only (`git push origin --delete <branch>`) sends no commits and passes
     # without it: the script reads git's ref lines, which `use_stdin` passes on. pre-push-test.sh
     # tests both, through lefthook.

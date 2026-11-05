@@ -21,6 +21,7 @@ import {
   IconAppearance,
   IconLanguage,
   IconPlanLimit,
+  IconSend,
 } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 
@@ -115,10 +116,10 @@ const side = (el: HTMLElement, group: string, label: string) =>
   );
 const saved = () => JSON.parse(localStorage.getItem(DISPLAY_KEY) ?? "null") as unknown;
 
-test("the sections are Plan and usage, Language, Appearance and About, in the design's order; no later section renders", async () => {
+test("the sections are Plan and usage, Language, Appearance, Privacy and About, in the design's order; no later section renders", async () => {
   const { el } = await mount();
-  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "About"]);
-  for (const later of ["Plans", "Indian Kanoon", "Matters", "Safe workspace", "Updates", "Privacy"])
+  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "Privacy", "About"]);
+  for (const later of ["Plans", "Indian Kanoon", "Matters", "Safe workspace", "Updates"])
     expect(el.textContent).not.toContain(later);
   // the first opens, as the pane's h2, under the window's one h1
   expect(el.querySelector('[aria-current="page"] .set-nav-name')?.textContent).toBe(
@@ -260,9 +261,7 @@ test("a key the host locks disables its row, which says who manages it and sends
   const night = side(el, "Theme", "Night");
   expect(night?.disabled || night?.hasAttribute("data-disabled")).toBe(true);
   const row = night?.closest(".set-row");
-  expect(row?.querySelector('[data-testid="managed"]')?.textContent).toBe(
-    "Managed by your organisation",
-  );
+  expect(row?.querySelector('[data-testid="managed"]')?.textContent).toBe("Managed by firm");
   await act(async () => night?.click());
   expect(transport.only("next_command")).toEqual([]);
   expect(html().dataset["theme"]).toBe("day");
@@ -288,7 +287,7 @@ test("every locked control names its managed line in aria-describedby: switches,
       .filter((id) => id !== "")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  const managed = "Managed by your organisation";
+  const managed = "Managed by firm";
   expect(el.querySelectorAll('[data-testid="managed"]')).toHaveLength(4);
   expect(described(el.querySelector('[aria-label="Theme"]'))).toBe(managed);
   expect(described(el.querySelector('[aria-label="Reduced motion"]'))).toBe(managed);
@@ -424,7 +423,7 @@ for (const platform of ["mac", "windows"] as const) {
 test("each section on the side carries its 16 px icon before its name, hidden; the name still names the section", async () => {
   const { el } = await mount();
   const rows = [...el.querySelectorAll<HTMLButtonElement>(".set-nav-row")];
-  const icons = [IconPlanLimit, IconLanguage, IconAppearance, IconAbout];
+  const icons = [IconPlanLimit, IconLanguage, IconAppearance, IconSend, IconAbout];
   expect(rows).toHaveLength(icons.length);
   rows.forEach((row, i) => {
     const holder = row.querySelector(".set-nav-icon");
@@ -432,5 +431,5 @@ test("each section on the side carries its 16 px icon before its name, hidden; t
     expect(iconIn(holder, icons[i] ?? IconAbout, 16)).not.toBeNull();
     expect(row.firstElementChild).toBe(holder);
   });
-  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "About"]);
+  expect(navNames(el)).toEqual(["Plan and usage", "Language", "Appearance", "Privacy", "About"]);
 });

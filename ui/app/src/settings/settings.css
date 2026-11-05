@@ -6,5 +6,6 @@
 @import "@clauseo/components/clauseo/lockup.css";
 @import "@clauseo/components/clauseo/settings-window.css";
 @import "./usage.css";
+@import "./privacy.css";
 @source ".";
 @source not "./**/*.test.*";

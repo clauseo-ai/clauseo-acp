@@ -13,25 +13,28 @@ use clauseo_protocol::{
     AvailableCommand, ChangeKind, CheckpointKind, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, CompactionStatus, ConfigCategory, ConfigChoice, ConfigOption,
     ConfigOptionKind, ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost,
-    Deliverable, Delivery, DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome,
-    ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason,
-    FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited,
-    PermissionChoice, PermissionExpired, PermissionKind, PermissionOption, PermissionRequested,
-    PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus, Principal,
-    PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
-    SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome, SteerResolved,
-    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
-    ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    Deliverable, Delivery, DetachReason, DomainEvent, DoneBy, ElicitationExpired,
+    ElicitationOutcome, ElicitationRequest, ElicitationRequested, ElicitationResolved, ErrorCode,
+    ExpiryReason, FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated,
+    MatterKind, MatterRelocated, ModeChanged, Notice, NoticeLevel, OutsideEdits, PageVia,
+    PageVisited, PermissionAbout, PermissionChoice, PermissionExpired, PermissionKind,
+    PermissionOption, PermissionRequested, PermissionResolved, PlanEntry, PlanPriority,
+    PlanReplaced, PlanStatus, Principal, PromptCapabilities, QueuedPromptEdited, RawFrom,
+    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy,
+    SteerOutcome, SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended,
+    TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+    Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated,
+    ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
+    TurnUsage, UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
     checkpoint_id, count, elicitation_id, finite, matter_id, message_id, path,
     permission_request_id, raw, short, thread_id, tool_call_id, turn_id,
 };
+
+#[path = "examples/setup.rs"]
+mod setup;
 
 /// A tool call with every field filled.
 pub fn tool_call_started() -> ToolCallStarted {
@@ -97,10 +100,32 @@ pub fn file_changes() -> Vec<FileChange> {
 }
 
 /// Events that hold a value added after v1 that no example in [`every_event`] holds, so the
-/// corpus writer finds a holder for it: error codes no example turn fails with, and the page
-/// vias no example opens a page with.
+/// corpus writer finds a holder for it: error codes no example turn fails with, the page vias
+/// no example opens a page with, and the stop reasons no example turn ends with.
 pub fn later_variants() -> Vec<DomainEvent> {
     vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        ThreadRenamed {
+            title: short("Read the lease"),
+            by: RenameSource::Placeholder,
+        }
+        .into(),
+        ThreadSnoozed {
+            until: None,
+            by: SnoozeBy::Expired,
+        }
+        .into(),
+        ThreadDone {
+            done: false,
+            by: DoneBy::Lawyer,
+        }
+        .into(),
         TurnFailed {
             turn: turn_id(3),
             code: ErrorCode::SettingsLocked,
@@ -165,7 +190,35 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("inside the data folder".to_owned()),
         }
         .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderNetwork,
+            detail: Some("on a network drive".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::MatterFolderNoPermissions,
+            detail: Some("no file permissions".to_owned()),
+        }
+        .into(),
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::AgentGuardMissing,
+            detail: Some("the guard hook has no program".to_owned()),
+        }
+        .into(),
+        // Never a turn's failure in practice (the updater's code); here for the corpus.
+        TurnFailed {
+            turn: turn_id(3),
+            code: ErrorCode::UpdateFailed,
+            detail: Some("the signature did not verify".to_owned()),
+        }
+        .into(),
     ]
+    .into_iter()
+    .chain(setup::turns())
+    .collect()
 }
 
 /// One example of every known event kind, in `DomainEvent::KINDS` order.
@@ -214,6 +267,16 @@ fn thread_events() -> Vec<DomainEvent> {
         }
         .into(),
         ThreadArchived {}.into(),
+        ThreadSnoozed {
+            until: Some(Timestamp::new(1_760_086_400_000).unwrap()),
+            by: SnoozeBy::Lawyer,
+        }
+        .into(),
+        ThreadDone {
+            done: true,
+            by: DoneBy::MorningSweep,
+        }
+        .into(),
         AgentSessionAttached {
             session: "sess-1".parse().unwrap(),
             agent_version: Some("0.9.0".to_owned()),
@@ -348,6 +411,7 @@ fn session_events() -> Vec<DomainEvent> {
                 agent_label: "Yes".to_owned(),
             }],
             deliverable: Deliverable::Live,
+            about: Some(PermissionAbout::AgentPlan),
         }
         .into(),
         PermissionResolved {

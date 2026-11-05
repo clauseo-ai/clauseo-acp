@@ -104,6 +104,7 @@ describe.skipIf(process.platform === "win32")("runTool", () => {
     });
     const exited = new Promise((done) => leader.once("exit", (code) => done(code)));
     await ready(leader.stdout);
+    if (leader.pid === undefined) throw new Error("the leader has no pid");
     process.kill(-leader.pid, "SIGTERM");
     expect(await exited).toBe(128 + 15);
     expect(await until(() => !leftovers(), 3_000)).toBe(true);

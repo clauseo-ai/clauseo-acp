@@ -114,10 +114,7 @@ impl ClaudeOptions {
                     serde_json::json!([{"path": path, "type": "local"}]),
                 );
             } else {
-                tracing::warn!(
-                    path = %dir.display(),
-                    "the Claude plugin folder is not UTF-8: no skills go to Claude"
-                );
+                tracing::warn!("the Claude plugin folder is not UTF-8: no skills go to Claude");
             }
         }
         let mut settings = Map::new();

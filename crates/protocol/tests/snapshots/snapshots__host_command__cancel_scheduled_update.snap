@@ -1,0 +1,8 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+assertion_line: 6
+expression: "HostCommand::CancelScheduledUpdate {}"
+---
+{
+  "cancel_scheduled_update": {}
+}

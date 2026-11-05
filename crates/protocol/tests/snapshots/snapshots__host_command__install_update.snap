@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+assertion_line: 6
+expression: "HostCommand::InstallUpdate { when: InstallWhen::AfterTurn }"
+---
+{
+  "install_update": {
+    "when": "after_turn"
+  }
+}

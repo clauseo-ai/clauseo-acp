@@ -25,7 +25,8 @@ export const ICON_NAMES = [
   {
     component: "IconArrowUp",
     source: "arrowUp",
-    meaning: "Send, the arrow up, not used in the room yet",
+    meaning:
+      "Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet)",
   },
   {
     component: "IconSend",
@@ -53,6 +54,11 @@ export const ICON_NAMES = [
   { component: "IconNotProtected", source: "notProtected", meaning: "Not protected" },
   { component: "IconFolder", source: "folder", meaning: "A folder beyond the matter" },
   { component: "IconWebsite", source: "website", meaning: "A website" },
+  {
+    component: "IconFailed",
+    source: "triangleAlert",
+    meaning: "Failed: a conversation's answer failed, on the rail's status line",
+  },
   {
     component: "IconBreak",
     source: "circleAlert",
@@ -198,6 +204,12 @@ export const ICON_NAMES = [
     meaning:
       "A tool call that fetches from the network, a web fetch or a web search, not used in the room yet",
   },
+  { component: "IconArchived", source: "archive", meaning: "Archived: a conversation set aside" },
+  {
+    component: "IconSnooze",
+    source: "alarmClock",
+    meaning: "Snooze: a conversation set aside until a time, on the rail",
+  },
   {
     component: "IconFileWord",
     source: "fileWord",
@@ -223,4 +235,11 @@ export const ICON_NAMES = [
     source: "fileGeneric",
     meaning: "Any other file: the page alone",
   },
+  {
+    component: "IconBrowser",
+    source: "appWindow",
+    meaning: "Browser: Clauseo's own browser, on this computer",
+  },
+  { component: "IconDownload", source: "download", meaning: "Download Chrome" },
+  { component: "IconInfo", source: "info", meaning: "More about it: an info tip" },
 ] as const;

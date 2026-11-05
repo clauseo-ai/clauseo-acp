@@ -2,7 +2,7 @@
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
 {"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
-{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"request":{"id":"elicit-1","method":"elicitation/create","params":{"mode":"url","sessionId":"sess-1","elicitationId":"el-1","message":"Sign the contract in your browser","url":"https://sign.example.com/contract/42"}}}
 {"expect_response":{"id":"elicit-1","result":"{{any}}"}}

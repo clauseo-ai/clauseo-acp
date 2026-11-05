@@ -1,7 +1,8 @@
 //! The app-server's answers mapped to a [`ReadOutcome`] for Codex.
 
 use clauseo_codex_appserver::{
-    Account, PlanType, RateLimitReachedType, RateLimitSnapshot, RateLimitWindow,
+    Account, ChatgptAccount, GetAccountRateLimitsResponse, PlanType, RateLimitReachedType,
+    RateLimitSnapshot, RateLimitWindow,
 };
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, BillingProvider, Finite,
@@ -12,7 +13,7 @@ use super::Answers;
 use crate::model::kind_rank;
 use crate::readers::claude::looks_like_email;
 use crate::words;
-use crate::{ReadFailure, ReadOutcome};
+use crate::{AccountRead, ReadFailure, ReadOutcome};
 
 /// The `limitId` of Codex's own limit, whose snapshot sets the windows.
 const CODEX_LIMIT: &str = "codex";
@@ -27,22 +28,37 @@ const WEEK_MINS: i64 = 7 * 24 * 60;
 /// The shortest and longest month, in minutes: 28 and 31 days.
 const MONTH_MINS: std::ops::RangeInclusive<i64> = 28 * 24 * 60..=31 * 24 * 60;
 
-/// The outcome of a read that got every answer.
+/// The outcome of a read. Without `account/read` (late or failed while the limits came, which
+/// implies a `ChatGPT` sign-in) it is the `ChatGPT` outcome with no email, the plan from the
+/// snapshot, and [`AccountRead::NotRead`].
 pub(crate) fn outcome(answers: Answers) -> ReadOutcome {
-    let account = match answers.account.account {
-        None => return ReadOutcome::SignedOut,
-        Some(Account::ApiKey) => {
-            return pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY);
-        }
-        Some(Account::AmazonBedrock(_)) => {
-            return pay_as_you_go(BillingProvider::Bedrock, REF_BEDROCK);
-        }
-        Some(Account::Unknown(_)) => {
-            return ReadOutcome::Failed(ReadFailure::Malformed("unknown account type".to_owned()));
-        }
-        Some(Account::Chatgpt(account)) => account,
+    let Some(read) = answers.account else {
+        let unread = ChatgptAccount {
+            email: None,
+            plan_type: PlanType::Unknown(String::new()),
+        };
+        return chatgpt(&unread, answers.limits.as_ref(), AccountRead::NotRead);
     };
-    let snapshot = answers.limits.as_ref().and_then(|limits| {
+    match read.account {
+        None => ReadOutcome::SignedOut,
+        Some(Account::ApiKey) => pay_as_you_go(BillingProvider::OpenAi, REF_API_KEY),
+        Some(Account::AmazonBedrock(_)) => pay_as_you_go(BillingProvider::Bedrock, REF_BEDROCK),
+        Some(Account::Unknown(_)) => {
+            ReadOutcome::Failed(ReadFailure::Malformed("unknown account type".to_owned()))
+        }
+        Some(Account::Chatgpt(account)) => {
+            chatgpt(&account, answers.limits.as_ref(), AccountRead::Read)
+        }
+    }
+}
+
+/// A `ChatGPT` sign-in's outcome from `account` and its `limits`.
+fn chatgpt(
+    account: &ChatgptAccount,
+    limits: Option<&GetAccountRateLimitsResponse>,
+    account_read: AccountRead,
+) -> ReadOutcome {
+    let snapshot = limits.and_then(|limits| {
         let by_id = limits
             .rate_limits_by_limit_id
             .as_ref()
@@ -91,6 +107,7 @@ pub(crate) fn outcome(answers: Answers) -> ReadOutcome {
     ReadOutcome::Usage {
         limits,
         reached: snapshot.and_then(reached),
+        account_read,
     }
 }
 
@@ -108,6 +125,7 @@ fn pay_as_you_go(via: BillingProvider, account: &str) -> ReadOutcome {
     ReadOutcome::Usage {
         limits,
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 

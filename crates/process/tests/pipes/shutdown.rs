@@ -28,7 +28,7 @@ fn idle_exits_on_stdin_close() {
     } = launch("idle", &dir).unwrap();
     let timer = ManualTimer::new();
     let (outcome, pumped, armed) = block_on(async {
-        let (outcome, pumped) = join!(handle.shutdown(&timer), stderr.drain());
+        let (outcome, pumped) = join!(handle.shutdown(&timer, None), stderr.drain());
         (outcome, pumped, timer.next_armed().await)
     });
     let ShutdownOutcome::StdinClosed(report) = outcome else {
@@ -66,7 +66,8 @@ fn ignore_stdin_close_escalates_to_sigterm() {
         assert!(timer.fire());
         assert_eq!(timer.next_armed().await, Duration::from_secs(3));
     };
-    let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
+    let (outcome, (), pumped) =
+        block_on(async { join!(handle.shutdown(&timer, None), script, pumped) });
     let ShutdownOutcome::Terminated(report) = outcome else {
         panic!("expected Terminated, got {outcome:?}");
     };
@@ -126,7 +127,8 @@ fn sigterm_ignoring_agent_is_killed() {
         // The wait for the exit after SIGKILL, which the exit beats.
         assert_eq!(timer.next_armed().await, Duration::from_secs(2));
     };
-    let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
+    let (outcome, (), pumped) =
+        block_on(async { join!(handle.shutdown(&timer, None), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };
@@ -173,7 +175,8 @@ fn ignore_stdin_close_terminates_job() {
             timer.fire();
         }
     };
-    let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
+    let (outcome, (), pumped) =
+        block_on(async { join!(handle.shutdown(&timer, None), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };

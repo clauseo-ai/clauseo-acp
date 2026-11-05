@@ -3,8 +3,8 @@
 #![expect(
     clippy::disallowed_methods,
     reason = "the host's one place that creates folders (the data folder, the matters root and \
-              agents' homes), writes an agent home's config.toml, and writes unit tests' temp \
-              folders"
+              agents' homes), writes an agent home's config.toml, appends to and rotates the log \
+              file, and writes unit tests' temp folders"
 )]
 
 use std::io;
@@ -74,11 +74,38 @@ pub(crate) fn rename_folder(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// Opens the file `path` for appending, creating it (0600 on Unix): the host's log file
+/// (`log_file.rs`, decision record 0047).
+pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true).create(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)
+}
+
+/// Renames the file `from` to `to`, replacing a file at `to`: the log file's rotation.
+pub(crate) fn rename_file(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// Removes the folder `path` and everything under it; a missing folder is fine. A link inside
 /// is removed, never followed (`std::fs::remove_dir_all`): a session's run folder.
 pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     match std::fs::remove_dir_all(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Removes the link or file `path` itself, never what a link points to: a leftover download's
+/// working entry that is not a real folder (`browser/install/archive.rs`). On Windows a link to
+/// a folder (or a junction) is removed as a folder, which removes the link only.
+pub(crate) fn remove_link(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if cfg!(windows) && std::fs::symlink_metadata(path).is_ok() => {
+            std::fs::remove_dir(path).map_err(|_dir| error)
+        }
         other => other,
     }
 }

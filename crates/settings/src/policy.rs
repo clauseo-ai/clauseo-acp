@@ -90,7 +90,8 @@ pub enum Kind {
 pub fn kind_of(key: &str) -> Option<Kind> {
     match leaf::KEYS.iter().find(|(known, _)| *known == key) {
         Some(&(_, kind)) => Some(kind),
-        None => leaf::agent_id(key).map(|_| Kind::Object),
+        None => (leaf::agent_id(key).is_some() || crate::plans::plan_id(key).is_some())
+            .then_some(Kind::Object),
     }
 }
 
