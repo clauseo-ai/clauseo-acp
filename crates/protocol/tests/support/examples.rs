@@ -33,6 +33,8 @@ use crate::fixtures::{
     permission_request_id, raw, short, thread_id, tool_call_id, turn_id,
 };
 
+#[path = "examples/later.rs"]
+mod later;
 #[path = "examples/setup.rs"]
 mod setup;
 
@@ -215,14 +217,9 @@ pub fn later_variants() -> Vec<DomainEvent> {
             detail: Some("the signature did not verify".to_owned()),
         }
         .into(),
-        TurnFailed {
-            turn: turn_id(3),
-            code: ErrorCode::SettingsRefused,
-            detail: Some("plans.claude-acp.endpoint: not an https address".to_owned()),
-        }
-        .into(),
     ]
     .into_iter()
+    .chain(later::failures())
     .chain(setup::turns())
     .collect()
 }
