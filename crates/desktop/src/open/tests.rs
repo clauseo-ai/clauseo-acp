@@ -247,6 +247,101 @@ fn a_file_outside_its_matter_is_refused() {
     assert_eq!(opener.opened(), []);
 }
 
+/// A document in a nested subfolder of its matter opens, and what it hands on has no `\\?\`
+/// prefix at a normal length: `dunce` keeps the prefix only past `MAX_PATH`.
+#[test]
+fn a_document_in_a_nested_folder_of_its_matter_opens_plain() {
+    let scratch = Scratch::new("open-nested", &[]);
+    let folder = scratch.path().join("Acme");
+    scratch.dir("Acme/Clients/2026/Drafts");
+    let brief = scratch.file("Acme/Clients/2026/Drafts/Brief.docx", b"PK");
+    let document = check_document(&brief, &folder).unwrap();
+    assert!(
+        !document.path.to_string_lossy().starts_with(r"\\?\"),
+        "{}",
+        document.path.display()
+    );
+    assert_eq!(document.kind, "docx");
+    let host = host(&folder, &brief);
+    let opener = FakeOpener::default();
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(
+        opener.opened(),
+        [Opened::Path(document.path, "docx".to_owned())]
+    );
+}
+
+/// `starts_with` compares whole components, so a sibling whose name begins with the folder's
+/// name (`Acme2` beside `Acme`) is not inside it.
+#[test]
+fn a_sibling_whose_name_starts_with_the_folders_is_refused() {
+    let scratch = Scratch::new("open-prefix", &[]);
+    let folder = scratch.dir("Acme");
+    scratch.dir("Acme2");
+    let sibling = scratch.file("Acme2/Brief.docx", b"PK");
+    let opener = FakeOpener::default();
+    let host = host(&folder, &sibling);
+    let refused = file(&host, &opener, host.file);
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
+    assert_eq!(opener.opened(), []);
+}
+
+/// Eight nested folder names, about 370 characters with the separators: a document under them
+/// passes `MAX_PATH` (260 UTF-16 units) on Windows, whatever the scratch folder's own length.
+#[cfg(windows)]
+fn deep_folders() -> Vec<String> {
+    (0..8)
+        .map(|n| format!("Subfolder {n} with a long name to pass MAX_PATH"))
+        .collect()
+}
+
+/// On Windows a document past `MAX_PATH` in a short matter folder is accepted, and it is handed on
+/// verbatim, as a long path must be. Both sides canonicalize verbatim, so `starts_with` finds
+/// the folder. A file outside the matter, named through `..`, is still refused.
+#[cfg(windows)]
+#[test]
+fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    let scratch = Scratch::new("open-long-path", &[]);
+    let folder = scratch.dir("Acme");
+    let nested = deep_folders();
+    let rel = nested.join("/");
+    scratch.dir(&format!("Acme/{rel}"));
+    let brief = scratch.file(&format!("Acme/{rel}/Brief.docx"), b"PK");
+    let long = dunce::canonicalize(&brief).unwrap();
+    assert!(
+        long.as_os_str().encode_wide().count() > 260,
+        "{}",
+        long.display()
+    );
+
+    let document = check_document(&brief, &folder).unwrap();
+    assert!(
+        document.path.to_string_lossy().starts_with(r"\\?\"),
+        "a long path stays verbatim: {}",
+        document.path.display()
+    );
+    let host = host(&folder, &brief);
+    let opener = FakeOpener::default();
+    file(&host, &opener, host.file).unwrap();
+    assert_eq!(
+        opener.opened(),
+        [Opened::Path(document.path, "docx".to_owned())]
+    );
+
+    // `Acme\<first folder>\..\..\Outside.docx` is `Outside.docx` beside the matter's folder.
+    scratch.file("Outside.docx", b"PK");
+    let through = folder
+        .join(&nested[0])
+        .join("..")
+        .join("..")
+        .join("Outside.docx");
+    let refused = check_document(&through, &folder);
+    assert_eq!(code(refused), ErrorCode::CommandInvalid);
+    assert_eq!(opener.opened().len(), 1);
+}
+
 #[test]
 fn only_document_files_open() {
     let scratch = Scratch::new("open-types", &[]);
