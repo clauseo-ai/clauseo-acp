@@ -20,7 +20,8 @@ import type {
 } from "../transport/protocol.ts";
 
 /** A transport that carries the setup wire: R20's `setup` command and stream, and S21's `count_ui`. The desktop one
- * stubs it until stage D's P5 lands; the fake scripts it. The room asks for it by duck type (first-run/hold.ts). */
+ * carries desktop's own (tauri-transport.ts, setup-feed.ts); the fake scripts it. The room asks for it by duck type
+ * (first-run/hold.ts). */
 export interface SetupSource {
   /** Hears each SetupEvent: a new listener first gets SetupInfo, then each agent's install and sign-in state. Returns
    * the unsubscribe. */
@@ -223,7 +224,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       return stop;
     },
     command: (command) => {
-      transport.setup(command).catch(warn("setup"));
+      // the command's kind only: it can hold a pasted code or an API key
+      transport.setup(command).catch(warn(`setup ${Object.keys(command).join(",")}`));
     },
     set: (patch) => emit({ ...state, ...patch }),
     setCounts: (on) => {
