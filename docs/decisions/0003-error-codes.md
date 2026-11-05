@@ -98,6 +98,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `update.failed` | The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. | yes | host (the updater, decision record 0037; produced from R23 PR 4) |
 | `settings.refused` | The change breaks a settings rule, such as an agent entry that is not Clauseo's own install, a secret-shaped variable or an address that is not https; the message names the key, never the value, and nothing was changed. | no | host (`HostHandle::set_agent_launch`, `HostHandle::set_plan`; decision record 0048) |
 | `settings.key_stored` | A key is already stored for this agent, so this window may not replace it; it is changed or removed in Settings. No key text is in the message. | no | desktop (`setup`: a `SetAgentKey` from `main` when the agent already has a key, decision record 0048) |
+| `signin.login_shared` | A Codex login, logout or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login file; the remedy is in the app, "Stop using it here". | no | host (Codex login, logout and authenticate; decision record 0048) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

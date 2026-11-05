@@ -200,6 +200,9 @@ error_codes! {
     SettingsKeyStored = "settings.key_stored", retryable: false, meaning: "A key is already \
         stored for this agent, so this window may not replace it; it is changed or removed in \
         Settings. No key text is in the message.";
+    SigninLoginShared = "signin.login_shared", retryable: false, meaning: "A Codex login, logout \
+        or authenticate was refused while Clauseo's Codex home shares the lawyer's ChatGPT login \
+        file; the remedy is in the app, \"Stop using it here\".";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

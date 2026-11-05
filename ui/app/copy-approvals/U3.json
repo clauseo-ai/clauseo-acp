@@ -590,6 +590,14 @@
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
+  "U3-err-signin.login_shared": {
+    "en": "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
   "U3-51": {
     "en": "You didn't allow a request, so the answer stopped. The answer so far is kept.",
     "hi": null,
