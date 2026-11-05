@@ -55,6 +55,10 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
             tracing::info!(%agent, "the matters' login links: none before stage C");
             let _gone = reply.send(Ok(Vec::new()));
         }
+        SignInRequest::LimitsLogin { agent, reply } => {
+            super::super::limits::login_changed(actor, agent);
+            let _gone = reply.send(Ok(()));
+        }
     }
 }
 

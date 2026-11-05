@@ -257,6 +257,12 @@ pub(crate) fn refresh(actor: &mut Actor, agent: Option<AgentKind>, why: RefreshW
     feed(actor, input);
 }
 
+/// `HostHandle::limits_login_changed`: one `Input::LoginChanged`, a read at once past any age
+/// or back-off (a read in flight is followed by another), the deadlines left as they were.
+pub(crate) fn login_changed(actor: &mut Actor, agent: AgentKind) {
+    feed(actor, ModelInput::LoginChanged { agent });
+}
+
 /// A rate-limit signal of `thread`'s agent, in a turn or outside one: `Input::Live` for the
 /// agent's kind (an id with no kind has no limits).
 pub(crate) fn live(actor: &mut Actor, thread: ThreadId, signal: &LimitSignal) {
