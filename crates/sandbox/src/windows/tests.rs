@@ -1,5 +1,8 @@
 //! The folder check's answers on folders this test makes, and the admin shares on a Windows
 //! runner.
+//!
+//! Past 500 lines: split tier B's record tests (from the registry read down) into a file of
+//! their own when this grows.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -435,15 +438,21 @@ fn a_sandbox_folder_owned_by_another_account_is_taken_back_or_refused() {
     }
 }
 
-#[test]
-fn an_explicit_entry_on_a_file_in_the_sandbox_folder_is_dropped() {
-    let temp = TempDir::new("sandbox-file-ace");
+/// A sandbox folder made by `make_sandbox_dir` under a fresh temp folder.
+fn sandbox_folder(test: &str) -> (TempDir, PathBuf) {
+    let temp = TempDir::new(test);
     let folder = temp.path().join("sandbox");
     super::write::make_sandbox_dir(&folder).unwrap();
+    (temp, folder)
+}
+
+#[test]
+fn a_record_file_with_an_explicit_entry_keeps_only_what_it_inherits() {
+    let (temp, _folder) = sandbox_folder("record-file-ace");
     let file = temp.file("sandbox/matters.json", "{}");
     test_dacl::protect_with(&file, "D:P(A;;FA;;;WD)").unwrap();
     assert!(dacl_sddl(&file).contains(";WD)"));
-    super::write::make_sandbox_dir(&folder).unwrap();
+    super::write::check_owned_file(&file).unwrap();
     let sddl = dacl_sddl(&file);
     assert!(!sddl.starts_with("D:P"), "{sddl}");
     assert!(!sddl.contains(";WD)"), "{sddl}");
@@ -452,4 +461,64 @@ fn an_explicit_entry_on_a_file_in_the_sandbox_folder_is_dropped() {
         assert!(flags.contains("ID"), "an explicit entry is left: {sddl}");
     }
     assert_eq!(sddl.split('(').count() - 1, 3, "{sddl}");
+}
+
+#[test]
+fn a_record_file_owned_by_another_account_is_taken_back() {
+    use super::private_dir::{owner, set_owner};
+    use super::sids::Sid;
+
+    let (temp, _folder) = sandbox_folder("record-file-owner");
+    let file = temp.file("sandbox/matters.json", "{}");
+    if !enable_restore_privilege() {
+        println!("skipped: this token can't give a file away");
+        return;
+    }
+    let local_service = Sid::parse("S-1-5-19").unwrap();
+    set_owner(&file, &local_service).unwrap();
+    assert_eq!(owner(&file).unwrap(), local_service);
+    super::write::check_owned_file(&file).unwrap();
+    assert_eq!(
+        owner(&file).unwrap(),
+        super::record::current_user_sid().unwrap()
+    );
+}
+
+#[test]
+fn a_hard_linked_record_file_is_refused() {
+    let (temp, _folder) = sandbox_folder("record-file-hard-link");
+    let outside = temp.file("outside.json", "{}");
+    let linked = temp.hard_link("sandbox/matters.json", &outside);
+    let error = super::write::check_owned_file(&linked).unwrap_err();
+    assert!(error.to_string().contains("hard links"), "{error}");
+}
+
+#[test]
+fn a_missing_record_file_is_fine() {
+    let (_temp, folder) = sandbox_folder("record-file-missing");
+    super::write::check_owned_file(&folder.join("matters.json")).unwrap();
+}
+
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test makes its junction with cmd's mklink /J, which exits at once"
+)]
+fn a_junction_named_sandbox_is_refused() {
+    let temp = TempDir::new("sandbox-junction");
+    let elsewhere = temp.dir("elsewhere");
+    let junction = temp.path().join("sandbox");
+    let made = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(&junction)
+        .arg(&elsewhere)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let error = super::write::make_sandbox_dir(&junction).unwrap_err();
+    assert!(error.to_string().contains("reparse point"), "{error}");
+    // The folder the junction names kept its DACL: nothing was set through the link.
+    assert!(!dacl_sddl(&elsewhere).starts_with("D:P"));
 }
