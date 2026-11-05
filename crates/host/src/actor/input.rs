@@ -23,6 +23,26 @@ use crate::pipeline::Ticket;
 /// A reply to one handle call.
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, Error>>;
 
+/// A sign-in call from a handle (decision record 0048).
+#[derive(Debug)]
+pub(crate) enum SignInRequest {
+    /// `HostHandle::restart_agents`.
+    Restart { agent: AgentId, reply: Reply<()> },
+    /// `HostHandle::stop_agents`.
+    Stop { agent: AgentId, reply: Reply<()> },
+    /// `HostHandle::set_reused_login`.
+    Reused {
+        agent: AgentId,
+        reused: bool,
+        reply: Reply<()>,
+    },
+    /// The folders whose login links `HostHandle::remove_login_links` removes.
+    LinkHomes {
+        agent: AgentId,
+        reply: Reply<Vec<PathBuf>>,
+    },
+}
+
 /// A subscription's number, unique for the host's run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct SubId(pub(crate) u64);
@@ -103,6 +123,8 @@ pub(crate) enum Request {
         plan: Option<Box<clauseo_settings::Plan>>,
         reply: Reply<()>,
     },
+    /// A sign-in call (`turn/sign_in.rs`).
+    SignIn(SignInRequest),
     Shutdown {
         reply: Reply<()>,
     },

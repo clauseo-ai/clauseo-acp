@@ -30,7 +30,7 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, Holder, JobKind, LimitMark, Then, TimerKind, TurnJob, TurnPhase, TurnTimer, asks, cancel,
-    current, failure, host_stopping, known, matter_of, state, steps, updates,
+    current, failure, host_stopping, known, matter_of, queue, sign_in, state, steps, updates,
 };
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -103,7 +103,12 @@ pub(super) fn on_prompt_done(
             if fallback {
                 current.limit_read = Some(LimitRead::default());
             }
-            End::failed(error.code(), Some(error.to_string()), None)
+            let text = error.to_string();
+            End::failed(
+                sign_in::code_of(actor, error.code(), &text),
+                Some(text),
+                None,
+            )
         }
     };
     end_turn(actor, thread, end);
@@ -417,11 +422,17 @@ pub(super) fn after_events(
 /// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     let now = actor.now().mono;
+    let mut requeue = None;
     let ended = state(actor, thread).and_then(|state| {
-        let current = state.current.take()?;
+        let mut current = state.current.take()?;
+        let stopped = state.stopped_for_sign_in.take();
         let close = &state.closing.as_ref()?.close;
         // A turn ended with no close of its own (a host bug lost its matter) is not counted.
-        (close.turn == current.turn).then(|| counting::Ended {
+        if close.turn != current.turn {
+            return None;
+        }
+        requeue = sign_in::requeue_of(&mut current, stopped, close);
+        Some(counting::Ended {
             started: current.started,
             first_words: current.first_words,
             now,
@@ -431,6 +442,9 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     });
     if let Some(ended) = ended {
         counting::answer_ended(actor, thread, &ended);
+    }
+    if let Some(requeue) = requeue {
+        queue::keep_for_sign_in(actor, thread, requeue);
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);

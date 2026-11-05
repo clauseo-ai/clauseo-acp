@@ -528,6 +528,7 @@ impl Actor {
                 let written = settings::set_plan(self, &agent, plan.as_deref());
                 let _gone = reply.send(written);
             }
+            Request::SignIn(request) => turn::sign_in_request(self, request),
             Request::Shutdown { reply } => {
                 match authorize(&Principal::LocalDesktop, Access::Shutdown) {
                     Ok(()) => shutdown::begin_shutdown(self, Some(reply)),

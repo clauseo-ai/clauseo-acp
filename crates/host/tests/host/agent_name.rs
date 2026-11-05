@@ -81,11 +81,25 @@ fn same_title_on_a_second_start_logs_nothing_new() {
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
-    for prompt in ["Read the lease.", "Read it again."] {
-        let (turn, _) = host.prompt(thread, prompt);
-        let ended = events.until_turn_ended(turn);
-        assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
-    }
+    let (first, _) = host.prompt(thread, "Read the lease.");
+    let ended = events.until_turn_ended(first);
+    assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+    // The failed turn comes back held for the sign-in (`sign_in_hold.rs`); resuming it by
+    // hand starts the agent a second time.
+    let queued = |events: &crate::observe::Events| {
+        events.events().find_map(|event| match event {
+            DomainEvent::TurnQueued(queued) if queued.behind_turn() == Some(first) => {
+                Some(queued.turn())
+            }
+            _ => None,
+        })
+    };
+    events.until("the turn put back", |events| queued(events).is_some());
+    let again = queued(&events).unwrap();
+    host.settle();
+    host.ok(HostCommand::ResumeQueue { thread });
+    let ended = events.until_turn_ended(again);
+    assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
     host.settle();
     events.drain_ready();
     // Both turns failed at session/new, so the second start did happen.

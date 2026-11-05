@@ -122,6 +122,8 @@ mod locate;
 #[cfg(test)]
 #[path = "host/log_file.rs"]
 mod log_file;
+#[path = "host/login_check.rs"]
+mod login_check;
 #[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
@@ -188,6 +190,9 @@ mod settings;
 #[cfg(test)]
 #[path = "host/settings_entries.rs"]
 mod settings_entries;
+#[cfg(test)]
+#[path = "host/sign_in_hold.rs"]
+mod sign_in_hold;
 #[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
