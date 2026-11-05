@@ -97,6 +97,8 @@
         <key>nda-kit</key>
         <string>sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4</string>
       </dict>
+      <key>update.mode</key>
+      <string>none</string>
     </dict>
   </array>
   <key>PayloadType</key>

@@ -54,5 +54,8 @@
     "enabled": {
       "nda-kit": "sha256:a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"
     }
+  },
+  "update": {
+    "mode": "none"
   }
 }

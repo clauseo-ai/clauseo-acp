@@ -24,10 +24,9 @@ fn doc(name: &str) -> PathBuf {
 }
 
 /// Keys the schema has that the notes still list under "### Coming", and the samples leave out:
-/// a key read and locked, but that nothing acts on yet. `update.mode` stays there until the
-/// updater works (R23); the pull request that wires it moves the row into the table, adds it to
-/// both samples and takes it out of here.
-const COMING: [&str; 1] = ["update.mode"];
+/// a key read and locked, but that nothing acts on yet. None at the moment (`update.mode` left
+/// with R23 PR 5).
+const COMING: [&str; 0] = [];
 
 /// Every settings key, from the JSON Schema: `<section>.<field>`, and an agent's as
 /// `agents.<id>`, less the [`COMING`] ones. `None` when the schema's shape is not the one read
