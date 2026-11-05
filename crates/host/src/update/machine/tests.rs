@@ -16,6 +16,7 @@ use crate::update::{
 };
 
 mod refusals;
+mod review;
 mod scheduled;
 mod start;
 
@@ -157,8 +158,10 @@ fn net() -> UpdaterError {
 fn update_idle_or_failed_checks_when_its_timer_fires() {
     for m in [idle(), failed()] {
         let due = m.timer().unwrap();
+        // Early, it arms again at the same time (tests/review.rs).
         let (early, fx) = go(&m, Input::TimerFired, at(due.as_millis() - 1));
-        assert!(fx.is_empty() && early.view() == m.view(), "early: {fx:?}");
+        assert_eq!(fx, [Effect::ArmTimer { at: due }]);
+        assert_eq!(early.view(), m.view());
         let (next, fx) = go(&m, Input::TimerFired, due);
         assert_eq!(next.view().state, UpdateState::Checking);
         assert_eq!(fx, [Effect::StartCheck, Effect::Publish]);
