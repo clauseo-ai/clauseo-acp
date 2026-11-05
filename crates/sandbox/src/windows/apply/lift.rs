@@ -74,7 +74,7 @@ pub(super) fn lift(
     };
     if let Err(refused) = super::back::finish(ledger, acl, around, &taken, &[]) {
         let failure: ApplyFailure = refused.failure;
-        tracing::warn!(%failure, "a lifted folder's walk failed; its entries stay pending");
+        tracing::warn!(%failure, "a lifted folder's walk failed; its entries stay removing");
     }
     taken.removed.len() + taken.shared
 }

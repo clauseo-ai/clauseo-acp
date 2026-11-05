@@ -1,11 +1,11 @@
 //! The way back (S15 PR3): a launch's rollback, `forget_matter`, and the start's `reconcile`.
 //!
 //! Each takes entries back through [`Ledger::take_back`], which under one hold of the ledger's
-//! lock sets them `pending` on disk, decides which are shared from the file as read then, and
+//! lock marks them `removing` on disk, decides which are shared from the file as read then, and
 //! removes the rest's permission entries (the review's M3 and M4). The trees are then walked
 //! again, outside the lock, so the inherited copies go too, and only then are the entries whose
-//! permission entry is gone dropped ([`Ledger::drop_gone`]). A crash anywhere leaves `pending`
-//! entries, which [`reconcile`] walks and settles.
+//! permission entry is gone dropped ([`Ledger::drop_gone`]). A crash anywhere leaves `removing`
+//! entries, whose removal [`reconcile`] finishes (round 4).
 //!
 //! A Low label on another name for the same file counts as the same permission entry
 //! ([`AclWriter::same_file`]): the label belongs to the file, so forgetting one matter whose
@@ -24,7 +24,7 @@ use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Sid, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{
-    Entry, EntryId, Forgotten, Ledger, Reconciled, Shares, Take, TakenBack,
+    Entry, EntryId, EntryState, Forgotten, Ledger, Reconciled, Shares, Take, TakenBack,
 };
 use crate::windows::writer::{AclWriter, ApplyFailure, Reach};
 
@@ -99,7 +99,7 @@ pub(super) fn take_back(
 }
 
 /// Takes back the entries this run added: the ones it wrote are removed (never one another
-/// entry names), the others dropped. A removal or walk that fails leaves its entry `pending`.
+/// entry names), the others dropped. A removal or walk that fails leaves its entry `removing`.
 pub(super) fn roll_back(
     ledger: &mut Ledger,
     plan: &AdmittedPlan,
@@ -127,7 +127,7 @@ pub(super) fn roll_back(
         Ok(taken) => {
             if let Err(refused) = finish(ledger, acl, around, &taken, &[]) {
                 let failure = refused.failure;
-                tracing::warn!(%failure, "a rollback's walks or drops failed; entries stay pending");
+                tracing::warn!(%failure, "a rollback's walks or drops failed; entries stay removing");
             }
         }
         Err(error) => {
@@ -184,7 +184,7 @@ pub(super) fn finish(
             Ok(_) => walked.push(root.clone()),
             Err(refused) => {
                 let failure = refused.failure;
-                tracing::warn!(%failure, "a walk after a take-back failed; its entries stay pending");
+                tracing::warn!(%failure, "a walk after a take-back failed; its entries stay removing");
                 failed.get_or_insert(refused);
             }
         }
@@ -208,7 +208,7 @@ pub(super) fn finish(
 /// lawyer's own label put back) unless another matter's entry names it, hands what its pool
 /// user made in its matter, state and notes folders back to the desktop user
 /// ([`AclWriter::reclaim`], the review's M5), walks each tree once, and drops the entries whose
-/// permission entry is gone. An entry whose removal or walk failed stays `pending` for the next
+/// permission entry is gone. An entry whose removal or walk failed stays `removing` for the next
 /// try.
 ///
 /// The hand-back it owes each pool user is recorded under the lock before any removal, and
@@ -258,12 +258,19 @@ pub fn forget_matter(
 }
 
 /// At start: walks each `pending` entry's tree again, plainly (an entry is `pending` when a
-/// launch, a rollback or a forget stopped partway, the review's M2), then marks the ones whose
-/// permission entry is there `applied` and drops the rest. An entry whose check or walk fails
-/// stays `pending` for the next start. Two kinds stay `pending` on purpose, counted as
-/// deferred: a deny entry whose permission entry is there, so its matter's next launch walks its
-/// tree strictly, as a plain walk doesn't check what beats the deny (N4); and every entry of a
-/// matter whose hand-back is owed, which a retried `forget_matter` needs (N5).
+/// launch stopped partway, the review's M2), then marks the ones whose permission entry is there
+/// `applied` and drops the rest. An entry whose check or walk fails stays `pending` for the
+/// next start. Two kinds stay `pending` on purpose, counted as deferred: a deny entry whose
+/// permission entry is there, so its matter's next launch walks its tree strictly, as a plain
+/// walk doesn't check what beats the deny (N4); and every entry of a matter whose hand-back is
+/// owed, which a retried `forget_matter` needs (N5).
+///
+/// An entry a rollback or a forget marked `removing` before it stopped is never taken for
+/// written: its removal is finished first, through the same take-back (an entry another one
+/// names is dropped without a removal), its tree walked with the rest, and it is dropped once
+/// its permission entry is gone; one of a matter whose hand-back is owed is kept for the
+/// retried forget, deferred (S15 `PR3b` round 4). So a crash during the rollback of a refused
+/// launch never leaves that launch's grants applied.
 pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconciled, Error> {
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
     let pending = ledger.pending().map_err(failed)?;
@@ -273,6 +280,10 @@ pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconci
         .map(|o| o.matter)
         .collect();
     let mut done = Reconciled::default();
+    let removing = |e: &Entry| (e.state == EntryState::Removing).then_some(Take::Remove);
+    let taken = take_back(ledger, None, acl, removing).map_err(failed)?;
+    done.unchecked += taken.kept;
+    done.removed += taken.shared;
     let (mut there, mut gone) = (Vec::new(), Vec::new());
     for entry in pending {
         match present_entry(acl, &entry) {
@@ -286,7 +297,7 @@ pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconci
         }
     }
     let mut walked: BTreeMap<PathBuf, bool> = BTreeMap::new();
-    for entry in there.iter().chain(&gone) {
+    for entry in there.iter().chain(&gone).chain(&taken.removed) {
         if entry.inherit == Inherit::ThisOnly || walked.contains_key(&entry.path) {
             continue;
         }
@@ -311,12 +322,26 @@ pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconci
         .filter(|e| settled(e) && !owes(e))
         .map(|e| e.id)
         .collect();
-    done.deferred = there.iter().filter(deny).count() + gone.iter().filter(owes).count();
-    done.unchecked += there.len() + gone.len() - applied.len() - dropped.len() - done.deferred;
+    let finished: Vec<EntryId> = taken
+        .removed
+        .iter()
+        .filter(|e| settled(e) && !owes(e))
+        .map(|e| e.id)
+        .collect();
+    let deferred = there.iter().filter(deny).count() + gone.iter().filter(owes).count();
+    let kept_owed = taken.removed.iter().filter(owes).count();
+    done.unchecked += there.len() + gone.len() - applied.len() - dropped.len() - deferred;
+    done.unchecked += taken.removed.len() - finished.len() - kept_owed;
+    done.deferred = deferred + kept_owed;
     ledger.mark_walked(&applied).map_err(failed)?;
     done.applied = applied.len();
     done.dropped = ledger
         .drop_gone(&dropped, |entry| present_entry(acl, entry))
         .map_err(failed)?;
+    let removed = ledger
+        .drop_gone(&finished, |entry| present_entry(acl, entry))
+        .map_err(failed)?;
+    done.unchecked += finished.len() - removed;
+    done.removed += removed;
     Ok(done)
 }

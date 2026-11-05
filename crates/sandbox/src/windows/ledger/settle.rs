@@ -22,11 +22,18 @@ pub(super) fn reconcile(
             slots.push(slot);
             continue;
         };
-        if known.entry.state != EntryState::Pending {
+        if known.entry.state == EntryState::Applied {
             slots.push(Slot::Known(known));
             continue;
         }
+        let removing = known.entry.state == EntryState::Removing;
         match present(&known.entry) {
+            // Round 4: being removed, never taken for written; only a walk-backed reconcile
+            // removes it.
+            Ok(true) if removing => {
+                slots.push(Slot::Known(known));
+                done.unchecked += 1;
+            }
             // N4: a deny waits for its matter's next launch to walk it strictly.
             Ok(true) if known.entry.rights.is_deny() => {
                 slots.push(Slot::Known(known));

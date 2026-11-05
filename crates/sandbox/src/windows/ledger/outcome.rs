@@ -21,6 +21,10 @@ pub struct Reconciled {
     /// (their matter's next launch walks them strictly, N4), and entries of a matter whose
     /// hand-back is owed (a retried forget needs them, N5).
     pub deferred: usize,
+    /// Entries a rollback or forget was removing when it stopped, whose removal is now finished
+    /// and which are dropped (round 4). One of a matter whose hand-back is owed has its
+    /// permission entry removed but is kept, and counts as deferred.
+    pub removed: usize,
 }
 
 /// What [`Ledger::take_back`] does with an entry it takes.
@@ -35,11 +39,11 @@ pub enum Take {
 /// What [`Ledger::take_back`] did.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TakenBack {
-    /// Entries whose permission entry was removed; still `pending` until their trees are walked.
+    /// Entries whose permission entry was removed; still `removing` until their trees are walked.
     pub removed: Vec<Entry>,
     /// Entries dropped without a removal because another entry names the same permission entry.
     pub shared: usize,
-    /// Entries whose removal failed, kept `pending` for the next try.
+    /// Entries whose removal failed, kept `removing` for the next try.
     pub kept: usize,
 }
 

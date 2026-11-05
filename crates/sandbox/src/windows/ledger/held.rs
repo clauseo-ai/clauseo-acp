@@ -1,5 +1,6 @@
 //! One hold of the ledger's lock across more than one write: what a take-back needs, so its
-//! entries are `pending` on disk before any permission entry is removed (S15 PR3 review, M4).
+//! entries are marked removing on disk before any permission entry is removed (S15 PR3 review,
+//! M4; round 4).
 
 use std::io;
 use std::path::Path;
@@ -136,6 +137,22 @@ pub(super) fn set_state(state: &mut State, ids: &[EntryId], to: EntryState) {
     }
 }
 
+/// Sets entry `id` back to `pending` if it is being removed: a launch is about to write its
+/// permission entry again. Whether it was.
+pub(super) fn revive(state: &mut State, id: EntryId) -> bool {
+    let mut changed = false;
+    for slot in &mut state.slots {
+        if let Slot::Known(known) = slot
+            && known.entry.id == id
+            && known.entry.state == EntryState::Removing
+        {
+            known.entry.state = EntryState::Pending;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// How a take-back works out whether two entries name one permission entry.
 pub(crate) trait Shares {
     /// Whether `a` and `b` are one file (`AclWriter::same_file`); a check that fails is
@@ -191,7 +208,7 @@ pub(super) fn take_back(
         return Ok(done);
     }
     let ids: Vec<EntryId> = picked.iter().map(|(e, _)| e.id).collect();
-    set_state(&mut held.state, &ids, EntryState::Pending);
+    set_state(&mut held.state, &ids, EntryState::Removing);
     if let Some(matter) = owe {
         let entries: Vec<Entry> = picked.iter().map(|(e, _)| e.clone()).collect();
         owed::owe(&mut held.state, matter, &entries);
@@ -259,7 +276,8 @@ pub(super) fn mark_walked(state: &mut State, ids: &[EntryId]) -> bool {
     changed
 }
 
-/// Drops each of `ids` still `pending` whose permission entry `present` says is gone; how many.
+/// Drops each of `ids` still `pending` or being removed whose permission entry `present` says
+/// is gone; how many.
 pub(super) fn drop_gone(
     state: &mut State,
     ids: &[EntryId],
@@ -268,7 +286,7 @@ pub(super) fn drop_gone(
     let gone: Vec<EntryId> = state
         .entries()
         .filter(|e| {
-            ids.contains(&e.id) && e.state == EntryState::Pending && matches!(present(e), Ok(false))
+            ids.contains(&e.id) && e.state != EntryState::Applied && matches!(present(e), Ok(false))
         })
         .map(|e| e.id)
         .collect();

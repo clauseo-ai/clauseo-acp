@@ -6,7 +6,9 @@
 //! start, [`reconcile`] walks each `pending` entry's tree again, then marks it `applied` if
 //! its permission entry is there and drops it if not; a deny entry stays `pending` instead, so
 //! its matter's next launch walks its tree strictly (S15 `PR3b` round 2, N4). Taking entries back
-//! ([`Ledger::take_back`]) sets them `pending` on disk before any removal, and leaves a
+//! ([`Ledger::take_back`]) marks them `removing` on disk before any removal, so a crash partway
+//! is never read as a launch that wrote them (round 4); [`reconcile`] finishes their removal. It
+//! leaves a
 //! permission entry another entry names: the same entry on the same path, or a Low label on
 //! another name for the same file. A Low label's earlier label is never recorded when it is our
 //! own label, and goes to the entry that shares the label when its own entry is dropped (N7). So
@@ -92,6 +94,12 @@ pub enum EntryState {
     Pending,
     /// The permission entry was written.
     Applied,
+    /// A rollback or a forget is taking it back: set before any removal, so a crash partway
+    /// leaves an entry [`reconcile`] finishes removing, never one it takes for written (S15
+    /// `PR3b` round 4).
+    ///
+    /// [`reconcile`]: super::apply::reconcile
+    Removing,
 }
 
 /// An entry's number, unique in its ledger and never reused.
@@ -211,10 +219,12 @@ impl Ledger {
 
     /// The write-ahead step, under the lock: lists each of `plan`'s grants as `pending`, then
     /// replaces the file, before any permission entry is written. A grant already listed for the
-    /// matter, pending or applied, keeps its entry. The plan learns each grant's entry
-    /// ([`AdmittedPlan::entries`]) and which ones it added ([`AdmittedPlan::created`]). A plan
-    /// already recorded is refused (`InvalidInput`). The file is untouched when every grant was
-    /// listed already, or when the write fails.
+    /// matter keeps its entry; one being removed is set back to `pending`, as this launch is
+    /// about to write it again, so no take-back still running and no reconcile removes it after
+    /// (round 4). The plan learns each grant's entry ([`AdmittedPlan::entries`]) and which ones
+    /// it added ([`AdmittedPlan::created`]). A plan already recorded is refused (`InvalidInput`).
+    /// The file is untouched when every grant was listed already and none was being removed, or
+    /// when the write fails.
     pub fn record_pending(&mut self, plan: &mut AdmittedPlan) -> io::Result<()> {
         if !plan.entries.is_empty() {
             return Err(io::Error::new(
@@ -225,12 +235,14 @@ impl Ledger {
         let (entries, created) = self.update(true, |state| {
             let mut entries = Vec::with_capacity(plan.grants().len());
             let mut created = Vec::new();
+            let mut revived = false;
             for (grant, &matter) in plan.grants().iter().zip(plan.owners()) {
-                if let Some(id) = state
+                let listed = state
                     .entries()
                     .find(|entry| entry.lists(matter, grant))
-                    .map(|entry| entry.id)
-                {
+                    .map(|entry| entry.id);
+                if let Some(id) = listed {
+                    revived |= held::revive(state, id);
                     entries.push(id);
                     continue;
                 }
@@ -257,7 +269,7 @@ impl Ledger {
                 entries.push(id);
                 created.push(id);
             }
-            let changed = !created.is_empty();
+            let changed = revived || !created.is_empty();
             Ok((changed, (entries, created)))
         })?;
         plan.entries = entries;
@@ -332,7 +344,9 @@ impl Ledger {
     /// entry is there is marked `applied`, unless it is a deny entry: that stays `pending` for
     /// its matter's next launch to walk strictly (N4). One whose permission entry isn't is
     /// dropped, unless its matter's hand-back is owed (N5). One `present` fails on stays pending
-    /// for the next start. Applied entries and set aside ones are left as they are.
+    /// for the next start. A `removing` entry is dropped like a pending one whose permission entry
+    /// is gone, and otherwise kept (only [`reconcile`] removes it), never marked `applied`.
+    /// Applied entries and set aside ones are left as they are.
     pub fn reconcile(
         &mut self,
         mut present: impl FnMut(&Entry) -> io::Result<bool>,
@@ -342,7 +356,7 @@ impl Ledger {
 
     /// Forgets `matter`'s entries with no walk: [`Ledger::take_back`] of each of them, then the
     /// ones whose permission entry `remove` removed dropped. Entries `remove` failed on stay,
-    /// `pending`, for the next try; a shared one is dropped without a removal.
+    /// `removing`, for the next try; a shared one is dropped without a removal.
     pub fn forget_matter(
         &mut self,
         matter: MatterId,
@@ -455,13 +469,13 @@ impl Ledger {
     }
 
     /// Takes permission entries back, under one hold of the lock (the review's M3 and M4): each
-    /// entry `pick` takes, read from the file now, is set back to `pending` and the file
+    /// entry `pick` takes, read from the file now, is marked `removing` and the file
     /// written, before any removal. Then each one `pick` marks [`Take::Remove`] is handed to
     /// `remove` once per permission entry, unless an entry `pick` didn't take names the same
     /// permission entry (it is shared): a shared one, and each [`Take::Drop`], is dropped. The
-    /// file is written again. Entries whose permission entry was removed stay `pending` until
+    /// file is written again. Entries whose permission entry was removed stay `removing` until
     /// their trees are walked ([`Ledger::drop_gone`]); entries `remove` failed on stay
-    /// `pending` for the next try. Returns the entries removed.
+    /// `removing` for the next try. Returns the entries removed.
     pub fn take_back(
         &mut self,
         mut pick: impl FnMut(&Entry) -> Option<Take>,
@@ -472,7 +486,7 @@ impl Ledger {
 
     /// [`Ledger::take_back`], with `files` saying which names are one file (so a Low label on
     /// another name for the same file is shared, N7), and with `owe` recording the hand-backs
-    /// that matter's forget owes in the same save that sets the entries `pending` (N5).
+    /// that matter's forget owes in the same save that marks the entries `removing` (N5).
     pub(crate) fn take_back_with(
         &mut self,
         owe: Option<MatterId>,
@@ -483,7 +497,8 @@ impl Ledger {
         self.locked(|held| held::take_back(held, owe, &mut pick, files, &mut remove))
     }
 
-    /// Drops each of `ids` that is still `pending` and whose permission entry `present` says
+    /// Drops each of `ids` that is still `pending` or `removing` and whose permission entry
+    /// `present` says
     /// is gone, under the lock: the end of a take-back, once its trees are walked. An entry
     /// whose permission entry is there again (another launch wrote it) is kept.
     pub fn drop_gone(

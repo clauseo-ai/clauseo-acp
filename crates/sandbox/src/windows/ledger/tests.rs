@@ -237,6 +237,7 @@ fn reconcile_keeps_a_pending_entry_whose_ace_is_there_and_drops_one_whose_isnt()
             dropped: 1,
             unchecked: 1,
             deferred: 0,
+            removed: 0,
         }
     );
     let after = [

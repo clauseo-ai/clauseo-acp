@@ -50,6 +50,8 @@ pub(super) struct FakeAcl {
     pub(super) panic_walk: Option<PathBuf>,
     /// A removal panics.
     pub(super) panic_remove: bool,
+    /// A check of whether an entry on this path is there panics.
+    pub(super) panic_present: Option<PathBuf>,
     /// Runs before each write, as another process acting meanwhile.
     pub(super) on_add: Option<OnAdd>,
     /// A hand-back walk of this root fails, `PermissionDenied` on its `child`.
@@ -155,6 +157,10 @@ impl AclWriter for FakeAcl {
     }
 
     fn present(&mut self, grant: &Grant) -> io::Result<bool> {
+        assert!(
+            self.panic_present.as_deref() != Some(grant.path()),
+            "a crash during a check"
+        );
         Ok(self.aces.contains(&self.key_of(grant)))
     }
 
