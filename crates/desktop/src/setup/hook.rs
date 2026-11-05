@@ -10,8 +10,11 @@
 //!   the settings crate has already limited to its list. A Codex gateway is later (the brief),
 //!   so a Codex endpoint adds no variable.
 //!
-//! The snapshot is refreshed on each `SettingsChanged` (`setup/refresh.rs`). The env's values
-//! are plain `OsString`s once handed to the host: the key there is not zeroed.
+//! The snapshot is refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
+//! the one function that makes these variables: the limits readers take the same ones
+//! (`setup/readers.rs`), so a read goes where the agent's launches go. Desktop's copy is
+//! `Zeroizing`; the env's values are plain `OsString`s once handed to the host, which drops
+//! them once the agent is spawned (decision record 0048, ruling 5).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -22,6 +25,7 @@ use clauseo_profile::{PackWrite, PacksWritten, SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{Effective, Plan, PlanProvider};
 use serde_json::{Map, Value};
+use zeroize::Zeroizing;
 
 use super::keys::KeySlot;
 
@@ -61,24 +65,38 @@ impl SetupHook {
         Self { profile, ..self }
     }
 
-    /// What this hook adds for `agent` of `kind`: the key variable, then the plan's.
+    /// What this hook adds for `agent` of `kind` ([`setup_vars`]), as the host takes it.
     fn setup_env(&self, agent: &AgentId, kind: AgentKind) -> BTreeMap<OsString, OsString> {
-        let mut env = BTreeMap::new();
-        let plan = self
-            .plans
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(agent)
-            .cloned();
-        if let Some(plan) = plan {
-            plan_env(kind, &plan, &mut env);
-        }
-        let key = self.keys.get().and_then(|keys| keys.get(agent));
-        if let Some(key) = key.filter(|key| !key.is_empty()) {
-            env.insert(OsString::from(key_var(kind)), OsString::from(key.as_str()));
-        }
-        env
+        setup_vars(&self.keys, &self.plans, agent, kind)
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value.as_str())))
+            .collect()
     }
+}
+
+/// The variables setup adds for `agent` of `kind`, to its launches (the hook) and its limits
+/// reads (`setup/readers.rs`) alike: its firm plan's, then its stored key's (none while the
+/// keys load, or with no key). Zeroed when dropped.
+pub(crate) fn setup_vars(
+    keys: &KeySlot,
+    plans: &Plans,
+    agent: &AgentId,
+    kind: AgentKind,
+) -> BTreeMap<String, Zeroizing<String>> {
+    let mut vars = BTreeMap::new();
+    let plan = plans
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(agent)
+        .cloned();
+    if let Some(plan) = plan {
+        plan_env(kind, &plan, &mut vars);
+    }
+    let key = keys.get().and_then(|keys| keys.get(agent));
+    if let Some(key) = key.filter(|key| !key.is_empty()) {
+        vars.insert(key_var(kind).to_owned(), key);
+    }
+    vars
 }
 
 /// The variable `kind`'s key goes in.
@@ -90,17 +108,17 @@ pub(crate) fn key_var(kind: AgentKind) -> &'static str {
 }
 
 /// `plan`'s variables for `kind`, into `env`.
-fn plan_env(kind: AgentKind, plan: &Plan, env: &mut BTreeMap<OsString, OsString>) {
+fn plan_env(kind: AgentKind, plan: &Plan, env: &mut BTreeMap<String, Zeroizing<String>>) {
     for (name, value) in &plan.env {
-        env.insert(OsString::from(name), OsString::from(value));
+        env.insert(name.clone(), Zeroizing::new(value.clone()));
     }
     if kind != AgentKind::Claude {
         return;
     }
     if let Some(endpoint) = &plan.endpoint {
         env.insert(
-            OsString::from("ANTHROPIC_BASE_URL"),
-            OsString::from(endpoint),
+            "ANTHROPIC_BASE_URL".to_owned(),
+            Zeroizing::new(endpoint.clone()),
         );
     }
     let provider = match plan.provider {
@@ -109,7 +127,7 @@ fn plan_env(kind: AgentKind, plan: &Plan, env: &mut BTreeMap<OsString, OsString>
         Some(PlanProvider::Anthropic) | None => None,
     };
     if let Some(name) = provider {
-        env.insert(OsString::from(name), OsString::from("1"));
+        env.insert(name.to_owned(), Zeroizing::new("1".to_owned()));
     }
 }
 

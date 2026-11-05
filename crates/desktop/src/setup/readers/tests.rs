@@ -14,7 +14,7 @@ use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{AgentLaunch, Effective, Locations, SystemFiles};
 use futures::FutureExt as _;
 
-use super::{LeaveReaders, SwappableReaders};
+use super::{LeaveReaders, SwappableReaders, read_vars};
 use crate::bridge::lock;
 use crate::setup::keys::KeyCache;
 use crate::test_support::{Scratch, block_on};
@@ -62,8 +62,12 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
     let slot = Arc::new(OnceLock::new());
     let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
     let launcher = Arc::new(Recording::default());
-    let readers =
-        SwappableReaders::new(&effective, Arc::clone(&launcher) as Arc<dyn Launcher>, slot);
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        Arc::default(),
+    );
     // No entry yet: no launch.
     assert!(matches!(
         block_on(readers.read(AgentKind::Claude)),
@@ -99,4 +103,86 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
         spec.env().get(OsStr::new("ANTHROPIC_API_KEY")) == Some(&OsString::from(KEY)),
         "the stored key is not in the read's env"
     );
+}
+
+/// The security review's M4: a read carries exactly the variables the launch hook adds for the
+/// plan and the key (one function makes both), so with a firm endpoint and a stored key the
+/// read goes to the firm's gateway with the key.
+#[test]
+fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
+    use clauseo_host::ProfileHook as _;
+    use clauseo_settings::{Plan, PlanProvider};
+
+    use crate::setup::hook::SetupHook;
+
+    let scratch = Scratch::folder("setup-readers-plan", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.store(&claude, KEY).unwrap();
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
+    let plan = Plan {
+        endpoint: Some("https://gw.firm.example".to_owned()),
+        provider: Some(PlanProvider::Bedrock),
+        env: [("AWS_REGION".to_owned(), "eu-west-2".to_owned())].into(),
+    };
+    let plans: crate::setup::hook::Plans =
+        Arc::new(std::sync::RwLock::new([(claude.clone(), plan)].into()));
+    let hook = SetupHook::new(Arc::clone(&slot), Arc::clone(&plans));
+    let hooked: Vec<(String, String)> = hook
+        .launch_env(&claude)
+        .into_iter()
+        .map(|(name, value)| (name.into_string().unwrap(), value.into_string().unwrap()))
+        .collect();
+    assert_eq!(read_vars(&slot, &plans, AgentKind::Claude), hooked);
+    let names: Vec<&str> = hooked.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "AWS_REGION",
+            "CLAUDE_CODE_USE_BEDROCK"
+        ]
+    );
+    // And a read's spec carries each of them.
+    let launcher = Arc::new(Recording::default());
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        plans,
+    );
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: [("ANTHROPIC_API_KEY".to_owned(), String::new())].into(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    assert!(matches!(
+        block_on(readers.read(AgentKind::Claude)),
+        ReadOutcome::Failed(_)
+    ));
+    let specs = lock(&launcher.0).clone();
+    let [spec] = specs.as_slice() else {
+        panic!("one launch, got {}", specs.len());
+    };
+    for (name, value) in &hooked {
+        assert!(
+            spec.env().get(OsStr::new(name)) == Some(&OsString::from(value)),
+            "{name} is not the hook's in the read's env"
+        );
+    }
 }

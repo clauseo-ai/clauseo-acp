@@ -308,15 +308,18 @@ fn start_host<R: Runtime>(
             .ok();
         let effective = load_effective(&locations);
         let setup_read = setup::SetupStart::read(&effective, &locations);
+        // The host starts refusing launches until the keys load, and those policy blocks.
+        let refusals = setup_read.launch_refusals();
         let keys = setup::KeySlot::default();
         let launcher: Arc<dyn clauseo_process::Launcher> =
             Arc::new(host_launcher(SystemDirs.home()));
+        let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
         let readers = Arc::new(setup::SwappableReaders::new(
             &effective,
             launcher,
             Arc::clone(&keys),
+            Arc::clone(&plans),
         ));
-        let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
         let reused = setup::ReusedLogins::default();
         let reread_at = locations.clone();
         let side = setup::HostSide {
@@ -338,6 +341,9 @@ fn start_host<R: Runtime>(
             )))
             .with_sign_in_again(clauseo_agents::is_sign_in_again)
             .with_limits_reader(readers);
+        let config = refusals.into_iter().fold(config, |config, (agent, code)| {
+            config.with_launch_refused(agent, code)
+        });
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

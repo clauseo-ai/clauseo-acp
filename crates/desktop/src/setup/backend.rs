@@ -225,9 +225,12 @@ impl AgentsBackend {
         Ok(())
     }
 
-    /// `SetAgentKey`: refused while policy blocks the agent, and from `main` while a key is
-    /// there; a reused login is left first (the leave order). The reads are held while the key
-    /// is written, then the agents restart with it and the limits read it.
+    /// `SetAgentKey`: refused while policy blocks the agent, for a key the keychain would
+    /// refuse (`command.invalid`), and from `main` while a key is there; a reused login is left
+    /// first (the leave order), but only once the key is known to be taken: `main`'s first key
+    /// on a reused login reads the keychain first, and a read that fails refuses it, so no
+    /// refusal ever follows a leave (the security review's M5). The reads are held while the
+    /// key is written, then the agents restart with it and the limits read it.
     async fn set_key(
         &self,
         agent: &AgentId,
@@ -235,11 +238,18 @@ impl AgentsBackend {
         key_write: KeyWrite,
     ) -> Result<(), HostError> {
         self.refuse_blocked(agent)?;
+        KeyCache::check(agent, &key)?;
         // `main`'s first key leaves no login for a key that is there already.
         if key_write == KeyWrite::OnlyIfAbsent && self.keys.has(agent) {
             return Err(key_stored(agent));
         }
         let left = self.reused(agent);
+        if left
+            && key_write == KeyWrite::OnlyIfAbsent
+            && self.keys.probe(agent, self.key_trigger(agent)).await?
+        {
+            return Err(key_stored(agent));
+        }
         if left {
             leave::leave_reused(self, agent).await?;
         }
