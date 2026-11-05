@@ -73,6 +73,13 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         stop_cause,
         ..
     } = *agent;
+    let unresponsive = matches!(
+        ended,
+        Ended::Stopped {
+            step: StopStep::Unresponsive,
+            ..
+        }
+    );
     let reason = match ended {
         Ended::Exited(reason) => reason,
         Ended::Stopped { step, report } => {
@@ -138,6 +145,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     if !after_stop.is_empty() {
         start(actor, thread, after_stop);
     }
+    super::super::sign_in::agent_ended(actor, thread, unresponsive);
     actor.release(StreamId::Thread(thread));
 }
 

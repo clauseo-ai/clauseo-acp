@@ -252,7 +252,7 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             browser,
         ))
     })();
-    let sweep = actor.run_sweep.clone();
+    let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
     let (stored, data, (home, claude), mut run, (skills, packs), browser) = match paths {
         Ok(paths) => paths,

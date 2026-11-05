@@ -9,7 +9,10 @@
 //!   held for that agent's sign-in, once.
 //! - `stop_agents` cancels each turn of an id through the Cancel path (the lawyer's Stop, which
 //!   also ends what the turn left running), marks it to go back held, drops a launch being
-//!   prepared and stops the agent, so no process of it runs while the login link changes.
+//!   prepared and stops the agent, so no process of it runs while the login link changes. It
+//!   answers once the agents have ended or its wait ran out (`sign_in/stops.rs`), and holds the
+//!   id, in memory only, until `restart_agents`: no launch of it starts ([`launch_refusal`])
+//!   and a prompt for it queues held (`queue/sign_in.rs`).
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
@@ -24,6 +27,10 @@ use super::{Current, agents, cancel, current, state};
 use crate::agent::login_link::{LoginLink, LoginSplit, Seen};
 use crate::error::Error;
 
+mod stops;
+
+pub(super) use stops::{StopWaits, agent_ended, on_timer as stop_timer};
+
 /// One sign-in call from a handle.
 pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
     match request {
@@ -33,7 +40,7 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
         }
         SignInRequest::Stop { agent, reply } => {
             stop(actor, &agent);
-            let _gone = reply.send(Ok(()));
+            stops::wait(actor, agent, reply);
         }
         SignInRequest::Reused {
             agent,
@@ -76,6 +83,7 @@ fn threads_of(actor: &Actor, agent: &AgentId) -> Vec<ThreadId> {
 /// start waits for its stopped agent's end, then launches a new one.
 fn restart(actor: &mut Actor, agent: &AgentId) {
     tracing::info!(%agent, "the agents restart for a new login");
+    actor.wiring.sign_in.held.remove(agent);
     for thread in threads_of(actor, agent) {
         let idle = state(actor, thread)
             .is_some_and(|state| state.current.is_none() && state.agent.is_some());
@@ -83,6 +91,8 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
             agents::stop(actor, thread);
         }
         queue::resume_sign_in(actor, thread);
+        // A head sent now that the hold kept back starts too.
+        queue::move_on(actor, thread);
     }
 }
 
@@ -90,6 +100,7 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
 /// being prepared dropped (its waiting work fails as closed), every agent stopped.
 fn stop(actor: &mut Actor, agent: &AgentId) {
     tracing::info!(%agent, "the agents stop while the login changes");
+    actor.wiring.sign_in.held.insert(agent.clone());
     for thread in threads_of(actor, agent) {
         if let Some(turn) = current(actor, thread)
             .filter(|current| !current.cancelled)
@@ -106,6 +117,26 @@ fn stop(actor: &mut Actor, agent: &AgentId) {
         }
         agents::stop(actor, thread);
     }
+}
+
+/// Whether `stop_agents` holds `thread`'s agent: nothing of it launches, and a prompt for it
+/// queues held.
+pub(super) fn holds(actor: &Actor, thread: ThreadId) -> bool {
+    actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| actor.wiring.sign_in.held.contains(&entry.row.agent))
+}
+
+/// Why a launch of `thread`'s agent may not start: `stop_agents` holds it, so what waits fails
+/// with `agent.auth_required` and a turn goes back held for the sign-in.
+pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
+    holds(actor, thread).then(|| {
+        Error::refused(
+            ErrorCode::AgentAuthRequired,
+            "the agent starts again once its sign-in has changed",
+        )
+    })
 }
 
 /// The code a turn failing with an error of `code` and `text` ends with:

@@ -9,14 +9,20 @@
 //! marked as waiting for the sign-in. `HostHandle::restart_agents` resumes it once; a lawyer's
 //! `ResumeQueue`, `SendQueuedNow` or new prompt moves it as usual, and the mark goes when the
 //! queue no longer shows held (`held.rs`).
+//!
+//! While `HostHandle::stop_agents` holds the agent (decision record 0048, P4d), a prompt that
+//! would start at once queues instead, held and marked the same way ([`hold_prompt`]), so it is
+//! not lost and nothing launches; `restart_agents` lifts the hold and resumes it once, through
+//! [`resume`].
 
 use clauseo_protocol::TurnQueued;
 use clauseo_protocol::{ContentBlock, DeliveryRequest, MessageId, StreamId, ThreadId, TurnId};
 
 use super::super::super::Actor;
+use super::super::super::commands::CommandCtx;
 use super::super::out::Out;
 use super::super::{Then, host_stopping, lost};
-use super::{After, Queued, drop_turn, move_on, queue, sync_held};
+use super::{After, Queued, drop_turn, log_queued, move_on, queue, sync_held};
 use crate::build;
 use crate::error::Error;
 
@@ -102,6 +108,37 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
         drop_turn(actor, thread, turn);
     }
     sent
+}
+
+/// A prompt sent while `stop_agents` holds the thread's agent and nothing runs or waits: one
+/// commit of its `UserMessage { Queue }` and its `TurnQueued` behind the thread itself (no turn
+/// is ahead of it), and the queue held for the sign-in, this turn marked unless one is.
+pub(super) fn hold_prompt(
+    actor: &mut Actor,
+    ctx: CommandCtx,
+    thread: ThreadId,
+    blocks: Vec<ContentBlock>,
+) -> Result<(), Error> {
+    tracing::info!(%thread, "a prompt queues held while its agent's login changes");
+    log_queued(
+        actor,
+        ctx,
+        thread,
+        None,
+        blocks,
+        DeliveryRequest::Queue,
+        |turn, message, content, queue| {
+            queue.turns.push_back(Queued {
+                turn,
+                message,
+                content,
+                forced: false,
+            });
+            queue.held = true;
+            queue.sign_in.get_or_insert(turn);
+            After::Held(turn)
+        },
+    )
 }
 
 /// `restart_agents`' part for `thread`: a queue held for the sign-in moves on, once.
