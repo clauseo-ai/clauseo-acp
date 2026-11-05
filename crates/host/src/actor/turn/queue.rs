@@ -105,7 +105,8 @@ pub(super) fn queued_turns(actor: &Actor, thread: ThreadId) -> Vec<TurnId> {
 /// What a queue command's commit continues with.
 #[derive(Debug)]
 pub(crate) enum After {
-    /// A prompt joined the queue's end: the queue is no longer held.
+    /// A prompt joined the queue's end: the queue is no longer held, unless a hold for the
+    /// sign-in applies (`sign_in.rs`).
     Appended(TurnId),
     /// A prompt sent now joined its head: cancel the current turn.
     Jumped(TurnId),
@@ -120,7 +121,7 @@ pub(crate) enum After {
     Requeued(TurnId),
     /// A queued turn's removal (`TurnEnded { Cancelled }`).
     Removed(TurnId),
-    /// A prompt queued held while `stop_agents` holds its agent (`sign_in.rs`).
+    /// A prompt queued held while a hold for the sign-in applies (`sign_in.rs`).
     Held(TurnId),
 }
 
@@ -204,7 +205,9 @@ fn route(
     }
     let running = turn_running(actor, thread);
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
-    if running.is_none() && !queued && super::sign_in::holds(actor, thread) {
+    let joins = delivery == DeliveryRequest::Queue || !queued;
+    if running.is_none() && joins && sign_in::applies(actor, thread) {
+        // Nothing may start: the prompt queues held, at the end.
         return sign_in::hold_prompt(actor, ctx, thread, blocks);
     }
     match (delivery, running) {
@@ -252,13 +255,7 @@ fn append(
     thread: ThreadId,
     blocks: Vec<ContentBlock>,
 ) -> Result<(), Error> {
-    let full = queue(actor, thread).is_some_and(|queue| queue.turns.len() >= MAX_QUEUED_TURNS);
-    if full {
-        return Err(Error::refused(
-            ErrorCode::ThreadQueueFull,
-            format!("the thread already has {MAX_QUEUED_TURNS} queued messages"),
-        ));
-    }
+    refuse_full(actor, thread)?;
     let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
     let queued = |turn, message, content| Queued {
         turn,
@@ -278,6 +275,18 @@ fn append(
             After::Appended(turn)
         },
     )
+}
+
+/// `thread.queue_full` when the queue is at the limit.
+fn refuse_full(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
+    let full = queue(actor, thread).is_some_and(|queue| queue.turns.len() >= MAX_QUEUED_TURNS);
+    if full {
+        return Err(Error::refused(
+            ErrorCode::ThreadQueueFull,
+            format!("the thread already has {MAX_QUEUED_TURNS} queued messages"),
+        ));
+    }
+    Ok(())
 }
 
 /// A prompt sent now while a turn runs or ends: it joins the head and starts once that turn
@@ -383,7 +392,10 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
     match (after, ok) {
         (After::Appended(_), true) => {
             counting::question_sent(actor, thread, Delivery::Queued);
-            if let Some(queue) = queue(actor, thread) {
+            // A hold for the sign-in keeps the queue held, and its mark.
+            if !sign_in::applies(actor, thread)
+                && let Some(queue) = queue(actor, thread)
+            {
                 queue.held = false;
             }
             move_on(actor, thread);
