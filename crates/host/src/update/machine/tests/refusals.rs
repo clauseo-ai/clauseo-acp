@@ -33,7 +33,8 @@ fn takers(input: &Input) -> &'static [&'static str] {
     ];
     match input {
         Input::CheckRequested => &["idle", "failed"],
-        Input::InstallRequested(_) => &["ready"],
+        Input::InstallRequested(InstallWhen::Now) => &["ready", "scheduled"],
+        Input::InstallRequested(InstallWhen::AfterTurn) => &["ready"],
         Input::CancelScheduled => &["scheduled", "stopping turns"],
         Input::ModeSet(UpdateMode::None) => &[],
         Input::ModeSet(_) => ALL,
@@ -76,8 +77,8 @@ fn update_every_command_is_refused_in_each_state_that_does_not_take_it() {
             }
         }
     }
-    // 9 states x 7 commands, less the 24 pairs taken.
-    assert_eq!(refused, 9 * 7 - 24);
+    // 9 states x 7 commands, less the 25 pairs taken.
+    assert_eq!(refused, 9 * 7 - 25);
 }
 
 #[test]

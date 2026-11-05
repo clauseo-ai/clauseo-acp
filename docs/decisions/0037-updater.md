@@ -88,7 +88,8 @@ timer) changes nothing. Its transitions are R23's table: `idle` or
 `failed` to `checking` on the timer or `CheckForUpdate`; `checking` to `idle` (nothing offered)
 or `downloading`; `downloading` to `ready`; `ready` to `installing` (`now`, after stopping turns)
 or `scheduled` (`after_turn` while a turn runs); `scheduled` to `installing` when the last turn
-ends, or back to `ready` on `CancelScheduledUpdate`, which also takes back a `now` install still
+ends, or as `ready` with `now` on `InstallUpdate { when: now }` ("Restart now" upgrades the
+wait in place), or back to `ready` on `CancelScheduledUpdate`, which also takes back a `now` install still
 waiting for its cancelled turns and releases the gate; an error in `checking` or `downloading`
 to `failed`, and `installing` to `failed` at the next start through the marker; anything to
 `managed` when policy or the install kind says so, except an install whose `BeginInstall` has

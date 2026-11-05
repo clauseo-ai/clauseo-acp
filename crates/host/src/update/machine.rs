@@ -14,6 +14,7 @@
 //! | `ready` | `InstallRequested(now)` | `installing`, after cancelling running turns |
 //! | `ready` | `InstallRequested(after_turn)` | `scheduled`, or `installing` if no turn runs |
 //! | `scheduled` | no turn running | `installing` |
+//! | `scheduled` | `InstallRequested(now)` | as `ready` with `now` |
 //! | `scheduled`, `installing` before its install began | `CancelScheduled` | `ready` |
 //! | `checking`, `downloading` | an error | `failed` |
 //! | any | the install kind, `update.mode: none` or policy says managed | `managed` |
@@ -195,7 +196,10 @@ impl Machine {
             }
             Input::DownloadDone(result) => self.download_done(result, now, fx),
             Input::InstallRequested(when) => {
-                if !matches!(self.state, UpdateState::Ready { .. }) {
+                // `scheduled` takes `now` too: "Restart now" upgrades the wait in place.
+                let upgrade =
+                    when == InstallWhen::Now && matches!(self.state, UpdateState::Scheduled { .. });
+                if !upgrade && !matches!(self.state, UpdateState::Ready { .. }) {
                     return Err(Refusal::NotNow);
                 }
                 self.install(when, fx);
@@ -342,8 +346,9 @@ impl Machine {
         self.arm_interval(now, fx);
     }
 
-    /// From `ready`: at once when no turn runs; else `now` stops the turns and holds new sends,
-    /// and `after_turn` waits, letting new turns start and push it back.
+    /// From `ready`, or `scheduled` with `now`: at once when no turn runs; else `now` stops the
+    /// turns and holds new sends, and `after_turn` waits, letting new turns start and push it
+    /// back.
     fn install(&mut self, when: InstallWhen, fx: &mut Vec<Effect>) {
         if !self.turns_running {
             return self.begin_install(false, fx);
