@@ -167,6 +167,13 @@ impl Store {
         self.root.join("tally").join(format!("{week}.json"))
     }
 
+    /// Fails with `InvalidInput` when `counts` is there but is no real folder (a symbolic link,
+    /// a junction, a file), so loading reads and removes nothing where it points. A missing
+    /// folder is fine: it is made when first written.
+    pub(crate) fn check_root(&self) -> io::Result<()> {
+        real_folder(&self.root).map(drop)
+    }
+
     /// The saved install id, if there is a readable one. A folder in its place is removed, so
     /// the new id can be written.
     pub(crate) fn read_install(&self) -> Option<InstallId> {
@@ -226,8 +233,17 @@ impl Store {
     /// The files in `<counts>/<folder>`, sorted; a missing folder has none. A leftover temp file
     /// is removed, and so is anything that is not a plain file (a folder, a link), which could
     /// otherwise fail every read.
+    ///
+    /// `counts` and `counts/<folder>` must each be a real folder: a symbolic link, junction or
+    /// other reparse point at either fails with `InvalidInput` and nothing is listed or removed,
+    /// since `read_dir` would follow it and the removals would empty a folder outside the data
+    /// folder. The error comes back from the first tick, as any open error does.
     fn list(&self, folder: &str) -> io::Result<Vec<PathBuf>> {
-        let entries = match std::fs::read_dir(self.root.join(folder)) {
+        let dir = self.root.join(folder);
+        if !real_folder(&self.root)? || !real_folder(&dir)? {
+            return Ok(Vec::new());
+        }
+        let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(err),
@@ -268,6 +284,38 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<Option<T
     }
     write::remove_file(path)?;
     Ok(None)
+}
+
+/// Whether `path` is a real folder (`Ok(false)` when missing). A symbolic link, junction or
+/// other reparse point, or a file, there fails with `InvalidInput`: never followed.
+fn real_folder(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+        Ok(meta) if is_real_dir(&meta) => Ok(true),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is a link or a file, not a counts folder; nothing in it is touched",
+                path.display()
+            ),
+        )),
+    }
+}
+
+/// Whether `meta` (from `symlink_metadata`, which never follows a link) is a real folder: not a
+/// symbolic link and, on Windows, no reparse point of any kind (a junction included).
+fn is_real_dir(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+        const REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    meta.is_dir() && !meta.file_type().is_symlink()
 }
 
 /// Removes a folder where a file should be, which would otherwise fail every read and write.
