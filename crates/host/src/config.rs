@@ -1,18 +1,14 @@
 //! What `Host::start` needs: the settings, the launcher, and the parts tests swap out.
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_acp::McpServer;
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_profile::{PackWrite, PacksWritten, SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentId, MatterId, ThreadId};
+use clauseo_protocol::{MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
-use serde_json::{Map, Value};
 
 use crate::agent::login_link::{LoginCheck, SignIn, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
@@ -27,76 +23,8 @@ use crate::search::SearchSeams;
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
-/// What Clauseo's launch profile adds to an agent's session and launch (decision record 0030).
-/// The host calls it at each launch and session start, with only the agent's id, then fills the
-/// per-session placeholders (`clauseo_profile::placeholders`) and sets its own keys over what
-/// the hook returned (`agent/loads.rs` lists them):
-///
-/// - `session_meta` becomes the `_meta` of `session/new` and `session/load`. A
-///   `claudeCode.options.mcpServers` in it is removed in every MCP control mode: servers come
-///   only from [`ProfileHook::mcp_servers`].
-/// - `launch_env` fills the hook slot of the agent's launch.
-/// - `mcp_servers` go after the lawyer's enabled servers. The host fills each `browser`
-///   entry's tokens per session, or drops the entry (no proxy, no browser, too many browsers,
-///   `tools.browser` off, or the firm's `managed-mcp.json`).
-/// - `codex_config` keys go into a Codex agent's `CODEX_CONFIG`, added only where R15's keys
-///   and the host's own (`web_search`, `hooks`) leave room.
-/// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
-///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
-/// - `pack_write` turns the launch's [`PackRequest`] (decision record 0040) into the packs the
-///   launch-prep thread loads and writes into `run/<session id>/skill-packs/`; the
-///   [`PacksWritten`] it gets goes to that launch's `session_meta` and `codex_config` only.
-///
-/// Every method runs on the host thread, at each launch and session start, and must do no I/O:
-/// no file, network or process call, and nothing that blocks. It hands back data the adapter
-/// already holds; the host does any file work (writing `launch_writes`) off that thread.
-pub trait ProfileHook: Send {
-    /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
-    /// `packs` is this launch's own pack plugin, written on its launch-prep thread; `None` when
-    /// it has none. The desktop adapter names it as Claude's second plugin
-    /// (`ClauseoProfile::session_meta_with_packs`).
-    fn session_meta(
-        &self,
-        agent: &AgentId,
-        packs: Option<&PacksWritten>,
-    ) -> Option<Map<String, Value>>;
-    /// Variables set on top of the agent's own when it launches.
-    fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString>;
-    /// MCP servers for `agent`'s sessions, after the lawyer's (default: none). Strings may hold
-    /// `clauseo_profile::placeholders::IN_SERVERS` tokens.
-    fn mcp_servers(&self, _agent: &AgentId) -> Vec<McpServer> {
-        Vec::new()
-    }
-    /// Keys for a Codex agent's `CODEX_CONFIG`, as nested objects (default: none). Strings may
-    /// hold `clauseo_profile::placeholders::IN_INSTRUCTIONS` tokens in `developer_instructions`.
-    /// `written` is this launch's own token, from writing the first of [`Self::launch_writes`]
-    /// on its launch-prep thread; `None` when that write failed or there was none. The desktop
-    /// adapter hands it to `ClauseoProfile::codex_keys`, and without it calls
-    /// `ClauseoProfile::codex_keys_without_index`, so the skills index names only files this
-    /// launch wrote (decision record 0031). `packs` is this launch's own pack plugin, so the
-    /// pack lines name exactly the files it wrote (`ClauseoProfile::codex_keys_with_packs`).
-    fn codex_config(
-        &self,
-        _agent: &AgentId,
-        _written: Option<&SkillsWritten>,
-        _packs: Option<&PacksWritten>,
-    ) -> Map<String, Value> {
-        Map::new()
-    }
-    /// The skills writes to run, in order, before `agent` starts (default: none), as
-    /// `ClauseoProfile::launch_writes` gives them: Claude's plugin first, for a Codex agent too,
-    /// since Codex reads its skills through the index in its instructions. A write failure is a
-    /// warning, never a failed launch.
-    fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
-        Vec::new()
-    }
-    /// The skill packs to load and write before `agent` starts, from `request` (default:
-    /// none): `ClauseoProfile::pack_write` adds where the packs live. A load or write failure
-    /// is a warning, never a failed launch.
-    fn pack_write(&self, _agent: &AgentId, _request: &PackRequest) -> Option<PackWrite> {
-        None
-    }
-}
+mod profile_hook;
+pub use profile_hook::{NoProfile, ProfileHook};
 
 pub use crate::actor::turn::PackRequest;
 
@@ -139,6 +67,9 @@ impl EgressProxy for TestProxy {
     }
 }
 
+/// A hook run between a skill pack's two reads, with its id (`HostConfig::with_pack_read_hook`).
+pub(crate) type PackReadHook = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// What the browser entry and the agents' `PATH` need beyond the hook: the proxy, stetdoc's
 /// folder, where to look for Chrome, and the browser slots.
 #[derive(Clone)]
@@ -163,6 +94,8 @@ pub(crate) struct LaunchWiring {
     pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
     /// The sign-in hook, the sign-in-again test, and the host's sign-in state.
     pub(crate) sign_in: SignIn,
+    /// Run between a skill pack's two reads, for tests (`actor/settings/packs.rs`).
+    pub(crate) pack_read_hook: Option<PackReadHook>,
 }
 
 impl Default for LaunchWiring {
@@ -178,6 +111,7 @@ impl Default for LaunchWiring {
             inherited_env: None,
             install_tools: None,
             sign_in: SignIn::default(),
+            pack_read_hook: None,
         }
     }
 }
@@ -195,24 +129,6 @@ impl std::fmt::Debug for LaunchWiring {
             .field("install_tools", &self.install_tools.is_some())
             .field("sign_in", &self.sign_in)
             .finish_non_exhaustive()
-    }
-}
-
-/// No profile: no `_meta`, no extra variables.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoProfile;
-
-impl ProfileHook for NoProfile {
-    fn session_meta(
-        &self,
-        _agent: &AgentId,
-        _packs: Option<&PacksWritten>,
-    ) -> Option<Map<String, Value>> {
-        None
-    }
-
-    fn launch_env(&self, _agent: &AgentId) -> BTreeMap<OsString, OsString> {
-        BTreeMap::new()
     }
 }
 
@@ -558,6 +474,15 @@ impl HostConfig {
     /// default), only `agent.auth_required` itself is.
     pub fn with_sign_in_again(mut self, again: SignInAgain) -> Self {
         self.wiring.sign_in.again = Some(again);
+        self
+    }
+
+    /// A hook run, with the pack's id, between the two reads of a skill pack that
+    /// `SetSkillPack` and `ListSkillPacks` make off the host thread: a test changes the pack
+    /// there, or asks which thread reads.
+    #[cfg(feature = "test-support")]
+    pub fn with_pack_read_hook(mut self, hook: Arc<dyn Fn(&str) + Send + Sync>) -> Self {
+        self.wiring.pack_read_hook = Some(hook);
         self
     }
 

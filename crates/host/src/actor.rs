@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::pin;
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -23,7 +22,6 @@ use clauseo_store::Store;
 use futures::executor::{LocalPool, LocalSpawner};
 use futures::future::{AbortHandle, Abortable};
 use futures::task::LocalSpawnExt;
-use futures::{StreamExt, stream};
 
 use crate::clock::{Clock, Now};
 use crate::config::{HostConfig, ProfileHook};
@@ -46,6 +44,7 @@ pub(crate) mod header_tools;
 pub(crate) mod input;
 pub(crate) mod limits;
 mod locate;
+mod main_loop;
 mod matter_details;
 mod matters;
 mod papers;
@@ -98,6 +97,9 @@ pub(crate) struct Actor {
     /// The settings. Only the actor touches them, so it is the one lock their writes need: each
     /// `Set…Settings` runs its `Effective` write here, one command at a time.
     pub(crate) effective: Effective,
+    /// Each skill pack's generation, bumped by every `SetSkillPack` for it: an `on`'s read
+    /// writes only while its generation is still the pack's (`settings/packs.rs`).
+    pub(crate) pack_generations: BTreeMap<clauseo_protocol::PackId, u64>,
     /// The policy lock causes last logged (`settings/lock_causes.rs`): a reload logs a change.
     pub(crate) lock_causes: Vec<clauseo_settings::LockReason>,
     /// The usage counts (`HostConfig::with_counts`), or none: every call site is then a no-op
@@ -246,7 +248,7 @@ fn run(
             }
         };
         startup::begin_startup(&mut actor);
-        let exit = main_loop(&mut actor, requests, internal).await;
+        let exit = main_loop::main_loop(&mut actor, requests, internal).await;
         match exit {
             Exit::Shutdown(replies) => {
                 let closed = shutdown::close(actor).await;
@@ -267,47 +269,6 @@ fn run(
         Err(abort_reply) => {
             let _gone = abort_reply.send(());
             Ok(())
-        }
-    }
-}
-
-/// One item of the merged input stream.
-enum Next {
-    Request(Request),
-    /// Every handle is gone: shut down.
-    HandlesGone,
-    Input(Input),
-}
-
-/// The loop: one input at a time until shutdown or abort.
-async fn main_loop(
-    actor: &mut Actor,
-    requests: async_channel::Receiver<Request>,
-    internal: async_channel::Receiver<Input>,
-) -> Exit {
-    let requests = requests
-        .map(Next::Request)
-        .chain(stream::once(async { Next::HandlesGone }));
-    let mut inputs = pin!(stream::select(requests, internal.map(Next::Input)));
-    loop {
-        if let Some(exit) = actor.settle() {
-            return exit;
-        }
-        match inputs.next().await {
-            Some(Next::Request(request)) => {
-                actor.on_request(request);
-                triage::tick(actor);
-                app_lists::flush(actor);
-            }
-            // Every handle is gone (the internal channel never ends: the actor holds a sender).
-            Some(Next::HandlesGone) | None => shutdown::begin_shutdown(actor, None),
-            #[cfg(feature = "test-support")]
-            Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
-            Some(Next::Input(input)) => {
-                actor.on_input(input);
-                triage::tick(actor);
-                app_lists::flush(actor);
-            }
         }
     }
 }
@@ -566,6 +527,7 @@ impl Actor {
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
+            Input::SkillPack(read) => settings::packs::on_read(self, *read),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

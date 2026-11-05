@@ -112,6 +112,10 @@ golden! { HostCommand::name_of {
             browser: Some(true),
         },
     };
+    SetSkillPack => set_skill_pack: HostCommand::SetSkillPack {
+        id: PackId::new("nda-kit").unwrap(),
+        on: true,
+    };
     SetPrivacySettings => set_privacy_settings: HostCommand::SetPrivacySettings {
         patch: privacy::privacy_patch(),
     };

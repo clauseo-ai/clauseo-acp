@@ -8,15 +8,18 @@
 //! mirror test in `tests/host/settings.rs` also holds the keys and the JSON names together.
 //! The tool switches (`tools`, `SetToolSettings`) are in `tools.rs`, beside this file's UI code;
 //! the privacy switches (`privacy`, `SetPrivacySettings`, `FirstAct`) in `privacy.rs`; desktop's
-//! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`.
+//! Rust-only `set_agent_launch` and `set_plan`, and the firm plans' view, in `entries.rs`;
+//! `SetSkillPack` in `packs.rs`.
 
 mod entries;
 mod lock_causes;
+pub(in crate::actor) mod packs;
 mod privacy;
 mod tools;
 
 pub(in crate::actor) use entries::{set_agent_launch, set_plan};
 pub(in crate::actor) use lock_causes::log as log_lock_causes;
+pub(super) use packs::set_skill_pack;
 pub(in crate::actor) use privacy::{first_act, set_privacy_settings};
 pub(super) use tools::set_tool_settings;
 

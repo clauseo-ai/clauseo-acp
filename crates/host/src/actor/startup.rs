@@ -89,6 +89,7 @@ pub(super) async fn open(
         count_on_commit: BTreeMap::new(),
         browser_install,
         header_tools: super::header_tools::HeaderTools::default(),
+        pack_generations: BTreeMap::new(),
         run_sweep: super::turn::RunSweep::default(),
         refused_folders: parts.refused_folders,
         home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),

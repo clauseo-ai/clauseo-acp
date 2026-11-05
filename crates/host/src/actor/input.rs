@@ -217,6 +217,8 @@ pub(crate) enum Input {
     Scan(super::scan::ScanInput),
     /// Where the Chrome for Testing download stands, from its thread.
     BrowserInstall(clauseo_protocol::BrowserInstallState),
+    /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
+    SkillPack(Box<super::settings::packs::PackRead>),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -244,6 +246,7 @@ impl std::fmt::Debug for Input {
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
             Self::BrowserInstall(_) => "BrowserInstall",
+            Self::SkillPack(_) => "SkillPack",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

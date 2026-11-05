@@ -203,6 +203,8 @@ impl HostCommand {
             // The font size's range is the settings crate's rule; the host checks it.
             | Self::SetUiSettings { patch: _ }
             | Self::SetToolSettings { patch: _ }
+            // The id is checked by its type as it decodes.
+            | Self::SetSkillPack { id: _, on: _ }
             | Self::SetPrivacySettings { patch: _ }
             | Self::FirstAct { counts: _ }
             // The client's name and the date are checked by their types as they decode.

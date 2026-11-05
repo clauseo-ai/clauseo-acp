@@ -16,8 +16,8 @@ use clauseo_profile::{
     SkillsWritten,
 };
 use clauseo_protocol::{
-    AgentId, AgentKind, DomainEvent, FieldChange, HostCommand, MatterId, NoticeLevel, StreamId,
-    ThreadId,
+    AgentId, AgentKind, DomainEvent, FieldChange, HostCommand, MatterId, NoticeLevel, PackId,
+    StreamId, ThreadId,
 };
 use clauseo_settings::Locations;
 use serde_json::{Map, Value, json};
@@ -442,4 +442,47 @@ fn a_restored_matter_list_still_skips_a_pack_whose_hash_no_longer_matches() {
     host.shutdown();
     let seen = launcher.seen();
     assert_eq!(skill_folders(&seen[0]), ["lease-kit--lease-review"]);
+}
+
+/// The matter's list is the one way the main window names packs (`UpdateMatter.skill_packs`;
+/// `SetSkillPack` is the settings window's), so it can only narrow what Settings turned on:
+/// a listed pack left off, or one whose files changed after it was turned on, never loads.
+#[test]
+fn a_matter_list_never_loads_a_pack_that_is_off_or_changed() {
+    let dir = Dir::new("packs_matter_narrows", &[]);
+    put_pack(&dir, "a-kit", &["a-review"], b"Notes.\n");
+    put_pack(&dir, "b-kit", &["b-review"], b"Notes.\n");
+    put_pack(&dir, "c-kit", &["c-review"], b"Notes.\n");
+    let claude = claude_with(&dir, "packs-narrows", true);
+    let entries = agents(&[(CLAUDE, &claude, json!({}))]);
+    settings(&dir, entries, skills_on(&[]));
+    let launcher = Wired::new(&dir);
+    let host = start(&dir, 0, &launcher);
+    for id in ["a-kit", "c-kit"] {
+        host.ok(HostCommand::SetSkillPack {
+            id: PackId::new(id).unwrap(),
+            on: true,
+        });
+    }
+    // One byte of C changes after it was turned on.
+    write::write(
+        &pack_dir(&dir, "c-kit").join("skills/c-review/references/notes.md"),
+        b"Notes!\n",
+    );
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    bind(&host, matter, &["a-kit", "b-kit", "c-kit"]);
+    let thread = host.create_thread(matter, CLAUDE);
+    let events = prompt_until_over(&host, thread);
+    events.assert_no_mismatch();
+    assert_eq!(
+        warnings(&events),
+        [
+            "Clauseo didn't load the skill pack \"b-kit\". This matter is set to use it, but it isn't turned on.",
+            "Clauseo didn't load the skill pack \"c-kit\". Its files changed after it was turned on. Turn it on again to use it.",
+        ]
+    );
+    host.shutdown();
+    let seen = launcher.seen();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(skill_folders(&seen[0]), ["a-kit--a-review"]);
 }

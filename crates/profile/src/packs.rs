@@ -11,10 +11,13 @@
 //! - [`write_packs`] writes the loaded packs into a launch's own Claude plugin, a fresh copy
 //!   from memory each launch, and returns the [`PacksWritten`] token the Codex index and Claude's
 //!   `_meta` need ([`plugin`], [`index`]).
+//! - [`inspect_twice`] is what turning a pack on and listing packs read with, so a pack that
+//!   changed mid-read is told apart ([`status`]).
 //!
 //! Nothing here starts a process (tested). A pack's files are copied, never run, and never get
 //! the exec bit.
 
+pub mod folders;
 pub mod hash;
 pub mod index;
 pub mod manifest;
@@ -22,6 +25,7 @@ pub mod plugin;
 pub mod read;
 pub mod render;
 pub mod scripts;
+pub mod status;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -32,10 +36,14 @@ use std::path::{Path, PathBuf};
 use crate::skills::builtin::BUILTIN;
 use crate::skills::stetdoc::STETDOC;
 
+pub use folders::PackFolders;
 pub use hash::PackHash;
 pub use manifest::PackManifest;
 pub use plugin::{PacksWritten, WrittenSkill, write_packs};
 pub use render::{Pack, PackSkill};
+pub use status::{
+    PACKS_DIR, ReadError, inspect_twice, inspect_twice_in, inspect_twice_with, listed,
+};
 
 /// The manifest's file name, at the top of a pack.
 pub const PACK_MANIFEST: &str = "clauseo-pack.json";
@@ -199,13 +207,27 @@ impl Skip {
 /// Reads, checks, hashes and renders the pack `id` in `packs_root`, all from one read into
 /// memory. The folder must be listed by `read_dir` under exactly the name `id`, so a disk that
 /// ignores case never matches `NDA-Kit` to `nda-kit`. Pure apart from the reads: no write, no
-/// process. Off the host thread.
+/// process. Off the host thread. For one pack; a caller reading many lists the folder once
+/// and uses [`inspect_in`].
 pub fn inspect(packs_root: &Path, id: &str, allow_scripts: bool) -> Result<Pack, Refusal> {
     if !is_pack_id(id) {
         return Err(Refusal::BadId);
     }
     let folder = pack_folder(packs_root, id)?;
-    let files = read::read_pack(&folder)?;
+    inspect_at(&folder, id, allow_scripts)
+}
+
+/// [`inspect`], the pack's folder found in `folders`, a listing taken once for many packs.
+pub fn inspect_in(folders: &PackFolders, id: &str, allow_scripts: bool) -> Result<Pack, Refusal> {
+    if !is_pack_id(id) {
+        return Err(Refusal::BadId);
+    }
+    inspect_at(folders.find(id)?, id, allow_scripts)
+}
+
+/// Reads, checks, hashes and renders the pack `id` in `folder`.
+fn inspect_at(folder: &Path, id: &str, allow_scripts: bool) -> Result<Pack, Refusal> {
+    let files = read::read_pack(folder)?;
     render::check_and_render(id, files, allow_scripts)
 }
 

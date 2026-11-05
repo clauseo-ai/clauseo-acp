@@ -17,7 +17,9 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::{PendingMatter, Stage};
-use super::settings::{first_act, set_privacy_settings, set_tool_settings, set_ui_settings};
+use super::settings::{
+    first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
+};
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -261,6 +263,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
         HostCommand::SetUiSettings { patch } => set_ui_settings(actor, ctx, &patch),
         HostCommand::SetToolSettings { patch } => set_tool_settings(actor, ctx, &patch),
+        HostCommand::SetSkillPack { id, on } => set_skill_pack(actor, ctx, &id, on),
         HostCommand::ScanFolder { folder } => super::scan::scan_folder(actor, ctx, folder),
         HostCommand::CancelScan { folder } => super::scan::cancel_scan(actor, ctx, folder),
         HostCommand::SetPrivacySettings { patch } => set_privacy_settings(actor, ctx, &patch),

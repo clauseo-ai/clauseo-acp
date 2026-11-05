@@ -486,3 +486,50 @@ fn the_update_commands_go_by_window() {
     let other = block_on(bridge.query("other", HostQuery::GetUpdate)).unwrap_err();
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }
+
+/// `SetSkillPack` (0040, PR-E) is the settings window's alone, as the other `Set*` switches
+/// are: the main window and any other label are refused with `command.invalid` before the host
+/// sees it.
+#[test]
+fn set_skill_pack_from_the_main_window_is_refused() {
+    let scratch = Scratch::new("admit-skill-pack-main", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for on in [true, false] {
+        let set = command(json!({"set_skill_pack": {"id": "nda-kit", "on": on}}));
+        for label in [MAIN, "other"] {
+            let refused = bridge.admit(label, &set).unwrap_err();
+            assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}");
+        }
+    }
+}
+
+/// The Skills pane in Settings turns packs on and off.
+#[test]
+fn set_skill_pack_from_the_settings_window_is_admitted() {
+    let scratch = Scratch::new("admit-skill-pack-settings", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for on in [true, false] {
+        let set = command(json!({"set_skill_pack": {"id": "nda-kit", "on": on}}));
+        assert!(bridge.admit(SETTINGS, &set).is_ok());
+    }
+}
+
+/// `ListSkillPacks` is read by both windows: the main window's matter picker and Settings'
+/// Skills pane. Any other window is refused.
+#[test]
+fn list_skill_packs_from_main_and_settings_is_admitted() {
+    let scratch = Scratch::new("admit-list-skill-packs", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for window in [MAIN, SETTINGS] {
+        let answer = block_on(bridge.query(window, read(json!("list_skill_packs"))));
+        assert!(
+            matches!(&answer, Ok(QueryResult::SkillPacks(packs)) if packs.is_empty()),
+            "{window}: {answer:?}"
+        );
+    }
+    let other = block_on(bridge.query("other", read(json!("list_skill_packs")))).unwrap_err();
+    assert_eq!(other.code(), ErrorCode::CommandInvalid);
+}
