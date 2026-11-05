@@ -14,7 +14,9 @@
 //!   `SigninNote` is logged by its code (`events::note`). The status check runs once an agent's
 //!   install is `Ready`; an agent not installed shows `SignedOut`.
 //! - **Confirms.** `InstallAgent` and `SetFirmEndpoint` ask the lawyer first; a decline runs
-//!   nothing and answers `transport.unauthorized`. `OpenSignInPage` opens the `DeviceCode`
+//!   nothing and answers `transport.unauthorized`. `RetryAgentInstall` asks nothing, so it is
+//!   `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
+//!   is installed only through `InstallAgent`'s confirm. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
 //! - **Piece B's.** Leaving a reused login runs 0048's leave order (stop the agents, S18's
@@ -27,8 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_agents::{
-    Agents, AgentsEvent, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
-    Source,
+    AgentsEvent, InstallState, Installed, Method, PasteCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::{
     AgentId, AgentKind, CommandOutcome, Count, ErrorCode, HostError, InstallLog, InstallProgress,
@@ -45,77 +46,7 @@ use super::{KeyWrite, SetupBackend, SetupEvents, events};
 use crate::dialogs::BoxFuture;
 use crate::open::{Opener, open_url_unconfirmed};
 
-/// What the backend asks of S18's `Agents`: a seam, so the tests record the calls.
-pub(crate) trait SetupAgents: Send + Sync {
-    /// `Agents::install`.
-    fn install(&self, agent: &AgentId);
-    /// `Agents::retry`.
-    fn retry(&self, agent: &AgentId, use_system_proxy: bool);
-    /// `Agents::state`.
-    fn state(&self, agent: &AgentId) -> Option<InstallState>;
-    /// `Agents::installed`.
-    fn installed(&self, agent: &AgentId) -> Option<Installed>;
-    /// `Agents::sign_in`.
-    fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError>;
-    /// `Agents::cancel_sign_in`.
-    fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::paste_code`.
-    fn paste_code(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError>;
-    /// `Agents::sign_out`.
-    fn sign_out(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::check_status`.
-    fn check_status(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::find_login`.
-    fn find_login(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::use_found_login`.
-    fn use_found_login(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::use_different_account`.
-    fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError>;
-    /// `Agents::signin_state`.
-    fn signin_state(&self, agent: &AgentId) -> Option<SigninState>;
-}
-
-impl SetupAgents for Agents {
-    fn install(&self, agent: &AgentId) {
-        Agents::install(self, agent);
-    }
-    fn retry(&self, agent: &AgentId, use_system_proxy: bool) {
-        Agents::retry(self, agent, use_system_proxy);
-    }
-    fn state(&self, agent: &AgentId) -> Option<InstallState> {
-        Agents::state(self, agent)
-    }
-    fn installed(&self, agent: &AgentId) -> Option<Installed> {
-        Agents::installed(self, agent)
-    }
-    fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
-        Agents::sign_in(self, agent, method)
-    }
-    fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::cancel_sign_in(self, agent)
-    }
-    fn paste_code(&self, agent: &AgentId, code: PasteCode) -> Result<(), SigninError> {
-        Agents::paste_code(self, agent, code)
-    }
-    fn sign_out(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::sign_out(self, agent)
-    }
-    fn check_status(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::check_status(self, agent)
-    }
-    fn find_login(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::find_login(self, agent)
-    }
-    fn use_found_login(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::use_found_login(self, agent)
-    }
-    fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
-        Agents::use_different_account(self, agent)
-    }
-    fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
-        Agents::signin_state(self, agent)
-    }
-}
+pub(crate) use self::seam::SetupAgents;
 
 /// One agent as the backend knows it from the snapshot and the locations.
 #[derive(Debug, Clone)]
@@ -181,7 +112,22 @@ impl AgentsBackend {
             }
             SetupCommand::RetryAgentInstall {
                 use_system_proxy, ..
-            } => agents.retry(&agent, use_system_proxy),
+            } => {
+                let restartable = matches!(
+                    agents.state(&agent),
+                    Some(
+                        InstallState::Failed(_)
+                            | InstallState::Waiting { .. }
+                            | InstallState::Paused
+                    )
+                );
+                if !restartable {
+                    return Err(invalid(format!(
+                        "{agent}'s install is not failed, waiting or paused; installing asks first"
+                    )));
+                }
+                agents.retry(&agent, use_system_proxy);
+            }
             SetupCommand::StartSignIn { console, .. } => {
                 self.refuse_blocked(&agent)?;
                 let method = plan_method(&agent, console)?;
@@ -557,5 +503,6 @@ fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
 }
 
+mod seam;
 #[cfg(test)]
 mod tests;
