@@ -260,6 +260,45 @@ fn scan_folder_needs_a_picked_folder_and_cancel_scan_starts_nothing() {
 }
 
 /// `privacy.counts` as the settings window reads it.
+/// The New matter dialog's folder warning takes only a ref this run's picker issued, as
+/// `CreateMatter` does, for both sources that name one; the default location names none.
+#[test]
+fn folder_support_needs_a_picked_folder() {
+    let scratch = Scratch::new("admit-folder-support", &["work", "other"]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let work = scratch.path().join("work");
+    let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(scratch.path()))).unwrap();
+    let folder = picked.unwrap().folder;
+    let not_picked = block_on(host.host.register_folder(scratch.path().join("other"))).unwrap();
+    for kind in ["existing_folder", "new_folder"] {
+        let ask = |folder| read(json!({"folder_support": {"source": {kind: {"folder": folder}}}}));
+        let answer = block_on(bridge.query(MAIN, ask(folder)));
+        // Admitted: it reaches the host, which answers or refuses the folder as create would
+        // (the scratch's folders sit in its data folder, so an import's is
+        // `matter.folder_in_matters_root`); never the bridge's `command.invalid`.
+        assert!(
+            matches!(answer, Ok(QueryResult::FolderSupport(_)))
+                || answer
+                    .as_ref()
+                    .is_err_and(|error| error.code() == ErrorCode::MatterFolderInMattersRoot),
+            "{kind}: {answer:?}"
+        );
+        let refusal = block_on(bridge.query(MAIN, ask(not_picked))).unwrap_err();
+        assert_eq!(
+            refusal.code(),
+            ErrorCode::CommandInvalid,
+            "{kind}: {refusal:?}"
+        );
+    }
+    let default = read(json!({"folder_support": {"source": "default_location"}}));
+    let answer = block_on(bridge.query(MAIN, default));
+    assert!(
+        matches!(answer, Ok(QueryResult::FolderSupport(_))),
+        "{answer:?}"
+    );
+}
+
 fn counts_switch(bridge: &Bridge) -> bool {
     match block_on(bridge.query(SETTINGS, HostQuery::GetSettings)) {
         Ok(QueryResult::Settings(view)) => view.privacy.counts,

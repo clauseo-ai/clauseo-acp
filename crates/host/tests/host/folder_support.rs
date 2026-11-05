@@ -4,6 +4,7 @@
 //! change starts Codex, and the row keeps saying why its shell's writes there fail. Off Windows
 //! nothing is checked and the row never has an answer. The check's own answers are tested in
 //! `clauseo_sandbox::windows`; its refusals and its deadline in `agent/folder_support/tests.rs`.
+//! `HostQuery::FolderSupport` is in `folder_query.rs`.
 
 use clauseo_protocol::{FolderSupportKind, MatterId};
 

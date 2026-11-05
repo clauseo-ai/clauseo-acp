@@ -95,6 +95,9 @@
 //!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged`,
 //!   `MattersChanged` and `ThreadsChanged`, starting with the current state of each.
 //! - `HostQuery::ListAgents` lists the settings agents with their kinds.
+//! - `HostQuery::FolderSupport` runs the Windows folder check of the place a `CreateMatter`
+//!   with the same source would use, off the actor, before the matter exists, after create's own
+//!   refusals, and answers what a matter's row would show.
 //! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
 //!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy
 //!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.

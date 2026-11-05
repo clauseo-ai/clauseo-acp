@@ -63,7 +63,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Papers { .. }
         | QueryResult::Agents(_)
         | QueryResult::DefaultLocation(_)
-        | QueryResult::Search(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::Search(_)
+        | QueryResult::FolderSupport(_)) => panic!("not matters: {other:?}"),
     }
 }
 
