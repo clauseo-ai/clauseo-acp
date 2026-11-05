@@ -14,7 +14,8 @@
 //! (decision record 0048, P4d), a hold applies ([`applies`]): a prompt sent while nothing runs
 //! queues at the end, held and marked the same way, whatever its delivery (queue, send now, or a
 //! steer with nothing to join), so it is not lost and nothing launches ([`hold_prompt`]); a
-//! prompt that joins the queue keeps it held and marked. `restart_agents` lifts the hold and
+//! prompt that joins the queue keeps it held and marked. Under that hold a lawyer's `ResumeQueue`
+//! or `SendQueuedNow` changes nothing (`commands.rs`). `restart_agents` lifts the hold and
 //! resumes the queue once, through [`resume`].
 
 use clauseo_protocol::TurnQueued;

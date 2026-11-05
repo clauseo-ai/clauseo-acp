@@ -384,6 +384,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   turn put back is (#408's hold), so it is not lost and nothing fails. A prompt joining the queue
   keeps it held and marked (the host code owner's review of #461). A launch that still comes (work
   waiting on a stopped agent) fails with `agent.auth_required`, so its turn goes back held.
+  A lawyer's `ResumeQueue` or `SendQueuedNow` under this hold is accepted and changes nothing: the
+  queue stays held and marked, its held flag still shows, and its turns run once, in order, at
+  `restart_agents` (the host code owner's review of #461).
   `restart_agents` lifts the hold and resumes once, through P4b's path. Desktop calls it too
   when its leave flow is abandoned, so there is no `release_agents`. **The hold lives in memory
   only:** a host restart clears it. The queue then comes back held as every restored queue does,
