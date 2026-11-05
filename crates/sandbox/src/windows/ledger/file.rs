@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::{Entry, LEDGER_VERSION};
+use super::{Entry, HandbackOwed, LEDGER_VERSION};
 use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::sids::{Reserved, Sid};
 
@@ -31,6 +31,11 @@ impl Trust {
         };
         sid_ok && entry.path.is_absolute()
     }
+
+    /// Whether a hand-back owed may be acted on: it names one of the trusted SIDs (a pool user).
+    pub(super) fn admits_owed(&self, owed: &HandbackOwed) -> bool {
+        self.trusted.contains(&owed.pool)
+    }
 }
 
 /// An entry as read: one this version reads and trusts, with any fields a newer version added
@@ -50,10 +55,30 @@ pub(super) struct Known {
     pub(super) extra: Map<String, Value>,
 }
 
+/// A hand-back owed as read: one this version reads and trusts, with the fields it doesn't know,
+/// or one kept as it was. A kept one still blocks its pool user's reuse when it names it
+/// ([`Ledger::handback_owed`](super::Ledger::handback_owed)), and is never acted on otherwise.
+#[derive(Debug, Clone)]
+pub(super) enum OwedSlot {
+    Known(KnownOwed),
+    SetAside(Value),
+}
+
+/// A hand-back owed this version reads, and the fields it doesn't know.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct KnownOwed {
+    #[serde(flatten)]
+    pub(super) owed: HandbackOwed,
+    #[serde(flatten)]
+    pub(super) extra: Map<String, Value>,
+}
+
 /// The file's contents.
 #[derive(Debug, Clone)]
 pub(super) struct State {
     pub(super) slots: Vec<Slot>,
+    /// The hand-backs `forget_matter` still owes (S15 `PR3b` round 2, N5).
+    pub(super) handbacks: Vec<OwedSlot>,
     pub(super) next_id: u64,
     pub(super) extra: Map<String, Value>,
 }
@@ -62,6 +87,7 @@ impl State {
     pub(super) fn empty() -> State {
         State {
             slots: Vec::new(),
+            handbacks: Vec::new(),
             next_id: 1,
             extra: Map::new(),
         }
@@ -71,6 +97,14 @@ impl State {
         self.slots.iter().filter_map(|slot| match slot {
             Slot::Known(known) => Some(&known.entry),
             Slot::SetAside(_) => None,
+        })
+    }
+
+    /// The hand-backs owed this version reads and trusts.
+    pub(super) fn owed(&self) -> impl Iterator<Item = &HandbackOwed> {
+        self.handbacks.iter().filter_map(|slot| match slot {
+            OwedSlot::Known(known) => Some(&known.owed),
+            OwedSlot::SetAside(_) => None,
         })
     }
 }
@@ -109,6 +143,11 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
         Some(Value::Array(items)) => items.into_iter().map(|v| read_slot(v, trust)).collect(),
         Some(_) => return Err(invalid("the ACL ledger's entries are not a list")),
     };
+    let handbacks: Vec<OwedSlot> = match top.remove("handbacks") {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items.into_iter().map(|v| read_owed(v, trust)).collect(),
+        Some(_) => return Err(invalid("the ACL ledger's hand-backs are not a list")),
+    };
     let stored_next = top.remove("next_id").and_then(|n| n.as_u64()).unwrap_or(1);
     let highest = slots
         .iter()
@@ -128,6 +167,7 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
     }
     Ok(State {
         slots,
+        handbacks,
         next_id,
         extra: top,
     })
@@ -138,6 +178,14 @@ fn read_slot(value: Value, trust: &Trust) -> Slot {
     match Known::deserialize(&value) {
         Ok(known) if trust.admits(&known.entry) => Slot::Known(known),
         Ok(_) | Err(_) => Slot::SetAside(value),
+    }
+}
+
+/// One hand-back owed as read: known if this version reads it all and trusts it, else kept.
+fn read_owed(value: Value, trust: &Trust) -> OwedSlot {
+    match KnownOwed::deserialize(&value) {
+        Ok(known) if trust.admits_owed(&known.owed) => OwedSlot::Known(known),
+        Ok(_) | Err(_) => OwedSlot::SetAside(value),
     }
 }
 
@@ -154,6 +202,16 @@ pub(super) fn render(state: &State) -> io::Result<Vec<u8>> {
         });
     }
     top.insert("entries".to_owned(), Value::Array(entries));
+    if !state.handbacks.is_empty() {
+        let mut owed = Vec::with_capacity(state.handbacks.len());
+        for slot in &state.handbacks {
+            owed.push(match slot {
+                OwedSlot::Known(known) => serde_json::to_value(known).map_err(invalid)?,
+                OwedSlot::SetAside(value) => value.clone(),
+            });
+        }
+        top.insert("handbacks".to_owned(), Value::Array(owed));
+    }
     for (key, value) in &state.extra {
         top.entry(key.clone()).or_insert_with(|| value.clone());
     }

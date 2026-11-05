@@ -235,7 +235,8 @@ fn reconcile_keeps_a_pending_entry_whose_ace_is_there_and_drops_one_whose_isnt()
         Reconciled {
             applied: 1,
             dropped: 1,
-            unchecked: 1
+            unchecked: 1,
+            deferred: 0,
         }
     );
     let after = [
@@ -420,3 +421,6 @@ mod kinds;
 
 /// What is read back from a file: unread, untrusted and refused files.
 mod file;
+
+/// Round 2: deny entries left pending, hand-backs owed, our own label.
+mod round2;

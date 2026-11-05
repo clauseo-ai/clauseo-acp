@@ -4,9 +4,17 @@
 //! It is write-ahead. An entry is recorded `pending` and the file replaced before its permission
 //! entry is written; once it is written and its tree walked, the entry is marked `applied`. At
 //! start, [`reconcile`] walks each `pending` entry's tree again, then marks it `applied` if
-//! its permission entry is there and drops it if not. Taking entries back ([`Ledger::take_back`])
-//! sets them `pending` on disk before any removal. So every permission entry written is listed,
-//! and no `applied` entry lacks one or its walk.
+//! its permission entry is there and drops it if not; a deny entry stays `pending` instead, so
+//! its matter's next launch walks its tree strictly (S15 `PR3b` round 2, N4). Taking entries back
+//! ([`Ledger::take_back`]) sets them `pending` on disk before any removal, and leaves a
+//! permission entry another entry names: the same entry on the same path, or a Low label on
+//! another name for the same file. A Low label's earlier label is never recorded when it is our
+//! own label, and goes to the entry that shares the label when its own entry is dropped (N7). So
+//! every permission entry written is listed, and no `applied` entry lacks one or its walk.
+//!
+//! A forget records the hand-back it owes each pool user of its matter, under the lock and before
+//! any removal, and clears it only once every hand-back walk has succeeded (`owed.rs`, N5). While
+//! one is owed, the matter's entries are never dropped by [`reconcile`].
 //!
 //! Every change is a read-modify-write under the exclusive OS lock on `acl-ledger.lock` beside
 //! the file (`write::lock_exclusive_for`, the records' bounded wait): the file is read again
@@ -27,7 +35,9 @@
 //! one whose SID is neither a trusted SID given to [`Ledger::open`] (the pool users and their
 //! group) nor a matter-form SID outside the reserved accounts and domains (`sids::Reserved`), a
 //! label item naming anything but the Low level, and one whose path isn't absolute, are kept as
-//! they are, written back unchanged, and never acted on or handed out. A file from a newer format
+//! they are, written back unchanged, and never acted on or handed out. So is a hand-back owed
+//! this version can't read or that names an untrusted SID, except that it still blocks the reuse
+//! of the pool user it names. A file from a newer format
 //! version, or one that isn't JSON, is refused with `InvalidData` and left alone.
 //!
 //! [`reconcile`]: super::apply::reconcile
@@ -44,14 +54,19 @@ use super::admit::PathKind;
 use super::fence::{MatterFolders, plan_fence};
 use super::matters::SANDBOX_DIR;
 use super::sids::{Reserved, Sid};
-use super::write;
 use super::writer::Label;
 
 mod file;
 mod held;
+mod outcome;
+mod owed;
+mod settle;
 
-use file::{Known, Slot, State, Trust, exists, invalid, read_state, render};
-use held::Held;
+use file::{Known, Slot, State, Trust, invalid, read_state};
+pub(crate) use held::Shares;
+use held::{ByPath, Held};
+pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
+pub use owed::HandbackOwed;
 
 /// The ledger's file name in `<data_dir>\sandbox`.
 pub const LEDGER_FILE: &str = "acl-ledger.json";
@@ -129,54 +144,6 @@ impl Entry {
             && self.inherit == grant.inherit
             && self.kind == grant.kind
     }
-}
-
-/// The entries [`Ledger::mark_applied`] was asked to mark that the file no longer lists; the
-/// inner error of its `NotFound` (`io::Error::get_ref` and `downcast_ref`).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("the ACL ledger no longer lists {} of this launch's entries", .0.len())]
-pub struct MissingEntries(pub Vec<EntryId>);
-
-/// What [`reconcile`](super::apply::reconcile) did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Reconciled {
-    /// Pending entries whose permission entry was there, now applied.
-    pub applied: usize,
-    /// Pending entries whose permission entry wasn't there, dropped.
-    pub dropped: usize,
-    /// Pending entries the check failed on, kept pending.
-    pub unchecked: usize,
-}
-
-/// What [`Ledger::take_back`] does with an entry it takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Take {
-    /// Remove its permission entry, unless another entry names it too; then drop it.
-    Remove,
-    /// Drop it without a removal (its permission entry was there before, or never written).
-    Drop,
-}
-
-/// What [`Ledger::take_back`] did.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct TakenBack {
-    /// Entries whose permission entry was removed; still `pending` until their trees are walked.
-    pub removed: Vec<Entry>,
-    /// Entries dropped without a removal because another entry names the same permission entry.
-    pub shared: usize,
-    /// Entries whose removal failed, kept `pending` for the next try.
-    pub kept: usize,
-}
-
-/// What [`forget_matter`](super::apply::forget_matter) did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Forgotten {
-    /// Entries whose permission entry was removed, now dropped.
-    pub removed: usize,
-    /// Entries whose removal failed, kept for the next try.
-    pub kept: usize,
-    /// Entries dropped without a removal: another matter's entry names the same entry.
-    pub shared: usize,
 }
 
 /// The ledger: its path, whom its entries may name, and the contents last read. Each change
@@ -353,45 +320,16 @@ impl Ledger {
     }
 
     /// Under the lock: asks `present` about each trusted `pending` entry, with no walk; the
-    /// caller walks each pending entry's tree first ([`reconcile`] does). One whose
-    /// permission entry is there is marked `applied`; one whose permission entry isn't is
-    /// dropped; one `present` fails on stays pending for the next start. Applied entries and set
-    /// aside ones are left as they are.
+    /// caller walks each pending entry's tree first ([`reconcile`] does). One whose permission
+    /// entry is there is marked `applied`, unless it is a deny entry: that stays `pending` for
+    /// its matter's next launch to walk strictly (N4). One whose permission entry isn't is
+    /// dropped, unless its matter's hand-back is owed (N5). One `present` fails on stays pending
+    /// for the next start. Applied entries and set aside ones are left as they are.
     pub fn reconcile(
         &mut self,
         mut present: impl FnMut(&Entry) -> io::Result<bool>,
     ) -> io::Result<Reconciled> {
-        self.update(false, |state| {
-            let mut done = Reconciled::default();
-            let mut slots = Vec::with_capacity(state.slots.len());
-            for slot in std::mem::take(&mut state.slots) {
-                let Slot::Known(mut known) = slot else {
-                    slots.push(slot);
-                    continue;
-                };
-                if known.entry.state != EntryState::Pending {
-                    slots.push(Slot::Known(known));
-                    continue;
-                }
-                match present(&known.entry) {
-                    Ok(true) => {
-                        known.entry.state = EntryState::Applied;
-                        slots.push(Slot::Known(known));
-                        done.applied += 1;
-                    }
-                    Ok(false) => done.dropped += 1,
-                    Err(error) => {
-                        // The kinds alone: the error's text may hold the path.
-                        let (kind, error) = (known.entry.kind, error.kind());
-                        tracing::warn!(%kind, %error, "a pending ACL entry wasn't checked");
-                        slots.push(Slot::Known(known));
-                        done.unchecked += 1;
-                    }
-                }
-            }
-            state.slots = slots;
-            Ok((done.applied + done.dropped > 0, done))
-        })
+        self.update(false, |state| Ok(settle::reconcile(state, &mut present)))
     }
 
     /// Forgets `matter`'s entries with no walk: [`Ledger::take_back`] of each of them, then the
@@ -419,8 +357,32 @@ impl Ledger {
             .any(|other| other.matter != entry.matter && same_ace(other, entry))
     }
 
+    /// Whether a hand-back is still owed for `pool`, as last read: a forget started and some
+    /// hand-back walk hasn't succeeded yet (`owed.rs`). PR4's pool-user reuse check (R14) must
+    /// refuse to reuse a pool user while this returns true. A kept hand-back this version can't
+    /// read or trust counts too when it names `pool`. A hand-back the lawyer can't do (a file it
+    /// can't open and can't set aside, as under the `C:\m` layout without `FILE_DELETE_CHILD`)
+    /// stays owed until PR4's elevated clean-up takes ownership with admin rights, then hands it
+    /// back.
+    pub fn handback_owed(&self, pool: &Sid) -> bool {
+        owed::owed_for(&self.state, pool)
+    }
+
+    /// The hand-backs still owed, as last read: each names a matter whose `forget_matter` must
+    /// be run again.
+    pub fn handbacks_owed(&self) -> Vec<HandbackOwed> {
+        self.state.owed().cloned().collect()
+    }
+
+    /// Clears `matter`'s hand-backs owed, under the lock: once every hand-back walk for it has
+    /// succeeded.
+    pub(crate) fn clear_handbacks(&mut self, matter: MatterId) -> io::Result<()> {
+        self.update(false, |state| Ok((owed::clear(state, matter), ())))
+    }
+
     /// Records `label` as the explicit label entry `id`'s path had before ours: written before
-    /// our label is (L4). Only an entry `plan` added, still pending, with none recorded yet.
+    /// our label is (L4). Only an entry `plan` added, still pending, with none recorded yet, and
+    /// never our own label ([`is_our_label`], N7).
     pub fn set_prior_label(
         &mut self,
         plan: &AdmittedPlan,
@@ -437,6 +399,7 @@ impl Ledger {
                     && known.entry.id == id
                     && known.entry.state == EntryState::Pending
                     && known.entry.prior_label.is_none()
+                    && !is_our_label(&label, known.entry.inherit)
                 {
                     known.entry.prior_label = Some(label);
                     changed = true;
@@ -482,7 +445,20 @@ impl Ledger {
         mut pick: impl FnMut(&Entry) -> Option<Take>,
         mut remove: impl FnMut(&Entry) -> io::Result<()>,
     ) -> io::Result<TakenBack> {
-        self.locked(|held| held::take_back(held, &mut pick, &mut remove))
+        self.locked(|held| held::take_back(held, None, &mut pick, &mut ByPath, &mut remove))
+    }
+
+    /// [`Ledger::take_back`], with `files` saying which names are one file (so a Low label on
+    /// another name for the same file is shared, N7), and with `owe` recording the hand-backs
+    /// that matter's forget owes in the same save that sets the entries `pending` (N5).
+    pub(crate) fn take_back_with(
+        &mut self,
+        owe: Option<MatterId>,
+        mut pick: impl FnMut(&Entry) -> Option<Take>,
+        files: &mut dyn Shares,
+        mut remove: impl FnMut(&Entry) -> io::Result<()>,
+    ) -> io::Result<TakenBack> {
+        self.locked(|held| held::take_back(held, owe, &mut pick, files, &mut remove))
     }
 
     /// Drops each of `ids` that is still `pending` and whose permission entry `present` says
@@ -518,57 +494,13 @@ impl Ledger {
         })
     }
 
-    /// One read-modify-write. With `create` false and no ledger file, there is nothing to change:
-    /// `change` runs on an empty ledger and nothing is made. Otherwise the folder is made or
-    /// secured, the lock taken, the file read again, `change` run on what was read, and the file
-    /// replaced if `change` says it changed something. The cache then matches the file: the new
-    /// contents, or on a failed write what was read.
+    /// One read-modify-write under the lock (`held::update`); the cache then matches the file.
     fn update<R>(
         &mut self,
         create: bool,
         change: impl FnOnce(&mut State) -> io::Result<(bool, R)>,
     ) -> io::Result<R> {
-        let folder = self
-            .path
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the ledger has no folder"))?
-            .to_owned();
-        if !create && !exists(&self.path)? {
-            let mut state = State::empty();
-            let (_, result) = change(&mut state)?;
-            self.state = State::empty();
-            return Ok(result);
-        }
-        write::make_sandbox_dir(&folder)?;
-        // As `MatterSids::sid_for` does: the lock file is checked before it is locked, and the
-        // ledger under the lock (owned by the user, `SYSTEM` or `Administrators`, one link, no
-        // reparse point, its entries reset to the folder's).
-        let lock = folder.join(LEDGER_LOCK);
-        write::check_owned_file(&lock)?;
-        let _held = write::lock_exclusive_for(&lock, write::LOCK_WAIT)?;
-        write::check_owned_file(&self.path)?;
-        let fresh = read_state(&self.path, &self.trust)?;
-        let mut next = fresh.clone();
-        let outcome = change(&mut next);
-        let (changed, result) = match outcome {
-            Ok(done) => done,
-            Err(error) => {
-                self.state = fresh;
-                return Err(error);
-            }
-        };
-        if changed {
-            if let Err(error) =
-                render(&next).and_then(|bytes| write::write_atomic(&self.path, &bytes))
-            {
-                self.state = fresh;
-                return Err(error);
-            }
-            self.state = next;
-        } else {
-            self.state = fresh;
-        }
-        Ok(result)
+        held::update(&self.path, &self.trust, &mut self.state, create, change)
     }
 
     /// Runs `change` under one hold of the lock on the file as read now (`held.rs`); the
@@ -580,6 +512,25 @@ impl Ledger {
         }
         result
     }
+}
+
+/// Whether `label` is the Low label a [`Rights::LowLabel`] grant reaching `inherit` writes (on
+/// a folder or a file): our own, never to be recorded as the lawyer's earlier label (N7).
+pub(crate) fn is_our_label(label: &Label, inherit: Inherit) -> bool {
+    /// `INHERITED_ACE`, which a label read may carry.
+    const INHERITED: u8 = 0x10;
+    /// `S-1-16-4096`'s level.
+    const LOW: u32 = 4096;
+    let ours: &[u8] = match inherit {
+        Inherit::ThisOnly => &[0],
+        // Object and container inherit on a folder; none on a file.
+        Inherit::Tree => &[0, 0x3],
+        // Object inherit, inherit only, no propagation.
+        Inherit::FilesInFolder => &[0xd],
+    };
+    label.level == LOW
+        && label.mask == Rights::LowLabel.mask()
+        && ours.contains(&(label.flags & !INHERITED))
 }
 
 /// Whether two entries name the same permission entry: path, SID, rights and inheritance.

@@ -1,184 +1,32 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
 use super::*;
 use crate::windows::FolderSupport;
-use crate::windows::acl_plan::Grant;
-use crate::windows::acl_plan::plan;
-use crate::windows::admit::{FolderList, ReadDir, admit_with};
+use crate::windows::acl_plan::{Grant, Inherit, Sid, plan};
+use crate::windows::admit::admit_with;
 use crate::windows::fence::{MatterFolders, Neighbours};
 use crate::windows::ledger::{EntryState, ledger_path};
 use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
     reserved, sids, trusted,
 };
-use crate::windows::writer::{Found, Label, Strict};
+use crate::windows::writer::{Found, Label};
 
-type Key = (PathBuf, String, Rights, Inherit);
+mod fake;
+mod review;
+mod round2;
 
-fn key(grant: &Grant) -> Key {
-    (
-        grant.path().to_owned(),
-        grant.sid().as_str().to_owned(),
-        grant.rights(),
-        grant.inherit(),
-    )
-}
+use fake::{Around, FakeAcl, Key, key};
 
-/// The permission writes, in memory: the entries present, the walks asked for, and failures
-/// to give.
-/// What runs before each fake write.
-type OnAdd = Box<dyn FnMut(&Grant)>;
-
-#[derive(Default)]
-struct FakeAcl {
-    aces: BTreeSet<Key>,
-    fail_add: Option<PathBuf>,
-    fail_walk: Option<(PathBuf, ApplyFailure)>,
-    walks: Vec<(PathBuf, Reach, bool)>,
-    /// The lawyer's own explicit labels, by path.
-    labels: BTreeMap<PathBuf, Label>,
-    /// The labels put back, in order.
-    restored: Vec<(PathBuf, Label)>,
-    /// The child the last failed walk refused.
-    refused: Option<PathBuf>,
-    /// The trees handed back, with the pool users named.
-    reclaimed: Vec<(PathBuf, Vec<Sid>)>,
-    /// What `found` hands out next.
-    found: Vec<Found>,
-    /// `fail_walk` fails once only.
-    fail_once: bool,
-    /// A walk of this root panics, as a crash would stop it.
-    panic_walk: Option<PathBuf>,
-    /// A removal panics.
-    panic_remove: bool,
-    /// Runs before each write, as another process acting meanwhile.
-    on_add: Option<OnAdd>,
-}
-
-/// What a launch needs from around the matter, faked: the real listing, every folder `Ok`,
-/// the set-asides asked for, and the credentials file.
-#[derive(Debug, Default)]
-struct Around {
-    set_aside: Vec<PathBuf>,
-    credentials: Option<PathBuf>,
-}
-
-impl FolderList for Around {
-    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
-        ReadDir.subfolders(parent)
-    }
-}
-
-impl Surroundings for Around {
-    fn check(&self, _folder: &Path) -> io::Result<FolderSupport> {
-        Ok(FolderSupport::Ok)
-    }
-
-    fn set_aside(&mut self, path: &Path) -> io::Result<()> {
-        self.set_aside.push(path.to_owned());
-        Ok(())
-    }
-
-    fn credentials(&self) -> Option<PathBuf> {
-        self.credentials.clone()
-    }
-}
-
-/// The surroundings of `w`'s matter: its credential link is the credentials file.
+/// The surroundings of `w`'s matter: the credentials file its credential link must be, outside
+/// the state folder (same name, so the fake counts it the same file).
 fn around(w: &World) -> Around {
     Around {
-        credentials: Some(w.at(&format!("{STATE}/auth.json"))),
+        credentials: Some(w.at("elsewhere/auth.json")),
         ..Around::default()
-    }
-}
-
-impl AclWriter for FakeAcl {
-    fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
-        if let Some(hook) = self.on_add.as_mut() {
-            hook(grant);
-        }
-        if self.fail_add.as_deref() == Some(grant.path()) {
-            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
-        }
-        Ok(if self.aces.insert(key(grant)) {
-            Added::Written
-        } else {
-            Added::AlreadyThere
-        })
-    }
-
-    fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
-        assert!(!self.panic_remove, "a crash during a removal");
-        self.aces.remove(&key(grant));
-        Ok(())
-    }
-
-    fn present(&mut self, grant: &Grant) -> io::Result<bool> {
-        Ok(self.aces.contains(&key(grant)))
-    }
-
-    fn propagate(
-        &mut self,
-        root: &Path,
-        reach: Reach,
-        strict: Option<&Strict>,
-    ) -> Result<Walked, ApplyFailure> {
-        self.walks.push((root.to_owned(), reach, strict.is_some()));
-        assert!(
-            self.panic_walk.as_deref() != Some(root),
-            "a crash during a walk"
-        );
-        if let Some((at, failure)) = self.fail_walk.clone()
-            && at == root
-            && strict.is_some()
-        {
-            if self.fail_once {
-                self.fail_walk = None;
-            }
-            self.refused = Some(root.join("child"));
-            return Err(failure);
-        }
-        Ok(Walked {
-            visited: 1,
-            ..Walked::default()
-        })
-    }
-
-    fn refused_at(&mut self) -> Option<PathBuf> {
-        self.refused.take()
-    }
-
-    fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure> {
-        self.walks.push((root.to_owned(), Reach::Tree, false));
-        self.reclaimed.push((root.to_owned(), pool.to_vec()));
-        Ok(Walked::default())
-    }
-
-    fn same_file(&mut self, a: &Path, b: &Path) -> io::Result<bool> {
-        Ok(a.file_name() == b.file_name())
-    }
-
-    fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
-        if grant.path().file_name() != expected.file_name() {
-            return Err(ApplyFailure::Changed);
-        }
-        self.add(grant)
-    }
-
-    fn found(&mut self) -> Vec<Found> {
-        std::mem::take(&mut self.found)
-    }
-
-    fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {
-        Ok(self.labels.get(path).copied())
-    }
-
-    fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure> {
-        self.restored.push((grant.path().to_owned(), label));
-        Ok(())
     }
 }
 
@@ -482,7 +330,7 @@ fn forgetting_a_matter_removes_its_entries_but_a_shared_one_and_walks_each_tree_
     ledger.record_pending(&mut two).unwrap();
     acl.walks.clear();
 
-    let done = forget_matter(&mut ledger, matter_one(), &mut acl).unwrap();
+    let done = forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     assert_eq!(done.shared, 1);
     assert_eq!(done.kept, 0);
     let left: Vec<Key> = acl.aces.iter().cloned().collect();
@@ -507,7 +355,10 @@ fn reconcile_keeps_a_pending_entry_whose_entry_is_there() {
     ledger.record_pending(&mut plan).unwrap();
     acl.aces.insert(key(&deny));
     let done = reconcile(&mut ledger, &mut acl).unwrap();
-    assert_eq!((done.applied, done.dropped), (1, 1));
+    // A deny whose entry is there stays pending for the next launch's strict walk (N4).
+    assert_eq!((done.deferred, done.dropped), (1, 1));
+    let kept: Vec<EntryState> = ledger.entries().map(|e| e.state).collect();
+    assert_eq!(kept, vec![EntryState::Pending]);
 }
 
 #[test]
@@ -562,5 +413,3 @@ fn growing_the_pool_adds_the_new_users_denies_to_every_registered_matter() {
     let owners: BTreeSet<MatterId> = ledger.entries().map(|e| e.matter).collect();
     assert_eq!(owners, [matter_one(), matter_two()].into_iter().collect());
 }
-
-mod review;

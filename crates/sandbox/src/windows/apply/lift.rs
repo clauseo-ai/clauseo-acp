@@ -14,13 +14,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use super::Surroundings;
-use super::back::remove_entry;
+use super::back::take_back;
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::run_plan;
 use crate::windows::acl_plan::{AdmittedPlan, Rights, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Entry, Ledger, Take};
 use crate::windows::writer::AclWriter;
+use crate::windows::writer::ApplyFailure;
 
 /// Lifts the sibling denies on `roots` (the plan's matter folders) or on a folder holding one;
 /// see the module's docs. Returns how many entries were dropped.
@@ -54,14 +55,16 @@ pub(super) fn lift(
         lifting
             .iter()
             .any(|l| {
-                l.path == entry.path
+                // N12: the matter too, so a matter whose replacement failed keeps its deny.
+                l.matter == entry.matter
+                    && l.path == entry.path
                     && l.sid == entry.sid
                     && l.rights == entry.rights
                     && l.inherit == entry.inherit
             })
             .then_some(Take::Remove)
     };
-    let taken = match ledger.take_back(pick, |entry| remove_entry(acl, entry)) {
+    let taken = match take_back(ledger, None, acl, pick) {
         Ok(taken) => taken,
         Err(error) => {
             let error = error.kind();
@@ -69,7 +72,8 @@ pub(super) fn lift(
             return 0;
         }
     };
-    if let Err(failure) = super::back::finish(ledger, acl, &taken, &[]) {
+    if let Err(refused) = super::back::finish(ledger, acl, around, &taken, &[]) {
+        let failure: ApplyFailure = refused.failure;
         tracing::warn!(%failure, "a lifted folder's walk failed; its entries stay pending");
     }
     taken.removed.len() + taken.shared

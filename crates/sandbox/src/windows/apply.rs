@@ -6,16 +6,21 @@
 //! 1. Grants on names that don't exist are left out: NTFS holds no entry for a missing name, and
 //!    a protected name the agent makes later is set aside after the session (`set_aside.rs`).
 //! 2. The credential link must still be the expected credentials file (the same file ID), or the
-//!    launch is refused.
+//!    launch is refused. So is an expected file inside the state folder, or the link itself:
+//!    the agent can write there (N8). The link's entry is written through
+//!    [`AclWriter::add_expecting`], which compares the file ID on the handle it writes through.
 //! 3. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
-//!    first records the explicit label its path has now, so it can be put back. Then the entries
-//!    are written, path by path from the shallowest.
+//!    first records the explicit label its path has now, so it can be put back, unless that
+//!    label is our own: the one this grant writes, or the one another entry for the same file
+//!    wrote (N7). Then the entries are written, path by path from the shallowest.
 //! 4. The walk ([`AclWriter::propagate`]) carries the inherited entries down: on every tree whose
 //!    entry this launch wrote or whose entry was still `pending`, and on the matter, state and
 //!    notes folders at every launch, so a file moved in since the last launch picks them up. A
 //!    walk over a tree that carries a deny is strict ([`Strict`]): a child a pool user owns that
 //!    would beat the inherited deny is repaired, one the lawyer owns refuses the launch, and one
-//!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) or refuses it.
+//!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) if it is inside the
+//!    launch's own matter, state or notes tree, and refuses it anywhere else (`walk.rs`). The
+//!    protected names the walks of the matter's own tree met are kept for the set-aside (N1).
 //! 5. Only then are the entries marked `applied`.
 //! 6. Only after all that succeeds does a folder that is now a registered matter lose the
 //!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
@@ -32,21 +37,24 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::FolderSupport;
-use super::acl_plan::{AdmittedPlan, Inherit, Rights, Sid, in_folder};
+use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::fence::RegisteredMatter;
-use super::ledger::{EntryId, EntryState, Ledger};
-use super::writer::{AclWriter, Added, ApplyFailure, Reach, Strict, Walked};
+use super::ledger::{EntryId, EntryState, Ledger, is_our_label};
+use super::writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Walked};
 use crate::Error;
 
 mod back;
 mod lift;
+mod walk;
 
 pub use back::{forget_matter, reconcile};
+use walk::{OWN_KINDS, Refused, Walk, clearing, inside_any, own_roots, roots_of, strict_for};
+use walk::{strict_of, walks};
 
 /// What [`apply`] did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Applied {
     /// Entries written by this launch.
     pub written: usize,
@@ -55,6 +63,21 @@ pub struct Applied {
     pub lifted: usize,
     /// What the walks saw.
     pub walked: Walked,
+    /// The protected names (`.git`, `.claude`, `.mcp.json` at any depth) this launch's walks
+    /// of its own matter tree met, with their file IDs. PR6 passes them to the set-aside's
+    /// `before_launch`, which records them so `after_session` can set aside what changed (N1).
+    pub found: Vec<Found>,
+}
+
+/// What [`repair_after_session`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Repaired {
+    /// What the walks saw.
+    pub walked: Walked,
+    /// The protected names the walks of the matter's own tree met, with their file IDs. PR6
+    /// passes them to the set-aside's `after_session`, which sets aside what is new or changed
+    /// since launch (N1).
+    pub found: Vec<Found>,
 }
 
 /// What a launch needs from around the matter besides the permission writes: the gate's folder
@@ -94,15 +117,18 @@ pub fn apply(
         written: run.written.len(),
         lifted,
         walked: run.walked,
+        found: run.found.into_iter().collect(),
     })
 }
 
-/// What a run wrote, for its rollback.
+/// What a run wrote, for its rollback, and what its walks saw.
 #[derive(Debug, Default)]
 struct Run {
     /// Indexes into the plan's grants whose entry this run wrote.
     written: Vec<usize>,
     walked: Walked,
+    /// The protected names met inside the plan's own matter folder.
+    found: BTreeSet<Found>,
 }
 
 /// Steps 1 to 5 of [`apply`], rolled back on a failure.
@@ -120,22 +146,20 @@ fn run_plan(
     let mut run = Run::default();
     match write_all(ledger, plan, acl, around, &mut run) {
         Ok(()) => Ok(run),
-        Err((path_kind, failure)) => {
-            let at = acl.refused_at();
+        Err(mut refused) => {
+            refused.at = refused.at.or_else(|| acl.refused_at());
+            let (path_kind, failure) = (refused.kind, refused.failure);
             tracing::warn!(%path_kind, %failure, "tier B's entries failed; rolling back");
-            back::roll_back(ledger, plan, acl, &run);
-            Err(Error::AclApply {
-                path_kind,
-                failure,
-                at,
-            })
+            back::roll_back(ledger, plan, acl, around, &run);
+            Err(refused.error())
         }
     }
 }
 
 /// L5: the credential link is the file the launcher expects, by its file ID. The link sits in
 /// the state folder, which the agent can write; the entry and Low label it gets must not land on
-/// another file.
+/// another file. So the expected file must not be in the state folder itself, nor be the link
+/// (N8): either would make the check compare the link with itself.
 fn check_credentials(
     plan: &AdmittedPlan,
     acl: &mut dyn AclWriter,
@@ -148,6 +172,21 @@ fn check_credentials(
     let Some(expected) = around.credentials() else {
         return Err(refused(kind, ApplyFailure::Changed));
     };
+    let states: Vec<PathBuf> = plan
+        .grants()
+        .iter()
+        .filter(|g| g.kind() == PathKind::State)
+        .map(|g| g.path().to_owned())
+        .collect();
+    let canonical = expected
+        .parent()
+        .and_then(|folder| dunce::canonicalize(folder).ok())
+        .zip(expected.file_name())
+        .map(|(folder, name)| folder.join(name));
+    let agents = |p: &PathBuf| in_folder(p, link.path()) || inside_any(p, &states);
+    if std::iter::once(&expected).chain(&canonical).any(agents) {
+        return Err(refused(kind, ApplyFailure::Changed));
+    }
     match acl.same_file(link.path(), &expected) {
         Ok(true) => Ok(()),
         Ok(false) => Err(refused(kind, ApplyFailure::Changed)),
@@ -161,15 +200,18 @@ fn write_all(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
     run: &mut Run,
-) -> Result<(), (PathKind, ApplyFailure)> {
+) -> Result<(), Refused> {
     let grants = plan.grants();
-    let ledger_failed = |kind, e: io::Error| (kind, ApplyFailure::Ledger(e.kind()));
+    let ledger_failed = |kind, e: io::Error| Refused::new(kind, ApplyFailure::Ledger(e.kind()));
     // L4: a new label entry first records the explicit label there now, before ours replaces it.
     for (grant, &id) in grants.iter().zip(plan.entries()) {
         if grant.rights().is_label() && plan.created().contains(&id) {
             let found = acl.label(grant.path());
-            let found = found.map_err(|e| (grant.kind(), ApplyFailure::Io(e.kind())))?;
-            if let Some(label) = found {
+            let found =
+                found.map_err(|e| Refused::new(grant.kind(), ApplyFailure::Io(e.kind())))?;
+            if let Some(label) = found
+                && !ours(ledger, acl, grant, id, &label)
+            {
                 ledger
                     .set_prior_label(plan, id, label)
                     .map_err(|e| ledger_failed(grant.kind(), e))?;
@@ -197,186 +239,101 @@ fn write_all(
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
                 _ => acl.add(grant),
             };
-            match added.map_err(|f| (grant.kind(), f))? {
+            match added.map_err(|f| Refused::new(grant.kind(), f))? {
                 Added::Written => run.written.push(i),
                 Added::AlreadyThere => {}
             }
         }
     }
     let strict = strict_for(plan);
+    let own = own_roots(plan);
+    let matter = roots_of(plan, &[PathKind::Matter]);
     let unwalked = |i: usize| {
         run.written.contains(&i) || plan.entries().get(i).is_some_and(|id| pending.contains(id))
     };
+    // N1: nothing an earlier walk met comes in.
+    drop(acl.found());
     for walk in walks(plan, unwalked) {
-        let seen = walk_with_set_aside(acl, around, &walk, walk.strict.then_some(&strict))?;
+        let Walk {
+            root,
+            reach,
+            strict: is_strict,
+            kind,
+        } = &walk;
+        let strict = is_strict.then_some(&strict);
+        let seen = clearing(acl, around, &own, *kind, |acl| {
+            acl.propagate(root, *reach, strict)
+        })?;
         run.walked.add(seen);
+        let met = acl.found().into_iter();
+        run.found
+            .extend(met.filter(|found| inside_any(&found.path, &matter)));
     }
     ledger
         .mark_walked(plan.entries())
         .map_err(|e| ledger_failed(PathKind::Matter, e))
 }
 
-/// One walk; a child the lawyer can't open is set aside and the walk run once more.
-fn walk_with_set_aside(
+/// Whether `label`, found on label grant `grant`'s path (entry `id`), is our own: the label
+/// this grant writes, or the one another ledger entry for the same file wrote. Never recorded as
+/// the lawyer's earlier label (N7).
+fn ours(
+    ledger: &Ledger,
     acl: &mut dyn AclWriter,
-    around: &mut dyn Surroundings,
-    walk: &Walk,
-    strict: Option<&Strict>,
-) -> Result<Walked, (PathKind, ApplyFailure)> {
-    match acl.propagate(&walk.root, walk.reach, strict) {
-        Err(ApplyFailure::ChildShut) => {
-            let Some(shut) = acl.refused_at() else {
-                return Err((walk.kind, ApplyFailure::ChildShut));
-            };
-            if let Err(error) = around.set_aside(&shut) {
-                let error = error.kind();
-                tracing::warn!(%error, "a child the lawyer can't open couldn't be set aside");
-                // Keep the path for the refusal's cause.
-                return Err((walk.kind, keep_refused(acl, walk, strict)));
-            }
-            acl.propagate(&walk.root, walk.reach, strict)
-                .map_err(|f| (walk.kind, f))
-        }
-        other => other.map_err(|f| (walk.kind, f)),
+    grant: &Grant,
+    id: EntryId,
+    label: &Label,
+) -> bool {
+    if is_our_label(label, grant.inherit()) {
+        return true;
     }
-}
-
-/// Walks again so the writer holds the shut child's path for the refusal, and gives the
-/// failure: [`ApplyFailure::ChildShut`] unless the walk now fails otherwise.
-fn keep_refused(acl: &mut dyn AclWriter, walk: &Walk, strict: Option<&Strict>) -> ApplyFailure {
-    match acl.propagate(&walk.root, walk.reach, strict) {
-        Ok(_) => ApplyFailure::ChildShut,
-        Err(failure) => failure,
-    }
-}
-
-/// What a strict walk of `plan`'s trees holds children to: the SIDs its denies name, and every
-/// pool SID it names (the owners whose children are repaired).
-fn strict_for(plan: &AdmittedPlan) -> Strict {
-    let sids = |keep: &dyn Fn(Rights) -> bool| -> Vec<Sid> {
-        plan.grants()
-            .iter()
-            .filter(|g| keep(g.rights()))
-            .map(|g| g.sid().clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    };
-    Strict {
-        watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
-        pool: sids(&|r| !r.is_label()),
-    }
-}
-
-/// One walk to run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Walk {
-    root: PathBuf,
-    reach: Reach,
-    strict: bool,
-    kind: PathKind,
-}
-
-/// The walks `plan` needs, shallowest first: each path with an inheritable grant `unwalked`
-/// names (this run wrote its entry, or its entry was still pending), and the launch's own
-/// matter, state and notes folders always. A tree inside another walked tree is left to that
-/// walk. A tree is strict when it is one of the launch's own folders or carries a deny.
-fn walks(plan: &AdmittedPlan, unwalked: impl Fn(usize) -> bool) -> Vec<Walk> {
-    let own_kinds = [PathKind::Matter, PathKind::State, PathKind::Notes];
-    let mut found: BTreeMap<(usize, PathBuf), Walk> = BTreeMap::new();
-    for (i, (grant, owner)) in plan.grants().iter().zip(plan.owners()).enumerate() {
-        if grant.inherit() == Inherit::ThisOnly {
-            continue;
-        }
-        let own = *owner == plan.matter()
-            && grant.rights() == Rights::Modify
-            && own_kinds.contains(&grant.kind());
-        if !own && !unwalked(i) {
-            continue;
-        }
-        let reach = reach_of(grant.inherit());
-        let key = (grant.path().components().count(), grant.path().to_owned());
-        let walk = found.entry(key).or_insert_with(|| Walk {
-            root: grant.path().to_owned(),
-            reach,
-            strict: false,
-            kind: grant.kind(),
-        });
-        walk.strict |= own || grant.rights().is_deny();
-        if reach == Reach::Tree {
-            walk.reach = Reach::Tree;
-        }
-    }
-    let all: Vec<Walk> = found.into_values().collect();
-    all.iter()
-        .filter(|w| {
-            !all.iter().any(|outer| {
-                outer.reach == Reach::Tree
-                    && outer.root != w.root
-                    && in_folder(&w.root, &outer.root)
-                    && (outer.strict || !w.strict)
-            })
-        })
-        .cloned()
-        .collect()
-}
-
-/// How far an entry's inheritance reaches.
-fn reach_of(inherit: Inherit) -> Reach {
-    match inherit {
-        Inherit::FilesInFolder => Reach::FilesOnly,
-        Inherit::Tree | Inherit::ThisOnly => Reach::Tree,
-    }
+    ledger.entries().any(|e| {
+        e.id != id
+            && e.rights.is_label()
+            && is_our_label(label, e.inherit)
+            && (e.path == grant.path() || acl.same_file(&e.path, grant.path()).unwrap_or(false))
+    })
 }
 
 /// When `matter`'s agent exits (PR6's launcher calls this beside the set-aside's
 /// `after_session`): its matter, state and notes trees walked strictly again, so what the agent
 /// made open to other matters' agents during the session is repaired now rather than at the next
-/// launch (the review's M5). A child the lawyer can't open is set aside as at launch.
+/// launch (the review's M5). Children the lawyer can't open in those trees are set aside as at
+/// launch. Returns the protected names the walks of the matter's own tree met, for the
+/// set-aside's `after_session` (N1).
 pub fn repair_after_session(
     ledger: &Ledger,
     matter: clauseo_protocol::MatterId,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
-) -> Result<Walked, Error> {
+) -> Result<Repaired, Error> {
     let entries = ledger.matter_entries(matter);
-    let sids = |keep: &dyn Fn(Rights) -> bool| -> Vec<Sid> {
-        entries
-            .iter()
-            .filter(|e| keep(e.rights))
-            .map(|e| e.sid.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    };
-    let strict = Strict {
-        watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
-        pool: sids(&|r| !r.is_label()),
-    };
-    let own = [PathKind::Matter, PathKind::State, PathKind::Notes];
+    let strict = strict_of(&entries);
     let roots: BTreeSet<(PathBuf, PathKind)> = entries
         .iter()
-        .filter(|e| own.contains(&e.kind) && e.rights == Rights::Modify)
+        .filter(|e| OWN_KINDS.contains(&e.kind) && e.rights == Rights::Modify)
         .map(|e| (e.path.clone(), e.kind))
         .collect();
-    let mut seen = Walked::default();
-    for (root, kind) in roots {
-        let walk = Walk {
-            root,
-            reach: Reach::Tree,
-            strict: true,
-            kind,
-        };
-        let walked = walk_with_set_aside(acl, around, &walk, Some(&strict)).map_err(
-            |(path_kind, failure)| Error::AclApply {
-                path_kind,
-                failure,
-                at: acl.refused_at(),
-            },
-        )?;
-        seen.add(walked);
+    let own: Vec<PathBuf> = roots.iter().map(|(root, _)| root.clone()).collect();
+    let matter_roots: Vec<PathBuf> = roots
+        .iter()
+        .filter(|(_, kind)| *kind == PathKind::Matter)
+        .map(|(root, _)| root.clone())
+        .collect();
+    let mut done = Repaired::default();
+    let mut found: BTreeSet<Found> = BTreeSet::new();
+    drop(acl.found());
+    for (root, kind) in &roots {
+        let walked = clearing(acl, around, &own, *kind, |acl| {
+            acl.propagate(root, Reach::Tree, Some(&strict))
+        })
+        .map_err(Refused::error)?;
+        done.walked.add(walked);
+        let met = acl.found().into_iter();
+        found.extend(met.filter(|f| inside_any(&f.path, &matter_roots)));
     }
-    Ok(seen)
+    done.found = found.into_iter().collect();
+    Ok(done)
 }
 
 /// Fences every registered matter against the whole `pool`, as when the pool grows: each
@@ -387,7 +344,7 @@ pub fn repair_after_session(
 pub fn fence_registered(
     ledger: &mut Ledger,
     registered: &[RegisteredMatter],
-    pool: &[Sid],
+    pool: &[super::acl_plan::Sid],
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
 ) -> Result<Applied, Error> {

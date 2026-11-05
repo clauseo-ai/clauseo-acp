@@ -153,3 +153,59 @@ fn a_ledger_or_lock_file_with_a_second_link_is_refused_before_any_change() {
         assert_eq!(next.entries(), [] as [EntryId; 0]);
     }
 }
+
+/// N5: hand-backs owed are read and written back with the entries' rules: one this version
+/// can't read, or that names an untrusted SID, is kept as it was and never cleared, and one
+/// that names a pool user in any form still holds that pool user back.
+#[test]
+fn handbacks_owed_this_version_cant_read_or_trust_are_kept_and_still_block_reuse() {
+    let temp = TempDir::new("ledger-handbacks");
+    let (one, two) = (matter_one(), matter_two());
+    let [other, third] = OTHER_POOL_SIDS;
+    let text = format!(
+        r#"{{
+  "version": 1,
+  "next_id": 1,
+  "entries": [],
+  "handbacks": [
+    {{"matter": "{one}", "pool": "{USER_SID}", "note": "kept"}},
+    {{"matter": "not a matter id", "pool": "{other}"}},
+    {{"matter": "{two}", "pool": "S-1-1-0"}},
+    "not an object"
+  ]
+}}"#
+    );
+    let path = temp.file("sandbox/acl-ledger.json", &text);
+    let mut ledger = open(&path);
+    let owed = ledger.handbacks_owed();
+    assert_eq!(owed.len(), 1);
+    assert_eq!((owed[0].matter, owed[0].pool.as_str()), (one, USER_SID));
+    assert!(ledger.handback_owed(&Sid::parse(USER_SID).unwrap()));
+    assert!(
+        ledger.handback_owed(&Sid::parse(other).unwrap()),
+        "unread, still blocks"
+    );
+    assert!(!ledger.handback_owed(&Sid::parse(third).unwrap()));
+    // Clearing matter one's leaves the kept ones exactly as they were.
+    let mut plan = plan_for(two, "m5");
+    ledger.record_pending(&mut plan).unwrap();
+    ledger.clear_handbacks(one).unwrap();
+    let written: serde_json::Value = serde_json::from_slice(&read(&path)).unwrap();
+    let before: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        written["handbacks"].as_array().unwrap()[..],
+        before["handbacks"].as_array().unwrap()[1..]
+    );
+    assert!(!open(&path).handback_owed(&Sid::parse(USER_SID).unwrap()));
+}
+
+/// N5: a file without hand-backs is written without the list, as before.
+#[test]
+fn a_ledger_with_no_handback_owed_writes_no_list() {
+    let temp = TempDir::new("ledger-no-handbacks");
+    let path = ledger_path(temp.path());
+    let mut plan = plan_for(matter_one(), "m1");
+    open(&path).record_pending(&mut plan).unwrap();
+    let written: serde_json::Value = serde_json::from_slice(&read(&path)).unwrap();
+    assert!(written.get("handbacks").is_none());
+}

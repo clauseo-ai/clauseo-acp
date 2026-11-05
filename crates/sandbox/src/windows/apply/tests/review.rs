@@ -91,7 +91,8 @@ fn a_matter_nested_in_a_denied_sibling_gets_the_walk_down_set_in_its_place() {
 }
 
 /// M2: a crash partway through a sibling's walk leaves its entry pending, and reconcile walks
-/// that tree again before marking it applied.
+/// that tree again. The sibling's deny stays pending (round 2's N4): its matter's next launch
+/// walks it strictly (`round2.rs`).
 #[test]
 fn a_crash_during_a_sibling_walk_is_walked_again_by_reconcile() {
     let w = world("review-m2", &[]);
@@ -111,7 +112,7 @@ fn a_crash_during_a_sibling_walk_is_walked_again_by_reconcile() {
     let done = reconcile(&mut ledger, &mut acl).unwrap();
     assert!(done.applied >= 1, "{done:?}");
     assert!(acl.walks.iter().any(|(r, _, _)| *r == sib1));
-    assert_eq!(state(&ledger), Some(EntryState::Applied));
+    assert_eq!(state(&ledger), Some(EntryState::Pending));
 }
 
 /// M2, the next launch: an entry an earlier launch left pending gets its walk then.
@@ -209,7 +210,12 @@ fn a_crash_during_forget_leaves_its_entries_pending() {
     .unwrap();
     acl.panic_remove = true;
     let crashed = catch_unwind(AssertUnwindSafe(|| {
-        drop(forget_matter(&mut ledger, matter_one(), &mut acl));
+        drop(forget_matter(
+            &mut ledger,
+            matter_one(),
+            &mut acl,
+            &mut around(&w),
+        ));
     }));
     assert!(crashed.is_err());
     let ledger = super::ledger(&w);
@@ -262,7 +268,7 @@ fn the_lawyers_label_is_put_back_when_the_matter_is_forgotten() {
         .find(|e| e.path == matter && e.rights == Rights::LowLabel)
         .and_then(|e| e.prior_label);
     assert_eq!(recorded, Some(lawyers));
-    forget_matter(&mut ledger, matter_one(), &mut acl).unwrap();
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     assert!(acl.restored.contains(&(matter, lawyers)));
 }
 
@@ -312,7 +318,7 @@ fn forgetting_a_matter_reclaims_its_own_folders_for_the_desktop_user() {
         &mut around(&w),
     )
     .unwrap();
-    forget_matter(&mut ledger, matter_one(), &mut acl).unwrap();
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     let roots: BTreeSet<PathBuf> = acl.reclaimed.iter().map(|(r, _)| r.clone()).collect();
     for own in ["matter", STATE, NOTES] {
         assert!(roots.contains(&w.canonical(own)), "{own}");
