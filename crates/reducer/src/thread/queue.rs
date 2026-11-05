@@ -49,13 +49,31 @@ pub(super) fn mark_prompt(
     status: UserMessageStatus,
     out: &mut Applied,
 ) {
+    mark(state, turn, status, false, out);
+}
+
+/// `turn` was put back at the head of its thread's queue (an `at_head` `TurnQueued`): its
+/// prompt shows `Queued` and `at_head`, with one `Upsert` when either changed.
+pub(super) fn mark_put_back(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    mark(state, turn, UserMessageStatus::Queued, true, out);
+}
+
+/// Sets the status of `turn`'s unstarted prompt, and its `at_head` when `at_head` is true.
+fn mark(
+    state: &mut ThreadState,
+    turn: TurnId,
+    status: UserMessageStatus,
+    at_head: bool,
+    out: &mut Applied,
+) {
     let Some(order) = state.index.unstarted(turn) else {
         return;
     };
-    if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order)
-        && set(&mut prompt.status, status)
-    {
-        push_user_upsert(&mut out.changes, prompt);
+    if let Some(ViewEntry::UserMessage(prompt)) = state.entries.get_mut(&order) {
+        let changed = set(&mut prompt.status, status) | (at_head && set(&mut prompt.at_head, true));
+        if changed {
+            push_user_upsert(&mut out.changes, prompt);
+        }
     }
 }
 

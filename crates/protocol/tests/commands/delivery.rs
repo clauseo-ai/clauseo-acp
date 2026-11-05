@@ -70,6 +70,7 @@ fn queue_has_one_wire_form() {
         status: UserMessageStatus::Queued,
         edited: false,
         steer: None,
+        at_head: false,
         ts: Timestamp::ZERO,
     };
     let queued = serde_json::to_string(&message(Delivery::Queue)).unwrap();

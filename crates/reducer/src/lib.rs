@@ -97,6 +97,7 @@ mod change;
 mod error;
 mod matter;
 mod order;
+mod queued_order;
 mod snapshot;
 mod split;
 mod state;
@@ -108,6 +109,7 @@ use clauseo_protocol::Envelope;
 
 pub use change::{Anomaly, Applied, TextDelta, ViewChange};
 pub use error::Error;
+pub use queued_order::queued_order;
 pub use snapshot::{REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef};
 pub use state::{MatterState, StreamState, ThreadState};
 pub use view::{VIEW_SNAPSHOT_ENTRIES, page_entries, view_snapshot};
