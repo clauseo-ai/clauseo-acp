@@ -2,7 +2,8 @@
 //! it completes or fails, because the completion is where its input and output are whole: Claude's
 //! first `tool_call` has an empty `rawInput`, and Codex's start item an empty query. Only the calls
 //! that could be web calls are kept: kind `search` or `fetch`, or a name of `WebSearch` or
-//! `WebFetch`. A call that fails, or is still open when the turn ends, records nothing.
+//! `WebFetch`. A call records only in the turn it started in: one that fails, is still open when its
+//! turn ends, or completes in a later turn records nothing.
 
 use std::collections::BTreeMap;
 
@@ -26,6 +27,8 @@ pub(crate) struct Calls(BTreeMap<CompactString, Pending>);
 /// One call as its latest start or update left it.
 #[derive(Debug)]
 struct Pending {
+    /// The turn the call started in: the only turn it can record in.
+    turn: TurnId,
     tool_call: ToolCallId,
     title: CompactString,
     tool_name: Option<CompactString>,
@@ -48,17 +51,16 @@ impl Calls {
         agent: &AgentId,
         call: &ToolCall,
     ) -> Option<DomainEvent> {
+        // A call of `turn` ends the calls of the turns before it: those can no longer record.
+        self.0.retain(|_, pending| pending.turn == turn);
         if !is_candidate(call.kind, call.tool_name.as_deref()) {
             return None;
         }
-        let pending = Pending::of(tool_call, call);
+        let pending = Pending::of(turn, tool_call, call);
         match call.status {
             ToolCallStatus::Completed => finished(turn, agent, &pending),
             ToolCallStatus::Failed | ToolCallStatus::Cancelled => None,
             ToolCallStatus::Pending | ToolCallStatus::InProgress | ToolCallStatus::Unknown => {
-                if self.0.len() >= MAX_CALLS {
-                    self.0.clear();
-                }
                 self.0.insert(call.acp_id.clone(), pending);
                 None
             }
@@ -75,6 +77,11 @@ impl Calls {
         patch: &ToolCallPatch,
     ) -> Option<DomainEvent> {
         let pending = self.0.get_mut(acp_id)?;
+        if pending.turn != turn {
+            // The call began in an earlier turn: it records nothing, and is forgotten.
+            self.0.remove(acp_id);
+            return None;
+        }
         pending.absorb(patch);
         match patch.status? {
             ToolCallStatus::Completed => {
@@ -97,8 +104,9 @@ fn is_candidate(kind: ToolKind, name: Option<&str>) -> bool {
 }
 
 impl Pending {
-    fn of(tool_call: ToolCallId, call: &ToolCall) -> Self {
+    fn of(turn: TurnId, tool_call: ToolCallId, call: &ToolCall) -> Self {
         Self {
+            turn,
             tool_call,
             title: call.title.clone(),
             tool_name: call.tool_name.clone(),

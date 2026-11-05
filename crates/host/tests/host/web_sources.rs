@@ -330,3 +330,53 @@ fn a_replayed_search_adds_no_second_record() {
     assert_eq!(searches(&events).len(), 1, "{}", events.dump());
     host.shutdown();
 }
+
+/// D1: a search left open in turn 1 and completed in turn 2 records nothing, under either turn.
+#[test]
+fn a_search_open_in_one_turn_and_completed_in_the_next_records_nothing() {
+    let dir = Dir::new(
+        "web_carried",
+        &[(CODEX, Scenario::Local("codex-web-carried"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Search.");
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::EndTurn);
+    let (second, _) = host.prompt(thread, "And then?");
+    assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(searches(&events), [], "{}", events.dump());
+    host.shutdown();
+}
+
+/// D1: a Claude fetch cancelled in turn 1 whose completion arrives after turn 2's prompt starts
+/// records nothing.
+#[test]
+fn a_cancelled_fetch_that_completes_after_the_next_prompt_records_nothing() {
+    let dir = Dir::new(
+        "web_cancel_carried",
+        &[(CLAUDE, Scenario::Local("web-cancel-carried"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Read it.");
+    events.until("the fetch is logged", |events| {
+        events.count(|event| matches!(event, DomainEvent::ToolCallStarted(s) if s.acp_id.as_str() == "tc-carried")) == 1
+    });
+    assert_eq!(
+        host.ok(clauseo_protocol::HostCommand::Cancel { thread }),
+        clauseo_protocol::CommandOutcome::Done
+    );
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
+    let (second, _) = host.prompt(thread, "And then?");
+    assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    assert_eq!(pages(&events), [], "{}", events.dump());
+    host.shutdown();
+}
