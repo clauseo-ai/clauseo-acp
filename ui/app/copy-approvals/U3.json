@@ -655,5 +655,13 @@
     "status": "provisional",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.agents_still_running": {
+    "en": "Clauseo is still finishing. Try again in a moment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

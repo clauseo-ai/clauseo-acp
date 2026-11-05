@@ -40,6 +40,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterFolderTooDeep,
             "too deep for Windows to start programs in",
         ),
+        failed(
+            ErrorCode::SigninAgentsStillRunning,
+            "an agent was still running after the stop wait",
+        ),
     ]
 }
 
