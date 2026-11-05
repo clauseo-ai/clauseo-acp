@@ -109,6 +109,9 @@ mod limits_asks;
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]
+#[path = "host/limits_login.rs"]
+mod limits_login;
+#[cfg(test)]
 #[path = "host/limits_pending.rs"]
 mod limits_pending;
 #[cfg(test)]

@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use clauseo_protocol::{
-    AgentId, CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
-    MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId, ViewEpoch,
+    AgentId, AgentKind, CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError,
+    HostQuery, MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId,
+    ViewEpoch,
 };
 use futures::channel::oneshot;
 
@@ -399,6 +400,16 @@ impl HostHandle {
         login_link::remove_links(agent, homes)
             .await
             .map_err(HostError::from)
+    }
+
+    /// Desktop's word that `agent`'s login changed (a sign-in, a sign-out, an account change, or
+    /// an API key or firm endpoint set or cleared; decision record 0048): `limits`'
+    /// `Input::LoginChanged`, so the limits are read at once, past any age or back-off, and a
+    /// read already in flight, which read the old login, is followed by another. The next
+    /// scheduled read stays where it was. Rust only: no window can send it.
+    pub async fn limits_login_changed(&self, agent: AgentKind) -> Result<(), HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::LimitsLogin { agent, reply }))
+            .await
     }
 
     /// Stops the host: no more commands, running turns cancelled, agents stopped, text
