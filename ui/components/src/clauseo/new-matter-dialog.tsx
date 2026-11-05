@@ -28,6 +28,8 @@ export function NewMatterDialog({
   error,
   nextError,
   openMatter,
+  warning,
+  blocked,
   testIds,
   finalFocus,
 }: {
@@ -49,6 +51,8 @@ export function NewMatterDialog({
   error?: NewMatterFormProps["error"];
   nextError?: NewMatterFormProps["nextError"];
   openMatter?: NewMatterFormProps["openMatter"];
+  warning?: NewMatterFormProps["warning"];
+  blocked?: NewMatterFormProps["blocked"];
   testIds?: NewMatterFormProps["testIds"];
   /** Optional: where focus goes when it closes, New matter's button. Left out, the element focused before it opened. */
   finalFocus?: RefObject<HTMLElement | null>;
@@ -77,6 +81,8 @@ export function NewMatterDialog({
             error={error}
             nextError={nextError}
             openMatter={openMatter}
+            warning={warning}
+            blocked={blocked}
             testIds={testIds}
             {...(name === undefined ? {} : { name })}
             {...(client === undefined ? {} : { client })}

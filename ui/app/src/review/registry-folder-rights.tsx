@@ -1,16 +1,17 @@
-// Folder rights' copy review entries (FR-01 to FR-06, FR-11, FR-12, FR-15): the room's notice for a matter folder
-// Clauseo can't fence, the text it opens for IT, the toolbar's Not protected, and the reason on an Editing files card,
-// in the real room over FakeTransport, the host's folder_support set on the one matter. Apart from registry.tsx to
-// keep that file under the size limit. New matter's warning (FR7 to FR10, FR13, FR14) and the mode picker's off
-// options (FR16, FR17) wait on the host and on a mode picker.
+// Folder rights' copy review entries (FR-01 to FR-15, FR-20): the room's notice for a matter folder Clauseo can't
+// fence or couldn't check, the text it opens for IT, the toolbar's Not protected, the reason on an Editing files card,
+// in the real room over FakeTransport, the host's folder_support set on the one matter; and New matter's warning for
+// a folder picked, the host's FolderSupport answering. Apart from registry.tsx to keep that file under the size
+// limit. The mode picker's off options (FR16, FR17) wait on a mode picker.
 import type { ReactNode } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
 import { TURN, uuid } from "../testing/stream-script.ts";
+import { FakeTransport } from "../transport/fake-transport.ts";
 import type { FolderSupportKind, ViewEntry } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
-import { MATTER, roomHost, threadHost } from "./hosts.ts";
-import { RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
+import { MATTER, NEW_MATTER, roomHost, threadHost, type Step } from "./hosts.ts";
+import { RoomAfter, RoomFocusing, RoomOver, RoomPressing } from "./states.tsx";
 import { folderCardWords, folderWords as w, uiWords, type WordsRef } from "./words.ts";
 
 /** Several lines of one id, joined with " / " as the approved page writes them. */
@@ -31,6 +32,23 @@ const notProtected: WordsRef = {
 const room = (kind: FolderSupportKind) => () =>
   roomHost([{ ...MATTER, folder_display: "D:\\Matters\\Acme Traders", folder_support: kind }]);
 const INFO = '[data-testid="folder-notice"] .room-info';
+
+/** New matter over a host whose picker gives a folder on the approved page's drive and whose check reads `kind`. */
+const picking = (kind: FolderSupportKind) => () =>
+  new FakeTransport({
+    query: (query) =>
+      typeof query === "object" && "folder_support" in query
+        ? { folder_support: { support: kind } }
+        : { matters: [MATTER] },
+    pickFolder: () => ({
+      folder: "review-folder",
+      display:
+        kind === "network" ? "\\\\fileserver\\matters\\Rathi Steels" : "E:\\Matters\\Rathi Steels",
+    }),
+  });
+/** New matter, the name typed, and Change: the folder picked, its warning under the folder line. */
+const PICKED: readonly Step[] = [...NEW_MATTER, { press: "matter-existing" }];
+const warned = (kind: FolderSupportKind) => () => <RoomAfter host={picking(kind)} steps={PICKED} />;
 const entry = (id: string, words: WordsRef, render: () => ReactNode): Entry => ({
   id,
   words,
@@ -112,6 +130,24 @@ export const FOLDER_RIGHTS: Entry[] = [
     ]),
     () => <RoomFocusing host={card} focus='[data-testid="folder-reason"] .room-info' />,
   ),
+  // New matter's warning for a folder on a network drive: its title, its name, and its body with why behind the info
+  // icon (FR8's why provisional, "an agent" reworded)
+  entry(
+    "FR-07",
+    joined([w("On a network drive"), w("This folder is on a network drive")]),
+    warned("network"),
+  ),
+  entry(
+    "FR-08",
+    joined([
+      w("Claude asks before every change. Codex can't work here."),
+      w("Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+    ]),
+    warned("network"),
+  ),
+  // the warning's buttons: another folder through the picker, and the matter made there anyway
+  entry("FR-09", w("Choose another folder"), warned("network")),
+  entry("FR-10", w("Create anyway"), warned("network")),
   // a network drive's matter in the toolbar: the existing word and its open lock
   entry("FR-11", notProtected, () => <RoomOver host={room("network")} />),
   // a network drive's notice: its words, its name, and behind its info icon
@@ -139,5 +175,27 @@ export const FOLDER_RIGHTS: Entry[] = [
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
+  ),
+  // New matter's warning for a drive without file permissions, as FR-07 and FR-08 (FR14's why provisional)
+  entry(
+    "FR-13",
+    joined([w("No file permissions"), w("This drive doesn't keep file permissions")]),
+    warned("no_permissions"),
+  ),
+  entry(
+    "FR-14",
+    joined([
+      w("Claude asks before every change. Codex can't work here."),
+      w(
+        "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+      ),
+    ]),
+    warned("no_permissions"),
+  ),
+  // the room's notice for a folder the host couldn't check (provisional): one line, its name too
+  entry(
+    "FR-20",
+    w("Clauseo couldn't check this folder, so Claude asks before every change."),
+    () => <RoomOver host={room("check_failed")} />,
   ),
 ];

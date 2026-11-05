@@ -2,8 +2,9 @@
 // if fixed side by side, since the rail groups matters by their next date, and the folder Clauseo makes for it under
 // Documents as one muted line with a quiet Change. The lawyer's words take the composer's setting, 17 px at 600. First
 // launch opens it on the first screen, and the rail's New matter opens the same form. The folder's path is the
-// computer's own, in English in both languages.
-import { useEffect, useId, useRef, useState } from "react";
+// computer's own, in English in both languages. A warning about the folder picked, from the caller, sits under the
+// folder line, its two buttons in Create's place.
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Field } from "@base-ui/react/field";
 import { Input } from "@base-ui/react/input";
 import { Button } from "../ui/button.tsx";
@@ -49,8 +50,25 @@ export type NewMatterFormProps = {
   /** Optional: for a line that names a matter on the list (matter.folder_is_matter), Open it sits under the line and
    * calls this, which opens that matter. Left out, the line has no button. */
   openMatter?: (() => void) | undefined;
-  /** Optional: test ids for the name field, Change, Create the matter and Open it. */
-  testIds?: { name?: string; existing?: string; create?: string; open?: string } | undefined;
+  /** Optional: a warning about the folder picked, under the folder line, from the caller in the language. While it
+   * shows, its two buttons stand in Create's place: `choose`, the main one, calls `onChoose` or, left out, opens the
+   * picker as Change does; `anyway` creates as Create does. */
+  warning?:
+    | { note: ReactNode; choose: string; anyway: string; onChoose?: (() => void) | undefined }
+    | undefined;
+  /** Optional: Create held back, for a folder the caller refused. */
+  blocked?: boolean | undefined;
+  /** Optional: test ids for the name field, Change, Create the matter and Open it, and the warning's buttons. */
+  testIds?:
+    | {
+        name?: string;
+        existing?: string;
+        create?: string;
+        open?: string;
+        choose?: string;
+        anyway?: string;
+      }
+    | undefined;
   /** Whether the form carries its own heading, "A new matter". */
   titled?: boolean;
   /** Optional: in a dialog, the form's buttons stand as a dialog's do, at its end with the one
@@ -126,6 +144,8 @@ export function NewMatterForm({
   error,
   nextError,
   openMatter,
+  warning,
+  blocked = false,
   testIds,
   titled = true,
   inDialog = false,
@@ -154,7 +174,7 @@ export function NewMatterForm({
     : nextError !== undefined
       ? nextError
       : nextDateError(lang, next);
-  const ready = name.trim() !== "" && dateLine === null;
+  const ready = name.trim() !== "" && dateLine === null && !blocked;
   const dateShown = dateLeft ? dateLine : null;
   const folder =
     picked ?? (given !== undefined ? given : (folderFor?.(name.trim() || name0) ?? null));
@@ -189,14 +209,25 @@ export function NewMatterForm({
   };
   const createButton = (
     <Button
-      kind="tone"
+      kind={warning === undefined ? "tone" : "quiet"}
       type="submit"
       disabled={!ready || pending}
       aria-busy={pending ? true : undefined}
       data-pending={pending ? "" : undefined}
-      data-testid={testIds?.create}
+      data-testid={warning === undefined ? testIds?.create : testIds?.anyway}
     >
-      <span className="deva-nudge">{w("Create the matter")}</span>
+      <span className="deva-nudge">{warning?.anyway ?? w("Create the matter")}</span>
+    </Button>
+  );
+  // the warning's main button: another folder, by the caller's way or the picker Change opens
+  const chooseButton = warning !== undefined && (
+    <Button
+      kind="tone"
+      disabled={picking}
+      data-testid={testIds?.choose}
+      onClick={() => (warning.onChoose === undefined ? void change() : warning.onChoose())}
+    >
+      <span className="deva-nudge">{warning.choose}</span>
     </Button>
   );
   return (
@@ -265,6 +296,7 @@ export function NewMatterForm({
           <span className="deva-nudge">{w("Change")}</span>
         </Button>
       </div>
+      {warning?.note}
       {error !== undefined && error !== null && (
         <div className="matter-form-refusal">
           <p role="alert" className="matter-form-error">
@@ -291,9 +323,11 @@ export function NewMatterForm({
             </Button>
           )}
           {createButton}
+          {chooseButton}
         </span>
       ) : (
         <span className="flex flex-wrap gap-s2 mt-s2">
+          {chooseButton}
           {createButton}
           {onCancel !== undefined && (
             <Button kind="quiet" onClick={onCancel}>

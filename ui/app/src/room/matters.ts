@@ -15,6 +15,7 @@ import { quietly } from "./open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
+  FolderSupportKind,
   MatterId,
   MatterSummary,
   ThreadId,
@@ -339,6 +340,12 @@ export class Matters {
       console.warn(`get_default_location failed: ${JSON.stringify(error)}`);
       return null;
     }
+  }
+
+  /** New matter's folder check (FolderSupport) of where a create with `source` would go: the host's reading, or
+   * undefined for a fine folder. Rejects with the host's error, create's own refusal included. */
+  async folderSupport(source: NextMatterSource): Promise<FolderSupportKind | undefined> {
+    return (await this.#transport.query({ folder_support: { source } })).folder_support?.support;
   }
 
   /** The folder picker, for the form: the folder and how it reads, or null when the lawyer cancelled. */
