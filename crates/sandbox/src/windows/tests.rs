@@ -221,11 +221,17 @@ fn this_users_sid_is_a_canonical_account_sid() {
 }
 
 #[test]
-fn the_runner_is_a_supported_windows() {
+fn the_runners_architecture_and_build_are_read() {
     let os = super::os_facts();
-    assert!(!os.arm64, "{os:?}");
+    assert_eq!(os.arm64, cfg!(target_arch = "aarch64"), "{os:?}");
     let build = os.build.unwrap();
     assert!(build >= crate::detect::FIRST_BUILD, "{build}");
+    // ARM64 is tier C on purpose; the nightly's ARM64 runner checks that on real hardware.
+    if os.arm64 {
+        let found = crate::detect::detect(None);
+        let unsupported = Some(crate::detect::NoSandbox::UnsupportedOs);
+        assert_eq!(found.reason, unsupported, "{found:?}");
+    }
 }
 
 #[test]
