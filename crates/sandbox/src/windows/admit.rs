@@ -1,10 +1,10 @@
 //! The folder gate (S15's D1): before tier B plans or writes anything for a launch, every folder
-//! it would grant on must take permission entries, and so must every other matter's folder that
-//! a group in every matter's token can reach (D8). One refusal refuses the whole launch, and a
-//! refusal has planned and written nothing: [`Admitted`] is the only way into
-//! [`acl_plan::plan`](super::acl_plan::plan), and only the gate makes one.
+//! it would grant on must take permission entries, and so must every sibling folder it will deny
+//! the pool users. One refusal refuses the whole launch, and a refusal has planned and written
+//! nothing: [`Admitted`] is the only way into [`acl_plan::plan`](super::acl_plan::plan), and only
+//! the gate makes one.
 //!
-//! The gate's logic takes the folder check and the DACL reader as parameters ([`admit_with`]),
+//! The gate's logic takes the folder check and the folder lister as parameters ([`admit_with`]),
 //! so its tests run on every OS; [`admit`] is the Windows call with the real folder check.
 
 use std::fmt;
@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use super::FolderSupport;
 // The gate itself builds on Windows and for tests; elsewhere only its types do.
 #[cfg(any(windows, test, feature = "test-support"))]
-use super::acl_plan::{AGENTS_DIR, in_folder};
+use super::acl_plan::in_folder;
+#[cfg(any(windows, test, feature = "test-support"))]
+use super::acl_plan::targets::AGENTS_DIR;
 #[cfg(any(windows, test, feature = "test-support"))]
 use crate::Error;
 use crate::Policy;
@@ -49,8 +51,11 @@ pub enum PathKind {
     ReadOnlyInMatter,
     /// A write-denied path in the state folder ([`Policy::read_only_in_state`]).
     ReadOnlyInState,
-    /// Another matter's folder that a group in every matter's token can reach (D8).
+    /// Another registered matter's folder.
     OtherMatter,
+    /// A folder beside the matter in its parent that isn't a registered matter: denied to every
+    /// pool user's reads.
+    Sibling,
 }
 
 impl fmt::Display for PathKind {
@@ -68,6 +73,7 @@ impl fmt::Display for PathKind {
             PathKind::ReadOnlyInMatter => "a read-only path in the matter",
             PathKind::ReadOnlyInState => "a read-only path in the state folder",
             PathKind::OtherMatter => "another matter's folder",
+            PathKind::Sibling => "a folder beside the matter",
         })
     }
 }
@@ -82,7 +88,7 @@ pub enum FolderRefusal {
     /// a final path that can't be read.
     CheckFailed(io::ErrorKind),
     /// The matter folder is Clauseo's data folder, holds it, or is inside it, or the data folder
-    /// doesn't resolve. Holding it, the matter's `Modify` pair would reach `<data_dir>\sandbox`
+    /// doesn't resolve. Holding it, the matter's `Modify` entries would reach `<data_dir>\sandbox`
     /// (the SID map, the ledger, the marker); inside it, the agent would reach Clauseo's state.
     OverlapsDataFolder,
     /// The path is the lawyer's profile folder or a folder above it.
@@ -131,23 +137,40 @@ impl fmt::Display for FolderRefusal {
     }
 }
 
-/// Reads another matter's folder's DACL, for D8. A trait so tests can fake it; the Windows
-/// reader comes with S15's ACL code (PR3).
-pub trait GroupAccess {
-    /// Whether `folder`'s DACL lets a group that every matter's restricted token holds reach it:
-    /// any allow entry, inheritable ones included, that gives `BUILTIN\Users`, `Everyone`,
-    /// `Authenticated Users` or `RESTRICTED` a read or write right. A missing folder is
-    /// `NotFound`.
-    fn group_can_reach(&self, folder: &Path) -> io::Result<bool>;
+/// Lists the folders in a folder: the IO the gate needs for the matter's siblings. A trait so
+/// tests can fake it; [`ReadDir`] reads the file system.
+pub trait FolderList {
+    /// The folders directly in `parent` (files left out), as paths.
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>>;
+}
+
+/// [`FolderList`] through `std::fs::read_dir`: entries whose own type (not followed) is a
+/// folder. Links are listed by `file_type` as links, so they are left out here; the gate skips
+/// any reparse point again anyway.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReadDir;
+
+impl FolderList for ReadDir {
+    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
+        let mut folders = Vec::new();
+        for entry in std::fs::read_dir(parent)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                folders.push(entry.path());
+            }
+        }
+        folders.sort();
+        Ok(folders)
+    }
 }
 
 /// A launch the gate let through: every folder it grants on answered `Ok`. Holds the policy and
-/// the other matters' folders this matter's SID must be denied (D8). Only the gate makes one.
+/// the sibling folders the pool users are to be denied reading. Only the gate makes one.
 #[derive(Debug)]
 pub struct Admitted<'a> {
     policy: &'a Policy,
     data_dir: PathBuf,
-    closed: Vec<PathBuf>,
+    siblings: Vec<PathBuf>,
 }
 
 impl<'a> Admitted<'a> {
@@ -156,10 +179,11 @@ impl<'a> Admitted<'a> {
         self.policy
     }
 
-    /// Other matters' folders a group in every token can reach, each answering `Ok`: the plan
-    /// denies this matter's SID read and write on each.
-    pub fn closed(&self) -> &[PathBuf] {
-        &self.closed
+    /// The folders beside the matter in its parent the plan denies the pool group reading, each
+    /// answering `Ok`: not the matter, not a registered matter, no link, none holding or inside
+    /// one of the policy's paths, the profile or the data folder.
+    pub fn siblings(&self) -> &[PathBuf] {
+        &self.siblings
     }
 
     /// Clauseo's data folder, canonical.
@@ -191,10 +215,10 @@ pub fn grant_folders(policy: &Policy) -> Vec<(PathKind, &Path)> {
 pub fn admit<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    others: &[PathBuf],
-    groups: &dyn GroupAccess,
+    registered: &[PathBuf],
+    folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, others, super::folder_support, groups)
+    gate(policy, data_dir, registered, super::folder_support, folders)
 }
 
 /// The gate with a fake folder check, for this crate's tests and, through `test-support`,
@@ -203,14 +227,14 @@ pub fn admit<'a>(
 pub fn admit_with<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    others: &[PathBuf],
+    registered: &[PathBuf],
     check: impl FnMut(&Path) -> io::Result<FolderSupport>,
-    groups: &dyn GroupAccess,
+    folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
-    gate(policy, data_dir, others, check, groups)
+    gate(policy, data_dir, registered, check, folders)
 }
 
-/// The gate, with the folder check `check` and the DACL reader `groups` as parameters.
+/// The gate, with the folder check `check` and the folder lister `folders` as parameters.
 ///
 /// 0. The matter folder must not be `data_dir` (Clauseo's data folder), hold it, or sit inside
 ///    it, compared canonically: `data_dir` is canonicalised (the policy's paths already are),
@@ -219,23 +243,27 @@ pub fn admit_with<'a>(
 ///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
 /// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`]; any other answer, or an
 ///    error, refuses with [`Error::FolderUnsupported`] naming the folder's kind.
-/// 2. Each of `others`, the other matters' folders (their matter, state and notes folders):
-///    when `groups` says a group can reach it, or can't tell, it is closed to this matter, and
-///    so must answer `Ok` too. A `Network` folder is left alone: `ClauseoSandbox` is a local
-///    account a file server doesn't know, and the restricted token was refused every operation
-///    over `\\localhost` (`smb-spike.md`). A missing folder is left alone: nothing is there.
-///    Any other answer refuses with [`PathKind::OtherMatter`]. Before any of that, another
-///    matter's folder inside this matter, or holding it, refuses with
-///    [`FolderRefusal::NestedMatter`], whatever its DACL.
+/// 2. `registered` are the other registered matters' folders (their matter, state and notes
+///    folders). One inside this matter, or holding it, refuses with
+///    [`FolderRefusal::NestedMatter`] before any folder check. Isolation from them is the plan's
+///    deny for each other pool user, on this matter's own folders.
+/// 3. The siblings: each folder `folders` lists in the matter's parent, unless the parent is a
+///    volume's root (its folders are the system's: `Windows`, `Program Files`, `Users`; a known
+///    limit). Left out: the matter itself, a registered matter or a folder holding or inside one,
+///    a link or other reparse point, a folder missing by now, and a folder that is, holds or is
+///    inside one of the policy's paths, the profile or the data folder (denying it would deny
+///    the jail's own reads). Each other one must answer `Ok`, as a grant folder does; `Network`
+///    is left alone; any other answer refuses with [`PathKind::Sibling`]. A listing that fails
+///    refuses too.
 ///
 /// Nothing is written. A refusal returns before anything is planned.
 #[cfg(any(windows, test, feature = "test-support"))]
 fn gate<'a>(
     policy: &'a Policy,
     data_dir: &Path,
-    others: &[PathBuf],
+    registered: &[PathBuf],
     mut check: impl FnMut(&Path) -> io::Result<FolderSupport>,
-    groups: &dyn GroupAccess,
+    folders: &dyn FolderList,
 ) -> Result<Admitted<'a>, Error> {
     let data = match dunce::canonicalize(data_dir) {
         Ok(data) => data,
@@ -255,7 +283,7 @@ fn gate<'a>(
     if let Some((kind, refusal)) = unresolved_links(policy) {
         return Err(refused(kind, refusal));
     }
-    for other in others {
+    for other in registered {
         let canonical = dunce::canonicalize(other).unwrap_or_else(|_missing| other.clone());
         let nested = [other, &canonical]
             .iter()
@@ -269,30 +297,68 @@ fn gate<'a>(
             return Err(refused(kind, refusal));
         }
     }
-    let mut closed = Vec::new();
-    for other in others {
-        match groups.group_can_reach(other) {
-            Ok(false) => continue,
+    let siblings = siblings(policy, &data, registered, &mut check, folders)?;
+    Ok(Admitted {
+        policy,
+        data_dir: data,
+        siblings,
+    })
+}
+
+/// Step 3 of [`gate`]: the siblings the plan denies the pool group reading.
+#[cfg(any(windows, test, feature = "test-support"))]
+fn siblings(
+    policy: &Policy,
+    data: &Path,
+    registered: &[PathBuf],
+    check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
+    folders: &dyn FolderList,
+) -> Result<Vec<PathBuf>, Error> {
+    let matter = policy.matter();
+    let Some(parent) = matter.parent().filter(|parent| parent.parent().is_some()) else {
+        return Ok(Vec::new());
+    };
+    let listed = folders
+        .subfolders(parent)
+        .map_err(|error| refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind())))?;
+    let mut kept: Vec<&Path> = vec![policy.state(), data];
+    kept.extend(policy.notes());
+    kept.extend(policy.home());
+    kept.extend(policy.credential_link());
+    kept.extend(policy.claude_store().map(crate::ClaudeStore::dir));
+    kept.extend(policy.runtime().iter().map(PathBuf::as_path));
+    kept.extend(policy.read().iter().map(PathBuf::as_path));
+    kept.extend(policy.allowed_folders().iter().map(PathBuf::as_path));
+    kept.extend(registered.iter().map(PathBuf::as_path));
+    let overlaps = |a: &Path, b: &Path| in_folder(a, b) || in_folder(b, a);
+    let mut siblings = Vec::new();
+    for listed in listed {
+        let sibling = match dunce::canonicalize(&listed) {
+            Ok(sibling) => sibling,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            // A DACL that can't be read is taken as open: the folder is closed if it can be.
-            Ok(true) | Err(_) => {}
+            Err(error) => {
+                let refusal = FolderRefusal::CheckFailed(error.kind());
+                return Err(refused(PathKind::Sibling, refusal));
+            }
+        };
+        let reparse = is_reparse_point(&listed).map_err(|error| {
+            refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind()))
+        })?;
+        if reparse || overlaps(&sibling, matter) || kept.iter().any(|k| overlaps(&sibling, k)) {
+            continue;
         }
-        match check(other) {
-            Ok(FolderSupport::Ok) => closed.push(other.clone()),
+        match check(&sibling) {
+            Ok(FolderSupport::Ok) => siblings.push(sibling),
             Ok(FolderSupport::Network) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             answer => {
                 if let Some(refusal) = refusal(answer) {
-                    return Err(refused(PathKind::OtherMatter, refusal));
+                    return Err(refused(PathKind::Sibling, refusal));
                 }
             }
         }
     }
-    Ok(Admitted {
-        policy,
-        data_dir: data,
-        closed,
-    })
+    Ok(siblings)
 }
 
 /// Why the agents' folder can't be trusted, if it can't: `<data_dir>\agents` is a reparse point

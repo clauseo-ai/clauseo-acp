@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::test_support::TempDir;
+use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::test_world::{
-    MATTER_SID, USER_SID, matter_one, matter_two, reserved, user_sid,
+    GROUP_SID, MATTER_SID, OTHER_POOL_SIDS, USER_SID, matter_one, matter_two, reserved, trusted,
 };
 use crate::windows::write::write_atomic_with;
 
@@ -37,7 +38,7 @@ fn plan_for(matter: MatterId, folder: &str) -> AdmittedPlan {
 }
 
 fn open(path: &Path) -> Ledger {
-    Ledger::open(path, &user_sid(), &reserved()).unwrap()
+    Ledger::open(path, &trusted(), &reserved()).unwrap()
 }
 
 fn states(ledger: &Ledger) -> Vec<(u64, EntryState)> {
@@ -271,6 +272,69 @@ fn marking_an_entry_another_process_dropped_fails() {
         0,
         "nothing was marked or put back"
     );
+}
+
+#[test]
+fn labels_and_the_pool_denies_are_recorded_and_forget_matter_returns_them() {
+    // Each new kind of item: the Low label, another pool user's deny, the group's sibling deny.
+    let temp = TempDir::new("ledger-new-kinds");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let matter = abs("m1");
+    let item = |sid: &str, rights, kind| Grant {
+        path: matter.clone(),
+        sid: Sid::parse(sid).unwrap(),
+        rights,
+        inherit: Inherit::Tree,
+        kind,
+    };
+    let grants = vec![
+        item(LOW_LABEL_SID, Rights::LowLabel, PathKind::Matter),
+        item(OTHER_POOL_SIDS[0], Rights::DenyReadWrite, PathKind::Matter),
+        Grant {
+            path: abs("Drafts"),
+            ..item(GROUP_SID, Rights::DenyRead, PathKind::Sibling)
+        },
+    ];
+    let mut plan = AdmittedPlan::from_grants(matter_one(), grants.clone());
+    ledger.record_pending(&mut plan).unwrap();
+    let reopened = open(&path);
+    let read: Vec<Grant> = reopened.entries().map(Entry::grant).collect();
+    assert_eq!(read, grants, "every kind is read back and trusted");
+    let mut handed = Vec::new();
+    let done = ledger
+        .forget_matter(matter_one(), |entry| {
+            handed.push(entry.grant());
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        done,
+        Forgotten {
+            removed: 3,
+            kept: 0
+        }
+    );
+    assert_eq!(handed, grants);
+}
+
+#[test]
+fn a_label_naming_anything_but_the_low_level_is_set_aside() {
+    let temp = TempDir::new("ledger-label-trust");
+    let path = ledger_path(temp.path());
+    let mut ledger = open(&path);
+    let label = |sid: &str| Grant {
+        path: abs("m1"),
+        sid: Sid::parse(sid).unwrap(),
+        rights: Rights::LowLabel,
+        inherit: Inherit::Tree,
+        kind: PathKind::Matter,
+    };
+    let mut plan = AdmittedPlan::from_grants(matter_one(), vec![label(USER_SID)]);
+    ledger.record_pending(&mut plan).unwrap();
+    let reopened = open(&path);
+    assert_eq!(reopened.entries().count(), 0);
+    assert_eq!(reopened.set_aside_entries(), 1);
 }
 
 #[test]

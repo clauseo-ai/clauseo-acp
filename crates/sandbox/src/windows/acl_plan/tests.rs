@@ -3,37 +3,64 @@ use std::path::Path;
 
 use super::super::admit::{Admitted, FolderRefusal, PathKind, admit_with};
 use super::super::test_world::{
-    FakeGroups, MATTER_SID, NOTES, STATE, STORE, USER_SID, World, matter_one, sids,
+    FakeFolders, GROUP_SID, MATTER_SID, NOTES, OTHER_POOL_SIDS, STATE, STORE, USER_SID, World,
+    matter_one, sids,
 };
 use super::*;
 use crate::windows::FolderSupport;
 use crate::{Error, Policy};
 
-/// The gate with every folder answering `Ok`.
+/// The gate with every folder answering `Ok`, `registered` the other matters and `folders` the
+/// listing of the matter's parent.
 fn admitted<'a>(
     w: &World,
     policy: &'a Policy,
-    others: &[PathBuf],
-    groups: &FakeGroups,
+    registered: &[PathBuf],
+    folders: &FakeFolders,
 ) -> Admitted<'a> {
     let data = w.at("data");
-    admit_with(policy, &data, others, |_| Ok(FolderSupport::Ok), groups).unwrap()
+    admit_with(
+        policy,
+        &data,
+        registered,
+        |_| Ok(FolderSupport::Ok),
+        folders,
+    )
+    .unwrap()
+}
+
+/// The plan's grants for `policy`, with no registered matter and no sibling.
+fn grants_for(w: &World, policy: &Policy, subjects: &Subjects) -> Vec<Grant> {
+    let admitted = admitted(w, policy, &[], &FakeFolders::default());
+    plan(&admitted, subjects, matter_one())
+        .unwrap()
+        .grants()
+        .to_vec()
+}
+
+/// A short name for a test SID.
+fn who(sid: &Sid) -> &'static str {
+    match sid.as_str() {
+        USER_SID => "pool",
+        MATTER_SID => "matter",
+        GROUP_SID => "group",
+        LOW_LABEL_SID => "low",
+        s if s == OTHER_POOL_SIDS[0] => "other-pool-1",
+        s if s == OTHER_POOL_SIDS[1] => "other-pool-2",
+        _ => "?",
+    }
 }
 
 /// The plan as text, one entry a line, paths relative to the temp folder.
 fn render(w: &World, grants: &[Grant]) -> String {
     let mut out = String::new();
     for g in grants {
-        let who = match g.sid.as_str() {
-            USER_SID => "user",
-            MATTER_SID => "matter",
-            _ => "other",
-        };
         writeln!(
             out,
-            "{:?} {:?} {who} 0x{:08x} {:?} {}",
+            "{:?} {:?} {} 0x{:08x} {:?} {}",
             g.kind,
             g.rights,
+            who(&g.sid),
             g.rights.mask(),
             g.inherit,
             w.relative(&g.path)
@@ -46,86 +73,169 @@ fn render(w: &World, grants: &[Grant]) -> String {
 #[test]
 fn the_full_plan() {
     let w = World::new("plan-full");
+    w.dir.dir("Drafts");
     let policy = w.full_policy();
-    let groups = FakeGroups {
-        open: vec![w.canonical("other/m2")],
-        ..FakeGroups::default()
+    let folders = FakeFolders {
+        listing: vec![w.canonical("Drafts"), w.canonical("matter")],
+        ..FakeFolders::default()
     };
-    let others = [w.canonical("other/m2"), w.canonical("other/m3")];
-    let grants = plan(
-        &admitted(&w, &policy, &others, &groups),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap();
-    insta::assert_snapshot!(render(&w, &grants));
+    let admitted = admitted(&w, &policy, &[w.canonical("other/m2")], &folders);
+    let plan = plan(&admitted, &sids(), matter_one()).unwrap();
+    insta::assert_snapshot!(render(&w, plan.grants()));
 }
 
 #[test]
-fn every_allow_comes_in_a_pair() {
-    let w = World::new("plan-pairs");
-    let policy = w.full_policy();
-    let grants = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap();
-    let allows: Vec<&Grant> = grants.iter().filter(|g| !g.rights.is_deny()).collect();
-    assert!(allows.len() >= 20, "{allows:#?}");
-    let (user, matter) = (
-        Sid::parse(USER_SID).unwrap(),
-        Sid::parse(MATTER_SID).unwrap(),
-    );
+fn every_allow_names_the_pool_user_and_no_one_else_by_default() {
+    let w = World::new("plan-pool-user");
+    let grants = grants_for(&w, &w.full_policy(), &sids());
+    let allows: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_allow()).collect();
+    assert!(allows.len() >= 10, "{allows:#?}");
     for g in &allows {
-        let partner = if g.sid == user { &matter } else { &user };
-        assert!(g.sid == user || g.sid == matter, "{g:?}");
-        let paired = allows.iter().any(|p| {
-            &p.sid == partner && p.path == g.path && p.rights == g.rights && p.inherit == g.inherit
+        assert_eq!(g.sid.as_str(), USER_SID, "{g:?}");
+    }
+    assert!(grants.iter().all(|g| g.sid.as_str() != MATTER_SID));
+}
+
+#[test]
+fn the_matter_sid_is_a_second_subject_of_every_allow_when_asked() {
+    let w = World::new("plan-matter-sid");
+    let mut subjects = sids();
+    subjects.matter = Some(Sid::parse(MATTER_SID).unwrap());
+    let grants = grants_for(&w, &w.full_policy(), &subjects);
+    let allows: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_allow()).collect();
+    let pool = allows.iter().filter(|g| g.sid.as_str() == USER_SID).count();
+    let matter: Vec<&&Grant> = allows
+        .iter()
+        .filter(|g| g.sid.as_str() == MATTER_SID)
+        .collect();
+    assert_eq!(pool, matter.len());
+    for m in matter {
+        let twin = allows.iter().any(|g| {
+            g.sid.as_str() == USER_SID
+                && g.path == m.path
+                && g.rights == m.rights
+                && g.inherit == m.inherit
         });
-        assert!(paired, "no pair for {g:?}");
+        assert!(twin, "no pool-user twin for {m:?}");
     }
-    let users = allows.iter().filter(|g| g.sid == user).count();
-    assert_eq!(users * 2, allows.len());
+    // The matter SID never takes a deny or the label.
+    let others = grants.iter().filter(|g| !g.rights.is_allow());
+    assert!(others.into_iter().all(|g| g.sid.as_str() != MATTER_SID));
 }
 
 #[test]
-fn every_deny_names_the_matter_sid_alone() {
-    // A deny for the user would block every matter's agent, this one's included.
-    let w = World::new("plan-denies");
+fn the_matter_state_and_notes_folders_get_the_low_label() {
+    let w = World::new("plan-low-label");
     let policy = w.full_policy();
-    let groups = FakeGroups {
-        open: vec![w.canonical("other/m2")],
-        ..FakeGroups::default()
-    };
-    let admitted = admitted(&w, &policy, &[w.canonical("other/m2")], &groups);
-    let grants = plan(&admitted, &sids(), matter_one())
-        .map(|p| p.grants().to_vec())
-        .unwrap();
-    let denies: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_deny()).collect();
-    assert_ne!(denies.len(), 0);
-    for g in denies {
-        assert_eq!(g.sid.as_str(), MATTER_SID, "{g:?}");
+    let grants = grants_for(&w, &policy, &sids());
+    let labels: Vec<&Grant> = grants.iter().filter(|g| g.rights.is_label()).collect();
+    let want = [
+        (policy.matter(), PathKind::Matter),
+        (policy.state(), PathKind::State),
+        (policy.notes().unwrap(), PathKind::Notes),
+    ];
+    assert_eq!(labels.len(), want.len(), "{labels:#?}");
+    for (label, (path, kind)) in labels.iter().zip(want) {
+        assert_eq!((label.path.as_path(), label.kind), (path, kind));
+        assert_eq!(label.sid.as_str(), LOW_LABEL_SID);
+        assert_eq!(label.inherit, Inherit::Tree, "OICI");
+        assert_eq!(label.rights.mask(), 0x1, "no-write-up");
+        assert!(!label.rights.is_deny() && !label.rights.is_allow());
     }
 }
 
 #[test]
-fn read_only_names_get_deny_write() {
+fn every_other_pool_user_is_denied_this_matters_own_folders_and_no_one_else_is() {
+    let w = World::new("plan-other-pool");
+    let policy = w.full_policy();
+    let grants = grants_for(&w, &policy, &sids());
+    let denies: Vec<&Grant> = grants
+        .iter()
+        .filter(|g| g.rights == Rights::DenyReadWrite)
+        .collect();
+    let own = [policy.matter(), policy.state(), policy.notes().unwrap()];
+    assert_eq!(
+        denies.len(),
+        OTHER_POOL_SIDS.len() * own.len(),
+        "{denies:#?}"
+    );
+    for other in OTHER_POOL_SIDS {
+        for folder in own {
+            let found = denies
+                .iter()
+                .any(|g| g.sid.as_str() == other && g.path == folder && g.inherit == Inherit::Tree);
+            assert!(found, "{other} on {folder:?}");
+        }
+    }
+    for g in &denies {
+        assert!(OTHER_POOL_SIDS.contains(&g.sid.as_str()), "{g:?}");
+    }
+    assert_eq!(
+        Rights::DenyReadWrite.mask() & 0x3,
+        0x3,
+        "read and write data"
+    );
+    // The pool user itself is never another pool user.
+    let mut colliding = sids();
+    colliding
+        .other_pool_users
+        .push(Sid::parse(USER_SID).unwrap());
+    let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
+    assert!(matches!(
+        plan(&admitted, &colliding, matter_one()),
+        Err(Error::Policy(_))
+    ));
+}
+
+#[test]
+fn siblings_get_the_groups_deny_read_and_the_matter_and_registered_ones_none() {
+    let w = World::new("plan-siblings");
+    for rel in ["Drafts", "Precedents", "registered"] {
+        w.dir.dir(rel);
+    }
+    let policy = w.full_policy();
+    let folders = FakeFolders {
+        listing: ["Drafts", "Precedents", "registered", "matter"]
+            .iter()
+            .map(|rel| w.canonical(rel))
+            .collect(),
+        ..FakeFolders::default()
+    };
+    let admitted = admitted(&w, &policy, &[w.canonical("registered")], &folders);
+    let grants = plan(&admitted, &sids(), matter_one()).unwrap();
+    let group: Vec<&Grant> = grants
+        .grants()
+        .iter()
+        .filter(|g| g.sid.as_str() == GROUP_SID)
+        .collect();
+    let paths: Vec<&Path> = group.iter().map(|g| g.path.as_path()).collect();
+    assert_eq!(paths, [w.canonical("Drafts"), w.canonical("Precedents")]);
+    for g in &group {
+        assert_eq!(
+            (g.rights, g.inherit, g.kind),
+            (Rights::DenyRead, Inherit::Tree, PathKind::Sibling)
+        );
+    }
+    assert_eq!(Rights::DenyRead.mask() & 0x2, 0, "reads only");
+    // Nothing for the group on the matter, a registered matter or the parent.
+    for path in [
+        w.canonical("matter"),
+        w.canonical("registered"),
+        w.canonical(""),
+    ] {
+        assert!(!group.iter().any(|g| g.path == path), "{path:?}");
+    }
+}
+
+#[test]
+fn read_only_names_get_deny_write_for_the_pool_user() {
     let w = World::new("plan-read-only");
     let policy = w.full_policy();
-    let grants = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap();
+    let grants = grants_for(&w, &policy, &sids());
     let denied = |path: &Path| {
-        grants.iter().find(|g| {
-            g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == MATTER_SID
-        })
+        grants
+            .iter()
+            .find(|g| g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == USER_SID)
     };
     // Every rule the policy names, nothing hard-coded here.
     assert!(policy.read_only_in_matter().len() > 8);
@@ -178,14 +288,7 @@ fn modify_never_gives_delete_child_or_permission_changes() {
 #[test]
 fn nothing_lands_in_the_profiles_claude_folder() {
     let w = World::new("plan-no-claude");
-    let policy = w.full_policy();
-    let grants = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap();
+    let grants = grants_for(&w, &w.full_policy(), &sids());
     let claude = w.canonical("home/.claude");
     let home = w.canonical("home");
     for g in &grants {
@@ -205,13 +308,8 @@ fn a_claude_store_in_the_profiles_claude_folder_is_refused() {
         .claude_store(w.at("home/.claude"))
         .build()
         .unwrap();
-    let error = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap_err();
+    let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
+    let error = plan(&admitted, &sids(), matter_one()).unwrap_err();
     let Error::Policy(message) = &error else {
         panic!("{error:?}");
     };
@@ -232,13 +330,8 @@ fn a_read_path_in_the_profiles_claude_folder_is_refused() {
         .read(w.at("home/.claude/skills"))
         .build()
         .unwrap();
-    let error = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap_err();
+    let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
+    let error = plan(&admitted, &sids(), matter_one()).unwrap_err();
     assert!(error.to_string().contains("a read path"), "{error}");
 }
 
@@ -260,50 +353,18 @@ fn the_claude_folder_matches_in_any_letter_case() {
 }
 
 #[test]
-fn another_matter_a_group_can_reach_is_denied_to_this_matter() {
-    // D8: `Users` stays a restricting SID, so this matter's token would pass both checks on m2.
-    let w = World::new("plan-d8");
-    let policy = w.full_policy();
-    let (m2, m3) = (w.canonical("other/m2"), w.canonical("other/m3"));
-    let groups = FakeGroups {
-        open: vec![m2.clone()],
-        ..FakeGroups::default()
-    };
-    let grants = plan(
-        &admitted(&w, &policy, &[m2.clone(), m3.clone()], &groups),
-        &sids(),
-        matter_one(),
-    )
-    .map(|p| p.grants().to_vec())
-    .unwrap();
-    let on = |path: &Path| grants.iter().filter(|g| g.path == path).collect::<Vec<_>>();
-    let m2_grants = on(&m2);
-    assert_eq!(m2_grants.len(), 1, "{m2_grants:#?}");
-    let deny = m2_grants[0];
-    assert_eq!(deny.sid.as_str(), MATTER_SID);
-    assert_eq!(deny.rights, Rights::DenyReadWrite);
-    assert_eq!(deny.inherit, Inherit::Tree);
-    assert_eq!(deny.kind, PathKind::OtherMatter);
-    assert_eq!(deny.rights.mask() & 0x1, 0x1, "read data is denied");
-    assert_eq!(deny.rights.mask() & 0x2, 0x2, "write data is denied");
-    assert!(on(&m3).is_empty(), "m3's DACL grants no group");
-}
-
-#[test]
-fn the_same_sid_twice_is_refused() {
+fn a_pool_user_that_is_the_group_or_the_matter_sid_is_refused() {
     let w = World::new("plan-same-sid");
     let policy = w.builder().build().unwrap();
-    let same = Sids {
-        user: Sid::parse(MATTER_SID).unwrap(),
-        matter: Sid::parse(MATTER_SID).unwrap(),
-    };
-    let error = plan(
-        &admitted(&w, &policy, &[], &FakeGroups::default()),
-        &same,
-        matter_one(),
-    )
-    .unwrap_err();
-    assert!(matches!(error, Error::Policy(_)), "{error:?}");
+    let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
+    let mut as_group = sids();
+    as_group.pool_group = as_group.pool_user.clone();
+    let mut as_matter = sids();
+    as_matter.matter = Some(as_matter.pool_user.clone());
+    for subjects in [as_group, as_matter] {
+        let error = plan(&admitted, &subjects, matter_one()).unwrap_err();
+        assert!(matches!(error, Error::Policy(_)), "{error:?}");
+    }
 }
 
 /// The profile, the sandbox records and the data folder's allow list.

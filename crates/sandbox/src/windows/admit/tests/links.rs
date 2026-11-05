@@ -30,7 +30,7 @@ fn agents_as_a_link_refuses_the_launch() {
     };
     let policy = w.builder().build().unwrap();
     let check = |_: &Path| Ok(FolderSupport::Ok);
-    let refused = admit_with(&policy, &w.at("data2"), &[], check, &FakeGroups::default());
+    let refused = admit_with(&policy, &w.at("data2"), &[], check, &FakeFolders::default());
     let Err(Error::FolderUnsupported { support, .. }) = refused else {
         panic!("not refused: {refused:?}");
     };
@@ -44,7 +44,7 @@ fn a_symlinked_credential_link_or_store_file_refuses_and_a_hard_link_passes() {
     let secret = w.dir.file("elsewhere/secret.json", "{}");
     let auth = format!("{STATE}/auth.json");
     let check = |_: &Path| Ok(FolderSupport::Ok);
-    let groups = FakeGroups::default();
+    let groups = FakeFolders::default();
     // A hard link, as the host makes the credential link: fine.
     let real = w.dir.file("elsewhere/auth.json", "{}");
     w.dir.hard_link(&auth, &real);

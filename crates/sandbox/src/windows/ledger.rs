@@ -21,11 +21,11 @@
 //! entries its own plan added.
 //!
 //! Entries are not trusted on load. One this version can't read (an older shape, a newer kind),
-//! one whose SID is neither the `ClauseoSandbox` SID given to [`Ledger::open`] nor a matter-form
-//! SID outside the reserved accounts and domains (`sids::Reserved`), and one whose path isn't
-//! absolute, are kept as they are, written back unchanged, and never acted on or handed out. A
-//! file from a newer format version, or one that isn't JSON, is refused with `InvalidData` and
-//! left alone.
+//! one whose SID is neither a trusted SID given to [`Ledger::open`] (the pool users and their
+//! group) nor a matter-form SID outside the reserved accounts and domains (`sids::Reserved`), a
+//! label item naming anything but the Low level, and one whose path isn't absolute, are kept as
+//! they are, written back unchanged, and never acted on or handed out. A file from a newer format
+//! version, or one that isn't JSON, is refused with `InvalidData` and left alone.
 //!
 //! [`reconcile`]: Ledger::reconcile
 
@@ -156,14 +156,19 @@ pub struct Ledger {
 }
 
 impl Ledger {
-    /// Reads the ledger at `path` (see [`ledger_path`]). `user` is the `ClauseoSandbox` SID and
-    /// `reserved` the accounts and domains no matter SID may be in (`Reserved::of_this_machine`
-    /// on Windows): an entry naming any other SID is set aside. A missing file is an empty
-    /// ledger. A newer format version or a file that isn't a JSON object is `InvalidData`.
-    pub fn open(path: impl Into<PathBuf>, user: &Sid, reserved: &Reserved) -> io::Result<Ledger> {
+    /// Reads the ledger at `path` (see [`ledger_path`]). `trusted` are the pool users' SIDs and
+    /// their group's, and `reserved` the accounts and domains no matter SID may be in
+    /// (`Reserved::of_this_machine` on Windows): an entry naming any other SID is set aside. A
+    /// missing file is an empty ledger. A newer format version or a file that isn't a JSON
+    /// object is `InvalidData`.
+    pub fn open(
+        path: impl Into<PathBuf>,
+        trusted: &[Sid],
+        reserved: &Reserved,
+    ) -> io::Result<Ledger> {
         let path = path.into();
         let trust = Trust {
-            user: user.clone(),
+            trusted: trusted.to_vec(),
             reserved: reserved.clone(),
         };
         let state = read_state(&path, &trust)?;

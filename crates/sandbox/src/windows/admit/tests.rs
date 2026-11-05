@@ -5,7 +5,7 @@ use super::*;
 use crate::windows::acl_plan::{AdmittedPlan, plan};
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::test_world::{
-    FakeGroups, NOTES, STATE, STORE, World, matter_one, matter_two, reserved, sids, user_sid,
+    FakeFolders, NOTES, STATE, STORE, World, matter_one, matter_two, reserved, sids, trusted,
 };
 
 /// A folder check that answers `answer` for `folder` and `Ok` for every other path.
@@ -29,7 +29,7 @@ fn prepare(
     data: &Path,
     others: &[PathBuf],
     check: impl FnMut(&Path) -> io::Result<FolderSupport>,
-    groups: &FakeGroups,
+    groups: &FakeFolders,
     ledger: &mut Ledger,
 ) -> Result<usize, Error> {
     let admitted = admit_with(policy, data, others, check, groups)?;
@@ -41,14 +41,14 @@ fn prepare(
 /// A ledger with one of another matter's entries already in it, and its bytes.
 fn ledger_with_an_entry(w: &World) -> (Ledger, Vec<u8>) {
     let path = ledger_path(&w.at("data"));
-    let mut ledger = Ledger::open(&path, &user_sid(), &reserved()).unwrap();
+    let mut ledger = Ledger::open(&path, &trusted(), &reserved()).unwrap();
     let other = w.builder().build().unwrap();
     let admitted = admit_with(
         &other,
         &w.at("data"),
         &[],
         |_| Ok(FolderSupport::Ok),
-        &FakeGroups::default(),
+        &FakeFolders::default(),
     );
     let grants = plan(&admitted.unwrap(), &sids(), matter_one()).unwrap();
     let mut two = AdmittedPlan::from_grants(matter_two(), grants.grants()[..2].to_vec());
@@ -66,7 +66,7 @@ fn every_grant_folder_is_checked() {
         asked.push(path.to_owned());
         Ok(FolderSupport::Ok)
     };
-    admit_with(&policy, &w.at("data"), &[], check, &FakeGroups::default()).unwrap();
+    admit_with(&policy, &w.at("data"), &[], check, &FakeFolders::default()).unwrap();
     let want = [
         w.canonical("matter"),
         w.canonical(STATE),
@@ -101,8 +101,8 @@ fn each_refused_folder_names_its_kind_and_not_its_path() {
     for (rel, kind) in cases {
         for answer in answers {
             let check = answering(w.canonical(rel), answer);
-            let error =
-                admit_with(&policy, &w.at("data"), &[], check, &FakeGroups::default()).unwrap_err();
+            let error = admit_with(&policy, &w.at("data"), &[], check, &FakeFolders::default())
+                .unwrap_err();
             let Error::FolderUnsupported { path_kind, support } = &error else {
                 panic!("{error:?}");
             };
@@ -135,7 +135,7 @@ fn a_refusal_leaves_the_ledger_byte_identical() {
             &w.at("data"),
             &[],
             check,
-            &FakeGroups::default(),
+            &FakeFolders::default(),
             &mut ledger,
         );
         assert!(matches!(refused, Err(Error::FolderUnsupported { .. })));
@@ -152,7 +152,7 @@ fn a_refusal_leaves_the_ledger_byte_identical() {
         &w.at("data"),
         &[],
         check,
-        &FakeGroups::default(),
+        &FakeFolders::default(),
         &mut ledger,
     )
     .unwrap();
@@ -165,7 +165,7 @@ fn a_refusal_on_a_fresh_data_folder_makes_no_ledger() {
     let w = World::new("admit-no-ledger");
     let policy = w.full_policy();
     let path = ledger_path(&w.at("data"));
-    let mut ledger = Ledger::open(&path, &user_sid(), &reserved()).unwrap();
+    let mut ledger = Ledger::open(&path, &trusted(), &reserved()).unwrap();
     let check = answering(w.canonical("matter"), || Ok(FolderSupport::NoPermissions));
     assert!(
         prepare(
@@ -173,7 +173,7 @@ fn a_refusal_on_a_fresh_data_folder_makes_no_ledger() {
             &w.at("data"),
             &[],
             check,
-            &FakeGroups::default(),
+            &FakeFolders::default(),
             &mut ledger
         )
         .is_err()
@@ -182,136 +182,139 @@ fn a_refusal_on_a_fresh_data_folder_makes_no_ledger() {
     assert!(!w.at("data/sandbox").exists());
 }
 
-#[test]
-fn other_matters_a_group_can_reach_are_closed() {
-    let w = World::new("admit-others");
-    let policy = w.builder().build().unwrap();
-    let (m2, m3) = (w.canonical("other/m2"), w.canonical("other/m3"));
-    let unread = w.at("other/unread");
-    let gone = w.at("other/gone");
-    let groups = FakeGroups {
-        open: vec![m2.clone()],
-        failing: vec![unread.clone()],
-        missing: vec![gone.clone()],
-        ..FakeGroups::default()
-    };
-    let others = [m2.clone(), m3, unread.clone(), gone];
-    let admitted = admit_with(
-        &policy,
-        &w.at("data"),
-        &others,
-        |_| Ok(FolderSupport::Ok),
-        &groups,
-    )
-    .unwrap();
-    // A DACL that can't be read counts as open; a missing folder has nothing to close.
-    assert_eq!(admitted.closed(), [m2, unread]);
-    assert_eq!(groups.asked.borrow().len(), 4);
+/// The world's matter with a registered matter and two plain folders beside it, listed for
+/// real, and the canonical paths of the plain ones and the registered one.
+fn with_siblings(w: &World) -> (Vec<PathBuf>, PathBuf) {
+    for rel in ["Drafts", "Precedents", "registered"] {
+        w.dir.dir(rel);
+    }
+    let plain = vec![w.canonical("Drafts"), w.canonical("Precedents")];
+    (plain, w.canonical("registered"))
 }
 
 #[test]
-fn another_matter_that_cant_be_closed_refuses_the_launch() {
-    let w = World::new("admit-others-refused");
+fn folders_beside_the_matter_are_siblings_but_not_the_matter_or_a_registered_one() {
+    // The real listing (`ReadDir`) of the matter's parent: the matter, the data folder, the home
+    // and the registered matter are left out, and each plain folder is admitted as a sibling.
+    let w = World::new("admit-siblings");
+    let (plain, registered) = with_siblings(&w);
     let policy = w.builder().build().unwrap();
-    let m2 = w.canonical("other/m2");
-    let groups = FakeGroups {
-        open: vec![m2.clone()],
-        ..FakeGroups::default()
-    };
-    let (mut ledger, before) = ledger_with_an_entry(&w);
-    for answer in [
-        FolderSupport::CantChangePermissions,
-        FolderSupport::NoPermissions,
-    ] {
-        let check = |path: &Path| {
-            Ok(if path == m2 {
-                answer
-            } else {
-                FolderSupport::Ok
-            })
-        };
-        let error = prepare(
-            &policy,
-            &w.at("data"),
-            std::slice::from_ref(&m2),
-            check,
-            &groups,
-            &mut ledger,
-        )
-        .unwrap_err();
-        let Error::FolderUnsupported { path_kind, support } = error else {
-            panic!("{error:?}");
-        };
-        assert_eq!(path_kind, PathKind::OtherMatter);
-        assert_eq!(support, FolderRefusal::Support(answer));
-        assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let reg = [registered.clone()];
+    let admitted = admit_with(&policy, &w.at("data"), &reg, check, &ReadDir).unwrap();
+    let siblings = admitted.siblings();
+    for path in &plain {
+        assert!(siblings.contains(path), "{path:?} in {siblings:?}");
+    }
+    let excluded = [
+        w.canonical("matter"),
+        w.canonical("data"),
+        w.canonical("home"),
+        registered,
+    ];
+    for path in &excluded {
+        assert!(!siblings.contains(path), "{path:?} in {siblings:?}");
     }
 }
 
 #[test]
-fn another_matter_on_a_share_or_gone_is_left_alone() {
-    let w = World::new("admit-others-network");
+fn a_sibling_that_cant_take_the_deny_refuses_the_launch() {
+    let w = World::new("admit-sibling-refused");
+    let (plain, registered) = with_siblings(&w);
     let policy = w.builder().build().unwrap();
-    let m2 = w.canonical("other/m2");
-    let groups = FakeGroups {
-        open: vec![m2.clone()],
-        ..FakeGroups::default()
+    let (mut ledger, before) = ledger_with_an_entry(&w);
+    let listing = FakeFolders {
+        listing: plain.clone(),
+        ..FakeFolders::default()
     };
-    let network = |path: &Path| {
-        Ok(if path == m2 {
-            FolderSupport::Network
-        } else {
-            FolderSupport::Ok
-        })
-    };
-    let admitted = admit_with(
+    let check = answering(plain[0].clone(), || {
+        Ok(FolderSupport::CantChangePermissions)
+    });
+    let refused = prepare(
         &policy,
         &w.at("data"),
-        std::slice::from_ref(&m2),
-        network,
-        &groups,
-    )
-    .unwrap();
-    assert_eq!(admitted.closed(), [] as [PathBuf; 0]);
-    let gone = |path: &Path| {
-        if path == m2 {
-            Err(io::Error::from(io::ErrorKind::NotFound))
-        } else {
-            Ok(FolderSupport::Ok)
-        }
+        &[registered],
+        check,
+        &listing,
+        &mut ledger,
+    );
+    let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
+        panic!("not refused: {refused:?}");
     };
-    let admitted = admit_with(
-        &policy,
-        &w.at("data"),
-        std::slice::from_ref(&m2),
-        gone,
-        &groups,
-    )
-    .unwrap();
-    assert_eq!(admitted.closed(), [] as [PathBuf; 0]);
+    let want = FolderRefusal::Support(FolderSupport::CantChangePermissions);
+    assert_eq!((path_kind, support), (PathKind::Sibling, want));
+    assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
 }
 
 #[test]
-fn other_matters_are_not_read_when_a_grant_folder_is_refused() {
-    let w = World::new("admit-order");
+fn a_listing_that_fails_refuses_and_a_share_or_missing_sibling_is_left_alone() {
+    let w = World::new("admit-sibling-listing");
+    let (plain, _) = with_siblings(&w);
     let policy = w.builder().build().unwrap();
-    let groups = FakeGroups::default();
-    let check = answering(w.canonical("matter"), || Ok(FolderSupport::Network));
-    let others = [w.canonical("other/m2")];
-    assert!(admit_with(&policy, &w.at("data"), &others, check, &groups).is_err());
-    assert!(groups.asked.borrow().is_empty());
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let failing = FakeFolders {
+        failing: true,
+        ..FakeFolders::default()
+    };
+    let refused = admit_with(&policy, &w.at("data"), &[], check, &failing);
+    let Err(Error::FolderUnsupported { path_kind, .. }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(path_kind, PathKind::Sibling);
+    let mut listing = plain.clone();
+    listing.push(w.at("gone"));
+    let listed = FakeFolders {
+        listing,
+        ..FakeFolders::default()
+    };
+    let share = answering(plain[0].clone(), || Ok(FolderSupport::Network));
+    let admitted = admit_with(&policy, &w.at("data"), &[], share, &listed).unwrap();
+    assert_eq!(admitted.siblings(), &plain[1..]);
+}
+
+#[test]
+fn a_sibling_holding_a_registered_matter_or_a_policy_path_is_left_alone() {
+    // A deny there would reach the registered matter's own pool user, or the jail's own reads.
+    let w = World::new("admit-sibling-holds");
+    w.dir.dir("Clients/registered");
+    w.dir.dir("Tools/bin");
+    let policy = w.builder().read(w.at("Tools/bin")).build().unwrap();
+    let listed = FakeFolders {
+        listing: vec![w.canonical("Clients"), w.canonical("Tools")],
+        ..FakeFolders::default()
+    };
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let reg = [w.canonical("Clients/registered")];
+    let admitted = admit_with(&policy, &w.at("data"), &reg, check, &listed).unwrap();
+    assert_eq!(admitted.siblings(), [] as [PathBuf; 0]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_sibling_is_left_alone() {
+    let w = World::new("admit-sibling-link");
+    let target = w.dir.dir("elsewhere/target");
+    let link = w.dir.symlink("linked", &target);
+    let policy = w.builder().build().unwrap();
+    let listed = FakeFolders {
+        listing: vec![link],
+        ..FakeFolders::default()
+    };
+    let check = |_: &Path| Ok(FolderSupport::Ok);
+    let admitted = admit_with(&policy, &w.at("data"), &[], check, &listed).unwrap();
+    assert_eq!(admitted.siblings(), [] as [PathBuf; 0]);
 }
 
 #[test]
 fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
-    // Matter `m` and another matter `m\B` inside it, then the other way round. No group can
-    // reach either (the DACL reader says no), and the folder checks all say Ok.
+    // Matter `m` and another matter `m\B` inside it, then the other way round. The folder
+    // checks all say Ok.
     let w = World::new("admit-nested");
     w.dir.dir("matter/B");
     let policy = w.builder().build().unwrap();
     let (mut ledger, before) = ledger_with_an_entry(&w);
     let inner = w.canonical("matter/B");
-    let groups = FakeGroups::default();
+    let groups = FakeFolders::default();
     let check = |_: &Path| Ok(FolderSupport::Ok);
     let refused = prepare(
         &policy,
@@ -330,7 +333,7 @@ fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
     );
     assert!(
         groups.asked.borrow().is_empty(),
-        "refused before the DACL is read"
+        "refused before the siblings are listed"
     );
     assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
 
@@ -355,7 +358,7 @@ fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
         checked += 1;
         Ok(FolderSupport::Ok)
     };
-    let groups = FakeGroups::default();
+    let groups = FakeFolders::default();
     let refused = prepare(
         policy,
         data_dir,
@@ -435,7 +438,7 @@ fn a_matter_beside_the_data_folder_is_admitted() {
         &w.at("data"),
         &[],
         |_| Ok(FolderSupport::Ok),
-        &FakeGroups::default(),
+        &FakeFolders::default(),
     );
     assert!(admitted.is_ok());
     // A data folder whose name only starts like the matter's isn't inside it.
@@ -445,7 +448,7 @@ fn a_matter_beside_the_data_folder_is_admitted() {
         &w.at("matter-data"),
         &[],
         |_| Ok(FolderSupport::Ok),
-        &FakeGroups::default(),
+        &FakeFolders::default(),
     );
     assert!(admitted.is_ok());
 }

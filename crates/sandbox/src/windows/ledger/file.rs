@@ -8,21 +8,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{Entry, LEDGER_VERSION};
+use crate::windows::acl_plan::LOW_LABEL_SID;
 use crate::windows::sids::{Reserved, Sid};
 
 /// Which SIDs a ledger entry may name to be acted on.
 #[derive(Debug, Clone)]
 pub(super) struct Trust {
-    pub(super) user: Sid,
+    pub(super) trusted: Vec<Sid>,
     pub(super) reserved: Reserved,
 }
 
 impl Trust {
-    /// Whether `entry` may be acted on: its SID is the sandbox user's, or a matter-form SID the
-    /// reserved accounts and domains admit; and its path is absolute.
+    /// Whether `entry` may be acted on: its path is absolute, and it is the Low label naming
+    /// the Low level, or an access entry naming one of the trusted SIDs (the pool users and their
+    /// group) or a matter-form SID the reserved accounts and domains admit.
     pub(super) fn admits(&self, entry: &Entry) -> bool {
-        let sid_ok = entry.sid == self.user
-            || (entry.sid.is_matter_form() && self.reserved.admits(&entry.sid));
+        let sid_ok = if entry.rights.is_label() {
+            entry.sid.as_str() == LOW_LABEL_SID
+        } else {
+            self.trusted.contains(&entry.sid)
+                || (entry.sid.is_matter_form() && self.reserved.admits(&entry.sid))
+        };
         sid_ok && entry.path.is_absolute()
     }
 }
