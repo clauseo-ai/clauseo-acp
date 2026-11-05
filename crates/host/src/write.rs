@@ -151,6 +151,13 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
 
 /// Syncs the folder `path`, so a rename into it survives a power cut (Unix: `fsync` of the
 /// folder). On Windows a folder cannot be opened this way, and NTFS journals the rename itself.
+#[cfg_attr(
+    windows,
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "one signature on every OS; only Unix can fail, Windows has nothing to sync"
+    )
+)]
 pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     return std::fs::File::open(path)?.sync_all();

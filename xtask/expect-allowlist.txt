@@ -238,6 +238,8 @@ crates/matters/src/place/windows.rs - unsafe_code
 # clauseo-host: the one clock read, the one place that creates folders, and the unit tests' folders.
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
+# R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.
+crates/host/src/write.rs sync_dir clippy::unnecessary_wraps
 crates/host/tests/host/write.rs - clippy::disallowed_methods
 crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
