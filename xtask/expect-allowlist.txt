@@ -144,6 +144,8 @@ crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
+# The set-aside's folders opened and items renamed by handle (src/windows/set_aside/ntfs.rs).
+crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
 # play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code

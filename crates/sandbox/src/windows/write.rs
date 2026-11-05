@@ -36,13 +36,11 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Moves `from` (a name in the matter, not followed if a link) to `to`, making `to`'s parents
-/// first: [`set_aside_with`](super::set_aside_with)'s one change. Refuses (`AlreadyExists`)
-/// when something is at `to`, since a rename over an empty folder would succeed on Unix.
-pub(crate) fn move_aside(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Renames `from` (not followed if a link) to `to`, refusing (`AlreadyExists`) when something
+/// is at `to`, since a rename over a file (or, on Unix, an empty folder) would succeed. For the
+/// set-aside's tests: the agent's renames, and the moves of their stand-in for NTFS.
+#[cfg(test)]
+pub(crate) fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(to) {
         Ok(_) => return Err(io::Error::from(io::ErrorKind::AlreadyExists)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}

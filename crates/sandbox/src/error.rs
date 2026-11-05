@@ -64,6 +64,11 @@ pub enum Error {
         /// lawyer (a protected child, a broad allow, one the lawyer can't open). Never logged.
         at: Option<std::path::PathBuf>,
     },
+    /// Windows tier B couldn't set aside a protected name that changed in a session, or couldn't
+    /// read or write the record it checks against (`windows::set_aside`). The launch is refused,
+    /// and the record stays open, so the next launch checks again. Names no path.
+    #[error("the sandbox couldn't set aside a changed protected name: {0}")]
+    SetAside(crate::windows::SetAsideFailure),
 }
 
 impl Error {
@@ -78,7 +83,8 @@ impl Error {
             | Error::ProxyStart(_)
             | Error::FolderUnsupported { .. }
             | Error::NeighbourUnfenceable { .. }
-            | Error::AclApply { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::AclApply { .. }
+            | Error::SetAside(_) => ErrorCode::AgentLaunchFailed,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }
