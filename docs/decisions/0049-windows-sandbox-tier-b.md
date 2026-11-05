@@ -86,6 +86,17 @@ The plan's eight decisions (orchestrator, 2026-11-05):
 - **D8.** On a matter whose root DACL grants a restricting group read (`Users`, per PR0), every
   other matter's SID gets a ledgered deny-read ACE.
 
+- **D11 (approved; private plan #397).** `Everyone` stays among the token's restricting SIDs.
+
+### Accepted risk: `Everyone` in the token
+
+Fix 3 (dropping `Everyone`) failed: bcrypt needs write access to KsecDD, and nsiproxy's IOCTL
+`0x120007` admits only `Everyone`, `SYSTEM` or `Administrators`, so name lookups fail. The
+mitigation: PR5 sets an explicit DACL on every pipe the runner makes, with a VM test that another
+matter's agent gets error 5. The residual risk: a pipe the agent makes with no security set gets
+NPFS's default descriptor (`Everyone` read), so another matter's agent can read it. A later tier
+may drop `Everyone` behind a proxy that runs as the desktop user.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
