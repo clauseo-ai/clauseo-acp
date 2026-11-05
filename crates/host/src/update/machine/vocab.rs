@@ -55,7 +55,9 @@ pub(crate) enum Input {
     CancelScheduled,
     /// `SetUpdateMode { mode }`.
     ModeSet(UpdateMode),
-    /// The settings changed `update.mode` in force or its lock (a policy reload).
+    /// The settings changed `update.mode` in force or its lock: a `SetUpdateMode` write (the
+    /// actor checks it with `ModeSet` first, then hands over what the settings hold after it),
+    /// or a policy reload.
     PolicyChanged(ModeInForce),
     /// Whether any thread has a running turn, sent each time that flips.
     TurnsRunning(bool),

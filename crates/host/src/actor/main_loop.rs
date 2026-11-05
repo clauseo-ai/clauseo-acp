@@ -1,13 +1,13 @@
 //! The host thread's loop: requests from handles and internal inputs merged into one stream,
-//! taken one at a time until shutdown or abort, each followed by the triage tick and the app
-//! lists' flush. Moved out of `actor.rs` as it was; no behaviour of its own.
+//! taken one at a time until shutdown or abort, each followed by the updater's tick, the triage
+//! tick and the app lists' flush. Moved out of `actor.rs` as it was; no behaviour of its own.
 
 use std::pin::pin;
 
 use futures::stream::{self, StreamExt};
 
 use super::input::{Input, Request};
-use super::{Actor, Exit, app_lists, shutdown, triage};
+use super::{Actor, Exit, app_lists, shutdown, triage, update};
 
 /// One item of the merged input stream.
 enum Next {
@@ -34,6 +34,7 @@ pub(super) async fn main_loop(
         match inputs.next().await {
             Some(Next::Request(request)) => {
                 actor.on_request(request);
+                update::tick(actor);
                 triage::tick(actor);
                 app_lists::flush(actor);
             }
@@ -43,6 +44,7 @@ pub(super) async fn main_loop(
             Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
             Some(Next::Input(input)) => {
                 actor.on_input(input);
+                update::tick(actor);
                 triage::tick(actor);
                 app_lists::flush(actor);
             }

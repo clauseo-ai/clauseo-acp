@@ -157,7 +157,8 @@ impl Machine {
         }
     }
 
-    /// When the armed timer fires, if one is armed.
+    /// When the armed timer fires, if one is armed. The actor keeps its own (`ArmTimer`).
+    #[cfg(test)]
     pub(crate) fn timer(&self) -> Option<Timestamp> {
         self.timer
     }

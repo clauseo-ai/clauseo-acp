@@ -131,7 +131,7 @@ pub(super) fn query(
             let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
-        HostQuery::GetUpdate => super::update::answer(reply),
+        HostQuery::GetUpdate => super::update::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {

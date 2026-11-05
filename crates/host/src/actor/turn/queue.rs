@@ -89,6 +89,12 @@ impl ThreadQueue {
     }
 }
 
+/// Whether `queue` has turns that start by themselves once the current turn ends: it is not
+/// held for the lawyer.
+pub(super) fn moves_by_itself(queue: &ThreadQueue) -> bool {
+    !queue.is_empty() && !queue.held
+}
+
 /// The queued turns of `thread`, in order.
 #[cfg(test)]
 pub(super) fn queued_turns(actor: &Actor, thread: ThreadId) -> Vec<TurnId> {
@@ -199,6 +205,11 @@ fn route(
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     refuse_stuck(actor, thread)?;
+    // An install under `now` holds new sends: whatever its delivery, a prompt waits queued,
+    // stored and never started, until the install goes ahead or is taken back.
+    if super::super::update::gated(actor) {
+        return append(actor, ctx, thread, blocks);
+    }
     if delivery == DeliveryRequest::Steer
         && let Some(target) = steer::target(actor, thread)
     {
@@ -248,7 +259,8 @@ fn refuse_stuck(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
 }
 
 /// A prompt joins the end of the queue: one commit of `UserMessage { Queue }`, `TurnQueued`
-/// behind the turn ahead, and the receipt. Refused with `thread.queue_full` at the limit.
+/// behind the turn ahead (behind its own thread alone when none is, as a held send on an idle
+/// thread), and the receipt. Refused with `thread.queue_full` at the limit.
 fn append(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -256,7 +268,7 @@ fn append(
     blocks: Vec<ContentBlock>,
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
-    let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
+    let ahead = turn_ahead(actor, thread);
     let queued = |turn, message, content| Queued {
         turn,
         message,
@@ -267,7 +279,7 @@ fn append(
         actor,
         ctx,
         thread,
-        Some(ahead),
+        ahead,
         blocks,
         DeliveryRequest::Queue,
         |turn, message, content, queue| {
@@ -319,9 +331,9 @@ fn jump(
 }
 
 /// One commit of a new turn's `UserMessage`, its `TurnQueued` behind `ahead` of its own
-/// thread (behind the thread itself with none), `SteerResolved { SentNow }` for a steer, and the
-/// receipt (`PromptAccepted`). `place` puts the turn in the queue before the commit is sent
-/// (taken out again if it is refused).
+/// thread (behind the thread itself, its thread alone, with none), `SteerResolved { SentNow }`
+/// for a steer, and the receipt (`PromptAccepted`). `place` puts the turn in the queue before
+/// the commit is sent (taken out again if it is refused).
 fn log_queued(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -447,9 +459,13 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
 }
 
 /// Starts the head when nothing runs, no end or steer is outstanding, and the queue is not
-/// held (a head sent now starts even then), unless `stop_agents` holds the agent.
+/// held (a head sent now starts even then), unless `stop_agents` holds the agent. Nothing
+/// starts while an install holds new sends.
 pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
-    if host_stopping(actor) || super::sign_in::holds(actor, thread) {
+    if host_stopping(actor)
+        || super::sign_in::holds(actor, thread)
+        || super::super::update::gated(actor)
+    {
         return;
     }
     let Some(state) = state(actor, thread) else {

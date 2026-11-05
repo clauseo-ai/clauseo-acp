@@ -68,6 +68,11 @@ pub(super) async fn open(
         super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
     });
     let browser_install = super::browser_install::BrowserInstall::for_wiring(&parts.wiring);
+    let update = super::update::start(
+        parts.update,
+        parts.effective.locations().clone(),
+        post.clone(),
+    );
     let mut actor = Actor {
         spawner,
         post,
@@ -86,6 +91,7 @@ pub(super) async fn open(
         pre_write_guard: parts.pre_write_guard,
         wiring: parts.wiring,
         counts: parts.counts,
+        update,
         count_on_commit: BTreeMap::new(),
         browser_install,
         header_tools: super::header_tools::HeaderTools::default(),

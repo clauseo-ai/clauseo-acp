@@ -121,8 +121,14 @@
 //!   `download`; never `install`, which desktop runs after the host has stopped), the values
 //!   that cross it ([`Offer`], [`Downloaded`], [`Opaque`], [`ProgressSink`], [`UpdaterError`]),
 //!   `update.json`'s [`UpdateMarker`], and [`NoUpdater`], managed by a package so nothing is
-//!   ever checked. The pure state machine that decides each call is `update/machine.rs`; the
-//!   actor runs it from R23 PR 4.
+//!   ever checked. [`read_update_marker`] reads `update.json` as the last run left it.
+//! - The updater in the actor (`actor/update.rs`): `HostConfig::with_updater`, its jitter seed
+//!   and the app's version start the pure machine (`update/machine.rs`) once the host serves.
+//!   Its check and download run on the pool, one timer on the host clock, `update.json` on the
+//!   `clauseo-update` thread, never the actor's. `InstallUpdate { now }` holds new sends
+//!   queued and stops every running turn as Stop does; `after_turn` waits until no turn runs.
+//!   Then the host answers, shuts down as a quit does, and ends with
+//!   [`HostExit::Install`] ([`HostHandle::exit`]) for desktop to install.
 //! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
 //!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
@@ -251,7 +257,8 @@ pub use config::{EgressProxy, HostConfig, NoProfile, PackRequest, ProfileHook, S
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{
-    AppSubscription, EventSubscription, Host, HostHandle, HostJoin, LocatedFile, Subscription,
+    AppSubscription, EventSubscription, Host, HostExit, HostHandle, HostJoin, LocatedFile,
+    Subscription,
 };
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
@@ -260,5 +267,5 @@ pub use ids::{IdSource, RandomV7};
 pub use search::SearchHold;
 pub use update::{
     CachedDownload, Downloaded, InstallKind, MarkerState, NoUpdater, Offer, Opaque, Progress,
-    ProgressSink, UpdateMarker, Updater, UpdaterError,
+    ProgressSink, UpdateMarker, Updater, UpdaterError, read_update_marker,
 };
