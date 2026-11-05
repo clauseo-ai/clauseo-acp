@@ -22,5 +22,53 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-04": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-05": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-06": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-07": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-08": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-09": {
+    "en": "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

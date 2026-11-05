@@ -26,6 +26,45 @@ function cameBack(files: readonly string[], more: number, w: NoticeWords): strin
       });
 }
 
+/** The line for a skill pack the launch left out, by its reason: the pack's id in straight quotes, as the app quotes
+ * its other names (the id goes in as it is, as a thread's title does). A reason this version does not know gives null. */
+function packSkipped(pack: string, reason: string, w: NoticeWords): string | null {
+  switch (reason) {
+    case "not_turned_on":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.",
+        { pack },
+      );
+    case "not_admitted":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.",
+        { pack },
+      );
+    case "changed":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.",
+        { pack },
+      );
+    case "missing":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.",
+        { pack },
+      );
+    case "invalid":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.",
+        { pack },
+      );
+    case "too_many":
+      return w.th(
+        "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.",
+        { pack },
+      );
+    default:
+      return null;
+  }
+}
+
 /** The line for a notice's kind in the page's language, its slots filled; null for no kind, or a kind this version
  * does not know, so the notice's own text shows. */
 export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string | null {
@@ -41,6 +80,12 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
     typeof kind === "object" && kind !== null && "files_came_back" in kind
       ? kind.files_came_back
       : undefined;
-  if (came === undefined || came.files.length + came.more === 0) return null;
-  return cameBack(came.files, came.more, w);
+  if (came !== undefined)
+    return came.files.length + came.more === 0 ? null : cameBack(came.files, came.more, w);
+  const skipped =
+    typeof kind === "object" && kind !== null && "skill_pack_not_loaded" in kind
+      ? kind.skill_pack_not_loaded
+      : undefined;
+  if (skipped === undefined || typeof skipped.pack !== "string") return null;
+  return packSkipped(skipped.pack, skipped.reason, w);
 }
