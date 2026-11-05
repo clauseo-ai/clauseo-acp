@@ -1,4 +1,5 @@
-//! MCP servers and `_meta` on the wire, for `session/new` and `session/load`.
+//! MCP servers, `additionalDirectories` and `_meta` on the wire, for `session/new` and
+//! `session/load`.
 
 use super::*;
 
@@ -31,13 +32,21 @@ fn expected_server() -> Value {
     })
 }
 
+fn directories() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/data/run/s1"),
+        PathBuf::from("/data/agent-state/m1/notes"),
+    ]
+}
+
 #[test]
-fn a_stdio_server_and_meta_go_on_new_and_load_with_no_type_field() {
+fn a_stdio_server_directories_and_meta_go_on_new_and_load_with_no_type_field() {
     let (client, _events, driver, mut agent) = pipes();
     let calls = async move {
         client.initialize().await.unwrap();
         let new = client.new_session(NewSession {
             cwd: cwd(),
+            additional_directories: directories(),
             mcp_servers: vec![server()],
             meta: Some(meta()),
         });
@@ -45,6 +54,7 @@ fn a_stdio_server_and_meta_go_on_new_and_load_with_no_type_field() {
         let load = client.load_session(LoadSession {
             session: AgentSessionId::new("s-0").unwrap(),
             cwd: cwd(),
+            additional_directories: directories(),
             mcp_servers: vec![server()],
             meta: Some(meta()),
         });
@@ -57,6 +67,8 @@ fn a_stdio_server_and_meta_go_on_new_and_load_with_no_type_field() {
         assert_eq!(new["params"]["mcpServers"], json!([expected_server()]));
         assert_eq!(new["params"]["mcpServers"][0].get("type"), None);
         assert_eq!(new["params"]["_meta"], Value::Object(meta()));
+        let sent = json!(["/data/run/s1", "/data/agent-state/m1/notes"]);
+        assert_eq!(new["params"]["additionalDirectories"], sent);
         agent.respond(&new, &json!({"sessionId": "s-1"}));
         let load = agent.read().await;
         assert_eq!(load["method"], "session/load");
@@ -64,6 +76,7 @@ fn a_stdio_server_and_meta_go_on_new_and_load_with_no_type_field() {
         assert_eq!(load["params"]["mcpServers"], json!([expected_server()]));
         assert_eq!(load["params"]["mcpServers"][0].get("type"), None);
         assert_eq!(load["params"]["_meta"], Value::Object(meta()));
+        assert_eq!(load["params"]["additionalDirectories"], sent);
         agent.respond(&load, &json!({}));
         assert!(agent.written.next().await.is_none());
     };
@@ -73,13 +86,14 @@ fn a_stdio_server_and_meta_go_on_new_and_load_with_no_type_field() {
 }
 
 #[test]
-fn load_without_meta_sends_no_meta() {
+fn load_without_meta_or_directories_sends_neither() {
     let (client, _events, driver, mut agent) = pipes();
     let calls = async move {
         client.initialize().await.unwrap();
         let load = client.load_session(LoadSession {
             session: AgentSessionId::new("s-0").unwrap(),
             cwd: cwd(),
+            additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
             meta: None,
         });
@@ -90,6 +104,7 @@ fn load_without_meta_sends_no_meta() {
         let load = agent.read().await;
         assert_eq!(load["params"]["mcpServers"], json!([]));
         assert_eq!(load["params"].get("_meta"), None);
+        assert_eq!(load["params"].get("additionalDirectories"), None);
         agent.respond(&load, &json!({}));
         assert!(agent.written.next().await.is_none());
     };

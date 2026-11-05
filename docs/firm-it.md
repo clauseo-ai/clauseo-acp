@@ -336,5 +336,12 @@ Coming:
 
 ## Later
 
+Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated
+sandbox, which can't enforce a read deny, so a Codex shell on Windows can read Clauseo's data
+folder, other matters' notes and the search index included. This lasts until Codex runs in the
+elevated sandbox (S15) ([decision 0030](decisions/0030-launch-profile.md), "Codex's data-folder
+deny").
+
+
 ADMX and ADML templates, a firm bundle zip, an MSI and a `.pkg` for Jamf come when a firm asks. Claude
 Code's and Codex's own managed settings are the vendors' (their business plans), not Clauseo's.

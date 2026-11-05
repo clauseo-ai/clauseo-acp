@@ -525,6 +525,62 @@ change from the settings window as `ui` does.
   the workspace build turns on serde_json's `preserve_order`.
 - **`AGENTS.md` has no map line** for `crates/profile`: the file is at its enforced limit.
 
+### Codex's data-folder deny
+
+Every Codex session's `CODEX_CONFIG` carries a permission profile, `clauseo`. It is chosen with
+`default_permissions` and extends the built-in `:workspace`. Its `filesystem` table denies what
+of the data folder only Clauseo uses (`agent::codex_fence::rules`), scoped under the data folder
+as a literal path. That covers the logs, settings, updates, the store's and the search index's
+databases (`search.sqlite*` holds every matter's prompts and answers), skill pack sources, Claude's
+whole folder, and in Codex's home its login, `sessions/`, `history.jsonl` and its databases
+(`state_5.sqlite*` and its siblings). It denies `run`, `agent-state` and `run.old-*` whole, so
+a session or matter made after the launch is denied too. The paths come from `Locations` where it
+names them, and a guard test checks each `Locations` path is denied or allowed for a stated reason.
+
+The session's own run folder and the matter's notes are reopened two ways, both deeper than the
+`run` and `agent-state` denies. The profile names them `write`: once a profile is chosen, Codex
+no longer takes `CODEX_CONFIG`'s `sandbox_workspace_write.writable_roots` (stage B, live, macOS).
+And the host sends them as ACP `additionalDirectories` on `session/new`, `session/load` and
+`session/resume` (`profile_loads::codex_directories`). codex-acp 2.2.2 makes each turn's
+`workspaceWrite` roots from those (`dist/index.js:35598-35612, 35878-35885`). It also marks them
+trusted projects (`:35452`), which is inert: Codex looks trust up only for the cwd, its project
+root and its repo root (`codex-rs/config/src/config_toml.rs:907-921`,
+`codex-rs/config/src/loader/mod.rs:1048-1090`). And it adds `<root>/.agents/skills` of each as a
+skill root (`:35506-35514`); Clauseo writes no `.agents` in either folder. The run folder is
+writable whole, so the agent can write this session's pack plugin (`<run>/skill-packs`), which
+0040 accepts. It relies on these codex `rust-v0.162.1` files and lines:
+
+- the profile keys: `codex-rs/config/src/permissions_toml.rs:113-118, 224-244`; a scoped base read
+  literally: `codex-rs/core/src/config/permissions.rs:572-623, 674-705`;
+- a session-flags `default_permissions` choosing profiles: `codex-rs/core/src/config/mod.rs:2594-2615`;
+- codex-acp's per-turn policy passed through (`codex-rs/app-server/src/request_processors/turn_processor.rs:846, 893, 918`)
+  and rebuilt keeping the profile's deny entries: `codex-rs/core/src/session/session.rs:491-507`,
+  `codex-rs/protocol/src/permissions.rs:709-731`;
+- the deepest rule winning, deny winning a tie: `codex-rs/protocol/src/permissions.rs:1043-1048`;
+- Seatbelt and bubblewrap enforcing it on every sandboxed command:
+  `codex-rs/sandboxing/src/seatbelt.rs:899-900, 1045-1046`, `codex-rs/linux-sandbox/src/bwrap.rs:490-511, 1353-1362`;
+  bubblewrap binding a writable root over a masked denied folder (`bwrap.rs:615-659, 1370-1398`);
+  Seatbelt reading every writable root (`permissions.rs:1466-1476`) with a deny as an excluded
+  subpath (`seatbelt.rs:966-981, 1007-1020`).
+
+Why not deny the whole data folder. Bubblewrap reopens only a writable root under a denied folder
+(`bwrap.rs:608-660`); a read-only root is bound before the masks and stays hidden
+(`bwrap.rs:536-584`). The shell must read, but never write, Codex's install
+(`codex-rs/arg0/src/lib.rs:329`: `apply_patch` re-runs the Codex binary in the sandbox), Codex's
+home, and the built-in skills Codex's index names under `profile/claude-plugin/skills`. So
+`profile` and `agents/codex-acp` stay readable: `profile` is the same for every matter. Codex
+itself keeps cross-matter records: one Codex home per agent holds every matter's transcripts and
+databases. The deny binds only sandboxed processes, not Codex's own process
+(`codex-rs/state/src/sqlite.rs:34-39, 61-63`). A home per matter is a later design question.
+
+Gaps: a data folder whose path holds a glob character loses the `run.old-*` deny, since a scoped
+glob reads its base as glob text. The other rules are literal. A data folder that isn't UTF-8
+already fails the launch (`Folders::of`). Windows gets no profile: Clauseo runs Codex there in the
+unelevated sandbox, which refuses to run any sandboxed command when a profile denies reads
+(`codex-rs/sandboxing/src/windows.rs:111-131`), until the elevated sandbox (S15). For what the
+fence is and isn't (tier C has no wall between matters), see the data-folder fence section of
+this record and firm-it §8.
+
 ## Consequences
 
 - R22 adds its text with `Instructions::with_part` and its skills with `SkillSource::builtin`

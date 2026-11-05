@@ -162,7 +162,9 @@ fn new_session(
         .into_iter()
         .map(mcp_server)
         .collect::<Vec<_>>();
-    let mut sent = acp::NewSessionRequest::new(cwd.clone()).mcp_servers(servers);
+    let mut sent = acp::NewSessionRequest::new(cwd.clone())
+        .additional_directories(request.additional_directories)
+        .mcp_servers(servers);
     sent.meta = request.meta;
     let state = Arc::clone(shared);
     send(cx, shared, sent, reply, move |response| async move {
@@ -268,6 +270,7 @@ fn load_session(
     let entry = SessionState::new(request.cwd.clone(), Origin::Replay);
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
+        .additional_directories(request.additional_directories)
         .mcp_servers(
             request
                 .mcp_servers
@@ -308,6 +311,7 @@ fn resume_session(
     let entry = SessionState::new(request.cwd.clone(), Origin::Idle);
     shared.state().sessions.insert(key.clone(), entry);
     let mut sent = acp::ResumeSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
+        .additional_directories(request.additional_directories)
         .mcp_servers(
             request
                 .mcp_servers

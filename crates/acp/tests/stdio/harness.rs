@@ -35,6 +35,7 @@ impl Ctx {
     pub(crate) fn new_session(&self) -> NewSession {
         NewSession {
             cwd: self.cwd.clone(),
+            additional_directories: Vec::new(),
             mcp_servers: Vec::new(),
             meta: None,
         }

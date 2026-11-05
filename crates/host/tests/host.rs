@@ -57,6 +57,9 @@ mod web_sources;
 #[path = "host/codex.rs"]
 mod codex;
 #[cfg(test)]
+#[path = "host/codex_fence.rs"]
+mod codex_fence;
+#[cfg(test)]
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
 #[cfg(test)]

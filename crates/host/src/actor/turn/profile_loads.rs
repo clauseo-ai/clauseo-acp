@@ -3,7 +3,7 @@
 //! does the merging. Path joins and map work only: the folders were made on the launch-prep
 //! thread (`launch_checks.rs`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
 use clauseo_protocol::{AgentKind, ErrorCode, ThreadId, ToolAvailability};
@@ -52,21 +52,35 @@ pub(super) fn launch_keys(
             .profile
             .codex_config(&agent_id, written.as_ref(), packs);
         codex.keys = profile::codex_keys(keys, web_search, folders)?;
+        // The data-folder fence (`agent::codex_fence`), in every Codex session.
+        let session = crate::agent::codex_fence::Session {
+            run_root: &prepared.run.root,
+            notes: &prepared.run.notes,
+            codex_home: &codex.home,
+        };
+        let fence =
+            crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
+        codex.keys.extend(fence);
     }
     Ok(())
 }
 
-/// The `_meta` and MCP servers for `thread`'s `session/new`, `session/load` or
+/// What [`session_loads`] gives a session call: `_meta`, the MCP servers and ACP's
+/// `additionalDirectories`.
+pub(super) type SessionLoads = (Map<String, Value>, Vec<McpServer>, Vec<PathBuf>);
+
+/// The `_meta`, MCP servers and extra roots for `thread`'s `session/new`, `session/load` or
 /// `session/resume`, whose matter folder is `matter`: the profile hook's `_meta` with the
 /// host's switches and keys over it and its tokens filled (the hook gets this launch's own skill
 /// packs token, so Claude's second plugin is this launch's); the servers the lawyer turned on, then
-/// the hook's (none when the firm's `managed-mcp.json` is present). Holds the session's tool
-/// state for the thread's header until the session call answers ([`show_tools`]).
+/// the hook's (none when the firm's `managed-mcp.json` is present); and for Codex, its run folder
+/// and the matter's notes ([`codex_directories`]). Holds the session's tool state for the
+/// thread's header until the session call answers ([`show_tools`]).
 pub(super) fn session_loads(
     actor: &mut Actor,
     thread: ThreadId,
     matter: &Path,
-) -> Result<(Map<String, Value>, Vec<McpServer>), Error> {
+) -> Result<SessionLoads, Error> {
     let agent_id = actor.check_thread(thread)?.row.agent.clone();
     let kind = AgentKind::of(&agent_id);
     let run: RunFolders = actor
@@ -161,7 +175,22 @@ pub(super) fn session_loads(
         .chain(browser_state)
         .collect();
     super::super::header_tools::hold(actor, thread, tools);
-    Ok((meta, servers))
+    let directories = if kind == Some(AgentKind::Codex) {
+        codex_directories(&run)
+    } else {
+        Vec::new()
+    };
+    Ok((meta, servers, directories))
+}
+
+/// Codex's ACP `additionalDirectories`: the session's run folder (its work folder and its pack
+/// plugin) and the matter's notes. codex-acp makes each turn's `workspaceWrite` roots from them,
+/// beside the matter folder and tmp (codex-acp 2.2.2 `dist/index.js:35598-35612, 35878-35885`).
+/// With the data-folder fence's profile selected, Codex reads no `writable_roots` from
+/// `CODEX_CONFIG`, so these and the profile's own `write` entries (`agent::codex_fence`) are what
+/// reopen both folders under its deny of `<data>/run` and `<data>/agent-state`.
+pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
+    vec![run.root.clone(), run.notes.clone()]
 }
 
 /// The session call answered: the tool state [`session_loads`] held shows in the header.
