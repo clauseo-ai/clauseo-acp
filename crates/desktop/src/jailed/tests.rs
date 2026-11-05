@@ -33,6 +33,7 @@ impl SandboxProbe for Probe {
 #[derive(Default)]
 struct Counted {
     guards: Vec<Vec<OsString>>,
+    deletes: Vec<Vec<OsString>>,
     apps: u32,
 }
 
@@ -40,6 +41,11 @@ impl Stages for Counted {
     fn guard(&mut self, args: &[OsString]) -> i32 {
         self.guards.push(args.to_vec());
         2
+    }
+
+    fn delete_app_data(&mut self, args: &[OsString]) -> i32 {
+        self.deletes.push(args.to_vec());
+        3
     }
 
     fn app(&mut self) -> tauri::Result<()> {
@@ -124,6 +130,58 @@ fn the_guard_flag_anywhere_but_first_is_refused_when_sandboxed() {
     );
     assert_eq!(stages.guards, NO_GUARD);
     assert_eq!(stages.apps, 0);
+}
+
+#[test]
+fn the_uninstallers_deletion_runs_with_its_arguments_outside_the_sandbox_only() {
+    let probe = Probe::new(|| Ok(false));
+    let (launched, stderr, stages) = start(&["--delete-app-data", "--keep-sandbox"], &probe);
+    assert!(matches!(launched, Launched::Exit(3)), "{launched:?}");
+    assert_eq!(stderr, "");
+    assert_eq!(stages.deletes, [vec![OsString::from("--keep-sandbox")]]);
+    assert_eq!((stages.apps, stages.guards.len()), (0, 0));
+    assert_eq!(probe.asked.get(), 1);
+
+    // Inside the sandbox: refused as every start is, nothing deleted.
+    let probe = Probe::new(|| Ok(true));
+    let (launched, stderr, stages) = start(&["--delete-app-data"], &probe);
+    assert!(
+        matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
+        "{launched:?}"
+    );
+    assert_eq!(stderr, format!("{REFUSAL}\n"));
+    assert_eq!((stages.deletes.len(), stages.apps), (0, 0));
+}
+
+#[test]
+fn a_failed_check_refuses_the_uninstallers_deletion() {
+    // Unlike a start, which goes ahead: a deletion that cannot tell fails closed.
+    let probe = Probe::new(|| Err(io::Error::other("access denied")));
+    let (launched, stderr, stages) = start(&["--delete-app-data"], &probe);
+    assert!(
+        matches!(launched, Launched::Exit(crate::delete_app_data::FAILED)),
+        "{launched:?}"
+    );
+    assert_eq!(
+        stderr,
+        "Clauseo could not tell whether it runs in the agent sandbox (access denied); nothing \
+         deleted.\n"
+    );
+    assert_eq!((stages.deletes.len(), stages.apps), (0, 0));
+}
+
+#[test]
+fn the_deletion_flag_anywhere_but_first_starts_the_app() {
+    for args in [
+        &["clauseo://open", "--delete-app-data"][..],
+        &["--delete-app-data=1"][..],
+        &["--Delete-App-Data"][..],
+    ] {
+        let probe = Probe::new(|| Ok(false));
+        let (launched, _, stages) = start(args, &probe);
+        assert!(matches!(launched, Launched::App(Ok(()))), "{launched:?}");
+        assert_eq!((stages.deletes.len(), stages.apps), (0, 1), "{args:?}");
+    }
 }
 
 /// The real calls run on each CI OS (on Windows and macOS this is the only run of the FFI). Only

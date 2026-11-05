@@ -81,6 +81,7 @@ mod bridge;
 mod commands;
 mod counts;
 mod csp;
+mod delete_app_data;
 mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
