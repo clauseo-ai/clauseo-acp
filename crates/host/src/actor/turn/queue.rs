@@ -6,14 +6,15 @@
 //! durable: always to a head sent now (send now, a queued prompt sent now, a requeued steer), else
 //! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
 //! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
-//! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold for the sign-in
-//! applies, `sign_in.rs`). While a steer request is out, it waits for the answer,
+//! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
+//! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer,
 //! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
 //! the view shows it through `clauseo_reducer::set_queue_held`. At start-up every queued turn
 //! comes back held, rebuilt from the log ([`restore`]).
 
 mod commands;
 mod held;
+mod hold;
 mod restore;
 mod sign_in;
 mod steer;
@@ -117,8 +118,6 @@ pub(crate) enum After {
     Appended(TurnId),
     /// A prompt sent now joined its head: cancel the current turn.
     Jumped(TurnId),
-    /// A prompt sent now on an idle thread joined its head while an install holds new sends.
-    HeldNow(TurnId),
     /// A queued prompt was edited; `old` is put back if the commit fails.
     Edited {
         turn: TurnId,
@@ -130,8 +129,8 @@ pub(crate) enum After {
     Requeued(TurnId),
     /// A queued turn's removal (`TurnEnded { Cancelled }`).
     Removed(TurnId),
-    /// A prompt queued held while a hold for the sign-in applies (`sign_in.rs`).
-    Held(TurnId),
+    /// A prompt queued held while a hold applies (`hold.rs`), counted as delivered so.
+    Held(TurnId, Delivery),
 }
 
 pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQueue> {
@@ -207,30 +206,18 @@ fn route(
 ) -> Result<(), Error> {
     steps::refuse_unsendable(actor, thread)?;
     refuse_stuck(actor, thread)?;
-    // An install under `now` holds new sends: a prompt waits queued, stored and never started,
-    // until the install goes ahead or is taken back. One sent now keeps its place at the head
-    // and starts first once the hold lifts, whatever the stop of the turn ahead (the install
-    // already cancels that turn).
-    if super::super::update::gated(actor) {
-        return match (delivery, turn_running(actor, thread)) {
-            (DeliveryRequest::Queue, _) => append(actor, ctx, thread, blocks),
-            (DeliveryRequest::SendNow | DeliveryRequest::Steer, Some(running)) => {
-                jump(actor, ctx, thread, running, blocks, delivery)
-            }
-            (DeliveryRequest::SendNow | DeliveryRequest::Steer, None) => {
-                held_now(actor, ctx, thread, blocks, delivery)
-            }
-        };
-    }
+    let holds = hold::holds(actor, thread);
+    // Under an install's hold a steer joins no turn: the install stops it.
     if delivery == DeliveryRequest::Steer
+        && !holds.update_now()
         && let Some(target) = steer::target(actor, thread)
     {
         return steer::steer(actor, ctx, thread, target, blocks);
     }
     let running = turn_running(actor, thread);
-    if running.is_none() && sign_in::applies(actor, thread) {
-        // Nothing may start: whatever its delivery, the prompt queues held.
-        return sign_in::hold_prompt(actor, ctx, thread, blocks);
+    if running.is_none() && !holds.is_empty() {
+        // Nothing may start: the prompt queues held, whatever holds it (`hold.rs`).
+        return hold::hold_prompt(actor, ctx, thread, blocks, delivery, holds);
     }
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
     match (delivery, running) {
@@ -342,44 +329,6 @@ fn jump(
     )
 }
 
-/// A prompt sent now on an idle thread while an install holds new sends: it joins the head,
-/// sent now, so it starts first once the hold lifts, ahead of a held queue, which then moves
-/// on after it, as it would have had the send started at once.
-fn held_now(
-    actor: &mut Actor,
-    ctx: CommandCtx,
-    thread: ThreadId,
-    blocks: Vec<ContentBlock>,
-    delivery: DeliveryRequest,
-) -> Result<(), Error> {
-    let full = queue(actor, thread).is_some_and(|queue| queue.turns.len() >= MAX_QUEUED_TURNS);
-    if full {
-        return Err(Error::refused(
-            ErrorCode::ThreadQueueFull,
-            format!("the thread already has {MAX_QUEUED_TURNS} queued messages"),
-        ));
-    }
-    log_queued(
-        actor,
-        ctx,
-        thread,
-        None,
-        blocks,
-        delivery,
-        |turn, message, content, queue| {
-            // As `route` for a send now on an idle thread: the held queue moves on after it.
-            queue.held = false;
-            queue.turns.push_front(Queued {
-                turn,
-                message,
-                content,
-                forced: true,
-            });
-            After::HeldNow(turn)
-        },
-    )
-}
-
 /// One commit of a new turn's `UserMessage`, its `TurnQueued` behind `ahead` of its own
 /// thread (behind the thread itself, its thread alone, with none), `SteerResolved { SentNow }`
 /// for a steer, and the receipt (`PromptAccepted`). `place` puts the turn in the queue before
@@ -468,23 +417,18 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             cancel::cancel_current(actor, thread);
             move_on(actor, thread);
         }
-        (After::HeldNow(_), true) => {
-            counting::question_sent(actor, thread, Delivery::Now);
-            move_on(actor, thread);
-        }
         (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
         (After::Steer(ask), true) => {
             counting::question_sent(actor, thread, Delivery::Steer);
             steer::send(actor, thread, *ask);
         }
         (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
-        (After::Held(_), true) => counting::question_sent(actor, thread, Delivery::Queued),
+        (After::Held(_, delivery), true) => counting::question_sent(actor, thread, delivery),
         (
             After::Appended(turn)
             | After::Jumped(turn)
-            | After::HeldNow(turn)
             | After::Requeued(turn)
-            | After::Held(turn),
+            | After::Held(turn, _),
             false,
         ) => {
             drop_turn(actor, thread, turn);
@@ -517,13 +461,10 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
 }
 
 /// Starts the head when nothing runs, no end or steer is outstanding, and the queue is not
-/// held (a head sent now starts even then), unless `stop_agents` holds the agent. Nothing
-/// starts while an install holds new sends.
+/// held (a head sent now starts even then), unless `stop_agents` holds the agent or an install
+/// holds new sends (`hold.rs`): each lift moves the queue on only once neither is left.
 pub(super) fn move_on(actor: &mut Actor, thread: ThreadId) {
-    if host_stopping(actor)
-        || super::sign_in::holds(actor, thread)
-        || super::super::update::gated(actor)
-    {
+    if host_stopping(actor) || hold::holds(actor, thread).stops_starts() {
         return;
     }
     let Some(state) = state(actor, thread) else {

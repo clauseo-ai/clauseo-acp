@@ -282,6 +282,9 @@ mod undo_preview;
 #[path = "host/update.rs"]
 mod update;
 #[cfg(test)]
+#[path = "host/update_holds.rs"]
+mod update_holds;
+#[cfg(test)]
 #[path = "host/update_install.rs"]
 mod update_install;
 #[cfg(test)]
