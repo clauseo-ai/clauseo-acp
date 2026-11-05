@@ -90,6 +90,8 @@ pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
 pub use apply::fence_registered;
 pub use apply::{Applied, Surroundings, apply, forget_matter, reconcile, repair_after_session};
 #[cfg(windows)]
+pub use clean_close::NtfsJournal;
+#[cfg(windows)]
 pub(crate) use detect::os_facts;
 pub use fence::{MatterFolders, Neighbours, RegisteredMatter, plan_fence};
 #[cfg(windows)]

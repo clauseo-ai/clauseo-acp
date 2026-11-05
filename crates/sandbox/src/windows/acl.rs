@@ -45,7 +45,7 @@ use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked
 use object::{Handle, Object, os_error};
 use walk::Mode;
 
-mod object;
+pub(in crate::windows) mod object;
 mod walk;
 
 /// What every read here asks for: owner, group, DACL and label, all under `READ_CONTROL`.
