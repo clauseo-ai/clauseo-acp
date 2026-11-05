@@ -108,6 +108,12 @@ pub enum Inherit {
 
 /// One permission entry to write. Made only inside this crate: by [`plan`], or read back from
 /// the ledger.
+///
+/// **For PR3, which writes them:** open every target with `FILE_FLAG_OPEN_REPARSE_POINT` and
+/// set the entry through that handle, refusing a reparse point that isn't the target itself, as
+/// defence in depth: the gate checked the names the policy keeps unresolved (the credential link,
+/// the Claude store's files) and the agents' folders, but a name can change between the gate and
+/// the write.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Grant {
     pub(crate) path: PathBuf,
@@ -297,9 +303,9 @@ pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<Ad
 
 /// Why `grant` may not be written, if it may not. `<data_dir>` is an allow list:
 ///
-/// - any path with a name that ends in `.` or a space, holds `:` (an NTFS stream, such as
-///   `home::$INDEX_ALLOCATION`) or looks like a short 8.3 name (`~` then a digit) is refused
-///   first ([`FolderRefusal::OddSpelling`]): Windows reads each as another spelling of a name;
+/// - any path with a name that ends in `.` or a space, or holds `:` (an NTFS stream, such as
+///   `home::$INDEX_ALLOCATION`), is refused first ([`FolderRefusal::OddSpelling`]): Windows reads
+///   each as another spelling of a name;
 /// - on the profile folder or above it ([`FolderRefusal::HoldsTheProfile`]);
 /// - on, over or in `<data_dir>\sandbox` ([`FolderRefusal::OverlapsSandboxRecords`]);
 /// - a deny, or a path entirely outside `<data_dir>`, is fine;
@@ -390,18 +396,17 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// Whether a name in `path` is a spelling Windows reads as another name: one ending in `.` or
-/// a space, one holding `:` (a stream), or one like a short 8.3 name (`~` then a digit).
+/// a space, or one holding `:` (a stream; the drive's colon is in the prefix, not a name).
+/// Short 8.3 names need no rule here: every policy path, and the data folder, is canonical
+/// through the final-path API (`dunce::canonicalize`, `GetFinalPathNameByHandleW` on Windows),
+/// which gives long names, and a `~` is an ordinary character (`Draft~2`).
 pub(super) fn odd_spelling(path: &Path) -> bool {
     path.components().any(|part| {
         let Component::Normal(name) = part else {
             return false;
         };
         let name = name.to_string_lossy();
-        let short = name
-            .split('~')
-            .skip(1)
-            .any(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
-        name.ends_with('.') || name.ends_with(' ') || name.contains(':') || short
+        name.ends_with('.') || name.ends_with(' ') || name.contains(':')
     })
 }
 

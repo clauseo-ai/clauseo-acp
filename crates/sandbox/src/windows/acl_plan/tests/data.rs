@@ -195,8 +195,6 @@ fn names_windows_reads_as_another_spelling_are_refused() {
         "/d/agents/claude-acp/home ",
         "/d/agents/claude-acp/home::$INDEX_ALLOCATION",
         "/d/agents/claude-acp/home:stream",
-        "/d/agents/CLAUDE~1/home",
-        "/d/agents/claude-acp/HOME~2",
     ] {
         assert!(odd_spelling(Path::new(odd)), "{odd}");
     }
@@ -225,4 +223,18 @@ fn a_claude_store_spelled_another_way_is_refused() {
         let got = refusal(&w, &policy).unwrap();
         assert_eq!(got.1, FolderRefusal::OddSpelling, "{odd}");
     }
+}
+
+#[test]
+fn a_matter_named_with_a_tilde_and_digit_is_planned() {
+    // `Draft~2` is an ordinary name; the canonical path is what the plan compares.
+    let w = World::new("plan-tilde-matter");
+    w.dir.dir("Draft~2");
+    let policy = Policy::builder(w.at("Draft~2"), w.at(STATE))
+        .home(w.at("home"))
+        .hidden(w.at("data"))
+        .build()
+        .unwrap();
+    assert_eq!(refusal(&w, &policy), None);
+    assert!(odd_spelling(Path::new("/d/agents/claude-acp/home.")));
 }
