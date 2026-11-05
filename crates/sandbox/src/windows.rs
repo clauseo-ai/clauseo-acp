@@ -2,7 +2,8 @@
 //!
 //! - [`folder_support`] (Windows only, `folder.rs`): whether a folder can take the agent's
 //!   permission entries: network, no permissions, or no `WRITE_DAC`.
-//! - [`admit`] (`admit.rs`): the folder gate. Every folder tier B would grant on must answer
+//! - [`admit`] (`admit.rs`): the folder gate. The matter must not be, hold or sit inside
+//!   Clauseo's data folder, and every folder tier B would grant on must answer
 //!   [`FolderSupport::Ok`], or the launch is refused with
 //!   [`Error::FolderUnsupported`](crate::Error::FolderUnsupported) and nothing is planned or
 //!   written. The other matters a group can reach are found here too (D8).

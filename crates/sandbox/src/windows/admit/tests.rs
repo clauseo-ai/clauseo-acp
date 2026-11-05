@@ -24,12 +24,13 @@ fn answering(
 /// pending entries. A refusal returns at the gate.
 fn prepare(
     policy: &Policy,
+    data: &Path,
     others: &[PathBuf],
     check: impl FnMut(&Path) -> io::Result<FolderSupport>,
     groups: &FakeGroups,
     ledger: &mut Ledger,
 ) -> Result<usize, Error> {
-    let admitted = admit_with(policy, others, check, groups)?;
+    let admitted = admit_with(policy, data, others, check, groups)?;
     let grants = plan(&admitted, &sids())?;
     let ids = ledger
         .record_pending(matter_one(), &grants)
@@ -44,6 +45,7 @@ fn ledger_with_an_entry(w: &World) -> (Ledger, Vec<u8>) {
     let other = w.builder().build().unwrap();
     let admitted = admit_with(
         &other,
+        &w.at("data"),
         &[],
         |_| Ok(FolderSupport::Ok),
         &FakeGroups::default(),
@@ -63,7 +65,7 @@ fn every_grant_folder_is_checked() {
         asked.push(path.to_owned());
         Ok(FolderSupport::Ok)
     };
-    admit_with(&policy, &[], check, &FakeGroups::default()).unwrap();
+    admit_with(&policy, &w.at("data"), &[], check, &FakeGroups::default()).unwrap();
     let want = [
         w.canonical("matter"),
         w.canonical("data/agent-state/m1/claude"),
@@ -98,7 +100,8 @@ fn each_refused_folder_names_its_kind_and_not_its_path() {
     for (rel, kind) in cases {
         for answer in answers {
             let check = answering(w.canonical(rel), answer);
-            let error = admit_with(&policy, &[], check, &FakeGroups::default()).unwrap_err();
+            let error =
+                admit_with(&policy, &w.at("data"), &[], check, &FakeGroups::default()).unwrap_err();
             let Error::FolderUnsupported { path_kind, support } = &error else {
                 panic!("{error:?}");
             };
@@ -130,7 +133,14 @@ fn a_refusal_leaves_the_ledger_byte_identical() {
         "data/agent-state/m1/notes",
     ] {
         let check = answering(w.canonical(rel), || Ok(FolderSupport::Network));
-        let refused = prepare(&policy, &[], check, &FakeGroups::default(), &mut ledger);
+        let refused = prepare(
+            &policy,
+            &w.at("data"),
+            &[],
+            check,
+            &FakeGroups::default(),
+            &mut ledger,
+        );
         assert!(matches!(refused, Err(Error::FolderUnsupported { .. })));
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -140,7 +150,15 @@ fn a_refusal_leaves_the_ledger_byte_identical() {
     }
     // The same launch, admitted, does write: the refusal is what kept the file as it was.
     let check = |_: &Path| Ok(FolderSupport::Ok);
-    let planned = prepare(&policy, &[], check, &FakeGroups::default(), &mut ledger).unwrap();
+    let planned = prepare(
+        &policy,
+        &w.at("data"),
+        &[],
+        check,
+        &FakeGroups::default(),
+        &mut ledger,
+    )
+    .unwrap();
     assert!(planned > 0);
     assert_ne!(std::fs::read(&path).unwrap(), before);
 }
@@ -152,7 +170,17 @@ fn a_refusal_on_a_fresh_data_folder_makes_no_ledger() {
     let path = ledger_path(&w.at("data"));
     let mut ledger = Ledger::open(&path).unwrap();
     let check = answering(w.canonical("matter"), || Ok(FolderSupport::NoPermissions));
-    assert!(prepare(&policy, &[], check, &FakeGroups::default(), &mut ledger).is_err());
+    assert!(
+        prepare(
+            &policy,
+            &w.at("data"),
+            &[],
+            check,
+            &FakeGroups::default(),
+            &mut ledger
+        )
+        .is_err()
+    );
     assert!(!path.exists());
     assert!(!w.at("data/sandbox").exists());
 }
@@ -171,7 +199,14 @@ fn other_matters_a_group_can_reach_are_closed() {
         ..FakeGroups::default()
     };
     let others = [m2.clone(), m3, unread.clone(), gone];
-    let admitted = admit_with(&policy, &others, |_| Ok(FolderSupport::Ok), &groups).unwrap();
+    let admitted = admit_with(
+        &policy,
+        &w.at("data"),
+        &others,
+        |_| Ok(FolderSupport::Ok),
+        &groups,
+    )
+    .unwrap();
     // A DACL that can't be read counts as open; a missing folder has nothing to close.
     assert_eq!(admitted.closed(), [m2, unread]);
     assert_eq!(groups.asked.borrow().len(), 4);
@@ -200,6 +235,7 @@ fn another_matter_that_cant_be_closed_refuses_the_launch() {
         };
         let error = prepare(
             &policy,
+            &w.at("data"),
             std::slice::from_ref(&m2),
             check,
             &groups,
@@ -231,7 +267,14 @@ fn another_matter_on_a_share_or_gone_is_left_alone() {
             FolderSupport::Ok
         })
     };
-    let admitted = admit_with(&policy, std::slice::from_ref(&m2), network, &groups).unwrap();
+    let admitted = admit_with(
+        &policy,
+        &w.at("data"),
+        std::slice::from_ref(&m2),
+        network,
+        &groups,
+    )
+    .unwrap();
     assert_eq!(admitted.closed(), [] as [PathBuf; 0]);
     let gone = |path: &Path| {
         if path == m2 {
@@ -240,7 +283,14 @@ fn another_matter_on_a_share_or_gone_is_left_alone() {
             Ok(FolderSupport::Ok)
         }
     };
-    let admitted = admit_with(&policy, std::slice::from_ref(&m2), gone, &groups).unwrap();
+    let admitted = admit_with(
+        &policy,
+        &w.at("data"),
+        std::slice::from_ref(&m2),
+        gone,
+        &groups,
+    )
+    .unwrap();
     assert_eq!(admitted.closed(), [] as [PathBuf; 0]);
 }
 
@@ -251,8 +301,112 @@ fn other_matters_are_not_read_when_a_grant_folder_is_refused() {
     let groups = FakeGroups::default();
     let check = answering(w.canonical("matter"), || Ok(FolderSupport::Network));
     let others = [w.canonical("other/m2")];
-    assert!(admit_with(&policy, &others, check, &groups).is_err());
+    assert!(admit_with(&policy, &w.at("data"), &others, check, &groups).is_err());
     assert!(groups.asked.borrow().is_empty());
+}
+
+/// Asserts that `policy` is refused before any folder check, as a matter that overlaps
+/// `data_dir`, and that the ledger is as it was.
+fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
+    let (mut ledger, before) = ledger_with_an_entry(w);
+    let mut checked = 0;
+    let check = |_: &Path| {
+        checked += 1;
+        Ok(FolderSupport::Ok)
+    };
+    let groups = FakeGroups::default();
+    let refused = prepare(
+        policy,
+        data_dir,
+        &[w.canonical("other/m2")],
+        check,
+        &groups,
+        &mut ledger,
+    );
+    let Err(error @ Error::FolderUnsupported { path_kind, support }) = refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(path_kind, PathKind::Matter);
+    assert_eq!(support, FolderRefusal::OverlapsDataFolder);
+    assert_eq!(checked, 0, "refused before any folder check");
+    assert!(groups.asked.borrow().is_empty());
+    assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
+    let root = dunce::canonicalize(w.dir.path()).unwrap();
+    let text = format!("{error} {error:?}");
+    assert!(!text.contains(&*root.to_string_lossy()), "a path in {text}");
+}
+
+#[test]
+fn a_matter_that_is_the_data_folder_is_refused() {
+    let w = World::new("admit-data-is-matter");
+    let policy = Policy::builder(w.at("data"), w.at("elsewhere"))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
+    assert_overlaps(&w, &policy, &w.at("data"));
+}
+
+#[test]
+fn a_matter_that_holds_the_data_folder_is_refused() {
+    // Its Modify pair would reach <data_dir>\sandbox: the SID map, the ledger, the marker.
+    let w = World::new("admit-matter-holds-data");
+    w.dir.dir("matter/Clauseo");
+    let policy = w.builder().build().unwrap();
+    assert_overlaps(&w, &policy, &w.at("matter/Clauseo"));
+}
+
+#[test]
+fn a_matter_inside_the_data_folder_is_refused() {
+    let w = World::new("admit-matter-in-data");
+    let policy = Policy::builder(w.at("data/agents/node"), w.at("elsewhere"))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
+    assert_overlaps(&w, &policy, &w.at("data"));
+}
+
+#[test]
+fn a_data_folder_reached_through_another_spelling_still_matches() {
+    // `data_dir` is canonicalised: a `..` spelling (and on Windows a short or differently
+    // cased one) is the same folder.
+    let w = World::new("admit-data-spelling");
+    let policy = Policy::builder(w.at("data/agents/node"), w.at("elsewhere"))
+        .home(w.at("home"))
+        .build()
+        .unwrap();
+    assert_overlaps(&w, &policy, &w.at("elsewhere/../data"));
+}
+
+#[test]
+fn a_data_folder_that_doesnt_resolve_refuses() {
+    let w = World::new("admit-data-missing");
+    let policy = w.builder().build().unwrap();
+    assert_overlaps(&w, &policy, &w.at("no-such-data"));
+}
+
+#[test]
+fn a_matter_beside_the_data_folder_is_admitted() {
+    // The tests' world: `<root>/matter` and `<root>/data` share a parent and nothing else.
+    let w = World::new("admit-data-beside");
+    let policy = w.builder().build().unwrap();
+    let admitted = admit_with(
+        &policy,
+        &w.at("data"),
+        &[],
+        |_| Ok(FolderSupport::Ok),
+        &FakeGroups::default(),
+    );
+    assert!(admitted.is_ok());
+    // A data folder whose name only starts like the matter's isn't inside it.
+    w.dir.dir("matter-data");
+    let admitted = admit_with(
+        &policy,
+        &w.at("matter-data"),
+        &[],
+        |_| Ok(FolderSupport::Ok),
+        &FakeGroups::default(),
+    );
+    assert!(admitted.is_ok());
 }
 
 /// The gate with the real folder check, on CI's Windows job.
@@ -271,13 +425,20 @@ mod on_windows {
     fn assert_refused(w: &World, policy: &Policy, kind: PathKind, want: FolderRefusal) {
         let (mut ledger, before) = ledger_with_an_entry(w);
         let groups = FakeGroups::default();
-        let admitted = admit(policy, &[], &groups);
+        let admitted = admit(policy, &w.at("data"), &[], &groups);
         let Err(Error::FolderUnsupported { path_kind, support }) = admitted else {
             panic!("not refused: {admitted:?}");
         };
         assert_eq!((path_kind, support), (kind, want));
         // The launch's own steps refuse at the gate too, before a plan or an entry.
-        let refused = prepare(policy, &[], folder_support, &groups, &mut ledger);
+        let refused = prepare(
+            policy,
+            &w.at("data"),
+            &[],
+            folder_support,
+            &groups,
+            &mut ledger,
+        );
         assert!(matches!(refused, Err(Error::FolderUnsupported { .. })));
         assert_eq!(std::fs::read(ledger.path()).unwrap(), before);
     }
@@ -299,7 +460,7 @@ mod on_windows {
     fn a_local_world_is_admitted() {
         let w = World::new("admit-win-ok");
         let policy = w.full_policy();
-        let admitted = admit(&policy, &[], &FakeGroups::default()).unwrap();
+        let admitted = admit(&policy, &w.at("data"), &[], &FakeGroups::default()).unwrap();
         assert_ne!(plan(&admitted, &sids()).unwrap().len(), 0);
     }
 
@@ -365,5 +526,20 @@ mod on_windows {
         remove_dir(&w.at("data/agent-state/m1/notes"));
         let want = FolderRefusal::CheckFailed(io::ErrorKind::NotFound);
         assert_refused(&w, &policy, PathKind::Notes, want);
+    }
+
+    #[test]
+    fn a_matter_holding_the_data_folder_is_refused_in_any_letter_case() {
+        // NTFS compares names without case: `MATTER\CLAUSEO` is `matter\Clauseo`.
+        let w = World::new("admit-win-data-case");
+        w.dir.dir("matter/Clauseo");
+        let policy = w.builder().build().unwrap();
+        let shouted = PathBuf::from(w.at("matter/Clauseo").to_string_lossy().to_uppercase());
+        let refused = admit(&policy, &shouted, &[], &FakeGroups::default());
+        let Err(Error::FolderUnsupported { path_kind, support }) = refused else {
+            panic!("not refused: {refused:?}");
+        };
+        assert_eq!(path_kind, PathKind::Matter);
+        assert_eq!(support, FolderRefusal::OverlapsDataFolder);
     }
 }
