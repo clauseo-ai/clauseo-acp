@@ -16,6 +16,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SettingsKeyStored,
             "a key is already stored for claude-acp",
         ),
+        failed(
+            ErrorCode::SigninLoginShared,
+            "the Codex home shares the ChatGPT login file",
+        ),
     ]
 }
 

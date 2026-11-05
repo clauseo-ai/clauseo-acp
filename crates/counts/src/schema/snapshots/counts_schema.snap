@@ -1496,7 +1496,8 @@ expression: counts_schema()
         "agent.guard_missing",
         "update.failed",
         "settings.refused",
-        "settings.key_stored"
+        "settings.key_stored",
+        "signin.login_shared"
       ],
       "type": "string"
     },

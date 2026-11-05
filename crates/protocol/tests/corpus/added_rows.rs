@@ -268,4 +268,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (356, 0x8851_c359_aff6_7ca3),
         (258, 0x1892_6a40_293d_13dd),
     ),
+    (
+        "added/turn_failed-SigninLoginShared",
+        include_bytes!("added/turn_failed-SigninLoginShared.jsonl"),
+        include_bytes!("added/turn_failed-SigninLoginShared.msgpack"),
+        (362, 0xe6e5_121b_bfde_671f),
+        (264, 0x0aee_bfe1_9aae_0cf1),
+    ),
 ];

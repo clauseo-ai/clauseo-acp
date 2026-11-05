@@ -53,6 +53,7 @@ export type ErrorCode =
   | "settings.locked"
   | "settings.refused"
   | "settings.key_stored"
+  | "signin.login_shared"
   | "agent.install_offline"
   | "agent.install_blocked"
   | "agent.install_disk_full"
@@ -123,6 +124,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "settings.refused": "Clauseo couldn't save that setting. Your settings are as they were.",
   "settings.key_stored":
     "A key is already kept on this computer. To change it, open Settings, then Plans.",
+  "signin.login_shared":
+    "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.",
   "agent.install_offline": "You're offline. Setting up waits for the connection.",
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
