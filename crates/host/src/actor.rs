@@ -422,24 +422,6 @@ impl Actor {
         Ok(ticket)
     }
 
-    /// Gives `draft` a receipt the store refuses when [`Actor::fault`] picks it.
-    #[cfg(test)]
-    fn with_fault(&mut self, mut draft: Draft) -> Draft {
-        let ts = self.clock.now().wall;
-        if let Some(fault) = self.fault.as_mut()
-            && let Some(command_id) = fault(draft.events())
-        {
-            draft.receipt(clauseo_store::Receipt {
-                command_id,
-                stream: None,
-                payload_hash: [0; 32],
-                result: CommandOutcome::Done,
-                ts,
-            });
-        }
-        draft
-    }
-
     /// One request from a handle.
     fn on_request(&mut self, request: Request) {
         if !matches!(self.phase, HostPhase::Serving) {
