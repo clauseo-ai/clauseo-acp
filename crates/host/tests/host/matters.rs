@@ -323,6 +323,49 @@ fn update_matter_keeps_clears_and_sets_skill_packs() {
 }
 
 #[test]
+fn update_matter_refuses_a_reserved_pack_id() {
+    let dir = Dir::new("update_reserved_pack", &[]);
+    let host = dir.start(0);
+    let folder = dir.folder("m", &[]);
+    let matter = created(import(&host, "m", &folder, (None, None)));
+    let kept = packs(&["contracts"]);
+    host.ok(HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        skill_packs: FieldChange::Set(kept.clone()),
+        pinned: None,
+    });
+    // Each reserved name is refused as a bad value is: command.invalid, and nothing changes.
+    for reserved in [
+        "clauseo",
+        "clauseo-x",
+        "builtin",
+        "stetdoc",
+        "legal-drafting",
+    ] {
+        let list = PackList::new(vec![
+            PackId::new("contracts").unwrap(),
+            PackId::new(reserved).unwrap(),
+        ])
+        .unwrap();
+        host.refused(
+            HostCommand::UpdateMatter {
+                matter,
+                client: FieldChange::Keep,
+                next_date: FieldChange::Keep,
+                skill_packs: FieldChange::Set(list),
+                pinned: Some(true),
+            },
+            ErrorCode::CommandInvalid,
+        );
+        assert_eq!(summary(&host, matter).skill_packs, Some(kept.clone()));
+        assert!(!summary(&host, matter).pinned, "{reserved}");
+    }
+    host.shutdown();
+}
+
+#[test]
 fn open_matter_records_last_opened() {
     let dir = Dir::new("open_matter", &[]);
     let host = dir.start(0);

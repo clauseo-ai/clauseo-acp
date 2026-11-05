@@ -205,7 +205,7 @@ fn assert_optional(ts: &str) {
             || line.starts_with("export type RawPayload = null | ")
             || line.trim() == "client?: ClientName | null,"
             || line.trim() == "next_date?: Date | null,"
-            || line.trim() == "skill_packs?: string[] | null,";
+            || line.trim() == "skill_packs?: PackList | null,";
         assert!(allowed, "unexpected `null` in: {line}");
     }
 }

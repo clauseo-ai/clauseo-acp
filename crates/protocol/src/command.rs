@@ -207,7 +207,7 @@ pub enum HostCommand {
         next_date: FieldChange<Date>,
         /// The skill packs the matter may load, from those turned on (decision record 0040).
         #[serde(default, skip_serializing_if = "FieldChange::is_keep")]
-        #[cfg_attr(feature = "specta", specta(type = Option<Option<Vec<String>>>))]
+        #[cfg_attr(feature = "specta", specta(type = Option<Option<PackList>>))]
         skill_packs: FieldChange<PackList>,
         /// Whether it is pinned to the top of the rail.
         #[serde(default, skip_serializing_if = "Option::is_none")]

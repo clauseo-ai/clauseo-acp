@@ -38,9 +38,8 @@ pub(super) struct Update {
 
 /// `UpdateMatter`: the changed row and the receipt.
 pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId, update: Update) {
-    let done = actor
-        .check_matter(matter)
-        .map(|entry| entry.row.clone())
+    let done = check_skill_packs(&update.skill_packs)
+        .and_then(|()| actor.check_matter(matter).map(|entry| entry.row.clone()))
         .and_then(|before| {
             let mut row = before.clone();
             apply(&mut row.client, update.client);
@@ -53,6 +52,27 @@ pub(super) fn update_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterI
         });
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));
+    }
+}
+
+/// A list that names a reserved pack id (`clauseo`, `clauseo-*`, a built-in skill, `stetdoc`) is
+/// refused with `command.invalid`, as a bad value is: no pack folder can have such an id, so the
+/// list would only ever skip it at launch. A stored list can still hold one (the store reads it),
+/// so a launch skips it there (PR-D).
+fn check_skill_packs(change: &FieldChange<PackList>) -> Result<(), Error> {
+    match change {
+        FieldChange::Set(list)
+            if list
+                .as_slice()
+                .iter()
+                .any(|id| !clauseo_profile::packs::is_pack_id(id.as_str())) =>
+        {
+            Err(Error::refused(
+                ErrorCode::CommandInvalid,
+                "a skill pack id is reserved for Clauseo's own packs and skills",
+            ))
+        }
+        FieldChange::Keep | FieldChange::Clear | FieldChange::Set(_) => Ok(()),
     }
 }
 

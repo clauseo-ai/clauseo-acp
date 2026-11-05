@@ -29,6 +29,9 @@ mod windows;
 
 use std::path::{Path, PathBuf};
 
+use crate::skills::builtin::BUILTIN;
+use crate::skills::stetdoc::STETDOC;
+
 pub use hash::PackHash;
 pub use manifest::PackManifest;
 pub use plugin::{PacksWritten, write_packs};
@@ -64,20 +67,28 @@ pub const DEPTH_MAX: usize = 8;
 /// The most bytes a file's path inside a pack has, so a rendered path stays short on Windows.
 pub const PATH_MAX: usize = 160;
 
+/// Reserved pack ids that are neither built-in skill names nor `clauseo-*`: the built-in pack's
+/// id and the bare `builtin`.
+const RESERVED: [&str; 2] = ["clauseo", "builtin"];
+
 /// The most skills a pack lists.
 pub const SKILLS_MAX: usize = 32;
 
 /// The most extra packs one launch loads; the rest are skipped as [`Skip::TooMany`].
 pub const PACKS_PER_LAUNCH: usize = 16;
 
-/// Whether `id` may name a pack: the rule is [`PackId`](clauseo_protocol::PackId)'s in
-/// `protocol` (`^[a-z0-9]+(-[a-z0-9]+)*$`, 2 to 30 bytes, no Windows device name, not `clauseo`,
-/// any `clauseo-*`, `builtin`, `stetdoc` or a built-in skill's name). That its reserved list
-/// holds profile's own built-in names (`BUILTIN` and `STETDOC`) is checked by a test in
-/// `tests/packs.rs`. Since no id holds `--`, the rendered `<pack>--<skill>` splits one way
-/// only and never equals a built-in name.
+/// Whether `id` may name a pack: the shape is [`PackId`](clauseo_protocol::PackId)'s
+/// (`^[a-z0-9]+(-[a-z0-9]+)*$`, 2 to 30 bytes, no Windows device name), and it is not reserved:
+/// not `clauseo`, not `clauseo-*`, not `builtin`, not `stetdoc`, not a built-in skill's name.
+/// Since no id holds `--`, the rendered `<pack>--<skill>` splits one way only and never equals
+/// a built-in name. The host refuses a reserved id in a matter's list with this same check.
 pub fn is_pack_id(id: &str) -> bool {
-    clauseo_protocol::PackId::new(id).is_ok()
+    clauseo_protocol::PackId::new(id).is_ok() && !is_reserved(id)
+}
+
+/// Whether `id` is reserved for Clauseo's own packs and skills.
+fn is_reserved(id: &str) -> bool {
+    RESERVED.contains(&id) || id.starts_with("clauseo-") || id == STETDOC || BUILTIN.contains(&id)
 }
 
 /// Whether `name` may name a skill inside a pack: [`is_pack_id`]'s charset and no `--`, 1 to

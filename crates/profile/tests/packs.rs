@@ -522,11 +522,16 @@ fn a_rendered_name_never_equals_a_builtin() {
 }
 
 #[test]
-fn the_protocol_pack_id_refuses_every_builtin_and_stetdoc_name() {
-    // The reserved list lives in `protocol`; this keeps it from drifting from profile's names.
+fn the_pack_id_rule_refuses_every_builtin_stetdoc_and_clauseo_name() {
+    // Profile owns its built-in names; this is the rule the host also applies to a matter's list.
     for name in BUILTIN.iter().chain([&STETDOC]) {
-        assert!(clauseo_protocol::PackId::new(name).is_err(), "{name}");
+        assert!(clauseo_protocol::PackId::new(name).is_ok(), "{name}");
+        assert!(!is_pack_id(name), "{name}");
     }
+    for name in ["clauseo", "clauseo-x", "builtin"] {
+        assert!(!is_pack_id(name), "{name}");
+    }
+    assert!(is_pack_id("nda-kit"));
 }
 
 #[test]
