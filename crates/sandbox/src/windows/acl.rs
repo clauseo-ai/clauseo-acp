@@ -37,6 +37,7 @@ use super::acl_bytes::{
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
+use super::folder::verbatim_wide;
 use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
 use object::{Handle, Object, os_error};
 
@@ -97,7 +98,7 @@ impl AclWriter for NtfsAcl {
             if dacl.has(&spec) {
                 return Ok(Added::AlreadyThere);
             }
-            let bits = now.control & (DACL_PROTECTED | DACL_AUTO_INHERITED);
+            let bits = root_bits(now.control);
             let written = build_descriptor(bits, Some(&dacl.with(&spec)), None);
             target.set(dacl_info(now.control), &written).map_err(io)?;
         }
@@ -127,7 +128,7 @@ impl AclWriter for NtfsAcl {
             let Some(kept) = Acl::parse(dacl).map_err(io)?.without(&spec) else {
                 return Ok(());
             };
-            let bits = now.control & (DACL_PROTECTED | DACL_AUTO_INHERITED);
+            let bits = root_bits(now.control);
             let written = build_descriptor(bits, Some(&kept), None);
             target.set(dacl_info(now.control), &written).map_err(io)?;
         }
@@ -252,13 +253,24 @@ fn check_target(target: &Object, grant: &Grant) -> Result<(), ApplyFailure> {
 }
 
 /// Whether `target`'s final path (`GetFinalPathNameByHandleW`, normalized, with its drive
-/// letter) is `planned`, compared part by part without ASCII case, `\\?\` set aside.
+/// letter, always `\\?\`) is `planned`, compared part by part without ASCII case. `planned`
+/// is put in the same `\\?\` form it was opened through, rather than the final path stripped
+/// of it: `dunce` keeps `\\?\` on a path longer than `MAX_PATH`, a share's path or a name it
+/// can't write plainly, which made every such target `Changed`.
 fn same_path(target: &Object, planned: &Path) -> io::Result<bool> {
     let final_path = PathBuf::from(OsString::from_wide(&target.normalized()?));
-    let final_path = dunce::simplified(&final_path);
-    let planned = std::path::absolute(planned)?;
-    let planned = dunce::simplified(&planned);
-    Ok(in_folder(final_path, planned) && in_folder(planned, final_path))
+    let mut wide = verbatim_wide(planned)?;
+    wide.pop();
+    let planned = PathBuf::from(OsString::from_wide(&wide));
+    Ok(in_folder(&final_path, &planned) && in_folder(&planned, &final_path))
+}
+
+/// The DACL control bits a write on a target keeps: its protection, and the auto-inherited mark
+/// (`SE_DACL_AUTO_INHERITED`) set whether it was there or not. Its inherited entries stay as
+/// they are. A target not marked so (a matter under a plain `C:\m`, the Windows run 2, row 15)
+/// would otherwise keep a DACL whose inherited entries no later propagation can tell apart.
+fn root_bits(control: u16) -> u16 {
+    (control & DACL_PROTECTED) | DACL_AUTO_INHERITED
 }
 
 /// `DACL_SECURITY_INFORMATION`, with the protection kept when `control` has it.

@@ -294,3 +294,31 @@ fn a_descriptor_is_built_and_read_back() {
     assert!(Descriptor::parse(&only[..10]).is_err());
     assert!(Acl::parse(&dacl[..dacl.len() - 1]).is_err());
 }
+
+/// The Windows run 2, row 15 (a plain `C:\m`): a child not marked auto-inherited loses its
+/// inherited copies before it is worked out again, so none comes back explicit; its explicit
+/// entries, owner, group and SACL stay, and the DACL is marked auto-inherited.
+#[test]
+fn a_dacl_not_auto_inherited_loses_its_inherited_copies_before_the_walk_works_it_out() {
+    let owner = sid_bytes(&sid(POOL));
+    let group = sid_bytes(&sid(OTHER));
+    let explicit = spec(POOL, Rights::Modify).bytes();
+    let users = inherited("S-1-5-32-545", Rights::ReadAndExecute);
+    let dacl = render(2, &[&explicit, &users]);
+    let sacl = render(2, &[&spec(LOW_LABEL_SID, Rights::LowLabel).bytes()]);
+    let before = assemble(0, [Some(&owner), Some(&group), Some(&sacl), Some(&dacl)]);
+
+    let after = without_inherited(&before).unwrap();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(render(2, &[&explicit]).as_slice()));
+    assert_eq!(read.sacl, Some(sacl.as_slice()));
+    assert_eq!(read.control & DACL_AUTO_INHERITED, DACL_AUTO_INHERITED);
+    let sid_at = |at: usize| {
+        let offset = usize::try_from(read_u32(&after, at).unwrap()).unwrap();
+        after[offset..offset + 8 + 4 * usize::from(after[offset + 1])].to_vec()
+    };
+    assert_eq!(sid_at(4), owner);
+    assert_eq!(sid_at(8), group);
+    let bare = build_descriptor(0, None, Some(&sacl));
+    assert_eq!(without_inherited(&bare).unwrap(), bare);
+}

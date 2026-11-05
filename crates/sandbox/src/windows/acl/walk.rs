@@ -37,7 +37,7 @@ use super::object::{Object, os_error, reparse_refused, words};
 use super::{NtfsAcl, READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    broad_allow, build_descriptor, inherited_label, sid_bytes,
+    broad_allow, build_descriptor, inherited_label, sid_bytes, without_inherited,
 };
 use crate::windows::acl_plan::Sid;
 use crate::windows::writer::{ApplyFailure, Reach, Walked};
@@ -171,18 +171,26 @@ fn settle(
         }
     }
     let mut changed = false;
-    let inherited = inherit(acl, parent, current, child.folder).map_err(io)?;
-    let new = Descriptor::parse(&inherited).map_err(io)?;
     let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
+    // A DACL neither protected nor auto-inherited loses its inherited copies first, as
+    // `SetNamedSecurityInfoW`'s propagation does; see [`without_inherited`].
+    let creator = if now.dacl.is_some() && now.control & bits == 0 {
+        without_inherited(current).map_err(io)?
+    } else {
+        current.to_vec()
+    };
+    let inherited = inherit(acl, parent, &creator, child.folder).map_err(io)?;
+    let new = Descriptor::parse(&inherited).map_err(io)?;
+    let mut want = new.control & bits;
+    if want & DACL_PROTECTED == 0 {
+        want |= DACL_AUTO_INHERITED;
+    }
     if let Some(dacl) = new.dacl
-        && (new.dacl != now.dacl || new.control & bits != now.control & bits)
+        && (new.dacl != now.dacl || want != now.control & bits)
     {
         let info = dacl_info(new.control);
         child
-            .set(
-                info,
-                &build_descriptor(new.control & bits, Some(dacl), None),
-            )
+            .set(info, &build_descriptor(want, Some(dacl), None))
             .map_err(io)?;
         changed = true;
     }
