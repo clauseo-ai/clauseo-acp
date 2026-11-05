@@ -271,6 +271,11 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Lifting a sibling's deny happens only after the new matter's first launch succeeds.** Until
   then the folder keeps its fix 2 deny, so its new matter's agent reads it only through its own
   entries, which are nearer and come first.
+- **A launch killed mid-walk** ends with its own pool user's allow and label entries `applied`
+  (`reconcile` finds them present), while its fence and sibling denies stay `pending` (N4), so
+  the next launch walks those deny trees strictly and still refuses what it would have refused.
+  No agent runs in between, and the allow names only the matter's own pool user on its own matter
+  (accepted; no launch marker).
 - **A nested `CLAUDE.md` or `AGENTS.md`** the agent makes below the matter's root is not set
   aside.
 - **The repair undoes a lawyer's own lock-down of an agent's file**: clearing the protection of a
