@@ -10,3 +10,6 @@ dist-review/
 CLAUDE.local.md
 *.local.*
 .env*
+# insta pending snapshots: accept them over the .snap, never commit them
+*.snap.new
+*.pending-snap
