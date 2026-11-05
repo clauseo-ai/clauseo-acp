@@ -69,7 +69,11 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   the top of `policy.json`, `"MCP"`, `"mcpServers"`, `mcp_servers`, `mcp.Servers`,
   `mcp.servers.firm` written as one key), lock the list empty, even beside a valid `mcp` section, with a warning naming the shape that sets it.
   macOS managed preferences are read key by key by exact name, so a profile must use
-  `mcp.servers` exactly; any other name there is never seen. An entry left out inside a valid
+  `mcp.servers` exactly; any other name there is never seen. *Amended 2026-11-05 (host's review of #450):* the
+  shim also takes key names from the domain's managed plist files in
+  `/Library/Managed Preferences` and asks for each, so a misnamed forced key is seen and the
+  misnamed rule locks its section, as in `policy.json` and the registry. Each value, and
+  whether it is forced, still comes from CFPreferences. An entry left out inside a valid
   list, an unrelated unknown key, and an empty `"mcp": {}` (as for any section) lock nothing, and
   neither does a key under `agents.` whose agent id holds `mcp` (`agents.mcp-proxy`): it is an
   agent's key. In the user's `settings.json` all of this is only a warning. This replaces the
@@ -95,7 +99,10 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   managed preferences and `policy.json` read it.
   A boolean or string-list key is read from `REG_DWORD` and `REG_MULTI_SZ` as above.
 - Managed preferences cannot list unknown keys, since they are read key by key; an unknown key
-  there is not reported.
+  there is not reported. *Amended 2026-11-05 (host's review of #450):* key names
+  now also come from the managed plist files, so an unknown forced key is reported, and one
+  that looks like a security section locks it; values and "forced" still come from
+  CFPreferences.
 - The policy layer is read once at start-up. A change takes effect on the next start.
 
 ## Status
