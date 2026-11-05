@@ -9,13 +9,15 @@
 //! - the split check: while desktop has said the login is reused
 //!   (`HostHandle::set_reused_login`), any answer but [`LoginLink::Shared`] refuses the launch
 //!   with `agent.auth_required` and sends a [`LoginSplit`] on `HostHandle::login_splits`;
-//! - the guard: while the home's file shares the lawyer's file id, a typed `/login` to that
-//!   Codex agent is refused with `signin.login_shared` (`/logout` is refused always, P4a).
+//! - the guard: while [`LoginCheck::shared`] says the home's `auth.json` is the lawyer's file
+//!   (a symbolic link included, which the split check sees as a split), or cannot say, a typed
+//!   `/login` to that Codex agent is refused with `signin.login_shared` (`/logout` is refused
+//!   always, P4a), and the API-key `authenticate` retry is not armed (P4d).
 //!
 //! A check that does not answer in time is [`Seen::Unknown`], never a sign-in answer: it is no
 //! split and changes no flag. The split check refuses the launch (`agent.launch_failed`, which
-//! may be retried), and the guard refuses as for a shared file, as S18's checks do for a stat
-//! that fails. The logs name the agent and the outcome, never a path.
+//! may be retried), and the guard refuses as for a shared file ([`treated_as_shared`]), as S18's
+//! checks do for a stat that fails. The logs name the agent and the outcome, never a path.
 //!
 //! `HostHandle::remove_login_links` removes each matter's `auth.json` link ([`remove_links`])
 //! on a thread of its own, never the actor's.
@@ -49,6 +51,30 @@ pub trait LoginCheck {
     /// `CODEX_HOME`) against the lawyer's `~/.codex/auth.json`, by stat only, never an open.
     /// Called off the actor; a call that takes too long is given up on.
     fn check(&self, agent: &AgentId, agent_home: &Path) -> LoginLink;
+
+    /// Whether `agent_home`'s `auth.json` is the lawyer's `~/.codex/auth.json`, however it
+    /// got there: a hard link, or a symbolic link (which [`Self::check`] answers
+    /// [`LoginLink::Split`]). By stat only, never an open; called off the actor, beside
+    /// [`Self::check`], and given up on with it. Only the `/login` and `authenticate` guard
+    /// reads it, and the host counts [`Shared::Unknown`] as shared.
+    fn shared(&self, agent: &AgentId, agent_home: &Path) -> Shared;
+}
+
+/// The hook's answer to [`LoginCheck::shared`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shared {
+    /// The home's `auth.json` is the lawyer's file.
+    Yes,
+    /// It is not, or there is none.
+    No,
+    /// A stat failed, so it is not known.
+    Unknown,
+}
+
+/// Whether the guard treats `shared` as shared: `Yes`, and `Unknown` (fail closed). The one
+/// place the host decides it.
+pub(crate) fn treated_as_shared(shared: Shared) -> bool {
+    shared != Shared::No
 }
 
 /// The hook's answer.
@@ -99,11 +125,12 @@ pub(crate) enum Seen {
     Unknown,
 }
 
-impl Seen {
-    /// Whether the guard refuses a login change: the file is shared, or that is not known.
-    pub(crate) fn guards(self) -> bool {
-        matches!(self, Self::Answered(LoginLink::Shared) | Self::Unknown)
-    }
+/// What a launch's check found: [`LoginCheck::check`]'s answer for the split check, and
+/// [`LoginCheck::shared`]'s for the guard (`Unknown` when the hook did not answer in time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Checked {
+    pub(crate) link: Seen,
+    pub(crate) shared: Shared,
 }
 
 /// The host's sign-in state: the hook and the sign-in-again test a caller set, the channel of
@@ -120,7 +147,7 @@ pub(crate) struct SignIn {
     /// The agents whose login desktop said is reused (`HostHandle::set_reused_login`).
     pub(crate) reused: BTreeSet<AgentId>,
     /// What each Codex agent's last launch's check found.
-    pub(crate) seen: BTreeMap<AgentId, Seen>,
+    pub(crate) seen: BTreeMap<AgentId, Checked>,
     /// The agents `HostHandle::stop_agents` holds until `restart_agents`: none of them
     /// launches, and their prompts queue held. In memory only: a host restart clears it.
     pub(crate) held: BTreeSet<AgentId>,
@@ -170,12 +197,15 @@ impl SignIn {
         self.splits.send(split);
     }
 
-    /// Whether the guard refuses a login change for `agent`: with a hook set, while its login
-    /// is reused or its last check found the file shared or gave no answer.
+    /// Whether the guard refuses a login change for `agent` (a typed `/login`): with a hook
+    /// set, while its login is reused or its last check's `shared` counts as shared.
     pub(crate) fn guards(&self, agent: &AgentId) -> bool {
         self.check.is_some()
             && (self.reused.contains(agent)
-                || self.seen.get(agent).is_some_and(|seen| seen.guards()))
+                || self
+                    .seen
+                    .get(agent)
+                    .is_some_and(|seen| treated_as_shared(seen.shared)))
     }
 
     /// Whether `text`, an agent error's, asks for a sign-in again by the test a caller set.
@@ -184,29 +214,36 @@ impl SignIn {
     }
 }
 
-/// Asks `hook` about `agent`'s login in `home` off the actor, for `matter`'s launch, waiting at
-/// most [`CHECK_WAIT`] on `clock`.
+/// Asks `hook` about `agent`'s login in `home` off the actor, both its calls in one job, for
+/// `matter`'s launch, waiting at most [`CHECK_WAIT`] on `clock`.
 pub(crate) async fn check(
     clock: Arc<dyn Clock>,
     matter: MatterId,
     hook: Arc<dyn LoginCheck + Send + Sync>,
     agent: AgentId,
     home: PathBuf,
-) -> Seen {
+) -> Checked {
     let job = Job {
         what: "login check",
         matter: Some(matter),
         wait: CHECK_WAIT,
     };
     let asked = agent.clone();
-    match off_actor(clock, job, move || Ok(hook.check(&asked, &home))).await {
-        Ok(link) => {
-            tracing::info!(%agent, ?link, "the login check answered");
-            Seen::Answered(link)
+    let asked_both = move || Ok((hook.check(&asked, &home), hook.shared(&asked, &home)));
+    match off_actor(clock, job, asked_both).await {
+        Ok((link, shared)) => {
+            tracing::info!(%agent, ?link, ?shared, "the login check answered");
+            Checked {
+                link: Seen::Answered(link),
+                shared,
+            }
         }
         Err(error) => {
             tracing::warn!(%agent, code = error.code().as_str(), "the login check gave no answer");
-            Seen::Unknown
+            Checked {
+                link: Seen::Unknown,
+                shared: Shared::Unknown,
+            }
         }
     }
 }

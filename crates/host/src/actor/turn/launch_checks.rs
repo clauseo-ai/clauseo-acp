@@ -47,7 +47,7 @@ use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 
 use crate::agent::folder_support::{Answer, FolderCheck};
-use crate::agent::login_link::{self, LoginCheck, Seen};
+use crate::agent::login_link::{self, Checked, LoginCheck};
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -216,7 +216,7 @@ pub(crate) struct CodexPrepared {
     pub(super) keys: serde_json::Map<String, serde_json::Value>,
     /// What the sign-in hook found for the home (`agent/login_link.rs`), asked after the
     /// rest succeeded; `None` with no hook set.
-    pub(super) login: Option<Seen>,
+    pub(super) login: Option<Checked>,
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state.
@@ -322,8 +322,8 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
             (Ok(mut prepared), Some((hook, agent))) => {
                 if let Some(codex) = prepared.codex.as_mut() {
                     let home = codex.home.clone();
-                    let seen = login_link::check(check_clock, matter, hook, agent, home).await;
-                    codex.login = Some(seen);
+                    let checked = login_link::check(check_clock, matter, hook, agent, home).await;
+                    codex.login = Some(checked);
                 }
                 Ok(prepared)
             }

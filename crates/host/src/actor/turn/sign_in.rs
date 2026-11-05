@@ -212,9 +212,10 @@ pub(super) fn check_launch(
     thread: ThreadId,
     prepared: &Prepared,
 ) -> Result<(), Error> {
-    let Some(seen) = prepared.codex.as_ref().and_then(|codex| codex.login) else {
+    let Some(checked) = prepared.codex.as_ref().and_then(|codex| codex.login) else {
         return Ok(());
     };
+    let seen = checked.link;
     let Some(agent) = actor
         .threads
         .get(&thread)
@@ -223,7 +224,7 @@ pub(super) fn check_launch(
         return Ok(());
     };
     let sign_in = &mut actor.wiring.sign_in;
-    sign_in.seen.insert(agent.clone(), seen);
+    sign_in.seen.insert(agent.clone(), checked);
     if !sign_in.reused.contains(&agent) {
         return Ok(());
     }
