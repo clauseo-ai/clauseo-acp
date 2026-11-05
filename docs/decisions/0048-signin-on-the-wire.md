@@ -267,7 +267,7 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - `restart_agents(agent) -> Result<(), HostError>` stops each live agent of that id that is
     not in a turn, with the shutdown ladder's stop, so the next question launches with the new
     login. It then resumes each queue held for that agent's sign-in, once.
-  - `stop_agents(agent) -> Result<(), HostError>` is step 1 of the leave order. It cancels each
+  - `stop_agents(agent)` is step 1 of the leave order (P4d, below, has its answer and hold). It cancels each
     turn of that id through the Cancel path (the lawyer's Stop, so what the turn left running
     ends too) and marks the turn to go back held. It drops a launch still being prepared, whose
     waiting work fails as closed, and stops every live agent of that id.
@@ -339,8 +339,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     unknown answer is to refuse, as S18's stat failures do. So while the login is reused the
     launch fails with `agent.launch_failed`, which may be retried, and the guard treats the file
     as shared.
-  - *The guard.* While the hook is set and the login is reused, or the last check answered
-    `Shared` or gave no answer, a prompt to that Codex agent whose text starts `/login` is
+  - *The guard.* While the hook is set and the login is reused, or the last check found the
+    file shared or gave no answer (P4d: `shared`, below), a prompt to that Codex agent whose text starts `/login` is
     refused with `signin.login_shared` before anything is queued. `/logout` is refused always,
     as above. The host never calls `login`.
   - *`/login` is hidden too.* The host drops `login`, in any case, from the commands a Codex
@@ -367,6 +367,38 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   retryable and goes just before `unknown`, after `settings.refused`. It refuses a Codex login
   change while Clauseo's Codex home shares the lawyer's ChatGPT login file. The fix is in the
   app ("Stop using it here"), and the words are in `ERROR_WORDS`.
+
+**The host's additions for desktop's leave flow (R20 P4d, the host code owner's approval,
+2026-11-05).** All Rust only.
+
+- *`limits_login_changed(AgentKind) -> Result<(), HostError>`* is `limits`' `Input::LoginChanged`
+  (P2): one read at once, past any age or back-off, and the next scheduled read where it was.
+- *`stop_agents` waits, bounded, and holds.* It now returns `Result<AgentsStopped, HostError>`.
+  It answers `Exited` once every process of the id has ended, and `TimedOut` once its own 10 s
+  wait on the host clock has run out (the shutdown ladder's 7 s and a margin), or when a process
+  outlived its kill. It never hangs. From the call on, the id is held: nothing of it launches,
+  and a prompt that would start at once queues instead, held and marked for the sign-in as
+  P4b's turn put back is (#408's hold), so it is not lost. A launch that still comes (work
+  waiting on a stopped agent) fails with `agent.auth_required`, so its turn goes back held.
+  `restart_agents` lifts the hold and resumes once, through P4b's path. Desktop calls it too
+  when its leave flow is abandoned, so there is no `release_agents`. **The hold lives in memory
+  only:** a host restart clears it. The queue then comes back held as every restored queue does,
+  and waits for the lawyer, not for `restart_agents`.
+- *`set_launch_refused(agent, Option<ErrorCode>) -> Result<(), HostError>`* refuses the id's
+  **new launches only**. The codes come from a list, `signin.policy_unreadable` for now. Any
+  other code is a bug: debug builds assert, and release builds refuse it with `command.invalid`
+  and change nothing. A turn that would launch fails as any refused launch does, an ordinary
+  `TurnFailed` with that code. **Sessions already running go on until they exit,** unless
+  desktop calls `stop_agents`. `None` lifts the refusal. It is in memory only.
+- *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
+  `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
+  file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no
+  hard link) and `Yes` to `shared`. The host asks both at each Codex launch, in the same
+  bounded off-actor call. **`Unknown`, and a call that does not answer in time, count as
+  shared** (fail closed), decided in one place (`login_link::treated_as_shared`). Only the
+  `/login` and `authenticate` guard reads `shared`: the guard refuses `/login`, and the API-key
+  `authenticate` retry is not armed, while the login is reused or `shared` counts as shared.
+  The split check still reads `check` alone.
 
 ## Consequences
 
