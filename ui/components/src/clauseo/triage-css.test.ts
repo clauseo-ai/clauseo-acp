@@ -1,6 +1,6 @@
 // triage.css (U16b), read as text with the rail's other sheets: nothing moves under the pointer or the focus (no rule
 // that applies only then changes a row's box), nothing clips or fades a title at rest, under the pointer or with the
-// focus, the buttons' width is held at all times, the info icon's target is at least 24 px, and Undo is padded so its
+// focus, a conversation's buttons stand over its end on an opaque fill while a shelf or done row holds its one button's width, the info icon's target is at least 24 px, and Undo is padded so its
 // focus ring clears its letters.
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
@@ -49,7 +49,7 @@ test("Undo is padded, so its focus ring clears its letters", () => {
   expect(undo?.decls.get("padding")).toBe("0 var(--s1)");
 });
 
-test("no title is clipped or faded, at rest, under the pointer or with the focus: the buttons' width is held instead", () => {
+test("no title is clipped or faded, at rest, under the pointer or with the focus", () => {
   const clip =
     /mask|overflow\s*:\s*(hidden|clip)|text-overflow|line-clamp|clip-path|white-space\s*:\s*nowrap/;
   const title = /room-conv|room-shelf-row|room-matter-name|room-matter-note|room-one-act/;
@@ -64,13 +64,22 @@ test("no title is clipped or faded, at rest, under the pointer or with the focus
         found.push(`${sheet}: ${(m[1] ?? "").trim()}`);
   }
   expect(found).toEqual([]);
-  // held at all times, for the row's buttons, not only under the pointer
+  // a shelf or done row holds its one button's width at all times, not only under the pointer
   const held = rules().filter((r) =>
     r.decls.get("padding-right")?.includes("--size-control-small"),
   );
-  expect(held.map((r) => r.selector)).toEqual([
-    ".room-conv-item[data-triage] .room-conv",
-    ".room-one-act :is(.room-conv, .room-shelf-row)",
-  ]);
+  expect(held.map((r) => r.selector)).toEqual([".room-one-act :is(.room-conv, .room-shelf-row)"]);
   expect(held.every((r) => !/:hover|:focus/.test(r.selector))).toBe(true);
+});
+
+test("a conversation's title takes the row up to its mark: its buttons stand over the row's end on an opaque fill", () => {
+  // no width held for the buttons on a conversation's row
+  expect(
+    rules().filter((r) => /\.room-conv-item\[data-triage\] \.room-conv\b(?!-)/.test(r.selector)),
+  ).toEqual([]);
+  // the hovered row's tone over the plane it sits on, so no word shows through
+  const fill = rules().find((r) => r.selector === ".room-conv-item[data-triage] .room-conv-acts");
+  expect(fill?.decls.get("background")).toBe(
+    "linear-gradient(var(--hover), var(--hover)), var(--tile-hover)",
+  );
 });

@@ -14,6 +14,7 @@ import { railView } from "./rail-lists.ts";
 import {
   A,
   arm,
+  conversations,
   focusWindow,
   hover,
   needs,
@@ -288,7 +289,7 @@ test("the open conversation's chevron is drawn from the first render, its menu l
   // no pointer, no focus: the chevron already stands, so the title's room never changes under the pointer
   const chevron = actions("List of dates");
   expect(chevron).not.toBeNull();
-  // a row with Snooze holds its buttons' width from the first render, before they mount; the open one, its chevron's
+  // a row with Snooze is marked from the first render, before its buttons mount; the open one draws its chevron
   const bail = [...(rail()?.querySelectorAll(".room-conv-item") ?? [])].find((li) =>
     li.textContent?.includes("Bail conditions"),
   );
@@ -298,6 +299,27 @@ test("the open conversation's chevron is drawn from the first render, its menu l
   expect(chevron?.closest(".room-conv-item")?.querySelector(".room-conv-more")).toBe(chevron);
   await press(chevron);
   expect(menuItems().map((i) => i.textContent)).toEqual(["Snooze", "Mark as done"]);
+});
+
+test("a row's two buttons mount with the focus on it, and Tab reaches them next, Snooze then Mark as done", async () => {
+  await mount({ lists: withA([T_A, T_LIST]) });
+  const row = conversations().find(
+    (c) => c.querySelector(".room-conv-title")?.textContent === "Bail conditions",
+  );
+  await act(async () => row?.focus());
+  await act(async () => settled());
+  const li = row?.closest("li");
+  const snooze = li?.querySelector<HTMLElement>('[data-testid="snooze"]');
+  const done = li?.querySelector<HTMLElement>('[data-testid="mark-done"]');
+  expect(snooze?.getAttribute("aria-label")).toBe("Snooze, Bail conditions");
+  expect(done?.getAttribute("aria-label")).toBe("Mark as done, Bail conditions");
+  // the tab order: every focusable in the rail, in the document's order, none taken out of it
+  const order = [
+    ...(rail()?.querySelectorAll<HTMLElement>("button, [href], [tabindex]") ?? []),
+  ].filter((e) => e.tabIndex >= 0 && !e.hasAttribute("disabled"));
+  const at = order.indexOf(row as HTMLElement);
+  expect(at).toBeGreaterThanOrEqual(0);
+  expect(order.slice(at + 1, at + 3)).toEqual([snooze, done]);
 });
 
 test("the later chunk is warmed once, when the page is idle after the rail mounts", async () => {
