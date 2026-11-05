@@ -1,30 +1,18 @@
-//! Matter SIDs: one random SID per matter, the restricting SID that keeps one matter's agent
-//! out of another's folders (S15, "The token"). Each is `S-1-5-21-<a>-<b>-<c>-<rid>` from the OS's
-//! randomness, made at the matter's first launch and kept in `<data_dir>\sandbox\matters.json`
-//! (matter id to SID). A matter keeps its SID for good: nothing here removes one, and only
-//! `forget_matter` (S15 PR3, S15a) will. A SID is never handed to a second matter.
+//! SIDs as text ([`Sid`]), the matter SID's shape (`S-1-5-21-<a>-<b>-<c>-<rid>`, random), and
+//! the SIDs a matter SID must never be ([`Reserved`]): this machine's real accounts. The matter
+//! SIDs' file is `matters.rs`.
 //!
 //! Built on every OS so its tests run everywhere; only Windows uses it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
-use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
-use super::write;
+#[cfg(windows)]
 use crate::SetupError;
 
-/// The folder under the data folder that holds the sandbox's records.
-pub const SANDBOX_DIR: &str = "sandbox";
-/// The matter SIDs' file, in [`SANDBOX_DIR`].
-pub const MATTERS_FILE: &str = "matters.json";
-/// The version `matters.json` is written at; a file at another version is refused, not
-/// rewritten.
-const MATTERS_VERSION: u32 = 1;
 /// The fewest sub-authorities a SID may have here, and the most (`SID_MAX_SUB_AUTHORITIES`).
 const SUB_AUTHORITIES: std::ops::RangeInclusive<usize> = 1..=15;
 /// The largest identifier authority: 48 bits.
@@ -81,6 +69,14 @@ impl Sid {
             && rid.is_some_and(|rid| rid >= MATTER_RID_MIN)
     }
 
+    /// The account domain of a SID under `S-1-5-21` (a machine's or a domain's): the three
+    /// sub-authorities after `21`, when a relative id follows them or not. `None` for others.
+    pub fn domain(&self) -> Option<[u32; 3]> {
+        let rest = self.0.strip_prefix("S-1-5-21-")?;
+        let mut parts = rest.split('-').map(|part| part.parse::<u32>().ok());
+        Some([parts.next()??, parts.next()??, parts.next()??])
+    }
+
     /// A new matter SID from the OS's randomness: three random sub-authorities after `21`, and a
     /// random relative id of at least 1000.
     pub(crate) fn random_matter() -> io::Result<Sid> {
@@ -125,155 +121,70 @@ impl From<Sid> for String {
     }
 }
 
-/// `matters.json` as it is on disk.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MattersFile {
-    version: u32,
-    matters: BTreeMap<MatterId, Sid>,
+/// The SIDs a matter SID must never be: this machine's real accounts, each named and by its
+/// account domain. A matter SID in the domain of the lawyer's or `ClauseoSandbox`'s account
+/// (`S-1-5-21-<machine>-…`) could equal a real account of the machine, so every such SID is
+/// refused too, as are the accounts themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reserved {
+    sids: BTreeSet<Sid>,
+    domains: BTreeSet<[u32; 3]>,
 }
 
-/// The matter SIDs of one data folder, as `matters.json` held them when loaded.
-#[derive(Debug)]
-pub struct MatterSids {
-    path: PathBuf,
-    sids: BTreeMap<MatterId, Sid>,
-}
+impl Reserved {
+    /// The accounts `sids` and, for each under `S-1-5-21`, its account domain.
+    pub fn new(sids: impl IntoIterator<Item = Sid>) -> Reserved {
+        let sids: BTreeSet<Sid> = sids.into_iter().collect();
+        let domains = sids.iter().filter_map(Sid::domain).collect();
+        Reserved { sids, domains }
+    }
 
-/// One load, change and save of `matters.json` at a time in this process, so two launches can't
-/// each add a matter and lose the other's.
-static MATTERS_LOCK: Mutex<()> = Mutex::new(());
+    /// Whether `sid` may be a matter SID: it is none of the accounts and in none of their
+    /// domains.
+    pub fn admits(&self, sid: &Sid) -> bool {
+        !self.sids.contains(sid)
+            && sid
+                .domain()
+                .is_none_or(|domain| !self.domains.contains(&domain))
+    }
 
-/// The SID of `matter` in `data_dir`'s `matters.json`, made and saved first if the matter has
-/// none. Loads, adds and saves under one process-wide lock.
-pub fn matter_sid(data_dir: &Path, matter: &MatterId) -> Result<Sid, SetupError> {
-    let _held = MATTERS_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    MatterSids::load(data_dir)?.sid_for(matter)
-}
-
-impl MatterSids {
-    /// Loads `<data_dir>\sandbox\matters.json`; no file is no matters. A file that can't be read
-    /// or parsed, is at another version, holds a SID not of the matter form or holds one SID
-    /// twice is an error, and is left as it is: rewriting it would lose matters' SIDs, and with
-    /// them the way to remove their permission entries.
-    pub fn load(data_dir: &Path) -> Result<MatterSids, SetupError> {
-        let path = data_dir.join(SANDBOX_DIR).join(MATTERS_FILE);
-        let failed = |why: String| SetupError::Failed(format!("{}: {why}", path.display()));
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(MatterSids {
-                    path,
-                    sids: BTreeMap::new(),
-                });
-            }
-            Err(error) => return Err(failed(error.to_string())),
-        };
-        let file: MattersFile =
-            serde_json::from_slice(&bytes).map_err(|error| failed(error.to_string()))?;
-        if file.version != MATTERS_VERSION {
-            return Err(failed(format!(
-                "version {}, not {MATTERS_VERSION}",
-                file.version
-            )));
+    /// This machine's reservations: this process's user, and `ClauseoSandbox` when the
+    /// machine's `UserSid` record names it. A read that fails, or a record that is not a SID,
+    /// is an error: matter SIDs are not checked against a guess.
+    #[cfg(windows)]
+    pub fn of_this_machine() -> Result<Reserved, SetupError> {
+        let failed = |why: String| SetupError::Failed(format!("this machine's accounts: {why}"));
+        let mut sids = vec![super::record::current_user_sid().map_err(|e| failed(e.to_string()))?];
+        if let Some(text) = super::record::sandbox_user_sid().map_err(|e| failed(e.to_string()))? {
+            sids.push(Sid::parse(&text).map_err(|e| failed(e.to_string()))?);
         }
-        let mut seen = BTreeSet::new();
-        for (matter, sid) in &file.matters {
-            if !sid.is_matter_form() {
-                return Err(failed(format!("{matter}'s SID {sid} is not a matter SID")));
-            }
-            if !seen.insert(sid) {
-                return Err(failed(format!("{sid} is held by two matters")));
-            }
-        }
-        Ok(MatterSids {
-            path,
-            sids: file.matters,
-        })
-    }
-
-    /// The SID `matter` has, if any.
-    pub fn get(&self, matter: &MatterId) -> Option<&Sid> {
-        self.sids.get(matter)
-    }
-
-    /// How many matters have a SID.
-    pub fn len(&self) -> usize {
-        self.sids.len()
-    }
-
-    /// Whether no matter has a SID.
-    pub fn is_empty(&self) -> bool {
-        self.sids.is_empty()
-    }
-
-    /// The SID of `matter`. A matter without one gets a new random SID that no matter in the
-    /// file holds, and the file is saved with it before it is returned; if the save fails, the
-    /// matter has no SID and `self` is unchanged.
-    pub fn sid_for(&mut self, matter: &MatterId) -> Result<Sid, SetupError> {
-        if let Some(sid) = self.sids.get(matter) {
-            return Ok(sid.clone());
-        }
-        let failed = |why: io::Error| SetupError::Failed(format!("matter SID: {why}"));
-        let sid = loop {
-            let sid = Sid::random_matter().map_err(failed)?;
-            if !self.sids.values().any(|held| *held == sid) {
-                break sid;
-            }
-        };
-        let mut sids = self.sids.clone();
-        sids.insert(*matter, sid.clone());
-        self.save(&sids)?;
-        self.sids = sids;
-        Ok(sid)
-    }
-
-    /// Writes `sids` to the file atomically, making the sandbox folder if missing.
-    fn save(&self, sids: &BTreeMap<MatterId, Sid>) -> Result<(), SetupError> {
-        let failed = |why: String| SetupError::Failed(format!("{}: {why}", self.path.display()));
-        let file = MattersFile {
-            version: MATTERS_VERSION,
-            matters: sids.clone(),
-        };
-        let mut bytes =
-            serde_json::to_vec_pretty(&file).map_err(|error| failed(error.to_string()))?;
-        bytes.push(b'\n');
-        if let Some(folder) = self.path.parent() {
-            write::make_dirs(folder).map_err(|error| failed(error.to_string()))?;
-        }
-        write::write_atomic(&self.path, &bytes).map_err(|error| failed(error.to_string()))
+        Ok(Reserved::new(sids))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TempDir;
 
-    /// A fresh matter id: a v7 UUID from random bytes, enough for distinct test matters.
-    fn matter() -> MatterId {
-        let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes).unwrap();
-        bytes[6] = (bytes[6] & 0x0f) | 0x70;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let hex = |range: std::ops::Range<usize>| -> String {
-            bytes[range]
-                .iter()
-                .flat_map(|byte| [byte >> 4, byte & 0xf])
-                .map(|nibble| char::from_digit(u32::from(nibble), 16).unwrap())
-                .collect()
-        };
-        let text = format!(
-            "{}-{}-{}-{}-{}",
-            hex(0..4),
-            hex(4..6),
-            hex(6..8),
-            hex(8..10),
-            hex(10..16)
-        );
-        text.parse().unwrap()
+    #[test]
+    fn the_account_domain_is_the_three_parts_after_21() {
+        let domain = |text: &str| Sid::parse(text).unwrap().domain();
+        assert_eq!(domain("S-1-5-21-7-8-9-1001"), Some([7, 8, 9]));
+        assert_eq!(domain("S-1-5-21-7-8-9"), Some([7, 8, 9]));
+        assert_eq!(domain("S-1-5-21-7-8"), None);
+        assert_eq!(domain("S-1-5-32-544"), None);
+        assert_eq!(domain("S-1-5-18"), None);
+    }
+
+    #[test]
+    fn reserved_refuses_the_accounts_and_their_domains() {
+        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
+        let reserved = Reserved::new([lawyer.clone()]);
+        assert!(!reserved.admits(&lawyer));
+        assert!(!reserved.admits(&Sid::parse("S-1-5-21-7-8-9-1003").unwrap()));
+        assert!(!reserved.admits(&Sid::parse("S-1-5-21-7-8-9-600177987").unwrap()));
+        assert!(reserved.admits(&Sid::parse("S-1-5-21-7-8-10-1001").unwrap()));
+        assert!(Reserved::default().admits(&lawyer));
     }
 
     #[test]
@@ -336,63 +247,5 @@ mod tests {
                 .is_matter_form()
         );
         assert!(!Sid::parse("S-1-16-21-1-2-3-1000").unwrap().is_matter_form());
-    }
-
-    #[test]
-    fn two_matters_get_different_sids_and_keep_them_across_reloads() {
-        let temp = TempDir::new("matter-sids");
-        let (a, b) = (matter(), matter());
-        let sid_a = matter_sid(temp.path(), &a).unwrap();
-        let sid_b = matter_sid(temp.path(), &b).unwrap();
-        assert_ne!(sid_a, sid_b);
-        assert_eq!(matter_sid(temp.path(), &a).unwrap(), sid_a);
-        let loaded = MatterSids::load(temp.path()).unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded.get(&a), Some(&sid_a));
-        assert_eq!(loaded.get(&b), Some(&sid_b));
-    }
-
-    #[test]
-    fn the_file_is_replaced_whole_and_reloads() {
-        let temp = TempDir::new("matter-sids-file");
-        let a = matter();
-        let mut sids = MatterSids::load(temp.path()).unwrap();
-        assert!(sids.is_empty());
-        let sid = sids.sid_for(&a).unwrap();
-        let folder = temp.path().join(SANDBOX_DIR);
-        let text = std::fs::read_to_string(folder.join(MATTERS_FILE)).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(json["version"], 1);
-        assert_eq!(json["matters"][a.to_string()], sid.as_str());
-        let names: Vec<String> = std::fs::read_dir(&folder)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(names, [MATTERS_FILE], "no temporary file is left");
-        let b = matter();
-        let sid_b = sids.sid_for(&b).unwrap();
-        let again = MatterSids::load(temp.path()).unwrap();
-        assert_eq!((again.get(&a), again.get(&b)), (Some(&sid), Some(&sid_b)));
-    }
-
-    #[test]
-    fn a_bad_file_is_refused_and_left_as_it_is() {
-        let temp = TempDir::new("matter-sids-bad");
-        let a = matter().to_string();
-        let b = matter().to_string();
-        let sid = "S-1-5-21-1-2-3-1000";
-        for bad in [
-            "not json".to_owned(),
-            r#"{"version":2,"matters":{}}"#.to_owned(),
-            format!(r#"{{"version":1,"matters":{{"{a}":"S-1-5-32-544"}}}}"#),
-            format!(r#"{{"version":1,"matters":{{"{a}":"{sid}","{b}":"{sid}"}}}}"#),
-            format!(r#"{{"version":1,"matters":{{"not-a-matter":"{sid}"}}}}"#),
-            r#"{"version":1,"matters":{},"extra":1}"#.to_owned(),
-        ] {
-            let path = temp.file(&format!("{SANDBOX_DIR}/{MATTERS_FILE}"), &bad);
-            assert!(MatterSids::load(temp.path()).is_err(), "{bad}");
-            assert!(matter_sid(temp.path(), &matter()).is_err(), "{bad}");
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), bad);
-        }
     }
 }

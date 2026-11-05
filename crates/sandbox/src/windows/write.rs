@@ -1,19 +1,40 @@
 //! The Windows sandbox's record files (`<data_dir>\sandbox\matters.json`, `setup.json`): the
-//! folder they live in and their atomic replacement. The one place those modules change files;
-//! workspace `clippy.toml` bans each call, and the expect below covers only this file.
+//! folder they live in, its lock file, and their atomic replacement. The one place those modules
+//! change files; workspace `clippy.toml` bans each call, and the expect below covers only this
+//! file.
 
 #![expect(
     clippy::disallowed_methods,
     reason = "the sandbox's record files, outside the jail, are written here alone"
 )]
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::Path;
 
-/// Makes the folder `path` and every missing parent; a folder already there is fine.
-pub(crate) fn make_dirs(path: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(path)
+/// Makes the sandbox folder `path` and every missing parent; a folder already there is fine. On
+/// Windows it then gets its protected DACL (`private_dir::protect`: the desktop user, `SYSTEM`
+/// and `Administrators` with full access, nothing inherited), set again on every call, so a
+/// folder whose DACL changed gets it back.
+pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(windows)]
+    super::private_dir::protect(path)?;
+    Ok(())
+}
+
+/// Opens the lock file `path` (made if missing, never truncated) and takes its exclusive OS
+/// lock (`LockFileEx` on Windows, `flock` elsewhere), waiting for any other holder, in this
+/// process or another. Dropping the file releases the lock.
+pub(crate) fn lock_exclusive(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.lock()?;
+    Ok(file)
 }
 
 /// Replaces the file `path` with `bytes` in one step: the bytes go to a new file beside it

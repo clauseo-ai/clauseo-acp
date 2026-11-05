@@ -3,9 +3,10 @@
 //! writes nothing and takes no lock, and it answers for the calling process's own token, which
 //! the agent inherits.
 //!
-//! Tier B's records (S15): each matter's SID in `<data_dir>\sandbox\matters.json` ([`sids`]),
-//! the set-up marker `setup.json` ([`marker`]), the machine's sandbox user record
-//! ([`sandbox_user_sid`]), and the set-up state they give ([`setup_state`]).
+//! Tier B's records (S15), in `<data_dir>\sandbox\` under a protected DACL: each matter's SID in
+//! `matters.json` ([`matters`], [`sids`]) and the set-up marker `setup.json` ([`marker`]); the
+//! machine's sandbox user and owner records ([`sandbox_user_sid`], [`sandbox_owner_sid`]); and
+//! the set-up state they give ([`setup_state`]).
 #![expect(
     unsafe_code,
     reason = "FFI to the Win32 file, volume and security calls"
@@ -398,6 +399,8 @@ fn os_error(error: &windows::core::Error) -> io::Error {
 
 mod detect;
 pub mod marker;
+pub mod matters;
+mod private_dir;
 mod record;
 pub mod sids;
 #[cfg(any(test, feature = "test-support"))]
@@ -406,6 +409,6 @@ mod write;
 
 pub(crate) use detect::os_facts;
 pub use marker::setup_state;
-pub use record::{RecordError, sandbox_user_sid};
+pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
 #[cfg(test)]
 mod tests;

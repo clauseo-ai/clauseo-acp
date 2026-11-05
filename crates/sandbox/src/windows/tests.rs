@@ -229,3 +229,138 @@ fn a_data_folder_without_a_marker_needs_set_up() {
     let temp = TempDir::new("setup-state");
     assert_eq!(super::setup_state(temp.path()), crate::SetupState::Needed);
 }
+
+// The review's fixes: machine accounts never load as matter SIDs, and the sandbox folder's
+// protected DACL.
+
+/// A fixed matter id (a v7 UUID).
+const MATTER_A: &str = "0190f5c8-7b1a-7c3d-8e4f-0123456789ab";
+
+/// `matters.json` under `temp` mapping `MATTER_A` to `sid`.
+fn matters_with(temp: &TempDir, sid: &str) {
+    temp.file(
+        "sandbox/matters.json",
+        &format!(r#"{{"version":1,"matters":{{"{MATTER_A}":"{sid}"}}}}"#),
+    );
+}
+
+#[test]
+fn machine_accounts_never_load_as_matter_sids() {
+    use super::matters::MatterSids;
+    use super::sids::{Reserved, Sid};
+
+    let temp = TempDir::new("matter-sids-accounts");
+    let user = super::record::current_user_sid().unwrap();
+    matters_with(&temp, user.as_str());
+    assert!(MatterSids::load(temp.path()).is_err(), "{user}");
+    if let Some(record) = super::sandbox_user_sid().unwrap() {
+        // A machine that was set up: the real record.
+        matters_with(&temp, &record);
+        assert!(MatterSids::load(temp.path()).is_err(), "{record}");
+    } else {
+        // A CI runner has no record: the same reservation, given by hand.
+        let sandbox = Sid::parse("S-1-5-21-11-22-33-1005").unwrap();
+        matters_with(&temp, sandbox.as_str());
+        let reserved = Reserved::new([user.clone(), sandbox]);
+        assert!(MatterSids::load_with(temp.path(), reserved).is_err());
+    }
+    // New matter SIDs stay out of this user's domain.
+    let fresh = TempDir::new("matter-sids-fresh");
+    let mut sids = MatterSids::load(fresh.path()).unwrap();
+    let matter: clauseo_protocol::MatterId = MATTER_A.parse().unwrap();
+    let sid = sids.sid_for(&matter).unwrap();
+    assert!(
+        user.domain().is_none() || sid.domain() != user.domain(),
+        "{sid}"
+    );
+}
+
+/// The SDDL of `path`'s DACL.
+fn dacl_sddl(path: &Path) -> String {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows::Win32::Foundation::{ERROR_SUCCESS, HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::core::{PCWSTR, PWSTR};
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `wide` is NUL-terminated; `descriptor` is a live out-pointer, freed below.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            PCWSTR(wide.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &raw mut descriptor,
+        )
+    };
+    assert_eq!(status, ERROR_SUCCESS);
+    let mut text = PWSTR::null();
+    // SAFETY: the descriptor is valid; `text` is a live out-pointer, freed below.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+    }
+    .unwrap();
+    // SAFETY: a NUL-terminated string from the call above.
+    let sddl = unsafe { text.to_string() }.unwrap();
+    // SAFETY: both were allocated with LocalAlloc and are freed once.
+    unsafe {
+        LocalFree(Some(HLOCAL(text.0.cast())));
+        LocalFree(Some(HLOCAL(descriptor.0)));
+    }
+    sddl
+}
+
+/// Asserts `path`'s DACL is protected and holds exactly three entries: full access for the
+/// user, `SYSTEM` and `Administrators`.
+fn assert_private(path: &Path) {
+    let user = super::record::current_user_sid().unwrap();
+    let sddl = dacl_sddl(path);
+    assert!(sddl.starts_with("D:P"), "{sddl}");
+    let mut trustees: Vec<String> = sddl
+        .split('(')
+        .skip(1)
+        .map(|ace| {
+            let fields: Vec<&str> = ace.trim_end_matches(')').split(';').collect();
+            assert_eq!(fields.len(), 6, "{sddl}");
+            assert_eq!((fields[0], fields[2]), ("A", "FA"), "{sddl}");
+            fields[5].to_owned()
+        })
+        .collect();
+    trustees.sort();
+    // The local Administrator account (RID 500) prints as the alias LA.
+    let me = if user.as_str().ends_with("-500") {
+        "LA".to_owned()
+    } else {
+        user.as_str().to_owned()
+    };
+    let mut expected = vec![me, "BA".to_owned(), "SY".to_owned()];
+    expected.sort();
+    assert_eq!(trustees, expected, "{sddl}");
+}
+
+#[test]
+fn the_sandbox_folder_gets_a_protected_private_dacl_again_and_again() {
+    let temp = TempDir::new("sandbox-dacl");
+    let folder = temp.path().join("sandbox");
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_private(&folder);
+    // A DACL changed behind the folder's back is put back at the next make.
+    test_dacl::protect_with(&folder, "D:P(A;OICI;FA;;;WD)").unwrap();
+    super::write::make_sandbox_dir(&folder).unwrap();
+    assert_private(&folder);
+}
