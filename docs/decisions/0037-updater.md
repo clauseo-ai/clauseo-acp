@@ -229,6 +229,10 @@ call before `install` stays a no-op seam until S22 merges.
 - **The jitter seed** comes from the clock at start; `HostConfig::with_update_jitter_seed` fixes
   it for tests, and `with_app_version` gives the app's version (desktop passes its own).
 - **`UpdateChanged`** is not among the app feed's first frames: a window asks `GetUpdate`.
+- **Counts.** `managed` counts once a day across starts: the actor skips it when the open day's
+  counts already hold it, with nothing new saved. A background `failed` counts once a day per run
+  (the machine's rule), since it shares its key with the failures the lawyer asked for, which
+  always count, as does a failed install.
 - **Logs** name a failed step's stage and kind (`network`, `signature`, `io`, `other`), never its
   text, which may hold a path or a URL (0047).
 
