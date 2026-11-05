@@ -25,9 +25,9 @@ use windows::Win32::Security::Authorization::{
     ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
 };
 use windows::Win32::Security::{
-    ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, InitializeAcl,
-    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
@@ -51,6 +51,12 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// for `user`, `SYSTEM` and `Administrators`; `P` protects it from the parent's entries.
 pub(crate) fn sddl(user: &str) -> String {
     format!("D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+}
+
+/// A record file's DACL: the folder's three entries, written on the file itself and protected,
+/// so it never depends on what the file would inherit.
+pub(crate) fn file_sddl(user: &str) -> String {
+    format!("D:P(A;;FA;;;{user})(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
 /// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`.
@@ -105,7 +111,8 @@ pub(crate) fn protect(path: &Path) -> io::Result<()> {
 
 /// Checks the record file `path` through one handle: missing is fine; refused if it is a link,
 /// not a file, or has another hard link; taken back for the user when another account owns it,
-/// or refused naming the owner; then reset to only the entries it inherits from the folder.
+/// or refused naming the owner; then given [`file_sddl`]'s protected DACL, the folder's three
+/// entries written explicitly.
 pub(crate) fn check_file(path: &Path) -> io::Result<()> {
     let user = current_user_sid()?;
     let handle = match Handle::open(path) {
@@ -114,17 +121,15 @@ pub(crate) fn check_file(path: &Path) -> io::Result<()> {
         Err(error) => return Err(error),
     };
     let handle = repair(path, handle, &user, false)?;
-    let mut empty = ACL::default();
-    let size = u32::try_from(size_of::<ACL>()).map_err(io::Error::other)?;
-    // SAFETY: `empty` is live, writable and `size` bytes long.
-    unsafe { InitializeAcl(&raw mut empty, size, ACL_REVISION) }.map_err(|e| os_error(&e))?;
+    let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
+    let dacl = descriptor.dacl()?;
     handle
         .set(
-            DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             None,
-            Some(&raw const empty),
+            Some(dacl),
         )
-        .map_err(|error| named(path, "its entries can't be reset", &error))
+        .map_err(|error| named(path, "its DACL can't be set", &error))
 }
 
 #[cfg(test)]

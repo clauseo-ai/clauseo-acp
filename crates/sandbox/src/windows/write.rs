@@ -51,7 +51,7 @@ pub(crate) struct Found {
 
 /// What the repair does with what it [`Found`]: refuse (why), or take ownership back for the
 /// user first (`Ok(true)`) or not (`Ok(false)`), then set the DACL (the folder's protected
-/// one, or a file's inherited-only one). Fails closed: a link, the wrong kind or a second hard
+/// one, or the same entries on a file). Fails closed: a link, the wrong kind or a second hard
 /// link (which would carry the DACL change to a file elsewhere) is refused.
 pub(crate) fn repair_plan(found: Found) -> Result<bool, String> {
     if found.reparse {
@@ -66,13 +66,14 @@ pub(crate) fn repair_plan(found: Found) -> Result<bool, String> {
     Ok(!found.owner_allowed)
 }
 
-/// Checks a file this crate keeps in the sandbox folder (`matters.json`, `matters.lock`, the
-/// ACE ledger and its lock), before reading or writing it and under its lock where it has one.
-/// A missing file is fine. On Windows the file is opened without following a link and, through
-/// that handle, refused when [`repair_plan`] refuses, taken back for the user when another
-/// account owns it (or refused when it can't be), and reset to the entries it inherits from the
-/// folder (`private_dir::check_file`). Elsewhere, where only tests use it, a link or a second
-/// hard link is refused.
+/// Checks a file this crate keeps in the sandbox folder (`matters.json`, `matters.lock`,
+/// `setup.json`, the ACE ledger and its lock), before reading or writing it, under its lock
+/// where it has one, and again after a save puts a new file in place. A missing file is fine.
+/// On Windows the file is opened without following a link and, through that handle, refused
+/// when [`repair_plan`] refuses, taken back for the user when another account owns it (or
+/// refused when it can't be), and given the folder's three entries as its own protected DACL
+/// (`private_dir::check_file`). Elsewhere, where only tests use it, a link or a second hard
+/// link is refused.
 pub(crate) fn check_owned_file(path: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
