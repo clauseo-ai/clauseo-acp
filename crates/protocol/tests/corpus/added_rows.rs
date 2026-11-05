@@ -380,4 +380,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (420, 0xe149_b057_59e7_94bb),
         (329, 0x7499_ef70_034e_c238),
     ),
+    (
+        "added/turn_failed-SigninAgentsStillRunning",
+        include_bytes!("added/turn_failed-SigninAgentsStillRunning.jsonl"),
+        include_bytes!("added/turn_failed-SigninAgentsStillRunning.msgpack"),
+        (372, 0xcba4_8eb3_1328_8783),
+        (274, 0xa9ed_b98d_d126_c303),
+    ),
 ];
