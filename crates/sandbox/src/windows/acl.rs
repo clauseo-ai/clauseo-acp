@@ -29,6 +29,7 @@ use windows::Win32::Security::{
     OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
     TOKEN_QUERY,
 };
+use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
@@ -38,6 +39,7 @@ use super::acl_bytes::{
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
+use super::ledger::RecordedFile;
 use super::record::current_user_sid;
 use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
@@ -91,53 +93,50 @@ impl AclWriter for NtfsAcl {
     }
 
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
-        let io = |e: io::Error| ApplyFailure::Io(e.kind());
-        let Some(target) = open_planned(grant.path())? else {
-            return Ok(());
-        };
-        let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
-        let current = target.security(READ_ALL).map_err(io)?;
-        let now = Descriptor::parse(&current).map_err(io)?;
-        if grant.rights().is_label() {
-            let Some(sacl) = now.sacl else { return Ok(()) };
-            let Some(kept) = Acl::parse(sacl).map_err(io)?.without(&spec) else {
-                return Ok(());
-            };
-            let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
-            let written = build_descriptor(bits, None, Some(&kept));
-            target
-                .set(LABEL_SECURITY_INFORMATION, &written)
-                .map_err(io)?;
-        } else {
-            let Some(dacl) = now.dacl else { return Ok(()) };
-            let Some(kept) = Acl::parse(dacl).map_err(io)?.without(&spec) else {
-                return Ok(());
-            };
-            let bits = root_bits(now.control);
-            let written = build_descriptor(bits, Some(&kept), None);
-            target.set(dacl_info(now.control), &written).map_err(io)?;
+        match open_planned(grant.path())? {
+            Some(target) => remove_on(&target, grant),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// A target that is a link now, or whose final path isn't the planned one, is an error, so
     /// reconcile keeps its entry pending rather than judge it by another object.
     fn present(&mut self, grant: &Grant) -> io::Result<bool> {
-        let Some(target) = open_planned(grant.path())? else {
-            return Ok(false);
-        };
-        let spec = AceSpec::for_grant(grant, target.folder)?;
-        let current = target.security(READ_ALL)?;
-        let now = Descriptor::parse(&current)?;
-        let acl = if grant.rights().is_label() {
-            now.sacl
+        match open_planned(grant.path())? {
+            Some(target) => present_on(&target, grant),
+            None => Ok(false),
+        }
+    }
+
+    /// Opened for `WRITE_DAC` to remove an allow or deny, `WRITE_OWNER` to remove or put back
+    /// a label: no more than the removal needs.
+    fn remove_recorded(
+        &mut self,
+        file: &RecordedFile,
+        grant: &Grant,
+        prior: Option<Label>,
+    ) -> Result<(), ApplyFailure> {
+        let rights = if grant.rights().is_label() {
+            WRITE_OWNER.0
         } else {
-            now.dacl
+            WRITE_DAC.0
         };
-        Ok(acl
-            .map(Acl::parse)
-            .transpose()?
-            .is_some_and(|acl| acl.has(&spec)))
+        let opened = Object::open_by_id(&file.path, file.id, rights);
+        let Some(target) = opened.map_err(|e| ApplyFailure::Io(e.kind()))? else {
+            return Ok(());
+        };
+        remove_on(&target, grant)?;
+        match prior {
+            Some(label) => restore_on(&target, grant, label),
+            None => Ok(()),
+        }
+    }
+
+    fn present_recorded(&mut self, file: &RecordedFile, grant: &Grant) -> io::Result<bool> {
+        match Object::open_by_id(&file.path, file.id, 0)? {
+            Some(target) => present_on(&target, grant),
+            None => Ok(false),
+        }
     }
 
     fn propagate(
@@ -214,33 +213,83 @@ impl AclWriter for NtfsAcl {
     }
 
     fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure> {
-        let io = |e: io::Error| ApplyFailure::Io(e.kind());
-        let Some(target) = open_planned(grant.path())? else {
+        match open_planned(grant.path())? {
+            Some(target) => restore_on(&target, grant, label),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Removes `grant`'s explicit entry from `target`; one already gone is `Ok`.
+fn remove_on(target: &Object, grant: &Grant) -> Result<(), ApplyFailure> {
+    let io = |e: io::Error| ApplyFailure::Io(e.kind());
+    let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
+    let current = target.security(READ_ALL).map_err(io)?;
+    let now = Descriptor::parse(&current).map_err(io)?;
+    if grant.rights().is_label() {
+        let Some(sacl) = now.sacl else { return Ok(()) };
+        let Some(kept) = Acl::parse(sacl).map_err(io)?.without(&spec) else {
             return Ok(());
         };
-        let ours = AceSpec::for_grant(grant, target.folder).map_err(io)?;
-        let current = target.security(READ_ALL).map_err(io)?;
-        let now = Descriptor::parse(&current).map_err(io)?;
-        let empty = empty_acl();
-        let sacl = Acl::parse(now.sacl.unwrap_or(&empty)).map_err(io)?;
-        // Another explicit label than ours is there: someone set it since; it stays.
-        if let Some(there) = explicit_label(&sacl)
-            && !sacl.has(&ours)
-            && there != label
-        {
-            return Ok(());
-        }
-        let theirs = label_spec(label);
-        if sacl.has(&theirs) {
-            return Ok(());
-        }
-        if !target.write_owner {
-            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
-        }
         let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
-        let written = build_descriptor(bits, None, Some(&sacl.with(&theirs)));
-        target.set(LABEL_SECURITY_INFORMATION, &written).map_err(io)
+        let written = build_descriptor(bits, None, Some(&kept));
+        target
+            .set(LABEL_SECURITY_INFORMATION, &written)
+            .map_err(io)?;
+    } else {
+        let Some(dacl) = now.dacl else { return Ok(()) };
+        let Some(kept) = Acl::parse(dacl).map_err(io)?.without(&spec) else {
+            return Ok(());
+        };
+        let bits = root_bits(now.control);
+        let written = build_descriptor(bits, Some(&kept), None);
+        target.set(dacl_info(now.control), &written).map_err(io)?;
     }
+    Ok(())
+}
+
+/// Whether `grant`'s explicit entry is on `target`.
+fn present_on(target: &Object, grant: &Grant) -> io::Result<bool> {
+    let spec = AceSpec::for_grant(grant, target.folder)?;
+    let current = target.security(READ_ALL)?;
+    let now = Descriptor::parse(&current)?;
+    let acl = if grant.rights().is_label() {
+        now.sacl
+    } else {
+        now.dacl
+    };
+    Ok(acl
+        .map(Acl::parse)
+        .transpose()?
+        .is_some_and(|acl| acl.has(&spec)))
+}
+
+/// Puts `label` back as the explicit label on `target` for label grant `grant`, as
+/// [`AclWriter::restore_label`] does.
+fn restore_on(target: &Object, grant: &Grant, label: Label) -> Result<(), ApplyFailure> {
+    let io = |e: io::Error| ApplyFailure::Io(e.kind());
+    let ours = AceSpec::for_grant(grant, target.folder).map_err(io)?;
+    let current = target.security(READ_ALL).map_err(io)?;
+    let now = Descriptor::parse(&current).map_err(io)?;
+    let empty = empty_acl();
+    let sacl = Acl::parse(now.sacl.unwrap_or(&empty)).map_err(io)?;
+    // Another explicit label than ours is there: someone set it since; it stays.
+    if let Some(there) = explicit_label(&sacl)
+        && !sacl.has(&ours)
+        && there != label
+    {
+        return Ok(());
+    }
+    let theirs = label_spec(label);
+    if sacl.has(&theirs) {
+        return Ok(());
+    }
+    if !target.write_owner {
+        return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+    }
+    let bits = now.control & (SACL_PROTECTED | SACL_AUTO_INHERITED);
+    let written = build_descriptor(bits, None, Some(&sacl.with(&theirs)));
+    target.set(LABEL_SECURITY_INFORMATION, &written).map_err(io)
 }
 
 /// The descriptor of `path` (owner, group, DACL and label), for the tests.

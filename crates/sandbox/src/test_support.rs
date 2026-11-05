@@ -83,7 +83,6 @@ pub(crate) fn set_mode(path: &Path, mode: u32) {
 }
 
 /// Removes the file at `path`.
-#[cfg(unix)]
 pub(crate) fn remove(path: &Path) {
     std::fs::remove_file(path).unwrap();
 }

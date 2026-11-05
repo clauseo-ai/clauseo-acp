@@ -2,11 +2,14 @@
 //! link's entries taken back from the credentials file it recorded (row 5, L5).
 
 use super::*;
-use crate::windows::writer::FileId;
 
 /// A launch of matter one whose credential link is a second name for `elsewhere/auth.json`;
 /// returns the credentials file and the number of the link's entries.
-fn launch_through_link(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl) -> (PathBuf, usize) {
+pub(super) fn launch_through_link(
+    w: &World,
+    ledger: &mut Ledger,
+    acl: &mut FakeAcl,
+) -> (PathBuf, usize) {
     w.dir.file("elsewhere/auth.json", "{}");
     w.dir.file("elsewhere/other.json", "{}");
     let auth = w.canonical("elsewhere/auth.json");
@@ -22,7 +25,7 @@ fn launch_through_link(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl) -> (Pa
 }
 
 /// How many permission entries `file` holds.
-fn on_file(acl: &FakeAcl, file: &Path) -> usize {
+pub(super) fn on_file(acl: &FakeAcl, file: &Path) -> usize {
     acl.aces.iter().filter(|(p, _, _, _)| p == file).count()
 }
 
@@ -46,41 +49,16 @@ fn forget_takes_the_links_entries_off_the_credentials_file_after_the_link_is_swa
     assert_eq!(ledger.entries().count(), 0);
 }
 
-/// Round 4, row 5 (L5): another file at the credentials file's recorded path (its ID differs)
-/// is never written: the link's entries stay, not applied, and forget reports them kept.
-#[test]
-fn another_file_at_the_credentials_path_keeps_the_links_entries_and_reports_them() {
-    let w = world("r4-l5-mismatch", &[]);
-    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
-    let (auth, entries) = launch_through_link(&w, &mut ledger, &mut acl);
-    let stranger = FileId {
-        volume: 1,
-        id: [7; 16],
-    };
-    acl.ids.insert(auth.clone(), stranger);
-    let done = forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
-    assert_eq!(done.kept, entries, "{done:?}");
-    assert_eq!(
-        on_file(&acl, &auth),
-        entries,
-        "nothing written on another file"
-    );
-    let left: Vec<_> = ledger.entries().collect();
-    assert_eq!(left.len(), entries, "{left:?}");
-    assert!(
-        left.iter()
-            .all(|e| e.kind == PathKind::CredentialLink && e.state != EntryState::Applied)
-    );
-}
-
-/// Round 4, row 5 (L5): a credentials file that is gone took the link's entries with it, so
-/// forget drops them, as it does an entry whose path is missing.
+/// Round 4, row 5 (L5): a credentials file that is gone under every name took the link's
+/// entries with it, so forget drops them, as it does an entry whose path is missing. Since
+/// round 5 it is looked for by its ID, which no file has any more.
 #[test]
 fn a_credentials_file_that_is_gone_lets_forget_drop_the_links_entries() {
     let w = world("r4-l5-gone", &[]);
     let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
     let (auth, _) = launch_through_link(&w, &mut ledger, &mut acl);
-    acl.gone.insert(auth);
+    acl.gone.insert(auth.clone());
+    acl.vanished.insert(auth);
     let done = forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     assert_eq!(done.kept, 0, "{done:?}");
     assert_eq!(ledger.entries().count(), 0);

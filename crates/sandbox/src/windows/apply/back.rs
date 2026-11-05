@@ -21,7 +21,7 @@ use clauseo_protocol::MatterId;
 use super::walk::{OWN_KINDS, Refused, clearing, reach_of};
 use super::{Run, Surroundings, refused};
 use crate::Error;
-use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Sid, in_folder};
+use crate::windows::acl_plan::{AdmittedPlan, Inherit, Sid, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{
     Entry, EntryId, EntryState, Forgotten, Ledger, Reconciled, Shares, Take, TakenBack,
@@ -29,12 +29,16 @@ use crate::windows::ledger::{
 use crate::windows::writer::{AclWriter, ApplyFailure, Reach};
 
 /// Removes `entry`'s permission entry, and puts back the explicit label its path had before
-/// ours (L4). A credential link's entry is removed from the credentials file it recorded
-/// ([`on_file`]).
+/// ours (L4). An entry that recorded the file it was written on (a credential link's, round 4,
+/// L5) is removed from that file by its ID ([`AclWriter::remove_recorded`]), wherever the file
+/// is now: never through the link, which may name another file by now, nor through the
+/// recorded path, which may hold another file. A file no longer there took its entries with
+/// it (S15 `PR3b` round 5).
 pub(super) fn remove_entry(acl: &mut dyn AclWriter, entry: &Entry) -> io::Result<()> {
-    let Some(grant) = on_file(acl, entry)? else {
-        return Ok(());
-    };
+    let grant = entry.grant();
+    if let Some(file) = &entry.file {
+        return Ok(acl.remove_recorded(file, &grant, entry.prior_label)?);
+    }
     acl.remove(&grant)?;
     if let Some(label) = entry.prior_label {
         acl.restore_label(&grant, label)?;
@@ -42,34 +46,12 @@ pub(super) fn remove_entry(acl: &mut dyn AclWriter, entry: &Entry) -> io::Result
     Ok(())
 }
 
-/// The grant through which `entry`'s permission entry is taken back or checked: its own, or,
-/// for an entry that recorded the file it was written on (a credential link's, round 4, L5),
-/// the same grant on that file's recorded path, once the file there, opened as itself, has the
-/// recorded file ID. Never through the link, which may name another file by now. `None` when
-/// nothing is at that path: a file that is gone took its entries with it, as a missing path
-/// does for [`AclWriter::remove`]. Another file there is [`ApplyFailure::Changed`]: the entry
-/// stays for the lawyer to see. The recorded path is outside the state folder (N8), out of the
-/// agent's reach, so it can't swap the file between the check and the write.
-fn on_file(acl: &mut dyn AclWriter, entry: &Entry) -> io::Result<Option<Grant>> {
-    let grant = entry.grant();
-    let Some(file) = &entry.file else {
-        return Ok(Some(grant));
-    };
-    match acl.file_id(&file.path)? {
-        None => Ok(None),
-        Some(id) if id == file.id => Ok(Some(Grant {
-            path: file.path.clone(),
-            ..grant
-        })),
-        Some(_) => Err(ApplyFailure::Changed.into()),
-    }
-}
-
-/// Whether `entry`'s permission entry is there, on the file [`on_file`] finds.
+/// Whether `entry`'s permission entry is there: on its path, or on the file it recorded, found
+/// by its ID as [`remove_entry`] finds it.
 pub(super) fn present_entry(acl: &mut dyn AclWriter, entry: &Entry) -> io::Result<bool> {
-    match on_file(acl, entry)? {
-        Some(grant) => acl.present(&grant),
-        None => Ok(false),
+    match &entry.file {
+        Some(file) => acl.present_recorded(file, &entry.grant()),
+        None => acl.present(&entry.grant()),
     }
 }
 

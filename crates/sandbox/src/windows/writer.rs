@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::acl_plan::{Grant, Sid};
+use super::ledger::RecordedFile;
 
 /// How far a walk goes below its root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,6 +180,20 @@ pub trait AclWriter {
     /// entries record the credentials file by it, so they are taken back from that file even
     /// once the link names another (S15 `PR3b` round 4, L5).
     fn file_id(&mut self, path: &Path) -> io::Result<Option<FileId>>;
+    /// Removes `grant`'s explicit entry from the file `file` recorded, opened by its ID on its
+    /// volume wherever its names are now (never through a path, so never through a link), and
+    /// with `prior` puts that label back as [`AclWriter::restore_label`] does. Another file at
+    /// the recorded path is left alone. `Ok` when no file has that ID any more: it took its
+    /// entries with it (S15 `PR3b` round 5).
+    fn remove_recorded(
+        &mut self,
+        file: &RecordedFile,
+        grant: &Grant,
+        prior: Option<Label>,
+    ) -> Result<(), ApplyFailure>;
+    /// Whether `grant`'s explicit entry is on the file `file` recorded, opened by its ID as
+    /// [`AclWriter::remove_recorded`] opens it; `false` when no file has that ID any more.
+    fn present_recorded(&mut self, file: &RecordedFile, grant: &Grant) -> io::Result<bool>;
     /// [`AclWriter::add`], refused as [`ApplyFailure::Changed`] unless the object it opened
     /// to write is the file `expected` names (one file ID, compared on that same handle): the
     /// credential link's write (L5, N8).

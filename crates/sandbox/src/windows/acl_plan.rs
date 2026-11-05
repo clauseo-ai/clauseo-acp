@@ -544,9 +544,9 @@ impl Plan<'_> {
 }
 
 /// Whether `path` is `folder` or under it, by the policy's comparison and also without ASCII
-/// case, as NTFS compares `.claude` with `.Claude`.
+/// case, as NTFS compares `.claude` with `.Claude`. Both are compared [`verbatim`].
 pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
-    let (path, folder) = (plain(path), plain(folder));
+    let (path, folder) = (verbatim(path), verbatim(folder));
     let (path, folder) = (path.as_path(), folder.as_path());
     if under(path, folder) {
         return true;
@@ -563,29 +563,28 @@ pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
     })
 }
 
-/// `path` without the verbatim prefix the final-path calls give (`\\?\C:\m` is `C:\m`, and
-/// `\\?\UNC\server\share` is `\\server\share`), so a path a walk reports compares with the
-/// plain paths the policy holds (S15 `PR3b` round 4). Every comparison of a path from a
-/// final-path call with a policy path goes through it, on both sides. On Windows it is
-/// `dunce::simplified`, which keeps the prefix when the plain form would mean another path
-/// (too long, a reserved name); such a path then matches nothing plain, and refuses. Elsewhere
-/// the prefix is taken off as text, so the tests' stand-in sees the same shapes.
-pub(super) fn plain(path: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        dunce::simplified(path).to_owned()
+/// `path` in the verbatim `\\?\` form, whatever its length, by `folder::verbatim_wide`'s
+/// rules: kept when it has the prefix, `\\.\` turned into `\\?\`, `\\server\share` made
+/// `\\?\UNC\server\share`, and `\\?\` put before anything else. So a final path, which is
+/// always verbatim, compares with a policy path, which is plain (S15 `PR3b` round 5: `dunce`'s
+/// plain form kept a path past `MAX_PATH` verbatim, which then matched nothing). Pure text, the
+/// same on every OS; `path` is absolute, with `\` separators. A name that isn't Unicode is kept
+/// as it is, except in a device or share path, which is read lossily.
+pub(super) fn verbatim(path: &Path) -> PathBuf {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    if bytes.starts_with(br"\\?\") {
+        return path.to_owned();
     }
-    #[cfg(not(windows))]
-    {
-        let text = path.to_string_lossy();
-        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-            PathBuf::from(format!(r"\\{rest}"))
-        } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-            PathBuf::from(rest)
-        } else {
-            path.to_owned()
-        }
+    if !bytes.starts_with(br"\\") {
+        let mut wide = std::ffi::OsString::from(r"\\?\");
+        wide.push(path.as_os_str());
+        return PathBuf::from(wide);
     }
+    let text = path.as_os_str().to_string_lossy();
+    PathBuf::from(match text.strip_prefix(r"\\.\") {
+        Some(rest) => format!(r"\\?\{rest}"),
+        None => format!(r"\\?\UNC\{}", text.get(2..).unwrap_or_default()),
+    })
 }
 
 pub(super) mod targets;

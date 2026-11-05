@@ -4,8 +4,10 @@
 //! link for another name for another file. A take-back through the link's path would then
 //! remove the entry from that other file and leave it, and the Low label, on the credentials
 //! file. So the launch records the credentials file, by its path and file ID, before the entry
-//! is written, and the way back opens that path as itself and checks the ID instead
-//! (`apply/back.rs`).
+//! is written, and the way back opens that file by its ID on its volume instead, wherever its
+//! names are now (`apply/back.rs`, round 5): a file put at the recorded path since is left
+//! alone, and a file that lost that name but lives on through the link still has its entries
+//! taken back.
 
 use std::path::PathBuf;
 
@@ -19,7 +21,7 @@ use crate::windows::writer::FileId;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RecordedFile {
-    /// Its path, outside the state folder (N8).
+    /// Its path, outside the state folder (N8): where its volume is found.
     pub path: PathBuf,
     /// Its ID when it was recorded.
     pub id: FileId,

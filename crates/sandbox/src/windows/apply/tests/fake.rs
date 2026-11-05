@@ -8,6 +8,7 @@ use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
+use crate::windows::ledger::RecordedFile;
 use crate::windows::writer::{
     AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
 };
@@ -64,10 +65,12 @@ pub(super) struct FakeAcl {
     pub(super) prefix: &'static str,
     /// Other names for one file: each key's entries and label live on its value's.
     pub(super) links: BTreeMap<PathBuf, PathBuf>,
-    /// File IDs given in place of the one a file's path makes: another file at that path.
-    pub(super) ids: BTreeMap<PathBuf, FileId>,
+    /// The file each ID [`AclWriter::file_id`] gave names: what an open by ID finds.
+    pub(super) issued: BTreeMap<(u64, [u8; 16]), PathBuf>,
     /// Paths with no file at all.
     pub(super) gone: BTreeSet<PathBuf>,
+    /// Files no longer there under any name: an open by their ID finds nothing.
+    pub(super) vanished: BTreeSet<PathBuf>,
 }
 
 impl FakeAcl {
@@ -83,6 +86,13 @@ impl FakeAcl {
     pub(super) fn key_of(&self, grant: &Grant) -> Key {
         let (_, sid, rights, inherit) = key(grant);
         (self.file(grant.path()), sid, rights, inherit)
+    }
+
+    /// The file `file` recorded, found by its ID wherever its names are now; `None` when it
+    /// is no longer there.
+    fn by_id(&self, file: &RecordedFile) -> Option<PathBuf> {
+        let found = self.issued.get(&(file.id.volume, file.id.id))?;
+        (!self.vanished.contains(found)).then(|| found.clone())
     }
 
     /// A shut child below `root`, taken off the list, as the walk reports it.
@@ -244,13 +254,10 @@ impl AclWriter for FakeAcl {
         self.add(grant)
     }
 
-    /// A made-up ID from the file `path` names, unless `ids` gives another.
+    /// A made-up ID from the file `path` names, kept in `issued`.
     fn file_id(&mut self, path: &Path) -> io::Result<Option<FileId>> {
         if self.gone.contains(path) {
             return Ok(None);
-        }
-        if let Some(id) = self.ids.get(path) {
-            return Ok(Some(*id));
         }
         let file = self.file(path);
         let half = |salt: u8| {
@@ -262,7 +269,38 @@ impl AclWriter for FakeAcl {
         let (low, high) = id.split_at_mut(8);
         low.copy_from_slice(&half(0));
         high.copy_from_slice(&half(1));
-        Ok(Some(FileId { volume: 1, id }))
+        let id = FileId { volume: 1, id };
+        self.issued.insert((id.volume, id.id), file);
+        Ok(Some(id))
+    }
+
+    /// The entry comes off the file `file` recorded, keyed by that file whatever `grant`'s path
+    /// names now, and `prior` goes back on it.
+    fn remove_recorded(
+        &mut self,
+        file: &RecordedFile,
+        grant: &Grant,
+        prior: Option<Label>,
+    ) -> Result<(), ApplyFailure> {
+        assert!(!self.panic_remove, "a crash during a removal");
+        let Some(found) = self.by_id(file) else {
+            return Ok(());
+        };
+        let (_, sid, rights, inherit) = key(grant);
+        self.aces.remove(&(found.clone(), sid, rights, inherit));
+        if let Some(label) = prior {
+            self.restored.push((found.clone(), label));
+            self.labels.insert(found, label);
+        }
+        Ok(())
+    }
+
+    fn present_recorded(&mut self, file: &RecordedFile, grant: &Grant) -> io::Result<bool> {
+        let Some(found) = self.by_id(file) else {
+            return Ok(false);
+        };
+        let (_, sid, rights, inherit) = key(grant);
+        Ok(self.aces.contains(&(found, sid, rights, inherit)))
     }
 
     /// The label on `path`'s file: ours when one of our label entries is there, else the
