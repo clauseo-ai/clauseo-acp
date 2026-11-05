@@ -213,6 +213,7 @@ mod build;
 mod clock;
 mod coalesce;
 mod config;
+pub mod connectors;
 mod encode;
 mod error;
 mod file_link;

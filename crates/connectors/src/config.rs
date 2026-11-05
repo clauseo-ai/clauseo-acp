@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::error::Error;
 use crate::known::{KnownConnector, PRODUCTION_ORIGIN, STAGING_ORIGIN};
 
 #[cfg(feature = "test-support")]
@@ -75,32 +74,29 @@ pub enum Origin {
     /// `https://data-staging.clauseo.chat`, the same paths as production.
     Staging,
     /// The fake connector at `http://127.0.0.1:<port>` (feature `test-support`); any other URL
-    /// is refused before any request (`Error::BadOrigin`).
+    /// is refused before any request (`crate::Error::BadOrigin`).
     #[cfg(feature = "test-support")]
     Fake(url::Url),
 }
 
 impl Origin {
-    /// Refuses an origin the crate must never talk to: a `Fake` that is not
-    /// `http://127.0.0.1:<port>` with no path, query, fragment or user info.
-    pub(crate) fn check(&self) -> Result<(), Error> {
+    /// Whether the crate may talk to this origin: not a `Fake` that is not
+    /// `http://127.0.0.1:<port>` with no path, query, fragment or user info. A `bool`, not a
+    /// `Result`: without `test-support` every origin is allowed, and clippy refuses a `Result`
+    /// that is always `Ok` (`unnecessary_wraps`).
+    pub(crate) fn allowed(&self) -> bool {
         match self {
-            Origin::Production | Origin::Staging => Ok(()),
+            Origin::Production | Origin::Staging => true,
             #[cfg(feature = "test-support")]
             Origin::Fake(url) => {
-                let loopback = url.scheme() == "http"
+                url.scheme() == "http"
                     && url.host_str() == Some("127.0.0.1")
                     && url.port().is_some()
                     && url.username().is_empty()
                     && url.password().is_none()
                     && matches!(url.path(), "" | "/")
                     && url.query().is_none()
-                    && url.fragment().is_none();
-                if loopback {
-                    Ok(())
-                } else {
-                    Err(Error::BadOrigin)
-                }
+                    && url.fragment().is_none()
             }
         }
     }

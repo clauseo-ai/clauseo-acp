@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver profile agents counts sandbox"
+APP_CRATES="desktop host search protocol settings process fake_agent reducer store matters acp limits codex_appserver connectors profile agents counts sandbox"
 
 nl=$'\n'
 rust=false app=false ui=false product=false product_also=false unknown=""
