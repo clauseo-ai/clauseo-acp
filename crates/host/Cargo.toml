@@ -38,6 +38,8 @@ async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.
 futures = { workspace = true, features = ["executor"] }
+# `update.json`'s marker (src/update.rs).
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
