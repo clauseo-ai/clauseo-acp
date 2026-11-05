@@ -14,9 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use clauseo_process::Launcher;
-use clauseo_protocol::{
-    CommandId, CommandOutcome, FolderRefId, MatterId, Principal, StreamId, ThreadId,
-};
+use clauseo_protocol::{CommandId, CommandOutcome, FolderRefId, MatterId, StreamId, ThreadId};
 use clauseo_settings::Effective;
 use clauseo_store::Store;
 use futures::executor::{LocalPool, LocalSpawner};
@@ -31,7 +29,6 @@ use crate::handle::{HostHandle, HostJoin};
 use crate::ids::Ids;
 use crate::matter_worker::MatterWorker;
 use crate::pipeline::{Draft, FeederTx, Pipeline, Ticket};
-use crate::principal::{Access, authorize};
 use crate::snapshot::SnapshotWorker;
 
 mod app;
@@ -51,6 +48,7 @@ mod papers;
 mod query;
 mod rail;
 mod relocate;
+mod requests;
 pub(crate) mod scan;
 mod seen;
 mod settings;
@@ -384,121 +382,9 @@ impl Actor {
         Ok(ticket)
     }
 
-    /// One request from a handle.
+    /// One request from a handle (`requests.rs`).
     fn on_request(&mut self, request: Request) {
-        if !matches!(self.phase, HostPhase::Serving) {
-            if let Request::Shutdown { reply } = request {
-                shutdown::begin_shutdown(self, Some(reply));
-            } else {
-                // Dropping the reply answers `internal`: the host is stopping.
-                drop(request);
-            }
-            return;
-        }
-        match request {
-            Request::Dispatch { command, reply } => commands::dispatch(self, command, reply),
-            Request::Query {
-                principal,
-                query,
-                reply,
-            } => query::query(self, &principal, &query, reply),
-            Request::Search {
-                principal,
-                window,
-                request,
-                reply,
-            } => match authorize(&principal, Access::Query) {
-                Ok(()) => self.search.query(
-                    &window,
-                    request,
-                    Box::new(move |answer| {
-                        let _gone = reply.send(answer);
-                    }),
-                ),
-                Err(error) => {
-                    let _gone = reply.send(Err(error));
-                }
-            },
-            Request::Subscribe {
-                principal,
-                stream,
-                after,
-                reply,
-            } => subs::subscribe(self, &principal, stream, after, reply),
-            Request::SubscribeEvents {
-                principal,
-                stream,
-                after_seq,
-                reply,
-            } => subs::subscribe_events(self, &principal, stream, after_seq, reply),
-            Request::SubscribeApp { principal, reply } => app::subscribe(self, &principal, reply),
-            Request::SubscribeLimits { principal, reply } => {
-                limits::subscribe(self, &principal, reply);
-            }
-            Request::Ack {
-                principal,
-                stream,
-                epoch,
-                cursor,
-                reply,
-            } => {
-                let acked = authorize(&principal, Access::Ack).map(|()| {
-                    subs::ack(self, stream, epoch, cursor);
-                });
-                let _gone = reply.send(acked);
-            }
-            Request::RegisterFolder { path, reply } => {
-                let minted = authorize(&Principal::LocalDesktop, Access::RegisterFolder)
-                    .and_then(|()| self.ids.mint::<FolderRefId>(self.clock.now().wall));
-                let _gone = reply.send(minted.inspect(|id| {
-                    self.folders.insert(*id, path);
-                }));
-            }
-            Request::RegisterFile { path, reply } => {
-                let minted = authorize(&Principal::LocalDesktop, Access::RegisterFile)
-                    .and_then(|()| papers::file_ref(self, path));
-                let _gone = reply.send(minted);
-            }
-            Request::LocateFile {
-                principal,
-                file,
-                reply,
-            } => {
-                let located = authorize(&principal, Access::LocateFile)
-                    .and_then(|()| locate::locate_file(self, file));
-                let _gone = reply.send(located);
-            }
-            Request::MatterFolder {
-                principal,
-                matter,
-                reply,
-            } => {
-                let folder = authorize(&principal, Access::MatterFolder)
-                    .and_then(|()| locate::matter_folder(self, matter));
-                let _gone = reply.send(folder);
-            }
-            Request::SetAgentLaunch {
-                agent,
-                launch,
-                reply,
-            } => {
-                let written = settings::set_agent_launch(self, &agent, &launch);
-                let _gone = reply.send(written);
-            }
-            Request::SetPlan { agent, plan, reply } => {
-                let written = settings::set_plan(self, &agent, plan);
-                let _gone = reply.send(written);
-            }
-            Request::SignIn(request) => turn::sign_in_request(self, request),
-            Request::Shutdown { reply } => {
-                match authorize(&Principal::LocalDesktop, Access::Shutdown) {
-                    Ok(()) => shutdown::begin_shutdown(self, Some(reply)),
-                    Err(error) => {
-                        let _gone = reply.send(Err(error));
-                    }
-                }
-            }
-        }
+        requests::on_request(self, request);
     }
 
     /// One internal input.
