@@ -29,12 +29,10 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::names::{Links, Names, keyed};
-use super::{Entry, SetAsideFailure};
+use super::{Entry, SET_ASIDE_DIR, SetAsideFailure};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
 
-/// The set-aside's folder in the sandbox folder.
-pub(super) const SET_ASIDE_DIR: &str = "set-aside";
 const RECORD_FILE: &str = "record.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const LOCK_FILE: &str = "set-aside.lock";

@@ -98,7 +98,8 @@ pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
 pub use set_aside::{
-    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason, SetAsideFailure,
+    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason, SET_ASIDE_DIR,
+    SetAsideFailure,
 };
 #[cfg(windows)]
 pub use set_aside::{

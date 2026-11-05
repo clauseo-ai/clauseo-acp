@@ -79,6 +79,10 @@ use std::time::SystemTime;
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
+/// The set-aside's folder in the sandbox folder (`<data_dir>\sandbox\set-aside\<matter>`). Public
+/// so the uninstaller keeps it by this name, not by a copy of the string.
+pub const SET_ASIDE_DIR: &str = "set-aside";
+
 #[cfg(any(windows, test))]
 mod check;
 #[cfg(any(windows, test))]
