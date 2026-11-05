@@ -28,6 +28,7 @@ use super::input::MatterTag;
 use super::matters::{registry, start_worker};
 use super::{Actor, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::pipeline::Draft;
 
@@ -137,8 +138,10 @@ pub(super) fn located(
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
         | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_) => Err(Error::Internal(
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's locate got another job's reply".to_owned(),
         )),
     };
@@ -210,6 +213,8 @@ pub(super) fn committed(actor: &mut Actor, matter: MatterId, folder: String, dur
         }
         // The folder the lawyer just picked is there: `found` until a list reads it again.
         actor.folder_states.remove(&matter);
+        // The new folder is unchecked until the matter's next agent launch.
+        actor.folder_supports.remove(&matter);
     } else {
         reopen_recorded(actor, matter);
     }
@@ -238,6 +243,8 @@ fn reopen_recorded(actor: &mut Actor, matter: MatterId) {
     };
     match worker.send(open, MatterTag::Open) {
         Ok(()) => actor.work.matter_jobs += 1,
-        Err(error) => tracing::warn!(%matter, %error, "could not reopen a matter's folder"),
+        Err(error) => {
+            tracing::warn!(%matter, error = %Cause(&error), "could not reopen a matter's folder");
+        }
     }
 }

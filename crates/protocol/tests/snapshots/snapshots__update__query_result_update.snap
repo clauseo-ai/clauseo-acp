@@ -1,0 +1,16 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 65
+expression: answer
+---
+{
+  "update": {
+    "current": "0.4.0",
+    "state": {
+      "managed": {
+        "by": "package"
+      }
+    },
+    "mode": "auto"
+  }
+}

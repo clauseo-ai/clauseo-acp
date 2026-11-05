@@ -46,3 +46,6 @@ mod rows;
 #[cfg(test)]
 #[path = "store/seen.rs"]
 mod seen;
+#[cfg(test)]
+#[path = "store/title_source.rs"]
+mod title_source;

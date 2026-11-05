@@ -10,9 +10,9 @@ use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
     AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionChoice,
-    PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested, PermissionResolved,
-    Principal, StreamId, ThreadId, TurnId,
+    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
+    PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
+    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -21,6 +21,7 @@ use super::out::Out;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
 
 /// A permission request from the agent, kept until it is logged.
@@ -30,6 +31,8 @@ pub(super) struct PermissionAsk {
     pub(super) key: PendingKey,
     pub(super) acp_tool_call_id: CompactString,
     pub(super) options: Vec<PermissionOption>,
+    /// What it is about, when the host can tell (`agent/plan_note.rs`).
+    pub(super) about: Option<PermissionAbout>,
 }
 
 /// A permission request and the turn it came in, while the matter thread checks its paths.
@@ -43,23 +46,34 @@ pub(super) struct HeldOpenCheck {
 /// answered `cancelled`. In it, when it names a path (or, naming none, its tool call has matter
 /// paths), the matter thread first resolves the paths into the matter folder and checks whether
 /// a program holds one open ([`on_held_open`]); otherwise, or when the check cannot be sent, it
-/// is logged `Live` for the lawyer at once.
+/// is logged `Live` for the lawyer at once. In forced ask it first loses the options
+/// `agent::forced_ask::keep_option` drops. A Claude request naming only its own plan note is
+/// marked `about: agent_plan` (`agent/plan_note.rs`), a label that changes nothing else.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
         key,
         acp_tool_call_id,
-        options,
+        mut options,
         mut paths,
     } = event
     else {
         return;
     };
+    // Forced ask (`agent/forced_ask.rs`): no option that would stop later asks is offered, so
+    // an answer naming one is refused as one the agent did not offer.
+    if agent(actor, thread).is_some_and(|agent| agent.forced_ask) {
+        options.retain(crate::agent::forced_ask::keep_option);
+    }
+    // Read from the paths the request itself names, before any fallback to the tool call's.
+    let plans = agent(actor, thread).and_then(|agent| agent.plan_notes.clone());
+    let about = crate::agent::plan_note::about(plans.as_deref(), &paths, cfg!(windows));
     let ask = PermissionAsk {
         session,
         key,
         acp_tool_call_id,
         options,
+        about,
     };
     let Some(turn) = live_turn(actor, thread) else {
         cancel_outside_turn(actor, thread, &ask.session);
@@ -89,7 +103,11 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         Ok(())
     })();
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "a permission request's paths were not checked");
+        tracing::warn!(
+            %thread,
+            error = %Cause(&error),
+            "a permission request's paths were not checked"
+        );
         log_for_lawyer(actor, thread, ask);
     }
 }
@@ -128,7 +146,10 @@ pub(super) fn on_held_open(
             spawn(actor, async move {
                 // Already answered when the turn was cancelled: then nothing is pending.
                 if let Err(error) = client.cancel_permission(ask.key).await {
-                    tracing::debug!(%error, "a checked permission after its turn was not cancelled");
+                    tracing::debug!(
+                        %error,
+                        "a checked permission after its turn was not cancelled"
+                    );
                 }
             });
         }
@@ -137,9 +158,17 @@ pub(super) fn on_held_open(
     match held {
         Some((path, held)) => {
             let why = "refused a permission request: a program holds the file open";
-            tracing::info!(%thread, %path, ?held, "{why}");
+            let held = match held {
+                HeldOpen::OwnerFile(_) => "owner_file",
+                HeldOpen::SharingViolation => "sharing_violation",
+            };
+            tracing::info!(%thread, held, "{why}");
             if let Err(error) = refuse_held_open(actor, thread, ask, path) {
-                tracing::warn!(%thread, %error, "a refused permission request was not logged");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "a refused permission request was not logged"
+                );
             }
         }
         None => log_for_lawyer(actor, thread, ask),
@@ -188,6 +217,7 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
         key,
         acp_tool_call_id,
         options,
+        about,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let logged = (|| -> Result<(), Error> {
@@ -200,12 +230,13 @@ fn log_for_lawyer(actor: &mut Actor, thread: ThreadId, ask: PermissionAsk) {
             tool_call,
             options,
             deliverable: Deliverable::Live,
+            about,
         };
         commit(actor, thread, [event.into()], Vec::new())
     })();
     limits::asking_changed(actor);
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "a permission request was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a permission request was not logged");
     }
 }
 
@@ -223,6 +254,7 @@ fn refuse_held_open(
         key,
         acp_tool_call_id,
         options,
+        about,
     } = ask;
     let tool_call = known_tool(actor, thread, &session, &acp_tool_call_id);
     let agent_id = agent(actor, thread)
@@ -259,6 +291,7 @@ fn refuse_held_open(
             tool_call,
             options,
             deliverable: Deliverable::Live,
+            about,
         },
     )?;
     out.push(
@@ -325,7 +358,7 @@ pub(super) fn on_elicitation(
     })();
     limits::asking_changed(actor);
     if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "an elicitation was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an elicitation was not logged");
     }
 }
 

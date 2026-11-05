@@ -9,6 +9,8 @@ struct Folder(std::path::PathBuf);
 
 impl Folder {
     fn new(test: &str) -> Self {
+        // Owner files planted here stay held through the stale rule: no Word runs in a test.
+        clauseo_matters::test_support::pretend_word_running_since_epoch();
         let root =
             std::env::temp_dir().join(format!("clauseo-host-walk-{test}-{}", std::process::id()));
         write::remove_dir_all(&root).unwrap();

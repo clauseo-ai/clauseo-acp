@@ -182,16 +182,124 @@ fn shown_for_every_agent_reads_each_one_due() {
     assert_eq!(actions, vec![Action::Read(CLAUDE), Action::Read(CODEX)]);
 }
 
+/// A live 5-hour signal of `agent` at 20%.
+fn signal(agent: AgentKind) -> Input {
+    live_input(
+        agent,
+        live("five_hour", LiveStatus::Allowed, Some(20.0), None),
+    )
+}
+
 #[test]
-fn claude_turn_end_reads_at_ten_minutes_not_before() {
+fn claude_turn_end_with_a_live_signal_reads_at_ten_minutes_not_before() {
     let mut model = idle(CLAUDE);
+    model.input(signal(CLAUDE), at(9));
     assert_eq!(
         model.input(turn_ended(CLAUDE, false), at_ms(10 * MINUTE - SECOND)),
         vec![]
     );
+    model.input(signal(CLAUDE), at_ms(10 * MINUTE - SECOND / 2));
     assert_eq!(
         model.input(turn_ended(CLAUDE, false), at(10)),
         vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn claude_turn_end_with_no_live_signal_reads_when_the_last_read_started_three_minutes_ago() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(3)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn claude_turn_end_with_no_live_signal_reads_none_when_the_last_read_started_a_minute_ago() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(model.input(turn_ended(CLAUDE, false), at(1)), vec![]);
+}
+
+#[test]
+fn claude_turn_end_with_no_live_signal_reads_at_two_minutes_not_before() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(2 * MINUTE - SECOND)),
+        vec![]
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(2)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn claude_turn_end_with_a_live_signal_reads_none_at_three_minutes_and_reads_at_eleven() {
+    let mut model = idle(CLAUDE);
+    model.input(signal(CLAUDE), at(2));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(3)),
+        vec![],
+        "a live signal came during the turn: the 10-minute rule"
+    );
+    model.input(signal(CLAUDE), at(10));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(11)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn a_turn_end_clears_the_live_signal_so_the_next_turn_without_one_reads_at_two_minutes() {
+    let mut model = idle(CLAUDE);
+    model.input(signal(CLAUDE), at(1));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(3)),
+        vec![],
+        "turn A had a live signal"
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(4)),
+        vec![Action::Read(CLAUDE)],
+        "turn B had none: the last read started 4 minutes ago"
+    );
+}
+
+#[test]
+fn a_turn_end_read_now_clears_the_live_signal_too() {
+    let mut model = idle(CLAUDE);
+    model.input(signal(CLAUDE), at(1));
+    model.input(turn_ended(CLAUDE, true), at(2));
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), at(2));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(4)),
+        vec![Action::Read(CLAUDE)],
+        "the next turn had no signal and its read started 2 minutes ago"
+    );
+}
+
+#[test]
+fn turn_ends_in_quick_succession_start_one_read_until_it_is_done() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(3)),
+        vec![Action::Read(CLAUDE)]
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(3 * MINUTE + SECOND)),
+        vec![],
+        "the read in flight counts"
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(6)),
+        vec![],
+        "old enough, but the read is still in flight: none stacks"
+    );
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), at(6));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(6 * MINUTE + SECOND)),
+        vec![Action::Read(CLAUDE)],
+        "once it is done, the next turn end reads: its age counts from 3 minutes"
     );
 }
 

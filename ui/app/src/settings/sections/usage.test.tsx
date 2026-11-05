@@ -39,7 +39,11 @@ let root: Root | null = null;
 let store: DisplayStore | null = null;
 let transport: FakeTransport = new FakeTransport();
 
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   localStorage.clear();
   history.replaceState(null, "", "/settings.html#usage");
 });
@@ -54,11 +58,8 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-const today = (hh: number, mm: number) => {
-  const d = new Date();
-  d.setHours(hh, mm, 0, 0);
-  return d.getTime();
-};
+/** hh:mm on NOW's day (TZ is UTC). */
+const today = (hh: number, mm: number) => NOW + ((hh - 17) * 60 + mm) * 60_000;
 const RESET = today(18, 10);
 const READ = today(0, 5);
 

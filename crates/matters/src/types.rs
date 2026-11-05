@@ -290,8 +290,10 @@ pub struct RestorePlan {
     /// where a folder should be, a folder or device name where the file should be, a name the
     /// folder holds only spelled otherwise, or a name the exclusion list now matches.
     pub kept: Vec<MatterPath>,
-    /// Files of `writes` that look open in another program now, sorted; a restore would fail
-    /// with `matter.file_locked` and write nothing.
+    /// Files of `writes` that look open in another program now, and any file the walk could
+    /// not read because another program holds it (on Windows, open with no sharing or locked;
+    /// in `writes` or not), sorted; a restore would fail with `matter.file_locked` and write
+    /// nothing. A held file keeps what the last checkpoint knew of it in the other lists.
     pub locked: Vec<MatterPath>,
 }
 

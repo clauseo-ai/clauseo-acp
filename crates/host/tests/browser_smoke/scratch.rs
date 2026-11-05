@@ -10,6 +10,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use clauseo_sandbox::ports::{self, PortClaim};
+
 /// Chrome's temp profile folder, made under the temp folder
 /// (agent-browser v0.41.1 `cli/src/native/cdp/chrome.rs:545-546`).
 pub(crate) const PROFILE_PREFIX: &str = "agent-browser-chrome-";
@@ -32,6 +34,15 @@ pub(crate) fn env_file(name: &str) -> PathBuf {
 pub(crate) struct Scratch {
     pub(crate) root: PathBuf,
     pub(crate) session: String,
+    /// The guard's `--cdp-port`, claimed as the host claims it.
+    pub(crate) cdp: PortClaim,
+    /// `AGENT_BROWSER_STREAM_PORT`.
+    pub(crate) stream: PortClaim,
+    /// Windows: the guard's `--daemon-port`, the hash of [`Self::session`].
+    pub(crate) daemon: Option<PortClaim>,
+    /// macOS and Linux: `AGENT_BROWSER_SOCKET_DIR`, made as the host makes it; removed on drop.
+    #[cfg(unix)]
+    pub(crate) socket_dir: clauseo_sandbox::BrowserSocketDir,
 }
 
 impl Scratch {
@@ -40,12 +51,21 @@ impl Scratch {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("clock after 1970")
             .as_nanos();
-        // The first 16 characters name the Unix socket folder, so the varying part leads.
-        let session = format!("smoke{:08x}{:x}", nanos & 0xffff_ffff, std::process::id());
-        let root = std::env::temp_dir().join(format!("clauseo-browser-{session}"));
+        let base = format!("smoke{:08x}{:x}", nanos & 0xffff_ffff, std::process::id());
+        let (session, daemon) = session_and_daemon(&base);
+        let root = std::env::temp_dir().join(format!("clauseo-browser-{base}"));
         std::fs::create_dir_all(root.join("browser")).expect("make the test folder");
         std::fs::write(root.join("config.json"), "{}").expect("write the config");
-        Self { root, session }
+        Self {
+            root,
+            session,
+            cdp: ports::claim_port().expect("claim the CDP port"),
+            stream: ports::claim_port().expect("claim the stream port"),
+            daemon,
+            #[cfg(unix)]
+            socket_dir: clauseo_sandbox::BrowserSocketDir::create()
+                .expect("make the socket folder"),
+        }
     }
 
     /// `--cwd`.
@@ -53,19 +73,36 @@ impl Scratch {
         self.root.join("browser")
     }
 
-    /// Removes the folder and, on Unix, the guard's socket folder under `/tmp`.
+    /// Removes the folder; the socket folder goes when the value drops.
     pub(crate) fn remove(&self) {
-        let mut folders = vec![self.root.clone()];
-        if cfg!(unix) {
-            let prefix = self.session.get(..16).unwrap_or(&self.session);
-            folders.push(PathBuf::from(format!("/tmp/clauseo-ab-{prefix}")));
-        }
-        for folder in folders {
-            if let Err(error) = std::fs::remove_dir_all(&folder) {
-                eprintln!("could not remove {}: {error}", folder.display());
-            }
+        if let Err(error) = std::fs::remove_dir_all(&self.root) {
+            eprintln!("could not remove {}: {error}", self.root.display());
         }
     }
+}
+
+/// macOS and Linux: `base` as the session, no daemon port. Windows: `base` and a counter,
+/// counted up until agent-browser's daemon port for the name (the host's
+/// `browser::session::daemon_port_of`, copied: it is crate-private) is one `claim_port_at`
+/// takes in the jail's range.
+fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
+    if cfg!(unix) {
+        return (base.to_owned(), None);
+    }
+    for at in 0..200_000_u32 {
+        let name = format!("{base}-{at}");
+        let mut hash: i32 = 0;
+        for c in name.chars() {
+            hash = (hash << 5).wrapping_sub(hash).wrapping_add(c as i32);
+        }
+        let port = u16::try_from(49_152 + hash.unsigned_abs() % 16_383).expect("a port");
+        if ports::WINDOWS_PORTS.contains(&port)
+            && let Ok(claim) = ports::claim_port_at(port)
+        {
+            return (name, Some(claim));
+        }
+    }
+    panic!("no session name gave a daemon port in the jail's range");
 }
 
 /// Every folder under `root` whose name starts with [`PROFILE_PREFIX`].

@@ -12,7 +12,10 @@ use clauseo_protocol::DetachReason;
 use futures::future::{Either, select};
 
 use crate::Timer;
-use crate::os::Tree;
+use crate::descendants::{Descendants, Snapshot};
+#[cfg(unix)]
+use crate::descendants::{Proc, kill_all};
+use crate::os::{Root, Tree};
 use crate::stderr::{self, Redactor, SharedRing};
 use crate::stdin::StdinSlot;
 
@@ -29,6 +32,12 @@ const KILL_GRACE: Duration = Duration::from_secs(2);
 pub struct Handle {
     child: Child,
     tree: Tree,
+    root: Root,
+    /// The descendants the shutdown was given (Unix), killed after the group: a command in a
+    /// session of its own has left the group, and once the agent is gone it is no longer a
+    /// descendant to find.
+    #[cfg(unix)]
+    listed: Option<Vec<Proc>>,
     stdin: StdinSlot,
     stderr: StderrSource,
     /// Whether the tree has been sent its kill, so `Drop` sends none: on Unix a group id can be
@@ -40,6 +49,7 @@ impl Handle {
     pub(crate) fn new(
         child: Child,
         tree: Tree,
+        root: Root,
         stdin: StdinSlot,
         ring: SharedRing,
         redactor: Arc<Redactor>,
@@ -47,6 +57,9 @@ impl Handle {
         Handle {
             child,
             tree,
+            root,
+            #[cfg(unix)]
+            listed: None,
             stdin,
             stderr: StderrSource { ring, redactor },
             tree_killed: false,
@@ -58,6 +71,11 @@ impl Handle {
         self.child.id()
     }
 
+    /// The agent's descendants, to list and end while it runs (see [`Descendants`]).
+    pub fn descendants(&self) -> Descendants {
+        Descendants::new(self.root.clone())
+    }
+
     /// Waits for the agent to exit on its own, then kills what is left of its tree, so a helper
     /// it started cannot outlive it. Dropping the future and calling again is fine.
     pub async fn exited(&mut self) -> ExitReport {
@@ -67,12 +85,26 @@ impl Handle {
 
     /// Stops the agent by the ladder: close its stdin and wait 2 s, then (Unix) SIGTERM to its
     /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job, and wait 2 s
-    /// more for the exit. Whichever way it exits, what is left of its tree is killed. The outcome
-    /// names the step that ended it, or says the agent never exited.
+    /// more for the exit. Whichever way it exits, what is left of its tree is killed: on Unix the
+    /// group, then every process of `listed` that still runs with its listed start (a command
+    /// in a session of its own has left the group). Take `listed` from
+    /// [`Handle::descendants`] just before, where a blocking listing may run; `None` (a listing
+    /// that failed or was not taken) kills the group only. Windows ends the whole job and does
+    /// not read it. The outcome names the step that ended it, or says the agent never exited.
     ///
     /// Keep reading the agent's stdout, or drop it, while this runs: an agent blocked writing to
     /// a full stdout pipe never sees its stdin close, and costs the whole 2 s and the SIGTERM.
-    pub async fn shutdown<T: Timer>(mut self, timer: &T) -> ShutdownOutcome {
+    pub async fn shutdown<T: Timer>(
+        mut self,
+        timer: &T,
+        listed: Option<Snapshot>,
+    ) -> ShutdownOutcome {
+        #[cfg(unix)]
+        {
+            self.listed = listed.and_then(Snapshot::into_processes);
+        }
+        #[cfg(windows)]
+        drop(listed);
         self.stdin.close();
         let exit = pin!(self.child.status());
         let ended = ladder(exit, timer, |step| self.step(step)).await;
@@ -126,11 +158,18 @@ impl Handle {
             return true;
         }
         self.tree_killed = true;
-        self.tree.kill()
+        let ended = self.tree.kill();
+        #[cfg(unix)]
+        if let Some(listed) = self.listed.take() {
+            kill_all(&listed);
+        }
+        ended
     }
 }
 
 impl Drop for Handle {
+    /// Kills the group or the job, without waiting and without listing (a listing blocks):
+    /// a descendant outside the group outlives a handle dropped without a shutdown.
     fn drop(&mut self) {
         self.kill_tree();
     }

@@ -1,5 +1,5 @@
 // The open conversation's thread in the room's work column and what the lawyer does in it: the commands Ask, Stop and
-// Undo send. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
+// Undo send, and the answers to the agent's permission requests and questions. Which thread is open is the conversations' (conversations.ts), which also make the thread on a draft's
 // first Ask and title it once the question is accepted, so a visit leaves no empty thread behind. A refused command
 // shows by its code only, never its message.
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,18 +7,23 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
+  ElicitationId,
+  ElicitationResponse,
   ErrorCode,
   FileRefId,
   HostCommand,
+  HostQuery,
   MatterId,
   MessageId,
   PermissionRequestId,
+  QueryResult,
   StepEntry,
   StreamHeader,
   StreamId,
   ThreadId,
   Timestamp,
   TurnId,
+  UndoPreview,
 } from "../../transport/protocol.ts";
 import { queueCountPick } from "../queue-entries.ts";
 import { turnRunning } from "./live.ts";
@@ -59,15 +64,40 @@ export type ConversationLink = {
   retry?: (thread: ThreadId, message: MessageId, at: Timestamp) => Promise<void>;
 };
 
+/** `{"preview_undo": {"thread", "turn"}}`, from the generated HostQuery: read-only; refused as command.unknown_thread,
+ * or command.invalid for a turn with no step or one already undone. */
+type PreviewUndoQuery = Extract<HostQuery, { preview_undo: unknown }>;
+
+/** The paths edited since a turn's after-turn checkpoint, from `{"undo_preview": {"edited_since": [...]}}`: empty when
+ * nothing changed. Rejects with the HostError when the host refuses, and with internal when its answer is another
+ * shape: an older host has no PreviewUndo, and the caller falls back. */
+export async function previewUndoOf(
+  transport: Pick<HostTransport, "query">,
+  thread: ThreadId,
+  turn: TurnId,
+): Promise<UndoPreview["edited_since"]> {
+  const query: PreviewUndoQuery = { preview_undo: { thread, turn } };
+  const answer: QueryResult = await transport.query(query);
+  if (!("undo_preview" in answer) || answer.undo_preview === undefined)
+    throw internalError("preview_undo answered something else");
+  return answer.undo_preview.edited_since;
+}
+
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
 export type ThreadActions = {
   readonly stream: StreamId | null;
   readonly sentTurn: TurnId | null;
   /** Undoes every file of a step; rejects with the HostError when the host refuses. */
   undo: (step: StepEntry) => Promise<void>;
+  /** Asks the host which of a step's papers were edited since Clauseo's change (PreviewUndo); absent where the host
+   * has no PreviewUndo. Rejects with the HostError when the host refuses. */
+  previewUndo?: ((step: StepEntry) => Promise<string[]>) | undefined;
   /** Answers a permission request with an option it offered; rejects with the HostError when the host refuses (an
    * allow_always declined at the native confirm: `transport.unauthorized`). */
   answer: (request: PermissionRequestId, option: string) => Promise<void>;
+  /** Answers an elicitation: accept with values, decline or cancel; rejects with the HostError when the host refuses
+   * (`elicitation.not_pending`, `elicitation.invalid_values`). */
+  answerElicitation: (elicitation: ElicitationId, response: ElicitationResponse) => Promise<void>;
   /** Stop: cancels the open thread's turn. */
   stop: () => void;
   /** H13's Retry from here on one of the lawyer's questions, at its time; absent where the host can't. Rejects with
@@ -242,6 +272,19 @@ export function useThreadSession(
     [command],
   );
 
+  const previewUndo = useCallback(
+    async (step: StepEntry): Promise<string[]> => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        return await previewUndoOf(transport, id, step.turn);
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [transport],
+  );
+
   const answer = useCallback(
     async (request: PermissionRequestId, option: string) => {
       const id = open.current;
@@ -253,6 +296,19 @@ export function useThreadSession(
       }
     },
     [transport],
+  );
+
+  const answerElicitation = useCallback(
+    async (elicitation: ElicitationId, response: ElicitationResponse) => {
+      const id = open.current;
+      if (id === null) throw internalError("no thread is open");
+      try {
+        await command({ answer_elicitation: { thread: id, elicitation, response } });
+      } catch (e) {
+        throw toHostError(e);
+      }
+    },
+    [command],
   );
 
   const retry = useMemo(
@@ -273,8 +329,8 @@ export function useThreadSession(
 
   const stream = thread === null ? null : streamOf(thread);
   const actions = useMemo(
-    () => ({ stream, sentTurn, undo, answer, stop, retry }),
-    [stream, sentTurn, undo, answer, stop, retry],
+    () => ({ stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry }),
+    [stream, sentTurn, undo, previewUndo, answer, answerElicitation, stop, retry],
   );
   return { thread, sentTurn, refused: refused ?? link.refused, ask, stop, actions };
 }

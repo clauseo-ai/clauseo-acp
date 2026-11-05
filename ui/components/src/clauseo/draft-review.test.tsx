@@ -237,6 +237,7 @@ test("Word holds the file: close it to accept, and Try again goes to the app", a
   expect(dialog.textContent).toContain(
     "Word holds the file while it is open. Nothing has changed yet.",
   );
+  expect(dialog.textContent).toContain("If it isn't open in Word, close Word and try again.");
   await click(one(".rd-try"));
   expect(onTryAgain).toHaveBeenCalledOnce();
 });

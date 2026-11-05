@@ -228,6 +228,14 @@ export const U7: Entry[] = [
     render: (lang) => over(heldScene(lang, "failed")),
   },
   {
+    id: "U7-32",
+    words: matterWords(
+      "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.",
+    ),
+    screen: "matters/held",
+    render: (lang) => over(heldScene(lang, "not_allowed")),
+  },
+  {
     id: "U7-19",
     words: matterWords("Send next"),
     screen: "matters/held",

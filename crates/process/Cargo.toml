@@ -19,13 +19,21 @@ futures = { workspace = true }
 memchr = { workspace = true }
 thiserror = { workspace = true }
 
-# killpg for the shutdown ladder and the tree kill.
+# killpg for the shutdown ladder and the tree kill; kill for a listed descendant; clock_gettime
+# and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`).
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal"] }
+nix = { workspace = true, features = ["signal", "time", "feature"] }
 
-# The Job Object, the suspended start and the thread resume (src/os/windows.rs).
+# libproc's proc_listchildpids, proc_pidinfo and proc_pidpath: the descendant listing
+# (src/os/macos.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
+# The Job Object, the suspended start and the thread resume, and the job's process list with each
+# process's creation time, image name, parent (Toolhelp) and end; the system time for a sweep's
+# cutoff (`Win32_System_SystemInformation`) (src/os/windows.rs).
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 # Itself with test-support, so the pipe tests reach `ManualTimer` with no flag.

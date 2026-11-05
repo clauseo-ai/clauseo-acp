@@ -1,9 +1,10 @@
 //! A launched agent's session: `session/load` with the stored session id when the agent offers
 //! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
 //! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
-//! its first prompt (the ask mode, the guard's trust); then the attach commit, the held replay
-//! and the work that waited. When `initialize` gave the agent a title, its name is logged first
-//! (`AgentNamed`, `log_agent_name`), so a failed `session/new` leaves it in the thread.
+//! its first prompt (the ask mode, the guard's trust), for a Claude agent the switch to
+//! Clauseo's mode; then the attach commit, the held replay and the work that waited. When
+//! `initialize` gave the agent a title, its name is logged first (`AgentNamed`,
+//! `log_agent_name`), so a failed `session/new` leaves it in the thread.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,8 +12,8 @@ use std::sync::Arc;
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
     AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
-    ConfigOptionsReplaced, Envelope, ErrorCode, ModeChanged, Notice, NoticeLevel, StreamId,
-    ThreadId, ViewEntry,
+    ConfigOptionsReplaced, Envelope, ErrorCode, MatterId, ModeChanged, Notice, NoticeLevel,
+    StreamId, ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -22,6 +23,7 @@ use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
 use crate::agent::{self, codex};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::sent::SentView;
 
 /// The notice a thread gets when its agent starts a new session after earlier turns.
@@ -77,7 +79,19 @@ pub(super) fn on_replay_log(
         .and_then(|entry| entry.row.acp_session_id.clone());
     let cwd = folder(actor, thread);
     let loads = session_loads(actor, thread);
+    if let Err(error) = &loads {
+        // A launch refused here (forced ask without its guard) ends as a failed launch, not a
+        // load that never goes out.
+        let loading = state(actor, thread)
+            .and_then(|state| state.agent.as_deref())
+            .is_some_and(|agent| agent.stage == Stage::Loading);
+        if loading {
+            launch_failed(actor, thread, error);
+            return;
+        }
+    }
     let clock = Arc::clone(&actor.clock);
+    let matter = matter_of(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
@@ -88,10 +102,15 @@ pub(super) fn on_replay_log(
     };
     match result {
         Ok(log) => agent.replay = Some(SentView::rebuild(StreamId::Thread(thread), &log)),
-        Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
+        Err(error) => tracing::warn!(%thread, error = %Cause(&error), "no log for replay dedupe"),
     }
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -123,11 +142,17 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let clock = Arc::clone(&actor.clock);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+    let matter = matter_of(actor, thread);
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -157,11 +182,17 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         }
     };
     let clock = Arc::clone(&actor.clock);
-    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
+    let matter = matter_of(actor, thread);
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
+    agent.mcp_commands = commands(&mcp_servers);
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
+    let check = codex::prepare::recheck(
+        clock,
+        matter,
+        agent.codex.is_some().then(|| agent.folder.clone()),
+    );
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -180,6 +211,11 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     });
 }
 
+/// `thread`'s matter, for the log of its `.codex` re-check.
+fn matter_of(actor: &Actor, thread: ThreadId) -> Option<MatterId> {
+    actor.threads.get(&thread).map(|entry| entry.row.matter)
+}
+
 /// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for
 /// both: the profile hook's `_meta` with the host's switches over it, and the servers the
 /// lawyer turned on, then the hook's (none when the firm's `managed-mcp.json` is present). See
@@ -192,6 +228,16 @@ fn session_loads(
     super::profile_loads::session_loads(actor, thread, &matter)
 }
 
+/// The program of each MCP server, which a cancelled turn's sweep leaves running.
+fn commands(servers: &[McpServer]) -> Vec<PathBuf> {
+    servers
+        .iter()
+        .map(|server| match server {
+            McpServer::Stdio { command, .. } => command.clone(),
+        })
+        .collect()
+}
+
 fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let matter = actor.check_thread(thread)?.row.matter;
     Ok(crate::agent::session_folder(std::path::Path::new(
@@ -199,17 +245,19 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     )))
 }
 
-/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; any other
-/// attaches now.
+/// The session is up. A Codex agent's session first runs [`prepare`]'s checks; a Claude
+/// agent's session that started in another mode than Clauseo's is first switched to it
+/// ([`claude_start`]); any other attaches now.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     super::profile_loads::show_tools(actor, thread);
-    let codex = actor
+    let kind = actor
         .threads
         .get(&thread)
-        .is_some_and(|entry| AgentKind::of(&entry.row.agent) == Some(AgentKind::Codex));
-    if !codex {
-        attach(actor, thread, start, loaded);
-        return;
+        .and_then(|entry| AgentKind::of(&entry.row.agent));
+    match kind {
+        Some(AgentKind::Codex) => {}
+        Some(AgentKind::Claude) => return claude_start(actor, thread, start, loaded),
+        None => return attach(actor, thread, start, loaded),
     }
     let ask =
         AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
@@ -239,7 +287,11 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     let (ask, switch) = match checks {
         Ok(checks) => checks,
         Err(error) => {
-            tracing::warn!(%thread, %error, "the Codex session cannot run in its ask mode");
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "the Codex session cannot run in its ask mode"
+            );
             launch_failed(actor, thread, &error);
             return;
         }
@@ -266,9 +318,10 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
     });
 }
 
-/// A Codex session's checks before its first prompt, in order: `session/set_mode` to the ask
-/// mode when `switch` (the host owns the mode: `INITIAL_AGENT_MODE` set it at launch, and
-/// this covers an adapter that did not take it); then, when a hooks object went into
+/// A session's checks before its first prompt, in order: `session/set_mode` to `ask` when
+/// `switch` (Codex's ask mode: the host owns the mode, `INITIAL_AGENT_MODE` set it at launch,
+/// and this covers an adapter that did not take it; Claude's [`agent::loads::CLAUDE_MODE`],
+/// see [`claude_start`]); then, for Codex, when a hooks object went into
 /// `CODEX_CONFIG` (`guard` is the session's folder), `_codex/hooks/list` once, which must
 /// show the guard trusted. The start comes back with the mode it now has.
 async fn prepare(
@@ -290,6 +343,60 @@ async fn prepare(
         }
     }
     Ok(start)
+}
+
+/// A Claude agent's session started in another mode than [`CLAUDE_MODE`]: claude-agent-acp
+/// 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed transcript's
+/// mode), which `_meta` cannot override (see `agent/loads.rs`). So `session/set_mode` goes
+/// first, before any prompt, through [`prepare`]; a failed switch fails the launch, so no
+/// prompt runs in the user's mode. A session already in it attaches now. One that reports no
+/// modes, or offers no such mode, fails the launch ([`claude_no_mode`]): the host could not
+/// tell or change the mode it runs in. On load this also resets a mode the lawyer reached in
+/// the session (see [`agent::loads::CLAUDE_MODE`]).
+fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+    let Some(modes) = start.modes.as_ref() else {
+        return claude_no_mode(actor, thread, "reported no modes");
+    };
+    if modes.current == agent::loads::CLAUDE_MODE {
+        return attach(actor, thread, start, loaded);
+    }
+    let offered = modes
+        .available
+        .iter()
+        .any(|mode| mode.id == agent::loads::CLAUDE_MODE);
+    let mode = AgentChoiceId::new(agent::loads::CLAUDE_MODE);
+    let (true, Ok(mode)) = (offered, mode) else {
+        return claude_no_mode(actor, thread, "offered no \"default\" mode");
+    };
+    tracing::info!(%thread, from = %modes.current, "switching the Claude session to Clauseo's mode");
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    agent.preparing = true;
+    let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
+    call(actor, thread, id, async move {
+        let result = prepare(&client, start, (mode, true), None).await;
+        fence.await;
+        AgentReply::Prepared { loaded, result }
+    });
+}
+
+/// Fails the launch of a Claude session whose mode the host cannot set to [`CLAUDE_MODE`]:
+/// `why` says what the agent's answer lacked.
+fn claude_no_mode(actor: &mut Actor, thread: ThreadId, why: &str) {
+    let error = Error::refused(
+        ErrorCode::AgentProtocolError,
+        format!(
+            "Claude Code {why}, so Clauseo cannot run it in its \"{}\" mode and sent no message",
+            agent::loads::CLAUDE_MODE
+        ),
+    );
+    tracing::warn!(
+        %thread,
+        error = %Cause(&error),
+        "the Claude session cannot run in Clauseo's mode"
+    );
+    launch_failed(actor, thread, &error);
 }
 
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode
@@ -423,7 +530,9 @@ fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactStrin
                 header.agent_name = Some(name);
             }
         }
-        Err(error) => tracing::warn!(%thread, %error, "the agent's name was not logged"),
+        Err(error) => {
+            tracing::warn!(%thread, error = %Cause(&error), "the agent's name was not logged");
+        }
     }
 }
 

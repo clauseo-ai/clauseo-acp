@@ -110,7 +110,7 @@ pub fn scan_links(matter: &Path) -> Vec<LinkFinding> {
     match scan_matter(matter) {
         Ok(scan) => scan.links,
         Err(error) => {
-            tracing::warn!(matter = %matter.display(), %error, "link scan failed");
+            tracing::warn!(%error, "link scan failed");
             Vec::new()
         }
     }
@@ -148,7 +148,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
             Ok(entries) => entries,
             Err(error) if first => return Err(Error::Probe(error)),
             Err(error) => {
-                tracing::warn!(folder = %folder.display(), %error, "matter walk skipped a folder");
+                tracing::warn!(%error, "matter walk skipped a folder");
                 continue;
             }
         };
@@ -157,7 +157,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) => {
-                    tracing::warn!(folder = %folder.display(), %error, "matter walk skipped an entry");
+                    tracing::warn!(%error, "matter walk skipped an entry");
                     continue;
                 }
             };
@@ -166,7 +166,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
                 Ok(kind) if in_git => walk.visit_in_git(path, kind, &entry),
                 Ok(kind) => walk.visit(&matter, path, kind, &entry),
                 Err(error) => {
-                    tracing::warn!(path = %path.display(), %error, "matter walk skipped an entry");
+                    tracing::warn!(%error, "matter walk skipped an entry");
                 }
             }
         }

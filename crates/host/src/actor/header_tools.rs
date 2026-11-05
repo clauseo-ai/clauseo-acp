@@ -17,6 +17,7 @@ use clauseo_reducer::ViewChange;
 
 use super::Actor;
 use super::streams::StreamSlot;
+use crate::log_file::Cause;
 use crate::view::StreamView;
 
 /// Each thread's tool state: as last shown, and as held for a session call not answered yet.
@@ -78,14 +79,20 @@ fn show(actor: &mut Actor, thread: ThreadId, tools: Vec<ToolState>) {
     else {
         return;
     };
-    let change = ViewChange::Upsert(Box::new(ViewEntry::Header(header)));
+    let change = ViewChange::Upsert(Box::new(ViewEntry::Header(Box::new(header))));
     match loaded.view.publish(vec![change], &mut actor.encoder) {
         Ok(events) => {
             for event in &events {
                 loaded.views.retain_mut(|sub| sub.offer(event));
             }
         }
-        Err(error) => tracing::warn!(%thread, %error, "the header's tools were not published"),
+        Err(error) => {
+            tracing::warn!(
+                %thread,
+                error = %Cause(&error),
+                "the header's tools were not published"
+            );
+        }
     }
 }
 

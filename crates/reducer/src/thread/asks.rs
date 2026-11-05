@@ -34,6 +34,7 @@ pub(super) fn permission_requested(
         options: event.options.clone(),
         deliverable: event.deliverable,
         state: PermissionState::Pending,
+        about: event.about,
         answered_at: None,
     };
     insert_new(state, seq, ViewEntry::Permission(entry), out);

@@ -93,6 +93,24 @@ credential that work for anyone who reads the log, and a userinfo or a token in 
 in plain text. The name list is the usual set of names that carry a credential or a signature; the
 value rule catches a token under a name nobody listed, such as `ref`.
 
+### The view
+
+The fold files each record under the tool call it belongs to. `ToolCallEntry.web` holds a
+`ToolCallWeb`, boxed, and is left out of the JSON when the call has no web records:
+
+- `search`, a `ToolCallSearch` (`query`, and `results`: the event's own `WebResult`s, with the
+  event's caps and nothing added). A `WebSearchRecorded` whose `tool_call` is the call's sets it;
+  a later one for the same call replaces it.
+- `pages`, a list of `ToolCallPage` (`url`, `title` when there is one, and `via`). Each
+  `PageVisited` whose `tool_call` is the call's appends one, in the log's order. A page opened
+  twice is listed twice, and the UI shows each URL once.
+- At most `MAX_PAGES_PER_CALL` = 50 pages per call. The reducer ignores the 51st and every later
+  one, and the 50 it keeps are the first 50 the log holds.
+- A record whose `tool_call` matches no tool call of the thread is ignored: it changes nothing and
+  is no anomaly.
+
+A change to a call's web sends the call's entry as an `Upsert`, as any change to a tool call does.
+
 ## Deviations
 
 - **`agent` is `AgentId`, not `AgentKind`.** The S26 brief named `agent: Option<AgentKind>`. The code
@@ -107,15 +125,15 @@ value rule catches a token under a name nobody listed, such as `ref`.
 
 The log now holds what the agent searched and opened, with the tool call and turn that did it, so a
 later view can show sources from the log alone. The events are additive: an older reader sees them
-as unknown kinds, and a newer one reads them with no migration and no snapshot change. What a later
-change must respect: the fields are now part of the log, so a rename or a removed field needs its own
-record under 0002, and a new `PageVia` value needs its row and its corpus entry. Until the sources
-list lands, nothing shows these events to the lawyer.
+as unknown kinds, and a newer one reads them with no migration. What a later change must respect:
+the fields are now part of the log, so a rename or a removed field needs its own record under 0002,
+and a new `PageVia` value needs its row and its corpus entry. The view carries the sources from this
+PR; until the sources list lands, nothing shows them to the lawyer.
 
-The PR that folds these events into reducer state (the sources list) must bump
-`REDUCER_SCHEMA_VERSION`. The reducer ignores them today, so its snapshots hold no trace of them;
-once a state field holds a source, an older snapshot lacks it, and a bump makes that snapshot
-rebuild from the events. Until then `REDUCER_SCHEMA_VERSION` stays as it is.
+The PR that folds these events into reducer state must bump `REDUCER_SCHEMA_VERSION`. That PR is
+this one (see "The view"): `ToolCallEntry.web` is a state field, so an older snapshot lacks the
+sources a log holds, and the bump makes each such snapshot rebuild from the events. The number goes
+from 7 to 8: 7 is the thread triage's (#294), which merged first.
 
 A later change to the caps or to the URL rule changes what a new entry holds, and not what an old
 one holds: an entry is never rewritten. It needs a record under 0002, and its corpus entry, if any,

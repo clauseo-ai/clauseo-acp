@@ -65,6 +65,12 @@ pub(crate) fn guard_command(
         .arg(agent_browser)
         .arg("--cwd")
         .arg(scratch.cwd())
+        .arg("--cdp-port")
+        .arg(scratch.cdp.port().to_string());
+    if let Some(daemon) = &scratch.daemon {
+        command.arg("--daemon-port").arg(daemon.port().to_string());
+    }
+    command
         .args(["--", "mcp", "--tools", "core"])
         .env_clear()
         .env("AGENT_BROWSER_CONFIG", scratch.root.join("config.json"))
@@ -73,7 +79,13 @@ pub(crate) fn guard_command(
             format!("http://127.0.0.1:{proxy_port}"),
         )
         .env("AGENT_BROWSER_SESSION", &scratch.session)
-        .env("AGENT_BROWSER_EXECUTABLE_PATH", chrome);
+        .env("AGENT_BROWSER_EXECUTABLE_PATH", chrome)
+        .env(
+            "AGENT_BROWSER_STREAM_PORT",
+            scratch.stream.port().to_string(),
+        );
+    #[cfg(unix)]
+    command.env("AGENT_BROWSER_SOCKET_DIR", scratch.socket_dir.path());
     for name in PASSED {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);

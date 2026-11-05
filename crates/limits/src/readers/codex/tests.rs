@@ -11,7 +11,7 @@ use clauseo_protocol::{
 use serde_json::{Value, json};
 
 use super::{Answers, outcome};
-use crate::{ReadFailure, ReadOutcome};
+use crate::{AccountRead, ReadFailure, ReadOutcome};
 
 /// The resets in the fixtures, in Unix seconds.
 const FIVE_HOUR_RESET: i64 = 1_793_642_400;
@@ -30,7 +30,10 @@ pub(super) fn answers(fixture: &Value) -> Answers {
     let limits: Option<GetAccountRateLimitsResponse> = fixture
         .get("rateLimitsRead")
         .map(|limits| serde_json::from_value(limits.clone()).unwrap());
-    Answers { account, limits }
+    Answers {
+        account: Some(account),
+        limits,
+    }
 }
 
 fn read(text: &str) -> ReadOutcome {
@@ -99,6 +102,7 @@ fn plan(
             },
         },
         reached,
+        account_read: AccountRead::Read,
     }
 }
 
@@ -114,6 +118,29 @@ pub(super) fn pay_as_you_go(account: &str, via: BillingProvider) -> ReadOutcome 
             source: LimitSource::NotApplicable,
         },
         reached: None,
+        account_read: AccountRead::Read,
+    }
+}
+
+/// The outcome `plus.json`'s limits alone map to, when `account/read` did not come: the plan
+/// ref, marked as not read.
+pub(super) fn plus_unread_outcome() -> ReadOutcome {
+    let ReadOutcome::Usage {
+        limits, reached, ..
+    } = plan(
+        "plan",
+        "ChatGPT Plus",
+        vec![session(25.0), weekly(40.0)],
+        AtLimitBehaviour::Pauses,
+        None,
+    )
+    else {
+        unreachable!("plan() is usage")
+    };
+    ReadOutcome::Usage {
+        limits,
+        reached,
+        account_read: AccountRead::NotRead,
     }
 }
 
@@ -177,7 +204,7 @@ fn go_with_no_email_is_the_plan_ref() {
         "Monthly limit",
         15.0,
         Some(MONTH_RESET),
-        Some(40_320),
+        Some(43_200),
     );
     assert_eq!(
         read(include_str!("../../../fixtures/codex/go.json")),
@@ -280,7 +307,9 @@ fn chatgpt(plan_type: &str, snapshot: &Value) -> ReadOutcome {
 
 fn limits_of(outcome: ReadOutcome) -> (AccountLimits, Option<LimitStopReason>) {
     match outcome {
-        ReadOutcome::Usage { limits, reached } => (limits, reached),
+        ReadOutcome::Usage {
+            limits, reached, ..
+        } => (limits, reached),
         other => panic!("not usage: {other:?}"),
     }
 }

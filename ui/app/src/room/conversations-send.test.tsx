@@ -26,8 +26,12 @@ const thread = (id: ThreadId, over: Partial<ThreadSummary> = {}): ThreadSummary 
 
 const refusal: HostError = { code: "internal", message: "for logs only", retryable: false };
 const field = () => h!.one("composer") as HTMLTextAreaElement | null;
+// the rail's morning sweep (U16b) goes at launch whenever the clock reads 05:00 or later: not these tests' business
 const kinds = () =>
-  h!.transport.only("dispatch").map((c) => Object.keys(c.command.command)[0] as keyof HostCommand);
+  h!.transport
+    .only("dispatch")
+    .map((c) => Object.keys(c.command.command)[0] as keyof HostCommand)
+    .filter((k) => k !== "sweep_done");
 const newRow = () =>
   h!
     .all("conversation")

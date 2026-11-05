@@ -28,6 +28,8 @@ pub(crate) enum Tag {
     Turn(turn::TurnTag),
     /// The retry of the commit logging a restore of this matter.
     Restore(MatterId),
+    /// The commit logging snoozes' wakes (`triage/wake.rs`).
+    Wake,
 }
 
 /// A matter the host knows.

@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 
 use super::browser::Switch;
 use super::profile::{ClaudeKeys, Folders, Login, codex_keys};
-use super::{GuardHook, McpControl, session_meta};
+use super::{GuardHook, McpControl, guard_missing, session_meta};
 use crate::browser::seed_sites::SEED_SITES;
 
 const ON: Switch = Switch {
@@ -158,12 +158,17 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
     }}});
     let program = Path::new("/app/clauseo");
     let matter = Path::new("/m");
-    let guard = Some(GuardHook { program, matter });
+    let guard = Some(GuardHook {
+        program,
+        matter,
+        ask_all: false,
+    });
     let keys = ClaudeKeys {
         web_search: ON,
         login: Login::FirstParty,
         folders: folders(),
         seed_sites: SEED_SITES,
+        forced_ask: false,
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -190,4 +195,129 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["matcher"], json!("Read"));
     assert_eq!(entries[1]["matcher"], json!(super::GUARD_MATCHER));
+}
+
+/// Forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, not the host's web rules and
+/// not the hook's own; the guard runs before every tool (`*`, MCP tools included) with
+/// `--ask-all` last. Without it the same inputs keep both as before.
+#[test]
+fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
+    let hook = json!({"claudeCode": {"options": {"allowedTools": ["Bash(git status)"]}}});
+    let meta_for = |forced_ask: bool| {
+        let guard = Some(GuardHook {
+            program: Path::new("/app/clauseo"),
+            matter: Path::new("/m"),
+            ask_all: forced_ask,
+        });
+        let keys = ClaudeKeys {
+            web_search: ON,
+            login: Login::FirstParty,
+            folders: folders(),
+            seed_sites: SEED_SITES,
+            forced_ask,
+        };
+        session_meta(
+            hook.as_object().cloned(),
+            McpControl::Clauseo,
+            guard,
+            Some(&keys),
+        )
+    };
+    let forced = meta_for(true);
+    let options = &forced["claudeCode"]["options"];
+    assert_eq!(options.get("allowedTools"), None, "{options}");
+    // The second fence, in the flag settings: the ask rules and no sandbox auto-allow.
+    assert_eq!(
+        options["settings"]["permissions"]["ask"],
+        json!(crate::agent::forced_ask::ASK_RULES),
+        "{options}"
+    );
+    assert_eq!(
+        options["settings"]["sandbox"]["autoAllowBashIfSandboxed"],
+        json!(false)
+    );
+    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
+    assert_eq!(guard["matcher"], json!("*"));
+    assert_eq!(
+        guard["hooks"][0]["args"],
+        json!(["--pre-write-guard", "--matter", "/m", "--ask-all"])
+    );
+
+    let plain = meta_for(false);
+    let options = &plain["claudeCode"]["options"];
+    assert_eq!(options["settings"].get("permissions"), None, "{options}");
+    assert_eq!(options["settings"].get("sandbox"), None, "{options}");
+    let allowed = options["allowedTools"].as_array().unwrap();
+    assert!(allowed.contains(&json!("Bash(git status)")), "{options}");
+    assert!(allowed.contains(&json!("WebSearch")), "{options}");
+    let guard = &options["settings"]["hooks"]["PreToolUse"][0];
+    assert_eq!(guard["matcher"], json!(super::GUARD_MATCHER));
+    assert_eq!(
+        guard["hooks"][0]["args"],
+        json!(["--pre-write-guard", "--matter", "/m"])
+    );
+}
+
+/// Forced ask keeps the hook's own `permissions` and `sandbox` keys and its ask rules, and adds
+/// every forced-ask rule once, after them.
+#[test]
+fn forced_ask_adds_its_ask_rules_after_the_hooks() {
+    let hook = json!({"claudeCode": {"options": {"settings": {
+        "permissions": {"ask": ["Bash", "Read(./secret)"], "allow": ["Read"]},
+        "sandbox": {"enabled": true, "autoAllowBashIfSandboxed": true},
+    }}}});
+    let keys = ClaudeKeys {
+        web_search: OFF,
+        login: Login::FirstParty,
+        folders: folders(),
+        seed_sites: SEED_SITES,
+        forced_ask: true,
+    };
+    let meta = session_meta(
+        hook.as_object().cloned(),
+        McpControl::Clauseo,
+        None,
+        Some(&keys),
+    );
+    let settings = &meta["claudeCode"]["options"]["settings"];
+    let mut expected = vec![json!("Bash"), json!("Read(./secret)")];
+    expected.extend(
+        crate::agent::forced_ask::ASK_RULES
+            .iter()
+            .filter(|rule| **rule != "Bash")
+            .map(|rule| json!(rule)),
+    );
+    assert_eq!(settings["permissions"]["ask"], Value::Array(expected));
+    assert_eq!(settings["permissions"]["allow"], json!(["Read"]));
+    assert_eq!(
+        settings["sandbox"],
+        json!({"enabled": true, "autoAllowBashIfSandboxed": false})
+    );
+}
+
+/// A forced-ask launch is refused when no guard hook could go to the agent
+/// (`actor/turn/profile_loads.rs`; the review's `rev_forced_ask_without_a_guard_still_fences`
+/// found a forced-ask `_meta` built with no guard carrying no hook). Each way there is no hook
+/// has its own reason kind, and a guard that can go has none.
+#[test]
+fn a_guard_that_cannot_go_has_a_reason() {
+    let program = Path::new("/app/clauseo");
+    let matter = Path::new("/m");
+    let guard = |program, matter| {
+        Some(GuardHook {
+            program,
+            matter,
+            ask_all: true,
+        })
+    };
+    assert_eq!(guard_missing(None), Some("no_program"));
+    assert_eq!(guard_missing(guard(program, matter)), None);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let bad = Path::new(std::ffi::OsStr::from_bytes(b"/m\xff"));
+        assert_eq!(guard_missing(guard(bad, matter)), Some("program_not_utf8"));
+        assert_eq!(guard_missing(guard(program, bad)), Some("matter_not_utf8"));
+        assert_eq!(super::guard_entry(guard(program, bad).unwrap()), None);
+    }
 }

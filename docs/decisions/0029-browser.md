@@ -22,15 +22,19 @@ Source lines below are agent-browser's, at tag v0.41.1, under `cli/src/`.
 **The binary.** `clauseo-mcp`, package `clauseo-mcp`. `main.rs` dispatches on argv[1] through one
 table of modes, which also builds the usage line; R24 adds `connector` to it. No mode, or any
 name not in the table (case-sensitive), prints `usage: clauseo-mcp <mode> ... (modes:
-browser-guard)` on stderr and exits 2. Dependencies: `serde_json` only. Plain threads, no async
+browser-guard)` on stderr and exits 2. Dependencies: `serde_json`, and `windows` on Windows (the Job Object). Plain threads, no async
 runtime, no HTTP client; `crates/mcp/tests/guard/deps.rs` walks `Cargo.lock` and fails if
 reqwest, hyper, hyper-util, h2, ureq, curl, isahc, attohttpc, rustls, native-tls, openssl,
 socket2, mio, tokio, async-std, smol or tauri becomes reachable.
 
-**The command line.** Exactly `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --
-<args...>`, in that order. `<file>` must be an absolute path to an existing file and `<folder>`
-an absolute path to an existing folder. The child's arguments are passed exactly as given.
-Anything else exits 2 with a reason and the mode's usage line.
+**The command line.** Exactly `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
+--cdp-port <port> -- <args...>`, in that order, and on Windows `--daemon-port <port>` after
+`--cdp-port` (required there, refused on macOS and Linux). `<file>` must be an absolute path to
+an existing file and `<folder>` an absolute path to an existing folder; each port is 1024 to
+65535 in plain decimal (no sign, no leading zero). Both ports are ones the host claimed for the
+session (host part, "Ports and socket folder"). The daemon port is an argument, not a variable,
+so it stays out of agent-browser's environment and the allow-list. The child's arguments are
+passed exactly as given. Anything else exits 2 with a reason and the mode's usage line.
 
 **The environment.** The child gets exactly this map (`env.rs`), nothing inherited:
 
@@ -40,13 +44,14 @@ Anything else exits 2 with a reason and the mode's usage line.
 | `AGENT_BROWSER_PROXY` | from the guard's environment; exactly `http://127.0.0.1:<port>`, port 1 to 65535, no leading zero |
 | `AGENT_BROWSER_SESSION` | from the guard's environment; 1 to 64 of `A-Z a-z 0-9 _ -` |
 | `AGENT_BROWSER_PROXY_BYPASS` | `<-loopback>`, so loopback goes through the proxy too |
-| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` |
+| `AGENT_BROWSER_ARGS` | `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`, a newline, then `--remote-debugging-port=<--cdp-port>`: agent-browser splits the value at newlines (`flags.rs` `split_launch_args`) and puts it after its own `--remote-debugging-port=0`, and Chrome takes the last of a repeated switch |
 | `AGENT_BROWSER_IDLE_TIMEOUT_MS` | `600000` |
 | `AGENT_BROWSER_MAX_OUTPUT` | `25000` (characters; see below) |
 | `AGENT_BROWSER_DEFAULT_TIMEOUT` | `30000` |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and lower case on Unix) | the validated proxy URL; no `NO_PROXY` |
 | `AGENT_BROWSER_DOWNLOAD_PATH`, `_SCREENSHOT_DIR` | `<cwd>/downloads`, `<cwd>/screenshots` |
-| `AGENT_BROWSER_SOCKET_DIR` | Unix: `/tmp/clauseo-ab-<first 16 characters of the session>`; Windows: `<cwd>\run` |
+| `AGENT_BROWSER_SOCKET_DIR` | Unix: from the guard's environment, the folder the host made for the session (below); Windows: `<cwd>\run`, whatever the environment says |
+| `AGENT_BROWSER_STREAM_PORT` | from the guard's environment, set by the host; a port from 1024 to 65535, no leading zero |
 | Unix: `HOME`, `TMPDIR` | `<cwd>/home`, `<cwd>/tmp` |
 | Windows: `TEMP`, `TMP` | `<cwd>\tmp` |
 | `PATH` | Unix `/usr/bin:/bin:/usr/sbin:/sbin`; Windows `<SystemRoot>\System32;<SystemRoot>`, `C:\Windows` when `SystemRoot` is absent |
@@ -65,15 +70,44 @@ at `<socket dir>/namespaces/<ns>/run/<session>.sock` (`connection.rs:136-141`,
 socket path may hold (`connection.rs:902-913`), so the browser would never start on macOS. The
 socket folder, `HOME` and `TMPDIR` are per session already, so a namespace adds nothing.
 
-**The Unix socket folder.** `<cwd>/run` can be too long for a socket path, so on Unix the socket
-folder is `/tmp/clauseo-ab-<first 16 characters of the session>` (`browser_guard/socket.rs`).
-The guard makes it with mode 0700 through its write module. If it exists already, it must be a
-real folder (`symlink_metadata`, not a link) with mode 0700 and the same owner uid as `--cwd`;
-otherwise the guard exits 2 with a stderr line. Then `<socket folder>/<session>.sock` must be at
-most 103 bytes (it is at most 102 with a 64-character session), else exit 2. On Windows the
-socket folder stays `<cwd>\run`: agent-browser uses loopback TCP there, and the folder holds only
-`.port` and `.pid` files. Two sessions whose ids share their first 16 characters share the folder,
-each with its own socket file. The host removes the folder at session end.
+**The Unix socket folder.** `<cwd>/run` can be too long for a socket path, so on Unix the host
+makes a short folder per session, `/tmp/clauseo-ab-<16 random>` (stage C's `BrowserSocketDir`,
+mode 0700, with its lock file beside it), and passes it as `AGENT_BROWSER_SOCKET_DIR`. The guard
+makes nothing there: it checks the folder (`browser_guard/socket.rs`) and exits 2 with a stderr
+line unless the path is absolute, names a real folder under `symlink_metadata` (not a link),
+with mode exactly 0700 and the same owner uid as `--cwd`, and `<socket folder>/<session>.sock`
+is at most 103 bytes (with the host's 32-byte folder it is at most 102 for a 64-character
+session). It passes the same value to agent-browser. On Windows the socket folder stays
+`<cwd>\run`: agent-browser uses loopback TCP there, and the folder holds only `.port` and
+`.pid` files. The host removes the folder once the agent's process tree was killed (host part,
+"Ports and socket folder", for what can outlive that).
+
+**The ports agent-browser reports.** agent-browser writes the port each listener got to a file
+in the socket folder, and when the port it was asked for will not bind it silently takes another
+and writes that one: the stream server's `<socket folder>/<session>.stream` on every OS (started
+with port fallback allowed, `native/daemon.rs` `StreamServer::start_without_client`,
+`stream/mod.rs`), and on Windows the daemon's `<cwd>\run\<session>.port` (from a port it derives
+from the session name, with an ephemeral fallback, the `TcpListener::bind` fallback). The host
+claims the stream port (`AGENT_BROWSER_STREAM_PORT`) and draws the Windows session name so the
+daemon's port is one it claimed (host part), passed as `--daemon-port`. After every line it
+relays from the child, for the session's whole life, the guard reads each file without following
+a link (`browser_guard/port_file.rs`): no file yet, or an empty one, means not started or being
+written; the claimed port is fine for now, and the file is read again after the next line, since
+the daemon can end (idle timeout, `agent_browser_close`) and start again on another port;
+another port, text that is no port, a link, or anything but a regular file ends agent-browser,
+and the guard exits 1 with a stderr line. A listener on another port would sit outside the ports
+the jail pins to the session.
+
+The socket folder is agent-writable (`<cwd>` is, and the jail allows the Unix socket folder to
+the whole session), so the agent can write the claimed port into a file itself. The check
+catches agent-browser's silent fallback to another port; it is not a boundary against the agent.
+
+How far "ends agent-browser" reaches differs by OS. On Windows the guard starts agent-browser
+suspended, puts it in a Job Object the guard owns (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no
+breakaway allowed), then resumes it (`browser_guard/job.rs`); `DETACHED_PROCESS` and a new
+process group do not leave a job, so ending the job ends the daemon and Chrome too. On Unix the
+guard kills the direct child only: the daemon has left the process group (`setsid`) and lives,
+on the wrong port, until its idle timeout (G17 item 6).
 
 Why each value:
 - The proxy variables: `agent_browser_read` with a `url` fetches through the CLI's own reqwest
@@ -121,8 +155,10 @@ by such a PID. The guard's close request on stdin EOF (above) is the normal end,
 timeout the backstop; how often a daemon outlives its session is a follow-up, measured in G17
 item 6 (host part, "No daemon kill by PID"). On
 Windows it is started with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`
-(`connection.rs:963-983`), which does not leave a Job Object, so the job kill should still end
-it (not verified). A daemon nobody kills ends after the idle timeout, 10 minutes.
+(`connection.rs:963-983`), which does not leave a Job Object; agent-browser runs in a job the
+guard owns (`browser_guard/job.rs`), whose last handle closes when the guard exits, however it
+exits, so the daemon and Chrome end with the guard on Windows. That closes G17 item 6 there; it
+stays open on Unix. A daemon nobody kills ends after the idle timeout, 10 minutes.
 
 **The filter** (`filter.rs`) applies to agent-to-child lines only, in this order:
 
@@ -217,9 +253,10 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
 - **The jail allows one socket folder, made by the host.** On Unix agent-browser keeps its
   socket in a folder outside `--cwd` (the state path is over the 103-byte socket limit). Since
   #257 the host makes it (`BrowserSocketDir`: `/tmp/clauseo-ab-<16 random>`, mode 0700,
-  lstat-checked, removed after the launch's process tree exits) and the jail may use only that
-  folder, not create it. Until the ports-and-socket follow-up lands, the guard's own `mkdir`
-  there is refused in the jail.
+  lstat-checked, removed once the agent's process tree was killed; an agent that ignores its
+  kill and the Unix daemon, which leaves the tree, can outlive that) and the jail may use only that
+  folder, not create it. The guard makes nothing there: it checks the folder it is given and
+  refuses to start on a failed check.
 - **`<state>/browser` and the browser's loopback ports, in the jail: the jail adds nothing
   beyond itself.** This restates stage C's two requirements that `--cwd` (`<state>/browser`)
   sit outside what the agent can write and that the agent's own tools be kept off the daemon's
@@ -236,10 +273,12 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   `browser::write_config` refuses a linked folder and replaces a link at the file name),
   `DevToolsActivePort`, and downloads (the host reads neither yet; whoever adds the read keeps
   this rule).
-- **Stage C's `BrowserSocketDir` and `ports::claim_port` merged in #257.** The ports-and-socket
-  follow-up moves the socket folder's creation to the host
-  (`AGENT_BROWSER_SOCKET_DIR = BrowserSocketDir::path()`) and pins the CDP, stream and Windows
-  daemon ports.
+- **Stage C's `BrowserSocketDir` and `ports::claim_port` merged in #257.** The host makes the
+  socket folder per session (`AGENT_BROWSER_SOCKET_DIR = BrowserSocketDir::path()`) and claims
+  the CDP, stream and Windows daemon ports (host part, "Ports and socket folder"). The jail
+  policy is not built on main yet: R17 takes both from the launch's `RunFolders::browser_session`
+  where it builds the session's policy, `PolicyBuilder::browser_socket_dir(&session.socket_dir)`
+  and `Loopback::Ports(session.ports.loopback())` (CDP, stream, then the daemon's on Windows).
 - **A daemon that outlives its session** (a kill of the guard on Unix) ends only at the idle
   timeout; the host does not kill it by PID (above). Follow-up: G17 item 6.
 
@@ -265,7 +304,7 @@ session that cannot get the browser makes no file system calls for it. In order:
    Windows ARM64. `<app data>` is the host's data folder.
 4. Otherwise none: `BrowserNotInstalled`.
 
-The Chrome for Testing download is added by a later S27 PR (part 3).
+The download that fills step 3 is the next section.
 
 Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
 counts when it is a regular file, following links (an installed Chrome may be one). In
@@ -289,6 +328,155 @@ still shows first. `BrowserNotInstalled` is the nearest existing reason; a reaso
 would be a protocol change. `tests/host/browser.rs` checks the file after a browser session
 starts and that its path is the one the profile's entry names. The smoke test writes its own
 config file, which stands in for this one.
+
+#### Ports and socket folder (`host/src/browser/session.rs`)
+
+For a session that can get the browser (`tools.browser` on, a proxy, a free slot, and a
+`browser` entry from the profile hook), the launch-prep thread, after finding its Chrome,
+claims a `BrowserSession`:
+
+- `BrowserPorts { cdp, stream, daemon }`, each a stage C `PortClaim`: `cdp` and `stream` from
+  `ports::claim_port()`, `daemon` on Windows only (below). No other session of this host is
+  handed them while they are held. They fill `{cdp_port}`, `{stream_port}` and `{daemon_port}`.
+- macOS and Linux: one `BrowserSocketDir` (`BrowserSocketDir::create()`), whose `path()`, the
+  `/tmp/...` form, fills `{socket_dir}`; never `canonical()`, which on macOS is 8 bytes longer
+  (`/private/tmp/...`) and counts against the socket path's 103 bytes.
+- agent-browser's session name, `{session_id}`: the session's id on macOS and Linux.
+
+The `BrowserSession` rides on the launch's `RunFolders` (in an `Arc`; the thread's turn state
+is its one lasting holder) and drops with the run folder in `launch_checks::discard`, off the
+actor: after the agent's process tree was killed (`clauseo-process` kills what is left of the
+tree however the agent ends), or when the agent never started. Processes can outlive that
+kill, and the claims drop anyway: an agent that ignores its kill (`StopStep::Unresponsive`,
+logged), and any jailed process that calls `setsid`, which `killpg` does not reach, such as
+agent-browser's Unix daemon, which then lives until its idle timeout (G17 item 6).
+
+**Residual risk: a claimed port taken by another host.** A claim holds within this host process
+only (stage C's `ports`). Chrome, the stream server and agent-browser's daemon bind only at the
+agent's first browser tool call, and the stream server and the daemon fall back to another port
+when theirs is taken. So a second host on the same machine (two OS users, or two Windows users
+sharing 61080 to 61179) can be handed a port this host claimed but has not bound yet. This
+host's jailed agent could then reach that host's Chrome on its CDP port, and this host's
+`.port` and `.stream` files never appear, so the guard's checks never fire. The odds are low on
+macOS (two hosts drawing the same ephemeral port in the window before the first tool call); on
+Windows, S15's per-launch rules (exact ports per launch, never the whole range, and a
+listener-side rule) close it; the upstream mitigation is a pipe or socket mode for CDP and the
+stream (vercel-labs/agent-browser#2313). Stage C's next sandbox PR also retires released ports
+for the host's life on Unix. Dropping the session releases the ports
+and removes the folder and its lock file. A claim that fails, or a token the claims cannot fill
+(`{socket_dir}` on Windows, `{daemon_port}` elsewhere), leaves the browser out with
+`BrowserNotInstalled` and a log line.
+
+At host start, once the store is open, `BrowserSocketDir::sweep_stale` removes the socket
+folders an earlier host left in `/tmp` (no id is kept: no launch is live yet; a folder whose
+lock another live host holds stays). `HostConfig::with_browser_socket_root` (test support)
+moves both the folders and the sweep to a test folder.
+
+**The Windows name search.** agent-browser derives its Windows daemon port from the session
+name (`connection.rs` `get_port_for_session`, no namespace): start with `h: i32 = 0`; for each
+character `c`, `h = (h << 5).wrapping_sub(h).wrapping_add(c as i32)`; the port is
+`49152 + (h.unsigned_abs() % 16383)`. The jail's Windows range is 61080 to 61179, so the
+remainder must be 11928 to 12027. The host draws random names of 16 characters from the guard's
+charset (`A-Z a-z 0-9 _ -`, from the OS's random source) until a name's port is in the range and
+`ports::claim_port_at(port)` claims it (`AddrInUse` draws again), at most 200,000 draws (a
+name lands in range about once in 164), then fails typed (`ClaimError::NameSearchExhausted`).
+That name is agent-browser's session name, and the port goes to the guard as `--daemon-port`,
+which checks the daemon's `.port` file (guard part, "The ports agent-browser reports"). Upstream issue
+vercel-labs/agent-browser#2313, a daemon port set by the caller, would remove the search.
+
+**Missing sidecars.** The same prep checks that the browser entry's `clauseo-mcp` (its command)
+and agent-browser (its `--agent-browser` argument) are files. A development build has no
+agent-browser: a missing one leaves the browser out with `BrowserNotInstalled` and a log line
+naming the file, and claims nothing.
+
+#### The Chrome for Testing download (`host/src/browser/install.rs`, part 3)
+
+agent-browser's own `install` writes under the home folder, which Clauseo cannot move on
+Windows, so the host downloads Chrome for Testing itself, once the lawyer agreed.
+
+**Wire.** `HostCommand::InstallBrowser {}` starts it and answers `Done` at once; while one runs
+it answers `Done` and does nothing (no second download), except while a cancelled one is still
+ending: then a new download starts once its `Failed { cancelled }` is out. `HostCommand::CancelBrowserInstall
+{}` stops it, and does nothing when none runs. Neither stores a receipt. Every app subscriber gets
+`HostEvent::BrowserInstall { state }` as it goes: some `Downloading { bytes, total }` (at most
+four a second, only once `Content-Length` is known), `Unpacking`, then one `Done` or one
+`Failed { code, message }`. The app's copy keys on `code` (`BrowserInstallFailure`, an open
+enum: `network`, `size_mismatch`, `disk_space`, `host_refused`, `signature`, `unpack`,
+`unsupported`, `cancelled`); `message` is for the log. The latest state goes into every app catch-up:
+the running download's last step, or the last download's end until the next one starts. So a
+window that lagged, resubscribed after a pause or the watchdog, or reloaded hears where the
+download stands, its end included. The desktop bridge admits both commands from the main window only, and only main's app
+feed carries the event (0012, 0028).
+
+**Flow.** One download at a time, on a thread of its own; the actor never waits on it.
+
+1. The machine: `mac-arm64`, `mac-x64` or `win64`. Linux, Windows ARM64 and the rest:
+   `unsupported`. The platform and `<app data>` are the launch prep's `ChromeRoots`, so the
+   search looks where the download writes.
+2. `<app data>/browsers/` is made (0700, through no link). Under 1 GB free there
+   (`statvfs` on macOS, `GetDiskFreeSpaceExW` on Windows): `disk_space`. A failed read only
+   warns.
+3. The version list, at most 1 MiB. Its URL must be `https://googlechromelabs.github.io/...`.
+   Stable's `version` must be dotted digits (32 bytes at most), and the `chrome` URL for the
+   platform must equal, byte for byte,
+   `https://storage.googleapis.com/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`.
+   Else `host_refused`, before anything downloads. The list has no hash (checked 2026-11-02),
+   so integrity is HTTPS to Google's host plus the size check.
+4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`. Its size must equal
+   the final response's `Content-Length`; a response without one fails too (`size_mismatch`).
+5. Unpacking (`Unpacking`): first the zip's entry names are read in Rust, from the central
+   directory and each local header (zip64 included). Refused: absolute names, `:` (drives and
+   streams), `\`, `..`, `.` and empty segments (a folder entry's trailing `/` aside), segments
+   ending in a dot or a space (Windows drops those), control characters, names that are not ASCII (macOS and
+   Windows match names ignoring Unicode case and normalisation, so two spellings could slip an
+   entry under a link entry), a name twice
+   (ignoring ASCII case), a Unicode-path extra field naming another file, and any entry under a
+   link entry (made on Unix or OS X), compared segment by segment, so every path has one
+   spelling. Then `ditto -x -k` (macOS) or `tar -xf` (Windows) unpacks into `.partial-…/chrome/`.
+   Then the result is walked without following links: a link must be relative, must never
+   climb above the unpack folder at any step when read as text from its own folder (so it
+   cannot leave and come back by that folder's name, which changes at the rename), and must
+   resolve inside; anything not a file, folder or link is refused. The browser binary must be a file
+   where the search expects it. Else `unpack`.
+6. The signature (next paragraph).
+7. Whatever is at `chrome-<version>` (a folder the search passed over, a file, a link, never
+   followed) is removed, `chrome/` is renamed to `browsers/chrome-<version>/` and walked again
+   there (removed if that fails), and the working folder goes.
+
+Every failure removes the working folder. A cancel, the lawyer's or the host's shutdown, ends
+the running tool's process tree and waits for it to exit before that removal; shutdown waits for
+the download's last state. At start a thread removes every `browsers/.partial-*` a crash left
+(folders with their contents, links and files themselves, never a link's target; a link at
+`browsers` itself is not followed), and the first
+download waits for it.
+
+**Tools.** Each is an absolute path, never a `PATH` lookup: `/usr/bin/curl`, `/usr/bin/ditto` and
+`/usr/bin/codesign` on macOS; `curl.exe` and `tar.exe` in `GetSystemDirectoryW()` (System32) on
+Windows. A missing tool is `unsupported`. Each runs through `clauseo_process::spawn_in_tree`. curl
+gets `-q` first (no `.curlrc`), then `--proto =https --proto-redir =https --tlsv1.2 --fail
+--location --max-redirs 0 --max-filesize 419430400 --connect-timeout 30 -y 60 -Y 1` (`CURL_FLAGS`).
+`--max-redirs 0` tightens the agreed `3` (security review): any redirect fails as curl's exit
+47, `host_refused` (a retry would meet the same redirect). HTTPS to Google's host is the whole
+integrity check while the signature does not enforce, so a redirect to another https host
+must not replace it; neither URL redirects today (checked 2026-11-04). curl's exit 63 (over
+the 400 MiB cap) is `size_mismatch`, any other failure `network`. Progress comes from polling the file's size and the `-D` header file every 250 ms. The tools sit behind
+`InstallTools`; the tests use fakes (`HostConfig::with_browser_install_tools`).
+
+**Signature.** macOS: `codesign --verify --deep --strict` on the app bundle, then `codesign -dv`
+must show `TeamIdentifier=EQHXZ8M8AV` (Google). Windows: `WinVerifyTrust` (Authenticode) on
+`chrome.exe`, without fetching revocation. The result is logged; it fails the download
+(`signature`) only while `SIGNATURE_REQUIRED_MAC` or `SIGNATURE_REQUIRED_WINDOWS` is true. Both
+are false: nobody has checked here whether Chrome for Testing is signed. The by-hand check below
+decides, and a later PR flips the constant.
+
+**Quarantine.** curl sets no `com.apple.quarantine` attribute, so Gatekeeper does not check the
+download when Chrome starts. HTTPS to Google's host, the size check, and the logged `codesign`
+result are the checks today.
+
+**By hand.** On a Mac (arm64 and Intel) and on Windows x64:
+`cargo test -p clauseo-host --lib real_download -- --ignored --nocapture` downloads the real zip
+into a temporary folder. Record what it logs, then run `codesign -dv --verbose=4` on the app, or
+`Get-AuthenticodeSignature` on `chrome.exe`, and note whether it passes.
 
 #### Slots and limits (`host/src/browser/limits.rs`)
 
@@ -388,7 +576,47 @@ lists; the `browser` module is public for it.
 
 ### Bundling agent-browser
 
-Added by a later S27 PR.
+#### Bundling (desktop)
+
+A release build ships agent-browser as a sidecar binary for each target. Nothing is committed:
+the release fetches the pinned asset, checks its hash and writes it into the desktop crate.
+
+- **The pin**, `crates/desktop/agent-browser.toml`: `version = "0.41.1"`, then one table per Rust
+  target triple with `url` and `sha256` (lowercase hex) of the release's raw binary (no archive).
+  A triple with no build may hold `none = true` and be left out explicitly; none does today, and the Rust
+  and node pin tests refuse it, so a future `none` is a deliberate change to those tests. The
+  file's header states the format. Each hash was taken from a download of the asset and matches
+  the digest GitHub lists for it. `crates/desktop/src/agent_browser_pin.rs` (the
+  `agent_browser_pin` test) checks the file: semver version, the six triples, each url under the
+  pinned release with its asset name, each sha256 in shape.
+- **The fetch**, `crates/desktop/sidecars/agent-browser.mjs`: `fetchAgentBrowser(triple,
+  destPath)`, Node built-ins only. It reads the pin, throws on a triple the pin does not name,
+  accepts only an https URL on `github.com/vercel-labs/agent-browser/releases/download/v<version>/`
+  whose asset name is one plain segment (no `/`, no `%`), and downloads it with a 120 s timeout.
+  The response must be HTTP 200 and at most 64 MB (a larger Content-Length is refused up front; a
+  larger body is refused while reading). Redirects are followed; the SHA-256 of the bytes decides
+  trust. A mismatch throws and writes nothing. Otherwise it writes `<destPath>.partial`, sets mode
+  0755 on non-Windows and renames it into place. Its tests, `sidecars/agent-browser.test.mjs`, stub
+  the network: `node --test 'crates/desktop/sidecars/*.test.mjs'` (Node 24 does not take a folder
+  argument). CI does not run them, because the xtask check is frozen.
+- **Stage F's script**, the release's sidecar script (not in this PR), calls `fetchAgentBrowser` once per release
+  target and writes `crates/desktop/binaries/clauseo-agent-browser-<triple>[.exe]`. It is not in this PR.
+  The base Tauri config has no `externalBin`, and this PR does not add one.
+- **The installed name** is `clauseo-agent-browser` (`.exe` on Windows), under 0035's `clauseo-`
+  prefix rule, since the `.deb` and `.rpm` put sidecars in `/usr/bin`; the desktop passes that
+  path as `--agent-browser` (`crates/desktop/src/profile.rs`). agent-browser's own image-name check
+  (`connection.rs:198`, `is_agent_browser_process`, which wants the name to start with
+  `agent-browser`) then skips its stale-daemon kill. On Windows the guard's Job Object (#329) covers
+  that; on Unix it is the known G17 item 6 limit: an orphaned daemon lasts until its idle timeout.
+- **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
+  Windows on ARM runs under x64 emulation; the pin says so in a comment.
+- **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream
+  has no NOTICE file), listed in `LICENSES/README.md`.
+- **Machine memory**: the desktop reads the machine's total physical memory once at start-up
+  (macOS `hw.memsize`, Windows `GlobalMemoryStatusEx`, Linux `MemTotal`) and passes it with
+  `HostConfig::with_machine_memory`, so the browser limit is 2 sessions at 8 GB or less and 4
+  above. Before this, production took the 2-browser default. The read runs on the thread that
+  starts the host, before `Host::start`. If it fails, nothing is passed and a warning is logged.
 
 #### `PageVisited` (`host/src/sources.rs`, `sources/browser.rs`)
 
@@ -521,8 +749,23 @@ The guard:
 - `serde` is not a direct dependency: `serde_json` alone does the work.
 - `AGENT_BROWSER_NAMESPACE` is not set; the brief set it to the session. With it, the Unix socket
   path is too long (above).
-- `AGENT_BROWSER_SOCKET_DIR` is `/tmp/clauseo-ab-<16 characters>` on Unix, not `<cwd>/run`, made
-  and checked by the guard; Windows keeps `<cwd>\run`.
+- `AGENT_BROWSER_SOCKET_DIR` is `/tmp/clauseo-ab-<16 random>` on Unix, not `<cwd>/run`, made by
+  the host and checked by the guard; Windows keeps `<cwd>\run`.
+- The ports-and-socket PR adds `--daemon-port <port>` (Windows only) to the guard, filled from
+  the Windows-only `{daemon_port}` token, so the guard can check agent-browser's `.port` file;
+  the brief listed only `--cdp-port`. The host does not see when the daemon starts (on the
+  agent's first browser call, inside the agent's MCP child), so the check sits in the guard.
+  The guard also takes an empty `.port` file as not written yet, so a reply relayed while the
+  daemon writes it cannot kill a good session.
+- After the security review: the guard reads the port files after every relayed line for the
+  session's whole life (a match no longer ends the checks); it checks the stream server's
+  `<session>.stream` too, on every OS; and on Windows agent-browser runs in a Job Object the
+  guard owns, so a refusal ends the daemon and Chrome, not just the direct child. `crates/mcp`
+  gains `windows` (Windows only) for it, with one `unsafe_code` expect in `job.rs`;
+  `clauseo-process` has the same steps but for an async child, with dependencies this crate may
+  not take.
+- The host depends on `clauseo-sandbox` (`BrowserSocketDir`, `ports`) and `getrandom` (the
+  Windows names); `ARCHITECTURE.md`'s row lists both.
 - `AGENT_BROWSER_CONFIG` and `AGENT_BROWSER_EXECUTABLE_PATH` must name existing files, and on
   Windows not network or device paths; the brief asked only for absolute paths. Windows also
   gets `SystemRoot` set when absent.
@@ -533,6 +776,18 @@ The guard:
   last child line dropped.
 - `AGENTS.md` lost the Map's comment line to fit the new `crates/mcp` line within its 120 lines
   and 8 KiB; `ARCHITECTURE.md` already says planned crates are in its table.
+
+The download (part 3):
+
+- The brief's `Failed { message }` also carries a `code`, so the app picks its copy without
+  reading English.
+- The tests use fake tools (`InstallTools`), not a local stub server: curl accepts only https,
+  so a stub would need a trusted certificate. The real tools have an ignored by-hand test.
+- A truncated download fails the size check (`size_mismatch`), and a broken zip fails the name
+  check (`unpack`). Neither leaves a folder.
+- A second `InstallBrowser` while one runs is not refused, as the brief said: it answers `Done`
+  and starts nothing. A refusal needs a new error code and a user-facing string, and the
+  running download's `BrowserInstall` events already say one is under way.
 
 ## Consequences
 
@@ -559,6 +814,16 @@ The guard:
 - The URL host reader follows the WHATWG URL standard as written; it was not compared with
   Chrome's or the `url` crate's parser on the same inputs.
 - The socket folder's owner and mode check ran on Linux only, not macOS.
+- The Windows name search and the port-file checks: their logic runs as tests on Linux; the
+  Windows wiring (`claim_port_at` in the jail's range, the read with
+  `FILE_FLAG_OPEN_REPARSE_POINT`, the guard's Job Object) passes `cargo clippy --target
+  x86_64-pc-windows-gnu` and was never run here; `tests/guard/tree.rs` runs it on CI's Windows
+  job. That Chrome honours the later
+  `--remote-debugging-port` over agent-browser's own `=0` is from Chrome's switch rule, not a run.
+- The Chrome for Testing download with the real tools: run only through fakes on Linux. Not
+  run: curl, `ditto` or `tar`, `codesign` and `WinVerifyTrust`, the free-space reads, and
+  whether Chrome for Testing is signed (the by-hand steps above). The Windows code
+  (`install/windows.rs`) was checked with clippy for `x86_64-pc-windows-msvc` in a crate of its own.
 
 ## Status
 

@@ -20,7 +20,7 @@ pub(super) fn is_remote(folder: &Path) -> bool {
     // SAFETY: `wide` is a NUL-terminated UTF-16 string and `root` a buffer whose length the
     // binding passes; both outlive the call, which keeps no pointer to either.
     if let Err(err) = unsafe { GetVolumePathNameW(&wide, &mut root) } {
-        tracing::warn!(path = %folder.display(), error = %err, "GetVolumePathNameW failed");
+        tracing::warn!(error = %err, "GetVolumePathNameW failed");
         return false;
     }
     let end = root

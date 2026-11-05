@@ -47,8 +47,8 @@ beside `v1/`, decoded and pinned the same way:
    `mv` commands that put the files in `corpus/added/` and the pair's `ADDED_AFTER_V1` row, with
    each file's byte length and FNV-1a hash.
 3. Run the printed `mv` commands and paste the row into `ADDED_AFTER_V1` in
-   `crates/protocol/tests/corpus.rs`. A row whose pins are still `(0, 0)` fails with the pin to
-   set.
+   `crates/protocol/tests/corpus/added_rows.rs`. A row whose pins are still `(0, 0)` fails with
+   the pin to set.
 
 The test fails until this is done: the known kinds must be exactly v1's plus those of the added
 files, and every variant must appear somewhere in v1 or the added files. The added files are as

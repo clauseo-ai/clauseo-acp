@@ -35,6 +35,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
 import { closeWindow } from "./close.ts";
+import { webviewHolders } from "./holders.ts";
 import {
   fakeAgentPath,
   launchProfile,
@@ -49,6 +50,7 @@ import {
   type RemovableWarmProfile,
   type Scratch,
 } from "./scratch.ts";
+import { withWordLock, type WordLock } from "./word-hold.ts";
 
 /** The time from starting the app to having its page: the port file, connecting, the page. */
 const SETUP_TIMEOUT_MS = 60_000;
@@ -482,7 +484,7 @@ export interface AppOptions {
 }
 
 export const test = base.extend<
-  AppOptions & { scratch: Scratch; apps: Apps; app: App },
+  AppOptions & { scratch: Scratch; apps: Apps; app: App; wordLock: WordLock },
   { warmProfile: RemovableWarmProfile }
 >({
   scenario: [null, { option: true }],
@@ -524,7 +526,16 @@ export const test = base.extend<
       if (process.env["E2E_KEEP_SCRATCH"] === "1") {
         process.stdout.write(`scratch folders kept in ${scratch.root}\n`);
       } else {
-        removeScratch(scratch);
+        // WebView2's processes can outlive the app under load: removeScratch waits for them, then
+        // kills them, and the run shows each time it had to.
+        await removeScratch(scratch, {
+          holders: webviewHolders,
+          warn: (message) => {
+            process.stdout.write(
+              `::warning title=WebView2 outlived the app::${message.replace(/\r?\n/g, " ")}\n`,
+            );
+          },
+        });
       }
     }
   },
@@ -556,5 +567,10 @@ export const test = base.extend<
 
   app: async ({ apps }, use) => {
     await use(await apps.start());
+  },
+
+  // Depends on scratch, so it is torn down first: no document is still held when the folders go.
+  wordLock: async ({ scratch }, use) => {
+    await withWordLock(scratch.matterDir, use);
   },
 });

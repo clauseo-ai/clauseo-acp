@@ -287,6 +287,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         status,
         folder_display,
         folder_state,
+        folder_support,
     } = a;
     *matter == b.matter
         && *name == b.name
@@ -298,6 +299,7 @@ fn same_matter(a: &MatterSummary, b: &MatterSummary) -> bool {
         && *status == b.status
         && *folder_display == b.folder_display
         && *folder_state == b.folder_state
+        && *folder_support == b.folder_support
 }
 
 /// Whether two thread rows show the same: every field but `last_activity`.
@@ -310,6 +312,8 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         status,
         queue_held,
         seen,
+        snoozed_until,
+        done,
         last_stop,
         last_activity: _,
     } = a;
@@ -320,6 +324,8 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         && *status == b.status
         && *queue_held == b.queue_held
         && *seen == b.seen
+        && *snoozed_until == b.snoozed_until
+        && *done == b.done
         && *last_stop == b.last_stop
 }
 

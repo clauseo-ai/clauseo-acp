@@ -16,10 +16,17 @@ pub(crate) const GUARD: &str = env!("CARGO_BIN_EXE_clauseo-mcp");
 
 /// The proxy the tests give the guard.
 pub(crate) const PROXY: &str = "http://127.0.0.1:9";
+/// The stream port the tests give the guard.
+pub(crate) const STREAM_PORT: &str = "61100";
+/// The CDP port the tests give the guard.
+pub(crate) const CDP_PORT: &str = "61101";
+/// The daemon port the tests give the guard on Windows.
+pub(crate) const DAEMON_PORT: &str = "61102";
 
 /// A folder under the system temp folder, unique per test and process, removed on drop, with
 /// the host's config and Chrome stand-in files in it. Each also has its own session id, whose
-/// first 16 characters name the Unix socket folder `/tmp/clauseo-ab-<id>`, removed on drop too.
+/// first 16 characters name the Unix socket folder `/tmp/clauseo-ab-<id>`, which the test makes
+/// as the host does (mode 0700) and removes on drop too.
 pub(crate) struct Scratch {
     path: PathBuf,
     session: String,
@@ -39,7 +46,17 @@ impl Scratch {
             (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
         });
         let session = format!("{hash:08x}{:08x}-t", std::process::id());
-        Self { path, session }
+        let scratch = Self { path, session };
+        #[cfg(unix)]
+        {
+            let socket_dir = scratch.socket_dir();
+            if std::fs::symlink_metadata(&socket_dir).is_ok() {
+                write::remove_dir_all(&socket_dir).unwrap();
+            }
+            write::create_dir_all(&socket_dir).unwrap();
+            write::set_mode(&socket_dir, 0o700).unwrap();
+        }
+        scratch
     }
 
     /// The session id this test gives the guard.
@@ -47,7 +64,7 @@ impl Scratch {
         &self.session
     }
 
-    /// The socket folder the guard uses on Unix.
+    /// The socket folder the host gives the guard on Unix.
     pub(crate) fn socket_dir(&self) -> PathBuf {
         PathBuf::from(format!("/tmp/clauseo-ab-{}", &self.session[..16]))
     }
@@ -106,10 +123,10 @@ pub(crate) fn example(name: &str) -> PathBuf {
     path
 }
 
-/// The variables the host sets, valid.
+/// The variables the host sets, valid: the socket folder on Unix only.
 pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
     let path = |name: &str| scratch.path().join(name).to_str().unwrap().to_owned();
-    vec![
+    let mut vars = vec![
         (
             "AGENT_BROWSER_CONFIG".to_owned(),
             path("agent-browser.json"),
@@ -120,11 +137,32 @@ pub(crate) fn host_env(scratch: &Scratch) -> Vec<(String, String)> {
             "AGENT_BROWSER_SESSION".to_owned(),
             scratch.session().to_owned(),
         ),
-    ]
+        (
+            "AGENT_BROWSER_STREAM_PORT".to_owned(),
+            STREAM_PORT.to_owned(),
+        ),
+    ];
+    if cfg!(unix) {
+        vars.push((
+            "AGENT_BROWSER_SOCKET_DIR".to_owned(),
+            scratch.socket_dir().to_str().unwrap().to_owned(),
+        ));
+    }
+    vars
 }
 
-/// `clauseo-mcp browser-guard --agent-browser <stub> --cwd <cwd> -- <child_args>`, with the host's
-/// variables on top of the test's own environment.
+/// `--cdp-port <port>`, and `--daemon-port <port>` on Windows: the ports the host passes.
+pub(crate) fn port_args() -> Vec<&'static str> {
+    let mut args = vec!["--cdp-port", CDP_PORT];
+    if cfg!(windows) {
+        args.extend(["--daemon-port", DAEMON_PORT]);
+    }
+    args
+}
+
+/// `clauseo-mcp browser-guard --agent-browser <stub> --cwd <cwd> --cdp-port <port> -- <child_args>`
+/// (with `--daemon-port` on Windows), with the host's variables on top of the test's own
+/// environment.
 pub(crate) fn guard_command(scratch: &Scratch, stub: &Path, child_args: &[&OsStr]) -> Command {
     let mut command = Command::new(GUARD);
     command
@@ -133,6 +171,7 @@ pub(crate) fn guard_command(scratch: &Scratch, stub: &Path, child_args: &[&OsStr
         .arg(stub)
         .arg("--cwd")
         .arg(scratch.cwd())
+        .args(port_args())
         .arg("--")
         .args(child_args)
         .envs(host_env(scratch));

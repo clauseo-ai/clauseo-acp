@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use clauseo_protocol::{MatterId, ThreadId, Timestamp};
+use clauseo_protocol::{ErrorCode, MatterId, ThreadId, Timestamp};
 
 use super::{RunFolders, RunSweep};
 use crate::ManualClock;
-use crate::agent::codex::prepare::{PREPARE_WAIT, off_actor_or_undo};
+use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, PREPARE_WAIT, off_actor_or_undo};
 use crate::config::SessionKey;
 use crate::pipeline::tests::support::id;
 use crate::write;
@@ -63,6 +63,7 @@ fn a_stale_prep_never_removes_the_newer_launch_folder() {
         let (data, sweep, stale) = (data.clone(), sweep.clone(), stale.clone());
         off_actor_or_undo(
             Arc::new(clock.clone()),
+            Job::short("a stale prep", None),
             move || {
                 let _told = entered.send_blocking(());
                 let _released = blocked.recv();
@@ -248,4 +249,105 @@ fn removing_a_run_folder_never_follows_a_link_inside_it() {
     for folder in [&data, &outside] {
         write::remove_dir_all(folder).unwrap();
     }
+}
+
+/// #365: a launch's preparation that takes longer than [`PREPARE_WAIT`] (a first Codex launch on
+/// Windows, whose new files an antivirus scans) is waited for, and its answer is taken: the
+/// launch goes on instead of failing as `matter.folder_missing`.
+#[test]
+fn a_launch_prep_slower_than_the_short_wait_is_waited_for() {
+    let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
+    let (entered, started) = async_channel::unbounded::<()>();
+    let (release, blocked) = mpsc::channel::<()>();
+    let slow = off_actor_or_undo(
+        Arc::new(clock.clone()),
+        Job::launch(id::<MatterId>(7)),
+        move || {
+            let _told = entered.send_blocking(());
+            let _released = blocked.recv();
+            Ok("prepared")
+        },
+        drop,
+    );
+    let mut slow = std::pin::pin!(slow);
+    // The first poll starts the work and arms the caller's timer.
+    assert!(futures::FutureExt::now_or_never(slow.as_mut()).is_none());
+    futures::executor::block_on(async {
+        started.recv().await.unwrap();
+        assert_eq!(clock.next_armed().await, LAUNCH_WAIT);
+        clock.advance(PREPARE_WAIT + Duration::from_secs(1));
+    });
+    // Past PREPARE_WAIT, with the work not done yet: the caller still waits.
+    let early = futures::FutureExt::now_or_never(slow.as_mut());
+    assert!(early.is_none(), "the caller gave up: {early:?}");
+    release.send(()).unwrap();
+    let result = futures::executor::block_on(slow);
+    assert_eq!(result.unwrap(), "prepared");
+}
+
+/// #365: a launch's preparation that has not answered by [`LAUNCH_WAIT`] fails as
+/// `agent.launch_failed`, which may be retried, never as `matter.folder_missing`; what it made
+/// once it answers is undone on its thread.
+#[test]
+fn a_launch_prep_past_its_bound_is_retryable_not_a_missing_folder() {
+    let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
+    let (entered, started) = async_channel::unbounded::<()>();
+    let (release, blocked) = mpsc::channel::<()>();
+    let (undone, was_undone) = mpsc::channel::<&str>();
+    let hung = off_actor_or_undo(
+        Arc::new(clock.clone()),
+        Job::launch(id::<MatterId>(7)),
+        move || {
+            let _told = entered.send_blocking(());
+            let _released = blocked.recv();
+            Ok("prepared")
+        },
+        move |late| {
+            let _told = undone.send(late);
+        },
+    );
+    let move_on = async {
+        started.recv().await.unwrap();
+        assert_eq!(clock.next_armed().await, LAUNCH_WAIT);
+        clock.advance(LAUNCH_WAIT);
+    };
+    let (result, ()) = futures::executor::block_on(futures::future::join(hung, move_on));
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert!(error.code().is_retryable());
+    release.send(()).unwrap();
+    assert_eq!(
+        was_undone.recv_timeout(Duration::from_secs(5)),
+        Ok("prepared"),
+        "the late answer is undone"
+    );
+}
+
+/// A Codex launch in a matter whose folder is gone still fails as `matter.folder_missing`, at
+/// once and before Codex's home is made: the slow-launch change keeps the real case.
+#[test]
+fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
+    let data = scratch("missing-folder");
+    let gone = data.join("matters").join("gone");
+    let home = data.join("agents").join("codex-acp").join("home");
+    let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
+    let prep = {
+        let (data, home) = (data.clone(), home.clone());
+        off_actor_or_undo(
+            Arc::new(clock),
+            Job::launch(id::<MatterId>(7)),
+            move || {
+                let check = crate::agent::folder_support::FolderCheck {
+                    matter: Some(id::<MatterId>(7)),
+                    source: crate::agent::folder_support::CheckSource::Windows,
+                };
+                crate::agent::codex::prepare_launch(&check, &gone, &data, &home)
+            },
+            drop,
+        )
+    };
+    let error = futures::executor::block_on(prep).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::MatterFolderMissing);
+    assert!(!home.exists(), "nothing is made for a missing folder");
+    write::remove_dir_all(&data).unwrap();
 }

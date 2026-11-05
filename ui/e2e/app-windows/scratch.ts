@@ -376,9 +376,120 @@ export function scratchEnv(scratch: Scratch): Record<string, string> {
   };
 }
 
-/** Removes the root. WebView2 and the agent may hold files for a moment after they end. */
-export function removeScratch(scratch: Scratch): void {
-  rmSync(scratch.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+/**
+ * The processes that may still hold a scratch folder after the app ended: on Windows, the
+ * WebView2 processes whose command line names it (holders.ts).
+ */
+export interface Holders {
+  /** The PIDs of the processes that hold `root`. */
+  find(root: string): Promise<number[]>;
+  /** Ends `pids`; one already gone is no error. */
+  kill(pids: readonly number[]): Promise<void>;
+}
+
+/** How long a scratch folder's {@link Holders} may take to exit on their own before the kill. */
+export const HOLDERS_EXIT_TIMEOUT_MS = 30_000;
+/** How long killed holders may take to go. */
+export const HOLDERS_KILL_TIMEOUT_MS = 10_000;
+const HOLDERS_POLL_MS = 1_000;
+
+/** How {@link removeScratch} waits for a held root; the defaults are the fixture's. */
+export interface RemoveOptions {
+  /** Who may hold the root; without it, a held root throws at once, as any other error does. */
+  holders?: Holders;
+  /** Hears of every wait for holders, every kill and every holder left after it. */
+  warn?: (message: string) => void;
+  exitTimeoutMs?: number;
+  killTimeoutMs?: number;
+  pollMs?: number;
+  /** Removes the root: `rmSync` with about 2 s of retries. The tests give a stand-in. */
+  remove?: (root: string) => void;
+}
+
+/** `rmSync` of `root`, retrying for about 2 s while a file is held. */
+function removeRoot(root: string): void {
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
+
+/** Whether `error` is a file still held open: what a process that has not let go makes. */
+function isHeld(error: unknown): boolean {
+  const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+  return code === "EPERM" || code === "EBUSY" || code === "ENOTEMPTY";
+}
+
+/**
+ * Removes the root. WebView2 and the agent may hold files for a moment after they end, so the
+ * removal retries for about 2 s. Under load WebView2's processes can outlive the app by minutes
+ * (clauseo-acp-private measurements/pr340-e2e-loop: up to 4 per folder, over 2 min after the
+ * app had gone), so when the removal still fails on a held file and `holders` is given, it waits
+ * up to `exitTimeoutMs` for them to exit, kills those still running, waits up to `killTimeoutMs`
+ * for them to go, and removes again. Throws the last removal's error.
+ */
+export async function removeScratch(scratch: Scratch, options: RemoveOptions = {}): Promise<void> {
+  const {
+    holders,
+    warn = () => {},
+    exitTimeoutMs = HOLDERS_EXIT_TIMEOUT_MS,
+    killTimeoutMs = HOLDERS_KILL_TIMEOUT_MS,
+    pollMs = HOLDERS_POLL_MS,
+    remove = removeRoot,
+  } = options;
+  const root = scratch.root;
+  try {
+    remove(root);
+    return;
+  } catch (error) {
+    if (holders === undefined || !isHeld(error)) throw error;
+  }
+  const start = performance.now();
+  const left = await waitForHolders(holders, root, exitTimeoutMs, pollMs, warn);
+  if (left === null) {
+    // Not known who holds it (warned): the removal's own error, if any, says the rest.
+  } else if (left.length === 0) {
+    warn(
+      `${root} was still held after the app ended; no WebView2 process named it ` +
+        `${Math.round(performance.now() - start)} ms later`,
+    );
+  } else {
+    warn(
+      `WebView2 processes ${left.join(", ")} still held ${root} ${exitTimeoutMs} ms after the ` +
+        `app ended; killing them`,
+    );
+    await holders.kill(left).catch((error: unknown) => {
+      warn(`killing ${left.join(", ")} failed: ${oneLine(error)}`);
+    });
+    const after = await waitForHolders(holders, root, killTimeoutMs, pollMs, warn);
+    if (after !== null && after.length > 0) {
+      warn(`processes ${after.join(", ")} still held ${root} after the kill; removing it anyway`);
+    }
+  }
+  remove(root);
+}
+
+/**
+ * Asks `holders` for `root`'s holders every `pollMs` until there are none or `timeoutMs` passes:
+ * the PIDs still there, none once they are gone. A failed question goes to `warn` and gives null,
+ * so the removal is still tried and its own error stands.
+ */
+async function waitForHolders(
+  holders: Holders,
+  root: string,
+  timeoutMs: number,
+  pollMs: number,
+  warn: (message: string) => void,
+): Promise<number[] | null> {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    let pids: number[];
+    try {
+      pids = await holders.find(root);
+    } catch (error) {
+      warn(`listing the processes that hold ${root} failed: ${oneLine(error)}`);
+      return null;
+    }
+    if (pids.length === 0 || performance.now() >= deadline) return pids;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
 }
 
 /**

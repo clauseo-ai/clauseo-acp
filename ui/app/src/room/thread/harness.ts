@@ -57,6 +57,8 @@ export type Script = {
   onRender?: ProfilerOnRenderCallback;
   /** The host rows it fakes beyond today's host (room/host-next.ts), such as H10's restart. */
   next?: FakeHost["next"];
+  /** The settings window's open (FakeHost's openSettings): with it the room has Settings. */
+  openSettings?: FakeHost["openSettings"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -65,6 +67,15 @@ export const defaultOutcome = (command: HostCommand): CommandOutcome => {
     return { prompt_accepted: { turn: TURN, message: "00000000-0000-7000-8000-00000000beef" } };
   return "done";
 };
+
+/** A script whose PreviewUndo answers as `preview` says (or throws its refusal); any other query is not scripted. The
+ * answer is typed by hand where the query is (session.ts): the bindings don't carry PreviewUndo yet. */
+export const previewUndoScript = (preview: () => unknown): Script => ({
+  query: (query) => {
+    if (typeof query === "object" && "preview_undo" in query) return preview() as never;
+    throw new Error(`not scripted: ${JSON.stringify(query)}`);
+  },
+});
 
 export type Harness = {
   transport: FakeTransport;
@@ -113,6 +124,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     },
     dispatch: (envelope) => (script.dispatch ?? defaultOutcome)(envelope.command),
     ...(script.next === undefined ? {} : { next: script.next }),
+    ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

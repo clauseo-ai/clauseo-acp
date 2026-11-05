@@ -1,0 +1,20 @@
+---
+source: crates/protocol/tests/snapshots.rs
+assertion_line: 337
+expression: "HostEvent::UpdateChanged(super::update::update_view())"
+---
+{
+  "update_changed": {
+    "current": "0.4.0",
+    "state": {
+      "downloading": {
+        "version": "0.4.1",
+        "received": 1048576,
+        "total": 52428800
+      }
+    },
+    "mode": "notify",
+    "checked_at": 1760000008000,
+    "updated_from": "0.3.9"
+  }
+}

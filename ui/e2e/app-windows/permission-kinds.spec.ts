@@ -1,4 +1,4 @@
-// fake_agent `permission-kinds`: four permission requests, each offering all four kinds; the
+// fake_agent `claude-permission-kinds`: four permission requests, each offering all four kinds; the
 // scenario accepts only allow_once, allow_always, reject_once, reject_always in that order (any
 // other answer ends fake_agent, so the closing answer never comes). allow_always passes Rust's
 // native confirmation because the fixture sets E2E_CONFIRM_ALWAYS=accept. The requests come with
@@ -10,7 +10,7 @@ import { test } from "./fixture.ts";
 import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
 import { window, type OptionKind } from "./selectors.ts";
 
-test.use({ scenario: "permission-kinds" });
+test.use({ scenario: "claude-permission-kinds" });
 
 /** The answer to each request, in the order the scenario sends them. */
 const ANSWERS: readonly OptionKind[] = [

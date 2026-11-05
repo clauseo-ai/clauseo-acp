@@ -25,7 +25,9 @@
 //! The policy test in `tests/policy.rs` runs each guarded entry point on macOS and checks that
 //! every read and listing ran with downloads off.
 //!
-//! Outside the guard: `.clauseo/matter.json` (ours: downloading it is right); the history
+//! Outside the guard: `.clauseo/matter.json` (ours: downloading it is right); the stale
+//! owner-file rule's read-only open of a document for `F_GETLK` (`locks/stale.rs`), which reads
+//! no content; the history
 //! reads of open, compare and write-back; and the listings that undo and restore make to match
 //! names byte for byte (`writeback::Names`), which run in their plan, outside any walk (a listing
 //! never downloads a file's content, research/39 §3; a folder a File Provider has not

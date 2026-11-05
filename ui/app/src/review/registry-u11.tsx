@@ -30,7 +30,7 @@ export const U11: Entry[] = [
   entry("U11-04", settingsWords("About"), "about"),
   entry("U11-05", settingsWords("{theme}, text size {n}"), "appearance"),
   entry("U11-06", settingsWords("Version {version}"), "about"),
-  entry("U11-07", settingsWords("Managed by your organisation"), "appearance", ["ui.theme"]),
+  entry("U11-07", settingsWords("Managed by firm"), "appearance", ["ui.theme"]),
   entry(
     "U11-08",
     settingsWords(

@@ -20,7 +20,7 @@ which check ids and bounded values as they decode; the bridge then checks what d
 
 | Command | Arguments | Answer | Rust checks |
 |---|---|---|---|
-| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`); from the `settings` window, everything but `SetUiSettings` and `SetToolSettings` ([0028](0028-settings-window.md)) |
+| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`); from the `settings` window, everything but `SetUiSettings` and `SetToolSettings` ([0028](0028-settings-window.md)); from every window, `SetPrivacySettings` and `FirstAct` until S21's desktop pull request rules on them ([0036](0036-counts.md)); the Chrome for Testing download's `InstallBrowser` and `CancelBrowserInstall` from `main` only ([0029](0029-browser.md)) |
 | `query` | `query: HostQuery` | `QueryResult` | decoding (`PageLimit`, `ReadLen` bounds); from the `settings` window, only `GetSettings` ([0028](0028-settings-window.md)) |
 | `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions; waits for the host's start and, after a failed start, returns that start's error; of calls that waited together (a reload while the host starts) the last to arrive is kept; destroying the window drops its channel, its subscriptions, its app feed and its watchdog ([0028](0028-settings-window.md)) |
 | `subscribe` | `stream: StreamId, after: ViewPosition \| null` | `()` | needs `open_stream` first |
@@ -36,10 +36,10 @@ The confirm shows fixed text: nothing the agent wrote reaches it. `SetMode` and
 page never sends them. For the same reason `answer_permission` refuses the four
 option ids claude-agent-acp 0.89.1 offers on leaving plan mode that switch the session's mode:
 `exit-plan-bypass` and `exit-plan-clear-bypass` (`allow_always`, to `bypassPermissions`), and
-`exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-ups: a mode command that
-classifies the mode and draws that confirm first; and acp sending
-`allowDangerouslySkipPermissions: false` in its session meta, so the bypass options are never
-offered. A Tauri rejection (an argument
+`exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-up: a mode command that
+classifies the mode and draws that confirm first. Since clauseo-acp-private#162 the host sends
+`allowDangerouslySkipPermissions: false` in every session's meta, so the bypass options are no
+longer offered; the refusal stays for an adapter that offers them anyway. A Tauri rejection (an argument
 that does not decode, a command no capability grants) reaches the page as a plain string; the
 webview's transport maps it to `{ code: "internal", message, retryable: false }`.
 
@@ -121,6 +121,36 @@ saves in this build, so e2e runs do not write the real app config folder.
 From U5 the room is the only page of `main` and the build-time switch between it and the internal
 window is gone; the commands, permissions and capabilities this record names serve the room. The
 settings window ([0028](0028-settings-window.md)) shows a second page with a subset of them.
+
+**Starting inside the agent sandbox.** The pre-write guard hook runs this executable from inside
+the agent sandbox, so the sandbox lets the agent start it: on Windows it grants read and execute
+on `Clauseo.exe`, and the macOS profile allows `process-exec`. A jailed agent could therefore
+start the whole app, whose window, settings and single-instance hand-off (a second launch passes
+its arguments, deep links included, to the running window) the sandbox exists to keep from it.
+So `main` (`crates/desktop/src/jailed.rs`) answers `--pre-write-guard` first, then asks
+whether the process is sandboxed before anything else starts; inside, it writes one line to
+stderr ("Clauseo will not start inside the agent sandbox.") and exits with code 77 (sysexits'
+`EX_NOPERM`). The checks on Windows, any one of which refuses: the process token is an
+`AppContainer` (`TokenIsAppContainer`); it has restricting SIDs
+(`GetTokenInformation(TokenRestrictedSids)` is not empty); or its user (`TokenUser`) is S15's
+sandbox user, the separate local account tier B runs the agent as (ADR 0038), which has neither of
+the first two. S15 owns that account and the record of its SID: its elevated set-up writes the SID
+string to `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, a SID in the `S-1-…` form,
+readable by everyone). The app reads it in the 64-bit view (`KEY_WOW64_64KEY`), unexpanded
+(`RRF_NOEXPAND`, so a `REG_EXPAND_SZ` is refused as another type), and compares with `EqualSid`
+after `ConvertStringSidToSidW`, never by account name; an alias such as `BA` is not a SID here. A
+missing key or value means no sandbox user on this machine. One function, `sandbox_user_sid()`,
+names the record; when S15 lands it moves into `clauseo-sandbox` beside the writer.
+`ERROR_ACCESS_DENIED` on opening or reading the token, or on
+reading the record, also refuses: an unjailed process can always read both, and a hostile agent
+could deny them (its own default DACL) to slip past. So does a record that is not a `REG_SZ` or
+not an `S-1-…` SID, since only S15's set-up writes there. On macOS,
+`sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is non-zero (its -1 error result counts as
+sandboxed). Linux has no check: the Linux agent jail is not a target. Any other failure (another
+token or registry error, such as `ERROR_MORE_DATA`) is reported on stderr and the app starts, so a
+broken API never locks a lawyer out. Known revisit:
+a sandboxed packaging of Clauseo itself (the Mac App Store, or MSIX with an `AppContainer`)
+would trip this check, and needs a way to tell its own sandbox from the agent's.
 
 ## Consequences
 

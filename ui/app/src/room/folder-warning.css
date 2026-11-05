@@ -1,0 +1,26 @@
+/* New matter's folder warning (folder-warning.tsx): under the folder line, on the well, its words beside their icon and
+   the info icon ending them; the form's own buttons below say what to do */
+.folder-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1-5) var(--s2) var(--s1-5) var(--s3);
+  border-radius: var(--r-card);
+  background: var(--well);
+  color: var(--muted);
+}
+.folder-warning-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+}
+.folder-warning-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.folder-warning-rest {
+  margin-inline-start: 0.3em;
+}
+.folder-warning-text .room-info {
+  vertical-align: middle;
+}

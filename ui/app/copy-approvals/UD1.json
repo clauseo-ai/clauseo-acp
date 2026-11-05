@@ -1,0 +1,583 @@
+{
+  "UD1-01": {
+    "en": "Clauseo works on your matters with the Claude or ChatGPT plan you already pay for.",
+    "hi": "Clauseo आपके मामलों पर उसी Claude या ChatGPT प्लान से काम करता है, जिसका भुगतान आप पहले से करते हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-02": {
+    "en": "Open the first matter",
+    "hi": "पहला मामला खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-03": {
+    "en": "Open the folder for a matter",
+    "hi": "किसी मामले का फ़ोल्डर खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-04": {
+    "en": "Clauseo reads its papers on this computer first. Apart from anonymous counts, nothing leaves it until you ask.",
+    "hi": "Clauseo पहले इसी कंप्यूटर पर उसके दस्तावेज़ पढ़ता है। गुमनाम गिनती के सिवा, आपके पूछने तक कुछ भी बाहर नहीं जाता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-05": {
+    "en": "Start a new matter",
+    "hi": "नया मामला शुरू करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-06": {
+    "en": "Send anonymous counts",
+    "hi": "गुमनाम गिनती भेजें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-07": {
+    "en": "Send anonymous counts.",
+    "hi": "गुमनाम गिनती भेजें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-08": {
+    "en": "How many questions, which features, how long answers take. Never your papers, your questions or the answers.",
+    "hi": "कितने प्रश्न, कौन-सी सुविधाएँ, और उत्तर कितना समय लेते हैं। आपके दस्तावेज़, आपके प्रश्न या उत्तर कभी नहीं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-09": {
+    "en": "What's sent",
+    "hi": "क्या भेजा जाता है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-11": {
+    "en": "Getting {name} ready. About {mb} MB.",
+    "hi": "{name} तैयार हो रहा है। लगभग {mb} MB।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-12": {
+    "en": "{name} is ready",
+    "hi": "{name} तैयार है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-13": {
+    "en": "Setting up {name} on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-14": {
+    "en": "Use the system proxy",
+    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-15": {
+    "en": "Ask your IT team",
+    "hi": "अपनी IT टीम से कहें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-16": {
+    "en": "Message copied",
+    "hi": "संदेश कॉपी हो गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-17": {
+    "en": "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.",
+    "hi": "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-18": {
+    "en": "{name} needs {need} MB free on this computer, and {free} MB is free.",
+    "hi": "{name} को इस कंप्यूटर पर {need} MB खाली जगह चाहिए, और अभी {free} MB खाली है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-19": {
+    "en": "{name} couldn't be downloaded.",
+    "hi": "{name} डाउनलोड नहीं हो सका।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-20": {
+    "en": "{name} couldn't be downloaded. The log is copied, with nothing from your matters in it.",
+    "hi": "{name} डाउनलोड नहीं हो सका। लॉग कॉपी हो गया है, उसमें आपके मामलों का कुछ नहीं है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-21": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-22": {
+    "en": "Details",
+    "hi": "विवरण",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-23": {
+    "en": "Your papers stay on this computer. {name} sees what each question sends it.",
+    "hi": "आपके दस्तावेज़ इसी कंप्यूटर पर रहते हैं। हर प्रश्न के साथ जो भेजा जाता है, वही {name} देखता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-24": {
+    "en": "Sign in to {name} to ask about this matter",
+    "hi": "इस मामले के बारे में पूछने के लिए {name} में साइन इन करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-25": {
+    "en": "Sign in",
+    "hi": "साइन इन करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-26": {
+    "en": "Use {name} instead",
+    "hi": "इसके बजाय {name} इस्तेमाल करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-27": {
+    "en": "Use an API key or my firm's account",
+    "hi": "API key या अपनी फ़र्म का खाता इस्तेमाल करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-28": {
+    "en": "Your browser opens when {name} is ready.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-29": {
+    "en": "Your browser opens when you reconnect.",
+    "hi": "दोबारा कनेक्ट होते ही आपका ब्राउज़र खुलेगा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-30": {
+    "en": "API key",
+    "hi": "API key",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-31": {
+    "en": "Use this key",
+    "hi": "यह key इस्तेमाल करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-32": {
+    "en": "A key from Claude or ChatGPT, or one from your firm's IT team. Billed to the key's own account.",
+    "hi": "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-33": {
+    "en": "Kept in this Mac's Keychain.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-34": {
+    "en": "Kept in Windows Credential Manager.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-35": {
+    "en": "Kept in this computer's keyring.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-36": {
+    "en": "This computer has no keyring to keep an API key in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-37": {
+    "en": "Sign in with an Anthropic Console account",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-38": {
+    "en": "Finish signing in in your browser",
+    "hi": "अपने ब्राउज़र में साइन इन पूरा करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-39": {
+    "en": "Didn't open?",
+    "hi": "ब्राउज़र नहीं खुला?",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-40": {
+    "en": "Got a code instead?",
+    "hi": "इसके बजाय कोड मिला?",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-41": {
+    "en": "Paste it",
+    "hi": "उसे पेस्ट करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-42": {
+    "en": "Code from your browser",
+    "hi": "ब्राउज़र से मिला कोड",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-43": {
+    "en": "Clauseo passes the code to {name} and keeps no copy.",
+    "hi": "Clauseo यह कोड {name} को दे देता है और उसकी कोई प्रति नहीं रखता।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-44": {
+    "en": "Send",
+    "hi": "भेजें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-45": {
+    "en": "Signed in as {email} · {plan}",
+    "hi": "{email} के रूप में साइन इन · {plan}",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-46": {
+    "en": "Signed in as {email}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-47": {
+    "en": "Signed in to {name}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-48": {
+    "en": "Using an API key, billed to its own account",
+    "hi": "API key से, उसी के खाते पर शुल्क",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-49": {
+    "en": "Using your firm's account",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-50": {
+    "en": "The sign-in link expired at {time}.",
+    "hi": "साइन इन का लिंक {time} बजे समाप्त हो गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-51": {
+    "en": "See {name}'s plans",
+    "hi": "{name} के प्लान देखें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-52": {
+    "en": "Use another account",
+    "hi": "दूसरा खाता इस्तेमाल करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-53": {
+    "en": "Clauseo works with a Claude Pro or Max plan.",
+    "hi": "Clauseo, Claude Pro या Max प्लान के साथ काम करता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-54": {
+    "en": "Clauseo works with a paid ChatGPT plan.",
+    "hi": "Clauseo, सशुल्क ChatGPT प्लान के साथ काम करता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "UD1-55": {
+    "en": "Clauseo found your {name} account ({email}) from {app} and will use it here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-56": {
+    "en": "Clauseo found your {name} account from {app} and will use it here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-57": {
+    "en": "Use it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-58": {
+    "en": "Sign in with a different account",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-59": {
+    "en": "A different account signs in to Clauseo only. {app} stays as it is.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-60": {
+    "en": "Signed in through {app} as {email} · {plan}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-61": {
+    "en": "Signed in through {app} as {email}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-62": {
+    "en": "Signed in through {app}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-63": {
+    "en": "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-64": {
+    "en": "Codex on this computer keeps its sign-in where Clauseo can't share it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-65": {
+    "en": "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-66": {
+    "en": "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-67": {
+    "en": "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-68": {
+    "en": "Codex's sign-in on this computer changed, so Clauseo stopped using it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-69": {
+    "en": "{app}'s sign-in stopped working here, so Clauseo stopped using it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-70": {
+    "en": "Use a code instead",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-71": {
+    "en": "Sign in to ChatGPT on that page and enter this code.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-72": {
+    "en": "The code works until {time}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-73": {
+    "en": "Copy",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-74": {
+    "en": "Open page",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-75": {
+    "en": "To turn it on, open ChatGPT, then Settings, then Security, and turn on Enable device code sign-in for Codex, Excel, PowerPoint, and Word. Then choose Try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-76": {
+    "en": "Sign in in the browser instead",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-77": {
+    "en": "Sign-in didn't finish.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-78": {
+    "en": "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-79": {
+    "en": "Ask your IT team.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-05",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

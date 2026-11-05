@@ -24,18 +24,14 @@ pub(crate) fn refuse_data_folder(stored: &Path, data: &Path) -> Result<(), Error
     let overlaps = match dunce::canonicalize(data) {
         Ok(data) => clauseo_matters::same_or_nested(stored, &data.join("agents")),
         Err(error) => {
-            tracing::warn!(data = %data.display(), %error, "the data folder does not resolve");
+            tracing::warn!(%error, "the data folder does not resolve");
             true
         }
     };
     if !overlaps {
         return Ok(());
     }
-    tracing::warn!(
-        folder = %stored.display(),
-        data = %data.display(),
-        "an agent was refused: the matter folder overlaps Clauseo's data folder"
-    );
+    tracing::warn!("an agent was refused: the matter folder overlaps Clauseo's data folder");
     Err(Error::refused(
         ErrorCode::MatterFolderRefused,
         "An agent can't work in this matter: its folder holds Clauseo's own data, where agents \

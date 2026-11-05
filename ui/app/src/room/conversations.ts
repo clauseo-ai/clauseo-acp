@@ -10,7 +10,8 @@
 //   reads the list again, so the row doesn't stay "Answering." after the turn's end slipped past.
 // - New conversation is a draft row, the room's alone (U6, "Decided here"): nothing reaches the host until its first
 //   send, which runs `create_thread`, then `send_prompt` (the session's), then `rename_thread` with the title its
-//   first message gives (conversation-title.ts). Leaving a draft with nothing typed drops it.
+//   first message gives (conversation-title.ts), a placeholder the agent's own title replaces (#339). Leaving a
+//   draft with nothing typed drops it.
 // - Each conversation has a key: the work column's key and its composer draft's, so moving between conversations
 //   remounts the work and each keeps its own words. A thread's key is its id, unless the room opened it before knowing
 //   it (a matter just opened, before its list is in; a draft that became the thread): then it keeps that first key, so
@@ -21,60 +22,21 @@ import { pickReopenThread } from "../store/reopen.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../transport/host-transport.ts";
-import type {
-  AgentId,
-  ErrorCode,
-  MatterId,
-  MessageId,
-  ThreadId,
-  ThreadStatus,
-  Timestamp,
-} from "../transport/protocol.ts";
+import type { AgentId, MatterId, MessageId, ThreadId, Timestamp } from "../transport/protocol.ts";
 import { agentFor, matterPlan, planOptions } from "./agent.ts";
-import type { ConversationRow, ConversationsView, Known } from "./conversations-view.ts";
+import { freshState, keepKept, type MatterState } from "./conversations-state.ts";
+import {
+  newestFirst,
+  noMatter,
+  resting,
+  type ConversationRow,
+  type ConversationsView,
+  type Known,
+} from "./conversations-view.ts";
 import type { AgentSummary, AppEvent, NextHost, ThreadsChanged } from "./host-next.ts";
 import type { Matters } from "./matters.ts";
 
 export type { ConversationRow, ConversationsView } from "./conversations-view.ts";
-
-/** Each visited matter's conversations, kept while the room lives. */
-type MatterState = {
-  matter: MatterId;
-  threads: Map<ThreadId, Known>;
-  /** Threads known to the room by a key other than their id. */
-  keys: Map<ThreadId, string>;
-  /** The draft: its key, whether its row shows (New conversation was pressed), and the plan chosen for it. */
-  draft: { key: string; shown: boolean; chosen: AgentId | null } | null;
-  /** The conversation open, by key; null before the matter is first opened. */
-  open: string | null;
-  /** The key that stands for what opens before the list says what that is: the thread to reopen, or a draft. */
-  pending: string | null;
-  phase: ConversationsView["phase"];
-  refused: ErrorCode | null;
-  /** The refused list's error, for a first send that can't go without it. */
-  refusal: unknown;
-  /** The list read in flight, for a first send while it loads. */
-  listing: Promise<void> | null;
-  ticket: number;
-  /** Threads given a rename by this room: one each. */
-  renamed: Set<ThreadId>;
-  /** H13: threads this room retried, with the thread and the time of the question they came from. */
-  retried: Map<ThreadId, { from: ThreadId; at: Timestamp }>;
-  /** Threads this room made (create_thread, retry_from): a list read that started before one was made still keeps it. */
-  made: Set<ThreadId>;
-  /** Threads this room made whose first question the host hasn't accepted yet (send_prompt refused): left with
-   * nothing typed, they are archived, so no empty thread stays on the list. */
-  unsent: Set<ThreadId>;
-};
-
-const resting = (s: ThreadStatus) => !(s === "starting" || s === "running" || s === "needs_you");
-
-/** Newest activity first: H6's last activity, else the newest created (v7 ids sort by creation). */
-const newestFirst = (a: Known, b: Known) => {
-  const at = (b.last_activity ?? -Infinity) - (a.last_activity ?? -Infinity);
-  if (at !== 0 && !Number.isNaN(at)) return at;
-  return a.thread < b.thread ? 1 : a.thread > b.thread ? -1 : 0;
-};
 
 export class Conversations {
   readonly #transport: HostTransport;
@@ -90,6 +52,8 @@ export class Conversations {
   #current: MatterState | null = null;
   #n = 0;
   #focus: { key: string; n: number } | null = null;
+  /** A conversation to open once its matter opens (openThread), with its summary where the list leaves it out. */
+  #target: { matter: MatterId; thread: ThreadId; known?: Known } | null = null;
   /** Each held thread's header as last read: what changed, and which views went. */
   #seenHeaders = new Map<ThreadId, unknown>();
   #view: ConversationsView;
@@ -159,6 +123,26 @@ export class Conversations {
     this.#opened(m);
     this.#focusOn(key);
     this.#emit();
+  }
+
+  /** Opens the thread `thread` of `matter`: now, when the matter is open; else once matters.ts opens it, in place of
+   * the conversation that would reopen there. Its list need not be in: the thread opens when it lists it. An archived
+   * thread, which the host's list leaves out, comes with its summary (`known`, Find's): it opens at once, and stays
+   * open over the list's reads while it is the one open, though it never takes a row. */
+  openThread(matter: MatterId, thread: ThreadId, known?: Known): void {
+    const m = this.#current;
+    if (m !== null && m.matter === matter) {
+      this.#target = null;
+      if (known !== undefined) this.#keep(m, known);
+      this.open(m.keys.get(thread) ?? thread);
+      return;
+    }
+    this.#target = known === undefined ? { matter, thread } : { matter, thread, known };
+  }
+
+  #keep(m: MatterState, known: Known): void {
+    m.kept = known;
+    if (!m.threads.has(known.thread)) m.threads.set(known.thread, known);
   }
 
   #focusOn(key: string): void {
@@ -238,21 +222,20 @@ export class Conversations {
   };
 
   #rename(m: MatterState, thread: ThreadId, title: string): void {
-    this.#transport
-      .dispatch({ command_id: crypto.randomUUID(), command: { rename_thread: { thread, title } } })
-      .then(
-        () => {
-          const now = m.threads.get(thread);
-          if (now === undefined || now.title !== undefined) return;
-          m.threads.set(thread, { ...now, title });
-          // with the next frame's flush, not a commit of its own beside it: the reply lands mid-stream (#253)
-          this.#store.inFrame(() => {
-            if (m === this.#current) this.#emit();
-          });
-        },
-        (error: unknown) =>
-          console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),
-      );
+    const command = { rename_thread: { thread, title, placeholder: true } };
+    this.#transport.dispatch({ command_id: crypto.randomUUID(), command }).then(
+      () => {
+        const now = m.threads.get(thread);
+        if (now === undefined || now.title !== undefined) return;
+        m.threads.set(thread, { ...now, title });
+        // with the next frame's flush, not a commit of its own beside it: the reply lands mid-stream (#253)
+        this.#store.inFrame(() => {
+          if (m === this.#current) this.#emit();
+        });
+      },
+      (error: unknown) =>
+        console.warn(`rename_thread failed: ${JSON.stringify(toHostError(error).code)}`),
+    );
   }
 
   /** H13, Retry from here: a new thread from the question `message` of `thread`, asked again; it opens once the
@@ -302,26 +285,22 @@ export class Conversations {
     }
     let m = this.#by.get(matter);
     if (m === undefined) {
-      m = {
-        matter,
-        threads: new Map(),
-        keys: new Map(),
-        draft: null,
-        open: null,
-        pending: null,
-        phase: "loading",
-        refused: null,
-        refusal: null,
-        listing: null,
-        ticket: 0,
-        renamed: new Set(),
-        retried: new Map(),
-        made: new Set(),
-        unsent: new Set(),
-      };
+      m = freshState(matter);
       this.#by.set(matter, m);
     }
-    const revisit = m.open !== null && m.phase === "ready";
+    const asked = this.#target?.matter === matter ? this.#target : null;
+    const target = asked?.thread ?? null;
+    this.#target = null;
+    if (asked?.known !== undefined) this.#keep(m, asked.known);
+    if (target !== null) {
+      // the conversation asked for, under its own key; until the list holds it (or Find gave it), a key that waits
+      const listed = (m.phase === "ready" || m.kept?.thread === target) && m.threads.has(target);
+      m.open = m.keys.get(target) ?? (listed ? target : this.#key());
+      if (!listed && !m.keys.has(target)) m.keys.set(target, m.open);
+      m.pending = listed ? null : m.open;
+      this.#focusOn(m.open);
+    }
+    const revisit = m.open !== null && m.phase === "ready" && m.pending === null;
     if (m.open === null) {
       m.open = this.#key();
       m.pending = m.open;
@@ -350,6 +329,7 @@ export class Conversations {
           const known = m.threads.get(made);
           if (!listed.has(made) && known !== undefined) listed.set(made, known);
         }
+        keepKept(m, listed);
         m.threads = listed;
         m.phase = "ready";
         m.refused = null;
@@ -374,8 +354,20 @@ export class Conversations {
     const key = m.open;
     if (key === null || m.draft?.key === key) return;
     const thread = this.#threadOf(m, key);
-    if (thread !== null && m.threads.get(thread)?.status !== "archived") return;
     const pending = m.pending === key;
+    const live =
+      thread !== null &&
+      (m.threads.get(thread)?.status !== "archived" || m.kept?.thread === thread);
+    if (live) {
+      // a conversation asked for (openThread), now listed: it opens, and H6 hears it seen
+      if (pending) {
+        m.pending = null;
+        this.#opened(m);
+      }
+      return;
+    }
+    // an archived thread asked for gives up its key to the one that reopens
+    if (thread !== null && pending) m.keys.delete(thread);
     m.pending = null;
     const pick = pickReopenThread([...m.threads.values()]);
     if (pick !== null) {
@@ -495,6 +487,7 @@ export class Conversations {
         const known = m.threads.get(made);
         if (!threads.has(made) && known !== undefined) threads.set(made, known);
       }
+    keepKept(m, threads);
     for (const gone of change.removed) {
       threads.delete(gone);
       m.made.delete(gone);
@@ -533,24 +526,11 @@ export class Conversations {
   #make(): ConversationsView {
     const m = this.#current;
     const agents = this.#agents;
-    if (m === null)
-      return {
-        matter: null,
-        phase: "loading",
-        refused: null,
-        rows: [],
-        open: null,
-        thread: null,
-        drafting: false,
-        plan: undefined,
-        agents,
-        options: planOptions(agents),
-        agent: agentFor({ chosen: null, setting: null, threads: [], agents }),
-        focus: null,
-        canRetry: this.#next.retry !== null,
-        retried: null,
-      };
-    const listed = [...m.threads.values()].filter((t) => t.status !== "archived").sort(newestFirst);
+    if (m === null) return noMatter(agents, this.#next.retry !== null);
+    // an archived thread kept open (Find's) takes no row, whatever its header says
+    const listed = [...m.threads.values()]
+      .filter((t) => t.status !== "archived" && t.thread !== m.kept?.thread)
+      .sort(newestFirst);
     const options = planOptions(agents, listed);
     const rows: ConversationRow[] = listed.map((t) => ({
       key: m.keys.get(t.thread) ?? t.thread,
@@ -560,6 +540,8 @@ export class Conversations {
       status: t.status,
       ...(t.seen === undefined ? {} : { seen: t.seen }),
       ...(t.last_stop === undefined ? {} : { last_stop: t.last_stop }),
+      ...(t.snoozed_until === undefined ? {} : { snoozed_until: t.snoozed_until }),
+      ...(t.done === true ? { done: true } : {}),
     }));
     const d = m.draft;
     if (d !== null && d.shown)
@@ -567,6 +549,8 @@ export class Conversations {
     const thread = m.open === null ? null : this.#threadOf(m, m.open);
     const origin = thread === null ? undefined : m.retried.get(thread);
     const source = origin === undefined ? undefined : m.threads.get(origin.from);
+    // the host refuses Retry from here in an archived conversation, as it refuses a question
+    const archived = thread !== null && m.threads.get(thread)?.status === "archived";
     return {
       matter: m.matter,
       phase: m.phase,
@@ -575,12 +559,13 @@ export class Conversations {
       open: m.open,
       thread,
       drafting: m.phase !== "loading" && thread === null,
+      archived,
       plan: matterPlan(listed, agents),
       agents,
       options,
       agent: this.#agentOf(m),
       focus: this.#focus !== null && this.#focus.key === m.open ? this.#focus : null,
-      canRetry: this.#next.retry !== null,
+      canRetry: this.#next.retry !== null && !archived,
       retried:
         origin === undefined
           ? null

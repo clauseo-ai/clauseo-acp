@@ -26,12 +26,33 @@ macro_rules! bundled {
 
 bundled! {
     scenarios: [
+        "ask-user-question",
+        "ask-user-question-stop",
         "auth-required",
         "auth-required-titled",
         "cancel-late-updates",
         "cancel-unanswered",
+        "children-on-requests",
+        "claude-ask-user-question",
+        "claude-ask-user-question-stop",
+        "claude-cancel-unanswered",
+        "claude-elicitation-form",
+        "claude-exit-mid-turn",
+        "claude-exit-mid-turn-then-load",
+        "claude-files-one-turn",
         "claude-hindi-answer",
+        "claude-limit-rejected",
+        "claude-limit-warning",
+        "claude-permission-cancelled",
+        "claude-permission-kinds",
+        "claude-prompt-stream",
+        "claude-queue-two-prompts",
+        "claude-send-now",
+        "claude-session-failure",
+        "claude-steer-injected",
+        "claude-tool-calls",
         "codex-auth-required",
+        "codex-deny-ends-turn",
         "codex-files",
         "codex-handshake",
         "codex-hook-trusted",
@@ -49,6 +70,7 @@ bundled! {
         "files-multi-turn",
         "files-one-turn",
         "grandchild",
+        "grandchild-own-group",
         "idle",
         "ignore-stdin-close",
         "initialize-caps",
@@ -59,7 +81,9 @@ bundled! {
         "malformed-line",
         "notice-compaction",
         "permission-cancelled",
+        "permission-deny-then-stop",
         "permission-kinds",
+        "permission-last-answer",
         "permission-share-mode",
         "permission-word-open",
         "plan",
@@ -77,7 +101,7 @@ bundled! {
         "unknown-update",
         "usage",
     ],
-    common: ["codex-handshake", "handshake"],
+    common: ["claude-handshake", "codex-handshake", "handshake"],
 }
 
 /// The text of bundled scenario `name`.
@@ -202,6 +226,38 @@ mod tests {
                 std::fs::read_to_string(scenario_path(name)).unwrap()
             );
         }
+    }
+
+    /// A `claude-<name>` scenario on `claude-handshake.jsonl` is `<name>` on `handshake.jsonl`
+    /// after its header: a change to one cannot leave the other behind.
+    #[test]
+    fn claude_variants_match_their_scenario_after_the_handshake() {
+        let mut checked = 0;
+        for name in SCENARIOS {
+            let Some(base) = name.strip_prefix("claude-") else {
+                continue;
+            };
+            let (Some(variant), Some(base_text)) = (text(name), text(base)) else {
+                continue;
+            };
+            let variant: Vec<&str> = variant.lines().collect();
+            if variant.get(1) != Some(&r#"{"include":"claude-handshake.jsonl"}"#) {
+                continue;
+            }
+            let base_lines: Vec<&str> = base_text.lines().collect();
+            assert_eq!(
+                base_lines.get(1),
+                Some(&r#"{"include":"handshake.jsonl"}"#),
+                "{base}"
+            );
+            assert_eq!(
+                variant[2..],
+                base_lines[2..],
+                "{name} has drifted from {base}"
+            );
+            checked += 1;
+        }
+        assert!(checked >= 10, "{checked} variants checked");
     }
 
     #[test]

@@ -6,9 +6,9 @@ use std::fmt::Debug;
 
 use clauseo_protocol::{
     CheckpointKind, ContentBlock, Deliverable, Delivery, DetachReason, DomainEvent, ErrorCode,
-    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionKind, RawFrom, RawPayload,
-    RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob, Timestamp,
-    ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
+    ExpiryReason, HostError, LimitSource, NoticeLevel, PermissionAbout, PermissionKind, RawFrom,
+    RawPayload, RenameSource, SkippedFileReason, StaleReason, SteerOutcome, StopReason, TextOrBlob,
+    Timestamp, ToolCallStatus, ToolKind, TurnFailed, UnavailableReason,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -105,14 +105,23 @@ fn permission_kind() {
 }
 
 #[test]
+fn permission_about() {
+    let cases = [(PermissionAbout::AgentPlan, "agent_plan")];
+    unit_enum(&PermissionAbout::ALL, &cases, PermissionAbout::Unknown);
+}
+
+#[test]
 fn stop_reason() {
-    use StopReason::{AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, Refusal};
+    use StopReason::{
+        AtLimit, Cancelled, EndTurn, Failed, MaxTokens, MaxTurnRequests, NotAllowed, Refusal,
+    };
     let cases = [
         (EndTurn, "end_turn"),
         (MaxTokens, "max_tokens"),
         (MaxTurnRequests, "max_turn_requests"),
         (Refusal, "refusal"),
         (Cancelled, "cancelled"),
+        (NotAllowed, "not_allowed"),
         (AtLimit, "at_limit"),
         (Failed, "failed"),
     ];
@@ -173,6 +182,7 @@ fn rename_source() {
     let cases = [
         (RenameSource::Lawyer, "lawyer"),
         (RenameSource::Agent, "agent"),
+        (RenameSource::Placeholder, "placeholder"),
     ];
     unit_enum(&RenameSource::ALL, &cases, RenameSource::Unknown);
 }

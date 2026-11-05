@@ -26,6 +26,57 @@
   /* why a search found it, where the name alone doesn't show: a client, a case number, when it was opened */
   .room-matter-match {
     @apply text-small text-muted;
+    /* a path or a file name on it can't reorder the row around it (docs/ui-states.md) */
+    unicode-bidi: isolate;
+  }
+  /* ---------- Find searching inside (U16a) ---------- */
+  /* its key, at the empty field's end */
+  .room-find-key {
+    flex: none;
+  }
+  /* a found word inside a snippet or a file name */
+  .room-find-hit {
+    @apply text-primary font-chip;
+  }
+  /* a paper found by its name: the file's glyph, then the name */
+  .room-find-paper {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1);
+  }
+  .room-find-paper > svg {
+    flex: none;
+    margin-top: var(--icon-line-drop);
+  }
+  /* an archived conversation: its 14 px mark at the end of the title, quiet */
+  .room-find-archived {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: var(--s1-5);
+    color: var(--quiet);
+  }
+  /* the index still being built: the clock, then the line */
+  .room-find-indexing {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+    padding: 0 var(--s3);
+    margin-bottom: var(--s2);
+    @apply text-small text-muted;
+  }
+  /* what Find covers, behind the info icon at the results' foot */
+  .room-find-foot {
+    padding: 0 var(--s3);
+    margin-top: var(--s2);
+  }
+  .room-find-scope {
+    display: inline-grid;
+    place-items: center;
+    width: var(--size-icon-line);
+    height: var(--size-icon-line);
+    color: var(--quiet);
+    border-radius: var(--r-round);
+    @apply is-hover:text-primary;
   }
   /* a status's mark (rail-mark.tsx): a 14 px icon in the status line's tone, or on a court-yellow disc where the matter
      waits on the lawyer's hand */
@@ -44,6 +95,79 @@
   /* on the status line's first line, centred on its 20 px line */
   .room-matter-mark {
     margin-top: var(--icon-line-drop);
+  }
+
+  /* Needs you (U16a): beneath the status's words, the conversation behind it, quiet, at the UI's weight */
+  .room-matter-where {
+    @apply block text-quiet font-ui;
+  }
+  /* a failure's words speak up, its mark stays in concrete: no red, no yellow */
+  .room-matter-row[data-state="failed"] .room-matter-mark {
+    color: var(--muted);
+  }
+
+  /* ---------- Matters / Recent (rail-switch.tsx): two segments under Find ---------- */
+  .room-switch {
+    flex: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-top: var(--s2);
+    padding: var(--size-seg-pad);
+    height: var(--size-control-small);
+    border-radius: var(--r-control);
+    background: var(--inset);
+  }
+  .room-switch > button {
+    @apply text-small text-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-chip);
+  }
+  @media (hover: hover) {
+    .room-switch > button:hover {
+      color: var(--primary);
+    }
+  }
+  .room-switch > button[aria-pressed="true"] {
+    @apply text-primary font-chip;
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+
+  /* ---------- Recent (rail-recent.tsx): every conversation, newest first, under its day ---------- */
+  .room-recent-row {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: transparent;
+    @apply is-hover:bg-hover is-active:bg-press;
+  }
+  .room-recent-row[aria-current] {
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .room-recent-row .room-conv-line {
+    align-items: flex-start;
+  }
+  .room-recent-row .room-conv-title {
+    @apply text-ui text-muted;
+  }
+  .room-recent-row .room-conv-mark {
+    margin-top: var(--icon-line-drop);
+  }
+  @media (hover: hover) {
+    .room-recent-row:hover .room-conv-title {
+      color: var(--primary);
+    }
+  }
+  .room-recent-row[aria-current] .room-conv-title {
+    @apply text-primary font-chip;
+  }
+  .room-recent-row[data-state="ready"] .room-conv-mark:not([data-waits]) {
+    color: var(--primary);
   }
 
   /* ---------- the current matter, opened: its row and its conversations on one raised plane ---------- */

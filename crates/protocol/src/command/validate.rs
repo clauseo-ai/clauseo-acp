@@ -10,7 +10,7 @@ use crate::title::shows_something;
 use crate::{AgentChoiceId, DeliveryRequest, check_display_title};
 use crate::{
     CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision, MatterPath,
-    PromptBlock, RawPayload, RestoreRequest, Title, is_windows_reserved_name,
+    PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode, is_windows_reserved_name,
 };
 
 /// Most prompt text, in UTF-8 bytes summed over the prompt's `Text` blocks (256 KiB). Raw bytes,
@@ -173,6 +173,8 @@ impl HostCommand {
                 matter: _,
                 folder: _,
             }
+            | Self::ScanFolder { folder: _ }
+            | Self::CancelScan { folder: _ }
             | Self::RemoveQueuedPrompt { thread: _, turn: _ }
             | Self::SendQueuedNow { thread: _, turn: _ }
             | Self::ResumeQueue { thread: _ }
@@ -196,10 +198,13 @@ impl HostCommand {
             | Self::RenameThread {
                 thread: _,
                 title: _,
+                placeholder: _,
             }
             // The font size's range is the settings crate's rule; the host checks it.
             | Self::SetUiSettings { patch: _ }
             | Self::SetToolSettings { patch: _ }
+            | Self::SetPrivacySettings { patch: _ }
+            | Self::FirstAct { counts: _ }
             // The client's name and the date are checked by their types as they decode.
             | Self::UpdateMatter {
                 matter: _,
@@ -210,8 +215,38 @@ impl HostCommand {
             | Self::OpenMatter { matter: _ }
             | Self::ForgetMatter { matter: _ }
             | Self::RefreshLimits { agent: _, why: _ }
-            | Self::MarkSeen { thread: _ } => Ok(()),
+            | Self::MarkSeen { thread: _ }
+            // The times are checked against the host's clock, by the host.
+            | Self::SnoozeThread {
+                thread: _,
+                until: _,
+            }
+            | Self::MarkThreadDone {
+                thread: _,
+                done: _,
+            }
+            | Self::SweepDone { day_start: _ }
+            // No fields; a second download while one runs is the host's refusal (state).
+            | Self::InstallBrowser {}
+            | Self::CancelBrowserInstall {}
+            // Whether the updater's state takes them is the host's check.
+            | Self::CheckForUpdate {}
+            | Self::InstallUpdate { when: _ }
+            | Self::CancelScheduledUpdate {} => Ok(()),
+            Self::SetUpdateMode { mode } => check_update_mode(*mode),
         }
+    }
+}
+
+/// `SetUpdateMode`'s mode: `auto` or `notify`. `none` comes only from the firm's policy (or a
+/// hand-edited file), never a window.
+fn check_update_mode(mode: UpdateMode) -> Result<(), Error> {
+    match mode {
+        UpdateMode::Auto | UpdateMode::Notify => Ok(()),
+        UpdateMode::None => Err(Error::Format {
+            kind: "SetUpdateMode",
+            rule: "a window sets auto or notify; none comes only from policy",
+        }),
     }
 }
 

@@ -6,7 +6,9 @@ use clauseo_protocol::{
     MAX_TITLE_CHARS, MatterSource, Title, check_display_title, is_windows_reserved_name,
 };
 
-use super::fixtures::{choice, command_id, err_contains, folder_ref_id, thread_id, title};
+use super::fixtures::{
+    choice, command_id, err_contains, folder_ref_id, round_trips, thread_id, title,
+};
 use super::{Validate, files, invalid, send_prompt, text, too_large};
 
 /// Whether `result` is one of the errors a refused title or id gives.
@@ -32,6 +34,7 @@ fn bad_title(text: &str, rule: &str) {
     let command = HostCommand::RenameThread {
         thread: thread_id(1),
         title: title("x"),
+        placeholder: false,
     };
     let json = serde_json::to_string(&command).unwrap().replace(
         r#""title":"x""#,
@@ -57,6 +60,22 @@ fn new_folder(name: &str) -> HostCommand {
 fn existing_folder(name: &str) -> HostCommand {
     let folder = folder_ref_id(3);
     create(name, MatterSource::ExistingFolder { folder })
+}
+
+/// `RenameThread` without `placeholder` decodes as a typed title (`false`), so an older caller
+/// stays valid; `true` marks the first-words placeholder, and the flag round-trips.
+#[test]
+fn rename_thread_placeholder_defaults_to_false() {
+    let thread = r#""thread":"01900000-0000-7000-8000-000000000002""#;
+    let without = format!(r#"{{"rename_thread":{{{thread},"title":"Draft"}}}}"#);
+    let with = format!(r#"{{"rename_thread":{{{thread},"title":"Draft","placeholder":true}}}}"#);
+    let decoded = |json: &str| match serde_json::from_str::<HostCommand>(json) {
+        Ok(HostCommand::RenameThread { placeholder, .. }) => placeholder,
+        other => panic!("{json} decoded as {other:?}"),
+    };
+    assert!(!decoded(&without));
+    assert!(decoded(&with));
+    round_trips(&serde_json::from_str::<HostCommand>(&with).unwrap());
 }
 
 #[test]

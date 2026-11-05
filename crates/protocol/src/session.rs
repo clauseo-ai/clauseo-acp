@@ -298,8 +298,32 @@ open_unit_enum! {
         Lawyer,
         /// The agent (`session_info_update`).
         Agent,
+        /// Clauseo's stand-in title (the first words), until the agent's arrives.
+        Placeholder,
     }
     test mod rename_source;
+}
+
+open_unit_enum! {
+    /// Who marked a thread done or not done.
+    pub enum DoneBy {
+        /// The lawyer (`MarkThreadDone`).
+        Lawyer,
+        /// The host's morning sweep (`SweepDone`), which marks quiet threads done once a day.
+        MorningSweep,
+    }
+    test mod done_by;
+}
+
+open_unit_enum! {
+    /// Who set or cleared a thread's snooze.
+    pub enum SnoozeBy {
+        /// The lawyer (`SnoozeThread`).
+        Lawyer,
+        /// The host, when the snooze's time came (always with `until` left out).
+        Expired,
+    }
+    test mod snooze_by;
 }
 
 open_unit_enum! {

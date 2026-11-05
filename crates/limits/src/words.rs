@@ -94,7 +94,9 @@ pub(crate) fn claude_model_label(display_name: &str) -> String {
 }
 
 /// The plan's name for Claude's `subscription_type`; `None` for a type this crate does not know.
-pub(crate) fn claude_plan(subscription_type: &str) -> Option<&'static str> {
+/// Public so desktop's sign-in line names the plan as `AccountLimits.plan` does (decision
+/// record 0048).
+pub fn claude_plan(subscription_type: &str) -> Option<&'static str> {
     match subscription_type {
         "pro" => Some("Claude Pro"),
         "max" => Some("Claude Max"),
@@ -106,8 +108,8 @@ pub(crate) fn claude_plan(subscription_type: &str) -> Option<&'static str> {
 
 /// The plan's name for Codex's `planType` wire value; `None` for one whose plain name is not
 /// clear from its id (`self_serve_business_*`, `ent26`, `enterprise_cbp_*`, `unknown`, and any
-/// value this crate does not know).
-pub(crate) fn codex_plan(plan_type: &str) -> Option<&'static str> {
+/// value this crate does not know). Public, as [`claude_plan`] is.
+pub fn codex_plan(plan_type: &str) -> Option<&'static str> {
     match plan_type {
         "free" => Some("ChatGPT Free"),
         "go" => Some("ChatGPT Go"),

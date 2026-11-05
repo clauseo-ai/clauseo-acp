@@ -13,23 +13,29 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clauseo_matters::{CommitId, DEFAULT_MARKER, NewMatter, Refusal};
+use clauseo_matters::{DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, ClientName, CommandOutcome, Date, DomainEvent, ErrorCode,
-    HostError, ImportSummary, MatterCreated, MatterId, MatterKind, MatterSource, QueryResult,
-    RestorePreview, StreamId, Title,
+    ClientName, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind, MatterSource,
+    Title,
 };
-use clauseo_store::MatterRow;
 
 use super::commands::{AfterCommand, CommandCtx};
 use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{
-    Claim, Claimed, ImportEnd, MatterJob, MatterReply, MatterWorker, Registry, Relink,
-    check_registry, matter_settings,
+    Claim, Claimed, MatterJob, MatterReply, MatterWorker, Registry, Relink, check_registry, made,
+    matter_settings,
 };
-use crate::pipeline::{Draft, Failure, MatterEvent};
+use crate::pipeline::Failure;
+
+mod made;
+pub(super) mod picked;
+
+pub(crate) use made::Made;
+use made::matter_commit;
+pub(super) use made::{Stage, discard, recorded, row_checked};
 
 /// The Scratch matter's name.
 const SCRATCH: &str = "Scratch";
@@ -141,15 +147,20 @@ fn begin_matter(
     };
     let worker = start_worker(actor, new.id)?;
     let cancel = Arc::new(AtomicBool::new(false));
+    let check = actor.folder_check;
     let job = if let Some(registry) = import {
         MatterJob::Import {
             new: new.clone(),
             refused: refused_folders(actor),
             registry,
             cancel: Arc::clone(&cancel),
+            check,
         }
     } else {
-        MatterJob::Create(new.clone())
+        MatterJob::Create {
+            new: new.clone(),
+            check,
+        }
     };
     worker.send(job, tag)?;
     actor.work.matter_jobs += 1;
@@ -203,7 +214,10 @@ pub(super) fn create_matter(
                 command.matter = Some(pending);
             }
         }
-        Err(error) => actor.finish_command(ctx.id, Err(error)),
+        Err(error) => {
+            made::not_created(None, &error, "check");
+            actor.finish_command(ctx.id, Err(error));
+        }
     }
 }
 
@@ -238,7 +252,10 @@ fn matter_folder(
 }
 
 /// The folder `folder` names, or `command.invalid` when it names none.
-fn registered(actor: &Actor, folder: clauseo_protocol::FolderRefId) -> Result<PathBuf, Error> {
+pub(super) fn registered(
+    actor: &Actor,
+    folder: clauseo_protocol::FolderRefId,
+) -> Result<PathBuf, Error> {
     actor
         .folders
         .get(&folder)
@@ -287,42 +304,63 @@ fn claimed_folders(actor: &Actor) -> Vec<Claimed> {
 /// folder and the data folder are told apart from the other refused folders by the entry the
 /// refusal names. Any other failure is passed on as it is.
 fn refusal(actor: &Actor, error: Error, folder: &Path) -> Error {
-    let Error::Matters(failure) = &error else {
-        return error;
-    };
-    if let clauseo_matters::Error::Io { path, source, .. } = failure
-        && source.kind() == io::ErrorKind::PermissionDenied
-        && path.starts_with(folder)
-    {
-        return Error::refused(ErrorCode::MatterFolderUnreadable, error.to_string());
+    RefusalNames::of(actor).refusal(error, folder, |matter| actor.matters.contains_key(matter))
+}
+
+/// What [`refusal`] tells the refused folders apart by, taken from the actor, so the
+/// `FolderSupport` query names a refusal off the actor as create does (`picked.rs`).
+struct RefusalNames {
+    home: Option<PathBuf>,
+    data_dir: PathBuf,
+}
+
+impl RefusalNames {
+    fn of(actor: &Actor) -> Self {
+        Self {
+            home: actor.home.clone(),
+            data_dir: actor.effective.data_dir().to_path_buf(),
+        }
     }
-    let clauseo_matters::Error::FolderRefused { reason, .. } = failure else {
-        return error;
-    };
-    let code = match reason {
-        Refusal::DriveRoot => ErrorCode::MatterFolderIsDrive,
-        Refusal::Listed(entry) if actor.home.as_deref() == Some(entry.as_path()) => {
-            ErrorCode::MatterFolderIsHome
+
+    /// [`refusal`]'s code for `error`; `listed` says whether a matter is on the list.
+    fn refusal(&self, error: Error, folder: &Path, listed: impl Fn(&MatterId) -> bool) -> Error {
+        let Error::Matters(failure) = &error else {
+            return error;
+        };
+        if let clauseo_matters::Error::Io { path, source, .. } = failure
+            && source.kind() == io::ErrorKind::PermissionDenied
+            && path.starts_with(folder)
+        {
+            return Error::refused(ErrorCode::MatterFolderUnreadable, error.to_string());
         }
-        Refusal::Listed(entry) if entry.as_path() == actor.effective.data_dir() => {
-            ErrorCode::MatterFolderInMattersRoot
-        }
-        Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
-        // Named only when on the list: a marker from another data folder or computer names a
-        // matter this install has never had, with nothing to open. (A forgotten matter's marker
-        // never gets here: the import brings that matter back.)
-        Refusal::AlreadyMatter(matter) => {
-            let refusal = HostError::new(ErrorCode::MatterFolderIsMatter, error.to_string());
-            return Error::Refused(if actor.matters.contains_key(matter) {
-                refusal.with_matter(*matter)
-            } else {
-                refusal
-            });
-        }
-        Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
-        Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
-    };
-    Error::refused(code, error.to_string())
+        let clauseo_matters::Error::FolderRefused { reason, .. } = failure else {
+            return error;
+        };
+        let code = match reason {
+            Refusal::DriveRoot => ErrorCode::MatterFolderIsDrive,
+            Refusal::Listed(entry) if self.home.as_deref() == Some(entry.as_path()) => {
+                ErrorCode::MatterFolderIsHome
+            }
+            Refusal::Listed(entry) if entry.as_path() == self.data_dir => {
+                ErrorCode::MatterFolderInMattersRoot
+            }
+            Refusal::Listed(_) => ErrorCode::MatterFolderIsSystem,
+            // Named only when on the list: a marker from another data folder or computer names a
+            // matter this install has never had, with nothing to open. (A forgotten matter's marker
+            // never gets here: the import brings that matter back.)
+            Refusal::AlreadyMatter(matter) => {
+                let refusal = HostError::new(ErrorCode::MatterFolderIsMatter, error.to_string());
+                return Error::Refused(if listed(matter) {
+                    refusal.with_matter(*matter)
+                } else {
+                    refusal
+                });
+            }
+            Refusal::UnreadableMatterJson => ErrorCode::MatterFolderUnreadable,
+            Refusal::MattersRoot => ErrorCode::MatterFolderInMattersRoot,
+        };
+        Error::refused(code, error.to_string())
+    }
 }
 
 /// Starts creating the Scratch matter in the first free folder of
@@ -347,7 +385,7 @@ pub(super) fn create_scratch(actor: &mut Actor) {
     );
     match begun {
         Ok(pending) => actor.scratch = Some(pending),
-        Err(error) => tracing::warn!(%error, "could not start the Scratch matter"),
+        Err(error) => tracing::warn!(error = %Cause(&error), "could not start the Scratch matter"),
     }
 }
 
@@ -369,6 +407,7 @@ pub(super) fn on_matter_reply(
                 return;
             };
             let outcome = CommandOutcome::MatterCreated { matter };
+            let minted = pending.new.id;
             let folder = pending.new.folder.clone();
             let committed = match made(reply) {
                 Err(Error::Matters(clauseo_matters::Error::FolderRefused {
@@ -380,19 +419,32 @@ pub(super) fn on_matter_reply(
                         super::matter_details::unforget(actor, &ctx, known, &folder, details)
                     })
                 }
-                made => made.and_then(|import| {
-                    let (draft, entry) =
-                        matter_commit(actor, *pending, import, Some((id, outcome)))?;
-                    let tag = Tag::Command {
-                        id,
-                        outcome,
-                        after: AfterCommand::Matter(Box::new(entry)),
-                    };
-                    actor.send_commit(draft, tag).map(|_| ())
-                }),
+                Err(error) => Err(error),
+                Ok((import, support)) => {
+                    // Made on disk from here: a failure discards it before the answer.
+                    let opened = super::counting::matter_created(import.1.as_ref(), folder);
+                    let sent = matter_commit(actor, *pending, import, Some((id, outcome)))
+                        .and_then(|(draft, entry)| {
+                            let after = AfterCommand::Matter(Box::new(entry));
+                            actor.send_commit(draft, Tag::Command { id, outcome, after })
+                        });
+                    match sent {
+                        Ok(_) => {
+                            // Kept once the commit is sent, so a matter discarded before it has
+                            // no entry; a store failure after it drops it in the discard.
+                            super::query::on_folder_support(actor, minted, support);
+                            super::counting::on_commit(actor, id, opened);
+                        }
+                        Err(error) => {
+                            made::discard(actor, Some(id), minted, error, made::Stage::Commit);
+                        }
+                    }
+                    return;
+                }
             };
             if let Err(error) = committed {
                 let error = refusal(actor, error, &folder);
+                made::not_created(Some(minted), &error, "worker");
                 actor.finish_command(id, Err(error));
             }
         }
@@ -400,21 +452,22 @@ pub(super) fn on_matter_reply(
             let Some(pending) = actor.scratch.take() else {
                 return;
             };
-            let committed = made(reply).and_then(|import| {
-                let (draft, entry) = matter_commit(actor, *pending, import, None)?;
-                actor
-                    .send_commit(draft, Tag::Scratch(Box::new(entry)))
-                    .map(|_| ())
-            });
-            if let Err(error) = committed {
-                tracing::warn!(%error, "could not create the Scratch matter");
+            match made(reply) {
+                Ok((import, _)) => {
+                    let sent =
+                        matter_commit(actor, *pending, import, None).and_then(|(draft, entry)| {
+                            actor.send_commit(draft, Tag::Scratch(Box::new(entry)))
+                        });
+                    if let Err(error) = sent {
+                        made::discard(actor, None, matter, error, made::Stage::Commit);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(error = %Cause(&error), "could not create the Scratch matter");
+                }
             }
         }
-        MatterTag::Open => {
-            if let MatterReply::Opened(Err(error)) = reply {
-                tracing::warn!(%matter, %error, "could not open a matter; it is tried again");
-            }
-        }
+        MatterTag::Open => super::matter_details::opened(matter, reply),
         MatterTag::Relocate { command, folder } => {
             super::relocate::located(actor, matter, command, &folder, reply);
         }
@@ -423,112 +476,25 @@ pub(super) fn on_matter_reply(
             if let MatterReply::Restored(result) = reply {
                 turn::on_restored(actor, &ask, result.map(|done| *done));
             } else {
-                tracing::error!(?reply, "a restore answered with another job's reply");
+                tracing::error!(
+                    reply = reply.name(),
+                    "a restore answered with another job's reply"
+                );
             }
         }
         MatterTag::Query(answer) => {
-            let result = match reply {
-                MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
-                MatterReply::Previewed(result) => result.map(|plan| {
-                    let plan = *plan;
-                    QueryResult::RestorePreview(RestorePreview {
-                        changes: plan.writes,
-                        added_since: plan.added_since,
-                        kept: plan.kept,
-                        locked: plan.locked,
-                    })
-                }),
-                other @ (MatterReply::Created(_)
-                | MatterReply::Imported(_)
-                | MatterReply::Opened(_)
-                | MatterReply::BeforeTurn(_)
-                | MatterReply::AfterTurn(_)
-                | MatterReply::Undone(_)
-                | MatterReply::Restored(_)
-                | MatterReply::Located(_)
-                | MatterReply::HeldOpen(_)
-                | MatterReply::Papers(_)) => Err(Error::Internal(format!(
-                    "a query answered with another job's reply: {other:?}"
-                ))),
-            };
-            let _gone = answer.send(result);
+            let _gone = answer.send(super::query::matter_answer(reply));
         }
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
+        MatterTag::Discard => made::discarded(actor, matter, &reply),
     }
-}
-
-/// The commit of a matter just made: `MatterCreated`, `CheckpointRecorded { Import }`, the
-/// matter's row and the root checkpoint's row (with the receipt for a command), and the entry
-/// it adds once durable.
-fn matter_commit(
-    actor: &mut Actor,
-    pending: PendingMatter,
-    (commit, import): (CommitId, Option<ImportSummary>),
-    command: Option<(clauseo_protocol::CommandId, CommandOutcome)>,
-) -> Result<(Draft, MatterEntry), Error> {
-    let PendingMatter {
-        new,
-        name,
-        kind,
-        details: (client, next_date),
-        worker,
-        cancel: _,
-    } = pending;
-    let now = actor.now();
-    let stream = StreamId::Matter(new.id);
-    let command_id = command.map(|(id, _)| id);
-    let created = MatterCreated::new(name.clone(), kind, import)?;
-    let checkpoint = CheckpointRecorded::new(new.checkpoint, CheckpointKind::Import, None, None)?;
-    let mut draft = Draft::new();
-    let ids = &mut actor.ids;
-    actor.pipeline.push(
-        &mut draft,
-        stream,
-        DomainEvent::MatterCreated(created),
-        command_id,
-        now.wall,
-        ids,
-    )?;
-    actor.pipeline.push_matter(
-        &mut draft,
-        new.id,
-        MatterEvent::checkpoint(checkpoint, commit),
-        command_id,
-        now.wall,
-        ids,
-    )?;
-    let shadow = matter_settings(actor.effective.data_dir())
-        .matters_root
-        .join(new.id.to_string());
-    let row = MatterRow {
-        id: new.id,
-        name,
-        kind,
-        folder_path: new.folder.to_string_lossy().into_owned(),
-        folder_locator: None,
-        shadow_repo_path: shadow.to_string_lossy().into_owned(),
-        created: new.created_at,
-        client,
-        next_date,
-        pinned: false,
-        last_opened: None,
-        forgotten: None,
-    };
-    draft.matter_row(row.clone());
-    if let Some((id, outcome)) = command {
-        let ctx = command_ctx(actor, id)?;
-        draft.receipt(ctx.receipt(Some(stream), outcome, now.wall));
-    }
-    let entry = MatterEntry {
-        row,
-        worker: Some(worker),
-        turns: turn::MatterTurns::default(),
-    };
-    Ok((draft, entry))
 }
 
 /// The receipt context of the pending command `id`.
-fn command_ctx(actor: &Actor, id: clauseo_protocol::CommandId) -> Result<CommandCtx, Error> {
+pub(super) fn command_ctx(
+    actor: &Actor,
+    id: clauseo_protocol::CommandId,
+) -> Result<CommandCtx, Error> {
     let hash = actor
         .commands
         .get(&id)
@@ -544,11 +510,10 @@ pub(super) fn scratch_committed(
     outcome: Result<(), &Failure>,
 ) {
     match outcome {
-        Ok(()) => {
-            actor.matters.insert(entry.row.id, entry);
-        }
+        Ok(()) => made::recorded(actor, entry),
         Err(failure) => {
-            tracing::warn!(error = %failure.error, "the Scratch matter was not stored");
+            let error = Error::Store(failure.error.clone());
+            made::discard(actor, None, entry.row.id, error, made::Stage::Store);
         }
     }
 }
@@ -559,38 +524,5 @@ pub(super) fn cancel_imports(actor: &Actor) {
         if let Some(matter) = &pending.matter {
             matter.cancel.store(true, Ordering::Relaxed);
         }
-    }
-}
-
-/// The root checkpoint's commit and the import summary of a create or import that succeeded,
-/// `None` for a new folder.
-fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> {
-    match reply {
-        MatterReply::Created(result) => result.map(|commit| (commit, None)),
-        MatterReply::Imported(result) => match result? {
-            ImportEnd::Done {
-                commit,
-                summary,
-                warnings,
-            } => {
-                for warning in &warnings {
-                    tracing::info!(?warning, "import warning");
-                }
-                Ok((commit, Some(summary)))
-            }
-            ImportEnd::Cancelled => Err(Error::Closed),
-        },
-        MatterReply::Opened(_)
-        | MatterReply::Located(_)
-        | MatterReply::BeforeTurn(_)
-        | MatterReply::AfterTurn(_)
-        | MatterReply::Undone(_)
-        | MatterReply::Restored(_)
-        | MatterReply::Compared(_)
-        | MatterReply::Previewed(_)
-        | MatterReply::HeldOpen(_)
-        | MatterReply::Papers(_) => Err(Error::Internal(
-            "a matter's create got another job's reply".to_owned(),
-        )),
     }
 }

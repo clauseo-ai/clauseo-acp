@@ -1,7 +1,7 @@
 // A transport for tests and the room's probe build (room/probe-main.tsx): the same channel reader and subscriptions as
 // the Tauri one, with the host replaced by a recorder. `deliver` plays a channel message as the bridge would send it;
 // `host` scripts the answers. It counts no messages: that bookkeeping is the desktop transport's own. With `host.next` it also answers the calls the host
-// doesn't have yet (room/host-next.ts), which the desktop transport never sends, and `appEvent` plays H4's events.
+// beyond the generated ones (room/host-next.ts), scripted, and `appEvent` plays H4's events as the room reads them.
 import type {
   AppEvent,
   NextCommand,
@@ -37,8 +37,11 @@ import type {
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SetupCommand,
+  SetupEvent,
   StreamId,
   ThreadId,
+  UiCount,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
@@ -63,7 +66,18 @@ export type FakeCall =
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings" }
   | { call: "next_query"; query: NextQuery }
-  | { call: "next_command"; command: NextCommand };
+  | { call: "next_command"; command: NextCommand }
+  | { call: "setup"; command: SetupCommand }
+  | { call: "count_ui"; event: UiCount };
+
+/** The setup wire, scripted (R20's `setup` and S21's `count_ui`; store/setup.ts's SetupSource). */
+export type FakeSetupHost = {
+  /** The events a new listener hears first, as the host replays SetupInfo and each agent's state; none when left
+   * out. */
+  first?: () => readonly SetupEvent[];
+  /** Answers each setup command; throwing refuses it. Its events, if any, are the test's to play (`setupEvent`). */
+  command?: (command: SetupCommand) => void | Promise<void>;
+};
 
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
@@ -75,6 +89,9 @@ export type FakeNextHost = {
   command?: (
     command: NextCommand,
   ) => void | NextOutcome | Promise<void> | Promise<NextOutcome | undefined>;
+  /** Optional: the first frames of each app subscription, as the host sends them (each matter's whole thread list,
+   * `all: true`), played to the new listener alone once the subscription is made. */
+  first?: () => readonly AppEvent[];
 };
 
 export type FakeHost = {
@@ -96,6 +113,9 @@ export type FakeHost = {
   releaseDate?: DisplayInfo["release_date"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
+  /** With it, the fake carries the setup wire (`onSetup`, `setup`, `countUi`), and the room loads the first run.
+   * Without it the fake has none of the three, like a host before R20. Read when the fake is made. */
+  setup?: FakeSetupHost;
 };
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
@@ -114,6 +134,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
   readonly openSettings: (() => Promise<void>) | undefined;
+  /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
+  readonly onSetup: ((listener: (event: SetupEvent) => void) => () => void) | undefined;
+  readonly setup: ((command: SetupCommand) => Promise<void>) | undefined;
+  readonly countUi: ((event: UiCount) => Promise<void>) | undefined;
+  readonly #setupHeard = new Set<(event: SetupEvent) => void>();
   readonly #parts: { [P in NextPart]-?: NonNullable<NextHost[P]> } = {
     papers: {
       listPapers: async (matter) => {
@@ -130,6 +155,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       },
       setUiSettings: async (patch) => {
         await this.#nextCommand({ [WIRE.setUiSettings]: { patch } });
+      },
+      setToolSettings: async (patch) => {
+        await this.#nextCommand({ [WIRE.setToolSettings]: { patch } });
       },
       onSettingsChanged: (listener) => {
         this.#settingsHeard.add(listener);
@@ -160,6 +188,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     app: {
       subscribeApp: (listener) => {
         this.#appHeard.add(listener);
+        const first = this.host.next?.first?.() ?? [];
+        if (first.length > 0)
+          queueMicrotask(() => {
+            for (const event of first) if (this.#appHeard.has(listener)) listener(event);
+          });
         return () => this.#appHeard.delete(listener);
       },
     },
@@ -196,6 +229,32 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
         : async () => {
             this.calls.push({ call: "open_settings" });
             await this.#answer(() => this.host.openSettings?.());
+          };
+    const setup = host.setup;
+    this.onSetup =
+      setup === undefined
+        ? undefined
+        : (listener) => {
+            this.#setupHeard.add(listener);
+            const first = setup.first?.() ?? [];
+            if (first.length > 0)
+              queueMicrotask(() => {
+                for (const event of first) if (this.#setupHeard.has(listener)) listener(event);
+              });
+            return () => this.#setupHeard.delete(listener);
+          };
+    this.setup =
+      setup === undefined
+        ? undefined
+        : async (command) => {
+            this.calls.push({ call: "setup", command });
+            await this.#answer(() => setup.command?.(command));
+          };
+    this.countUi =
+      setup === undefined
+        ? undefined
+        : async (event) => {
+            this.calls.push({ call: "count_ui", event });
           };
     this.#subs = new Subscriptions(
       {
@@ -278,7 +337,18 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#settingsHeard) listener(settings);
   }
 
-  /** Plays one app event (H4) as the host would send it to every window. */
+  /** Plays one SetupEvent (R20) as the host's `setup` stream would send it. */
+  setupEvent(event: SetupEvent): void {
+    for (const listener of this.#setupHeard) listener(event);
+  }
+
+  /** The setup commands sent, in order. */
+  setups(): SetupCommand[] {
+    return this.only("setup").map((c) => c.command);
+  }
+
+  /** Plays one app event (H4) as the host would send it to every window; `{ browser_install: { state } }` is the
+   * Chrome download's state (room/browser-install.ts). A new app listener hears `host.next.first` first, the catch-up. */
   appEvent(event: AppEvent): void {
     for (const listener of this.#appHeard) listener(event);
   }

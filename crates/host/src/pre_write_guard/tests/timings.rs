@@ -12,7 +12,12 @@ use super::{DENY, Fixture, deny, run_timed};
 fn timed(hook: &Value, on: bool) -> (i32, Vec<String>) {
     let args: [OsString; 0] = [];
     let mut errors = Vec::new();
-    let code = run_timed(&args, hook.to_string().as_bytes(), &mut errors, on);
+    let code = run_timed(
+        &args,
+        hook.to_string().as_bytes(),
+        (Vec::new(), &mut errors),
+        on,
+    );
     let errors = String::from_utf8(errors).unwrap();
     (code, errors.lines().map(str::to_owned).collect())
 }
@@ -97,7 +102,10 @@ fn off_the_guard_writes_only_its_own_lines() {
 fn ignored_input_is_timed_too() {
     let mut errors = Vec::new();
     let args: [OsString; 0] = [];
-    assert_eq!(run_timed(&args, &b"not json"[..], &mut errors, true), 0);
+    assert_eq!(
+        run_timed(&args, &b"not json"[..], (Vec::new(), &mut errors), true),
+        0
+    );
     let errors = String::from_utf8(errors).unwrap();
     let lines: Vec<&str> = errors.lines().collect();
     assert_eq!(lines.len(), 2, "{lines:?}");

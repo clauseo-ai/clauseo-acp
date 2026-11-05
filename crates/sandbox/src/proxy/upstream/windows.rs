@@ -43,7 +43,7 @@ pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String
                     tracing::debug!(host, port, "no WPAD file found");
                 }
                 Err(error) => {
-                    tracing::warn!(host, port, error, "WPAD failed; trying the next setting");
+                    tracing::warn!(port, error, "WPAD failed; trying the next setting");
                 }
             }
         }

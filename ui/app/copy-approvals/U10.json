@@ -1,0 +1,79 @@
+{
+  "U10-01": {
+    "en": "The answer stopped at {time}. Your question and the answer so far are kept.",
+    "hi": "उत्तर {time} बजे रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U10-02": {
+    "en": "The answer stopped here at {time}",
+    "hi": "उत्तर {time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U10-03": {
+    "en": "The answer stopped with no reason given. Restart asks your question once more. The answer so far stays above.",
+    "hi": "उत्तर बिना किसी कारण के रुक गया। फिर से शुरू करने पर आपका प्रश्न एक बार फिर पूछा जाता है। अब तक का उत्तर ऊपर बना रहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U10-04": {
+    "en": "This conversation stopped updating in this window.",
+    "hi": "यह बातचीत इस विंडो में अपडेट होना बंद हो गई।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-05": {
+    "en": "Clauseo couldn't open. A newer version of Clauseo saved its data, so this version can't read it. Your papers stay in their folders.",
+    "hi": "Clauseo नहीं खुल सका। इसका डेटा Clauseo के नए संस्करण ने सहेजा है, इसलिए यह संस्करण उसे पढ़ नहीं सकता। आपके दस्तावेज़ अपने फ़ोल्डरों में ही हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-06": {
+    "en": "Clauseo couldn't open. Its saved data doesn't read back. Your papers stay in their folders.",
+    "hi": "Clauseo नहीं खुल सका। इसका सहेजा गया डेटा वापस नहीं पढ़ा जा रहा। आपके दस्तावेज़ अपने फ़ोल्डरों में ही हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-07": {
+    "en": "Clauseo couldn't open. The computer's disk is full. Free some space, then open Clauseo again.",
+    "hi": "Clauseo नहीं खुल सका। कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर Clauseo दोबारा खोलें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-08": {
+    "en": "Clauseo couldn't open. It couldn't read or write its data. Open Clauseo again.",
+    "hi": "Clauseo नहीं खुल सका। यह अपना डेटा पढ़ या लिख नहीं सका। Clauseo दोबारा खोलें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-09": {
+    "en": "The answer stopped here on {day} at {time}",
+    "hi": "उत्तर {day} को {time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "U10-10": {
+    "en": "The computer's disk is full. Free some space.",
+    "hi": "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  }
+}

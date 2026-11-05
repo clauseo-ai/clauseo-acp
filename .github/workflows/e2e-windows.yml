@@ -9,19 +9,26 @@
 # E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
 # The job scoreboard-windows plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
 # with smoke's app on windows-2025 and uploads scoreboard-windows.json as the artifact
-# scoreboard-windows, which the pull request's scoreboard comment reads (scoreboard-comment.yml).
+# scoreboard-windows, on demand only.
+#
+# Per event (Rohan's CI decision, 2026-11-04):
+# - pull_request: smoke (windows-2025) when the app changed, else a quick skip; not required.
+# - merge_group: e2e-changes only; smoke is skipped (2026-11-04).
+# - push: no trigger. The merge queue already tested the code.
+# - schedule: smoke on x64 (the pull request's LTO-off profile, which saves the Rust cache pull
+#   requests restore) and ARM64 (full LTO).
+# - workflow_dispatch: smoke on x64 and ARM64, both full LTO, then scoreboard-windows.
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json, Playwright from
 #   ui/e2e/package.json.
 # - `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist. A plain
 #   `cargo build` would load devUrl instead.
-# - On a pull request and a push to main, the x64 smoke test's app is a release build with LTO
-#   off and 16 codegen units (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe
-#   like the shipped app, about 4 times faster to build than full LTO with a warm cache
-#   (ci-perfmax's notes). scoreboard-windows plays that same build on both. Nightly, on demand and
-#   on ARM64 the smoke test builds full LTO, the shipping profile, and runs the full suite on it;
-#   scoreboard.yml plays a full-LTO build nightly, on demand and on labelled pull requests.
+# - On a pull request and nightly, the x64 smoke test's app is a release build with LTO off and 16
+#   codegen units (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe like the
+#   shipped app, about 4 times faster to build than full LTO with a warm cache (ci-perfmax's
+#   notes). On demand and on ARM64 the smoke test builds full LTO, the shipping profile, and runs
+#   the full suite on it; scoreboard.yml plays a full-LTO x64 build nightly and on demand.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: e2e-windows
@@ -39,16 +46,14 @@ name: e2e-windows
 # reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
 # `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
 # scoreboard-windows is not a required check, so it is skipped as a whole when it has nothing to do.
-# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm). A
-# push to main plays the scoreboard on x64, which gives the comment its baseline, and saves the
-# Rust cache pull requests restore; nothing else saves one, and ARM64 keeps none.
+# The nightly run and a run on demand cover x64 and ARM64 (windows-11-arm). The nightly run saves
+# the x64 Rust cache pull requests restore; nothing else saves one, and ARM64 keeps none. No push
+# trigger since Rohan's CI decision (2026-11-04): the merge queue already tested main's code.
 
 on:
   pull_request:
   # A pull request in main's merge queue runs what a pull request runs (ci.yml).
   merge_group:
-  push:
-    branches: [main]
   schedule:
     - cron: "47 3 * * *"
   workflow_dispatch:
@@ -56,11 +61,10 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run. Pushes to main share one group, one running and one
-# waiting, the newest push replacing the waiting run; each nightly run, run on demand and merge
-# group has a group of its own. As in ci.yml, which says why.
+# A pull request keeps only its newest run; each nightly run, run on demand and merge group has a
+# group of its own.
 concurrency:
-  group: e2e-windows-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.sha) }}
+  group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -80,7 +84,7 @@ jobs:
           sparse-checkout: |
             /.github/scripts/
 
-      # A push, the nightly run and a run on demand run everything; a pull request runs what its
+      # The nightly run and a run on demand run everything; a pull request runs what its
       # changed paths need. ci.yml's `changes` job tests the rules against their fixtures.
       - name: Decide whether the smoke test and the scoreboard run
         id: filter
@@ -110,7 +114,10 @@ jobs:
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
-    if: ${{ !cancelled() }}
+    # Not in a merge group (2026-11-04): smoke left the merge-group requirement for main's nightly
+    # run, to cut the time from approval to merge; it still runs on pull requests that change the
+    # app, nightly and on demand, and a red one on main goes to its owner.
+    if: ${{ !cancelled() && github.event_name != 'merge_group' }}
     # A pull request that leaves the app alone only skips, on an ubuntu runner, which starts faster
     # than a Windows one. A failed e2e-changes runs everything on Windows.
     runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true' && 'ubuntu-24.04' || matrix.runner }}
@@ -130,13 +137,14 @@ jobs:
       # A failed decision runs everything, so the check always reports.
       RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.app == 'true' }}
       TARGET: ${{ matrix.target }}
-      # LTO off and 16 codegen units on a pull request, a merge group and a push to main (x64), so
-      # main saves the Rust cache under the key pull requests and merge groups look up (rust-cache
-      # hashes CARGO_* variables into it) and scoreboard-windows plays the same kind of build on
-      # both. Nightly, on demand and on ARM64: full LTO and 1 codegen unit, the shipping profile,
-      # under the full suite.
-      CARGO_PROFILE_RELEASE_LTO: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push') && matrix.runner == 'windows-2025' && 'false' || 'true' }}
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push') && matrix.runner == 'windows-2025' && '16' || '1' }}
+      # LTO off and 16 codegen units on a pull request, a merge group and the nightly run (x64), so
+      # the nightly run saves the Rust cache under the key pull requests look up (rust-cache hashes
+      # CARGO_* variables into it). Nightly x64 took the pull request's profile when the push
+      # trigger went (Rohan's CI decision, 2026-11-04): without a push run, only the nightly run can
+      # keep that cache warm, and x64 gave up its nightly full-LTO suite for it. On demand and on
+      # ARM64: full LTO and 1 codegen unit, the shipping profile, under the full suite.
+      CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name != 'workflow_dispatch' && matrix.runner == 'windows-2025' && 'false' || 'true' }}
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name != 'workflow_dispatch' && matrix.runner == 'windows-2025' && '16' || '1' }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       # The scripted agent the window's specs launch through settings.json (fixture.ts).
       E2E_FAKE_AGENT: ${{ github.workspace }}/target/${{ matrix.target }}/release/fake_agent.exe
@@ -172,15 +180,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      # x64 only, saved by a push to main only: the key pull requests restore. The nightly full-LTO
-      # build saves nothing (its CARGO_* values give it another key, and it would only push a
+      # x64 only, saved by the nightly run only: the key pull requests restore. A full-LTO build on
+      # demand saves nothing (its CARGO_* values give it another key, and it would only push a
       # second entry into the 10 GB cache). ARM64 runs after the merge and keeps no cache.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.RUN == 'true' && matrix.runner == 'windows-2025'
         with:
           key: e2e-${{ matrix.target }}
           cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'schedule' }}
 
       - name: Install the ui workspace
         if: env.RUN == 'true'
@@ -235,7 +243,7 @@ jobs:
 
       # Runs even when the run before failed: GitHub's Windows runners have no GPU, and the two runs
       # tell apart a failure of the GPU path from a failure of the app. Not on a pull request: the
-      # merge group runs it before the merge. It takes 2.6 min of smoke's 12, and smoke sets the pull
+      # nightly run and a run on demand run it. It takes 2.6 min of smoke's 12, and smoke sets the pull
       # request's wall time; from 2026-11-02 to 11-03 it failed alone once in 214 pull request runs.
       - name: Tests and numbers with --disable-gpu
         if: ${{ env.RUN == 'true' && github.event_name != 'pull_request' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
@@ -267,28 +275,20 @@ jobs:
   # a warm start: the warm-up makes one WebView2 profile and the measured plays reuse it (#173);
   # the smoke tests keep a fresh profile per launch, a first launch. It plays
   # smoke's app and fake_agent (the artifact e2e-app-x86_64-pc-windows-msvc), so it builds nothing:
-  # pull requests and main measure the same LTO-off release build, and the comment compares like
-  # with like. scoreboard.yml plays a full-LTO build nightly, on demand and on pull requests labelled
-  # `scoreboard`, for the absolute numbers. Runs on pull requests that touch the app's product code
-  # and on every push to main. Its numbers report and alert and never block a merge: the job is not
-  # a required check, and continue-on-error keeps a failure from turning the run red (a red run on
-  # main would hide that run's numbers from the comment, which reads main's successful runs only).
-  # The comment then shows this pull request's Windows numbers as not run.
+  # on demand that is a full-LTO build. On demand only (Rohan's CI decision, 2026-11-04: the
+  # scoreboard stays off the paths of pull requests and the queue; nightly, scoreboard.yml's
+  # scoreboard-windows-lto plays the same full-LTO x64 build). Its numbers report and alert and
+  # never block anything: the job is not a required check, and continue-on-error keeps a failure
+  # from turning the run red.
   scoreboard-windows:
     name: scoreboard-windows
     needs: [e2e-changes, smoke]
-    # On a push it waits for the ARM64 leg of smoke too, which costs nothing that matters: the
-    # comment reads main's numbers only from a completed, successful run, so the baseline is usable
-    # only once the whole run has ended, ARM64 included. An ARM64 failure does not skip this job
-    # (!cancelled() below); only a missing x64 artifact fails it, at the download.
-    # Pull requests and pushes to main only: nightly and on demand, smoke's build is full LTO, and
-    # its numbers would become main's baseline for the next pull requests (the comment reads main's
-    # newest run); scoreboard.yml's scoreboard-windows-lto plays full LTO then.
+    # It waits for the ARM64 leg of smoke too. An ARM64 failure does not skip this job (!cancelled()
+    # below); only a missing x64 artifact fails it, at the download. A run on demand runs
+    # everything, so e2e-changes says app and product.
     if: >-
       ${{ !cancelled() && needs.smoke.result != 'skipped'
-      && (github.event_name == 'pull_request' || github.event_name == 'push')
-      && (needs.e2e-changes.result != 'success'
-      || (needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.product == 'true')) }}
+      && github.event_name == 'workflow_dispatch' }}
     runs-on: windows-2025
     continue-on-error: true
     # The four plays took about 2.5 minutes inside smoke (run 41383564166 and earlier).

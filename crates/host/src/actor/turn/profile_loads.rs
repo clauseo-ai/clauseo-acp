@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use super::super::Actor;
 use super::launch_checks::{Prepared, RunFolders};
 use crate::agent::loads;
-use crate::agent::loads::browser::{self, BrowserInputs, Switch};
+use crate::agent::loads::browser::{self, BrowserInputs, Claims, Switch};
 use crate::agent::loads::profile::{self, ClaudeKeys, Folders, Login};
 use crate::browser::seed_sites::SEED_SITES;
 use crate::error::Error;
@@ -84,16 +84,40 @@ pub(super) fn session_loads(
         &settings_env,
         |name| std::env::var_os(name),
     );
+    // This launch's own folder answer decided it (`agent/forced_ask.rs`).
+    let forced_ask = super::state(actor, thread)
+        .and_then(|state| state.agent.as_deref())
+        .is_some_and(|agent| agent.forced_ask);
     let claude = (kind == Some(AgentKind::Claude)).then_some(ClaudeKeys {
         web_search,
         login,
         folders,
         seed_sites: SEED_SITES,
+        forced_ask,
     });
     let guard = actor
         .pre_write_guard
         .as_deref()
-        .map(|program| loads::GuardHook { program, matter });
+        .map(|program| loads::GuardHook {
+            program,
+            matter,
+            ask_all: forced_ask,
+        });
+    // Without the guard's hook, a forced-ask session would rest on the ask rules alone, and a
+    // hook that is missing fails open: refuse it.
+    if let (true, Some(_), Some(reason)) = (forced_ask, &claude, loads::guard_missing(guard)) {
+        let matter_id = actor.check_thread(thread)?.row.matter;
+        tracing::warn!(
+            matter = %matter_id,
+            reason,
+            "a forced-ask Claude launch has no guard hook to give: the launch is refused"
+        );
+        return Err(Error::refused(
+            ErrorCode::AgentGuardMissing,
+            "this matter's folder is unprotected, and the guard that makes Claude ask before \
+             each change could not be set up",
+        ));
+    }
     let mut meta = loads::session_meta(
         actor.profile.session_meta(&agent_id),
         control,
@@ -101,7 +125,6 @@ pub(super) fn session_loads(
         claude.as_ref(),
     );
     profile::fill_meta(&mut meta, folders)?;
-    let session_id = run.key.id();
     let inputs = BrowserInputs {
         switch: browser_switch,
         control,
@@ -113,7 +136,7 @@ pub(super) fn session_loads(
             .and_then(|proxy| proxy.port_for(run.key)),
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
-        session_id: &session_id,
+        claims: run.browser_session.as_deref().map(Claims::of),
     };
     let mut servers = loads::mcp_servers(&actor.effective, control);
     let (hook_servers, browser_state) =

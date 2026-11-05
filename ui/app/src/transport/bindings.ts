@@ -9,7 +9,8 @@ export const commands = {
 	/**
 	 *  Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
 	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
-	 *  window, everything but `SetUiSettings` and `SetToolSettings`.
+	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and
+	 *  `RefreshLimits`; from `main`, `SetToolSettings` and `SetPrivacySettings`.
 	 */
 	dispatch: (command: CommandEnvelope) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("dispatch", { command })),
 	/**  Answers a query; from the settings window, `GetSettings` only. */
@@ -85,10 +86,16 @@ export const commands = {
 	 *  Granted to `main` only.
 	 */
 	openSettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_settings")),
+	/**
+	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
+	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
+	 *  starts, so it waits for the host's start, whatever its outcome; it never fails.
+	 */
+	countUi: (event: UiCount) => typedError<null, HostError>(__TAURI_INVOKE("count_ui", { event })),
 };
 
 /* Constants */
-export const KNOWN_DOMAIN_EVENT_KINDS = ["thread_created","thread_renamed","thread_archived","agent_session_attached","agent_named","agent_session_detached","user_message","turn_queued","queued_prompt_edited","steer_resolved","turn_started","text_appended","content_appended","tool_call_started","tool_call_updated","web_search_recorded","page_visited","permission_requested","permission_resolved","permission_expired","elicitation_requested","elicitation_resolved","elicitation_expired","plan_replaced","mode_changed","config_options_replaced","commands_available","usage_updated","notice","compaction_changed","files_changed","turn_failed","turn_stopped_at_limit","turn_ended","step_undone","matter_created","checkpoint_recorded","outside_edits","version_restored","matter_relocated"] as const;
+export const KNOWN_DOMAIN_EVENT_KINDS = ["thread_created","thread_renamed","thread_archived","thread_snoozed","thread_done","agent_session_attached","agent_named","agent_session_detached","user_message","turn_queued","queued_prompt_edited","steer_resolved","turn_started","text_appended","content_appended","tool_call_started","tool_call_updated","web_search_recorded","page_visited","permission_requested","permission_resolved","permission_expired","elicitation_requested","elicitation_resolved","elicitation_expired","plan_replaced","mode_changed","config_options_replaced","commands_available","usage_updated","notice","compaction_changed","files_changed","turn_failed","turn_stopped_at_limit","turn_ended","step_undone","matter_created","checkpoint_recorded","outside_edits","version_restored","matter_relocated"] as const;
 
 /* Types */
 /**  One account's limits, as `limits` last read them. */
@@ -378,6 +385,75 @@ export type BlobRef = {
 	preview: string,
 };
 
+/**
+ *  Why a Chrome for Testing download failed. Open: a value a newer host adds decodes to
+ *  `Unknown`, which the app shows as a plain failure. The app picks its copy by this code,
+ *  never from `message`.
+ */
+export type BrowserInstallFailure = 
+/**
+ *  The network failed: curl could not connect, the server answered an error, or the
+ *  transfer stalled (slower than 1 byte a second for 60 s).
+ */
+"network" | 
+/**
+ *  The zip's size did not match its `Content-Length`, the response had none, or it was
+ *  larger than the 400 MiB cap.
+ */
+"size_mismatch" | 
+/**  Less than about 1 GB is free in the app data folder. */
+"disk_space" | 
+/**
+ *  The version list named a URL or version the host does not accept: not `https`, not
+ *  Google's host, or a path that does not match the version and platform.
+ */
+"host_refused" | 
+/**  Chrome's code signature did not check out (only while the host requires it). */
+"signature" | 
+/**
+ *  The zip did not unpack, held an entry that would land outside its folder or lacked
+ *  the browser, or a folder in the app data folder could not be written.
+ */
+"unpack" | 
+/**
+ *  This machine gets no Chrome for Testing download: Linux, Windows on ARM64, or a
+ *  system tool the download needs is missing.
+ */
+"unsupported" | 
+/**  The lawyer cancelled, or the app quit, during the download. */
+"cancelled" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**
+ *  Where the one Chrome for Testing download stands. A download publishes some `Downloading`,
+ *  then `Unpacking`, then one `Done` or one `Failed`; a download refused before it starts (an
+ *  unsupported machine, too little disk) publishes only its `Failed`. After `Done` the next
+ *  session started finds the browser; sessions already running keep their header.
+ */
+export type BrowserInstallState = 
+/**
+ *  The zip is downloading: `bytes` of `total` so far, at most about four a second. `total`
+ *  is the response's `Content-Length`.
+ */
+({ downloading: {
+	/**  Bytes on disk so far. */
+	bytes: Count,
+	/**  The whole zip's size, from `Content-Length`. */
+	total: Count,
+} }) & { failed?: never } | 
+/**  The zip is downloaded; it is being unpacked and checked. */
+"unpacking" | 
+/**  Chrome for Testing is in place; the next session uses it. */
+"done" | 
+/**  The download ended without a browser and left no folder behind. */
+({ failed: {
+	/**  Why, for the app's copy: the app picks what it shows by `code` alone. */
+	code: BrowserInstallFailure,
+	/**  What went wrong, in English, for the log only: the app never shows it. */
+	message: string,
+} }) & { downloading?: never };
+
 /**  What happened to a file. */
 export type ChangeKind = 
 /**  Created. */
@@ -481,7 +557,9 @@ export type CommandId = string;
 /**
  *  What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
  *  outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
- *  `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
+ *  `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
+ *  `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
+ *  `InstallBrowser`, `CancelBrowserInstall` and the four update commands answer `Done`.
  */
 export type CommandOutcome = 
 /**  Done; nothing new to name. */
@@ -826,85 +904,89 @@ export type DisplayInfo = {
  */
 export type DomainEvent = 
 /**  A thread was created (thread stream; host). */
-({ thread_created: ThreadCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_created: ThreadCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The thread got a new title (host, acp). */
-({ thread_renamed: ThreadRenamed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_renamed: ThreadRenamed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The thread was archived (host). */
-({ thread_archived: ThreadArchived }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_archived: ThreadArchived }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+/**  The lawyer snoozed the thread until a time, or cleared its snooze (host). */
+({ thread_snoozed: ThreadSnoozed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+/**  The thread was marked done or not done, by the lawyer or the morning sweep (host). */
+({ thread_done: ThreadDone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An agent session started or was loaded (acp). */
-({ agent_session_attached: AgentSessionAttached }) & { agent_named?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_session_attached: AgentSessionAttached }) & { agent_named?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's own display name, from `initialize` (host). */
-({ agent_named: AgentNamed }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_named: AgentNamed }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent session ended (acp, host). */
-({ agent_session_detached: AgentSessionDetached }) & { agent_named?: never; agent_session_attached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_session_detached: AgentSessionDetached }) & { agent_named?: never; agent_session_attached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The lawyer's message (host; acp on a `session/load` replay). */
-({ user_message: UserMessage }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; version_restored?: never; web_search_recorded?: never } | 
+({ user_message: UserMessage }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn waits (host). */
-({ turn_queued: TurnQueued }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_queued: TurnQueued }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A queued prompt was edited (host). */
-({ queued_prompt_edited: QueuedPromptEdited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ queued_prompt_edited: QueuedPromptEdited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Where a steered message went (host). */
-({ steer_resolved: SteerResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ steer_resolved: SteerResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn started (host). */
-({ turn_started: TurnStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_started: TurnStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Text appended to an answer or thought (acp). */
-({ text_appended: TextAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ text_appended: TextAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A non-text block in an answer or thought (acp). */
-({ content_appended: ContentAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ content_appended: ContentAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A tool call started (acp). */
-({ tool_call_started: ToolCallStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ tool_call_started: ToolCallStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A tool call changed (acp; host marks in-flight calls cancelled). */
-({ tool_call_updated: ToolCallUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ tool_call_updated: ToolCallUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A web search the agent ran, with its results (acp). */
-({ web_search_recorded: WebSearchRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never } | 
+({ web_search_recorded: WebSearchRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never } | 
 /**  A page the agent opened (acp). */
-({ page_visited: PageVisited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ page_visited: PageVisited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent asked for permission (acp). */
-({ permission_requested: PermissionRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_requested: PermissionRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A permission request was answered (host). */
-({ permission_resolved: PermissionResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_resolved: PermissionResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A permission request expired (host). */
-({ permission_expired: PermissionExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_expired: PermissionExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent asked for input (acp). */
-({ elicitation_requested: ElicitationRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_requested: ElicitationRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An elicitation was answered (host). */
-({ elicitation_resolved: ElicitationResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_resolved: ElicitationResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An elicitation expired (host). */
-({ elicitation_expired: ElicitationExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_expired: ElicitationExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's plan, replaced whole (acp). */
-({ plan_replaced: PlanReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ plan_replaced: PlanReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The session's mode changed (acp). */
-({ mode_changed: ModeChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ mode_changed: ModeChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The session's config options, replaced whole (acp). */
-({ config_options_replaced: ConfigOptionsReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ config_options_replaced: ConfigOptionsReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's slash commands, replaced whole (acp). */
-({ commands_available: CommandsAvailable }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ commands_available: CommandsAvailable }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Context use and cost (acp). */
-({ usage_updated: UsageUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ usage_updated: UsageUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A notice for the lawyer (acp, host). */
-({ notice: Notice }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ notice: Notice }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Context compaction started or finished (acp). */
-({ compaction_changed: CompactionChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ compaction_changed: CompactionChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The files a turn changed (matters, through host). */
-({ files_changed: FilesChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ files_changed: FilesChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Why a turn failed (host, acp). */
-({ turn_failed: TurnFailed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_failed: TurnFailed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A usage limit stopped a turn (limits, through host). */
-({ turn_stopped_at_limit: TurnStoppedAtLimit }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_stopped_at_limit: TurnStoppedAtLimit }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn ended, exactly once per turn (host). */
-({ turn_ended: TurnEnded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_ended: TurnEnded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A step was undone (host, matters). */
-({ step_undone: StepUndone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ step_undone: StepUndone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A matter was created (matter stream; host). */
-({ matter_created: MatterCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ matter_created: MatterCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A checkpoint was recorded (matter stream; matters, through host). */
-({ checkpoint_recorded: CheckpointRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ checkpoint_recorded: CheckpointRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Files changed outside Clauseo (matter stream; matters, through host). */
-({ outside_edits: OutsideEdits }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ outside_edits: OutsideEdits }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An earlier version was restored (matter stream; host, matters). */
-({ version_restored: VersionRestored }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; web_search_recorded?: never } | 
+({ version_restored: VersionRestored }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; web_search_recorded?: never } | 
 /**  The matter's folder was located after it moved (matter stream; host, matters). */
-({ matter_relocated: MatterRelocated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ matter_relocated: MatterRelocated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**
  *  A kind from a newer Clauseo, which this version does not know: one key, the
  *  kind, holding its payload as read. After a downgrade the host can still send
@@ -913,6 +995,15 @@ export type DomainEvent =
  *  so a `switch` over the kinds needs a default branch.
  */
 { [key in string]: RawPayload };
+
+/**  Who marked a thread done or not done. */
+export type DoneBy = 
+/**  The lawyer (`MarkThreadDone`). */
+"lawyer" | 
+/**  The host's morning sweep (`SweepDone`), which marks quiet threads done once a day. */
+"morning_sweep" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  An elicitation. Entry id `elicitation:<elicitation>`. */
 export type ElicitationEntry = {
@@ -1032,6 +1123,12 @@ export type ElicitationState =
  *  Text form: `<snake_case kind>:<uuid>`, for example `tool_call:<uuid>`.
  */
 export type EntryId = string;
+
+/**
+ *  An environment variable's name, never its value (decision record 0048): 1 to 255
+ *  characters of `[A-Za-z0-9_]`, so no `NAME=value` text fits in one.
+ */
+export type EnvName = string;
 
 /**
  *  One logged event: which stream it belongs to, its place there, and what caused it.
@@ -1160,12 +1257,42 @@ export type ErrorCode =
 "matter.folder_is_matter" | 
 /** The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. */
 "matter.folder_in_matters_root" | 
+/** The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. */
+"matter.folder_network" | 
+/** The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. */
+"matter.folder_no_permissions" | 
 /** The client is not allowed to make this call. */
 "transport.unauthorized" | 
 /** The message is larger than the transport accepts. */
 "transport.too_large" | 
 /** The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. */
 "settings.locked" | 
+/** The agent's install cannot reach its hosts: name resolution or connect failed with no route. The install waits and tries again by itself. */
+"agent.install_offline" | 
+/** A proxy or firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web page where a file should be. */
+"agent.install_blocked" | 
+/** Too little free space for the agent's install; a retry succeeds once space is freed. */
+"agent.install_disk_full" | 
+/** The agent's install failed for another reason, after three tries. */
+"agent.install_failed" | 
+/** The lawyer cancelled the sign-in, in Clauseo or on the vendor's page. */
+"signin.cancelled" | 
+/** The sign-in link or device code expired before the sign-in finished; a new sign-in gets a new one. */
+"signin.link_expired" | 
+/** The account has no plan the agent accepts. */
+"signin.no_plan" | 
+/** Device-code sign-in is turned off for the account. */
+"signin.device_code_off" | 
+/** Another program holds the port the agent's sign-in listens on (Codex's 1455). */
+"signin.port_busy" | 
+/** The sign-in ended before signing in, for any other reason. */
+"signin.failed" | 
+/** The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. */
+"signin.policy_unreadable" | 
+/** A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. */
+"agent.guard_missing" | 
+/** The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. */
+"update.failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -1186,6 +1313,15 @@ export type ExpiryReason =
 "host_restarted" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  What failed in an [`UpdateState::Failed`]. */
+export type FailedStage = 
+/**  Asking for the latest version. */
+"check" | 
+/**  Downloading it, or checking its signature. */
+"download" | 
+/**  Installing it, found at the next start. */
+"install";
 
 /**
  *  One file a turn (or an outside edit) changed.
@@ -1256,12 +1392,59 @@ export type FilesChanged = {
  */
 export type Finite = number;
 
+/**  Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": ".."}}`. */
+export type FolderPlace = 
+/**  On a disk of this computer, and no cloud service Clauseo knows syncs it. */
+"local" | 
+/**  On a network drive or share. */
+"network" | 
+/**  In a folder a cloud service syncs. */
+{ synced: {
+	/**
+	 *  The service, from the synced folder's name: `OneDrive`, `GoogleDrive`,
+	 *  `iCloud Drive`.
+	 */
+	service: string,
+} };
+
 /**
  *  An opaque handle the host gives the client for a folder; commands never name paths.
  * 
  * It must be a v7 UUID.
  */
 export type FolderRefId = string;
+
+/**
+ *  How far the scan of a folder before it becomes a matter has got, after
+ *  `HostCommand::ScanFolder`: an app-wide event (`HostEvent::FolderScanned`), never logged
+ *  and never part of a stream. The host sends at most one every 250 ms while the walk runs, and
+ *  always a last one with `done`. Counts are at most `u32::MAX`; `bytes` is at most
+ *  [`MAX_SAFE`](crate::MAX_SAFE).
+ */
+export type FolderScanned = {
+	/**  The folder, as `ScanFolder` named it. */
+	folder: FolderRefId,
+	/**
+	 *  Files an import would version so far: cloud-only and over-cap files are not counted.
+	 *  When the scan is done and not cancelled, `ImportSummary::files` for the same folder.
+	 */
+	files: number,
+	/**  Their total size in bytes; when done, `ImportSummary::bytes`. */
+	bytes: Count,
+	/**
+	 *  The file the walk reached last, relative to the folder; left out before the first file
+	 *  and in the last event.
+	 */
+	now_reading?: MatterPath,
+	/**  Where the folder lives. */
+	place: FolderPlace,
+	/**  Cloud-only files so far, counted from their metadata and never read. */
+	cloud_only: number,
+	/**  The last event of this scan. */
+	done: boolean,
+	/**  The scan was cancelled (`CancelScan`, or a newer `ScanFolder`); only with `done`. */
+	cancelled: boolean,
+};
 
 /**
  *  Whether a matter's folder is where the host recorded it. One `stat` per matter when the
@@ -1277,6 +1460,52 @@ export type FolderState =
 "missing" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**
+ *  Why Codex's sandbox can't work fully in a matter's folder on Windows: the sandbox adds
+ *  permission entries to the folder before Codex may write there. A folder with none of
+ *  these has no value.
+ */
+export type FolderSupportKind = 
+/**
+ *  The lawyer can't change the folder's permissions: Codex starts, but asks before every
+ *  file edit, and its shell's writes there fail.
+ */
+"cant_change_permissions" | 
+/**
+ *  The folder is on a network drive: Codex can neither read nor write it, so it is not
+ *  started there (`matter.folder_network`).
+ */
+"network" | 
+/**
+ *  The folder's drive keeps no permissions (FAT, exFAT): Codex is not started there
+ *  (`matter.folder_no_permissions`).
+ */
+"no_permissions" | 
+/**
+ *  The check couldn't answer (an io error, or no folder there): Claude runs in forced
+ *  ask, and Codex isn't refused (its own sandbox applies).
+ */
+"check_failed" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`. */
+export type FoundLogin = 
+/**  A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one). */
+"claude_settings" | 
+/**  Windows with the sandbox set up, where Claude's login is not reused. */
+"claude_windows_sandbox" | 
+/**  A Codex login held in the OS keyring, not in a file. */
+"codex_keyring" | 
+/**  Reuse stopped: a refresh failed twice. */
+"reused_failed" | 
+/**  Reuse stopped: the agent's own CLI is signed out. */
+"reused_signed_out" | 
+/**  Reuse stopped: the agent's own CLI is signed in to another account. */
+"reused_changed" | 
+/**  Reuse stopped: Codex's shared login file was replaced, so it is no longer shared. */
+"codex_link_split";
 
 /**  One piece of an event's JSON text. */
 export type Fragment = {
@@ -1353,6 +1582,18 @@ export type HeaderEntry = {
 	 *  compares equal.
 	 */
 	tools?: ToolState[],
+	/**
+	 *  When the lawyer's snooze ends, from the last `ThreadSnoozed` not cleared since (by
+	 *  `until` left out, which the host logs when the time comes, or by a waking event: the
+	 *  lawyer's message, a permission request, an elicitation, a limit stop, a failed or ended
+	 *  turn). Missing reads as `None`.
+	 */
+	snoozed_until?: Timestamp,
+	/**
+	 *  Whether the thread is marked done, from the last `ThreadDone` not cleared since by a
+	 *  waking event (the same ones as for `snoozed_until`). Missing reads as `false`.
+	 */
+	done?: boolean,
 	/**  The agent's current mode, if it reported one. */
 	mode_id?: string,
 	/**  The agent's config options (mode, model, thought level, others). */
@@ -1383,7 +1624,7 @@ export type HostCommand =
 	client?: ClientName,
 	/**  Its next date, such as a hearing; missing means none. */
 	next_date?: Date,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change a matter's details. Each field: missing leaves it, `null` clears it (`client`,
  *  `next_date`), a value sets it. A command that changes nothing answers `Done` too.
@@ -1397,12 +1638,12 @@ export type HostCommand =
 	next_date?: Date | null,
 	/**  Whether it is pinned to the top of the rail. */
 	pinned?: boolean,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never } | 
 /**  The lawyer opened a matter: its `last_opened` becomes now, which orders "Recent". */
 ({ open_matter: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Take a matter off Clauseo's list and stop its threads' agents; refused with
  *  `matter.turn_running` while a turn, undo or restore runs in it or turns wait. The
@@ -1412,7 +1653,7 @@ export type HostCommand =
 ({ forget_matter: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  "Locate folder": the matter's folder moved, and the lawyer picked where it is now. The
  *  host accepts the folder only when its `.clauseo/matter.json` names this matter, then
@@ -1427,7 +1668,7 @@ export type HostCommand =
 	matter: MatterId,
 	/**  The folder the lawyer picked. */
 	folder: FolderRefId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  The lawyer has seen a thread up to now: the host keeps the thread's last `seq` as its seen
  *  mark, so `ThreadSummary::seen` is true until a turn ends after it, and a `ready` or
@@ -1437,14 +1678,51 @@ export type HostCommand =
 ({ mark_seen: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Snooze a thread until `until`, or clear its snooze by hand (`until` left out): logs
+ *  `thread_snoozed` and answers `Done`, archived threads included. The host refuses an
+ *  `until` not after its clock's now, or more than [`MAX_SNOOZE_AHEAD_MS`] ahead
+ *  (`command.invalid`). JSON: `{"snooze_thread": {"thread": "...", "until": 1760000000000}}`.
+ */
+({ snooze_thread: {
+	/**  The thread. */
+	thread: ThreadId,
+	/**  When the snooze ends; left out to clear it. */
+	until?: Timestamp,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Mark a thread done or not done by the lawyer: logs `thread_done` with `by: lawyer` and
+ *  answers `Done`, archived threads included.
+ */
+({ mark_thread_done: {
+	/**  The thread. */
+	thread: ThreadId,
+	/**  Done, or no longer done. */
+	done: boolean,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  The morning sweep. The host knows no time zone, so the app sends this at its first moment
+ *  after 05:00 local each day (and at launch, when after 05:00), with `day_start` the local
+ *  midnight that began today. In every listed matter, each thread not archived, not done,
+ *  not snoozed past now, with nothing pending (no permission, question or limit choice), no
+ *  turn running or queued, its last ending seen (`MarkSeen`), no commit in flight and its
+ *  newest event before `day_start` is marked done (`thread_done`, `by: morning_sweep`), all
+ *  in one commit; answers `Done`. A second sweep the same day finds nothing new. The host
+ *  refuses a `day_start` more than [`MAX_DAY_START_SKEW_MS`] from its now
+ *  (`command.invalid`).
+ */
+({ sweep_done: {
+	/**  Today's local midnight. */
+	day_start: Timestamp,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; undo_step?: never; update_matter?: never } | 
 /**  Start a thread in a matter with an agent. */
 ({ create_thread: {
 	/**  The matter. */
 	matter: MatterId,
 	/**  The agent's registry id. */
 	agent: AgentId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Send a prompt. Never refused because a turn is running: it is queued, sent now or steered. */
 ({ send_prompt: {
 	/**  The thread. */
@@ -1461,7 +1739,7 @@ export type HostCommand =
 	 *  missing field. A mode this version does not know is refused when the command decodes.
 	 */
 	delivery?: DeliveryRequest,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Replace a queued prompt's text; the turn keeps its id, its place and its file blocks. */
 ({ edit_queued_prompt: {
 	/**  The thread. */
@@ -1475,36 +1753,36 @@ export type HostCommand =
 	 *  refuses it for a prompt without one (`command.invalid`).
 	 */
 	text: string,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Remove a queued prompt; its turn ends cancelled without starting. */
 ({ remove_queued_prompt: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Cancel the running turn and start this queued turn next. */
 ({ send_queued_now: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The queued turn. */
 	turn: TurnId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Start the head of a held queue. */
 ({ resume_queue: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Stop the thread's current turn; its queued turns stay, held. */
 ({ cancel: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Start the thread's agent again; refused while a turn runs. */
 ({ restart_agent: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Answer a permission request; the first valid answer wins. */
 ({ answer_permission: {
 	/**  The thread. */
@@ -1513,7 +1791,7 @@ export type HostCommand =
 	request: PermissionRequestId,
 	/**  One of the offered options' ids. */
 	option_id: AgentChoiceId,
-} }) & { answer_elicitation?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Answer an elicitation. */
 ({ answer_elicitation: {
 	/**  The thread. */
@@ -1525,7 +1803,7 @@ export type HostCommand =
 	 *  keys) of at most [`MAX_ELICITATION_VALUES_BYTES`].
 	 */
 	response: ElicitationResponse,
-} }) & { answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Set one of the agent's config options. */
 ({ set_config_option: {
 	/**  The thread. */
@@ -1534,26 +1812,31 @@ export type HostCommand =
 	option_id: AgentChoiceId,
 	/**  The new value. */
 	value: ConfigValue,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Set the agent's mode, when it has no mode config option. */
 ({ set_mode: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The mode's id. */
 	mode_id: AgentChoiceId,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Rename a thread. */
 ({ rename_thread: {
 	/**  The thread. */
 	thread: ThreadId,
 	/**  The new title. */
 	title: Title,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+	/**
+	 *  `true` for a title Clauseo made up (the first words), which the agent's own title
+	 *  replaces; `false` for one the lawyer typed. Missing means `false`.
+	 */
+	placeholder?: boolean,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Archive a thread; refused while a turn runs. */
 ({ archive_thread: {
 	/**  The thread. */
 	thread: ThreadId,
-} }) & { answer_elicitation?: never; answer_permission?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**  Undo a step, file by file; refused while a turn runs in the matter. */
 ({ undo_step: {
 	/**  The thread. */
@@ -1567,7 +1850,7 @@ export type HostCommand =
 	 *  that is not in the step's `FilesChanged`.
 	 */
 	files: FileDecision[],
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; update_matter?: never } | 
 /**  Restore an earlier version; refused while a turn runs in the matter. */
 ({ restore_version: {
 	/**  The matter. */
@@ -1579,7 +1862,7 @@ export type HostCommand =
 	 *  version does not know is refused when the command decodes.
 	 */
 	scope: RestoreRequest,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the display settings; answers `Done`, and every app subscriber gets
  *  `HostEvent::SettingsChanged`. A patch naming a key the firm's policy sets is refused
@@ -1589,7 +1872,7 @@ export type HostCommand =
 ({ set_ui_settings: {
 	/**  The fields to change. */
 	patch: UiPatch,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Change the tool switches (`tools.web_search`, `tools.browser`); answers `Done`, and every
  *  app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the firm's policy
@@ -1600,7 +1883,30 @@ export type HostCommand =
 ({ set_tool_settings: {
 	/**  The switches to change. */
 	patch: ToolsPatch,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never } | 
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
+ *  and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
+ *  firm's policy sets is refused whole with `settings.locked`; nothing changes. Before the
+ *  lawyer's first act, a patch naming `counts` is that first act (decision record 0036).
+ *  Turning counts off always saves; turning them on while the old counts folder cannot be
+ *  deleted is refused with `store.io` and changes nothing. Logs only the receipt.
+ */
+({ set_privacy_settings: {
+	/**  The switches to change. */
+	patch: PrivacyPatch,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  The lawyer's first act (the welcome's button): from now on the usage counts are saved and
+ *  sent, unless `counts` is `false`, which turns them off. Answers `Done`, and every app
+ *  subscriber gets `HostEvent::SettingsChanged` with `counts_started`. Once the first act
+ *  has happened, another changes nothing and answers `Done`. A policy lock on
+ *  `privacy.counts` stands over `counts`. Logs only the receipt (decision record 0036).
+ */
+({ first_act: {
+	/**  The switch as the lawyer left it. */
+	counts: boolean,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
 /**
  *  Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
  *  than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
@@ -1614,7 +1920,72 @@ export type HostCommand =
 	agent?: AgentKind,
 	/**  What asked for the refresh. */
 	why: RefreshWhy,
-} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; forget_matter?: never; mark_seen?: never; open_matter?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_tool_settings?: never; set_ui_settings?: never; undo_step?: never; update_matter?: never };
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Scan a folder before it becomes a matter: count its files and bytes as an import would,
+ *  count its cloud-only files without reading them, and tell where it lives. Progress
+ *  reaches app subscribers as `HostEvent::FolderScanned`, the last with `done`; the
+ *  command answers `Done` when the walk ends. Nothing is stored. One scan runs at a time:
+ *  a newer `ScanFolder` cancels the one running. A folder import would refuse is
+ *  `matter.folder_refused`.
+ */
+({ scan_folder: {
+	/**  The folder. */
+	folder: FolderRefId,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Cancel the scan of `folder`; its last `FolderScanned` says `cancelled`. Answers
+ *  `Done`, also when no scan of it runs.
+ */
+({ cancel_scan: {
+	/**  The folder. */
+	folder: FolderRefId,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Download Chrome for Testing into the app data folder, after the lawyer agreed. Answers
+ *  `Done` once the download has started, with no receipt (a repeated id starts it again
+ *  when none runs); every app subscriber then gets `HostEvent::BrowserInstall` as it goes,
+ *  ending with `Done` or `Failed`. While one runs it answers `Done` and does nothing: the
+ *  running download's events already say one is under way. Only the main window sends it,
+ *  from its consent dialog. JSON: `{"install_browser": {}}`.
+ */
+({ install_browser: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Stop the running Chrome for Testing download: it ends `Failed` with `cancelled` and
+ *  leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
+ *  JSON: `{"cancel_browser_install": {}}`.
+ */
+({ cancel_browser_install: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
+ *  `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
+ *  does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every
+ *  command's, so a window can test a command's kind with `in`.
+ */
+({ check_for_update: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Install the `ready` version: `now` stops running turns first, `after_turn` waits until
+ *  no thread has one (`scheduled`). Answers `Done` before the host starts to stop. In a
+ *  state that does not take it, `command.invalid`. Only the main window sends it.
+ */
+({ install_update: {
+	/**  When to install. */
+	when: InstallWhen,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Take a `scheduled` install back to `ready`. Answers `Done`; in another state,
+ *  `command.invalid`. Only the main window sends it. JSON: `{"cancel_scheduled_update": {}}`.
+ */
+({ cancel_scheduled_update: Record<string, never> }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; set_update_mode?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never } | 
+/**
+ *  Change `update.mode` to `auto` or `notify`; `none` is refused as `command.invalid`,
+ *  since it comes only from policy. A policy-locked key gives `settings.locked`. Answers
+ *  `Done`. Only the settings window sends it.
+ */
+({ set_update_mode: {
+	/**  The new mode. */
+	mode: UpdateMode,
+} }) & { answer_elicitation?: never; answer_permission?: never; archive_thread?: never; cancel?: never; cancel_browser_install?: never; cancel_scan?: never; cancel_scheduled_update?: never; check_for_update?: never; create_matter?: never; create_thread?: never; edit_queued_prompt?: never; first_act?: never; forget_matter?: never; install_browser?: never; install_update?: never; mark_seen?: never; mark_thread_done?: never; open_matter?: never; refresh_limits?: never; relocate_matter?: never; remove_queued_prompt?: never; rename_thread?: never; restart_agent?: never; restore_version?: never; resume_queue?: never; scan_folder?: never; send_prompt?: never; send_queued_now?: never; set_config_option?: never; set_mode?: never; set_privacy_settings?: never; set_tool_settings?: never; set_ui_settings?: never; snooze_thread?: never; sweep_done?: never; undo_step?: never; update_matter?: never };
 
 /**
  *  What every host call returns on failure.
@@ -1641,14 +2012,20 @@ export type HostError = {
 	 *  otherwise, and when that matter is not on the list (forgotten, or from another install).
 	 */
 	matter?: MatterId,
+	/**
+	 *  The matter's files the failure is about: for `matter.file_locked`, the files held open,
+	 *  sorted. Missing when it names none. For `matter.file_locked` the files are here, not in
+	 *  `message`.
+	 */
+	files?: MatterPath[],
 };
 
 /**  What a subscriber receives. Never logged (the log holds only `DomainEvent`s). */
 export type HostEvent = 
 /**  View patches, for a view subscription. */
-({ patches: PatchBatch }) & { account_limits_changed?: never; caught_up?: never; events?: never; limits_view_changed?: never; matters_changed?: never; settings_changed?: never; threads_changed?: never } | 
+({ patches: PatchBatch }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  Envelopes in `seq` order with no gap or duplicate, for an event subscription. */
-({ events: Envelope[] }) & { account_limits_changed?: never; caught_up?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never } | 
+({ events: Envelope[] }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  Once per event subscription, between the replayed envelopes and the live ones. */
 ({ caught_up: {
 	/**  The stream. */
@@ -1658,30 +2035,50 @@ export type HostEvent =
 	 *  creation event, so it is at least 1.
 	 */
 	last_seq: Seq,
-} }) & { account_limits_changed?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never } | 
+} }) & { account_limits_changed?: never; browser_install?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**  An account's limits changed (not part of any stream). */
-({ account_limits_changed: AccountLimits }) & { caught_up?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never } | 
+({ account_limits_changed: AccountLimits }) & { browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The whole limits view after a change. Never logged and in no stream: it reaches
  *  `subscribe_limits` subscribers only (R16).
  */
-({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; caught_up?: never; events?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never } | 
+({ limits_view_changed: LimitsView }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  The display settings changed: the whole view after the change. App-wide, never part of
  *  a stream: it reaches app subscribers only.
  */
-({ settings_changed: SettingsView }) & { account_limits_changed?: never; caught_up?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; threads_changed?: never } | 
+({ settings_changed: SettingsView }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  Where the Chrome for Testing download that `HostCommand::InstallBrowser` started stands.
+ *  App-wide, never logged and in no stream: it reaches app subscribers only, as each state
+ *  happens. Every app catch-up (a new, lagged or resubscribed subscriber) carries the latest
+ *  one: the running download's last step, or the last download's end until the next starts.
+ */
+({ browser_install: {
+	/**  Where it stands. */
+	state: BrowserInstallState,
+} }) & { account_limits_changed?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
  *  it reaches app subscribers only.
  */
-({ matters_changed: MattersChanged }) & { account_limits_changed?: never; caught_up?: never; events?: never; limits_view_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never } | 
+({ matters_changed: MattersChanged }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
 /**
  *  Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
  *  list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
  *  it has open.
  */
-({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; caught_up?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never };
+({ threads_changed: ThreadsChanged }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; update_changed?: never } | 
+/**
+ *  How far a folder scan has got (`HostCommand::ScanFolder`). App-wide, never part of a
+ *  stream: it reaches app subscribers only.
+ */
+({ folder_scanned: FolderScanned }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never; update_changed?: never } | 
+/**
+ *  The updater's state changed: the whole view after the change (decision record 0037).
+ *  App-wide, never part of a stream: it reaches app subscribers only.
+ */
+({ update_changed: UpdateView }) & { account_limits_changed?: never; browser_install?: never; caught_up?: never; events?: never; folder_scanned?: never; limits_view_changed?: never; matters_changed?: never; patches?: never; settings_changed?: never; threads_changed?: never };
 
 /**  A read. JSON: `"list_matters"` or `{"list_threads": {...}}`; unknown fields are refused. */
 export type HostQuery = 
@@ -1691,7 +2088,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; list_papers?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -1703,7 +2100,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
 /**
  *  The files that differ between two versions of a matter, or between a version and the
  *  matter's folder as it is now when `to` is `None` (nothing is stored).
@@ -1715,7 +2112,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
 /**  What restoring a version would do now, file by file. Writes nothing. */
 ({ preview_restore: {
 	/**  The matter. */
@@ -1724,7 +2121,19 @@ export type HostQuery =
 	checkpoint: CheckpointId,
 	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
 	scope: RestoreRequest,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+/**
+ *  What undoing a turn's step would meet now: the step's files whose content in the folder
+ *  differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
+ *  nothing. Refused as `command.invalid` when the turn has no step to undo (not started or
+ *  ended in this thread, no after-turn checkpoint, or undone already).
+ */
+({ preview_undo: {
+	/**  The thread. */
+	thread: ThreadId,
+	/**  The step's turn. */
+	turn: TurnId,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -1733,21 +2142,47 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never } | 
 /**  The display settings in force, and the keys the firm's policy locks. */
 "get_settings" | 
 /**  The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`). */
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
 /**  The agents in the settings, for a new thread's choice of agent. */
 "list_agents" | 
 /**
  *  Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
  *  line before a pick. JSON: `"get_default_location"`.
  */
-"get_default_location";
+"get_default_location" | 
+/**
+ *  Search inside matters and conversations (decision 0043). Answered
+ *  `QueryResult::Search`.
+ */
+({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never } | 
+/**
+ *  The Windows folder check of the place a `CreateMatter` with `source` would use, before
+ *  the matter exists: the New matter dialog's warning. Send the same `source` the create
+ *  will. `existing_folder` checks that folder; `new_folder` its picked parent;
+ *  `default_location` the default location (its nearest folder that exists, before the
+ *  first matter makes it). Answered `QueryResult::FolderSupport` with the values a matter's
+ *  row shows (`MatterSummary::folder_support`). What `CreateMatter` refuses before its
+ *  matter is made is refused here with the same code (`matter.folder_is_home` and the
+ *  rest, for an existing folder), and an unknown ref is `command.invalid`. A check that
+ *  doesn't answer in time answers `check_failed`. JSON:
+ *  `{"folder_support": {"source": {"existing_folder": {"folder": "..."}}}}`.
+ */
+({ folder_support: {
+	/**  Where the matter would be made, as `CreateMatter` names it. */
+	source: MatterSource,
+} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+/**
+ *  Where the updater stands (decision record 0037), read after subscribing to the app
+ *  stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
+ */
+"get_update";
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -1761,6 +2196,72 @@ export type ImportSummary = {
 	/**  Cloud placeholders skipped because their content is not on this computer. */
 	cloud_only: number,
 };
+
+/**
+ *  An install's log as "Details" shows it: English lines, already free of user names,
+ *  passwords and paths outside the data folder (`agents` redacts them). At most
+ *  [`MAX_INSTALL_LOG_LINES`] lines of at most [`MAX_INSTALL_LOG_LINE_BYTES`] bytes each; decoding
+ *  refuses more. JSON: `["Clauseo download log", "agent: claude-acp", ...]`.
+ */
+export type InstallLog = string[];
+
+/**  Where an agent's install is: `agents`' `InstallState`. There is no end estimate. */
+export type InstallProgress = 
+/**  Not installed, and no install running. */
+({ missing: {
+	/**
+	 *  Bytes an install would download here, Node's archive included when Node would be
+	 *  downloaded ("About {size} MB").
+	 */
+	download_bytes: Count,
+} }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
+/**  Offline: the install waits and tries again by itself. */
+({ waiting: {
+	/**  Why it waits: `agent.install_offline`. */
+	code: ErrorCode,
+	/**  The hosts the install contacts, for "Ask your IT team". */
+	hosts: string[],
+	/**  The log so far, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; failed?: never; missing?: never; ready?: never } | 
+/**  Downloading. */
+({ downloading: {
+	/**  Bytes received so far. */
+	received: Count,
+	/**  Bytes in all, Node's archive included. */
+	total: Count,
+} }) & { failed?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Every file is here and checked; npm is installing from them. */
+"installing" | 
+/**  Installed. */
+({ ready: {
+	/**  The adapter's version. */
+	version: string,
+} }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
+/**  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] starts again. */
+({ failed: {
+	/**  Why: `agent.install_blocked`, `agent.install_disk_full` or `agent.install_failed`. */
+	code: ErrorCode,
+	/**  For `agent.install_disk_full`: the space needed, in MB (10^6 bytes). */
+	need_mb?: Count,
+	/**  For `agent.install_disk_full`: the space free, in MB. */
+	free_mb?: Count,
+	/**  The hosts the install contacts, for "Ask your IT team". */
+	hosts: string[],
+	/**  The log, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Paused because another agent's install started; `InstallAgent` resumes it. */
+"paused" | 
+/**  The firm's policy runs this agent, so Clauseo installs nothing for it. */
+"managed";
+
+/**  When `InstallUpdate` installs. */
+export type InstallWhen = 
+/**  Now: running turns are stopped as Stop stops them, then the app quits to install. */
+"now" | 
+/**  Once no thread has a running turn; at once when none runs. */
+"after_turn";
 
 /**
  *  The TypeScript shape of a [`RawPayload`]: any JSON value. specta has no `unknown` outside
@@ -1780,85 +2281,89 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key 
  */
 export type KnownDomainEvent = 
 /**  A thread was created (thread stream; host). */
-({ thread_created: ThreadCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_created: ThreadCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The thread got a new title (host, acp). */
-({ thread_renamed: ThreadRenamed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_renamed: ThreadRenamed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The thread was archived (host). */
-({ thread_archived: ThreadArchived }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ thread_archived: ThreadArchived }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+/**  The lawyer snoozed the thread until a time, or cleared its snooze (host). */
+({ thread_snoozed: ThreadSnoozed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+/**  The thread was marked done or not done, by the lawyer or the morning sweep (host). */
+({ thread_done: ThreadDone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An agent session started or was loaded (acp). */
-({ agent_session_attached: AgentSessionAttached }) & { agent_named?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_session_attached: AgentSessionAttached }) & { agent_named?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's own display name, from `initialize` (host). */
-({ agent_named: AgentNamed }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_named: AgentNamed }) & { agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent session ended (acp, host). */
-({ agent_session_detached: AgentSessionDetached }) & { agent_named?: never; agent_session_attached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ agent_session_detached: AgentSessionDetached }) & { agent_named?: never; agent_session_attached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The lawyer's message (host; acp on a `session/load` replay). */
-({ user_message: UserMessage }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; version_restored?: never; web_search_recorded?: never } | 
+({ user_message: UserMessage }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn waits (host). */
-({ turn_queued: TurnQueued }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_queued: TurnQueued }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A queued prompt was edited (host). */
-({ queued_prompt_edited: QueuedPromptEdited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ queued_prompt_edited: QueuedPromptEdited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Where a steered message went (host). */
-({ steer_resolved: SteerResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ steer_resolved: SteerResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn started (host). */
-({ turn_started: TurnStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_started: TurnStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Text appended to an answer or thought (acp). */
-({ text_appended: TextAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ text_appended: TextAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A non-text block in an answer or thought (acp). */
-({ content_appended: ContentAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ content_appended: ContentAppended }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A tool call started (acp). */
-({ tool_call_started: ToolCallStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ tool_call_started: ToolCallStarted }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A tool call changed (acp; host marks in-flight calls cancelled). */
-({ tool_call_updated: ToolCallUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ tool_call_updated: ToolCallUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A web search the agent ran, with its results (acp). */
-({ web_search_recorded: WebSearchRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never } | 
+({ web_search_recorded: WebSearchRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never } | 
 /**  A page the agent opened (acp). */
-({ page_visited: PageVisited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ page_visited: PageVisited }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent asked for permission (acp). */
-({ permission_requested: PermissionRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_requested: PermissionRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A permission request was answered (host). */
-({ permission_resolved: PermissionResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_resolved: PermissionResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A permission request expired (host). */
-({ permission_expired: PermissionExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ permission_expired: PermissionExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent asked for input (acp). */
-({ elicitation_requested: ElicitationRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_requested: ElicitationRequested }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An elicitation was answered (host). */
-({ elicitation_resolved: ElicitationResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_resolved: ElicitationResolved }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An elicitation expired (host). */
-({ elicitation_expired: ElicitationExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ elicitation_expired: ElicitationExpired }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's plan, replaced whole (acp). */
-({ plan_replaced: PlanReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ plan_replaced: PlanReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The session's mode changed (acp). */
-({ mode_changed: ModeChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ mode_changed: ModeChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The session's config options, replaced whole (acp). */
-({ config_options_replaced: ConfigOptionsReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ config_options_replaced: ConfigOptionsReplaced }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The agent's slash commands, replaced whole (acp). */
-({ commands_available: CommandsAvailable }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ commands_available: CommandsAvailable }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Context use and cost (acp). */
-({ usage_updated: UsageUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ usage_updated: UsageUpdated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A notice for the lawyer (acp, host). */
-({ notice: Notice }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ notice: Notice }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Context compaction started or finished (acp). */
-({ compaction_changed: CompactionChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ compaction_changed: CompactionChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  The files a turn changed (matters, through host). */
-({ files_changed: FilesChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ files_changed: FilesChanged }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Why a turn failed (host, acp). */
-({ turn_failed: TurnFailed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_failed: TurnFailed }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A usage limit stopped a turn (limits, through host). */
-({ turn_stopped_at_limit: TurnStoppedAtLimit }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_stopped_at_limit: TurnStoppedAtLimit }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A turn ended, exactly once per turn (host). */
-({ turn_ended: TurnEnded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ turn_ended: TurnEnded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A step was undone (host, matters). */
-({ step_undone: StepUndone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ step_undone: StepUndone }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A matter was created (matter stream; host). */
-({ matter_created: MatterCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ matter_created: MatterCreated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  A checkpoint was recorded (matter stream; matters, through host). */
-({ checkpoint_recorded: CheckpointRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ checkpoint_recorded: CheckpointRecorded }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  Files changed outside Clauseo (matter stream; matters, through host). */
-({ outside_edits: OutsideEdits }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
+({ outside_edits: OutsideEdits }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never } | 
 /**  An earlier version was restored (matter stream; host, matters). */
-({ version_restored: VersionRestored }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; web_search_recorded?: never } | 
+({ version_restored: VersionRestored }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; matter_relocated?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; web_search_recorded?: never } | 
 /**  The matter's folder was located after it moved (matter stream; host, matters). */
-({ matter_relocated: MatterRelocated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_renamed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never };
+({ matter_relocated: MatterRelocated }) & { agent_named?: never; agent_session_attached?: never; agent_session_detached?: never; checkpoint_recorded?: never; commands_available?: never; compaction_changed?: never; config_options_replaced?: never; content_appended?: never; elicitation_expired?: never; elicitation_requested?: never; elicitation_resolved?: never; files_changed?: never; matter_created?: never; mode_changed?: never; notice?: never; outside_edits?: never; page_visited?: never; permission_expired?: never; permission_requested?: never; permission_resolved?: never; plan_replaced?: never; queued_prompt_edited?: never; steer_resolved?: never; step_undone?: never; text_appended?: never; thread_archived?: never; thread_created?: never; thread_done?: never; thread_renamed?: never; thread_snoozed?: never; tool_call_started?: never; tool_call_updated?: never; turn_ended?: never; turn_failed?: never; turn_queued?: never; turn_started?: never; turn_stopped_at_limit?: never; usage_updated?: never; user_message?: never; version_restored?: never; web_search_recorded?: never };
 
 /**  The app's language. */
 export type Language = 
@@ -2015,6 +2520,27 @@ export type Lite =
 "on" | 
 /**  Never light. */
 "off";
+
+/**  Whose login [`SignIn::LoginFound`] found. */
+export type LoginFrom = 
+/**  The lawyer's Claude Code. */
+"claude_code" | 
+/**  The lawyer's Codex CLI. */
+"codex";
+
+/**  Who manages updates in an [`UpdateState::Managed`]. */
+export type ManagedBy = 
+/**  The firm's policy sets `update.mode` to `none`, or a policy source cannot be read. */
+"policy" | 
+/**  A per-machine install (Program Files on Windows): IT updates it. */
+"per_machine" | 
+/**
+ *  The app's folder is not writable by the lawyer (macOS), so an update would ask for an
+ *  administrator.
+ */
+"read_only_location" | 
+/**  A package manager updates it (Linux), or this build has no updater. */
+"package";
 
 /**  An undo, a restore, a located folder or a compaction. Entry id `marker:<event>`. */
 export type MarkerEntry = {
@@ -2244,6 +2770,13 @@ export type MatterSummary = {
 	 *  `found`.
 	 */
 	folder_state?: FolderState,
+	/**
+	 *  What keeps Codex's sandbox from working fully in its folder, on Windows, as the host last
+	 *  checked it: when the matter was made and at each agent launch (an in-memory reading, not
+	 *  state in the log); `check_failed` when that check couldn't answer. Missing when the
+	 *  folder is fine, before any check since the host started, and off Windows.
+	 */
+	folder_support?: FolderSupportKind,
 };
 
 /**
@@ -2391,6 +2924,16 @@ export type PatchBatch = {
 	patches: ViewPatch[],
 };
 
+/**  What a permission request is about, when the host can tell. */
+export type PermissionAbout = 
+/**
+ *  The agent saving its own plan note in its own config folder, not one of the
+ *  lawyer's files.
+ */
+"agent_plan" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  How a permission request was answered. */
 export type PermissionChoice = 
 /**  An offered option was chosen. The kind is copied from the offer, never narrowed. */
@@ -2419,6 +2962,8 @@ export type PermissionEntry = {
 	deliverable: Deliverable,
 	/**  Where it stands. */
 	state: PermissionState,
+	/**  What the request is about when the host can tell (`PermissionRequested::about`). */
+	about?: PermissionAbout,
 	/**
 	 *  When it was answered or cancelled (display only; the `PermissionResolved` envelope's
 	 *  `ts`). `None` while pending and after it expired.
@@ -2474,6 +3019,11 @@ export type PermissionRequested = {
 	options: PermissionOption[],
 	/**  Whether an answer can reach the agent. */
 	deliverable: Deliverable,
+	/**
+	 *  What the request is about when the host can tell; `agent_plan`: the agent saving its
+	 *  own plan note in its own config folder, not one of the lawyer's files.
+	 */
+	about?: PermissionAbout,
 };
 
 /**  A permission request was answered; the first valid answer wins. */
@@ -2526,6 +3076,19 @@ export type PickedFolder = {
 	display: string,
 };
 
+/**
+ *  A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
+ *  accepts fields it does not know.
+ */
+export type PickedFolderSupport = {
+	/**
+	 *  What keeps Codex's sandbox from working fully in the folder, as a matter's row shows it
+	 *  (`MatterSummary::folder_support`), `check_failed` included. Missing for a fine folder,
+	 *  and always off Windows.
+	 */
+	support?: FolderSupportKind,
+};
+
 /**  One entry of the agent's plan. ACP v1 sends the full plan each time. */
 export type PlanEntry = {
 	/**  What the entry says. */
@@ -2550,6 +3113,15 @@ export type PlanPriority =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**  Whose service a firm plan uses (`plans.<id>.provider`). */
+export type PlanProvider = 
+/**  Anthropic's API, or a gateway that speaks it. */
+"anthropic" | 
+/**  Amazon Bedrock. */
+"bedrock" | 
+/**  Google Vertex AI. */
+"vertex";
+
 /**  The agent's plan, replaced whole (ACP v1 sends the full plan each time). */
 export type PlanReplaced = {
 	/**  The entries. */
@@ -2566,6 +3138,20 @@ export type PlanStatus =
 "completed" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**
+ *  An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
+ *  names of the extra variables. Each name is an [`EnvName`], which cannot hold `=` or a value
+ *  after it; the settings crate refuses a secret-shaped variable name.
+ */
+export type PlanView = {
+	/**  The firm's gateway, an `https` URL (`plans.<id>.endpoint`); missing when unset. */
+	endpoint?: string,
+	/**  Whose service the plan uses (`plans.<id>.provider`); missing when unset. */
+	provider?: PlanProvider,
+	/**  The names of the extra variables (`plans.<id>.env`), sorted; never their values. */
+	env_names?: EnvName[],
+};
 
 /**  The OS the host runs on. */
 export type Platform = 
@@ -2586,6 +3172,34 @@ export type Principal =
 "local_desktop" | 
 /**  A principal from a newer Clauseo; written back as the plain string `kind`. */
 string;
+
+/**
+ *  A change to the privacy switches: each field set is changed, the rest stay. A patch that
+ *  names a locked key is refused whole with `settings.locked`, and changes nothing. Unknown
+ *  fields are refused, as in every command.
+ */
+export type PrivacyPatch = {
+	/**  The new usage counts switch. */
+	counts?: boolean,
+	/**  The new crash reports switch. */
+	crash_reports?: boolean,
+};
+
+/**
+ *  The privacy switches in force: the lawyer's, with policy's `false` over them (a policy can
+ *  only turn them off; decision record 0036).
+ */
+export type PrivacySettings = {
+	/**  Whether Clauseo keeps and sends its anonymous usage counts (`privacy.counts`). */
+	counts: boolean,
+	/**  Whether Clauseo sends crash reports (`privacy.crash_reports`). */
+	crash_reports: boolean,
+	/**
+	 *  Whether the lawyer's first act has happened (`HostCommand::FirstAct`, or the first change
+	 *  of `counts`). Before it nothing is saved or sent, so the switch shows on but not started.
+	 */
+	counts_started: boolean,
+};
 
 /**
  *  One block of a prompt the lawyer sends. Files are named by opaque ids, never paths. Unknown
@@ -2616,19 +3230,23 @@ export type PromptCapabilities = {
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ matters: MatterSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never } | 
+({ threads: ThreadSummary[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; undo_preview?: never; update?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { agents?: never; blob?: never; default_location?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ entries: ViewEntry[] }) & { agents?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ file_changes: FileChange[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; settings?: never; threads?: never } | 
+({ restore_preview: RestorePreview }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
+/**  For `PreviewUndo`. */
+({ undo_preview: UndoPreview }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; update?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { agents?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ blob: BlobRange }) & { agents?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; threads?: never } | 
+({ settings: SettingsView }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; threads?: never; undo_preview?: never; update?: never } | 
+/**  For `GetUpdate`. */
+({ update: UpdateView }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -2653,11 +3271,21 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
-} }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
+} }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
-({ agents: AgentSummary[] }) & { blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ agents: AgentSummary[] }) & { blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
 /**  For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`. */
-({ default_location: DefaultLocation }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never };
+({ default_location: DefaultLocation }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
+/**
+ *  For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
+ *  came first.
+ */
+({ search: SearchAnswer }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
+/**
+ *  For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
+ *  `{"folder_support": {}}` for a fine folder.
+ */
+({ folder_support: PickedFolderSupport }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never };
 
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {
@@ -2754,6 +3382,8 @@ export type RenameSource =
 "lawyer" | 
 /**  The agent (`session_info_update`). */
 "agent" | 
+/**  Clauseo's stand-in title (the first words), until the agent's arrives. */
+"placeholder" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -2812,6 +3442,136 @@ export type RevealTarget =
 /**  Clauseo's app data folder: the event store, the version store and the settings. */
 "app_data";
 
+/**  A search's answer. */
+export type SearchAnswer = 
+/**  The hits. */
+{ page: SearchPage } | 
+/**
+ *  A newer search from the same window came first; this one has no hits. JSON:
+ *  `"cancelled"`.
+ */
+"cancelled";
+
+/**  One hit. */
+export type SearchHit = {
+	/**  What matched. */
+	kind: SearchKind,
+	/**  The matter it belongs to. */
+	matter: MatterId,
+	/**  The matter's name. */
+	matter_title?: string,
+	/**  The conversation, for every kind but a matter title and a file name. */
+	thread?: ThreadId,
+	/**  The conversation's title, when it has one. */
+	thread_title?: string,
+	/**
+	 *  For a prompt, an answer or a tool title: the `order` of its entry in the conversation's
+	 *  view (`ViewEntry`), which `PageEntries` pages by.
+	 */
+	order?: Seq,
+	/**  For a file name: the document's path in the matter folder. */
+	path?: string,
+	/**  When the text was written. */
+	at: Timestamp,
+	/**  The text around the match, in runs; joined in order they are the snippet. */
+	snippet: SnippetPart[],
+};
+
+/**  What a hit matched. */
+export type SearchKind = 
+/**  A matter's name. */
+"matter_title" | 
+/**  A conversation's title. */
+"thread_title" | 
+/**  The lawyer's prompt. */
+"prompt" | 
+/**  One agent message of kind answer, whole once its turn ended. */
+"answer" | 
+/**  A tool call's title. */
+"tool_title" | 
+/**  A document's path in the matter folder. */
+"file_name" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  How a page's hits are ordered. */
+export type SearchMode = 
+/**  Newest first: the last word was still being typed. */
+"newest_first" | 
+/**  Best first. */
+"ranked";
+
+/**  One page of hits. */
+export type SearchPage = {
+	/**  The hits, best first when ranked, newest first otherwise. */
+	hits: SearchHit[],
+	/**  The cursor for the next page, when there may be one. */
+	next?: string,
+	/**  How the hits are ordered. */
+	mode: SearchMode,
+	/**
+	 *  While the index is being built, how far it is: the hits come from what is indexed so
+	 *  far.
+	 */
+	indexing?: SearchProgress,
+};
+
+/**  A build of the search index, in conversations. */
+export type SearchProgress = {
+	/**  Conversations indexed so far. */
+	done: number,
+	/**  Conversations to index. */
+	total: number,
+};
+
+/**  One search, as the lawyer typed it. */
+export type SearchRequest = {
+	/**
+	 *  What the lawyer typed. While its last character is not whitespace the last word is
+	 *  still being typed: hits come newest first and that word matches as a prefix. Otherwise
+	 *  hits are ranked.
+	 */
+	query: string,
+	/**  Every matter, or one. */
+	scope: SearchScope,
+	/**  Whether archived conversations' hits are included. */
+	include_archived: boolean,
+	/**  Only these kinds; `None` (missing in JSON) is every kind. An empty list finds nothing. */
+	kinds?: SearchKind[],
+	/**
+	 *  Hits per page: [`DEFAULT_SEARCH_LIMIT`] when `None`, at most [`MAX_SEARCH_LIMIT`]
+	 *  (larger is cut to it, 0 is read as 1).
+	 */
+	limit?: number,
+	/**
+	 *  The `next` of the page before, for the page after it; `None` for the first page. A
+	 *  cursor the host cannot read, or one made for another query, gives the first page.
+	 */
+	cursor?: string,
+	/**
+	 *  The requesting window's count of searches, larger for each newer one. A newer search
+	 *  from the same window stops this one: it is answered `Cancelled`.
+	 */
+	generation: Count,
+};
+
+/**  Where a search looks. */
+export type SearchScope = 
+/**  Every matter on the list. JSON: `"all"`. */
+"all" | 
+/**  One matter. JSON: `{"matter": "<id>"}`. */
+{ matter: MatterId };
+
+/**
+ *  A pasted sign-in code or an API key, as a window sends it: 1 to [`MAX_SECRET_BYTES`] bytes.
+ * 
+ *  It decodes but never encodes: there is no `Serialize`, so nothing that holds one can be
+ *  written to a log, an event or a file through serde. `Debug` and `Display` print `<secret>`,
+ *  there is no `Clone`, and the text is zeroed when dropped. A decode error never quotes it.
+ *  TypeScript sees a plain `string`.
+ */
+export type Secret = string;
+
 /**  An event's position in its stream: gapless, starting at 1, assigned by the host at commit. */
 export type Seq = number;
 
@@ -2834,14 +3594,233 @@ export type SettingsView = {
 	 *  next session started, and a session already running keeps its tools.
 	 */
 	tools: ToolsSettingsView,
+	/**  The privacy switches in force, and whether the usage counts have started. */
+	privacy: PrivacySettings,
 	/**
 	 *  Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
-	 *  change these: a `SetUiSettings` or `SetToolSettings` naming one is refused with
-	 *  `settings.locked`. It can also name keys outside `ui` and `tools`
-	 *  (`matters.default_location`, `agents.<id>`).
+	 *  change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
+	 *  refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
+	 *  (`matters.default_location`, `agents.<id>`, `plans.<id>`). A key ending in `.` stands
+	 *  for every key under it: `plans.` while a policy source cannot be read. So a client asks
+	 *  whether a key is locked by prefix as well, not only by exact match: `plans.` locks
+	 *  `plans.claude-acp` though that exact key is not in the list.
 	 */
 	locked: string[],
+	/**  Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one. */
+	plans?: { [key in AgentId]: PlanView },
 };
+
+/**
+ *  What a window asks of an agent's install or sign-in. JSON: `{"start_sign_in": {"agent":
+ *  "claude-acp", "console": false}}`; unknown fields and unknown commands are refused. Decode
+ *  only: it may hold a [`Secret`], so it has no `Serialize`, and no `Clone`.
+ * 
+ *  Which window may send which command is desktop's allow-list (0048, "Allow-lists").
+ */
+export type SetupCommand = 
+/**
+ *  Install the agent, after a native confirm naming it and its size; another agent's
+ *  download pauses.
+ */
+({ install_agent: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Start a failed or paused install again. */
+({ retry_agent_install: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Whether to go through the OS's proxy this time; missing means `false`. */
+	use_system_proxy?: boolean,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**
+ *  Sign in with the agent's plan login. A sign-in already running for the agent is joined,
+ *  not restarted.
+ */
+({ start_sign_in: {
+	/**  The agent. */
+	agent: AgentId,
+	/**
+	 *  Claude only: sign in with an Anthropic Console account instead of a Claude.ai plan;
+	 *  missing means `false`.
+	 */
+	console?: boolean,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Stop the sign-in that is running. */
+({ cancel_sign_in: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Give the running sign-in the code the lawyer pasted (Claude's paste route). */
+({ paste_sign_in_code: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The pasted code: never stored, logged or shown. */
+	code: Secret,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Switch Codex's sign-in to its device code. */
+({ use_device_code: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Open the sign-in page again ("Didn't open?"); nothing happens when no page is known. */
+({ open_sign_in_page: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Sign Clauseo's own login out. Refused with `command.invalid` for a reused login. */
+({ sign_out: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  "Use it": reuse the login [`SignIn::LoginFound`] showed. */
+({ use_found_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never } | 
+/**  "Sign in with a different account": leave the found or reused login and sign in. */
+({ use_different_account: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_found_login?: never } | 
+/**  "Stop using it here": stop reusing the lawyer's own login; it stays signed in. */
+({ stop_using_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Look again for a login the lawyer already has. */
+({ find_login: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Store an API key for the agent in the OS keychain. */
+({ set_agent_key: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The key: kept only in the keychain. */
+	key: Secret,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**  Remove the agent's API key from the keychain. */
+({ clear_agent_key: {
+	/**  The agent. */
+	agent: AgentId,
+} }) & { cancel_sign_in?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
+/**
+ *  Set or clear the agent's firm endpoint (`plans.<id>.endpoint`), after a native confirm.
+ *  The settings crate checks the URL.
+ */
+({ set_firm_endpoint: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  The endpoint, an `https` URL; missing or `null` clears it. */
+	url?: string,
+} }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never };
+
+/**
+ *  What desktop's `setup` stream arm carries. A new subscription first gets `SetupInfo`, then
+ *  each agent's install and sign-in state, before any newer event.
+ */
+export type SetupEvent = 
+/**  What this computer offers. */
+({ setup_info: {
+	/**
+	 *  Whether the OS keychain can hold an API key: false where Linux has no Secret
+	 *  Service, and the key screens are hidden.
+	 */
+	keys_available: boolean,
+} }) & { agent_install_progress?: never; sign_in_changed?: never } | 
+/**  An agent's install state changed, or its download made progress. */
+({ agent_install_progress: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Its new state. */
+	state: InstallProgress,
+} }) & { setup_info?: never; sign_in_changed?: never } | 
+/**  An agent's sign-in state changed. */
+({ sign_in_changed: {
+	/**  The agent. */
+	agent: AgentId,
+	/**  Its new state. */
+	state: SignIn,
+} }) & { agent_install_progress?: never; setup_info?: never };
+
+/**  Where an agent's sign-in is: `agents`' `SigninState`, with how the agent is signed in. */
+export type SignIn = 
+/**  Not signed in. */
+({ signed_out: {
+	/**  A login seen but not reusable, or why reuse stopped; missing when neither. */
+	found?: FoundLogin,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; waiting?: never } | 
+/**
+ *  Waiting for the install to finish or the network to return; the sign-in then starts by
+ *  itself.
+ */
+"queued" | 
+/**  The login run is going and the vendor's page should be open. */
+({ waiting: {
+	/**  When the run started. */
+	since: Timestamp,
+	/**  Whether to offer "Didn't open?" (true after 30 seconds). */
+	nudge: boolean,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; signed_out?: never } | 
+/**  Codex's device code: the lawyer opens `url` and types `code` before `expires_at`. */
+({ device_code: {
+	/**  The device page, on one of the agent's sign-in hosts. */
+	url: string,
+	/**  The one-time code to type, such as `ABCD-1234`; shown, so not a [`Secret`]. */
+	code: string,
+	/**  When the code stops working. */
+	expires_at: Timestamp,
+} }) & { failed?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+/**  A login the lawyer already has, not used until they choose "Use it". */
+({ login_found: {
+	/**  Whose login it is. */
+	from: LoginFrom,
+	/**  The account, from the agent's own status output, when it names one. */
+	email?: string,
+} }) & { device_code?: never; failed?: never; signed_in?: never; signed_out?: never; waiting?: never } | 
+/**  Signed in. */
+({ signed_in: {
+	/**  The account's email, when known. */
+	email?: string,
+	/**  The plan in words, such as "Claude Max", when known. */
+	plan?: PlanLabel,
+	/**  How: a plan login, an API key or the firm's endpoint. */
+	method: SignInMethod,
+	/**  Whose login: the lawyer's own, reused, or Clauseo's. */
+	source: SignInSource,
+	/**  When the sign-in was confirmed. */
+	at: Timestamp,
+} }) & { device_code?: never; failed?: never; login_found?: never; signed_out?: never; waiting?: never } | 
+/**
+ *  The sign-in stopped: a `signin.*` code, `agent.auth_required`, or
+ *  `signin.policy_unreadable`.
+ */
+({ failed: {
+	/**  Why. */
+	code: ErrorCode,
+	/**  When. */
+	at: Timestamp,
+} }) & { device_code?: never; login_found?: never; signed_in?: never; signed_out?: never; waiting?: never };
+
+/**  How a signed-in agent is signed in. */
+export type SignInMethod = 
+/**  The vendor's plan login (a Claude.ai plan, a Console account, a `ChatGPT` plan). */
+"plan" | 
+/**  An API key from the keychain. */
+"api_key" | 
+/**  The firm's endpoint or provider (`plans.<id>`). */
+"firm";
+
+/**  Where a signed-in login came from. */
+export type SignInSource = 
+/**
+ *  The lawyer's own CLI login on this computer, reused after "Use it". Clauseo never signs
+ *  it out.
+ */
+"reused" | 
+/**  Clauseo's own sign-in, a key or an endpoint. */
+"own";
 
 /**
  *  A file a checkpoint did not version. Office lock and temp files (`~$*`, `*.tmp`) are never
@@ -2860,6 +3839,23 @@ export type SkippedFileReason =
 "over_size_cap" | 
 /**  A cloud placeholder whose content is not on this computer. */
 "cloud_only" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
+/**  A run of a hit's snippet. */
+export type SnippetPart = {
+	/**  The text. */
+	text: string,
+	/**  Whether it matched a word of the query. */
+	hit: boolean,
+};
+
+/**  Who set or cleared a thread's snooze. */
+export type SnoozeBy = 
+/**  The lawyer (`SnoozeThread`). */
+"lawyer" | 
+/**  The host, when the snooze's time came (always with `until` left out). */
+"expired" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -2963,7 +3959,10 @@ export type StepUndone = {
 	kept: MatterPath[],
 };
 
-/**  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `AtLimit` and `Failed`. */
+/**
+ *  Why a turn stopped: ACP v1's stop reasons plus Clauseo's `NotAllowed`, `AtLimit` and
+ *  `Failed`.
+ */
 export type StopReason = 
 /**  The agent finished. Only this ending moves the thread's queue on. */
 "end_turn" | 
@@ -2975,6 +3974,13 @@ export type StopReason =
 "refusal" | 
 /**  The lawyer or the host cancelled it. */
 "cancelled" | 
+/**
+ *  The agent cancelled it right after the lawyer refused a permission (Codex's only
+ *  reject option ends the turn); no Stop came after that refusal. Every rule treats it
+ *  as `Cancelled` (the queue holds); only the words differ. Never on a turn that had not
+ *  started.
+ */
+"not_allowed" | 
 /**  The account's usage limit stopped it; a `TurnStoppedAtLimit` explains it. */
 "at_limit" | 
 /**  It failed; a `TurnFailed` before it says why. */
@@ -3103,6 +4109,18 @@ export type ThreadCreated = {
 };
 
 /**
+ *  The thread was marked done (`done: true`) or not done. The reducer keeps it as
+ *  [`HeaderEntry::done`](crate::HeaderEntry); the same events that clear a snooze clear it.
+ *  JSON: `{"thread_done": {"done": true, "by": "morning_sweep"}}`.
+ */
+export type ThreadDone = {
+	/**  Done, or no longer done. */
+	done: boolean,
+	/**  Who marked it. */
+	by: DoneBy,
+};
+
+/**
  *  A thread: one conversation with an agent inside a matter.
  * 
  * It must be a v7 UUID.
@@ -3115,6 +4133,21 @@ export type ThreadRenamed = {
 	title: string,
 	/**  Who renamed it. */
 	by: RenameSource,
+};
+
+/**
+ *  The thread's snooze was set or cleared: by the lawyer until `until`, or cleared by hand
+ *  (`until` left out), or cleared by the host when its time came (`by: expired`). The reducer
+ *  keeps it as [`HeaderEntry::snoozed_until`](crate::HeaderEntry); the view needs no clock,
+ *  since the host logs the wake. A later lawyer's message, permission request, elicitation,
+ *  limit stop, failed or ended turn clears it too.
+ *  JSON: `{"thread_snoozed": {"until": 1760000000000, "by": "lawyer"}}`.
+ */
+export type ThreadSnoozed = {
+	/**  When the snooze ends; left out when the snooze was cleared. */
+	until?: Timestamp,
+	/**  Who set or cleared it. */
+	by: SnoozeBy,
 };
 
 /**
@@ -3170,6 +4203,16 @@ export type ThreadSummary = {
 	 *  last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
 	 */
 	seen?: boolean,
+	/**
+	 *  When its snooze ends, as [`HeaderEntry::snoozed_until`](crate::HeaderEntry::snoozed_until):
+	 *  the host clears it when the time comes. Missing reads as `None`.
+	 */
+	snoozed_until?: Timestamp,
+	/**
+	 *  Whether it is marked done, as [`HeaderEntry::done`](crate::HeaderEntry::done); missing
+	 *  reads as `false`.
+	 */
+	done?: boolean,
 	/**
 	 *  How and when its last turn ended, once one has. Known for every thread the host has
 	 *  loaded since it started (at start-up, every thread not archived in a listed matter).
@@ -3306,6 +4349,14 @@ export type ToolCallEntry = {
 	 *  instructions in the reducer bench; boxed, 0.4%).
 	 */
 	background?: BackgroundMark,
+	/**
+	 *  The web this call ran or opened (0041): its search and its pages, from the log's
+	 *  `WebSearchRecorded` and `PageVisited`, matched by `tool_call`. Missing and `None` both mean
+	 *  no web records, so a call without any is written as before. Boxed: most calls have none,
+	 *  and a tool call entry is copied on every update (as `background`; CI's reducer-bench
+	 *  measures the cost).
+	 */
+	web?: ToolCallWeb,
 };
 
 /**
@@ -3314,6 +4365,19 @@ export type ToolCallEntry = {
  * It must be a v7 UUID.
  */
 export type ToolCallId = string;
+
+/**
+ *  A page a tool call opened: its address, its title when the agent reported one, and how it was
+ *  opened.
+ */
+export type ToolCallPage = {
+	/**  The page's address, as the `PageVisited` event has it (after the log's URL rule). */
+	url: string,
+	/**  The page's title, when the agent reported one. Left out when there is none. */
+	title?: string,
+	/**  How the page was opened. An unknown value decodes as `PageVia::Unknown`. */
+	via: PageVia,
+};
 
 /**
  *  A change to a tool call: [`ToolCallStarted`](crate::ToolCallStarted)'s fields after
@@ -3342,6 +4406,17 @@ export type ToolCallPatch = {
 	raw_output?: TextOrBlob,
 	/**  The new content, replacing the old list. */
 	content?: ToolCallContent[],
+};
+
+/**  A web search a tool call ran: its query and the results the agent got, in their order. */
+export type ToolCallSearch = {
+	/**  The query text, as the `WebSearchRecorded` event has it. */
+	query: string,
+	/**
+	 *  The results, as the `WebSearchRecorded` event has them: the event's own type, with its caps
+	 *  applied by its constructor.
+	 */
+	results: WebResult[],
 };
 
 /**  A tool call the agent reported. */
@@ -3391,6 +4466,20 @@ export type ToolCallUpdated = {
 	tool_call: ToolCallId,
 	/**  What changed. */
 	patch: ToolCallPatch,
+};
+
+/**  What the web did for a tool call (0041): the search it ran and the pages it opened. */
+export type ToolCallWeb = {
+	/**
+	 *  The search the call ran, if it ran one. A later search record for the same call replaces
+	 *  it.
+	 */
+	search?: ToolCallSearch,
+	/**
+	 *  The pages it opened, in the order the log has them. Every record is kept, so a page opened
+	 *  twice is listed twice; the reducer keeps the first 50 and ignores the rest.
+	 */
+	pages: ToolCallPage[],
 };
 
 /**  What a tool call does, as ACP v1 names it. The UI picks an icon by kind. */
@@ -3595,6 +4684,97 @@ export type TurnUsage = {
 	cached_write?: Count,
 };
 
+/**  `break_shown.kind`. */
+export type UiBreakKind = 
+/**  The agent stopped. */
+"agent_stopped" | 
+/**  The sign-in expired. */
+"signin_expired" | 
+/**  No network. */
+"offline" | 
+/**  A terms notice. */
+"terms_notice" | 
+/**  The plan shut the lawyer out. */
+"plan_shut_out";
+
+/**  `break_shown.then`. */
+export type UiBreakThen = 
+/**  Restarted. */
+"restarted" | 
+/**  Signed in. */
+"signed_in" | 
+/**  Waited. */
+"waited" | 
+/**  Switched agent. */
+"switched_agent" | 
+/**  Left. */
+"left";
+
+/**  One count from the webview. */
+export type UiCount = 
+/**
+ *  The UI showed an error's copy. `unknown`, or a code this build does not know, is refused
+ *  as the argument is read (`StrictErrorCode`).
+ */
+({ error_shown: {
+	/**  The error's code. The bindings name it `ErrorCode`, whose strings it reads. */
+	code: ErrorCode,
+} }) & { break_shown?: never; feature_used?: never; onboarding_step?: never } | 
+/**  A break screen showed, and what the lawyer did next. */
+({ break_shown: {
+	/**  Which break. */
+	kind: UiBreakKind,
+	/**  What the lawyer did. */
+	then: UiBreakThen,
+} }) & { error_shown?: never; feature_used?: never; onboarding_step?: never } | 
+/**  A feature the webview alone sees was used. */
+({ feature_used: {
+	/**  The feature. */
+	feature: UiFeature,
+} }) & { break_shown?: never; error_shown?: never; onboarding_step?: never } | 
+/**  An onboarding screen's step; each counts once per install. */
+({ onboarding_step: {
+	/**  The step. */
+	step: UiOnboardingStep,
+} }) & { break_shown?: never; error_shown?: never; feature_used?: never };
+
+/**
+ *  The `feature_used` values the webview alone sees. `versions` and `compare` are the Versions
+ *  panel's (0036: the host would count each refresh, not each use).
+ */
+export type UiFeature = 
+/**  Versions opened. */
+"versions" | 
+/**  Compare. */
+"compare" | 
+/**  Open in Word. */
+"open_in_word" | 
+/**  Continue with the other agent. */
+"continue_other_agent" | 
+/**  A prepared answer was used. */
+"prepared_answer_used" | 
+/**  The sample matter. */
+"sample_matter";
+
+/**  `onboarding_step.step`: the onboarding screens' steps. */
+export type UiOnboardingStep = 
+/**  The welcome showed. */
+"welcome_shown" | 
+/**  A folder was chosen. */
+"folder_chosen" | 
+/**  A new matter was made. */
+"new_matter" | 
+/**  The sample matter opened. */
+"sample_opened" | 
+/**  The agent became ready. */
+"agent_ready" | 
+/**  The lawyer signed in to the agent. */
+"signed_in" | 
+/**  The first read finished. */
+"first_read_done" | 
+/**  The first question went. */
+"first_question";
+
 /**
  *  A change to the display settings: each field set is changed, the rest stay. A patch that
  *  names a locked key is refused whole with `settings.locked`; a font size out of range with
@@ -3635,6 +4815,114 @@ export type UnavailableReason =
 "read_failed" | 
 /**  The sign-in lacks the scope that shows plan limits; signing in again may fix it. */
 "missing_scope";
+
+/**
+ *  What undoing a step would meet now, for `PreviewUndo`. A struct, so later fields (such as
+ *  the files open in another program) are additive; it accepts fields it does not know.
+ */
+export type UndoPreview = {
+	/**
+	 *  The step's files whose content now differs from the step's after-turn checkpoint
+	 *  (changed, deleted, or added at a path the step deleted), sorted by path. Compared by
+	 *  content: a file the cache vouches for by its stat is not read, any other is hashed. A
+	 *  file not read (cloud-only, over the size cap) is not listed. Empty when nothing changed
+	 *  since: Undo then needs no "changed after Clauseo's edit" ask.
+	 */
+	edited_since: MatterPath[],
+};
+
+/**
+ *  `update.mode`: how updates install. A window sets only `auto` and `notify`; `none` comes
+ *  from policy (or a hand-edited settings file), and `SetUpdateMode { mode: none }` is refused
+ *  as `command.invalid`.
+ */
+export type UpdateMode = 
+/**
+ *  Download in the background and install at the next start, or sooner on
+ *  `InstallUpdate`.
+ */
+"auto" | 
+/**  Download in the background, install only on `InstallUpdate`. */
+"notify" | 
+/**  Never check: updates are managed. */
+"none";
+
+/**
+ *  Where the updater stands. JSON: `"idle"`, or a one-key object such as
+ *  `{"ready":{"version":"0.4.1"}}`.
+ */
+export type UpdateState = 
+/**  Nothing to do until the next check. */
+"idle" | 
+/**  Asking the release endpoint whether a newer version exists. */
+"checking" | 
+/**  Downloading a newer version. */
+({ downloading: {
+	/**  The version being downloaded. */
+	version: string,
+	/**  Bytes received so far. */
+	received: Count,
+	/**  The download's size, when the server said it. */
+	total?: Count,
+} }) & { failed?: never; installing?: never; managed?: never; ready?: never; scheduled?: never } | 
+/**
+ *  Downloaded and its signature checked: it installs on `InstallUpdate`, and in `auto` mode
+ *  also at the next start.
+ */
+({ ready: {
+	/**  The version ready to install. */
+	version: string,
+} }) & { downloading?: never; failed?: never; installing?: never; managed?: never; scheduled?: never } | 
+/**
+ *  `InstallUpdate { when: after_turn }` while a turn runs: it installs once no thread has
+ *  a running turn. `CancelScheduledUpdate` takes it back to `Ready`.
+ */
+({ scheduled: {
+	/**  The version waiting to install. */
+	version: string,
+} }) & { downloading?: never; failed?: never; installing?: never; managed?: never; ready?: never } | 
+/**  Shutting down to install; the app quits and starts again as the new version. */
+({ installing: {
+	/**  The version installing. */
+	version: string,
+} }) & { downloading?: never; failed?: never; managed?: never; ready?: never; scheduled?: never } | 
+/**
+ *  The last check, download or install failed; the next check (by timer or
+ *  `CheckForUpdate`) tries again.
+ */
+({ failed: {
+	/**  The version that failed, when one was known (missing for a failed check). */
+	version?: string,
+	/**  When it failed. */
+	at: Timestamp,
+	/**  What failed. */
+	stage: FailedStage,
+} }) & { downloading?: never; installing?: never; managed?: never; ready?: never; scheduled?: never } | 
+/**  Clauseo does not update itself here; someone else does, and checks never run. */
+({ managed: {
+	/**  Who manages updates. */
+	by: ManagedBy,
+} }) & { downloading?: never; failed?: never; installing?: never; ready?: never; scheduled?: never };
+
+/**
+ *  What `GetUpdate` answers and `UpdateChanged` carries: the running version and where the
+ *  updater stands.
+ */
+export type UpdateView = {
+	/**  The version running now. */
+	current: string,
+	/**  Where the updater stands. */
+	state: UpdateState,
+	/**  `update.mode` in force: the lawyer's, or policy's over it. */
+	mode: UpdateMode,
+	/**  When the last check that did not fail ended; missing before the first. */
+	checked_at?: Timestamp,
+	/**
+	 *  The version this run updated from, when this is the first start after an install;
+	 *  missing otherwise.
+	 */
+	updated_from?: string,
+};
 
 /**
  *  The agent reported its context use and cost. Token counts are at most

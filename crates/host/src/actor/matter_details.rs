@@ -22,6 +22,7 @@ use clauseo_protocol::{
 use clauseo_store::MatterRow;
 
 use super::commands::{AfterCommand, CommandCtx};
+use super::counting::OnCommit;
 use super::{Actor, Tag, turn};
 use crate::error::Error;
 use crate::pipeline::Draft;
@@ -63,7 +64,9 @@ pub(super) fn open_matter(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId)
                 last_opened: Some(now),
                 ..before.clone()
             };
-            commit_row(actor, ctx, before, row)
+            commit_row(actor, ctx, before, row)?;
+            super::counting::on_commit(actor, ctx.id, OnCommit::MatterOpened(matter));
+            Ok(())
         });
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));
@@ -124,7 +127,9 @@ fn forget(actor: &mut Actor, ctx: &CommandCtx, matter: MatterId) -> Result<(), E
 /// list with its row as it was.
 pub(super) fn forget_committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     if durable {
+        actor.search.forget(matter);
         actor.folder_states.remove(&matter);
+        actor.folder_supports.remove(&matter);
         turn::stop_agents(actor, matter);
         return;
     }
@@ -178,10 +183,41 @@ pub(super) fn unforget(
 /// otherwise it stays forgotten as it was.
 pub(super) fn unforget_committed(actor: &mut Actor, row: MatterRow, durable: bool) {
     if durable && let Some(mut entry) = actor.forgotten.remove(&row.id) {
+        actor.search.reindex(row.id);
         entry.row = row;
         // A new worker opens the folder where it is now, on first use.
         entry.worker = None;
-        actor.matters.insert(entry.row.id, entry);
+        let matter = entry.row.id;
+        actor.matters.insert(matter, entry);
+        load_threads(actor, matter);
+    }
+}
+
+/// Loads each thread of `matter` not archived, then lets it go, as start-up does for a listed
+/// matter: its header is known again (its row shows its title, snooze and done), and the snooze
+/// timer sees a snooze that ended while the matter was off the list (0045).
+fn load_threads(actor: &mut Actor, matter: MatterId) {
+    let threads: Vec<_> = actor
+        .threads
+        .values()
+        .filter(|thread| thread.row.matter == matter && !thread.row.archived)
+        .map(|thread| thread.row.id)
+        .collect();
+    for thread in threads {
+        let stream = StreamId::Thread(thread);
+        actor.with_loaded(
+            stream,
+            Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+                if let Err(error) = loaded {
+                    tracing::warn!(
+                        error = %crate::log_file::Cause(&error),
+                        %thread,
+                        "a returned matter's thread did not load"
+                    );
+                }
+                actor.release(stream);
+            }),
+        );
     }
 }
 
@@ -234,5 +270,20 @@ fn apply<T>(detail: &mut Option<T>, change: FieldChange<T>) {
         FieldChange::Keep => {}
         FieldChange::Clear => *detail = None,
         FieldChange::Set(value) => *detail = Some(value),
+    }
+}
+
+/// A matter worker's open answered: logged, by id only (decision record 0047); a failed open
+/// is tried again on the next use.
+pub(super) fn opened(matter: MatterId, reply: crate::matter_worker::MatterReply) {
+    if let crate::matter_worker::MatterReply::Opened(opened) = reply {
+        match opened {
+            Ok(_) => tracing::info!(target: crate::log_file::LIFECYCLE, %matter, "matter opened"),
+            Err(error) => tracing::warn!(
+                %matter,
+                error = %crate::log_file::Cause(&error),
+                "could not open a matter; it is tried again"
+            ),
+        }
     }
 }

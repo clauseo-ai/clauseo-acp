@@ -13,6 +13,7 @@ import {
   offersOf,
   PERMISSION_TEST_IDS,
   PLAN_EXIT_OPTIONS,
+  PLAN_NOTE_LINE,
   paperName,
   permissionModel,
 } from "./permission-model.ts";
@@ -112,6 +113,22 @@ test("the question: the paper's, else Clauseo asks with the call's title beneath
   expect([run.asks, run.title]).toEqual([true, iso("Run ls")]);
   const none = permissionModel(entry(), undefined);
   expect([none.asks, none.title]).toEqual([true, null]);
+});
+
+test("a plan note (about agent_plan): the line in place of the raw title; absent or unknown, the title as before", () => {
+  const write = call({
+    title: "Write C:\\Users\\lawyer\\.claude\\plans\\x.md",
+    locations: [{ outside: { display: "C:\\Users\\lawyer\\.claude\\plans\\x.md" } }],
+  });
+  const line = "Claude wants to save its plan as a note in its own folder, not in this matter.";
+  const plan = permissionModel(entry({ about: "agent_plan" }), write);
+  expect([plan.asks, plan.paper, plan.label, plan.title]).toEqual([true, null, line, null]);
+  expect(PLAN_NOTE_LINE).toBe(line);
+  expect(permissionModel(entry({ about: "agent_plan" }), undefined).label).toBe(line);
+  for (const e of [entry(), entry({ about: "unknown" })]) {
+    const m = permissionModel(e, write);
+    expect([m.asks, m.label, m.title]).toEqual([true, null, iso(write.title)]);
+  }
 });
 
 test("kept: an edit, delete or move with at least one place, every one inside the matter", () => {

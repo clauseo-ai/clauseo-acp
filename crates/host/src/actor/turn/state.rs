@@ -52,24 +52,33 @@ impl End {
 }
 
 impl Current {
-    pub(super) fn new(turn: TurnId, message: MessageId, prompt: Vec<ContentBlock>) -> Self {
+    pub(super) fn new(
+        turn: TurnId,
+        message: MessageId,
+        prompt: Vec<ContentBlock>,
+        started: std::time::Duration,
+    ) -> Self {
         Self {
             turn,
             message,
             prompt,
             phase: TurnPhase::Accepting,
             cancelled: false,
+            refused: false,
             limit: None,
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,
             prompt_call: None,
             cancel_timer: None,
+            before_prompt: None,
             end: None,
             failure: None,
             abort: false,
             store_failed: None,
             detach: None,
             limit_read: None,
+            started,
+            first_words: None,
         }
     }
 

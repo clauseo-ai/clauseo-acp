@@ -12,6 +12,9 @@ import {
   PLANNED_CODES,
   type ErrorCode,
 } from "./words-errors.ts";
+import { errorHindi } from "./words-errors.hi.ts";
+import { fr, type FolderKey } from "./words-folder.ts";
+import { frc, type FolderCardKey } from "./words-folder-card.ts";
 import { frame } from "./words-frame.ts";
 import { lim, type LimitKey } from "./words-limits.ts";
 import { th, type ThreadKey } from "./words-thread.ts";
@@ -31,6 +34,23 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Something here can't be shown in the thread.",
   "Clauseo changed 1 paper.",
   "You undid Clauseo's changes to 1 paper.",
+  "Send",
+  "Don't answer",
+  "Other",
+  "Required",
+  "Answer this question.",
+  "This answer doesn't fit the question.",
+  "Choose an answer to send, or 'Don't answer' to go on without one.",
+  "This question can't be shown here. Choose 'Don't answer', or Stop the answer.",
+  "Use {n} characters or fewer.",
+  "Use 1 character or fewer.",
+  "Use at least {n} characters.",
+  "Choose up to {n}.",
+  "Choose at least {n}.",
+  "Use a number from {min} to {max}.",
+  "Use {min} or more.",
+  "Use {max} or less.",
+  "Use a whole number.",
 ];
 const LIMITS: readonly LimitKey[] = [
   "Resets {time}",
@@ -80,16 +100,41 @@ test("the working line says Answering. in both languages", () => {
   expect(frame("hi", "Answering.")).toBe("उत्तर दिया जा रहा है।");
 });
 
-test("every error code has a sentence with Hindi, and none says agent", () => {
+test("every error code has a sentence with Hindi or Hindi later, and none says agent", () => {
   const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
   expect(codes.length).toBeGreaterThan(30);
-  for (const c of codes) sound(errorWords("en", c), errorWords("hi", c));
+  // the stopped sentence is the thread's, so it is not in errorHindi and reads as undefined here
+  const hindi: Readonly<Record<string, string | null>> = errorHindi;
+  for (const c of codes) {
+    const en = errorWords("en", c);
+    // hi: later (Rohan, 2026-11-03): new strings ship in English; their English is still checked
+    if (hindi[ERROR_WORDS[c]] === null) {
+      expect(en, en).not.toMatch(BANNED_EN);
+      continue;
+    }
+    sound(en, errorWords("hi", c));
+  }
   // and the sentences a thread's agent picks (the agent.* codes'): ChatGPT's, a named agent's with a sample name, so
   // our own words around the slot are checked (a settings id itself is the lawyer's label, shown as written), and the
   // nameless one
   for (const c of PLANNED_CODES)
-    for (const agent of [CODEX, named("Gemini"), named(null)])
-      sound(errorWords("en", c, agent), errorWords("hi", c, agent));
+    for (const agent of [CODEX, named("Gemini"), named(null)]) {
+      const en = errorWords("en", c, agent);
+      // hi: later (Rohan, 2026-11-03): a sentence whose Hindi is null ships in English, as above
+      if (hindi[plannedKey(c, agent).key] === null) expect(en, en).not.toMatch(BANNED_EN);
+      else sound(en, errorWords("hi", c, agent));
+    }
+});
+
+test("folder rights' words are English only for now, and none says agent, token or session", () => {
+  for (const k of Object.keys(fr.hi) as FolderKey[]) {
+    expect(fr.hi[k], k).toBeNull();
+    expect(fr("en", k), k).not.toMatch(BANNED_EN);
+  }
+  for (const k of Object.keys(frc.hi) as FolderCardKey[]) {
+    expect(frc.hi[k], k).toBeNull();
+    expect(frc("en", k), k).not.toMatch(BANNED_EN);
+  }
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {
@@ -143,6 +188,16 @@ const PLANNED_LINES = [
     "This version of the AI doesn't work with Clauseo.",
     "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
   ],
+  // hi: later, so its Hindi columns hold the English that errorWords falls back to
+  [
+    "agent.guard_missing",
+    "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",
+    "Clauseo can't start gemini safely here. Reinstall Clauseo.",
+    "Clauseo can't start gemini safely here. Reinstall Clauseo.",
+    "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+    "Clauseo can't start the AI safely here. Reinstall Clauseo.",
+  ],
 ] as const;
 
 test.each(PLANNED_LINES)(
@@ -195,7 +250,7 @@ test("a code this version doesn't know reads as unknown's sentence, which is int
   expect(errorWords("en", "toString")).toBe("Something went wrong inside Clauseo.");
 });
 
-test.each([["./words-errors.ts"], ["./words-limits.ts"], ["./words-thread.ts"]])(
+test.each([["./words-errors.hi.ts"], ["./words-limits.hi.ts"], ["./words-thread.hi.ts"]])(
   "Hindi in %s ends a sentence with the danda and avoids the banned words",
   (file) => {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");

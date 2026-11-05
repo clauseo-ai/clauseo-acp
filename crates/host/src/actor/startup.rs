@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
-use clauseo_protocol::{MatterKind, StreamId};
+use clauseo_protocol::{MatterId, MatterKind, StreamId, ThreadId};
 use clauseo_store::{Store, StoreOptions};
 use futures::executor::LocalSpawner;
 
@@ -16,6 +16,7 @@ use crate::config::HostConfig;
 use crate::encode::Encoder;
 use crate::error::Error;
 use crate::ids::Ids;
+use crate::log_file::Cause;
 use crate::matter_worker::matter_settings;
 use crate::pipeline::{Pipeline, Post, spawn_feeder};
 use crate::snapshot::SnapshotWorker;
@@ -33,38 +34,23 @@ pub(super) async fn open(
     write::create_dir_all(&data_dir).map_err(|error| Error::Store(error.into()))?;
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
-    let store = Store::open(StoreOptions::new(data_dir)).await?;
+    let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
+    let search = crate::search::Search::start(
+        data_dir,
+        store.clone(),
+        Arc::clone(&parts.clock),
+        &parts.search,
+    )?;
+    #[cfg(unix)]
+    crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     let heads = store.heads().await?;
     let tails = store.tail_times().await?.into_iter().collect();
-    let mut matters = BTreeMap::new();
-    let mut forgotten = BTreeMap::new();
-    let mut threads = BTreeMap::new();
-    for row in store.matters().await? {
-        for thread in store.threads(row.id).await? {
-            threads.insert(
-                thread.id,
-                ThreadEntry {
-                    row: thread,
-                    header: None,
-                    last_stop: None,
-                    turn: turn::TurnState::default(),
-                },
-            );
-        }
-        let list = if row.forgotten.is_some() {
-            &mut forgotten
-        } else {
-            &mut matters
-        };
-        list.insert(
-            row.id,
-            MatterEntry {
-                row,
-                worker: None,
-                turns: turn::MatterTurns::default(),
-            },
-        );
-    }
+    let Registry {
+        matters,
+        forgotten,
+        threads,
+    } = registry(&store).await?;
     let commits = post.clone();
     let feeder_post: Post = Rc::new(move |ticket, result| {
         let _gone = commits.try_send(Input::Committed { ticket, result });
@@ -75,12 +61,13 @@ pub(super) async fn open(
         let _gone = snapshot_post.try_send(Input::Snapshot(snapshot));
     }))?;
     let cached_limits = store.account_limits().await.unwrap_or_else(|error| {
-        tracing::warn!(%error, "the stored account limits were not read");
+        tracing::warn!(error = %Cause(&error), "the stored account limits were not read");
         Vec::new()
     });
     let limits_reader = parts.limits_reader.unwrap_or_else(|| {
         super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
     });
+    let browser_install = super::browser_install::BrowserInstall::for_wiring(&parts.wiring);
     let mut actor = Actor {
         spawner,
         post,
@@ -88,13 +75,18 @@ pub(super) async fn open(
         pipeline: Pipeline::new(heads),
         feeder,
         snapshots,
+        search,
         effective: parts.effective,
         launcher: parts.launcher,
         profile: parts.profile,
         managed_mcp: parts.managed_mcp,
         codex_hooks: parts.codex_hooks,
+        folder_check: parts.folder_check,
         pre_write_guard: parts.pre_write_guard,
         wiring: parts.wiring,
+        counts: parts.counts,
+        count_on_commit: BTreeMap::new(),
+        browser_install,
         header_tools: super::header_tools::HeaderTools::default(),
         run_sweep: super::turn::RunSweep::default(),
         refused_folders: parts.refused_folders,
@@ -113,22 +105,38 @@ pub(super) async fn open(
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
         limits: super::limits::LimitsHost::new(limits_reader),
+        triage: super::triage::Triage::new(),
         lists: super::app_lists::Lists::default(),
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),
         claims: BTreeMap::new(),
         folder_states: BTreeMap::new(),
+        folder_supports: BTreeMap::new(),
+        scans: super::scan::Scans::default(),
+        scan_walk: parts.scan_walk,
         stats_running: std::sync::Arc::default(),
         files: super::papers::FileRefs::default(),
         next_sub: 0,
         work: Work::default(),
         phase: HostPhase::Starting(ready),
         scratch: None,
+        made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,
+        #[cfg(test)]
+        lost_replies: 0,
+        #[cfg(test)]
+        failed_sends: 0,
     };
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
+    super::browser_install::start(&mut actor);
+    tracing::info!(
+        target: crate::log_file::LIFECYCLE,
+        matters = actor.matters.len(),
+        threads = actor.threads.len(),
+        "host started"
+    );
     Ok(actor)
 }
 
@@ -161,7 +169,11 @@ pub(super) fn begin_startup(actor: &mut Actor) {
                 match loaded {
                     Ok(()) => turn::reconcile(actor, thread),
                     Err(error) => {
-                        tracing::warn!(%error, %thread, "could not load a thread at start-up");
+                        tracing::warn!(
+                            error = %Cause(&error),
+                            %thread,
+                            "could not load a thread at start-up"
+                        );
                         turn::reconcile_skipped(actor, thread);
                     }
                 }
@@ -169,4 +181,49 @@ pub(super) fn begin_startup(actor: &mut Actor) {
             }),
         );
     }
+}
+
+/// The store's matters (forgotten ones apart) and every thread, as the actor holds them.
+struct Registry {
+    matters: BTreeMap<MatterId, MatterEntry>,
+    forgotten: BTreeMap<MatterId, MatterEntry>,
+    threads: BTreeMap<ThreadId, ThreadEntry>,
+}
+
+/// Reads the [`Registry`] from the store.
+async fn registry(store: &Store) -> Result<Registry, Error> {
+    let mut matters = BTreeMap::new();
+    let mut forgotten = BTreeMap::new();
+    let mut threads = BTreeMap::new();
+    for row in store.matters().await? {
+        for thread in store.threads(row.id).await? {
+            threads.insert(
+                thread.id,
+                ThreadEntry {
+                    row: thread,
+                    header: None,
+                    last_stop: None,
+                    turn: turn::TurnState::default(),
+                },
+            );
+        }
+        let list = if row.forgotten.is_some() {
+            &mut forgotten
+        } else {
+            &mut matters
+        };
+        list.insert(
+            row.id,
+            MatterEntry {
+                row,
+                worker: None,
+                turns: turn::MatterTurns::default(),
+            },
+        );
+    }
+    Ok(Registry {
+        matters,
+        forgotten,
+        threads,
+    })
 }

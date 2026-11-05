@@ -566,3 +566,5 @@ fn skip_ui_leaves_the_package_steps_to_the_scope() {
         UI
     );
 }
+
+mod no_tests;

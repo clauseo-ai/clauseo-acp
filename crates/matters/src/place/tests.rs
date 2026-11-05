@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{Place, mac_place, service_name, windows_place};
+use super::{Place, mac_place, service_name, windows_key, windows_place};
 
 fn synced(service: &str) -> Place {
     Place::Synced {
@@ -75,6 +75,63 @@ fn mac_cloud_storage_of_another_home_or_no_home_is_not_synced() {
     );
 }
 
+#[test]
+fn mac_a_data_volume_spelling_of_home_or_folder_is_still_synced() {
+    let data = "/System/Volumes/Data/Users/ana";
+    assert_eq!(
+        mac(
+            &format!("{data}/Library/CloudStorage/OneDrive-Contoso/Clients"),
+            Some(true)
+        ),
+        synced("OneDrive")
+    );
+    assert_eq!(
+        mac(&format!("{data}/Library/Mobile Documents/A"), Some(true)),
+        synced("iCloud Drive")
+    );
+    // HOME spelt on the data volume, the folder as Finder gives it.
+    assert_eq!(
+        mac_place(
+            Path::new("/Users/ana/Library/CloudStorage/Dropbox/A"),
+            Some(Path::new(data)),
+            Some(true)
+        ),
+        synced("Dropbox")
+    );
+    // Another user's folder on the data volume is not ana's.
+    assert_eq!(
+        mac(
+            "/System/Volumes/Data/Users/bo/Library/CloudStorage/OneDrive-X",
+            Some(true)
+        ),
+        Place::Local
+    );
+}
+
+#[test]
+fn mac_a_case_folded_home_is_still_synced() {
+    // The service comes from the folder's own spelling.
+    assert_eq!(
+        mac(
+            "/users/ANA/library/cloudstorage/GoogleDrive-ana@example.com/A",
+            Some(true)
+        ),
+        synced("GoogleDrive")
+    );
+    assert_eq!(
+        mac("/USERS/ana/LIBRARY/mobile documents/A", Some(true)),
+        synced("iCloud Drive")
+    );
+    assert_eq!(
+        mac_place(
+            Path::new("/Users/ana/Library/CloudStorage/Box-Box"),
+            Some(Path::new("/users/Ana")),
+            Some(true)
+        ),
+        synced("Box")
+    );
+}
+
 fn roots() -> Vec<String> {
     vec![
         r"C:\Users\ana\OneDrive".to_owned(),
@@ -142,6 +199,39 @@ fn windows_onedrive_on_a_share_is_synced() {
     let roots = [r"\\server\home\ana\OneDrive".to_owned()];
     assert_eq!(
         windows_place(r"\\server\home\ana\OneDrive\A", &roots, true),
+        synced("OneDrive")
+    );
+}
+
+#[test]
+fn windows_keys_fold_the_verbatim_forms() {
+    assert_eq!(
+        windows_key(r"\\?\UNC\Server\Share\Clients\"),
+        r"\\server\share\clients"
+    );
+    assert_eq!(windows_key(r"\\?\unc\server\share"), r"\\server\share");
+    assert_eq!(windows_key(r"\\?\C:\Users\Ana\"), r"c:\users\ana");
+    assert_eq!(windows_key("C:/Users/Ana"), r"c:\users\ana");
+    // Other verbatim and device forms stay as they are.
+    assert_eq!(windows_key(r"\\?\Volume{1234}\A"), r"\\?\volume{1234}\a");
+    assert_eq!(windows_key(r"\\.\pipe\x"), r"\\.\pipe\x");
+}
+
+#[test]
+fn windows_onedrive_matches_across_the_verbatim_forms() {
+    let share = [r"\\server\home\ana\OneDrive".to_owned()];
+    assert_eq!(
+        windows_place(r"\\?\UNC\server\home\ana\OneDrive\A", &share, true),
+        synced("OneDrive")
+    );
+    let verbatim_share = [r"\\?\UNC\server\home\ana\OneDrive".to_owned()];
+    assert_eq!(
+        windows_place(r"\\server\home\ana\OneDrive\A", &verbatim_share, true),
+        synced("OneDrive")
+    );
+    let verbatim_disk = [r"\\?\C:\Users\ana\OneDrive".to_owned()];
+    assert_eq!(
+        windows_place(r"C:\Users\ana\OneDrive\A", &verbatim_disk, false),
         synced("OneDrive")
     );
 }

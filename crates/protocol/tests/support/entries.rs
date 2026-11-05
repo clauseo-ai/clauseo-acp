@@ -12,10 +12,11 @@ use clauseo_protocol::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
     Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
     HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PermissionChoice, PermissionEntry,
-    PermissionKind, PermissionOption, PermissionState, Principal, StepEntry, StopReason, TextKind,
-    TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, UserMessageEntry, UserMessageStatus,
-    VersionEntry, ViewEntry,
+    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeLevel, PageVia, PermissionAbout,
+    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
+    Principal, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry,
+    ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
+    ViewEntry, WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -48,6 +49,8 @@ pub fn header_entry() -> HeaderEntry {
         queue_held: true,
         steer_joins_turn: true,
         tools: vec![],
+        snoozed_until: None,
+        done: false,
         mode_id: Some(short("plan")),
         config_options: vec![],
         commands: vec![],
@@ -75,7 +78,7 @@ pub fn agent_text_entry() -> AgentTextEntry {
 fn thread_entries() -> Vec<ViewEntry> {
     let tool = tool_call_started();
     vec![
-        ViewEntry::Header(header_entry()),
+        ViewEntry::Header(Box::new(header_entry())),
         ViewEntry::UserMessage(UserMessageEntry {
             order: seq(2),
             message: message_id(5),
@@ -120,6 +123,20 @@ fn thread_entries() -> Vec<ViewEntry> {
                 steer: message_id(9),
                 finished_at: None,
             })),
+            web: Some(Box::new(ToolCallWeb {
+                search: Some(ToolCallSearch {
+                    query: "limitation period contract".to_owned(),
+                    results: vec![WebResult::new(
+                        "Limitation Act 1980",
+                        "https://example.com/a",
+                    )],
+                }),
+                pages: vec![ToolCallPage {
+                    url: "https://example.com/a".to_owned(),
+                    title: Some("Limitation Act 1980".to_owned()),
+                    via: PageVia::Browser,
+                }],
+            })),
         })),
     ]
 }
@@ -142,6 +159,7 @@ fn approval_entries() -> Vec<ViewEntry> {
                 by: Principal::LocalDesktop,
                 held_open: Some(Box::new(path("Brief.docx"))),
             },
+            about: Some(PermissionAbout::AgentPlan),
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),
         ViewEntry::Elicitation(ElicitationEntry {

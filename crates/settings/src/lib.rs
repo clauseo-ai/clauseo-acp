@@ -5,8 +5,9 @@
 //! The settings schema ([`Settings`] and its sections) and its JSON Schema; where the data
 //! folder, `settings.json` and new matters go on each OS ([`Locations`]); the folders a lawyer
 //! may not pick as a matter ([`refused_folders`]); reading `settings.json` (JSON with comments)
-//! and its runtime writes, [`Effective::apply_ui_patch`] of a [`UiPatch`] and
-//! [`Effective::apply_tools_patch`] of a [`ToolsPatch`]; and the policy
+//! and its runtime writes, [`Effective::apply_ui_patch`] of a [`UiPatch`],
+//! [`Effective::apply_tools_patch`] of a [`ToolsPatch`] and [`Effective::apply_privacy_patch`]
+//! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
 //! sources, paths, formats and the merge rule.
@@ -20,23 +21,46 @@
 //! readers go through that owner. It answers [`Effective::settings`], [`Effective::agent`],
 //! [`Effective::mcp_servers`], [`Effective::enabled_mcp_servers`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
-//! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`],
-//! [`Effective::apply_ui_patch`] and [`Effective::apply_tools_patch`]. Every input is a trait:
+//! [`Effective::policy`], [`Effective::policy_present`], [`Effective::is_locked`],
+//! [`Effective::warnings`], [`Effective::apply_ui_patch`], [`Effective::apply_tools_patch`],
+//! [`Effective::check_privacy_patch`], [`Effective::apply_privacy_patch`],
+//! [`Effective::apply_update_mode`], [`Effective::set_agent_launch`], [`Effective::set_plan`]
+//! and [`Effective::plan`]. Every input is a trait:
 //! [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`]
 //! and [`SystemFiles`] over the OS. The
 //! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
 //! applied with [`Effective::apply_ui_patch`]: the only write to `settings.json` and the only
 //! change to settings after `load`. The `tools` switches are a [`ToolsPatch`], applied with
 //! [`Effective::apply_tools_patch`] the same way; a session reads them at its start, so they
-//! take effect at the next session start. Everything else takes effect on the next start.
+//! take effect at the next session start. The `privacy` switches are a [`PrivacyPatch`], applied
+//! with [`Effective::apply_privacy_patch`] the same way, and the lawyer's `update.mode` is an
+//! [`UpdateChoice`], applied with [`Effective::apply_update_mode`]. The host writes an
+//! installed agent's launch entry with [`Effective::set_agent_launch`] and a firm plan with
+//! [`Effective::set_plan`] (decision record 0048), never from a webview's choice. Everything
+//! else takes effect on the next start. [`Locations::update_marker`] and
+//! [`Locations::updates_dir`] name the updater's files, so the host joins no paths of its own.
 //!
 //! # Invariants
 //!
 //! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
 //!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
-//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`) off: the
-//!   list empty, each tool `false`.
+//!   locks each security key (`mcp.servers`, `tools.web_search`, `tools.browser`,
+//!   `privacy.counts`, `privacy.crash_reports`, `update.mode`, `install.bundle`,
+//!   `install.registry` and every `plans.<id>`) off: the list empty, each switch `false`, the
+//!   update mode `none`, each install key unset and no plan, so no endpoint the lawyer chose
+//!   stands in for the firm's (decision record 0048).
+//! - A policy may set `update.mode` to any of `auto`, `notify` and `none`, and locks it. The app
+//!   writes only `auto` or `notify` ([`UpdateChoice`], [`Effective::apply_update_mode`]).
+//! - A plan variable's name holding `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, in any case, is
+//!   refused in `settings.json`, in every policy source and in [`Effective::set_plan`]; a plan's
+//!   endpoint and `install.registry` are `https` URLs. No message quotes a plan's or an install
+//!   key's value.
+//! - [`Effective::set_agent_launch`] writes only Clauseo's own installs (a command or script
+//!   under `<data_dir>/agents/`), refuses a locked id, and never replaces an entry that is not
+//!   Clauseo's own.
+//! - A policy can only turn a `privacy` key off: a policy `true` is ignored with a warning and
+//!   locks nothing; a policy `false` locks it (decision record 0036).
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
@@ -56,7 +80,8 @@
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
 //!   written or changed in memory.
 //! - [`ToolsPatch`] holds only the `tools` fields and refuses any other key; one that names a
-//!   locked tool key is refused whole, as a [`UiPatch`] is.
+//!   locked tool key is refused whole, as a [`UiPatch`] is. [`PrivacyPatch`] is the same for
+//!   the `privacy` fields.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
 //!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
@@ -81,33 +106,40 @@ mod files;
 mod json;
 mod leaf;
 mod locations;
+mod plans;
 pub mod policy;
+mod privacy;
 mod schema;
 mod system;
 #[cfg(test)]
 mod testing;
 mod tools;
 mod ui;
+mod update;
 mod user;
 mod warning;
 
 pub use dirs::refused_folders;
-pub use effective::Effective;
+pub use effective::{Effective, EntryWrite};
 pub use error::Error;
 pub use files::{Files, SystemFiles};
 pub use leaf::RESERVED_MCP_SERVER;
 pub use locations::{
     DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
 };
+pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,
 };
+pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, MattersSettings, McpServerLaunch, McpSettings,
-    Motion, Settings, Theme, ToolsSettings, UiSettings, json_schema,
+    AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
+    McpServerLaunch, McpSettings, Motion, Plan, PlanProvider, PrivacySettings, Settings, Theme,
+    ToolsSettings, UiSettings, UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;
 pub use ui::UiPatch;
+pub use update::UpdateChoice;
 pub use warning::{Origin, Position, Warning, WarningKind};

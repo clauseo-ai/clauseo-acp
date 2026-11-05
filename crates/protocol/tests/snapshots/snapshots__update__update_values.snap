@@ -1,0 +1,27 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 78
+expression: values
+---
+[
+  [
+    "check",
+    "download",
+    "install"
+  ],
+  [
+    "policy",
+    "per_machine",
+    "read_only_location",
+    "package"
+  ],
+  [
+    "auto",
+    "notify",
+    "none"
+  ],
+  [
+    "now",
+    "after_turn"
+  ]
+]

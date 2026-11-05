@@ -11,7 +11,7 @@ use std::thread::JoinHandle;
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, Cursor, FileRefId, FolderRefId, HostError, HostQuery,
-    MatterId, Principal, QueryResult, Seq, StreamId, ViewEpoch,
+    MatterId, Principal, QueryResult, SearchAnswer, SearchRequest, Seq, StreamId, ViewEpoch,
 };
 use futures::channel::oneshot;
 
@@ -128,6 +128,26 @@ impl HostHandle {
         self.call(|reply| Request::Query {
             principal,
             query,
+            reply,
+        })
+        .await
+    }
+
+    /// Searches inside matters and conversations for `principal` (decision 0043). `window` names
+    /// the requester: a newer search (a larger `generation`) from the same window answers this
+    /// one `Cancelled`, interrupting it if it runs. `HostHandle::query` with `HostQuery::Search`
+    /// is the same under one shared window.
+    pub async fn search(
+        &self,
+        principal: Principal,
+        window: &str,
+        request: SearchRequest,
+    ) -> Result<SearchAnswer, HostError> {
+        let window = window.to_owned();
+        self.call(|reply| Request::Search {
+            principal,
+            window,
+            request,
             reply,
         })
         .await

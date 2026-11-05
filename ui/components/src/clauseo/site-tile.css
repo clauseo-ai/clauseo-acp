@@ -1,0 +1,30 @@
+/* A website's tile: the domain's first letter, muted on the inset tone, with a chip's corners. No colour coding: every
+   site takes the same tones. Every value comes from a token. */
+
+@layer components {
+  .site-tile {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--size-icon-line);
+    height: var(--size-icon-line);
+    border-radius: var(--r-label);
+    background: var(--inset);
+    color: var(--muted);
+    font-family: var(--font);
+    font-size: calc(var(--size-icon-line) * 0.68);
+    font-weight: 600;
+    line-height: 1;
+    overflow: hidden;
+  }
+  .site-tile[data-size="11"] {
+    width: var(--size-icon-chip);
+    height: var(--size-icon-chip);
+    font-size: calc(var(--size-icon-chip) * 0.7);
+  }
+  /* no host: the bare page, a little inside the tile */
+  .site-tile .icon {
+    width: 80%;
+    height: 80%;
+  }
+}

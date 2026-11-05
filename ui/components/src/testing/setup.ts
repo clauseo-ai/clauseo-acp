@@ -4,6 +4,9 @@
 import { act } from "react";
 import { afterEach } from "vitest";
 import { pending, settled } from "../lib/late.ts";
+// the Hindi words, which the app loads as a lazy chunk for a Hindi display, are in from the start in every test, so a
+// test can render in Hindi at once; display-hindi.test.tsx empties them to test the load itself
+import "../lib/words-hi.ts";
 
 afterEach(async () => {
   // only a test that rendered something lazy has a load on its way, and such a test is in React's act environment

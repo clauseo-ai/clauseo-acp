@@ -66,6 +66,29 @@ pub fn check_place(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
     check_folder(folder, refused)
 }
 
+/// Import's protected-tree check alone, as [`Matter::import`](crate::Matter::import) runs it
+/// after its marker read ([`check_outside_root`]): refuses a folder that is, holds or sits
+/// inside the matters root (`Refusal::MattersRoot`) or a `refused_trees` entry
+/// (`Refusal::Listed`). For the host's `FolderSupport` query, which refuses what an import
+/// would before checking the folder. The folder need not exist: a new matter's folder is
+/// checked before it is made, by its path as it would be ([`same_or_nested`] resolves the part
+/// that is not made yet), and nothing is read or written.
+pub fn check_protected(folder: &Path, settings: &Settings) -> Result<(), Error> {
+    let refuse = |reason| Error::FolderRefused {
+        folder: folder.to_path_buf(),
+        reason,
+    };
+    if same_or_nested(folder, &settings.matters_root) {
+        return Err(refuse(Refusal::MattersRoot));
+    }
+    for tree in &settings.refused_trees {
+        if same_or_nested(folder, tree) {
+            return Err(refuse(Refusal::Listed(tree.clone())));
+        }
+    }
+    Ok(())
+}
+
 /// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
 /// importing it again would take it from that matter), or for its place as
 /// [`check_outside_root`] does. Called after [`check_folder`].
@@ -93,33 +116,42 @@ pub(crate) fn check_new_matter(folder: &Path, settings: &Settings) -> Result<(),
 /// (`Refusal::Listed(entry)`, the entry as the host passed it). Import checks it after the marker;
 /// locate and relink, which need a marker, check it alone.
 pub(crate) fn check_outside_root(folder: &Path, settings: &Settings) -> Result<(), Error> {
-    let refuse = |reason| Error::FolderRefused {
-        folder: folder.to_path_buf(),
-        reason,
-    };
     dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
-    if same_or_nested(folder, &settings.matters_root) {
-        return Err(refuse(Refusal::MattersRoot));
-    }
-    for tree in &settings.refused_trees {
-        if same_or_nested(folder, tree) {
-            return Err(refuse(Refusal::Listed(tree.clone())));
-        }
-    }
-    Ok(())
+    check_protected(folder, settings)
 }
 
 /// Whether `a` and `b` are the same folder or one holds the other, compared as the refused-folder
-/// check compares paths: each canonicalised (taken as written when that fails, so a folder that
-/// has moved away still compares), by components, composed (NFC) everywhere, case-insensitively
-/// on macOS and Windows, and on
-/// macOS with and without `/System/Volumes/Data`. For the host's registry check before
+/// check compares paths: each resolved ([`resolved`]: its deepest existing folder canonicalised,
+/// the rest as written, so a folder that has moved away or is not made yet still compares, and
+/// compares through a symlinked or short-name prefix), by components, composed (NFC) everywhere,
+/// case-insensitively on macOS and Windows, and on macOS with and without
+/// `/System/Volumes/Data`. For the host's registry check before
 /// [`Matter::locate`](crate::Matter::locate) and [`Matter::relink`](crate::Matter::relink): a
 /// folder that is, contains or sits inside another registered matter's folder.
 pub fn same_or_nested(a: &Path, b: &Path) -> bool {
-    let keys =
-        |path: &Path| spellings(&dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
-    nested(&keys(a), &keys(b))
+    nested(&spellings(&resolved(a)), &spellings(&resolved(b)))
+}
+
+/// `path` canonicalised; when it does not exist, its deepest existing ancestor canonicalised with
+/// the rest of `path` appended as written, so a path not made yet under a symlink (macOS `/var`,
+/// `/private/var`) or a Windows short name (`RUNNER~1`) compares with the existing folders under
+/// it. `path` as written when no ancestor canonicalises, or when a missing part has no name
+/// (`..`).
+fn resolved(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(real) = dunce::canonicalize(base) {
+            return rest.iter().rev().fold(real, |real, name| real.join(name));
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                base = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// Whether a key of `a` starts with a key of `b`, or the other way round.
@@ -166,9 +198,12 @@ pub(crate) fn is_unc_text(text: &str) -> bool {
 }
 
 /// Whether `text` is a Windows drive root: a drive letter, `:` and an optional separator, with
-/// nothing after it, also in the `\\?\X:\` form.
+/// nothing after it, also in the `\\?\X:\` and `\\.\X:\` (device path) forms.
 pub(crate) fn is_windows_drive_root_text(text: &str) -> bool {
-    let rest = text.strip_prefix(r"\\?\").unwrap_or(text);
+    let rest = text
+        .strip_prefix(r"\\?\")
+        .or_else(|| text.strip_prefix(r"\\.\"))
+        .unwrap_or(text);
     match rest.as_bytes() {
         [letter, b':'] | [letter, b':', b'\\' | b'/'] => letter.is_ascii_alphabetic(),
         _ => false,
@@ -176,18 +211,43 @@ pub(crate) fn is_windows_drive_root_text(text: &str) -> bool {
 }
 
 /// Whether the canonical `folder` is a drive root by its path: `X:\` on every OS (an absolute
-/// Unix path never matches it), `/`, and on macOS `/Volumes/<name>`.
+/// Unix path never matches it); on Windows also a network share's root (`\\server\share\`,
+/// `\\?\UNC\server\share\`, the admin share `\\localhost\C$\` among them), which is a whole
+/// volume as a drive is; `/`; and on macOS `/Volumes/<name>`.
 fn is_drive_root(folder: &Path) -> bool {
     if is_windows_drive_root_text(&folder.to_string_lossy()) {
         return true;
+    }
+    #[cfg(windows)]
+    {
+        is_share_root(folder)
     }
     #[cfg(target_os = "macos")]
     {
         spellings(folder).iter().any(|key| is_macos_volume_key(key))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
-        cfg!(unix) && folder.parent().is_none()
+        folder.parent().is_none()
+    }
+}
+
+/// Windows: whether `folder` is a network share's root, a UNC prefix (`\\server\share` or
+/// `\\?\UNC\server\share`) with at most its root separator after it, or the device path
+/// `\\.\UNC\server\share`, which [`Prefix`] reads as the device `UNC` with the server and
+/// share as its first two names. Parsed by [`Prefix`], so a folder inside the share
+/// (`\\server\share\Clients`) is not one.
+#[cfg(windows)]
+fn is_share_root(folder: &Path) -> bool {
+    let mut parts = folder.components();
+    let Some(Component::Prefix(prefix)) = parts.next() else {
+        return false;
+    };
+    let names = parts.filter(|part| *part != Component::RootDir).count();
+    match prefix.kind() {
+        Prefix::UNC(..) | Prefix::VerbatimUNC(..) => names == 0,
+        Prefix::DeviceNS(device) => device.eq_ignore_ascii_case("UNC") && names <= 2,
+        Prefix::Verbatim(_) | Prefix::VerbatimDisk(_) | Prefix::Disk(_) => false,
     }
 }
 
@@ -245,8 +305,36 @@ pub(crate) fn keys_by(path: &Path, fold: Fold) -> Vec<Vec<OsString>> {
         .components()
         .map(|component| component_key(component, fold))
         .collect();
+    if cfg!(target_os = "macos") {
+        with_data_volume(key)
+    } else {
+        vec![key]
+    }
+}
+
+/// The comparison keys of `path` by the macOS rule whatever this OS is: [`spellings`] as macOS
+/// makes them (each component lowercased and composed (NFC) when UTF-8, and a
+/// `/System/Volumes/Data` key twice), for the macOS rules that run in every OS's tests
+/// (`place::mac_place`).
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) fn mac_spellings(path: &Path) -> Vec<Vec<OsString>> {
+    let key = path
+        .components()
+        .map(|component| {
+            let name = component.as_os_str();
+            name.to_str().map_or_else(
+                || name.to_owned(),
+                |text| OsString::from(text.to_lowercase().nfc().collect::<String>()),
+            )
+        })
+        .collect();
+    with_data_volume(key)
+}
+
+/// `key`, and first, when it starts with `/system/volumes/data` (macOS's data volume, where
+/// `/Users` also lives), `key` without those three parts.
+fn with_data_volume(key: Vec<OsString>) -> Vec<Vec<OsString>> {
     let mut keys = Vec::with_capacity(2);
-    #[cfg(target_os = "macos")]
     if let [_root, system, volumes, data, ..] = key.as_slice()
         && system == "system"
         && volumes == "volumes"

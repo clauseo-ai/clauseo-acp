@@ -2,8 +2,9 @@
 // view store too, so its folded line follows the call to completion; a paged one shows its entry alone. Answering
 // sends answer_permission and holds the prompt busy until the entry folds; allow_always shows the OS's confirm line
 // while the native dialog is up, and a confirm declined there (`transport.unauthorized`) puts the prompt back as it
-// was. Only the prompt Work names (KeyedRequestContext: the oldest pending one) takes the keys. An elicitation, until
-// it is designed, says the agent has a question, with its words and Stop; its URL is never shown or opened.
+// was. Only the prompt Work names (KeyedRequestContext: the oldest pending one) takes the keys. A pending form
+// elicitation is its form (elicitation-form.tsx): the fields, Send, Don't answer and Stop. A link elicitation
+// says the agent has a question, with its words and Stop; its URL is never shown or opened.
 import { use, useCallback, useMemo, useRef, useState } from "react";
 import { PermissionPrompt } from "@clauseo/components/clauseo/permission.tsx";
 import type { PermissionAnswer } from "@clauseo/components/clauseo/permission-keys.ts";
@@ -29,6 +30,9 @@ import {
   permissionModel,
   toolCallIdOf,
 } from "./permission-model.ts";
+import { ElicitationForm } from "./elicitation-form.tsx";
+import { FolderReason } from "./folder-reason.tsx";
+import { useFolderReason } from "./folder-support.ts";
 import { KeyedRequestContext } from "./permission-keyed.ts";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { useThreadActions } from "./thread/session.ts";
@@ -61,6 +65,7 @@ function Permission({
   const pending = m.state === "pending";
   const lang = w.lang;
   const plan = useAgentPlan();
+  const reason = useFolderReason(call?.kind) && pending;
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);
@@ -94,7 +99,8 @@ function Permission({
         keys={keys}
         offered={offered}
         {...(m.asks ? { question: w.th("Clauseo asks before going on.") } : {})}
-        title={m.title}
+        title={m.label === null ? m.title : w.th(m.label)}
+        {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
         done={m.done}
         busy={pending && asked !== null}
@@ -134,13 +140,25 @@ export function PagedPermission({ id, entry }: { id: EntryId; entry: PermissionE
   return <Permission id={id} entry={entry} call={undefined} keys={false} />;
 }
 
-/** An elicitation: while it waits, "A question for you", the agent's words and Stop the answer; then its words. */
+/** An elicitation: a pending form is its form; a pending link, "A question for you", the agent's words and Stop the
+ * answer; then its words. */
 export function Elicitation({ id, entry }: { id: EntryId; entry: ElicitationEntry }) {
   const w = useThreadWords();
   const { stop } = useThreadActions();
   const state = elicitationState(entry);
   const message = elicitationMessage(entry);
   const pending = state === "pending";
+  const form = typeof entry.request === "string" ? undefined : entry.request.form;
+  if (pending && form !== undefined)
+    return (
+      <div data-testid="elicitation" data-entry-id={id} data-state={state} className={ROW}>
+        <ElicitationForm
+          elicitation={entry.elicitation}
+          message={form.message}
+          schema={form.schema}
+        />
+      </div>
+    );
   return (
     <div data-testid="elicitation" data-entry-id={id} data-state={state} className={ROW}>
       {pending && (

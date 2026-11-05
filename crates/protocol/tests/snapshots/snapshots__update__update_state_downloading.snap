@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots/update.rs
+assertion_line: 32
+expression: "UpdateState::Downloading\n{ version: \"0.4.1\".to_owned(), received: count(0), total: None, }"
+---
+{
+  "downloading": {
+    "version": "0.4.1",
+    "received": 0
+  }
+}

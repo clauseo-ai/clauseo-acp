@@ -23,6 +23,16 @@ use serde_json::{Value, json};
 
 use crate::write;
 
+/// The variables the sign-in modes read, which a test sets itself or leaves unset.
+const SIGNIN_VARS: [&str; 6] = [
+    "BROWSER",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+    "CODEX_HOME",
+    "FAKE_SIGNIN",
+    "FAKE_SIGNIN_ENV_OUT",
+];
+
 /// A folder under the system temp folder, unique per test and process, removed on drop.
 pub(crate) struct Scratch {
     path: PathBuf,
@@ -78,23 +88,31 @@ pub(crate) struct Finished {
 impl Agent {
     /// Starts `fake_agent --scenario <scenario>` with `dir` as its working directory.
     pub(crate) fn start(scenario: &str, dir: &Path) -> Self {
-        Self::start_args(&["--scenario", scenario], dir)
+        Self::start_args(&["--scenario", scenario], dir, &[])
     }
 
-    /// Starts `fake_agent` with any arguments.
+    /// Starts `fake_agent` with `args` and `dir` as its working directory, and each `(name, value)`
+    /// of `env` set. The sign-in variables are removed first, so a host's own settings never reach
+    /// a test: only `env` sets them.
     #[expect(
         clippy::disallowed_methods,
         reason = "the test starts the binary it tests over pipes"
     )]
-    pub(crate) fn start_args(args: &[&str], dir: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_fake_agent"))
+    pub(crate) fn start_args(args: &[&str], dir: &Path, env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fake_agent"));
+        command
             .args(args)
             .current_dir(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::piped());
+        for name in SIGNIN_VARS {
+            command.env_remove(name);
+        }
+        for (name, value) in env {
+            command.env(name, value);
+        }
+        let mut child = command.spawn().unwrap();
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         let stderr = Some(BufReader::new(child.stderr.take().unwrap()));
@@ -239,6 +257,28 @@ impl Agent {
             json!({"cwd": cwd, "mcpServers": []}),
         ));
         self.expect_line(&json!({"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "sess-1"}}));
+    }
+
+    /// As [`Agent::handshake`], for a scenario on `common/claude-handshake.jsonl`: `session/new`
+    /// answers with claude-agent-acp's modes, in `default`.
+    pub(crate) fn claude_handshake(&mut self, cwd: &str) {
+        self.send(&request(
+            0,
+            "initialize",
+            json!({"protocolVersion": 1, "clientCapabilities": {}}),
+        ));
+        self.read_line();
+        self.send(&request(
+            1,
+            "session/new",
+            json!({"cwd": cwd, "mcpServers": []}),
+        ));
+        let answer = self.read_line();
+        assert_eq!(answer["result"]["sessionId"], "sess-1", "{answer}");
+        assert_eq!(
+            answer["result"]["modes"]["currentModeId"], "default",
+            "{answer}"
+        );
     }
 }
 

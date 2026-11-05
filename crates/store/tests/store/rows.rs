@@ -3,7 +3,7 @@
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentId, AgentKind, AgentSessionId, AtLimitBehaviour, Billing,
     BlobHash, CheckpointId, CommandId, LimitSource, MAX_BLOB_READ_BYTES, MatterId, MatterKind,
-    PlanLabel, ThreadId,
+    PlanLabel, RenameSource, ThreadId,
 };
 use clauseo_store::{
     BlobIn, CheckpointRow, Commit, DB_FILE, Error, MatterRow, ThreadRow, blob_ref,
@@ -199,6 +199,7 @@ fn thread_row(n: u64, matter: MatterId, updated: i64) -> ThreadRow {
         matter,
         agent: AgentId::new("claude-code").unwrap(),
         title: Some(format!("Thread {n}")),
+        title_source: Some(RenameSource::Agent),
         acp_session_id: Some(AgentSessionId::new(&format!("sess_{n}")).unwrap()),
         archived: n.is_multiple_of(2),
         created: ts(1),
@@ -221,6 +222,7 @@ fn matter_and_thread_rows_round_trip() {
     let newer = thread_row(2, matter(1), 9);
     let untitled = ThreadRow {
         title: None,
+        title_source: None,
         acp_session_id: None,
         ..thread_row(3, matter(2), 3)
     };

@@ -83,6 +83,24 @@ fn assert_exported(types: &Types, ts: &str) {
         "Finite",
         "LimitsView",
         "ViewEntry",
+        "SetupCommand",
+        "SetupEvent",
+        "Secret",
+        "InstallProgress",
+        "InstallLog",
+        "SignIn",
+        "FoundLogin",
+        "LoginFrom",
+        "SignInMethod",
+        "SignInSource",
+        "PlanView",
+        "PlanProvider",
+        "UpdateView",
+        "UpdateState",
+        "UpdateMode",
+        "InstallWhen",
+        "FailedStage",
+        "ManagedBy",
     ] {
         assert!(ours.contains(name), "wire_types() lacks {name}");
     }
@@ -256,6 +274,26 @@ fn exports_every_wire_type() {
     assert_snake_case(&ts);
     assert_optional(&ts);
     assert_scalars(&ts);
+    // A secret is a plain string to the webview, and the setup command carries it as one.
+    assert_block(&ts, "Secret", |b| {
+        b.starts_with("export type Secret = string;")
+    });
+    assert_block(&ts, "SetupCommand", |b| b.contains("key: Secret"));
+    // The updater (0037): unit states are plain strings, the rest one-key objects, and the
+    // commands and the query carry it as they carry the settings.
+    assert_block(&ts, "UpdateState", |b| {
+        b.contains("\"idle\"") && b.contains("managed: ") && b.contains("received: Count")
+    });
+    assert_block(&ts, "UpdateView", |b| {
+        b.contains("\tchecked_at?: Timestamp,\n") && b.contains("\tupdated_from?: string,\n")
+    });
+    assert_block(&ts, "HostCommand", |b| {
+        b.contains("check_for_update: ") && b.contains("when: InstallWhen")
+    });
+    assert_block(&ts, "HostQuery", |b| b.contains("\"get_update\""));
+    assert_block(&ts, "HostEvent", |b| {
+        b.contains("update_changed: UpdateView")
+    });
 }
 
 /// `known_kinds_typescript()` lists `DomainEvent::KINDS` in order, and its names are the keys of

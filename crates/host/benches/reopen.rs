@@ -83,9 +83,9 @@ fn reopen_20k_events(c: &mut Criterion) {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
                 run += 1;
-                let data = bench.path().join("runs").join(run.to_string());
-                dir::copy_store(&fixture, &data).unwrap();
-                let effective = Effective::load(&Locations::under_root(&data), &SystemFiles, &[]);
+                let home = bench.path().join("runs").join(run.to_string());
+                dir::copy_store(&fixture, &home.join("data")).unwrap();
+                let effective = Effective::load(&Locations::under_home(&home), &SystemFiles, &[]);
                 let launcher = PassthroughLauncher::new(SpawnOptions::new());
                 let config = HostConfig::new(effective, Arc::new(launcher));
                 let (handle, join) = Host::start(config).unwrap();
@@ -96,7 +96,7 @@ fn reopen_20k_events(c: &mut Criterion) {
                 );
                 block_on(handle.shutdown()).unwrap();
                 join.join().unwrap();
-                dir::remove(&data).unwrap();
+                dir::remove(&home).unwrap();
                 total += elapsed;
             }
             total

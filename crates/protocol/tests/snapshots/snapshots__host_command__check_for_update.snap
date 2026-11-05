@@ -1,0 +1,8 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+assertion_line: 6
+expression: "HostCommand::CheckForUpdate {}"
+---
+{
+  "check_for_update": {}
+}

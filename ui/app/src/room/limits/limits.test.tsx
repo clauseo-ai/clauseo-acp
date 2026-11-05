@@ -7,7 +7,7 @@ import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reset } from "../../testing/stream-script.ts";
 import type {
   AgentLimitsView,
@@ -27,7 +27,14 @@ vi.mock("./plan-card-load.ts", async (actual) => {
   return { preloadPlanCard: vi.fn(real.preloadPlanCard) };
 });
 
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
+const MIDNIGHT = NOW - 17 * 3_600_000; // the start of NOW's day
+
 let h: Harness | null = null;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
@@ -35,11 +42,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-const today = (hh: number, mm: number) => {
-  const d = new Date();
-  d.setHours(hh, mm, 0, 0);
-  return d.getTime();
-};
+const today = (hh: number, mm: number) => MIDNIGHT + hh * 3_600_000 + mm * 60_000;
 const RESET = today(18, 10);
 const READ = today(0, 5);
 const toneOf = (used: number): MeterTone =>

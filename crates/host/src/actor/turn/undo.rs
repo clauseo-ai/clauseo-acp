@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 
+use clauseo_counts::schema::Feature;
 use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
@@ -14,13 +15,14 @@ use clauseo_protocol::{
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, counting};
 use super::out::Out;
 use super::{
     Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
     prompt, queue, state,
 };
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, UndoJob};
 use crate::pipeline::MatterEvent;
 
@@ -89,14 +91,15 @@ pub(super) fn undo_step(
 }
 
 /// The step as the log has it.
-struct Step {
-    before: CheckpointId,
-    after: CheckpointId,
+pub(super) struct Step {
+    pub(super) before: CheckpointId,
+    pub(super) after: CheckpointId,
     paths: Vec<MatterPath>,
 }
 
 /// The step of `turn`: started, ended with a checkpoint, not undone; else `command.invalid`.
-fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
+/// `PreviewUndo` reads it too (`undo_preview.rs`).
+pub(super) fn step_of(log: &[Envelope], turn: TurnId) -> Result<Step, Error> {
     let (mut before, mut after, mut undone) = (None, None, false);
     let mut paths = Vec::new();
     for envelope in log {
@@ -354,7 +357,7 @@ fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
     };
     state.undo = Some(Box::new(log));
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "an undo was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an undo was not logged");
         actor.finish_command(ctx.id, Err(error));
         on_failed(actor, thread);
         if !failure::blocked(actor, thread) {
@@ -369,6 +372,7 @@ pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
     let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
         return;
     };
+    counting::feature_used(actor, Feature::Undo);
     prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
         for path in log.step.restored {
@@ -415,7 +419,7 @@ pub(super) fn retry(actor: &mut Actor, thread: ThreadId) {
         state.undo = Some(log);
     }
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "an undo was not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "an undo was not logged");
         on_failed(actor, thread);
     }
 }

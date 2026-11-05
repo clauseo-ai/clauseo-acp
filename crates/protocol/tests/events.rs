@@ -44,6 +44,10 @@ mod json_copies;
 mod held_open;
 
 #[cfg(test)]
+#[path = "events/permission_about.rs"]
+mod permission_about;
+
+#[cfg(test)]
 #[path = "events/constructors.rs"]
 mod constructors;
 
@@ -54,6 +58,10 @@ mod web;
 #[cfg(test)]
 #[path = "events/web_urls.rs"]
 mod web_urls;
+
+#[cfg(test)]
+#[path = "events/triage.rs"]
+mod triage;
 
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,

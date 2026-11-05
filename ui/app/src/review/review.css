@@ -6,6 +6,7 @@
 /* Plan and usage's tiles (U12): settings/main.tsx imports the window's sheet, never SettingsApp; only the tiles here, as the
    window's frame sheets would hide Matters in the room's 1000-1199 px band */
 @import "../settings/usage.css";
+@import "../settings/privacy.css";
 @source "../room";
 @source "../settings";
 @source not "../room/**/*.test.*";
@@ -76,6 +77,12 @@
 }
 .review-status[data-status="approved"] {
   background: var(--green-tint);
+  color: var(--green-text);
+}
+/* provisional: in use without Rohan's look yet, so outlined, not filled: neither approved nor waiting */
+.review-status[data-status="provisional"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--green-text);
   color: var(--green-text);
 }
 .review-status[data-status="change"],

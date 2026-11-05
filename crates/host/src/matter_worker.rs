@@ -17,11 +17,13 @@ use clauseo_matters::{
     matter_path_in,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, ImportSummary, MatterId, MatterPath, RestoreRequest,
-    ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
+    RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
+use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::sent::TurnPaths;
 
 /// The matter paths a turn's tool calls named, in `folder`: those `acp` placed inside the
@@ -83,17 +85,19 @@ pub(crate) struct RestoreJob {
 /// One job for a matter thread.
 #[derive(Debug)]
 pub(crate) enum MatterJob {
-    /// `Matter::create`; the worker keeps the matter.
-    Create(NewMatter),
+    /// `Matter::create`; the worker keeps the matter. Its folder check uses `check`, the
+    /// actor's source.
+    Create { new: NewMatter, check: CheckSource },
     /// `Matter::import` with a no-op progress callback; `cancel` is set by shutdown.
     /// Before it, the place check (`check_place`) and then the registry: a folder that is,
     /// holds or sits inside one of `registry`'s folders is `matter.folder_is_matter`
-    /// (`check_registry`).
+    /// (`check_registry`). Its folder check uses `check`, the actor's source.
     Import {
         new: NewMatter,
         refused: Vec<PathBuf>,
         registry: Vec<Claimed>,
         cancel: Arc<AtomicBool>,
+        check: CheckSource,
     },
     /// `Matter::open`. When it fails, the worker keeps the id and folder and tries the open
     /// again before the next job that needs the matter. With `relink`, the first open, if it
@@ -154,6 +158,15 @@ pub(crate) enum MatterJob {
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
+    /// `Matter::edited_since`: the files of the step from `before` to `after` whose content
+    /// now differs from `after`; writes nothing.
+    EditedSince {
+        before: CheckpointId,
+        after: CheckpointId,
+    },
+    /// `Matter::discard`: undoes the create or import this worker ran, for a matter the host
+    /// could not record; the worker holds no matter afterwards. With none held, nothing to do.
+    Discard,
 }
 
 /// How an import ended.
@@ -165,16 +178,58 @@ pub(crate) enum ImportEnd {
         commit: CommitId,
         summary: ImportSummary,
         warnings: Vec<ImportWarning>,
+        /// The folder check's answer (`agent/folder_support.rs`), made on this thread.
+        folder_support: Option<FolderSupportKind>,
     },
     /// The cancel flag was set; nothing was kept.
     Cancelled,
 }
 
+/// A made matter's root commit and import summary, and its folder check's answer.
+pub(crate) type Made = ((CommitId, Option<ImportSummary>), Option<FolderSupportKind>);
+
+/// The root checkpoint's commit and the import summary of a create or import that succeeded
+/// (`None` for a new folder), and the folder check's answer.
+pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
+    match reply {
+        MatterReply::Created(result) => result.map(|(commit, support)| ((commit, None), support)),
+        MatterReply::Imported(result) => match result? {
+            ImportEnd::Done {
+                commit,
+                summary,
+                warnings,
+                folder_support,
+            } => {
+                for warning in &warnings {
+                    tracing::info!(?warning, "import warning");
+                }
+                Ok(((commit, Some(summary)), folder_support))
+            }
+            ImportEnd::Cancelled => Err(Error::Closed),
+        },
+        MatterReply::Opened(_)
+        | MatterReply::Located(_)
+        | MatterReply::BeforeTurn(_)
+        | MatterReply::AfterTurn(_)
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Compared(_)
+        | MatterReply::Previewed(_)
+        | MatterReply::EditedSince(_)
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_)
+        | MatterReply::Discarded(_) => Err(Error::Internal(
+            "a matter's create got another job's reply".to_owned(),
+        )),
+    }
+}
+
 /// One job's result, one variant per [`MatterJob`] kind.
 #[derive(Debug)]
 pub(crate) enum MatterReply {
-    /// The root checkpoint's commit.
-    Created(Result<CommitId, Error>),
+    /// The root checkpoint's commit, and the folder check's answer (`agent/folder_support.rs`),
+    /// made on this thread.
+    Created(Result<(CommitId, Option<FolderSupportKind>), Error>),
     Imported(Result<ImportEnd, Error>),
     /// The open matter's last checkpoint.
     Opened(Result<Option<CheckpointId>, Error>),
@@ -189,6 +244,30 @@ pub(crate) enum MatterReply {
     /// The first path held open, with what shows it.
     HeldOpen(Option<(MatterPath, HeldOpen)>),
     Papers(Result<PaperList, Error>),
+    EditedSince(Result<Vec<MatterPath>, Error>),
+    Discarded(Result<(), Error>),
+}
+
+impl MatterReply {
+    /// The variant's name, for the log: its fields hold paths and file names.
+    pub(crate) const fn name(&self) -> &'static str {
+        match self {
+            Self::Created(_) => "Created",
+            Self::Imported(_) => "Imported",
+            Self::Opened(_) => "Opened",
+            Self::Located(_) => "Located",
+            Self::BeforeTurn(_) => "BeforeTurn",
+            Self::AfterTurn(_) => "AfterTurn",
+            Self::Undone(_) => "Undone",
+            Self::Restored(_) => "Restored",
+            Self::Compared(_) => "Compared",
+            Self::Previewed(_) => "Previewed",
+            Self::HeldOpen(_) => "HeldOpen",
+            Self::Papers(_) => "Papers",
+            Self::EditedSince(_) => "EditedSince",
+            Self::Discarded(_) => "Discarded",
+        }
+    }
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -285,7 +364,7 @@ impl<T: Send + 'static> MatterWorker<T> {
 impl<T: Send + 'static> Drop for MatterWorker<T> {
     fn drop(&mut self) {
         if let Err(err) = self.join() {
-            tracing::warn!(error = %err, "the matter thread panicked");
+            tracing::warn!(error = %Cause(&err), "the matter thread panicked");
         }
     }
 }
@@ -306,15 +385,20 @@ fn run<T>(
 /// Runs one job against the slot.
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
-        MatterJob::Create(new) => {
-            let root = new.checkpoint;
+        MatterJob::Create { new, check } => {
+            let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
             MatterReply::Created(
                 Matter::create(settings.clone(), new)
                     .map_err(Error::from)
                     .and_then(|matter| {
                         let commit = root_commit(&matter, root)?;
+                        let folder_check = crate::agent::folder_support::FolderCheck {
+                            matter: Some(id),
+                            source: check,
+                        };
+                        let support = folder_check.run(&folder).row_kind();
                         *slot = Slot::Open(Box::new(matter));
-                        Ok(commit)
+                        Ok((commit, support))
                     }),
             )
         }
@@ -323,11 +407,12 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             refused,
             registry,
             cancel,
+            check,
         } => MatterReply::Imported(
             clauseo_matters::check_place(&new.folder, &refused)
                 .map_err(Error::Matters)
                 .and_then(|()| check_registry(&new.folder, &registry, true))
-                .and_then(|()| import(settings, slot, new, &refused, &cancel)),
+                .and_then(|()| import(settings, slot, new, &refused, &cancel, check)),
         ),
         MatterJob::Open { id, folder, relink } => {
             *slot = Slot::Unopened { id, folder, relink };
@@ -407,6 +492,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
         }
+        MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
+            open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
+        ),
+        MatterJob::Discard => MatterReply::Discarded(match std::mem::replace(slot, Slot::Empty) {
+            Slot::Open(matter) => matter.discard().map_err(Error::from),
+            Slot::Empty | Slot::Unopened { .. } => Ok(()),
+        }),
     }
 }
 
@@ -423,8 +515,9 @@ fn import(
     new: NewMatter,
     refused: &[PathBuf],
     cancel: &AtomicBool,
+    check: CheckSource,
 ) -> Result<ImportEnd, Error> {
-    let root = new.checkpoint;
+    let (root, id, folder) = (new.checkpoint, new.id, new.folder.clone());
     match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
         Imported::Done {
             matter,
@@ -432,11 +525,17 @@ fn import(
             warnings,
         } => {
             let commit = root_commit(&matter, root)?;
+            let folder_check = crate::agent::folder_support::FolderCheck {
+                matter: Some(id),
+                source: check,
+            };
+            let folder_support = folder_check.run(&folder).row_kind();
             *slot = Slot::Open(matter);
             Ok(ImportEnd::Done {
                 commit,
                 summary,
                 warnings,
+                folder_support,
             })
         }
         Imported::Cancelled => Ok(ImportEnd::Cancelled),

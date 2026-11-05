@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use clauseo_host::{Host, ManualClock};
-use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_limits::{AccountRead, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AtLimitBehaviour, Billing, Finite, LimitSource,
     LimitWindow, LimitsView, PlanLabel, Timestamp, WindowKind,
@@ -345,6 +345,7 @@ fn usage(used: usize) -> ReadOutcome {
     ReadOutcome::Usage {
         limits,
         reached: None,
+        account_read: AccountRead::Read,
     }
 }
 

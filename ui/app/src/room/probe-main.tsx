@@ -4,7 +4,9 @@
 // each date group), its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes; with
 // ?thread=permission the stream ends, before its step, with the agent's permission requests: a pending prompt on a
 // paper above one answered once and done; with ?confirm=1 as well, the host holds every answer, so the probe can press
-// Always for this matter and find the prompt confirming (the OS line up, the answers waiting). The page's query sets its display for this page only (theme=night,
+// Always for this matter and find the prompt confirming (the OS line up, the answers waiting). With ?thread=ask the
+// thread is only the question and Claude's AskUserQuestion as forms, pending: two questions (a choice and a multi-select,
+// each with its Other) above one question (elicitation-fixtures.ts). The page's query sets its display for this page only (theme=night,
 // lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
 // window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
 // With ?versions=panel, band, undo, restore, wait, newest or word, the room has Versions open over the matter's history
@@ -22,6 +24,7 @@
 // for screenshots of Devanagari tables, ₹ and bold in the room. With ?thread=shaping, the thread is a question and a
 // fixed answer (testing/shaping-answer.ts), finished: the cells in every block type, for the Devanagari shaping audit's
 // 1a and 1d. Not shipped.
+import { whenWordsReady } from "@clauseo/components/lib/display.ts";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -52,6 +55,7 @@ import {
   userMessage,
 } from "../testing/stream-script.ts";
 import { installDevHooks, queryPatch } from "./dev-hooks.ts";
+import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { probeThreads } from "./probe-threads.ts";
@@ -117,6 +121,8 @@ const papers: PaperSummary[] = (
 /** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
  * version of a paper, above one answered once whose call completed. */
 const asking = page.get("thread") === "permission";
+/** ?thread=ask: the lawyer's question, then Claude's questions as forms, waiting on the lawyer. */
+const questioning = page.get("thread") === "ask";
 /** ?confirm=1: answer_permission never answers, as while the OS's own confirm is up. */
 const holding = asking && page.get("confirm") === "1";
 /** ?thread=commands: an idle thread whose header lists COMMANDS, and no scripted turn, so the composer is not busy. */
@@ -178,7 +184,18 @@ function stream(): HostEvent[] {
               ...turn.slice(0, -1),
               ...PERMISSIONS,
             ]
-          : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
+          : questioning
+            ? [
+                reset(
+                  [
+                    userMessage(2, 1, "Draft the petition to quash."),
+                    askEntry(3, uuid(1, 9), TWO_QUESTIONS),
+                    askEntry(4, uuid(2, 9), ONE_QUESTION),
+                  ],
+                  header("needs_you"),
+                ),
+              ]
+            : [reset([userMessage(2, 1, "When did the bank reply?")]), ...turn];
   const events: HostEvent[] = [];
   for (let at = 0; at < bodies.length; at += 25) {
     events.push(event(batch(at + 1, bodies.slice(at, at + 25))));
@@ -216,7 +233,7 @@ const transport = new FakeTransport({
     const answer = staged?.query(query);
     if (answer !== undefined) return answer;
     // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
-    if (asking && typeof query === "object" && query.list_threads !== undefined)
+    if ((asking || questioning) && typeof query === "object" && query.list_threads !== undefined)
       return {
         threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
       };
@@ -243,9 +260,10 @@ const transport = new FakeTransport({
     matters: () => matters,
     papers,
     location: "Documents/Clauseo",
+    // ?thread=ask lists its thread as ?thread=permission does: waiting on the lawyer, so the room opens it
     threads: () =>
       probeThreads(
-        { asking, commanding: idleThread, shaping: shapingThread },
+        { asking: asking || questioning, commanding: idleThread, shaping: shapingThread },
         wording?.threads ?? [],
       ),
   }),
@@ -268,8 +286,11 @@ installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");
-createRoot(container).render(
-  <StrictMode>
-    <App transport={transport} />
-  </StrictMode>,
+// as the room's main.tsx: a Hindi page renders once its words are in
+whenWordsReady(() =>
+  createRoot(container).render(
+    <StrictMode>
+      <App transport={transport} />
+    </StrictMode>,
+  ),
 );

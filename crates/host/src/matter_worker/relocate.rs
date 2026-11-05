@@ -8,6 +8,7 @@ use clauseo_protocol::{CheckpointId, ErrorCode, MatterId, Timestamp};
 
 use super::Slot;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// What a folder is checked against before it becomes a matter's folder again (locate) or gets
 /// its `matter.json` back (relink): the folders import refuses, and every other registered
@@ -90,7 +91,7 @@ pub(super) fn relink_matter(
     missing: clauseo_matters::Error,
 ) -> Result<Matter, Error> {
     if let Err(claimed) = relink.registry.check(folder) {
-        tracing::warn!(%id, error = %claimed, "matter.json is gone; not written again");
+        tracing::warn!(%id, error = %Cause(&claimed), "matter.json is gone; not written again");
         return Err(missing.into());
     }
     let matter = Matter::relink(
@@ -100,6 +101,6 @@ pub(super) fn relink_matter(
         relink.created_at,
         &relink.registry.refused,
     )?;
-    tracing::warn!(%id, folder = %folder.display(), "matter.json was gone; written again");
+    tracing::warn!(%id, "matter.json was gone; written again");
     Ok(matter)
 }

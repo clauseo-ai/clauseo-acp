@@ -3,7 +3,7 @@
 // under the open matter, moving between conversations, what a row not open says to assistive technology, and Hindi.
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reset, userMessage, uuid } from "../testing/stream-script.ts";
 import type {
   AgentId,
@@ -22,11 +22,17 @@ import { ThreadActionsContext, type ThreadActions } from "./thread/session.ts";
 import { clockOf } from "./when.ts";
 import { defaultOutcome, mountRoom, THE_MATTER, type Harness } from "./thread/harness.ts";
 
+const NOW = Date.UTC(2026, 10, 3, 17, 0); // a fixed instant; fixture times derive from NOW
 let h: Harness | null = null;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 afterEach(async () => {
   await h?.unmount();
   h = null;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const T1 = uuid(1, 1);
@@ -64,8 +70,12 @@ const rows = () => h!.all("conversation");
 /** A row by its title: the thread that opens first keeps the key the room gave it before the list was in. */
 const rowOf = (title: string) =>
   rows().find((r) => r.querySelector(".room-conv-title")?.textContent === title);
+// the rail's morning sweep (U16b) goes at launch whenever the clock reads 05:00 or later: not these tests' business
 const kinds = () =>
-  h!.transport.only("dispatch").map((c) => Object.keys(c.command.command)[0] as keyof HostCommand);
+  h!.transport
+    .only("dispatch")
+    .map((c) => Object.keys(c.command.command)[0] as keyof HostCommand)
+    .filter((k) => k !== "sweep_done");
 const streams = (call: "subscribe" | "unsubscribe") => h!.transport.only(call).map((c) => c.stream);
 
 // The file's first test mounts the room cold: 9.6 s on a loaded runner, and the rest of the file failed after it, so 30 s of its own.
@@ -88,7 +98,9 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   expect(kinds()).toEqual(["create_thread", "send_prompt", "rename_thread"]);
   expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
   expect(h.sent("send_prompt")[0]?.thread).toBe(MADE);
-  expect(h.sent("rename_thread")).toEqual([{ thread: MADE, title: titleOf(question) }]);
+  expect(h.sent("rename_thread")).toEqual([
+    { thread: MADE, title: titleOf(question), placeholder: true },
+  ]);
   // the draft became the thread, its row titled (with the next frame: #253), still current
   await act(async () => h!.store.flush());
   const current = rows().find((r) => r.getAttribute("aria-current") === "true");
@@ -228,7 +240,7 @@ test("after a retry the new conversation opens with its line: the question's tim
   const open = h.one("retried-open");
   expect(open).not.toBeNull();
   const line = open?.closest("p")?.textContent ?? "";
-  const time = clockOf(at, Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone, "en").time;
+  const time = clockOf(at, NOW, Intl.DateTimeFormat().resolvedOptions().timeZone, "en").time;
   expect(line).toContain(time);
   expect(line).toContain("Retried from your question at");
   expect(line).toContain("Indemnity");
@@ -249,6 +261,7 @@ async function retryButton(retry: ThreadActions["retry"]) {
     sentTurn: null,
     undo: async () => {},
     answer: async () => {},
+    answerElicitation: async () => {},
     stop: () => {},
     ...(retry === undefined ? {} : { retry }),
   };
@@ -564,8 +577,8 @@ test("a stop on another day says nothing on its row; one today says when", async
     next: fakeNext({
       matters: () => [detailed(THE_MATTER)],
       threads: () => [
-        info(T1, "Lease notice", Date.now() - 2 * day),
-        info(T2, "Indemnity", Date.now()),
+        info(T1, "Lease notice", NOW - 2 * day),
+        info(T2, "Indemnity", NOW - 30 * 60_000),
         { ...thread(T3, { title: "Reply" }), seen: true },
       ],
     }),

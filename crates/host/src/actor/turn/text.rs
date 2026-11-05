@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use clauseo_protocol::{StreamId, TextAppended, ThreadId};
+use clauseo_protocol::{StreamId, TextAppended, TextKind, ThreadId};
 use clauseo_reducer::{TextDelta, ViewChange, apply_text_delta};
 
 use super::super::Actor;
@@ -15,6 +15,7 @@ use super::out::Out;
 use super::{Then, TimerKind, TurnTimer, end, lost, state};
 use crate::coalesce::{DisplayText, TextIn};
 use crate::error::Error;
+use crate::log_file::Cause;
 
 /// One text delta of the live turn. A message's first delta closes the held batch first, so
 /// its provisional order is the seq its `TextAppended` gets.
@@ -26,6 +27,15 @@ pub(super) fn on_delta(actor: &mut Actor, thread: ThreadId, delta: TextIn) -> Re
     }
     let now = actor.now().mono;
     let state = state(actor, thread).ok_or_else(|| lost("a thread"))?;
+    // The usage counts' `answer_ended.first_words`: the first answer text of the turn.
+    if delta.kind == TextKind::Answer
+        && let Some(current) = state
+            .current
+            .as_mut()
+            .filter(|current| current.turn == delta.turn)
+    {
+        current.first_words.get_or_insert(now);
+    }
     let pushed = state.text.push(now, delta);
     if let Some(at) = pushed.display_at {
         arm(actor, thread, at.saturating_sub(now), TimerKind::Display);
@@ -62,7 +72,7 @@ pub(super) fn on_display_timer(actor: &mut Actor, thread: ThreadId) {
 /// text not shown stays held.
 fn show_display(actor: &mut Actor, thread: ThreadId, now: Duration) {
     if let Err(error) = show(actor, thread, false, now) {
-        tracing::error!(%thread, %error, "text could not be shown");
+        tracing::error!(%thread, error = %Cause(&error), "text could not be shown");
     }
 }
 
@@ -74,7 +84,7 @@ pub(super) fn on_durable_timer(actor: &mut Actor, thread: ThreadId) {
     }
     let sent = Out::new(actor, thread, None).and_then(|out| out.send(actor, Then::Nothing));
     if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "held text was not committed");
+        tracing::warn!(%thread, error = %Cause(&error), "held text was not committed");
     }
 }
 

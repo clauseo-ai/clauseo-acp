@@ -28,9 +28,9 @@ pub use payload::{
     ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
     ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
     PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    ThreadArchived, ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded,
-    TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage,
-    VersionRestored, WebResult, WebSearchRecorded,
+    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
+    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
+    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -200,6 +200,10 @@ domain_events! {
     ThreadRenamed(ThreadRenamed) = "thread_renamed", thread;
     /// The thread was archived (host).
     ThreadArchived(ThreadArchived) = "thread_archived", thread;
+    /// The lawyer snoozed the thread until a time, or cleared its snooze (host).
+    ThreadSnoozed(ThreadSnoozed) = "thread_snoozed", thread;
+    /// The thread was marked done or not done, by the lawyer or the morning sweep (host).
+    ThreadDone(ThreadDone) = "thread_done", thread;
     /// An agent session started or was loaded (acp).
     AgentSessionAttached(AgentSessionAttached) = "agent_session_attached", thread;
     /// The agent's own display name, from `initialize` (host).

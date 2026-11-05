@@ -1,0 +1,279 @@
+---
+source: crates/counts/src/schema/tests/wire.rs
+expression: tally_schema()
+---
+{
+  "$defs": {
+    "ActiveWeek": {
+      "additionalProperties": false,
+      "description": "An `active_week` cell: the install ran that week. Its count is always 1.",
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/One",
+          "description": "1."
+        }
+      },
+      "required": [
+        "n"
+      ],
+      "type": "object"
+    },
+    "Arch": {
+      "description": "The CPU architecture.",
+      "oneOf": [
+        {
+          "const": "x86_64",
+          "description": "Intel and AMD.",
+          "type": "string"
+        },
+        {
+          "const": "aarch64",
+          "description": "Apple silicon and ARM64 Windows.",
+          "type": "string"
+        }
+      ]
+    },
+    "Cell_Crash": {
+      "additionalProperties": false,
+      "description": "`crash` (weekly tally only): the next start after a crash.",
+      "properties": {
+        "after_launch": {
+          "description": "Whether it came within a short time of the start.",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/CrashKind",
+          "description": "What kind."
+        },
+        "n": {
+          "$ref": "#/$defs/Count"
+        },
+        "process": {
+          "$ref": "#/$defs/CrashProcess",
+          "description": "Which process."
+        }
+      },
+      "required": [
+        "process",
+        "kind",
+        "after_launch",
+        "n"
+      ],
+      "type": "object"
+    },
+    "Channel": {
+      "description": "The release channel, a build constant.",
+      "oneOf": [
+        {
+          "const": "stable",
+          "description": "Released builds.",
+          "type": "string"
+        },
+        {
+          "const": "beta",
+          "description": "Beta builds.",
+          "type": "string"
+        }
+      ]
+    },
+    "Count": {
+      "maximum": 9999,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "CrashKind": {
+      "description": "`crash.kind`.",
+      "oneOf": [
+        {
+          "const": "panic",
+          "description": "A Rust panic.",
+          "type": "string"
+        },
+        {
+          "const": "signal",
+          "description": "A signal or exception.",
+          "type": "string"
+        },
+        {
+          "const": "renderer_gone",
+          "description": "The webview's renderer went.",
+          "type": "string"
+        },
+        {
+          "const": "stall",
+          "description": "A stall the app never came back from.",
+          "type": "string"
+        }
+      ]
+    },
+    "CrashProcess": {
+      "description": "`crash.process`.",
+      "oneOf": [
+        {
+          "const": "host",
+          "description": "The host.",
+          "type": "string"
+        },
+        {
+          "const": "webview",
+          "description": "The webview.",
+          "type": "string"
+        }
+      ]
+    },
+    "InstallType": {
+      "description": "Whether the app is installed for one user or for the machine. Tally only.",
+      "oneOf": [
+        {
+          "const": "per_user",
+          "description": "Installed for the user alone.",
+          "type": "string"
+        },
+        {
+          "const": "per_machine",
+          "description": "Installed for every user, by IT.",
+          "type": "string"
+        }
+      ]
+    },
+    "One": {
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "Os": {
+      "description": "The operating system. Its major version travels beside it as `os_major`.",
+      "oneOf": [
+        {
+          "const": "macos",
+          "description": "macOS, `os_major` 13 to 40.",
+          "type": "string"
+        },
+        {
+          "const": "windows",
+          "description": "Windows, `os_major` 10 or 11.",
+          "type": "string"
+        },
+        {
+          "const": "linux",
+          "description": "Linux, with no version.",
+          "type": "string"
+        }
+      ]
+    },
+    "OsMajor": {
+      "maximum": 40,
+      "minimum": 10,
+      "type": "integer"
+    },
+    "SchemaVersion": {
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "TallyCells": {
+      "additionalProperties": false,
+      "description": "The weekly tally's cells.",
+      "properties": {
+        "active_week": {
+          "description": "`active_week`: one cell, or none.",
+          "items": {
+            "$ref": "#/$defs/ActiveWeek"
+          },
+          "type": "array"
+        },
+        "crash": {
+          "description": "`crash`.",
+          "items": {
+            "$ref": "#/$defs/Cell_Crash"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TallyId": {
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "Version": {
+      "pattern": "^(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})$",
+      "type": "string"
+    },
+    "Week": {
+      "pattern": "^2[0-9]{3}-W[0-9]{2}$",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One install's weekly tally: crashes and `active_week`, with the two fields that mark a\nfirm's fleet. No install id, so a crash can never be joined to one.",
+  "properties": {
+    "arch": {
+      "$ref": "#/$defs/Arch",
+      "description": "The CPU architecture."
+    },
+    "cells": {
+      "$ref": "#/$defs/TallyCells",
+      "description": "The week's non-zero cells."
+    },
+    "channel": {
+      "$ref": "#/$defs/Channel",
+      "description": "`stable` or `beta`."
+    },
+    "install_type": {
+      "$ref": "#/$defs/InstallType",
+      "description": "Installed for the user or for the machine."
+    },
+    "managed": {
+      "description": "Whether any policy source was read.",
+      "type": "boolean"
+    },
+    "os": {
+      "$ref": "#/$defs/Os",
+      "description": "The OS."
+    },
+    "os_major": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OsMajor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The OS's major version; Linux leaves it out."
+    },
+    "schema": {
+      "$ref": "#/$defs/SchemaVersion",
+      "description": "`1`."
+    },
+    "tally": {
+      "$ref": "#/$defs/TallyId",
+      "description": "This tally's own random id."
+    },
+    "version": {
+      "$ref": "#/$defs/Version",
+      "description": "The app's version."
+    },
+    "week": {
+      "$ref": "#/$defs/Week",
+      "description": "The ISO week."
+    }
+  },
+  "required": [
+    "schema",
+    "tally",
+    "week",
+    "version",
+    "channel",
+    "os",
+    "arch",
+    "install_type",
+    "managed",
+    "cells"
+  ],
+  "title": "TallyReport",
+  "type": "object"
+}

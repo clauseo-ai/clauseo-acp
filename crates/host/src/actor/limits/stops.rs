@@ -29,6 +29,7 @@ use super::super::input::Input;
 use super::super::state::HostPhase;
 use super::super::turn;
 use super::{LimitsInput, at_limit, read_wait, turn_ended};
+use crate::log_file::Cause;
 
 /// How many failed commits of one stop the unblock retries.
 const UNBLOCK_RETRIES: u8 = 2;
@@ -239,7 +240,12 @@ fn log_ready(actor: &mut Actor, thread: ThreadId, unblocked: bool) {
         }
         let sent = turn::log_limit_stop(actor, thread, stopped);
         if let Err(error) = &sent {
-            tracing::warn!(%thread, %turn, %error, "a stop at the limit was not logged yet");
+            tracing::warn!(
+                %thread,
+                %turn,
+                error = %Cause(error),
+                "a stop at the limit was not logged yet"
+            );
         }
         let blocked = turn::stream_blocked(actor, thread);
         if let Some(stop) = actor.limits.stops.iter_mut().find(|stop| stop.turn == turn) {
@@ -262,7 +268,11 @@ fn reload(actor: &mut Actor, thread: ThreadId) {
         Box::new(move |actor, loaded| match loaded {
             Ok(()) => log_ready(actor, thread, false),
             Err(error) => {
-                tracing::warn!(%thread, %error, "a stop at the limit waits: its thread did not load");
+                tracing::warn!(
+                    %thread,
+                    error = %Cause(&error),
+                    "a stop at the limit waits: its thread did not load"
+                );
             }
         }),
     );

@@ -10,7 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::serde_util::BorrowedStr;
-use crate::{Error, MatterId};
+use crate::{Error, MatterId, MatterPath};
 
 /// Writes `ErrorCode` and its methods from one table: variant, dotted string, retryable, and the
 /// meaning, which is both the variant's doc comment and what `meaning()` returns. The record in
@@ -150,12 +150,49 @@ error_codes! {
     MatterFolderInMattersRoot = "matter.folder_in_matters_root", retryable: false, meaning: "The \
         folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' \
         history folder in it.";
+    MatterFolderNetwork = "matter.folder_network", retryable: false, meaning: "The matter \
+        folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex \
+        is not started there.";
+    MatterFolderNoPermissions = "matter.folder_no_permissions", retryable: false,
+        meaning: "The matter folder is on a drive that keeps no file permissions (FAT, exFAT), \
+        which Codex's sandbox needs, so Codex is not started there.";
     TransportUnauthorized = "transport.unauthorized", retryable: false, meaning: "The client is \
         not allowed to make this call.";
     TransportTooLarge = "transport.too_large", retryable: false, meaning: "The message is larger \
         than the transport accepts.";
     SettingsLocked = "settings.locked", retryable: false, meaning: "The change names a setting \
         that the firm's policy sets, so the lawyer cannot change it; nothing was changed.";
+    AgentInstallOffline = "agent.install_offline", retryable: true, meaning: "The agent's install \
+        cannot reach its hosts: name resolution or connect failed with no route. The install \
+        waits and tries again by itself.";
+    AgentInstallBlocked = "agent.install_blocked", retryable: false, meaning: "A proxy or \
+        firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web \
+        page where a file should be.";
+    AgentInstallDiskFull = "agent.install_disk_full", retryable: true, meaning: "Too little free \
+        space for the agent's install; a retry succeeds once space is freed.";
+    AgentInstallFailed = "agent.install_failed", retryable: true, meaning: "The agent's install \
+        failed for another reason, after three tries.";
+    SigninCancelled = "signin.cancelled", retryable: false, meaning: "The lawyer cancelled the \
+        sign-in, in Clauseo or on the vendor's page.";
+    SigninLinkExpired = "signin.link_expired", retryable: true, meaning: "The sign-in link or \
+        device code expired before the sign-in finished; a new sign-in gets a new one.";
+    SigninNoPlan = "signin.no_plan", retryable: false, meaning: "The account has no plan the \
+        agent accepts.";
+    SigninDeviceCodeOff = "signin.device_code_off", retryable: false, meaning: "Device-code \
+        sign-in is turned off for the account.";
+    SigninPortBusy = "signin.port_busy", retryable: true, meaning: "Another program holds the \
+        port the agent's sign-in listens on (Codex's 1455).";
+    SigninFailed = "signin.failed", retryable: true, meaning: "The sign-in ended before signing \
+        in, for any other reason.";
+    SigninPolicyUnreadable = "signin.policy_unreadable", retryable: false, meaning: "The firm's \
+        policy cannot be read and once set this agent's firm plan, so sign-in and launch are \
+        refused rather than sent to a plan login.";
+    AgentGuardMissing = "agent.guard_missing", retryable: false, meaning: "A Claude launch that \
+        must ask before every change could not set up the guard that makes it ask, so it was \
+        not started.";
+    UpdateFailed = "update.failed", retryable: true, meaning: "The update's check, download, \
+        signature check or install failed; the version running keeps running, and a later check \
+        tries again.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
@@ -217,6 +254,11 @@ pub struct HostError {
     /// otherwise, and when that matter is not on the list (forgotten, or from another install).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
+    /// The matter's files the failure is about: for `matter.file_locked`, the files held open,
+    /// sorted. Missing when it names none. For `matter.file_locked` the files are here, not in
+    /// `message`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    files: Vec<MatterPath>,
 }
 
 impl HostError {
@@ -227,6 +269,7 @@ impl HostError {
             retryable: code.is_retryable(),
             message: message.into(),
             matter: None,
+            files: Vec::new(),
         }
     }
 
@@ -241,6 +284,19 @@ impl HostError {
     /// (`matter.folder_is_matter`).
     pub const fn matter(&self) -> Option<MatterId> {
         self.matter
+    }
+
+    /// The same failure, naming the matter's `files` it is about (see [`HostError::files`]).
+    #[must_use]
+    pub fn with_files(mut self, files: Vec<MatterPath>) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// The matter's files the failure is about: for `matter.file_locked`, the files held open.
+    /// Empty when it names none.
+    pub fn files(&self) -> &[MatterPath] {
+        &self.files
     }
 
     /// Why the call failed.
@@ -280,6 +336,8 @@ struct HostErrorWire<'a> {
     retryable: bool,
     #[serde(default)]
     matter: Option<MatterId>,
+    #[serde(default)]
+    files: Vec<MatterPath>,
 }
 
 impl<'de> Deserialize<'de> for HostError {
@@ -298,12 +356,14 @@ impl<'de> Deserialize<'de> for HostError {
                     code.is_retryable()
                 },
                 matter: wire.matter,
+                files: wire.files,
             },
             None => Self {
                 code: ErrorCode::Unknown,
                 message: format!("{raw}: {}", wire.message),
                 retryable: wire.retryable,
                 matter: wire.matter,
+                files: wire.files,
             },
         })
     }

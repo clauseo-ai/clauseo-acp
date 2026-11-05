@@ -3,7 +3,8 @@
 # `cfg(windows)` or `cfg(target_os = "macos")` mutant builds the same binary as the code and comes
 # back missed. Here those files are mutated where they compile.
 #
-# - Weekly, Sundays at 02:07 UTC, and by hand (workflow_dispatch, which needs write access). A
+# - By hand only until after the release (workflow_dispatch, which needs write access; the weekly
+#   Sunday 02:07 UTC run is off, Rohan's decision 2026-11-04). A
 #   dispatch can run one job (`only`), to check a pull request's tests against that job's
 #   mutants; the other jobs then run on ubuntu and skip every step, so they hold no Windows or
 #   macOS runner. No pull request or push event, so it never takes a runner from a pull request:
@@ -20,10 +21,18 @@
 #   crates/limits/src/readers/paths.rs's `cfg!(windows)` site, since limits was not in the issue.
 # - The config is .cargo/mutants.toml without its `exclude_globs` entries for the files mutated
 #   here (the settings OS shims, excluded on Linux because they are not compiled there), so the
-#   shims' own mutants run. Its `exclude_re` still applies, including SystemDirs' `home` and
-#   `known_folder` in crates/settings/src/system.rs: no test reads the real OS folders on any OS
-#   (tests use their own `PlatformDirs`), so those mutants stay excluded on Windows too.
-#   .github/scripts/mutants-platform.sh writes it, and fails a file that gives no mutant.
+#   shims' own mutants run, and with the job's `skip_re` added to its `exclude_re`. That
+#   `exclude_re` still applies, including SystemDirs' `home` and `known_folder` in
+#   crates/settings/src/system.rs: no test reads the real OS folders on any OS (tests use their own
+#   `PlatformDirs`), so those mutants stay excluded on Windows too. Its platform block holds the
+#   mutants of this code that no OS's tests can tell apart (equivalent or unobservable).
+# - Each job's `skip_re` lists the mutants it misses only because of its OS: code another OS's
+#   `cfg` block keeps out of its build (a file is mutated whole), or code equivalent on this OS
+#   but caught on another OS or on Linux. They apply to that job only. Each entry has its reason
+#   in a comment. A regex that matches no mutant of the job fails the job before any mutant runs,
+#   and the error names the regex: the code moved, so fix or drop the entry.
+#   .github/scripts/mutants-platform.sh writes the config, checks the skip list, and fails a file
+#   that gives no mutant.
 # - It only reports: a missed or timed-out mutant shows in the job summary and the artifact
 #   mutants-platform-<job> (mutants.out, kept 14 days), and never fails the job. A failed setup,
 #   or a cargo-mutants exit other than 0 (all caught), 2 (some missed) or 3 (some timed out),
@@ -37,8 +46,9 @@
 name: mutants-platform
 
 on:
-  schedule:
-    - cron: "7 2 * * 0"
+  # No schedule until after the release (Rohan's decision, 2026-11-04: mutation testing stops, and
+  # no "kill the mutant" pull requests meanwhile); on demand only. To restore the weekly run, put
+  # back `schedule:` with `- cron: "7 2 * * 0"`.
   workflow_dispatch:
     inputs:
       only:
@@ -98,6 +108,11 @@ jobs:
               crates/process/src/os/windows.rs
               crates/process/src/handle.rs
               crates/process/src/launch.rs
+            skip_re:
+              # `#[cfg(unix)]` `signal`, not compiled here; Linux catches it. Line 242 is Windows' own.
+              - 'crates/process/src/handle\.rs:236:5: replace signal -> Option<i32> with '
+              # Always None on Windows, whose `signal` has no signal to give; Linux catches it.
+              - 'crates/process/src/handle\.rs:\d+:\d+: replace ExitReport::signal -> Option<i32> with None$'
           # Cloud placeholders, drive roots, hidden folders, and the case-insensitive file
           # system's respelled names (writeback.rs, undo.rs).
           - name: windows-matters
@@ -115,6 +130,17 @@ jobs:
               crates/matters/src/matter/json.rs
               crates/matters/src/writeback.rs
               crates/matters/src/undo.rs
+            skip_re:
+              # Their Windows bodies are already `Ok(())` (full_flush_dir settles `Ok(())`); macOS catches them.
+              - 'crates/matters/src/fsync\.rs:\d+:\d+: replace (sync_dir|barrier|full_flush|full_flush_dir) -> io::Result<\(\)> with Ok\(\(\)\)$'
+              # The macOS block of `is_cloud_only`, not compiled here; lines 47 and 48 are Windows' own.
+              - 'crates/matters/src/probe\.rs:41:\d+: replace (!= with ==|& with \||& with \^) in <impl PlaceholderProbe for OsProbe>::is_cloud_only$'
+              # `is_mount_point` is Linux only, not compiled here.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_mount_point -> .*|.* in is_mount_point)$'
+              # `is_macos_volume_key` is macOS only, not compiled here.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_macos_volume_key -> .*|.* in is_macos_volume_key)$'
+              # The `cfg(unix)` line of `same_entry`, not compiled here; line 176's `==` is Windows' own.
+              - 'crates/matters/src/writeback\.rs:171:\d+: replace (&& with \|\||== with !=) in same_entry$'
           # Files with one Windows-only branch each, and settings' policy and folders.
           - name: windows-matters-settings
             runner: windows-2025
@@ -131,6 +157,13 @@ jobs:
               crates/settings/src/policy/windows.rs
               crates/settings/src/system.rs
               crates/settings/src/system/windows.rs
+            skip_re:
+              # The `cfg(unix)` `same_file`, not compiled here; Linux catches it. Line 97 is Windows' own.
+              - 'crates/matters/src/history/blob\.rs:90:5: replace same_file -> bool with false$'
+              # The comparisons of that `same_file`, not compiled here; Linux catches them.
+              - 'crates/matters/src/history/blob\.rs:\d+:\d+: replace == with != in same_file$'
+              # Only an ACL deny gives a stat error other than NotFound here; Linux catches it. Line 121 is caught.
+              - 'crates/matters/src/history/durable\.rs:105:21: replace match guard err\.kind\(\) == io::ErrorKind::NotFound with true in present$'
           # One macOS job, so this workflow takes one of the org's 5 macOS runners. no_download,
           # F_FULLFSYNC, /Volumes, the case-insensitive names, the managed-preferences policy, and
           # the store's fullfsync pragma.
@@ -152,9 +185,30 @@ jobs:
               crates/settings/src/policy.rs
               crates/settings/src/policy/macos.rs
               crates/store/src/open.rs
+            skip_re:
+              # No runner can make a dataless file; Windows catches it with an offline file.
+              - 'crates/matters/src/probe\.rs:\d+:\d+: replace <impl PlaceholderProbe for OsProbe>::is_cloud_only -> bool with false$'
+              # The Windows block of `is_cloud_only`, not compiled here; line 41 is macOS's own.
+              - 'crates/matters/src/probe\.rs:4[78]:\d+: replace (& with \||& with \^|\| with &|!= with ==) in <impl PlaceholderProbe for OsProbe>::is_cloud_only$'
+              # `is_share_root` is Windows only, not compiled here.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_share_root -> .*|.* in is_share_root)$'
+              # `is_mount_point` is Linux only, not compiled here.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: (replace is_mount_point -> .*|.* in is_mount_point)$'
+              # `fold`: `cfg!(target_os = "macos")` makes the parenthesis true here, and NFC keeps ASCII as it is; Windows catches both.
+              - 'crates/matters/src/refuse\.rs:\d+:\d+: replace (== with !=|&& with \|\|) in fold$'
+              # `open_exclusive` is Windows only, not compiled here.
+              - 'crates/matters/src/write\.rs:\d+:\d+: replace open_exclusive -> io::Result<File> with Ok\(Default::default\(\)\)$'
+              # `hide_dir`'s body is Windows only, so here it is already empty; Windows catches it.
+              - 'crates/matters/src/write\.rs:\d+:\d+: replace hide_dir with \(\)$'
+              # The Windows block of `hide_dir`, not compiled here.
+              - 'crates/matters/src/write\.rs:\d+:\d+: delete ! in hide_dir$'
+              # The `cfg(not(unix))` line of `same_entry`, not compiled here; line 171's `==` is macOS's own.
+              - 'crates/matters/src/writeback\.rs:176:44: replace == with != in same_entry$'
     env:
       PACKAGES: ${{ matrix.packages }}
       FILES: ${{ matrix.files }}
+      # The job's skip_re, as a JSON array (null when it has none); the script reads it with jq.
+      SKIP_RE: ${{ toJSON(matrix.skip_re) }}
       # 'true' unless a dispatch asked for another job (`only`); every step checks it.
       PICKED: ${{ (inputs.only || 'all') == 'all' || inputs.only == matrix.name }}
       JOBS: ${{ matrix.jobs || 2 }}

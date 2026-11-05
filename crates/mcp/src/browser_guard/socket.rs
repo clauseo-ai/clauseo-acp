@@ -1,17 +1,18 @@
 //! Unix only: the folder agent-browser's socket goes in. A Unix socket path holds at most 103
 //! bytes (`connection.rs:902-913` refuses longer), and `<cwd>/run/...` can exceed that, so the
-//! socket folder is `/tmp/clauseo-ab-<first 16 characters of the session>` instead
-//! (`env::socket_dir`). Other users can write to `/tmp`, so the guard makes the folder itself
-//! with mode 0700, and refuses one that already exists unless it is a real folder (not a link)
-//! with mode 0700 and the same owner as `--cwd`. Then it checks `<folder>/<session>.sock` fits.
-//! Windows keeps `<cwd>\run`, which holds only `.port` files.
+//! host makes a short folder in `/tmp` for each session (stage C's `BrowserSocketDir`,
+//! `/tmp/clauseo-ab-<16 random>`, mode 0700) and passes it as `AGENT_BROWSER_SOCKET_DIR`. The
+//! guard makes nothing there: it checks the folder it is given and refuses to start unless the
+//! path is absolute, names a real folder under `lstat` (not a link), with mode exactly 0700 and
+//! the same owner as `--cwd`, and `<folder>/<session>.sock` fits. Windows keeps `<cwd>\run`,
+//! which holds only `.port` and `.pid` files.
 
 use std::path::Path;
 
 /// The longest socket path agent-browser accepts, in bytes (`connection.rs:902-913`).
 pub(crate) const MAX_SOCKET_PATH_BYTES: usize = 103;
 
-/// What the guard reads about an existing socket folder, from `symlink_metadata`.
+/// What the guard reads about the socket folder, from `symlink_metadata`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Facts {
     /// A link, whatever it points at.
@@ -24,7 +25,7 @@ pub(crate) struct Facts {
     pub(crate) uid: u32,
 }
 
-/// `Err` with the reason when an existing socket folder is not one the guard may use.
+/// `Err` with the reason when the socket folder is not one the guard may use.
 pub(crate) fn check_facts(facts: Facts, cwd_uid: u32) -> Result<(), String> {
     if facts.is_link {
         return Err("it is a link".to_owned());
@@ -58,23 +59,28 @@ pub(crate) fn check_length(dir: &Path, session: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Makes the socket folder (mode 0700) or checks the one there, then checks the socket path's
-/// length. `Err` with the reason.
+/// Checks the socket folder the host gave: absolute, a real folder (not a link, read with
+/// `symlink_metadata`), mode 0700, owned by `--cwd`'s owner, and `<dir>/<session>.sock`
+/// within [`MAX_SOCKET_PATH_BYTES`]. Makes nothing. `Err` with the reason.
 #[cfg(unix)]
-pub(crate) fn prepare(dir: &Path, cwd: &Path, session: &str) -> Result<(), String> {
-    use std::io::ErrorKind;
+pub(crate) fn check(dir: &Path, cwd: &Path, session: &str) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
 
+    if !dir.is_absolute() {
+        return Err(format!(
+            "the socket folder {} is not an absolute path",
+            dir.display()
+        ));
+    }
     let cwd_uid = std::fs::metadata(cwd)
         .map_err(|error| format!("cannot read --cwd: {error}"))?
         .uid();
-    match crate::write::create_private_dir(dir) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(format!("cannot make {}: {error}", dir.display())),
-    }
-    let metadata = std::fs::symlink_metadata(dir)
-        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    let metadata = std::fs::symlink_metadata(dir).map_err(|error| {
+        format!(
+            "the socket folder {}: cannot read it: {error}",
+            dir.display()
+        )
+    })?;
     let facts = Facts {
         is_link: metadata.file_type().is_symlink(),
         is_dir: metadata.is_dir(),
@@ -159,7 +165,7 @@ mod tests {
     #[test]
     fn the_socket_path_must_fit_in_103_bytes() {
         let session = "x".repeat(64);
-        // `/tmp/clauseo-ab-` and 16 characters, `/`, 64, `.sock`: 102 bytes.
+        // `/tmp/clauseo-ab-` and 16 characters (the host's folder), `/`, 64, `.sock`: 102 bytes.
         let dir = Path::new("/tmp/clauseo-ab-xxxxxxxxxxxxxxxx");
         assert_eq!(check_length(dir, &session), Ok(()));
         assert_eq!(

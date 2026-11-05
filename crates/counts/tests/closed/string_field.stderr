@@ -1,0 +1,25 @@
+error[E0277]: the trait bound `String: Closed` is not satisfied
+ --> tests/closed/string_field.rs:8:1
+  |
+8 | clauseo_counts::closed_fields!(Opened { launch, matter });
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | the trait `Closed` is not implemented for `String`
+  | required by a bound introduced by this call
+  |
+  = help: the following other types implement trait `Closed`:
+            ActiveWeek
+            Agent
+            AnswerOutcome
+            Arch
+            Batch
+            Billing
+            BreakKind
+            BreakThen
+          and $N others
+note: required by a bound in `clauseo_counts::schema::require_closed_value`
+ --> src/schema/closed.rs
+  |
+  | pub const fn require_closed_value<T: Closed + ?Sized>(_: &T) {}
+  |                                      ^^^^^^ required by this bound in `require_closed_value`
+  = note: this error originates in the macro `clauseo_counts::closed_fields` (in Nightly builds, run with -Z macro-backtrace for more info)

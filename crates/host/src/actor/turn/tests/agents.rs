@@ -21,7 +21,7 @@ const EXIT_AFTER_UPDATES: &str = r#"{"expect":{"method":"session/prompt","as":"p
 {"exit":{"code":1}}
 "#;
 
-fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
+pub(super) fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
     let command = HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
@@ -37,7 +37,7 @@ fn send_prompt(rig: &mut Rig, n: u128, thread: ThreadId) -> TurnId {
 }
 
 /// Handles inputs until `thread` has no turn, no agent and nothing in flight.
-fn until_settled(rig: &mut Rig, thread: ThreadId) {
+pub(super) fn until_settled(rig: &mut Rig, thread: ThreadId) {
     rig.run_until("the turn's end and the agent's", |actor| {
         let state = &actor.threads[&thread].turn;
         state.current.is_none()

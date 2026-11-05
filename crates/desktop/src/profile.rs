@@ -206,7 +206,7 @@ pub(crate) fn paths_for(
     let stetdoc = stetdoc.unwrap_or_else(|| dir.join(STETDOC).join(program(STETDOC)));
     let browser = BrowserSidecars {
         clauseo_mcp: dir.join(program("clauseo-mcp")),
-        agent_browser: dir.join(program("agent-browser")),
+        agent_browser: dir.join(program("clauseo-agent-browser")),
     };
     ProfilePaths::new(locations, exe, stetdoc, browser).map_err(BuildError::Paths)
 }

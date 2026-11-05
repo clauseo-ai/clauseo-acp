@@ -19,8 +19,9 @@
 //! secret check (`fixtures/check.rs`), whose findings are printed. The G16 owner copies a
 //! recording into `fixtures/recorded/` by hand once it passes (`fixtures/README.md`).
 //!
-//! The first release's plan tests are Claude Pro, `ChatGPT` Plus and `ChatGPT` Go; Claude Max and
-//! Team stay fixture-only for now (Rohan, 2026-11-03).
+//! The first release's plan tests are Claude Pro and `ChatGPT` Plus. `ChatGPT` Go, Claude Max and
+//! Team stay fixture-only for now (Rohan, 2026-11-03; Go since 2026-11-04, when the Go test
+//! account moved to Plus). `codex_go` and its shape check stay, so a Go login brings it back.
 //!
 //! Run: `cargo nextest run -p clauseo-limits --run-ignored only --no-capture`.
 

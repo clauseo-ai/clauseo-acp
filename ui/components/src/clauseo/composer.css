@@ -45,6 +45,21 @@
   .room-status-plan {
     flex: none;
   }
+  /* the tool line, after the plan and its dot: a quiet button in the line's own words */
+  .room-status-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    flex: none;
+  }
+  /* starting a row of its own, the tool line drops its dot */
+  .room-status-tools[data-lead] > .room-dot {
+    display: none;
+  }
+  .room-status[data-fit="wrapped"] .room-status-tools {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
   /* nothing on the line is ever cut short: tight, the hint keeps only its key cap; wrapped, the line takes two */
   .room-status:is([data-fit="tight"], [data-fit="wrapped"]) .room-hint-turn {
     display: none;
@@ -247,5 +262,33 @@
   .room-line:has(> svg + span) > svg {
     flex: none;
     margin-top: calc((var(--s5) * var(--k) - var(--size-icon-line)) / 2);
+  }
+
+  /* ---------- the tool line: its glyphs on the status line, one quiet button ---------- */
+  .room-tool-glyphs {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    vertical-align: middle;
+  }
+
+  /* ---------- the tool line's popover: a row per tool, its glyph, name and chip, what's under it past the glyph ---------- */
+  .tool-row {
+    display: grid;
+    grid-template-columns: var(--size-icon) minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--s2);
+    row-gap: var(--s1);
+    padding: var(--s2) var(--s3);
+  }
+  .tool-row > .tool-row-sub {
+    grid-column: 2 / -1;
+  }
+
+  /* ---------- the tool line's popover: the foot that covers both tools ---------- */
+  /* parted from the rows above by the plate's hairline, so Open Settings reads as the whole popover's, not the last
+     row's */
+  .tool-pop-foot {
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
   }
 }

@@ -10,6 +10,7 @@
     "probe:webkit": "swift scripts/webkit-probe.swift",
     "build:review": "vite build --config vite.review.config.ts",
     "copy:check": "vitest run --config vite.review.config.ts",
+    "copy:running": "node scripts/copy-running.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "lint:types": "oxlint --type-aware",

@@ -5,6 +5,7 @@ import type {
   PermissionAnswer,
   PermissionState as PromptState,
 } from "@clauseo/components/clauseo/permission-keys.ts";
+import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { entryId } from "../store/view.ts";
 import type {
   ElicitationEntry,
@@ -50,12 +51,19 @@ export const PERMISSION_TEST_IDS = {
 /** An answer the lawyer can give, and the agent's option it sends. */
 export type Offer = { answer: PermissionAnswer; kind: KnownKind; option: string };
 
+/** The line the prompt shows, in place of the call's title, for a request to save Claude's own plan note (the host's
+ * `about: "agent_plan"`): a words key, so the row says it in the language on screen. */
+export const PLAN_NOTE_LINE: ThreadKey =
+  "Claude wants to save its plan as a note in its own folder, not in this matter.";
+
 export type PermissionModel = {
   offers: readonly Offer[];
   /** The paper the request saves a new version of, isolated; null when it isn't one paper of the matter. */
   paper: string | null;
   /** No paper: the prompt asks "Clauseo asks before going on." with the tool call's title beneath. */
   asks: boolean;
+  /** The words key the prompt shows beneath the ask instead of the title; null when the title is shown. */
+  label: ThreadKey | null;
   title: string | null;
   kept: boolean;
   done: boolean;
@@ -146,11 +154,14 @@ export function permissionModel(
   call: ToolCallEntry | undefined,
 ): PermissionModel {
   const paper = paperOf(call);
+  // a plan note is Claude's own file, outside the matter: the line stands where the raw path would show
+  const label = paper === null && entry.about === "agent_plan" ? PLAN_NOTE_LINE : null;
   return {
     offers: offersOf(entry.options),
     paper,
     asks: paper === null,
-    title: paper === null && call !== undefined ? isolated(call.title) : null,
+    label,
+    title: paper === null && call !== undefined && label === null ? isolated(call.title) : null,
     kept: keptOf(call),
     done: call?.status === "completed",
     ...stateOf(entry),

@@ -155,20 +155,37 @@ function probeEntry(): Plugin {
  * nothing to preload. The perf module and the entity table import nothing the first load lacks; the room's lazy parts
  * (the thread's list, the plan trigger, the working line's details, the composer's `/` menu) import only chunks
  * index.html preloads, and the list's change-note question only those and the list; U6's retried line only those, and
- * the title rules nothing; U7's queue strip only the first load. vite-config.test.ts checks that, and that no chunk carries a preload list. */
+ * the title rules nothing; U7's queue strip only the first load; U16a's Find results only the first load and the small
+ * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
+ * popover only those and the line; UD1's first run only the first load (U2's form, which it shares with New matter, it
+ * loads lazily itself, as Start a new matter is pressed). The Hindi words (ui/components' words-hi.ts, every words
+ * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
+ * The dialogs that share the dialog primitives are
+ * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
+ * importers of PRELOADED_CHUNKS. */
 export const BARE_CHUNKS = [
   "perf",
   "character-entities",
   "list",
   "plan-trigger",
   "working-details",
-  "change-note-ask",
-  "versions-chunk",
   "retried-line",
   "conversation-title",
   "composer-menu",
   "queue-strip",
+  "find-results",
+  "tool-line-room",
+  "tool-popover",
+  "first-run",
+  "words-hi",
 ];
+
+/** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
+ * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
+ * the first load with New matter's dialog (room.tsx, lazy), these three import them: New matter, change-note-ask and
+ * versions-chunk. Their preloads fetch the primitives in parallel, not in a waterfall after the click. vite-config.test.ts
+ * checks that only the chunks importing one of these carry a preload list. */
+export const PRELOADED_CHUNKS = ["new-matter", "change-note-ask", "versions-chunk"];
 
 const HELPER = "__vitePreload(() => ";
 const DEPS = ", __VITE_PRELOAD__)";
@@ -253,6 +270,10 @@ export const SLOW_TESTS = [
   /\/app\/src\/vite-config\.test\.ts$/,
   /\/components\/src\/markdown\/(?:split|repair|spec)\.test\.ts$/,
 ];
+
+/** The setup that gives a DOM test a working localStorage on a Node whose global one is unusable (storage-setup.ts): both
+ * projects' setupFiles, before their own. */
+const STORAGE_SETUP = fileURLToPath(new URL("./src/testing/storage-setup.ts", import.meta.url));
 
 /**
  * Vitest's order with the slowest files (SLOW_TESTS) first. Without a results cache (CI starts from none) vitest
@@ -345,7 +366,7 @@ export default defineConfig(({ mode }) => {
             include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
             environment: "node",
             // each test waits for its late imports (ui/components/src/lib/late.ts)
-            setupFiles: ["../components/src/testing/setup.ts"],
+            setupFiles: [STORAGE_SETUP, "../components/src/testing/setup.ts"],
             sequence: { groupOrder: AFTER_TIMED },
           },
         },
@@ -359,7 +380,7 @@ export default defineConfig(({ mode }) => {
             include: ["src/**/*.test.{ts,tsx}"],
             exclude: [...configDefaults.exclude, TIMED],
             environment: "node",
-            setupFiles: ["src/testing/setup.ts"],
+            setupFiles: [STORAGE_SETUP, "src/testing/setup.ts"],
             sequence: { groupOrder: AFTER_TIMED },
           },
         },

@@ -1,6 +1,6 @@
 ---
 source: crates/protocol/tests/snapshots.rs
-expression: "HostEvent::ThreadsChanged(ThreadsChanged\n{\n    matter: matter_id(1), threads:\n    vec![ThreadSummary\n    {\n        thread: thread_id(2), matter: matter_id(1), title:\n        Some(\"Draft the reply\".into()), agent: agent(\"claude-acp\"), status:\n        ThreadStatus::Idle, queue_held: false, seen: false, last_stop:\n        Some(LastStop\n        {\n            reason: StopReason::Cancelled, at:\n            Timestamp::new(1_760_000_008_000).unwrap()\n        }), last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),\n    }], removed: Vec::new(), all: true,\n})"
+expression: "HostEvent::ThreadsChanged(ThreadsChanged\n{\n    matter: matter_id(1), threads:\n    vec![ThreadSummary\n    {\n        thread: thread_id(2), matter: matter_id(1), title:\n        Some(\"Draft the reply\".into()), agent: agent(\"claude-acp\"), status:\n        ThreadStatus::Idle, queue_held: false, seen: false, snoozed_until:\n        Some(Timestamp::new(1_760_086_400_000).unwrap()), done: false,\n        last_stop:\n        Some(LastStop\n        {\n            reason: StopReason::Cancelled, at:\n            Timestamp::new(1_760_000_008_000).unwrap()\n        }), last_activity: Some(Timestamp::new(1_760_000_009_000).unwrap()),\n    }], removed: Vec::new(), all: true,\n})"
 ---
 {
   "threads_changed": {
@@ -14,6 +14,8 @@ expression: "HostEvent::ThreadsChanged(ThreadsChanged\n{\n    matter: matter_id(
         "status": "idle",
         "queue_held": false,
         "seen": false,
+        "snoozed_until": 1760086400000,
+        "done": false,
         "last_stop": {
           "reason": "cancelled",
           "at": 1760000008000

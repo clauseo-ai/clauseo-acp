@@ -1,0 +1,13 @@
+{"scenario":"title-codex-double","description":"codex-acp's two titles: turn one's session_info_update is the whole prompt (it is 200 code points or fewer), turn two's is the AI title 'Indemnity cap review'","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","title":"Review the indemnity cap in clause 9 and tell me if it is market"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"First answer."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","title":"Indemnity cap review"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Second answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

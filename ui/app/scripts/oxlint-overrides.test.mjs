@@ -26,6 +26,11 @@ const DOORS = {
   "scripts/guard.test.mjs": ["write"],
   "scripts/oxlint-bans.test.mjs": ["write"],
   "scripts/buildtime-proc.test.mjs": ["write", "process"],
+  // the one-shot split of copy-approvals.json into copy-approvals/, and its test's scratch folders
+  "scripts/split-copy-approvals.mjs": ["write"],
+  "scripts/split-copy-approvals.test.mjs": ["write"],
+  // the running copy review page: writes ../copy-review/running/ and drives agent-browser for its shots
+  "scripts/copy-running.mjs": ["write", "process"],
 };
 
 /** The import rule `scripts/**` sets with the paths of `doors` taken out. */
@@ -100,6 +105,9 @@ describe("the exact-name overrides of .oxlintrc.json", () => {
       lacks("scripts/guard.test.mjs", "write"),
       lacks("scripts/oxlint-bans.test.mjs", "write"),
       lacks("scripts/buildtime-proc.test.mjs", "write and process"),
+      lacks("scripts/split-copy-approvals.mjs", "write"),
+      lacks("scripts/split-copy-approvals.test.mjs", "write"),
+      lacks("scripts/copy-running.mjs", "write and process"),
     ]);
   });
 

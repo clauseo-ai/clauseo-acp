@@ -5,6 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { afterEach, expect, test } from "vitest";
 import type { CommandEnvelope, CommandOutcome, MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
@@ -70,12 +71,11 @@ function type(input: HTMLInputElement, text: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** New matter, pressed, and the name typed. */
+/** New matter, pressed, and the name typed. The dialog's chunk loads on the press: settled waits for it. */
 async function openForm(name = NAME) {
   await act(async () => byId("new-matter")?.click());
-  await settle();
+  await act(async () => settled());
   const field = byId<HTMLInputElement>("matter-name");
-  expect(field).not.toBeNull();
   await act(async () => type(field as HTMLInputElement, name));
 }
 
@@ -108,6 +108,15 @@ test("an existing folder through Change: its display shows, create_matter takes 
   expect(title()).toBe(NAME);
   expect(dialog()).toBeNull();
   expect(document.activeElement).toBe(byId("new-matter"));
+});
+
+test("the dialog opens the first time New matter is pressed, once its chunk has loaded", async () => {
+  await mount(today());
+  expect(byId("matter-name")).toBeNull();
+  await act(async () => byId("new-matter")?.click());
+  await act(async () => settled());
+  expect(dialog()).not.toBeNull();
+  expect(byId<HTMLInputElement>("matter-name")).not.toBeNull();
 });
 
 test("a matter made from the folded rail folds it, and focus goes back to Matters", async () => {
@@ -202,7 +211,10 @@ test("with a NextHost: the default location's folder line, create_matter with de
       next_date: "2026-11-30",
     },
   });
-  expect(transport.only("dispatch")).toEqual([]);
+  // nothing but the rail's morning sweep (U16b), sent at launch whenever the clock reads 05:00 or later
+  expect(transport.only("dispatch").filter((c) => !("sweep_done" in c.command.command))).toEqual(
+    [],
+  );
   expect(title()).toBe(NAME);
 });
 
@@ -218,6 +230,8 @@ const CODES = [
   "matter.folder_is_home",
   "matter.folder_is_system",
   "matter.folder_unreadable",
+  "matter.folder_is_matter",
+  "matter.folder_in_matters_root",
   "matter.folder_missing",
   "internal",
 ] as const;
@@ -246,6 +260,95 @@ for (const lang of ["en", "hi"] as const) {
     host = null;
   });
 }
+
+/** A NextHost whose create_matter is refused with `refusal`, and whose commands are recorded in `sent`. `open` is the
+ * matter opened last, so the one the form names is not the open one. */
+function refusingNext(refusal: NextHostError, sent: NextCommand[], open?: MatterSummary): FakeHost {
+  const matters = [
+    detailed(A),
+    ...(open === undefined ? [] : [detailed(open, { last_opened: 1 })]),
+  ];
+  return {
+    next: fakeNext({
+      matters: () => matters,
+      location: "Documents/Clauseo",
+      command: (c): NextOutcome | undefined => {
+        sent.push(c);
+        if ("create_matter" in c) throw refusal;
+        return undefined;
+      },
+    }),
+  };
+}
+
+test("a folder already a matter names the matter on the list, and Open it sends open_matter and closes the form", async () => {
+  const sent: NextCommand[] = [];
+  const OPEN: MatterSummary = { matter: uuid(3, 2), name: "Rao v. Union of India", kind: "folder" };
+  const transport = await mount(
+    refusingNext(
+      {
+        code: "matter.folder_is_matter",
+        message: "SECRET-DETAIL",
+        retryable: false,
+        matter: A.matter,
+      },
+      sent,
+      OPEN,
+    ),
+  );
+  expect(title()).toBe(OPEN.name);
+  await openForm();
+  await press("create-matter");
+  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+    `This folder is already a matter: \u2068${A.name}\u2069.`,
+  );
+  expect(dialog()?.textContent).not.toContain("SECRET-DETAIL");
+  await press("open-matter");
+  expect(sent).toContainEqual({ open_matter: { matter: A.matter } });
+  expect(created(transport)).toEqual([]);
+  expect(dialog()).toBeNull();
+  expect(title()).toBe(A.name);
+});
+
+test("a folder already a matter whose matter is not on the list says so, with no Open it", async () => {
+  const sent: NextCommand[] = [];
+  await mount(
+    refusingNext(
+      { code: "matter.folder_is_matter", message: "", retryable: false, matter: uuid(9, 9) },
+      sent,
+    ),
+  );
+  await openForm();
+  await press("create-matter");
+  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+    "This folder is already a matter.",
+  );
+  expect(byId("open-matter")).toBeNull();
+  expect(
+    [...(dialog()?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim()),
+  ).not.toContain("Open it");
+  expect(sent.filter((c) => "open_matter" in c)).toEqual([]);
+  expect(dialog()).not.toBeNull();
+});
+
+test("the matters' own folder is a choose-another refusal, and says where Clauseo keeps matters with its path", async () => {
+  const refusal: NextHostError = {
+    code: "matter.folder_in_matters_root",
+    message: "",
+    retryable: false,
+  };
+  await mount({
+    ...today(refusal),
+    pickFolder: () => ({ folder: "ref-root", display: "Documents/Clauseo" }),
+  });
+  await openForm();
+  await press("matter-existing");
+  await press("create-matter");
+  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toBe(
+    "\u2068Documents/Clauseo\u2069 is the folder Clauseo keeps matters in. Choose the folder for one matter.",
+  );
+  expect(byId("open-matter")).toBeNull();
+});
 
 test("the refusal lines differ by reason: a drive is not a home folder", () => {
   expect(createErrorLine("en", "matter.folder_is_drive", "C:\\")).not.toBe(

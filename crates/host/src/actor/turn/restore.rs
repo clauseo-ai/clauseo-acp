@@ -5,6 +5,7 @@
 //! until that commit is durable; a failed one is sent once more when the matter's stream
 //! drains, as an undo's is.
 
+use clauseo_counts::schema::Feature;
 use clauseo_matters::{CheckpointOutcome, Restored};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, ErrorCode, MatterId,
@@ -14,9 +15,10 @@ use clauseo_protocol::{
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::query::own_versions;
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, counting};
 use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
 
@@ -223,7 +225,7 @@ fn send_log(actor: &mut Actor, matter: MatterId, log: RestoreLog) {
     };
     entry.turns.restore = Some(Box::new(log));
     if let Err(error) = sent {
-        tracing::warn!(%matter, %error, "a restore was not logged");
+        tracing::warn!(%matter, error = %Cause(&error), "a restore was not logged");
         actor.finish_command(ctx.id, Err(error));
         on_failed(actor, matter);
         if actor.pipeline.blocked(StreamId::Matter(matter)).is_none() {
@@ -246,6 +248,7 @@ pub(crate) fn committed(actor: &mut Actor, matter: MatterId, durable: bool) {
     else {
         return;
     };
+    counting::feature_used(actor, Feature::Restore);
     note_restored(actor, matter, &log.written);
     end::pass_writer(actor, matter);
 }
@@ -312,7 +315,7 @@ pub(super) fn retry(actor: &mut Actor, matter: MatterId) {
         entry.turns.restore = Some(log);
     }
     if let Err(error) = sent {
-        tracing::warn!(%matter, %error, "a restore was not logged");
+        tracing::warn!(%matter, error = %Cause(&error), "a restore was not logged");
         on_failed(actor, matter);
     }
 }

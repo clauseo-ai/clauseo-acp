@@ -54,6 +54,16 @@ open_unit_enum! {
     test mod permission_kind;
 }
 
+open_unit_enum! {
+    /// What a permission request is about, when the host can tell.
+    pub enum PermissionAbout {
+        /// The agent saving its own plan note in its own config folder, not one of the
+        /// lawyer's files.
+        AgentPlan,
+    }
+    test mod permission_about;
+}
+
 open_data_enum! {
     /// How a permission request was answered.
     #[derive(Debug, Clone, PartialEq, Eq)]

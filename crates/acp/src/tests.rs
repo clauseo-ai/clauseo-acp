@@ -15,6 +15,7 @@ use super::*;
 mod codex;
 mod interface;
 mod mcp_wire;
+mod progress;
 mod prompts;
 mod requests;
 mod sdk_refused_lines;

@@ -93,7 +93,17 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
     assert!(effective.mcp_servers().is_empty());
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
-        ["mcp.servers", "tools.browser", "tools.web_search"]
+        [
+            "install.bundle",
+            "install.registry",
+            "mcp.servers",
+            "plans.",
+            "privacy.counts",
+            "privacy.crash_reports",
+            "tools.browser",
+            "tools.web_search",
+            "update.mode"
+        ]
     );
     let keys: Vec<&str> = effective
         .warnings()
@@ -114,7 +124,20 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             }
         })
         .collect();
-    assert_eq!(keys, ["mcp.servers", "tools.web_search", "tools.browser"]);
+    assert_eq!(
+        keys,
+        [
+            "mcp.servers",
+            "tools.web_search",
+            "tools.browser",
+            "privacy.counts",
+            "privacy.crash_reports",
+            "update.mode",
+            "install.bundle",
+            "install.registry",
+            "plans."
+        ]
+    );
 }
 
 #[test]

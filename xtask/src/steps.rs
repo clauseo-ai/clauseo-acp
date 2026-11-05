@@ -7,7 +7,7 @@ mod policy;
 mod run;
 mod ui;
 
-pub(crate) use plan::plan;
+pub(crate) use plan::{plan, without_tests};
 pub(crate) use run::{Exec, StepResult, StepStatus, run_all};
 
 use crate::checks::StaticCheck;

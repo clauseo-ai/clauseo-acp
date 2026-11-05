@@ -4,8 +4,8 @@
 //! A queued turn has its `UserMessage` and a `TurnQueued` behind its own thread logged, and no
 //! `TurnStarted` or `TurnEnded`. The queue moves on when the current turn's `TurnEnded` is
 //! durable: always to a head sent now (send now, a queued prompt sent now, a requeued steer), else
-//! only after `EndTurn`. Any other stop (`Cancelled`, `Failed`, `AtLimit`, `Refusal`,
-//! `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
+//! only after `EndTurn`. Any other stop (`Cancelled`, `NotAllowed`, `Failed`, `AtLimit`,
+//! `Refusal`, `MaxTokens`, `MaxTurnRequests`) holds it until the lawyer moves it: `ResumeQueue`,
 //! `SendQueuedNow` or a new `SendPrompt`. While a steer request is out, it waits for the answer,
 //! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
 //! the view shows it through `clauseo_reducer::set_queue_held`. At start-up every queued turn
@@ -18,17 +18,19 @@ mod steer;
 
 use std::collections::VecDeque;
 
+use clauseo_counts::schema::Delivery;
 use clauseo_protocol::{
     CommandOutcome, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
     PromptBlock, StopReason, StreamId, ThreadId, TurnId, TurnQueued,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
-use super::super::{Actor, Tag};
+use super::super::{Actor, Tag, counting};
 use super::out::Out;
 use super::{Current, Holder, Then, TurnTag, cancel, host_stopping, lost, matter_of, state, steps};
 use crate::build;
 use crate::error::Error;
+use crate::log_file::Cause;
 
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
@@ -364,17 +366,23 @@ pub(super) fn drop_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: bool) {
     match (after, ok) {
         (After::Appended(_), true) => {
+            counting::question_sent(actor, thread, Delivery::Queued);
             if let Some(queue) = queue(actor, thread) {
                 queue.held = false;
             }
             move_on(actor, thread);
         }
         (After::Jumped(_), true) => {
+            // Sent now, over the running answer, which it cancels.
+            counting::question_sent(actor, thread, Delivery::Now);
             cancel::cancel_current(actor, thread);
             move_on(actor, thread);
         }
         (After::Requeued(_) | After::Edited { .. }, true) => move_on(actor, thread),
-        (After::Steer(ask), true) => steer::send(actor, thread, *ask),
+        (After::Steer(ask), true) => {
+            counting::question_sent(actor, thread, Delivery::Steer);
+            steer::send(actor, thread, *ask);
+        }
         (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
         (After::Appended(turn) | After::Jumped(turn) | After::Requeued(turn), false) => {
             drop_turn(actor, thread, turn);
@@ -437,6 +445,7 @@ fn own_undo(actor: &Actor, thread: ThreadId) -> bool {
 
 /// The head becomes the current turn and goes to step 2.
 fn start_head(actor: &mut Actor, thread: ThreadId) {
+    let started = actor.now().mono;
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -444,7 +453,12 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let turn = head.turn;
-    state.current = Some(Box::new(Current::new(turn, head.message, head.content)));
+    state.current = Some(Box::new(Current::new(
+        turn,
+        head.message,
+        head.content,
+        started,
+    )));
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
         stream,
@@ -453,7 +467,11 @@ fn start_head(actor: &mut Actor, thread: ThreadId) {
                 Ok(()) => steps::on_accepted(actor, thread, turn),
                 Err(error) => {
                     // Nothing could be logged for it: it waits again, held.
-                    tracing::warn!(%thread, %error, "a queued turn could not start");
+                    tracing::warn!(
+                        %thread,
+                        error = %Cause(&error),
+                        "a queued turn could not start"
+                    );
                     put_back(actor, thread, turn);
                 }
             }

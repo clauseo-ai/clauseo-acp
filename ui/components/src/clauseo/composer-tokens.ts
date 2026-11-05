@@ -5,6 +5,8 @@
 //   (execCommand("delete")), so one undo brings it back. Left at a token's end goes to its start, Right at its start
 //   to its end; a caret put inside one any other way (a press, Up or Down) goes to its nearer edge, and a selection
 //   grows to whole tokens. Never while an input method composes, and never with Ctrl, Cmd or Alt held.
+// - A replacement the system makes in a token (macOS's smart quotes on a quoted paper's closing `"`) is refused at
+//   beforeinput; one at or after a token's end (Tamil99's vowel signs) is let be.
 // - Undo and redo read the value again for the tokens' texts (the agent's commands, the papers picked here), so a
 //   token they bring back is one again.
 // - The overlay is a copy of the field behind it: the field's face, padding, line height and transform (the
@@ -25,6 +27,14 @@ import {
   wordDelete,
   type Token,
 } from "./composer-tokens-logic.ts";
+
+/** The straight quote each curly one macOS's smart quotes put in replaces. */
+const STRAIGHT: Readonly<Record<string, string>> = {
+  "\u201c": '"',
+  "\u201d": '"',
+  "\u2018": "'",
+  "\u2019": "'",
+};
 
 export type Tokens = {
   /** The tokens that count now, in order: those standing alone (one typed against is plain text while it is). */
@@ -132,6 +142,39 @@ export function holdTokens(
     read(kind === "historyUndo" || kind === "historyRedo");
   };
 
+  /** A replacement the system makes in a token is refused: macOS's smart quotes turn a quoted paper's closing `"`
+   * into `”` as the pick puts it in, inside the pick's own insertText, or when a word is typed against it, and the
+   * token is lost (WKWebView, #117 M5).
+   * The range isn't read from target ranges (a textarea's are no offsets in its value, and the run logged none): while
+   * the pick's words stand in the field unread, a replacement can only be in them; otherwise it is the selection, as
+   * WebKit selects what it replaces (Tamil99's vowel signs, a spelling fix). One that starts at or after a token's end is let be. */
+  const onBeforeInput = (e: Event) => {
+    const ev = e as InputEvent;
+    // Not composing.current: WebKit's smart quotes come after the composition's words are in and before its
+    // compositionend, flagged as no composition (the M5-hi log, step 10). An input method's own is flagged.
+    if (ev.inputType !== "insertReplacementText" || ev.isComposing) return;
+    const p = pending;
+    if (p !== null && field.value.slice(p.start, p.end) === p.text) {
+      e.preventDefault();
+      return;
+    }
+    const start = field.selectionStart;
+    const end = field.selectionEnd;
+    if (field.value !== value) read(false);
+    if (start === end) {
+      // A collapsed caret: WebKit's smart quotes ask with the caret after the words, not on the quote they replace
+      // (the M5-hi log: the quote at 37, the caret at [39, 39] after a space, or at [47, 47] after a word typed against
+      // it). A curly quote replaces the last straight one before the caret: refused when that one is a token's. Any
+      // other replacement at a collapsed caret is let be (Tamil99's vowel signs, a spelling fix, the lawyer's own quotes).
+      const straight = STRAIGHT[ev.data ?? ""];
+      const at =
+        straight === undefined || start === 0 ? -1 : field.value.lastIndexOf(straight, start - 1);
+      if (at >= 0 && tokens.some((t) => t.start <= at && at < t.end)) e.preventDefault();
+      return;
+    }
+    if (tokens.some((t) => start < t.end && end > t.start)) e.preventDefault();
+  };
+
   /** Selects the range and deletes it through the engine, so undo brings it back. */
   const remove = (
     t: { start: number; end: number },
@@ -212,6 +255,7 @@ export function holdTokens(
   resized?.observe(field);
   const fonts = (doc as Document & { fonts?: FontFaceSet }).fonts;
 
+  field.addEventListener("beforeinput", onBeforeInput);
   field.addEventListener("input", onInput);
   field.addEventListener("keydown", onKey);
   field.addEventListener("keyup", snap);
@@ -236,6 +280,7 @@ export function holdTokens(
     },
     sync: () => read(false),
     stop: () => {
+      field.removeEventListener("beforeinput", onBeforeInput);
       field.removeEventListener("input", onInput);
       field.removeEventListener("keydown", onKey);
       field.removeEventListener("keyup", snap);

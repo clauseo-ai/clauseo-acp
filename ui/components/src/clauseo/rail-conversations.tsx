@@ -4,11 +4,18 @@
 // question for the lawyer on a court-yellow disc, an answer ready, stopped, or waiting for another conversation. Only a
 // question for the lawyer says its words on the row; the rest say theirs under the pointer and to assistive
 // technology. The current one stands raised on the surface tone; its actions sit behind a quiet chevron at its end.
+// U16b: under the pointer or with focus a row shows Snooze and Mark as done at its end, also in its context menu; a
+// snoozed one ends in the alarm clock; a line or the snooze picker can stand in a row's place; the done ones wait in
+// the Done fold under the list.
+import { useState, type ReactNode } from "react";
 import { RailMark } from "./rail-mark.tsx";
-import { CONVERSATION_MARK } from "./rail-marks.ts";
+import { CONVERSATION_MARK, DONE, SNOOZED } from "./rail-marks.ts";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconMore, IconNewMatter } from "../icons/icons.tsx";
+import { tw } from "../lib/words-triage.ts";
+import { Fold } from "./rail-fold.tsx";
+import type { Triage } from "./rail-triage.tsx";
 import { useDisplay } from "../lib/display.ts";
 import { langOfText } from "../lib/script.ts";
 import { useMatterWords } from "../lib/words-matters.ts";
@@ -28,12 +35,22 @@ export type ConversationRowProps = {
   at?: string;
   /** waiting: the title of the conversation it waits behind. */
   behind?: string;
+  /** failed: the failure's day, in the language, when it isn't today. */
+  day?: string;
   current?: boolean;
   onOpen?: () => void;
   /** The current conversation's actions: continue it with the other plan. */
   other?: { agent: string; onContinue: () => void };
   /** Optional: a test id on the row's button, which carries data-state and data-conversation. */
   testId?: string | undefined;
+  /** Optional: snoozed, its words ("Snoozed until tomorrow 9:00 am"): the row ends in the alarm clock. */
+  snoozed?: string | undefined;
+  /** Optional: Snooze and Mark as done, at its end and in its context menu. */
+  triage?: Triage | undefined;
+  /** Optional: what stands in the row's place: the line after a snooze or Done, or the snooze picker. */
+  replace?: ReactNode;
+  /** Optional: done. Only the open conversation stays in the list once done: it ends in the tick, named Done. */
+  done?: boolean | undefined;
 };
 
 function ConversationRow({
@@ -43,22 +60,45 @@ function ConversationRow({
   state = "idle",
   at = "",
   behind = "",
+  day = "",
   current = false,
   onOpen,
   other,
   testId,
+  snoozed,
+  triage,
+  replace,
+  done = false,
   plan = true,
 }: ConversationRowProps & { plan?: boolean }) {
   const w = useMatterWords();
-  const status = current ? null : conversationStatus(w.lang, state, at, behind);
+  // the two buttons (and their menu) mount once the pointer or the focus first comes to the row, so a row that appears
+  // mid-turn costs no menu's own commits, and a long list carries no menus nobody opened
+  const [armed, setArmed] = useState(false);
+  const arm = triage === undefined || armed ? undefined : () => setArmed(true);
+  // the open one's actions behind its chevron: its other plan, and Snooze and Done. The chevron is drawn whenever the
+  // row has them, so the title keeps its room; its menu mounts once the row is armed (or the chevron pressed first)
+  const more = current && (other !== undefined || triage !== undefined);
+  const menuNow = other !== undefined || armed;
+  const [openNow, setOpenNow] = useState(false);
+  if (replace !== undefined) return <li className="room-conv-item">{replace}</li>;
+  const status = current ? null : (snoozed ?? conversationStatus(w.lang, state, at, behind, day));
   // only a question for the lawyer says its words on the row; every other status is its icon, with its words under the
   // pointer and to assistive technology
-  const asks = status !== null && state === "question";
-  const hint = [title, plan ? agent : null, status]
+  const asks = status !== null && state === "question" && snoozed === undefined;
+  const finished = current && done ? tw(w.lang, "Done") : null;
+  const hint = [title, plan ? agent : null, status ?? finished]
     .filter((x) => x !== null && x !== "")
     .join(". ");
   return (
-    <li className="room-conv-item" data-current={current ? "" : undefined}>
+    <li
+      className="room-conv-item"
+      data-current={current ? "" : undefined}
+      // the buttons' width is held from the first render (triage.css), before they mount
+      data-triage={triage !== undefined && !current ? "" : undefined}
+      onPointerEnter={arm}
+      onFocus={arm}
+    >
       <button
         type="button"
         className="room-conv"
@@ -80,24 +120,45 @@ function ConversationRow({
           )}
           {status !== null && (
             <RailMark
-              mark={CONVERSATION_MARK[state as Exclude<ConversationState, "idle">]}
+              mark={
+                snoozed === undefined
+                  ? CONVERSATION_MARK[state as Exclude<ConversationState, "idle">]
+                  : SNOOZED
+              }
               className="room-conv-mark"
             />
           )}
+          {finished !== null && <RailMark mark={DONE} className="room-conv-mark" />}
         </span>
         {asks && (
           <span className="room-conv-ask">
             <Say>{status}</Say>
           </span>
         )}
-        {status !== null && !asks && (
+        {(finished !== null || (status !== null && !asks)) && (
           <span className="sr-only">
-            <Say>{status}</Say>
+            <Say>{finished ?? status ?? ""}</Say>
           </span>
         )}
       </button>
-      {current && other !== undefined && (
-        <Menu>
+      {more && !menuNow && (
+        <Button
+          kind="quiet"
+          size="small"
+          shape="icon"
+          className="room-conv-more"
+          aria-label={w.m("Actions for {title}", { title })}
+          aria-haspopup="menu"
+          onClick={() => {
+            setOpenNow(true);
+            setArmed(true);
+          }}
+        >
+          <IconMore size={16} />
+        </Button>
+      )}
+      {more && menuNow && (
+        <Menu defaultOpen={openNow}>
           <MenuTrigger
             render={
               <Button
@@ -112,14 +173,18 @@ function ConversationRow({
             <IconMore size={16} />
           </MenuTrigger>
           <MenuPopup align="start">
-            <MenuItem
-              label={w.m("Continue with {agent}", { agent: other.agent })}
-              note={w.m("A new conversation, with a summary of this one and a link back.")}
-              onClick={other.onContinue}
-            />
+            {triage?.items(false)}
+            {other !== undefined && (
+              <MenuItem
+                label={w.m("Continue with {agent}", { agent: other.agent })}
+                note={w.m("A new conversation, with a summary of this one and a link back.")}
+                onClick={other.onContinue}
+              />
+            )}
           </MenuPopup>
         </Menu>
       )}
+      {armed && !current && triage?.buttons(title)}
     </li>
   );
 }
@@ -131,6 +196,7 @@ export function ConversationList({
   onNew,
   plan,
   newTestId,
+  done,
 }: {
   /** The matter's name as filed, to name the list. */
   matter: string;
@@ -141,9 +207,17 @@ export function ConversationList({
   onNew?: () => void;
   /** Optional: a test id on New conversation. */
   newTestId?: string | undefined;
+  /** Optional: the done conversations, folded under the list: how many, and the open fold's rows. */
+  done?: { count: number; rows: () => ReactNode } | undefined;
 }) {
   const w = useMatterWords();
   const { platform } = useDisplay();
+  // the row's context menu, opened where it was asked for (rail-point-menu.tsx, loaded later): a row that appears
+  // mid-turn mounts no menu of its own
+  const [at, setAt] = useState<{ id: string; x: number; y: number } | null>(null);
+  const triage = conversations.find((c) => c.id === at?.id)?.triage;
+  // the row it was opened on lost its Snooze (gone, or done) while open: the menu is gone for good, not back with it
+  if (at !== null && triage === undefined) setAt(null);
   // the plan is named only on a conversation whose plan differs from the matter's own: the one most of its
   // conversations use; given no plan, the most common here, the first listed on a tie
   const count = (a: string) => conversations.filter((c) => c.agent === a).length;
@@ -155,11 +229,32 @@ export function ConversationList({
     );
   return (
     <div className="room-convs">
-      <ul aria-label={w.m("Conversations in {name}", { name: matter })} className="room-conv-list">
+      <ul
+        aria-label={w.m("Conversations in {name}", { name: matter })}
+        className="room-conv-list"
+        onContextMenu={(e) => {
+          const button =
+            e.target instanceof Element ? e.target.closest(".room-conv[data-conversation]") : null;
+          const id = button?.getAttribute("data-conversation") ?? null;
+          // only a row with Snooze has the menu: elsewhere the system's own stays shut too
+          if (button === null || conversations.find((c) => c.id === id)?.triage === undefined)
+            return;
+          e.preventDefault();
+          // the context key gives no point: the menu opens under the row
+          const box = button.getBoundingClientRect();
+          setAt({ id: id ?? "", x: e.clientX || box.left, y: e.clientY || box.bottom });
+        }}
+      >
         {conversations.map((c) => (
           <ConversationRow key={c.id} {...c} plan={c.agent !== first} />
         ))}
       </ul>
+      {at !== null && triage?.context(at, () => setAt(null))}
+      {done !== undefined && done.count > 0 && (
+        <Fold name={tw(w.lang, "Done")} count={done.count} className="room-done" testId="done-fold">
+          {done.rows}
+        </Fold>
+      )}
       <button
         type="button"
         className="room-conv room-conv-new"

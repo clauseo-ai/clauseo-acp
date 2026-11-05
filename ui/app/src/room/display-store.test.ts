@@ -286,6 +286,7 @@ test("without a host no key is locked", () => {
 const WIRE_VIEW: SettingsView = {
   ui: { theme: "dark", font_size: 17, language: "en", lite: "off", motion: "system" },
   tools: { web_search: true, browser: false },
+  privacy: { counts: true, crash_reports: false, counts_started: false },
   locked: ["ui.theme"],
 };
 
@@ -332,6 +333,7 @@ test("the first frame shows the host's last answer from localStorage, before the
   const host: SettingsHost = {
     getSettings: () => new Promise(() => {}),
     setUiSettings: async () => {},
+    setToolSettings: async () => {},
     onSettingsChanged: () => () => {},
   };
   const { started } = harness({ host }, cached);
@@ -344,6 +346,7 @@ test("a get_settings answer that a settings_changed overtook is dropped", async 
   const host: SettingsHost = {
     getSettings: () => new Promise((resolve) => (answer = resolve)),
     setUiSettings: async () => {},
+    setToolSettings: async () => {},
     onSettingsChanged: (listener) => {
       changed = listener;
       return () => {};

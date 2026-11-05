@@ -2,14 +2,16 @@
 // its own fake_agent scenario:
 //
 // - `files-one-turn`: three files change, so the lock block shows the general line. Word holds
-//   brief.txt open: its owner file `~$brief.txt` sits beside it. Undo on that turn writes three
-//   files, so it is refused whole and writes nothing; the room shows the lock block with Try again.
-//   Once the owner file is gone, Try again puts the folder back as it was.
+//   brief.txt open: the file is open, shared for reading only, and its owner file `~$brief.txt`
+//   sits beside it (word-hold.ts; since #409 an owner file alone is stale). Undo on that turn
+//   writes three files, so it is refused whole and writes nothing; the room shows the lock block
+//   with Try again.
+//   Once Word lets go of the file and the owner file is gone, Try again puts the folder back.
 // - `word-one-docx` (scenarios/word-one-docx.jsonl): one turn changes one `.docx`, Petition.docx, so
-//   the lock block names that Word document. Word holds it open: its owner file `~$tition.docx`
-//   sits beside it.
+//   the lock block names that Word document. Word holds it open, with its owner file
+//   `~$tition.docx` beside it.
 
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
@@ -48,14 +50,14 @@ const WORD_LINE = /Close '\u2068?Petition\.docx\u2069?' in Word to undo the chan
 const WORD_NOTE = "Word holds the file while it is open. Nothing has changed yet.";
 
 test.describe("files-one-turn", () => {
-  test.use({ scenario: "files-one-turn", matterFiles: BEFORE });
+  test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
 
   test("Undo waits while Word holds a file, then lands once it is closed", async ({
     app,
     scratch,
+    wordLock,
   }) => {
     const w = window(app.page);
-    const brief = join(scratch.matterDir, "brief.txt");
     await openMatter(w);
     await sendPrompt(w, "Finalise clause 4");
     await expect(w.agentMessages.last()).toHaveText(
@@ -65,21 +67,27 @@ test.describe("files-one-turn", () => {
     await expect(w.fileChanged).toHaveCount(3);
     expect(readTree(scratch.matterDir)).toEqual(AFTER);
 
-    // Word opens brief.txt: its owner file appears beside it.
-    writeFileSync(join(scratch.matterDir, OWNER), OWNER_BYTES);
+    // Word opens brief.txt: it holds the file, sharing reading only, and its owner file appears
+    // beside it.
+    const held = await wordLock.hold({
+      document: "brief.txt",
+      owner: OWNER,
+      ownerBytes: OWNER_BYTES,
+    });
 
     await w.undo.last().click();
 
-    // Refused: the lock block shows with Try again, Undo is gone, and nothing moved.
+    // Refused: the lock block shows with Try again, and Undo is gone.
     await expect(w.wordLock).toBeVisible();
     await expect(w.wordLock).toContainText(LOCKED_LINE);
     await expect(w.wordLockRetry).toBeVisible();
     await expect(w.undo).toHaveCount(0);
-    expect(readFileSync(brief, "utf8")).toBe(AFTER["brief.txt"]);
-    expect(readTree(scratch.matterDir)).toEqual({ ...AFTER, [OWNER]: OWNER_BYTES });
+    expect(existsSync(join(scratch.matterDir, OWNER))).toBe(true);
 
-    // Closed in Word: Try again goes through, and the lock block goes.
-    rmSync(join(scratch.matterDir, OWNER));
+    // Closed in Word: the file is let go and the owner file goes. Nothing moved while it was held;
+    // Try again goes through, and the lock block goes.
+    await held.release();
+    expect(readTree(scratch.matterDir)).toEqual(AFTER);
     await w.wordLockRetry.click();
     await expect(w.wordLock).toBeHidden();
     await expect.poll(() => readTree(scratch.matterDir)).toEqual(BEFORE);
@@ -92,9 +100,9 @@ test.describe("word-one-docx", () => {
   test("Undo of one Word document waits while Word holds it, then lands once it is closed", async ({
     app,
     scratch,
+    wordLock,
   }) => {
     const w = window(app.page);
-    const petition = join(scratch.matterDir, "Petition.docx");
     await openMatter(w);
     await sendPrompt(w, "Finalise the petition");
     await expect(w.agentMessages.last()).toHaveText("Edited the petition.");
@@ -102,25 +110,28 @@ test.describe("word-one-docx", () => {
     await expect(w.fileChanged).toHaveCount(1);
     expect(readTree(scratch.matterDir)).toEqual(PETITION_AFTER);
 
-    // Word opens Petition.docx: its owner file appears beside it.
-    writeFileSync(join(scratch.matterDir, PETITION_OWNER), OWNER_BYTES);
+    // Word opens Petition.docx: it holds the file, sharing reading only, and its owner file
+    // appears beside it.
+    const held = await wordLock.hold({
+      document: "Petition.docx",
+      owner: PETITION_OWNER,
+      ownerBytes: OWNER_BYTES,
+    });
 
     await w.undo.last().click();
 
-    // Refused: the lock block names the Word document, with Try again; Undo is gone; nothing moved.
+    // Refused: the lock block names the Word document, with Try again; Undo is gone.
     await expect(w.wordLock).toBeVisible();
     await expect(w.wordLock).toContainText(WORD_LINE);
     await expect(w.wordLock).toContainText(WORD_NOTE);
     await expect(w.wordLockRetry).toBeVisible();
     await expect(w.undo).toHaveCount(0);
-    expect(readFileSync(petition, "utf8")).toBe(PETITION_AFTER["Petition.docx"]);
-    expect(readTree(scratch.matterDir)).toEqual({
-      ...PETITION_AFTER,
-      [PETITION_OWNER]: OWNER_BYTES,
-    });
+    expect(existsSync(join(scratch.matterDir, PETITION_OWNER))).toBe(true);
 
-    // Closed in Word: Try again goes through, and the lock block goes.
-    rmSync(join(scratch.matterDir, PETITION_OWNER));
+    // Closed in Word: the file is let go and the owner file goes. Nothing moved while it was held;
+    // Try again goes through, and the lock block goes.
+    await held.release();
+    expect(readTree(scratch.matterDir)).toEqual(PETITION_AFTER);
     await w.wordLockRetry.click();
     await expect(w.wordLock).toBeHidden();
     await expect.poll(() => readTree(scratch.matterDir)).toEqual(PETITION_BEFORE);

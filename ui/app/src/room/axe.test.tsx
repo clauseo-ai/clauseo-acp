@@ -3,7 +3,8 @@
 // a matter and none, with no matter (the empty rail), when list_matters fails, with the rail in every state, and with
 // the new matter dialog open, with and without a NextHost, and with the agent's permission requests in the thread: a
 // pending prompt on a paper offering all four answers, one answered once and done, a command's, which asks, and one confirming: Always for this matter
-// pressed and held while the OS asks, its answers waiting. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// pressed and held while the OS asks, its answers waiting; and with the agent's questions as forms: Claude's
+// AskUserQuestion with one question and with two (radios, checkboxes, each with its Other). happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts). And U7's wait over the composer while
 // another conversation of the matter runs, with Stop the other and Queue.
 import { readFileSync } from "node:fs";
@@ -30,7 +31,8 @@ import {
   userMessage,
   uuid,
 } from "../testing/stream-script.ts";
-import { detailed, fakeNext, railStates } from "./fake-next.ts";
+import { askEntry, ONE_QUESTION, TWO_QUESTIONS } from "./elicitation-fixtures.ts";
+import { detailed, fakeNext, railStates, railThreads } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { frameBatch } from "../store/batch.ts";
 import { StoreContext } from "../store/hooks.ts";
@@ -79,6 +81,8 @@ type Scene = {
   wait?: boolean;
   /** The open thread's message sent and queued behind another conversation's: the panel without its heading (U7). */
   queued?: boolean;
+  /** The rail's Recent, chosen on its switch (U16a). */
+  recent?: boolean;
 };
 
 const ASKED = userMessage(2, 1, "Tighten the notice to the bank.");
@@ -92,6 +96,8 @@ const SCENES: Record<string, Scene> = {
   failed: { matters: "fails", papers: undefined },
   // every rail state, every date group, Pinned and the scratch matter (fake-next.ts's railStates)
   "the rail in every state": { matters: "states", papers: PAPERS },
+  // U16a: every conversation in every matter, newest first, under its day
+  "the rail's Recent": { matters: "states", papers: PAPERS, recent: true },
   "the new matter dialog": { matters: "states", papers: PAPERS, dialog: true },
   "the new matter dialog without a NextHost": { matters: true, papers: undefined, dialog: true },
   // a prompt on one paper inside the matter, all four answers offered
@@ -132,6 +138,12 @@ const SCENES: Record<string, Scene> = {
     papers: undefined,
     thread: [ASKED],
     queued: true,
+  },
+  // Claude's AskUserQuestion, one question and two, pending: the forms with their radios, checkboxes and Others
+  "the agent's questions": {
+    matters: true,
+    papers: undefined,
+    thread: [ASKED, askEntry(3, uuid(1, 9), ONE_QUESTION), askEntry(4, uuid(2, 9), TWO_QUESTIONS)],
   },
 };
 
@@ -211,7 +223,16 @@ function transportFor(scene: Scene): FakeTransport {
         }),
     ...(scene.papers === undefined
       ? {}
-      : { next: fakeNext({ matters: () => infos, papers: scene.papers }) }),
+      : {
+          next: fakeNext({
+            matters: () => infos,
+            papers: scene.papers,
+            // Needs you and Recent: every matter's threads, as the host's first frames give them
+            ...(scene.matters === "states"
+              ? { frames: true, threads: railThreads(OPEN, SCRATCH, Date.now()) }
+              : {}),
+          }),
+        }),
   });
   if (scene.confirming === true) transport.answerPermission = () => new Promise<void>(() => {});
   return transport;
@@ -240,10 +261,26 @@ for (const theme of THEMES) {
               await new Promise((resolve) => setTimeout(resolve, 0));
               await settled();
             });
+            // the switch holds its side for the session: each scene sets its own
+            if (scene.matters === "states") {
+              const side = scene.recent === true ? "recent" : "matters";
+              await act(async () =>
+                host
+                  ?.querySelector<HTMLButtonElement>(`[data-testid="rail-switch-${side}"]`)
+                  ?.click(),
+              );
+            }
+            if (scene.recent === true) {
+              expect(host.querySelector('[data-testid="recent-row"]'), name).not.toBeNull();
+            }
+            if (scene.matters === "states" && scene.recent !== true)
+              expect(host.querySelector('[data-testid="rail-needs-you"]'), name).not.toBeNull();
             if (scene.dialog === true) {
               await act(async () =>
                 host?.querySelector<HTMLButtonElement>('[data-testid="new-matter"]')?.click(),
               );
+              // the dialog's chunk loads on the press (room.tsx's NewMatter), so settled waits for it
+              await act(async () => settled());
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
             }
@@ -283,6 +320,14 @@ for (const theme of THEMES) {
               expect(wait, name).not.toBeNull();
               expect(wait?.querySelector('[data-testid="stop-other"]'), name).not.toBeNull();
               expect(wait?.querySelector('[data-testid="queue"]'), name).not.toBeNull();
+            } else if (scene.thread?.some((e) => e.elicitation !== undefined) === true) {
+              await act(async () => void (await loadThread()));
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              expect(host.querySelectorAll('[data-testid="elicitation-form"]'), name).toHaveLength(
+                2,
+              );
+              expect(host.querySelectorAll('input[type="radio"]'), name).toHaveLength(5);
+              expect(host.querySelectorAll('input[type="checkbox"]'), name).toHaveLength(3);
             } else if (scene.thread !== undefined) {
               await act(async () => void (await loadThread()));
               await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
@@ -315,7 +360,7 @@ for (const theme of THEMES) {
               if (scene.thread.some((e) => e.tool_call?.kind === "execute"))
                 expect(rows[0]?.textContent, name).toContain("Run ls papers");
             }
-            if (scene.matters === "states")
+            if (scene.matters === "states" && scene.recent !== true)
               expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(13);
             // the display the case names is the one on <html>
             const html = document.documentElement;

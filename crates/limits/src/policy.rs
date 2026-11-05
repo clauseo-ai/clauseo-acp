@@ -23,8 +23,12 @@ use triggers::request_read;
 /// is one more arm in [`kind_rules`], which the compiler asks for.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct KindRules {
-    /// A turn's end reads when the last read started at least this long ago, in milliseconds.
+    /// A turn's end that a live signal came before reads when the last read started at least
+    /// this long ago, in milliseconds.
     pub(crate) turn_read_after_ms: i64,
+    /// A turn's end that no live signal came before reads when the last read started at least
+    /// this long ago, in milliseconds.
+    pub(crate) turn_read_after_ms_no_live: i64,
     /// A live signal may add a window no read named yet (Claude's 5-hour and weekly windows).
     pub(crate) live_rows: bool,
     /// The at-limit line of an account that pauses at its limit, which names the agent.
@@ -36,11 +40,13 @@ pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
     match agent {
         AgentKind::Claude => KindRules {
             turn_read_after_ms: 10 * 60 * 1000,
+            turn_read_after_ms_no_live: 2 * 60 * 1000,
             live_rows: true,
             pauses_words: at_limit_words::CLAUDE_PAUSES,
         },
         AgentKind::Codex => KindRules {
             turn_read_after_ms: 60 * 1000,
+            turn_read_after_ms_no_live: 60 * 1000,
             live_rows: false,
             pauses_words: at_limit_words::CODEX_PAUSES,
         },
@@ -80,7 +86,17 @@ pub enum Input {
         /// The agent, or `None` for every agent.
         agent: Option<AgentKind>,
     },
-    /// A turn of `agent` ended.
+    /// The agent's login changed: a sign-in, a sign-out, an account change, or an API key or
+    /// firm endpoint set or cleared (decision record 0048). Reads at once, past any age or
+    /// back-off; a read already in flight read the old login, so another starts when it ends.
+    /// A question pending still holds the read until it is answered. Rust only: the host takes
+    /// it from desktop, never from a window, so a window cannot use it to skip the back-off.
+    LoginChanged {
+        /// The agent.
+        agent: AgentKind,
+    },
+    /// A turn of `agent` ended. With no turn-start input, "this turn" is the time since the
+    /// agent's last turn end: a live signal since then makes this end wait the longer age.
     TurnEnded {
         /// The agent.
         agent: AgentKind,
@@ -96,7 +112,8 @@ pub enum Input {
         /// Whether any question of any of its sessions is pending.
         asking: bool,
     },
-    /// A live rate-limit signal from `agent`.
+    /// A live rate-limit signal from `agent`. It counts toward the agent's next turn end, so
+    /// that end waits the longer age.
     Live {
         /// The agent.
         agent: AgentKind,
@@ -188,6 +205,11 @@ impl Limits {
                     actions.push(Action::ViewChanged);
                 }
             }
+            Input::LoginChanged { agent } => {
+                if let Some(state) = self.state_mut(agent) {
+                    triggers::login_changed(state, now, &mut actions);
+                }
+            }
             Input::TurnEnded { agent, read_now } => {
                 if let Some(state) = self.state_mut(agent) {
                     triggers::turn_ended(state, read_now, now, &mut actions);
@@ -200,15 +222,20 @@ impl Limits {
             }
             Input::Live { agent, signal } => {
                 if let Some(state) = self.state_mut(agent) {
+                    state.reads.live_seen();
                     actions.extend(apply_live(state, &signal, now));
                 }
             }
             Input::ReadDone { agent, outcome } => {
                 if let Some(state) = self.state_mut(agent)
-                    && state.reads.in_flight
+                    && state.reads.in_flight()
                 {
-                    state.reads.in_flight = false;
+                    let stale = state.reads.flight == triggers::Flight::ReadingStale;
+                    state.reads.flight = triggers::Flight::Idle;
                     actions.extend(apply_read(state, outcome, now));
+                    if stale {
+                        request_read(state, now, &mut actions);
+                    }
                 }
             }
             Input::Deadline => {

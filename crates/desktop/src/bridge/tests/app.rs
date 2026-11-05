@@ -292,11 +292,14 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
 fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_none() {
     let settings_changed = r#"{"settings_changed":{}}"#;
     let threads_changed = r#"{"threads_changed":{}}"#;
+    // The folder scan's progress (R20a): the room in `main` is its only reader.
+    let folder_scanned = r#"{"folder_scanned":{}}"#;
     let limits = r#"{"limits_view_changed":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
         (Feed::App, threads_changed),
+        (Feed::App, folder_scanned),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
@@ -304,6 +307,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     }
     assert!(carries(SETTINGS, Feed::App, settings_changed));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
+    assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));
 
     let scratch = Scratch::new("app-other-label", &[]);

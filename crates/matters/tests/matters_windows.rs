@@ -1,7 +1,8 @@
 //! Windows: the matters crate's Windows-only paths through its public interface, in real
 //! folders. A drive root is refused; the probe finds a file with the offline attribute
-//! cloud-only; and a file or folder another program holds open without sharing fails a read
-//! with an I/O error, never a finding that the file is missing or unchanged.
+//! cloud-only; a file or folder another program holds open without sharing fails a read
+//! with an I/O error, never a finding that the file is missing or unchanged; and a restore's
+//! preview answers with such a file locked, while the restore refuses with it.
 
 #![cfg(windows)]
 #![expect(
@@ -18,12 +19,14 @@ mod windows {
     use std::io::{self, Write};
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, mpsc};
+    use std::time::Duration;
 
     use clauseo_matters::{
         CheckpointOutcome, DEFAULT_MARKER, Error, Imported, Limits, Matter, MissingReason,
-        NewMatter, OsProbe, PlaceholderProbe, Refusal, Retention, Settings, TurnMeta, check_place,
+        NewMatter, OsProbe, PlaceholderProbe, Refusal, Restore, RestoreFiles, Retention, Settings,
+        TurnMeta, check_place,
     };
     use clauseo_protocol::{
         CheckpointId, ErrorCode, MatterId, MatterPath, SkippedFile, SkippedFileReason, Timestamp,
@@ -169,6 +172,38 @@ mod windows {
             Error::Io { op, source, .. } => (op, source),
             other => panic!("not an Io error: {other:?}"),
         }
+    }
+
+    /// `act` on `matter` on its own thread, with the matter back and what `act` returned; fails
+    /// the test when no answer comes within 60 s, so a call that hangs fails instead of hanging.
+    fn within_deadline<T: Send + 'static>(
+        mut matter: Matter,
+        act: impl FnOnce(&mut Matter) -> T + Send + 'static,
+    ) -> (Matter, T) {
+        let (send, receive) = mpsc::channel();
+        std::thread::spawn(move || {
+            let out = act(&mut matter);
+            let _gone = send.send((matter, out));
+        });
+        receive
+            .recv_timeout(Duration::from_secs(60))
+            .expect("no answer within 60 s")
+    }
+
+    /// The restore of the import, checkpoint 1, with outside-edits id `n` and restore id `n + 1`.
+    fn restore_import(n: u64) -> Restore<'static> {
+        Restore {
+            from: cid(1),
+            files: RestoreFiles::All,
+            outside_edits: cid(n),
+            checkpoint: cid(n + 1),
+            at: at(n),
+        }
+    }
+
+    /// The paths of the files a restore plan writes.
+    fn written(plan: &clauseo_matters::RestorePlan) -> Vec<&str> {
+        plan.writes.iter().map(|w| w.path().as_str()).collect()
     }
 
     /// The refusal in `err`, panicking on any other error.
@@ -343,5 +378,121 @@ mod windows {
         drop(held);
         let edited = matter.edited_since(cid(1), cid(3)).unwrap();
         assert!(edited.is_empty(), "{edited:?}");
+    }
+    /// The stale owner-file rule on Windows (this binary never calls `test_support`'s pretend
+    /// Word, so it reads the real process list; no Word runs on CI): an owner file whose document
+    /// opens with no sharing is stale and shows nothing held; while the test holds the document
+    /// with no sharing, as Word does, the same owner file is held.
+    #[test]
+    fn an_owner_file_is_stale_with_no_word_and_the_document_free_and_held_while_it_is_held() {
+        let dir = TestDir::new("stale-owner");
+        let root = dir.path();
+        write(&root.join("Invoice.docx"), b"one");
+        write(
+            &root.join("~$nvoice.docx"),
+            b"owner file left by a crashed Word",
+        );
+        assert_eq!(
+            clauseo_matters::held_open(root, &path("Invoice.docx")),
+            None,
+            "stale: no Word runs and the document opens with no sharing"
+        );
+        let held = hold(&root.join("Invoice.docx"));
+        assert_eq!(
+            clauseo_matters::held_open(root, &path("Invoice.docx")),
+            Some(clauseo_matters::HeldOpen::OwnerFile(
+                "~$nvoice.docx".to_owned()
+            )),
+            "held: the no-share open fails"
+        );
+        drop(held);
+    }
+
+    /// Word holds a document the restore would write: open with no sharing, its owner file
+    /// beside it, edited since the last checkpoint so the walk must read it (the Windows e2e's
+    /// versions-locked.spec.ts). The preview answers within the deadline, naming the document
+    /// locked and still written; it does not fail because the document cannot be read. The
+    /// restore refuses with `matter.file_locked` and writes nothing. Once Word lets go, both go
+    /// through.
+    #[test]
+    fn a_restore_preview_answers_with_a_file_held_without_sharing_locked() {
+        let case = Case::new("preview-held");
+        case.write("brief.txt", "Clause 4 draft\n");
+        case.write("old.txt", "Old terms\n");
+        let mut matter = case.import();
+        case.write("brief.txt", "Clause 4 final\n");
+        case.write("notes/a.txt", "Alpha\n");
+        matter
+            .after_turn(&meta(3), &tools(&["brief.txt", "notes/a.txt"]))
+            .unwrap();
+        let edited = "Clause 4 final, edited by the lawyer\n";
+        case.write("brief.txt", edited);
+        case.write("~$brief.txt", "owner file: open in Word");
+        let held = hold(&case.file("brief.txt"));
+
+        let (matter, preview) =
+            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let plan = preview.expect("the preview answers while the file is held");
+        assert_eq!(plan.locked, [path("brief.txt")], "{plan:?}");
+        assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
+        assert_eq!(plan.added_since, [path("notes/a.txt")], "{plan:?}");
+
+        let (matter, restored) = within_deadline(matter, |m| m.restore(&restore_import(4)));
+        let err = restored.expect_err("the restore went through a held file");
+        assert_eq!(err.code(), ErrorCode::MatterFileLocked, "{err:?}");
+        assert!(
+            matches!(&err, Error::FileLocked { paths } if paths == &[path("brief.txt")]),
+            "{err:?}"
+        );
+        drop(held);
+        assert_eq!(
+            std::fs::read_to_string(case.file("brief.txt")).unwrap(),
+            edited
+        );
+
+        // Word closed the document; its owner file left behind is stale (no Word runs).
+        let (mut matter, preview) =
+            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let plan = preview.unwrap();
+        assert!(plan.locked.is_empty(), "{plan:?}");
+        assert_eq!(written(&plan), ["brief.txt"], "{plan:?}");
+        matter.restore(&restore_import(4)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(case.file("brief.txt")).unwrap(),
+            "Clause 4 draft\n"
+        );
+    }
+
+    /// A file held without sharing that the version does not have, with no owner file beside it,
+    /// is locked too: the restore would not write it, but its walk cannot read it, so the
+    /// outside-edits checkpoint could not record it. A checkpoint still fails with the read's
+    /// error, as before: only a restore and its preview report a held file.
+    #[test]
+    fn a_held_file_the_version_lacks_is_locked_and_a_checkpoint_still_fails() {
+        let case = Case::new("preview-held-added");
+        case.write("brief.txt", "Clause 4 draft\n");
+        let matter = case.import();
+        case.write("added.txt", "added since the import\n");
+        let held = hold(&case.file("added.txt"));
+
+        let (mut matter, preview) =
+            within_deadline(matter, |m| m.preview_restore(cid(1), RestoreFiles::All));
+        let plan = preview.expect("the preview answers while the file is held");
+        assert_eq!(plan.locked, [path("added.txt")], "{plan:?}");
+        assert!(plan.writes.is_empty(), "{plan:?}");
+
+        let err = matter.restore(&restore_import(4)).unwrap_err();
+        assert!(
+            matches!(&err, Error::FileLocked { paths } if paths == &[path("added.txt")]),
+            "{err:?}"
+        );
+        let err = matter.before_turn(&meta(6)).unwrap_err();
+        let (_, source) = io_error(&err);
+        assert_eq!(
+            source.raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION),
+            "{err:?}"
+        );
+        drop(held);
     }
 }

@@ -18,7 +18,13 @@
 //! [`ValidatedCommand`] that [`CommandEnvelope::validate`] makes, and answers with a
 //! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
-//! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`]. A matter's rail
+//! section; the tool switches are a [`ToolsSettingsView`] and a [`ToolsPatch`], the privacy
+//! switches a [`PrivacySettings`] and a [`PrivacyPatch`], each agent's firm plan a [`PlanView`].
+//! The updater crosses as an [`UpdateView`] holding an [`UpdateState`] (decision record 0037).
+//! Sign-in and installs cross outside `HostCommand` and `HostEvent`, through desktop's own
+//! `setup` command and stream arm: a [`SetupCommand`] (a pasted code or a key inside it a
+//! [`Secret`], which never encodes) and a [`SetupEvent`] carrying [`InstallProgress`] and
+//! [`SignIn`] (decision record 0048). A matter's rail
 //! details are [`ClientName`], [`Date`] and [`MatterStatus`] on
 //! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
 //! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
@@ -87,7 +93,8 @@
 //!
 //! # Depends on
 //!
-//! `serde`, `serde_json`, `uuid`, `compact_str`, `thiserror`, and `specta` and `specta-serde`
+//! `serde`, `serde_json`, `uuid`, `compact_str`, `thiserror`, `zeroize` (a [`Secret`]'s text),
+//! and `specta` and `specta-serde`
 //! behind the `specta` feature.
 //! Never `tauri`, `tokio`, the file system, the network or processes (`ARCHITECTURE.md`).
 //!
@@ -98,9 +105,9 @@
 //! `number.rs` and `stream.rs` for the ids and numbers, `raw.rs` for unknown payloads, `text.rs`
 //! for inline costs, `title.rs` for the title rules, `open_enum.rs` for how unknown variants
 //! decode, `error.rs` and `error_code.rs` for errors and the codes, `limits.rs` for account
-//! limits, `command.rs` and `command/validate.rs` for commands and their limits, `query.rs`,
-//! `view.rs` (entries in `view/entry.rs`) and `patch.rs` for what subscribers receive, `wire.rs`
-//! for the TypeScript export's rules.
+//! limits, `command.rs` and `command/validate.rs` for commands and their limits, `setup.rs` for
+//! sign-in and installs, `query.rs`, `view.rs` (entries in `view/entry.rs`) and `patch.rs` for
+//! what subscribers receive, `wire.rs` for the TypeScript export's rules.
 //!
 //! Every event payload is in `event/payload/`; the value types inside them live by topic.
 //!
@@ -131,6 +138,7 @@
 )]
 
 mod approval;
+mod browser_install;
 mod command;
 mod content;
 mod details;
@@ -147,9 +155,11 @@ mod open_enum;
 mod patch;
 mod query;
 mod raw;
+mod search;
 mod serde_util;
 mod session;
 mod settings;
+mod setup;
 mod stream;
 #[cfg(test)]
 mod test_support;
@@ -157,6 +167,7 @@ mod text;
 mod title;
 mod tool;
 mod turn;
+mod update;
 mod view;
 mod web;
 #[cfg(feature = "specta")]
@@ -182,8 +193,9 @@ macro_rules! wire_types {
 wire_types! {
     approval::{
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
-        PermissionChoice, PermissionKind, PermissionOption, Principal,
+        PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
+    browser_install::{BrowserInstallFailure, BrowserInstallState},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
         RefreshWhy, RestoreRequest,
@@ -198,13 +210,14 @@ wire_types! {
         ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
         ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
         PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone,
-        TextAppended, ThreadArchived, ThreadCreated, ThreadRenamed, ToolCallStarted,
+        TextAppended, ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed,
+        ToolCallStarted,
         ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
         UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
-        ElicitationId, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
+        ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
     limits::{
@@ -214,26 +227,37 @@ wire_types! {
         UnavailableReason, WindowFreshness, WindowKind,
     },
     lists::{LastStop, MattersChanged, ThreadsChanged},
-    matter::{CheckpointKind, FileChoice, FileDecision, ImportSummary, MatterKind, RestoreScope},
+    matter::{
+        CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
+        MatterKind, RestoreScope,
+    },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     patch::{
         Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        AgentSummary, BlobRange, DefaultLocation, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary,
-        QueryResult, ReadLen, RestorePreview, ThreadSummary,
+        AgentSummary, BlobRange, DefaultLocation, FolderState, FolderSupportKind, HostQuery, MatterSummary, PageLimit, PaperSummary,
+        PickedFolderSupport, QueryResult, ReadLen, RestorePreview, ThreadSummary, UndoPreview,
     },
     raw::{RawPayload},
+    search::{
+        SearchAnswer, SearchHit, SearchKind, SearchMode, SearchPage, SearchProgress, SearchRequest,
+        SearchScope, SnippetPart,
+    },
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
-        ConfigOption, ConfigOptionKind, Cost, DetachReason, NoticeLevel, PlanEntry, PlanPriority,
+        ConfigOption, ConfigOptionKind, Cost, DetachReason, DoneBy, NoticeLevel, SnoozeBy, PlanEntry, PlanPriority,
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
     settings::{
-        Language, Lite, Motion, SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch,
-        UiSettings,
+        Language, Lite, Motion, PlanProvider, PlanView, PrivacyPatch, PrivacySettings,
+        SettingsView, Theme, ToolsPatch, ToolsSettingsView, UiPatch, UiSettings,
+    },
+    setup::{
+        FoundLogin, InstallLog, InstallProgress, LoginFrom, Secret, SetupCommand, SetupEvent,
+        SignIn, SignInMethod, SignInSource,
     },
     stream::{StreamId},
     text::{BlobRef, TextOrBlob},
@@ -242,12 +266,14 @@ wire_types! {
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
+    update::{FailedStage, InstallWhen, ManagedBy, UpdateMode, UpdateState, UpdateView},
     view::{
         AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, ElicitationEntry,
         ElicitationState,
         EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
-        UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
+        ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,
+        VersionEntry, ViewEntry,
     },
     view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
 }
@@ -255,6 +281,7 @@ wire_types! {
 // Re-exports that are not wire types: constants, functions, and types that never cross the
 // boundary.
 pub use command::{
+    MAX_DAY_START_SKEW_MS,
     MAX_ELICITATION_VALUES_BYTES,
     MAX_FILE_LIST,
     MAX_MATTER_NAME_BYTES,
@@ -263,6 +290,7 @@ pub use command::{
     MAX_PROMPT_FILES,
     MAX_PROMPT_TEXT_BYTES,
     MAX_QUEUED_TURNS,
+    MAX_SNOOZE_AHEAD_MS,
     // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
     ValidatedCommand,
 };
@@ -280,6 +308,9 @@ pub use number::MAX_SAFE;
 pub use open_enum::UnknownKind;
 pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
+pub use search::{DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT};
+// A setup command's variant without its fields, for desktop's allow-lists; never on the wire.
+pub use setup::{MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BYTES, SetupAction};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 pub use web::{

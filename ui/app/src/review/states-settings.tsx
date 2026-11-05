@@ -6,7 +6,7 @@ import { nextHostOf } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { LimitsView } from "../transport/protocol.ts";
+import type { LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
 
 /** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
  * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
@@ -17,12 +17,15 @@ export function SettingsOver({
   locked = [],
   limits,
   releaseDate = null,
+  tools,
 }: {
   section: SectionId;
   lang: Lang;
   locked?: string[];
   limits?: LimitsView;
   releaseDate?: string | null;
+  /** The tools' switches the host sends (SettingsView.tools, Privacy's switches); none when left out. */
+  tools?: ToolsSettingsView;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -30,7 +33,13 @@ export function SettingsOver({
       next: {
         query: (query) => {
           if (query === "get_settings")
-            return { settings: { ui: { ...DEFAULT_UI, language: lang }, locked } };
+            return {
+              settings: {
+                ui: { ...DEFAULT_UI, language: lang },
+                locked,
+                ...(tools === undefined ? {} : { tools }),
+              },
+            };
           throw new Error("not scripted");
         },
       },

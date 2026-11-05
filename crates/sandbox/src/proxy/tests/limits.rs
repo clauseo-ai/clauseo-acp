@@ -1,7 +1,8 @@
 //! Caps, timeouts, the handle's lifetime, connectivity, and what the handle shows.
 
-use std::io::Write;
+use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::harness::{
@@ -125,17 +126,28 @@ fn dropping_the_handle_closes_both_ports_and_every_tunnel() {
     rig.net.route("192.0.2.10:443", echo());
     let (mut tunnel, code) = rig.connect("api.anthropic.com:443");
     assert_eq!(code, 200);
-    let (port, browser_port) = (rig.handle.port(), rig.handle.browser_port());
+    // One idle connection on each listener, accepted or still queued, opened before the drop.
+    // A connect made after it proves nothing: the port is free then, and another test process
+    // can bind it first (it did, on CI).
+    let idle = [("agent", rig.agent()), ("browser", rig.browser())];
     drop(rig.handle);
     assert_eq!(read_all(&mut tunnel), b"", "the tunnel ended");
-    for port in [port, browser_port] {
-        let refused = TcpStream::connect(("127.0.0.1", port)).unwrap_err();
-        assert_eq!(
-            refused.kind(),
-            std::io::ErrorKind::ConnectionRefused,
-            "{port}"
-        );
+    for (listener, mut stream) in idle {
+        // The proxy closed it (EOF), or its listener closed with it still queued (a reset).
+        // A proxy that kept it would answer the 10 s head timeout, or let the read time out.
+        let read = stream.read(&mut [0u8; 1]);
+        let ended = match &read {
+            Ok(n) => *n == 0,
+            Err(error) => matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+            ),
+        };
+        assert!(ended, "the {listener} listener kept a connection: {read:?}");
     }
+    // The proxy thread let go of the sinks it was given: its tasks are gone too.
+    assert_eq!(Arc::strong_count(&rig.records), 1, "the record callback");
+    assert_eq!(Arc::strong_count(&rig.sink), 1, "the denial sink");
 }
 
 #[test]

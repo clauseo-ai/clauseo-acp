@@ -22,9 +22,12 @@
 //!   checks, the firm's upstream, refusals as [`Denial::Host`]. [`ports::bind_loopback`] binds
 //!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
 //!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
-//!   which no bind or claim of this process hands out again until the claim drops.
+//!   which no bind or claim of this process hands out again until the claim drops (on macOS
+//!   and Linux a dropped claim's port is retired, never handed out again).
 //! - Unix: the browser's socket folder ([`BrowserSocketDir`]), `/tmp/clauseo-ab-<id>`, made
 //!   by the host for one launch, removed on drop, and swept at host start.
+//! - Windows: the folder check (`windows::folder_support`), which says whether a folder can
+//!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`.
 //!
 //! # Interface
 //!
@@ -136,6 +139,8 @@ pub mod ports;
 pub mod proxy;
 #[cfg(test)]
 mod test_support;
+#[cfg(windows)]
+pub mod windows;
 
 #[cfg(unix)]
 pub use browser_dir::BrowserSocketDir;

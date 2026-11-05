@@ -304,11 +304,8 @@ fn cache_hits_then_expires_after_five_minutes() {
 #[test]
 fn failed_os_answer_goes_direct() {
     let answer = Err("the PAC script failed".to_owned());
-    assert_eq!(super::settle("example.test", 443, answer), Route::Direct);
-    assert_eq!(
-        super::settle("example.test", 443, Ok(http("p", 1))),
-        http("p", 1)
-    );
+    assert_eq!(super::settle(443, answer), Route::Direct);
+    assert_eq!(super::settle(443, Ok(http("p", 1))), http("p", 1));
 }
 
 #[test]
@@ -451,7 +448,7 @@ mod macos {
         let script = r#"function FindProxyForURL(url, host) { throw new Error("broken"); }"#;
         let answer = macos::script_route(script, "https://via-proxy.test/");
         assert!(answer.is_err(), "{answer:?}");
-        assert_eq!(settle("via-proxy.test", 443, answer), Route::Direct);
+        assert_eq!(settle(443, answer), Route::Direct);
     }
 }
 

@@ -287,9 +287,12 @@ export function ComposerMenu({
       field.focus();
       field.setSelectionRange(cur.trigger.at, end);
       const doc = field.ownerDocument;
+      const was = field.value;
       const ok =
         typeof doc.execCommand === "function" && doc.execCommand("insertText", false, text);
-      if (!ok || field.value.slice(cur.trigger.at, cur.trigger.at + text.length) !== text) {
+      // the engine's edit stands even when the system changed it after (a smart quote): putting the words in again
+      // over the old run's end would repeat part of them
+      if (!ok || field.value === was) {
         // no undo-keeping edit in this engine (happy-dom): put the words in, and tell the field's listeners
         field.setRangeText(text, cur.trigger.at, end, "end");
         field.dispatchEvent(new Event("input", { bubbles: true }));

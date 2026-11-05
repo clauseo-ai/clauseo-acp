@@ -4,11 +4,9 @@
 // picks with Enter into a token (`@path`, quoted when the path holds a space), never opens while an input method
 // composes, and tells the handle which papers the field's tokens mention: each once, in order, none once deleted, again
 // after undo.
-import { act, createRef, StrictMode, type ComponentType, type ReactNode } from "react";
+import { act, createRef, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
-import { settled } from "../lib/late.ts";
-import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
+import { expect, test, vi } from "vitest";
 import type { IconProps } from "../icons/icon.tsx";
 import {
   IconFileEmail,
@@ -17,161 +15,29 @@ import {
   IconFilePdf,
   IconFileWord,
 } from "../icons/icons.tsx";
-import { TooltipProvider } from "../ui/tooltip.tsx";
+import type { ComposerHandle, MentionList } from "./composer.tsx";
 import {
-  Composer,
-  type ComposerHandle,
-  type ComposerProps,
-  type MentionItem,
-  type MentionList,
-  type Mentions,
-} from "./composer.tsx";
-import { RoomScopeProvider } from "./room-scope-provider.tsx";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-if (!("fonts" in document)) {
-  Object.defineProperty(document, "fonts", {
-    value: { ready: Promise.resolve(), status: "loaded", load: async () => [] },
-  });
-}
-
-const paper = (id: string, path: string): MentionItem => {
-  const cut = path.lastIndexOf("/");
-  return {
-    id,
-    label: cut === -1 ? path : path.slice(cut + 1),
-    detail: cut === -1 ? undefined : path.slice(0, cut),
-    text: path,
-  };
-};
-const PAPERS: MentionItem[] = [
-  paper("f-1", "Lease deed.pdf"),
-  paper("f-2", "Pleadings/Board minutes.pdf"),
-  paper("f-3", "Notice.pdf"),
-];
-
-/** A room's papers: answers `list` (or what `answer` gives), counting the loads. */
-function source(list: MentionList | (() => Promise<MentionList>) = { items: PAPERS }) {
-  const load = vi.fn(typeof list === "function" ? list : async () => list);
-  const mentions: Mentions = { load };
-  return { mentions, load };
-}
-
-let host: HTMLDivElement | null = null;
-let root: ReturnType<typeof createRoot> | null = null;
-const wrap = (node: ReactNode) => (
-  <StrictMode>
-    <TooltipProvider>
-      <RoomScopeProvider>{node}</RoomScopeProvider>
-    </TooltipProvider>
-  </StrictMode>
-);
-const composer = (p: Partial<ComposerProps>) => (
-  <Composer
-    took={null}
-    plan=""
-    hint={null}
-    testIds={{ field: "composer", menu: "composer-menu", menuItem: "composer-menu-item" }}
-    {...p}
-  />
-);
-async function mount(node: ReactNode) {
-  showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced" });
-  host = document.createElement("div");
-  document.body.append(host);
-  root = createRoot(host);
-  await act(async () => root?.render(wrap(node)));
-}
-
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  host?.remove();
-  root = null;
-  showDisplay(DEFAULT_DISPLAY);
-  Reflect.deleteProperty(document, "execCommand");
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
-
-const field = () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"]')!;
-const menu = () => document.querySelector<HTMLElement>('[data-testid="composer-menu"]');
-const rows = () => [
-  ...document.querySelectorAll<HTMLElement>('[data-testid="composer-menu-item"]'),
-];
-const names = () => rows().map((r) => r.querySelector("bdi")?.textContent);
-/** The plane's lines under the rows: loading, failed, none, the count past 50, a list that stops short. */
-const notes = () => [...document.querySelectorAll(".fixed.z-20 p")].map((p) => p.textContent);
-const said = () => document.querySelector('[aria-live="polite"]')?.textContent;
-
-const focus = async () => {
-  await act(async () => field().focus());
-  await act(settled);
-};
-const edit = (value: string, init: { inputType?: string; isComposing?: boolean } = {}) =>
-  act(async () => {
-    const a = field();
-    Reflect.set(HTMLTextAreaElement.prototype, "value", value, a);
-    a.setSelectionRange(value.length, value.length);
-    a.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        inputType: init.inputType ?? "insertText",
-        isComposing: init.isComposing ?? false,
-      }),
-    );
-  });
-const key = (k: string, init: KeyboardEventInit = {}) =>
-  act(async () => {
-    const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init });
-    field().dispatchEvent(e);
-    return e.defaultPrevented;
-  });
-const put = (at: number) =>
-  act(async () => {
-    field().setSelectionRange(at, at);
-    document.dispatchEvent(new Event("selectionchange"));
-  });
-const compose = (kind: "compositionstart" | "compositionend") =>
-  act(async () => {
-    field().dispatchEvent(new CompositionEvent(kind, { bubbles: true, data: "" }));
-  });
-
-/** A Range's rects as a page would give them (composer-tokens.test.tsx's): one line, 10 px a character. */
-function lay() {
-  vi.spyOn(Range.prototype, "getClientRects").mockImplementation(function (this: Range) {
-    const r = new DOMRect(this.startOffset * 10, 0, (this.endOffset - this.startOffset) * 10, 26);
-    return [r] as unknown as DOMRectList;
-  });
-}
-const boxes = () => [...document.querySelectorAll(".room-field-tokens .room-token")];
-
-/** The engine's own editing with its undo stack (composer-tokens.test.tsx's). */
-function engine() {
-  const back: string[] = [];
-  const set = (a: HTMLTextAreaElement, v: string, at: number, inputType: string) => {
-    Reflect.set(HTMLTextAreaElement.prototype, "value", v, a);
-    a.setSelectionRange(at, at);
-    a.dispatchEvent(new InputEvent("input", { bubbles: true, inputType }));
-  };
-  const exec = (command: string, _ui?: boolean, value?: string) => {
-    const a = document.activeElement;
-    if (!(a instanceof HTMLTextAreaElement)) return false;
-    const insert = command === "delete" ? "" : (value ?? "");
-    const s = a.selectionStart;
-    back.push(a.value);
-    const kind = command === "delete" ? "deleteContentBackward" : "insertText";
-    set(a, a.value.slice(0, s) + insert + a.value.slice(a.selectionEnd), s + insert.length, kind);
-    return true;
-  };
-  Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
-  return {
-    undo: () =>
-      act(async () => {
-        const v = back.pop();
-        if (v !== undefined) set(field(), v, v.length, "historyUndo");
-      }),
-  };
-}
+  unmount,
+  paper,
+  PAPERS,
+  source,
+  composer,
+  mount,
+  field,
+  menu,
+  rows,
+  names,
+  notes,
+  said,
+  focus,
+  edit,
+  key,
+  put,
+  compose,
+  lay,
+  boxes,
+  engine,
+} from "./composer-mention-fixture.tsx";
 
 test("@ asks the room for its papers as it opens, says it is loading, then lists them; Enter there never sends", async () => {
   let answer: (list: MentionList) => void = () => {};
@@ -355,8 +221,7 @@ test("a matter with no papers says so; more than 50 matches show 50 with the cou
   await focus();
   await edit("@");
   expect(notes()).toEqual(["No papers yet."]);
-  await act(async () => root?.unmount());
-  host?.remove();
+  await unmount();
   const many = Array.from({ length: 2000 }, (_, i) => paper(`f-${i}`, `Bundle/Exhibit ${i}.pdf`));
   const full = source({ items: many, partial: true });
   await mount(composer({ mentions: full.mentions }));

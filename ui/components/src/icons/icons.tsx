@@ -7,8 +7,14 @@
 // is listed in names.ts, and icons.test.ts fails when the two disagree.
 // The icon pass's 21 (IconBreak to IconPlanLimit, at the end of this file) were cut from Lucide 1.66.0 (commit
 // a630cec77eac6568b989e87e4947a8bfe45caacd) on 3 Nov 2026, each drawn over its source at that release and checked
-// against it. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
-// reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file.
+// against it. IconArchived was cut from Lucide 1.66.0's archive (same commit) on 4 Nov 2026, the same way. The tool kinds' glyphs are in tool-kinds.tsx, cut the same way, and re-exported here; the three that
+// reuse a shape already here (IconToolEdit, IconToolSearch, IconToolFetch) stay in this file. The web tools'
+// IconBrowser and IconDownload are in web-tools.tsx, cut from Lucide 1.66.0 on 3 Nov 2026 the same way and re-exported
+// here; IconInfo, at the end of this file, reuses the shape IconAbout draws.
+// IconFailed was cut from Lucide 1.66.0 (triangle-alert, the same commit) on 4 Nov 2026 for U16a, the same way: its
+// rounded corners drawn square, its triangle drawn in from the edge so the miter joins stay inside the 20 px box.
+// IconSnooze was cut from Lucide 1.66.0's alarm-clock (the same commit) on 5 Nov 2026 for U16b: its points scaled about
+// the centre by 0.725, as IconChecking's clock was, so the two clocks read as one family.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export {
@@ -31,6 +37,7 @@ export {
   IconToolSwitchMode,
   IconToolThink,
 } from "./tool-kinds.tsx";
+export { IconBrowser, IconDownload } from "./web-tools.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {
@@ -137,7 +144,7 @@ export function IconArrowRight(props: IconProps) {
   return <IconTurnToIt {...props} />;
 }
 
-/** Send, the arrow up, not used in the room yet (source: arrowUp) */
+/** Wake now, on the Snoozed shelf: back up into the list (cut for Send, not used for it yet) (source: arrowUp) */
 export function IconArrowUp(props: IconProps) {
   return (
     <Icon {...props}>
@@ -249,6 +256,18 @@ export function IconWebsite(props: IconProps) {
         d="M10 2.75c-2.25 2-3.25 4.5-3.25 7.25s1 5.25 3.25 7.25c2.25-2 3.25-4.5 3.25-7.25S12.25 4.75 10 2.75z"
         vectorEffect="non-scaling-stroke"
       />
+    </Icon>
+  );
+}
+
+/** Failed: a conversation's answer failed, on the rail's status line (source: triangleAlert, Lucide triangle-alert at
+ * 1.66.0) */
+export function IconFailed(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10 3.25l7.5 13.5h-15z" vectorEffect="non-scaling-stroke" />
+      <path d="M10 8v3.5" vectorEffect="non-scaling-stroke" />
+      <path d="M10 14.15h.01" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }
@@ -510,6 +529,18 @@ export function IconPlanLimit(props: IconProps) {
   );
 }
 
+/** Archived: a conversation set aside, on a Find result (source: archive, Lucide archive at 1.66.0; the lid and the
+ * box's corners drawn square) */
+export function IconArchived(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.8 3.5h14.4v3.6H2.8z" vectorEffect="non-scaling-stroke" />
+      <path d="M4.2 7.1v10.1h11.6V7.1" vectorEffect="non-scaling-stroke" />
+      <path d="M8.55 10.6h2.9" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
 /** A tool call that edits files, not used in the room yet (source: penLine, Lucide pen-line, as toolEdit: the shape
  * IconYourChange draws, so it reuses it) */
 export function IconToolEdit(props: IconProps) {
@@ -526,4 +557,24 @@ export function IconToolSearch(props: IconProps) {
  * Lucide globe, as toolFetch: the shape IconWebsite draws, so it reuses it) */
 export function IconToolFetch(props: IconProps) {
   return <IconWebsite {...props} />;
+}
+
+/** Snooze: a conversation set aside until a time, on the rail (source: alarmClock, Lucide alarm-clock at 1.66.0) */
+export function IconSnooze(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="10" cy="10.75" r="5.8" vectorEffect="non-scaling-stroke" />
+      <path d="M10 7.85v2.9l1.45 1.45" vectorEffect="non-scaling-stroke" />
+      <path d="M4.95 3.5L2.75 5.65" vectorEffect="non-scaling-stroke" />
+      <path d="M17.25 5.65l-2.2-2.15" vectorEffect="non-scaling-stroke" />
+      <path d="M5.9 14.85L4.2 16.55" vectorEffect="non-scaling-stroke" />
+      <path d="M14.1 14.85l1.7 1.7" vectorEffect="non-scaling-stroke" />
+    </Icon>
+  );
+}
+
+/** More about it: an info tip's button (source: info, Lucide info at 1.66.0, as info: the shape IconAbout draws, so it
+ * reuses it) */
+export function IconInfo(props: IconProps) {
+  return <IconAbout {...props} />;
 }

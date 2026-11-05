@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { t } from "../lib/words.ts";
-import { rt, roomHindi } from "../lib/words-room.ts";
+import { rt } from "../lib/words-room.ts";
+import { roomHindi } from "../lib/words-room.hi.ts";
 import {
   acceptNext,
   fitCitations,

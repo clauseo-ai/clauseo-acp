@@ -71,10 +71,16 @@ export function nextDateError(lang: Lang, text: string): string | null {
 }
 
 /** The form's line for a matter the host wouldn't make, from the error's code and, where the caller has it, the
- * folder's display ("Documents/Acme", "C:\\"), isolated in the line. matter.folder_refused, which doesn't say why,
- * takes a line true of every reason the host gives it: a folder already a matter, an unreadable matter file, the
- * matters' own folder, a drive, the home folder, a system folder. H5's codes each say their reason. */
-export function createErrorLine(lang: Lang, code: string, shown?: string): string {
+ * folder's display ("Documents/Acme", "C:\\"), isolated in the line, and for matter.folder_is_matter the name of the
+ * matter that has the folder, when the matters list has it. matter.folder_refused, which doesn't say why, takes a line
+ * true of every reason the host gives it: a folder already a matter, an unreadable matter file, the matters' own
+ * folder, a drive, the home folder, a system folder. H5's codes each say their reason. */
+export function createErrorLine(
+  lang: Lang,
+  code: string,
+  shown?: string,
+  matterName?: string,
+): string {
   const both = (first: string | null, second: string) =>
     first === null ? second : `${first} ${second}`;
   const named = shown !== undefined && shown !== "";
@@ -82,6 +88,17 @@ export function createErrorLine(lang: Lang, code: string, shown?: string): strin
   switch (code) {
     case "matter.folder_refused":
       return mt(lang, "Clauseo can't make a matter of this folder. Choose another folder.");
+    case "matter.folder_is_matter":
+      return matterName === undefined || matterName === ""
+        ? mt(lang, "This folder is already a matter.")
+        : mt(lang, "This folder is already a matter: {name}.", { name: isolate(matterName) });
+    case "matter.folder_in_matters_root":
+      return both(
+        named
+          ? mt(lang, "{path} is the folder Clauseo keeps matters in.", { path })
+          : mt(lang, "That folder is where Clauseo keeps matters."),
+        mt(lang, "Choose the folder for one matter."),
+      );
     case "matter.folder_is_drive":
       return both(
         named ? mt(lang, "{path} is a whole drive.", { path }) : null,

@@ -86,6 +86,7 @@ fn a_create_keeps_its_details_and_list_matters_shows_every_field() {
             status: MatterStatus::Idle,
             folder_display: work.join("State v. Kunal Desai").display().to_string(),
             folder_state: FolderState::Found,
+            folder_support: None,
         }
     );
     // The Scratch matter is listed first (oldest), with no details, and outside this home it
@@ -120,13 +121,13 @@ fn a_folder_outside_home_shows_in_full() {
 #[test]
 fn a_default_location_create_makes_the_folder_there() {
     let dir = Dir::new("default_location_create", &[]);
-    let location = dir.data().join("work").join("Matters");
+    let location = dir.home().join("work").join("Matters");
     dir.set_settings(
         &[],
         serde_json::json!({ "matters": { "default_location": location.display().to_string() } }),
     );
     let host = dir.start_with(0, |config| {
-        config.with_home_folder(Some(dir.data().to_owned()))
+        config.with_home_folder(Some(dir.home().to_owned()))
     });
     let create = |name: &str| HostCommand::CreateMatter {
         name: Title::new(name).unwrap(),
@@ -173,7 +174,7 @@ fn without_a_set_location_the_default_is_documents_clauseo() {
         next_date: None,
     }));
     let folder = dir
-        .data()
+        .home()
         .join("Documents")
         .join("Clauseo")
         .join("Kaveri Agro");
@@ -342,7 +343,7 @@ fn get_default_location_shows_where_new_matters_go() {
     let dir = Dir::new("get_default_location", &[]);
     // Not set: Documents/Clauseo, below the home folder.
     let host = dir.start_with(0, |config| {
-        config.with_home_folder(Some(dir.data().to_owned()))
+        config.with_home_folder(Some(dir.home().to_owned()))
     });
     assert_eq!(
         default_display(&host),
@@ -350,13 +351,13 @@ fn get_default_location_shows_where_new_matters_go() {
     );
     host.shutdown();
     // Set, below home; then the same with no home known, in full.
-    let location = dir.data().join("work").join("Matters");
+    let location = dir.home().join("work").join("Matters");
     dir.set_settings(
         &[],
         serde_json::json!({ "matters": { "default_location": location.display().to_string() } }),
     );
     let host = dir.start_with(1, |config| {
-        config.with_home_folder(Some(dir.data().to_owned()))
+        config.with_home_folder(Some(dir.home().to_owned()))
     });
     assert_eq!(
         default_display(&host),

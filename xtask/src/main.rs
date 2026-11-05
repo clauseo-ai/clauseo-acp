@@ -1,4 +1,4 @@
-//! Workspace automation: `cargo xtask check [--quick] [--skip-ui]`,
+//! Workspace automation: `cargo xtask check [--quick] [--skip-ui] [--no-tests]`,
 //! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
 //! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]` and `cargo xtask mutants`.
 //!
@@ -31,7 +31,9 @@
 //! - Frozen, as AGENTS.md says: no new checks. Two exceptions, approved by Rohan 2026-11-03:
 //!   `check --skip-ui`, which `.github/scripts/pre-push.sh` passes on a branch with no ui change
 //!   and CI never passes; and `--quick` adding clauseo-fake_agent when a selected package's
-//!   tests run it (`changes::built_for_tests`).
+//!   tests run it (`changes::built_for_tests`). A third, approved by Rohan 2026-11-04:
+//!   `check --no-tests`, which `.github/scripts/pre-push.sh` always passes so that a push runs
+//!   the format, lint, typecheck and build steps only, and CI never passes.
 //! - `mutants` runs cargo-mutants on the diff against origin/main and reads its `outcomes.json`
 //!   (`mutants/outcomes.rs`); exclusions live in `.cargo/mutants.toml`, each with its reason.
 
@@ -80,6 +82,11 @@ enum Commands {
         /// passes it.
         #[arg(long)]
         skip_ui: bool,
+        /// Skip the five test steps (nextest, nextest-specta, doctest, vitest, playwright-unit);
+        /// the summary marks each `(skipped: --no-tests)`. Format, lint, typecheck and build
+        /// steps still run. `.github/scripts/pre-push.sh` always passes it; CI never does.
+        #[arg(long)]
+        no_tests: bool,
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
     /// how to install gitleaks and lefthook, and check their versions against the pins. `--only`
@@ -156,7 +163,11 @@ enum Commands {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Commands::Check { quick, skip_ui } => {
+        Commands::Check {
+            quick,
+            skip_ui,
+            no_tests,
+        } => {
             let root = workspace::workspace_root();
             let ctx = workspace::Context {
                 members: workspace::load(&root),
@@ -167,7 +178,12 @@ fn main() -> ExitCode {
             let mut exec = |cmd: &process::Cmd, on_output: &mut dyn FnMut(&[u8])| {
                 process::capture(cmd, &root, on_output)
             };
-            check::run(&ctx, quick, ci, skip_ui, &mut exec, &mut process::run_quiet)
+            let flags = check::Flags {
+                quick,
+                skip_ui,
+                no_tests,
+            };
+            check::run(&ctx, flags, ci, &mut exec, &mut process::run_quiet)
         }
         Commands::Setup {
             list: Some(format), ..

@@ -1,0 +1,20 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::FolderScanned(FolderScanned\n{\n    folder: folder_ref_id(2), files: 12, bytes: Count::new(40_960).unwrap(),\n    now_reading: Some(path(\"Leases/a.docx\")), place: FolderPlace::Synced\n    { service: \"OneDrive\".to_owned() }, cloud_only: 3, done: false, cancelled:\n    false,\n})"
+---
+{
+  "folder_scanned": {
+    "folder": "01900000-0000-7000-8000-000000000002",
+    "files": 12,
+    "bytes": 40960,
+    "now_reading": "Leases/a.docx",
+    "place": {
+      "synced": {
+        "service": "OneDrive"
+      }
+    },
+    "cloud_only": 3,
+    "done": false,
+    "cancelled": false
+  }
+}

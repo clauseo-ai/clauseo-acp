@@ -22,8 +22,12 @@ export function patternOf(text: string): RegExp {
 /** Marks the elements under root that show text; returns how many. */
 export function markText(root: Element, text: string): number {
   const want = patternOf(text);
-  // its slots stand for any words; elsewhere the string as written, anywhere in an element's own text
-  const held = new RegExp(want.source.slice(1, -1), "su");
+  // its slots stand for any words; elsewhere the string as written, anywhere in an element's own text as whole words
+  // ("Needs you" is not held by "Needs your permission")
+  const held = new RegExp(
+    `(?<![\\p{L}\\p{M}\\p{N}])${want.source.slice(1, -1)}(?![\\p{L}\\p{M}\\p{N}])`,
+    "su",
+  );
   const is = (value: string | null) => value !== null && want.test(value.trim());
   const shows = (el: Element) => is(el.textContent);
   let marked = 0;

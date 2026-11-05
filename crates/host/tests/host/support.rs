@@ -67,6 +67,8 @@ pub(crate) enum Scenario {
     Bundled(&'static str),
     /// `crates/host/tests/scenarios/<name>.jsonl`.
     Local(&'static str),
+    /// `ui/e2e/app-windows/scenarios/<name>.jsonl`, a scenario the window's specs play by path.
+    Ui(&'static str),
     /// A scenario file the test wrote (the Unix symlink test, and the launch profile's tests,
     /// whose launcher fills in each session's folders).
     Written(PathBuf),
@@ -78,6 +80,11 @@ impl Scenario {
         match self {
             Self::Bundled(name) => (*name).to_owned(),
             Self::Written(path) => path.display().to_string(),
+            Self::Ui(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../ui/e2e/app-windows/scenarios")
+                .join(format!("{name}.jsonl"))
+                .display()
+                .to_string(),
             Self::Local(name) => Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")
                 .join("scenarios")
@@ -88,27 +95,33 @@ impl Scenario {
     }
 }
 
-/// A test's own folder, `<temp>/clauseo-host-<test>-<pid>`, removed when dropped. The data
-/// folder is the root itself (`Locations::under_root`), agents get `home/` as their home, and
-/// matter folders go in `<temp>/clauseo-host-<test>-<pid>-work`, beside the root: a folder inside
-/// the data folder cannot be a matter.
+/// A test's own folder, `<temp>/clauseo-host-<test>-<pid>`, removed when dropped. It is the
+/// lawyer's home: the data folder is `root/data` and the new matters' folder `root/Documents/
+/// Clauseo`, outside it (`Locations::under_home`); agents get `home/` as their home, and matter
+/// folders go in `<temp>/clauseo-host-<test>-<pid>-work`, beside the root: a folder inside the
+/// data folder cannot be a matter.
 #[derive(Debug)]
 pub(crate) struct Dir {
     root: PathBuf,
+    data: PathBuf,
     work: PathBuf,
 }
 
 impl Dir {
     /// A fresh folder for `test`, with `agents` written into `settings.json`.
     pub(crate) fn new(test: &str, agents: &[(&str, Scenario)]) -> Self {
+        // Owner files planted here stay held through the stale rule: no Word runs in a test.
+        clauseo_matters::test_support::pretend_word_running_since_epoch();
         let stem = format!("clauseo-host-{test}-{}", std::process::id());
         let root = std::env::temp_dir().join(&stem);
         let work = std::env::temp_dir().join(format!("{stem}-work"));
         write::remove_dir_all(&root).unwrap();
         write::remove_dir_all(&work).unwrap();
         write::create_dir_all(&root.join("home"));
+        write::create_dir_all(&root.join("data"));
         write::create_dir_all(&work);
-        let dir = Self { root, work };
+        let data = root.join("data");
+        let dir = Self { root, data, work };
         dir.set_agents(agents);
         dir
     }
@@ -141,7 +154,7 @@ impl Dir {
             settings.extend(extra);
         }
         write::write(
-            &self.root.join("settings.json"),
+            &self.data().join("settings.json"),
             serde_json::to_string_pretty(&settings).unwrap().as_bytes(),
         );
     }
@@ -157,8 +170,13 @@ impl Dir {
         write::write(&self.root.join("managed-mcp.json"), b"{\"mcpServers\": {}}");
     }
 
-    /// The data folder (the test's root folder), where the store keeps its database.
+    /// The data folder, `root/data`, where the store keeps its database.
     pub(crate) fn data(&self) -> &Path {
+        &self.data
+    }
+
+    /// The lawyer's home folder: the test's own folder, the data folder inside it.
+    pub(crate) fn home(&self) -> &Path {
         &self.root
     }
 
@@ -172,9 +190,9 @@ impl Dir {
         folder
     }
 
-    /// The data folder (the test's root).
+    /// The data folder, as [`Dir::data`].
     pub(crate) fn data_dir(&self) -> &Path {
-        &self.root
+        &self.data
     }
 
     /// The folder the matter folders go in, `<root>-work`, beside the data folder.
@@ -204,7 +222,7 @@ impl Dir {
         clock: &ManualClock,
         launcher: Arc<dyn Launcher>,
     ) -> HostConfig {
-        let locations = Locations::under_root(&self.root);
+        let locations = Locations::under_home(&self.root);
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
         HostConfig::new(effective, launcher)
@@ -222,7 +240,7 @@ impl Dir {
 
     /// The text of `settings.json`.
     pub(crate) fn settings_json(&self) -> String {
-        std::fs::read_to_string(self.root.join("settings.json")).unwrap()
+        std::fs::read_to_string(self.data().join("settings.json")).unwrap()
     }
 
     /// Starts run `run` with `policy`, a `policy.json`'s text, as its one policy source.
@@ -231,9 +249,31 @@ impl Dir {
         self.start(run)
     }
 
-    /// Starts run `run` with every default.
+    /// Starts run `run` with every default. A start that finds the data folder's lock still held
+    /// is tried again, as [`open_store`] does: the config is rebuilt for each try.
     pub(crate) fn start(&self, run: u16) -> Running {
-        self.start_with(run, |config| config)
+        const TRIES: u32 = 2_000;
+        for _ in 0..TRIES {
+            let clock = Self::clock(run);
+            let config = self.config_launching(run, &clock, Arc::new(self.launcher()));
+            match Host::start(config) {
+                Ok((handle, join)) => {
+                    return Running {
+                        handle,
+                        join: Some(join),
+                        clock,
+                    };
+                }
+                Err(error) if error.code() == ErrorCode::StoreLocked => {
+                    wait(
+                        "a store lock",
+                        async_io::Timer::after(Duration::from_millis(5)),
+                    );
+                }
+                Err(error) => panic!("Host::start (run {run}): {error}"),
+            }
+        }
+        panic!("Host::start (run {run}): the store stayed locked");
     }
 
     /// Starts run `run`, letting `adjust` change the config first.

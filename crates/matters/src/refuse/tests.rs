@@ -1,19 +1,27 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use unicode_normalization::UnicodeNormalization;
+
 use super::{
-    check_folder, is_unc, is_unc_text, is_windows_drive_root_text, same_folder, same_or_nested,
+    Fold, check_folder, fold, is_unc, is_unc_text, is_windows_drive_root_text, same_folder,
+    same_or_nested,
 };
 use crate::test_dir::TestDir;
 use crate::{Error, MissingReason, Refusal, write};
 
 #[test]
 fn windows_drive_roots_by_text() {
-    for root in [r"C:\", r"c:\", r"\\?\C:\", "D:", "z:/"] {
+    for root in [
+        r"C:\", r"c:\", r"\\?\C:\", r"\\.\C:\", r"\\.\c:", "D:", "z:/",
+    ] {
         assert!(is_windows_drive_root_text(root), "{root} is a drive root");
     }
     for other in [
         r"C:\Users",
         r"\\?\C:\x",
+        r"\\.\C:\x",
+        r"\\.\pipe\x",
         r"\\server\share",
         r"\\?\UNC\server\share\x",
         "/",
@@ -213,4 +221,67 @@ fn a_sibling_in_another_unicode_form_is_refused_but_never_relinked() {
         cfg!(target_os = "macos")
     );
     assert!(same_folder(&composed, &composed));
+}
+
+/// A Devanagari name with a nukta letter, `ऱानून`: its composed form (U+0931 …) and its NFD
+/// form (U+0930 U+093C …) differ. The file-system fold composes only on macOS, where APFS matches
+/// the forms; ext4 and NTFS keep them apart, so the forms stay different there. The safety fold
+/// composes on every OS. (`क़` is not used: U+0958 is a composition exclusion, so its NFC form is
+/// the decomposed one.)
+#[test]
+fn a_decomposed_name_folds_to_its_composed_form_as_each_file_system_compares() {
+    let spelled = "\u{931}\u{93e}\u{928}\u{942}\u{928}";
+    let composed = OsString::from(spelled.nfc().collect::<String>());
+    let decomposed = OsString::from(spelled.nfd().collect::<String>());
+    assert_ne!(decomposed, composed);
+    assert!(
+        composed
+            .to_str()
+            .is_some_and(|text| text.starts_with('\u{931}'))
+    );
+    assert_eq!(
+        fold(decomposed.clone(), Fold::Safety),
+        fold(composed.clone(), Fold::Safety)
+    );
+    assert_eq!(
+        fold(decomposed, Fold::FileSystem) == fold(composed, Fold::FileSystem),
+        cfg!(target_os = "macos")
+    );
+}
+
+/// A network share's root is a whole volume, as a drive is: refused in both spellings, with or
+/// without the trailing separator, and so is the admin share; a folder inside a share is not
+/// (clauseo-ai/clauseo-acp#244).
+#[cfg(windows)]
+#[test]
+fn share_roots_are_drive_roots_on_windows() {
+    use super::is_drive_root;
+    for root in [
+        r"\\server\share\",
+        r"\\server\share",
+        r"\\?\UNC\server\share\",
+        r"\\?\UNC\server\share",
+        r"\\localhost\C$\",
+        r"\\?\UNC\localhost\C$\",
+        r"\\.\UNC\server\share\",
+        r"\\.\UNC\server\share",
+        r"C:\",
+        r"\\?\C:\",
+        r"\\.\C:\",
+    ] {
+        assert!(is_drive_root(Path::new(root)), "{root} is a drive root");
+    }
+    for inside in [
+        r"\\server\share\Clients\X",
+        r"\\?\UNC\server\share\Clients",
+        r"\\localhost\C$\Users",
+        r"\\.\UNC\server\share\Clients",
+        r"\\.\pipe\x\y\z",
+        r"C:\Users",
+    ] {
+        assert!(
+            !is_drive_root(Path::new(inside)),
+            "{inside} is not a drive root"
+        );
+    }
 }

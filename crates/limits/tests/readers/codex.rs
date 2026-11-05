@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_limits::{AccountRead, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{AccountRef, AgentKind, Billing, Finite, PlanLabel};
 use futures::executor::block_on;
 use futures::future::join;
@@ -39,10 +39,16 @@ fn read_once(setup: &Setup, play: Play) -> (ReadOutcome, std::sync::Arc<TestLaun
 fn a_full_app_server_exchange_reads_the_plus_plan() {
     let (setup, _) = codex_setup();
     let (outcome, launcher) = read_once(&setup, Play::Scenario("codex-plus"));
-    let ReadOutcome::Usage { limits, reached } = outcome else {
+    let ReadOutcome::Usage {
+        limits,
+        reached,
+        account_read,
+    } = outcome
+    else {
         panic!("no usage: {outcome:?}");
     };
     assert_eq!(reached, None);
+    assert_eq!(account_read, AccountRead::Read);
     assert_eq!(limits.agent, AgentKind::Codex);
     assert_eq!(
         limits.account,
@@ -189,6 +195,8 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
         "cloud.skills.enabled=false",
         "skills.bundled.enabled=false",
         "skills.include_instructions=false",
+        "cli_auth_credentials_store=\"file\"",
+        "shell_environment_policy.ignore_default_excludes=false",
     ] {
         args.extend([OsString::from("-c"), OsString::from(set)]);
     }

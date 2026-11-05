@@ -1,0 +1,316 @@
+{
+  "U12-01": {
+    "en": "Plenty left until the {time} reset",
+    "hi": "{time} बजे के रीसेट तक काफ़ी बाकी है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-02": {
+    "en": "Under half left. Resets at {time}.",
+    "hi": "आधे से कम बाकी। {time} बजे रीसेट।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-03": {
+    "en": "Close to the limit. Resets at {time}.",
+    "hi": "सीमा के करीब। {time} बजे रीसेट होगा।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-04": {
+    "en": "Plenty left",
+    "hi": "काफ़ी बाकी है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-05": {
+    "en": "Under half left.",
+    "hi": "आधे से कम बाकी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-06": {
+    "en": "Close to the limit.",
+    "hi": "सीमा के करीब।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-07": {
+    "en": "Usage not shown right now",
+    "hi": "अभी उपयोग नहीं दिख रहा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-08": {
+    "en": "{name}, pay as you go",
+    "hi": "{name}, उपयोग के अनुसार भुगतान",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-09": {
+    "en": "Billed to your Anthropic account",
+    "hi": "आपके Anthropic खाते में शुल्क लगता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-10": {
+    "en": "{n} percent of the plan left",
+    "hi": "प्लान का {n} प्रतिशत बाकी है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-11": {
+    "en": "Show the plan's limits",
+    "hi": "प्लान की सीमाएँ दिखाएँ",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-12": {
+    "en": "5-hour limit",
+    "hi": "5 घंटे की सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-13": {
+    "en": "Weekly limit",
+    "hi": "साप्ताहिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-16": {
+    "en": "Weekly limit for connected apps",
+    "hi": "जुड़े हुए ऐप्स की साप्ताहिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-17": {
+    "en": "Monthly limit",
+    "hi": "मासिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-18": {
+    "en": "Usage limit",
+    "hi": "उपयोग की सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-19": {
+    "en": "{n}% left",
+    "hi": "{n}% बाकी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-20": {
+    "en": "As of {time}",
+    "hi": "{time} बजे के आँकड़े",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-21": {
+    "en": "Usage isn't available right now.",
+    "hi": "अभी उपयोग की जानकारी उपलब्ध नहीं है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-22": {
+    "en": "Your {name} plan didn't send its limits this time. Asking still works as usual.",
+    "hi": "आपके {name} प्लान ने इस बार अपनी सीमाएँ नहीं भेजीं। पूछना पहले की तरह चलता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-23": {
+    "en": "Pay as you go, billed to your Anthropic account",
+    "hi": "उपयोग के अनुसार भुगतान, आपके Anthropic खाते में शुल्क लगता है",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-24": {
+    "en": "Close to your 5-hour limit.",
+    "hi": "आपकी 5 घंटे की सीमा करीब है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-25": {
+    "en": "Long tasks may pause until {time}.",
+    "hi": "लंबे काम {time} बजे तक रुक सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-26": {
+    "en": "Long tasks may pause until {day} {time}.",
+    "hi": "लंबे काम {day} {time} बजे तक रुक सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-27": {
+    "en": "{name} plan limit reached at {time}",
+    "hi": "{time} बजे {name} प्लान की सीमा पूरी हुई",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-28": {
+    "en": "{name} plan limit reached",
+    "hi": "{name} प्लान की सीमा पूरी हो गई",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-29": {
+    "en": "The 5-hour limit. It resets at {time}.",
+    "hi": "5 घंटे की सीमा। यह {time} बजे रीसेट होगी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-30": {
+    "en": "The 5-hour limit. It resets on {day} at {time}.",
+    "hi": "5 घंटे की सीमा। यह {day} को {time} बजे रीसेट होगी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-31": {
+    "en": "The weekly limit. It resets at {time}.",
+    "hi": "साप्ताहिक सीमा। यह {time} बजे रीसेट होगी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-32": {
+    "en": "The weekly limit. It resets on {day} at {time}.",
+    "hi": "साप्ताहिक सीमा। यह {day} को {time} बजे रीसेट होगी।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-33": {
+    "en": "Stopped here at {time}",
+    "hi": "{time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-34": {
+    "en": "Stopped here on {day} at {time}",
+    "hi": "{day} को {time} बजे यहाँ रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-35": {
+    "en": "Stopped at {time}, at the plan's limit",
+    "hi": "{time} बजे, प्लान की सीमा पर रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-36": {
+    "en": "Stopped on {day} at {time}, at the plan's limit",
+    "hi": "{day} को {time} बजे, प्लान की सीमा पर रुका",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-37": {
+    "en": "Plan and usage",
+    "hi": "प्लान और उपयोग",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-38": {
+    "en": "{n}% of the 5-hour limit left",
+    "hi": "5 घंटे की सीमा का {n}% बाकी",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-39": {
+    "en": "Pay as you go",
+    "hi": "उपयोग के अनुसार भुगतान",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-40": {
+    "en": "What each plan has left, and when it resets.",
+    "hi": "हर प्लान में कितना बाकी है, और वह कब रीसेट होता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-41": {
+    "en": "Updated at {time}",
+    "hi": "{time} बजे अपडेट किया गया",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-42": {
+    "en": "No limits to show. Each question is billed to the key's account.",
+    "hi": "दिखाने को कोई सीमा नहीं। हर प्रश्न का शुल्क उसी key के खाते पर लगता है।",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "design"
+  },
+  "U12-43": {
+    "en": "{name} plan limit reached on {day} at {time}",
+    "hi": "{day} को {time} बजे {name} प्लान की सीमा पूरी हुई",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator: 'yeah the copy is fine' (U12-14/15 option a)"
+  },
+  "U12-44": {
+    "en": "{model} weekly limit",
+    "hi": "{model} की साप्ताहिक सीमा",
+    "status": "approved",
+    "at": "2026-11-03",
+    "by": "Rohan",
+    "note": "Rohan, via the orchestrator (#236)"
+  }
+}

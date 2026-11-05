@@ -30,6 +30,10 @@ must therefore stay stable across versions.
 - `HostError.matter` (optional, left out when empty) names the matter a failure is about, for the
   codes whose meaning says so (`matter.folder_is_matter`), so the UI can name it and offer to
   open it without reading `message`. Added by decision record 0022.
+- `HostError.files` (optional, left out when empty) lists the matter's files a failure is about, as
+  matter paths: for `matter.file_locked`, the files held open, so the UI can name the document to
+  close without reading `message` (an undo has no preview that lists them). For
+  `matter.file_locked` the files are in `files`, not in `message`. A peer that predates it reads such an error as before, without the files.
 - `matter.folder_refused` stays, with its meaning: since 0022 the host answers `CreateMatter` with
   one of the six `matter.folder_*` codes after it instead, one per reason.
 
@@ -59,7 +63,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `agent.unsupported_version` | The agent speaks an ACP version Clauseo does not support. | no | acp |
 | `store.disk_full` | The disk is full; space must be freed first. | no | store |
 | `store.corrupt` | The data folder holds data that does not read back, a stored value that does not parse included. | no | store |
-| `store.io` | A read or write in the data folder failed, possibly for a passing reason. | yes | store |
+| `store.io` | A read or write in the data folder failed, possibly for a passing reason. | yes | store; host (`SetPrivacySettings` and `FirstAct`, when the usage counts folder or the first-act marker cannot be changed; 0036) |
 | `store.locked` | Another Clauseo process holds the data folder. | no | store |
 | `store.newer_version` | The data came from a newer Clauseo. | no | store |
 | `matter.checkpoint_failed` | Taking a checkpoint of the matter's files failed. | yes | matters |
@@ -74,9 +78,24 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `matter.folder_unreadable` | Clauseo may not read the folder, or its `.clauseo/matter.json` does not read, so it may belong to a matter. | no | host (0022) |
 | `matter.folder_is_matter` | The folder is a matter's folder, or sits inside one or holds one; the error's `matter` names that matter when it is on Clauseo's list. | no | host (0022) |
 | `matter.folder_in_matters_root` | The folder is or holds Clauseo's data folder, or is, holds or sits inside the matters' history folder in it. | no | host (0022) |
+| `matter.folder_network` | The matter folder is on a network drive, where Codex's sandbox can neither read nor write, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
+| `matter.folder_no_permissions` | The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. | no | host (a Codex agent's launch on Windows, `agent/folder_support.rs`) |
 | `transport.unauthorized` | The client is not allowed to make this call. | no | transport_ws, desktop |
 | `transport.too_large` | The message is larger than the transport accepts. | no | transport_ws, desktop |
-| `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`; decision records 0017 and 0030) |
+| `settings.locked` | The change names a setting that the firm's policy sets, so the lawyer cannot change it; nothing was changed. | no | host (`SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`; decision records 0017, 0030 and 0036) |
+| `agent.install_offline` | The agent's install cannot reach its hosts: name resolution or connect failed with no route. The install waits and tries again by itself. | yes | agents (S17 `FailureKind::Offline`), desktop (0048) |
+| `agent.install_blocked` | A proxy or firewall blocked the agent's download: a 403 or 407 from a proxy, a TLS failure, or a web page where a file should be. | no | agents (S17 `FailureKind::Blocked`), desktop (0048) |
+| `agent.install_disk_full` | Too little free space for the agent's install; a retry succeeds once space is freed. | yes | agents (S17 `FailureKind::DiskFull`), desktop (0048) |
+| `agent.install_failed` | The agent's install failed for another reason, after three tries. | yes | agents (S17 `FailureKind::Failed`), desktop (0048) |
+| `signin.cancelled` | The lawyer cancelled the sign-in, in Clauseo or on the vendor's page. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.link_expired` | The sign-in link or device code expired before the sign-in finished; a new sign-in gets a new one. | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.no_plan` | The account has no plan the agent accepts. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.device_code_off` | Device-code sign-in is turned off for the account. | no | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.port_busy` | Another program holds the port the agent's sign-in listens on (Codex's 1455). | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.failed` | The sign-in ended before signing in, for any other reason. | yes | agents (S18 `SigninCode`), desktop (0048); new area for R20 |
+| `signin.policy_unreadable` | The firm's policy cannot be read and once set this agent's firm plan, so sign-in and launch are refused rather than sent to a plan login. | no | desktop (0048); new area for R20 |
+| `agent.guard_missing` | A Claude launch that must ask before every change could not set up the guard that makes it ask, so it was not started. | no | host (a forced-ask Claude launch with no guard hook, `actor/turn/profile_loads.rs`) |
+| `update.failed` | The update's check, download, signature check or install failed; the version running keeps running, and a later check tries again. | yes | host (the updater, decision record 0037; produced from R23 PR 4) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

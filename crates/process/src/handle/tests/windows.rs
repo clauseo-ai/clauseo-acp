@@ -70,7 +70,8 @@ fn the_agent_is_killed_when_its_job_will_not_end() {
             timer.fire();
         }
     };
-    let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
+    let (outcome, (), pumped) =
+        block_on(async { join!(handle.shutdown(&timer, None), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };

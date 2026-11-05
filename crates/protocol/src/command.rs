@@ -18,11 +18,12 @@ use crate::MatterPath;
 use crate::{
     AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
     ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PermissionRequestId, PromptBlock, RestoreScope, ThreadId, Title, ToolsPatch, TurnId,
-    UiPatch,
+    MessageId, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope, ThreadId, Timestamp,
+    Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
+use crate::{InstallWhen, UpdateMode};
 
 mod validate;
 
@@ -35,6 +36,17 @@ pub use validate::{
 /// [`ErrorCode::ThreadQueueFull`](crate::ErrorCode::ThreadQueueFull) (the host's check, since the
 /// queue is state).
 pub const MAX_QUEUED_TURNS: usize = 10;
+
+/// How far ahead a `SnoozeThread` may snooze, in milliseconds (366 days). A later `until` is
+/// refused with [`ErrorCode::CommandInvalid`](crate::ErrorCode::CommandInvalid) (the host's
+/// check, since it needs the host's clock).
+pub const MAX_SNOOZE_AHEAD_MS: i64 = 366 * 24 * 60 * 60 * 1000;
+
+/// How far a `SweepDone`'s `day_start` may be from the host's now, either way, in
+/// milliseconds (26 hours: a day plus the widest gap between two time zones' midnights that a
+/// clock change can open). A `day_start` further away is refused with
+/// [`ErrorCode::CommandInvalid`](crate::ErrorCode::CommandInvalid) (the host's check).
+pub const MAX_DAY_START_SKEW_MS: i64 = 26 * 60 * 60 * 1000;
 
 /// One command as a client sends it. It names no principal: the surface that takes it (the
 /// desktop bridge, the transport, the cli) knows who sent it from its connection and passes the
@@ -229,6 +241,38 @@ pub enum HostCommand {
         /// The thread.
         thread: ThreadId,
     },
+    /// Snooze a thread until `until`, or clear its snooze by hand (`until` left out): logs
+    /// `thread_snoozed` and answers `Done`, archived threads included. The host refuses an
+    /// `until` not after its clock's now, or more than [`MAX_SNOOZE_AHEAD_MS`] ahead
+    /// (`command.invalid`). JSON: `{"snooze_thread": {"thread": "...", "until": 1760000000000}}`.
+    SnoozeThread {
+        /// The thread.
+        thread: ThreadId,
+        /// When the snooze ends; left out to clear it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        until: Option<Timestamp>,
+    },
+    /// Mark a thread done or not done by the lawyer: logs `thread_done` with `by: lawyer` and
+    /// answers `Done`, archived threads included.
+    MarkThreadDone {
+        /// The thread.
+        thread: ThreadId,
+        /// Done, or no longer done.
+        done: bool,
+    },
+    /// The morning sweep. The host knows no time zone, so the app sends this at its first moment
+    /// after 05:00 local each day (and at launch, when after 05:00), with `day_start` the local
+    /// midnight that began today. In every listed matter, each thread not archived, not done,
+    /// not snoozed past now, with nothing pending (no permission, question or limit choice), no
+    /// turn running or queued, its last ending seen (`MarkSeen`), no commit in flight and its
+    /// newest event before `day_start` is marked done (`thread_done`, `by: morning_sweep`), all
+    /// in one commit; answers `Done`. A second sweep the same day finds nothing new. The host
+    /// refuses a `day_start` more than [`MAX_DAY_START_SKEW_MS`] from its now
+    /// (`command.invalid`).
+    SweepDone {
+        /// Today's local midnight.
+        day_start: Timestamp,
+    },
     /// Start a thread in a matter with an agent.
     CreateThread {
         /// The matter.
@@ -332,6 +376,10 @@ pub enum HostCommand {
         thread: ThreadId,
         /// The new title.
         title: Title,
+        /// `true` for a title Clauseo made up (the first words), which the agent's own title
+        /// replaces; `false` for one the lawyer typed. Missing means `false`.
+        #[serde(default)]
+        placeholder: bool,
     },
     /// Archive a thread; refused while a turn runs.
     ArchiveThread {
@@ -377,6 +425,25 @@ pub enum HostCommand {
         /// The switches to change.
         patch: ToolsPatch,
     },
+    /// Change the privacy switches (`privacy.counts`, `privacy.crash_reports`); answers `Done`,
+    /// and every app subscriber gets `HostEvent::SettingsChanged`. A patch naming a key the
+    /// firm's policy sets is refused whole with `settings.locked`; nothing changes. Before the
+    /// lawyer's first act, a patch naming `counts` is that first act (decision record 0036).
+    /// Turning counts off always saves; turning them on while the old counts folder cannot be
+    /// deleted is refused with `store.io` and changes nothing. Logs only the receipt.
+    SetPrivacySettings {
+        /// The switches to change.
+        patch: PrivacyPatch,
+    },
+    /// The lawyer's first act (the welcome's button): from now on the usage counts are saved and
+    /// sent, unless `counts` is `false`, which turns them off. Answers `Done`, and every app
+    /// subscriber gets `HostEvent::SettingsChanged` with `counts_started`. Once the first act
+    /// has happened, another changes nothing and answers `Done`. A policy lock on
+    /// `privacy.counts` stands over `counts`. Logs only the receipt (decision record 0036).
+    FirstAct {
+        /// The switch as the lawyer left it.
+        counts: bool,
+    },
     /// Refresh account limits. Answers `Done` and logs nothing. `Shown` reads only data older
     /// than 5 minutes; `TryAgain` reads now unless a read is in flight or the last read started
     /// less than 10 s ago (it then re-emits the view). No read starts while the agent has a
@@ -390,11 +457,62 @@ pub enum HostCommand {
         /// What asked for the refresh.
         why: RefreshWhy,
     },
+    /// Scan a folder before it becomes a matter: count its files and bytes as an import would,
+    /// count its cloud-only files without reading them, and tell where it lives. Progress
+    /// reaches app subscribers as `HostEvent::FolderScanned`, the last with `done`; the
+    /// command answers `Done` when the walk ends. Nothing is stored. One scan runs at a time:
+    /// a newer `ScanFolder` cancels the one running. A folder import would refuse is
+    /// `matter.folder_refused`.
+    ScanFolder {
+        /// The folder.
+        folder: FolderRefId,
+    },
+    /// Cancel the scan of `folder`; its last `FolderScanned` says `cancelled`. Answers
+    /// `Done`, also when no scan of it runs.
+    CancelScan {
+        /// The folder.
+        folder: FolderRefId,
+    },
+    /// Download Chrome for Testing into the app data folder, after the lawyer agreed. Answers
+    /// `Done` once the download has started, with no receipt (a repeated id starts it again
+    /// when none runs); every app subscriber then gets `HostEvent::BrowserInstall` as it goes,
+    /// ending with `Done` or `Failed`. While one runs it answers `Done` and does nothing: the
+    /// running download's events already say one is under way. Only the main window sends it,
+    /// from its consent dialog. JSON: `{"install_browser": {}}`.
+    InstallBrowser {},
+    /// Stop the running Chrome for Testing download: it ends `Failed` with `cancelled` and
+    /// leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
+    /// JSON: `{"cancel_browser_install": {}}`.
+    CancelBrowserInstall {},
+    /// Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
+    /// `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
+    /// does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every
+    /// command's, so a window can test a command's kind with `in`.
+    CheckForUpdate {},
+    /// Install the `ready` version: `now` stops running turns first, `after_turn` waits until
+    /// no thread has one (`scheduled`). Answers `Done` before the host starts to stop. In a
+    /// state that does not take it, `command.invalid`. Only the main window sends it.
+    InstallUpdate {
+        /// When to install.
+        when: InstallWhen,
+    },
+    /// Take a `scheduled` install back to `ready`. Answers `Done`; in another state,
+    /// `command.invalid`. Only the main window sends it. JSON: `{"cancel_scheduled_update": {}}`.
+    CancelScheduledUpdate {},
+    /// Change `update.mode` to `auto` or `notify`; `none` is refused as `command.invalid`,
+    /// since it comes only from policy. A policy-locked key gives `settings.locked`. Answers
+    /// `Done`. Only the settings window sends it.
+    SetUpdateMode {
+        /// The new mode.
+        mode: UpdateMode,
+    },
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
 /// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits` and `MarkSeen` answer `Done`.
+/// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
+/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
+/// `InstallBrowser`, `CancelBrowserInstall` and the four update commands answer `Done`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

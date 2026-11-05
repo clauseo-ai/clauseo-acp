@@ -456,3 +456,61 @@ test("Stop's name is the answer's label, its word beside a square hidden from as
   expect(stop().textContent).toBe("रोकें");
   expect(stop().querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
 });
+
+/** A field that wraps `perLine` characters to a `line` px line, as an engine lays it out: its client height is its
+ * set height or one line, its scroll height its words' lines when they need more. */
+function wraps(a: HTMLTextAreaElement, line = 26, perLine = 40) {
+  const client = () => (a.style.height === "" ? line : parseFloat(a.style.height));
+  Object.defineProperty(a, "clientHeight", { configurable: true, get: client });
+  Object.defineProperty(a, "scrollHeight", {
+    configurable: true,
+    get: () => Math.max(client(), Math.ceil(a.value.length / perLine) * line),
+  });
+}
+
+test("plain typing writes the field's style only as its line count changes, never collapsing it per keystroke", async () => {
+  await mount(composer({}));
+  const a = field();
+  wraps(a);
+  const L = "न्यायालय ने आज अपना फैसला सुना दिया है। ".repeat(6) + "न्यायालय ";
+  // the first character fits it whole, as a mount's fit would have with a real engine's sizes
+  await type(L.slice(0, 1));
+  const writes: string[] = [];
+  const seen = new MutationObserver((records) => {
+    for (const _ of records) writes.push(a.style.cssText);
+  });
+  seen.observe(a, { attributes: true, attributeFilter: ["style"] });
+  for (let i = 2; i <= L.length; i++) await type(L.slice(0, i));
+  seen.disconnect();
+  // 249 characters at 40 a line: 7 lines, so it grows to 2, 3, 4, 5 and 6 lines, and then scrolls
+  expect(a.style.height).toBe("156px");
+  expect(a.style.overflowY).toBe("");
+  expect(writes.length).toBeLessThanOrEqual(6);
+  // taking words out fits it whole again: it shrinks
+  await type(L.slice(0, 50));
+  expect(a.style.height).toBe("52px");
+  expect(a.style.overflowY).toBe("hidden");
+  await type("");
+  expect(a.style.height).toBe("");
+});
+
+test("a field left a line too tall by words only put in is fitted whole once typing pauses", async () => {
+  await mount(composer({}));
+  const a = field();
+  wraps(a);
+  // 70 characters at 40 a line: two lines, and still two with one more
+  const words = "न्यायालय ने आज अपना फैसला सुना दिया है। ".repeat(2).slice(0, 70);
+  await type(words.slice(0, 1));
+  await type(words);
+  expect(a.style.height).toBe("52px");
+  // as a mark joining a conjunct narrows a line and the words need one line fewer: a scroll height never shows it
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  a.style.height = "78px";
+  await type(`${words}न`);
+  expect(a.style.height).toBe("78px");
+  await act(async () => vi.advanceTimersByTime(399));
+  expect(a.style.height).toBe("78px");
+  await act(async () => vi.advanceTimersByTime(1));
+  expect(a.style.height).toBe("52px");
+  vi.useRealTimers();
+});

@@ -9,9 +9,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterStatus,
-    RestoreRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
-    ViewEntry,
+    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
+    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
+    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -128,6 +128,16 @@ pub enum HostQuery {
         /// The whole matter or chosen files, as `RestoreVersion` takes it.
         scope: RestoreRequest,
     },
+    /// What undoing a turn's step would meet now: the step's files whose content in the folder
+    /// differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
+    /// nothing. Refused as `command.invalid` when the turn has no step to undo (not started or
+    /// ended in this thread, no after-turn checkpoint, or undone already).
+    PreviewUndo {
+        /// The thread.
+        thread: ThreadId,
+        /// The step's turn.
+        turn: TurnId,
+    },
     /// Part of a blob's text.
     ReadBlob {
         /// The blob.
@@ -149,6 +159,26 @@ pub enum HostQuery {
     /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
     /// line before a pick. JSON: `"get_default_location"`.
     GetDefaultLocation,
+    /// Search inside matters and conversations (decision 0043). Answered
+    /// `QueryResult::Search`.
+    Search(SearchRequest),
+    /// The Windows folder check of the place a `CreateMatter` with `source` would use, before
+    /// the matter exists: the New matter dialog's warning. Send the same `source` the create
+    /// will. `existing_folder` checks that folder; `new_folder` its picked parent;
+    /// `default_location` the default location (its nearest folder that exists, before the
+    /// first matter makes it). Answered `QueryResult::FolderSupport` with the values a matter's
+    /// row shows (`MatterSummary::folder_support`). What `CreateMatter` refuses before its
+    /// matter is made is refused here with the same code (`matter.folder_is_home` and the
+    /// rest, for an existing folder), and an unknown ref is `command.invalid`. A check that
+    /// doesn't answer in time answers `check_failed`. JSON:
+    /// `{"folder_support": {"source": {"existing_folder": {"folder": "..."}}}}`.
+    FolderSupport {
+        /// Where the matter would be made, as `CreateMatter` names it.
+        source: MatterSource,
+    },
+    /// Where the updater stands (decision record 0037), read after subscribing to the app
+    /// stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
+    GetUpdate,
 }
 
 /// A query's answer.
@@ -166,10 +196,14 @@ pub enum QueryResult {
     FileChanges(Vec<FileChange>),
     /// For `PreviewRestore`.
     RestorePreview(RestorePreview),
+    /// For `PreviewUndo`.
+    UndoPreview(UndoPreview),
     /// For `ReadBlob`.
     Blob(BlobRange),
     /// For `GetSettings`.
     Settings(SettingsView),
+    /// For `GetUpdate`.
+    Update(UpdateView),
     /// For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
     /// it by (the same excluded names, size cap and cloud-only files).
     Papers {
@@ -191,6 +225,24 @@ pub enum QueryResult {
     Agents(Vec<AgentSummary>),
     /// For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`.
     DefaultLocation(DefaultLocation),
+    /// For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
+    /// came first.
+    Search(SearchAnswer),
+    /// For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
+    /// `{"folder_support": {}}` for a fine folder.
+    FolderSupport(PickedFolderSupport),
+}
+
+/// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
+/// accepts fields it does not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PickedFolderSupport {
+    /// What keeps Codex's sandbox from working fully in the folder, as a matter's row shows it
+    /// (`MatterSummary::folder_support`), `check_failed` included. Missing for a fine folder,
+    /// and always off Windows.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub support: Option<FolderSupportKind>,
 }
 
 /// One file of a matter's folder, as `ListPapers` lists it.
@@ -250,6 +302,19 @@ pub struct RestorePreview {
     pub locked: Vec<MatterPath>,
 }
 
+/// What undoing a step would meet now, for `PreviewUndo`. A struct, so later fields (such as
+/// the files open in another program) are additive; it accepts fields it does not know.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct UndoPreview {
+    /// The step's files whose content now differs from the step's after-turn checkpoint
+    /// (changed, deleted, or added at a path the step deleted), sorted by path. Compared by
+    /// content: a file the cache vouches for by its stat is not read, any other is hashed. A
+    /// file not read (cloud-only, over the size cap) is not listed. Empty when nothing changed
+    /// since: Undo then needs no "changed after Clauseo's edit" ask.
+    pub edited_since: Vec<MatterPath>,
+}
+
 /// One matter in a list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -292,6 +357,12 @@ pub struct MatterSummary {
     /// `found`.
     #[serde(default)]
     pub folder_state: FolderState,
+    /// What keeps Codex's sandbox from working fully in its folder, on Windows, as the host last
+    /// checked it: when the matter was made and at each agent launch (an in-memory reading, not
+    /// state in the log); `check_failed` when that check couldn't answer. Missing when the
+    /// folder is fine, before any check since the host started, and off Windows.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub folder_support: Option<FolderSupportKind>,
 }
 
 open_unit_enum! {
@@ -305,6 +376,27 @@ open_unit_enum! {
         Missing,
     }
     test mod folder_state;
+}
+
+open_unit_enum! {
+    /// Why Codex's sandbox can't work fully in a matter's folder on Windows: the sandbox adds
+    /// permission entries to the folder before Codex may write there. A folder with none of
+    /// these has no value.
+    pub enum FolderSupportKind {
+        /// The lawyer can't change the folder's permissions: Codex starts, but asks before every
+        /// file edit, and its shell's writes there fail.
+        CantChangePermissions,
+        /// The folder is on a network drive: Codex can neither read nor write it, so it is not
+        /// started there (`matter.folder_network`).
+        Network,
+        /// The folder's drive keeps no permissions (FAT, exFAT): Codex is not started there
+        /// (`matter.folder_no_permissions`).
+        NoPermissions,
+        /// The check couldn't answer (an io error, or no folder there): Claude runs in forced
+        /// ask, and Codex isn't refused (its own sandbox applies).
+        CheckFailed,
+    }
+    test mod folder_support_kind;
 }
 
 /// What an older host, which sent no state, means: the folder is taken as found.
@@ -338,6 +430,14 @@ pub struct ThreadSummary {
     /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
     #[serde(default = "seen_default")]
     pub seen: bool,
+    /// When its snooze ends, as [`HeaderEntry::snoozed_until`](crate::HeaderEntry::snoozed_until):
+    /// the host clears it when the time comes. Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub snoozed_until: Option<Timestamp>,
+    /// Whether it is marked done, as [`HeaderEntry::done`](crate::HeaderEntry::done); missing
+    /// reads as `false`.
+    #[serde(default)]
+    pub done: bool,
     /// How and when its last turn ended, once one has. Known for every thread the host has
     /// loaded since it started (at start-up, every thread not archived in a listed matter).
     #[serde(skip_serializing_if = "Option::is_none", default)]

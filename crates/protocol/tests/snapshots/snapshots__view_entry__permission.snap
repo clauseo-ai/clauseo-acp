@@ -21,6 +21,7 @@ expression: "entry(\"permission\")"
         "held_open": "Brief.docx"
       }
     },
+    "about": "agent_plan",
     "answered_at": 1760000002000
   }
 }

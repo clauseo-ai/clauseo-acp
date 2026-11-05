@@ -238,6 +238,77 @@ fn agent_home_is_under_the_data_folder_never_the_temp_folder() {
     );
 }
 
+// The updater's files (R23) sit in the data folder, follow `CLAUSEO_DATA_DIR`, and are never
+// under the default matters folder or the matters' own `<data dir>/matters`.
+#[test]
+fn the_update_marker_and_downloads_are_in_the_data_folder_never_a_matters_folder() {
+    let over = FakeEnv(vec![(DATA_DIR_VAR, abs_str("tmp/run-9/data"))]);
+    for (os, dirs) in [
+        (Os::Windows, windows_dirs()),
+        (Os::Mac, home_dirs()),
+        (Os::Linux, home_dirs()),
+    ] {
+        for env in [&FakeEnv::default(), &over] {
+            let at = Locations::resolve_for(os, &dirs, env).unwrap();
+            let (marker, updates) = (at.update_marker(), at.updates_dir());
+            assert_eq!(marker, at.data_dir().join("update.json"), "{os:?}");
+            assert_eq!(updates, at.data_dir().join("updates"), "{os:?}");
+            for path in [&marker, &updates] {
+                assert!(
+                    !path.starts_with(at.default_matters_dir()),
+                    "{os:?}: {path:?}"
+                );
+                assert!(!path.starts_with(at.data_dir().join("matters")), "{path:?}");
+            }
+        }
+        let at = Locations::resolve_for(os, &dirs, &over).unwrap();
+        assert_eq!(
+            at.update_marker(),
+            abs("tmp/run-9/data/update.json"),
+            "{os:?}"
+        );
+        assert_eq!(at.updates_dir(), abs("tmp/run-9/data/updates"), "{os:?}");
+    }
+    let at = Locations::under_root(Path::new("/scratch/run-2"));
+    assert_eq!(at.update_marker(), Path::new("/scratch/run-2/update.json"));
+    assert_eq!(at.updates_dir(), Path::new("/scratch/run-2/updates"));
+}
+
+#[test]
+fn log_dir_is_logs_under_the_data_folder_on_every_os() {
+    for (os, dirs, data) in [
+        (
+            Os::Windows,
+            windows_dirs(),
+            "/C/Users/ada/AppData/Local/ai.clauseo.desktop",
+        ),
+        (
+            Os::Mac,
+            home_dirs(),
+            "/home/ada/Library/Application Support/ai.clauseo.desktop",
+        ),
+        (
+            Os::Linux,
+            home_dirs(),
+            "/home/ada/.local/share/ai.clauseo.desktop",
+        ),
+    ] {
+        let at = Locations::resolve_for(os, &dirs, &FakeEnv::default()).unwrap();
+        assert_eq!(at.log_dir(), Path::new(data).join("logs"), "{os:?}");
+    }
+}
+
+#[test]
+fn log_dir_follows_the_data_folder_override() {
+    let env = FakeEnv(vec![(DATA_DIR_VAR, abs_str("scratch/run-2"))]);
+    for os in [Os::Windows, Os::Mac, Os::Linux] {
+        let at = Locations::resolve_for(os, &windows_dirs(), &env).unwrap();
+        assert_eq!(at.log_dir(), abs("scratch/run-2/logs"), "{os:?}");
+    }
+    let rooted = Locations::under_root(Path::new("/scratch/run-3"));
+    assert_eq!(rooted.log_dir(), Path::new("/scratch/run-3/logs"));
+}
+
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "an agent id is [a-z0-9-]+")]
@@ -286,4 +357,17 @@ fn the_identifier_is_the_desktop_apps() {
     .unwrap();
     let config: serde_json::Value = serde_json::from_str(&config).unwrap();
     assert_eq!(config["identifier"], IDENTIFIER);
+}
+
+#[test]
+fn under_home_keeps_new_matters_outside_the_data_folder() {
+    let home = Path::new("/srv/home");
+    let at = Locations::under_home(home);
+    assert_eq!(at.data_dir(), home.join("data"));
+    assert_eq!(at.settings_file(), home.join("data").join("settings.json"));
+    assert_eq!(
+        at.default_matters_dir(),
+        home.join("Documents").join("Clauseo")
+    );
+    assert!(!at.default_matters_dir().starts_with(at.data_dir()));
 }

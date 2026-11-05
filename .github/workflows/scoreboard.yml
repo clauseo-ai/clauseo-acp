@@ -1,25 +1,18 @@
-# The speed scoreboard (R13) where it needs a macOS runner or a full-LTO build. The pull request
-# comment (scoreboard-comment.yml) reads scoreboard-macos from here; e2e-windows.yml's
-# scoreboard-windows job plays smoke's LTO-off build on every product pull request and main.
+# The speed scoreboard (R13) where it needs a macOS runner or a full-LTO build. Nightly and on
+# demand only (Rohan's CI decision, 2026-11-04: scoreboards, benches, mutants and fuzzing stay off
+# the paths of pull requests and the queue). The `pull_request` trigger, the `scoreboard` label
+# and the push to main are gone, so no pull request gets a scoreboard, and the pull request comment
+# (scoreboard-comment.yml) is off. e2e-windows.yml's scoreboard-windows job plays on demand only.
 #
 # - scoreboard-macos: the `marks` build of the app plays fake_agent's scoreboard session by itself,
 #   one warm-up and three measured launches (ui/e2e/scoreboard/macos.ts), and the job uploads
 #   scoreboard-macos.json as the artifact scoreboard-macos. The marks feature's clippy and tests
-#   run in ci.yml (macOS build job and Linux build job), where a failure counts. Every push to main, nightly, on demand, and pull requests
-#   labelled `scoreboard`: macOS runners are capped at 5 for the whole org, and their queue was the
-#   slowest part of a pull request's checks, so an unlabelled pull request takes at most one
-#   (ci.yml's `build (aarch64-apple-darwin)`, which also clippies the marks feature).
+#   run in ci.yml (macOS build job and Linux build job), where a failure counts. Nightly and on
+#   demand.
 # - scoreboard-windows-lto: the full-LTO release build with the e2e feature, the shipping-grade
 #   binary, played as scoreboard-windows plays smoke's; uploaded as scoreboard-windows-lto, which
-#   the comment does not read. Nightly, on demand, and pull requests labelled `scoreboard`.
-# - Its own workflow, so the label trigger stays out of ci.yml and e2e-windows.yml: `labeled`
-#   there would re-run them for any label, and their cancel-in-progress would kill the run in
-#   progress. Here a label other than `scoreboard` starts a run whose jobs are all skipped, in a
-#   concurrency group of its own, so it cancels nothing and takes no runner; scoreboard-comment.yml
-#   skips such a run too. Adding the label starts a run; each push to a labelled pull request
-#   starts another.
-# - The numbers report and alert, so a failure leaves the run green (continue-on-error): a red run
-#   on main would hide its numbers from the comment, which reads main's successful runs only. Not a
+#   the comment does not read. Nightly and on demand.
+# - The numbers report and alert, so a failure leaves the run green (continue-on-error). Not a
 #   required check.
 # - No version is written here, as in ci.yml. Every action is pinned by commit SHA, with its tag in
 #   a comment.
@@ -27,10 +20,6 @@
 name: scoreboard
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
-  push:
-    branches: [main]
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -38,23 +27,14 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run, except that a run started by another label gets a
-# group of its own (its run id), so it never cancels a scoreboard in progress. Pushes to main share
-# one group, one running and one waiting, the newest push replacing the waiting run, as in ci.yml;
-# each nightly run and run on demand has a group of its own.
+# Each nightly run and run on demand has a group of its own.
 concurrency:
-  group: >-
-    scoreboard-${{ github.event.pull_request.number || (github.event_name == 'push' && format('push-{0}', github.ref)) || format('{0}-{1}', github.event_name, github.sha) }}${{
-    (github.event.action == 'labeled' && github.event.label.name != 'scoreboard') && format('-other-label-{0}', github.run_id) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: scoreboard-${{ github.event_name }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   scoreboard-macos:
     name: scoreboard-macos
-    if: >-
-      github.event_name != 'pull_request'
-      || (github.event.action == 'labeled' && github.event.label.name == 'scoreboard')
-      || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'scoreboard'))
     runs-on: macos-15
     continue-on-error: true
     # About 12 minutes of build and tests, then at worst 4 plays × 3 launches × 240 s
@@ -132,11 +112,6 @@ jobs:
 
   scoreboard-windows-lto:
     name: scoreboard-windows-lto
-    if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-      || (github.event.action == 'labeled' && github.event.label.name == 'scoreboard')
-      || (github.event_name == 'pull_request' && github.event.action != 'labeled'
-          && contains(github.event.pull_request.labels.*.name, 'scoreboard'))
     runs-on: windows-2025
     continue-on-error: true
     # About 8 minutes of build, then the four plays with room for slow ones.

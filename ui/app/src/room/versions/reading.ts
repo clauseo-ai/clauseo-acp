@@ -5,6 +5,8 @@ import type { ViewStore } from "../../store/store.ts";
 import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type {
+  HostError,
+  MatterId,
   RestorePreview,
   StreamId,
   ThreadId,
@@ -13,7 +15,7 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { orderOf, pageBefore } from "../matter-stream.ts";
-import { wordLock } from "../word/lock.ts";
+import { lockedFiles, wordLocks } from "../word/lock.ts";
 import { inRowOrder, type Ask, type Done, type Unsaved } from "./state.ts";
 import type { Timeline } from "./timeline.ts";
 
@@ -165,17 +167,13 @@ export class DoneWatch {
   }
 }
 
-/** The files a preview says a refused restore was held on: the ones it names as locked, or else every file it writes. */
-const heldOn = (preview: RestorePreview): readonly string[] =>
-  preview.locked.length > 0 ? preview.locked : preview.changes.map((c) => c.path);
-
-/** The restore dialog after a program refused the restore a file: Word's lines when the files the preview names as
- * locked, or else the files the restore writes, are one Word document (word/lock.ts). A preview naming none locked and
- * writing more than one is asked again first, in case it now names one. Otherwise the dialog stays with what restoring
- * writes, says why, and offers Try again. */
+/** The restore dialog after a program refused the restore a file: Word's lines when the files the host names as held,
+ * or else the files the preview names as locked, or else the files the restore writes, are all Word documents
+ * (word/lock.ts). A preview naming none locked and writing more than one is asked again first, in case it now names
+ * one. Otherwise the dialog stays with what restoring writes, says why, and offers Try again. */
 export async function lockedRestore(
   ask: Extract<Ask, { act: "restore" }>,
-  code: string,
+  refusal: { code: string; files?: readonly string[] | undefined },
   previewOf: (id: string) => Promise<RestorePreview | null>,
 ): Promise<Ask> {
   const { id, undoes } = ask;
@@ -187,8 +185,46 @@ export async function lockedRestore(
       console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
     }
   }
-  const file = wordLock(code, heldOn(preview));
-  return file === null
-    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: code }
-    : { act: "restore", id, preview, undoes, stage: "word", file };
+  const files = wordLocks(
+    refusal.code,
+    lockedFiles(
+      refusal,
+      preview.changes.map((c) => c.path),
+      preview.locked,
+    ),
+  );
+  return files === null
+    ? { act: "restore", id, preview, undoes, stage: "confirm", failed: refusal.code }
+    : { act: "restore", id, preview, undoes, stage: "word", files };
+}
+
+/** What restoring a version would write now, by the host's preview_restore: null when the answer isn't one. */
+export async function previewRestore(
+  transport: HostTransport,
+  matter: MatterId,
+  id: string,
+): Promise<RestorePreview | null> {
+  const r = await transport.query({ preview_restore: { matter, checkpoint: id, scope: "matter" } });
+  return "restore_preview" in r ? r.restore_preview : null;
+}
+
+/** A restore whose preview rejected: the rejection is logged, and a file a program holds (matter.file_locked, with its
+ * files) gets lockedRestore's Word or lock dialog. That dialog needs what restoring writes, which the rejection didn't
+ * give, so the preview is asked again (lockedRestore does that). Null otherwise, and when the dialog would list
+ * nothing: the code's line says why. */
+export async function refusedPreview(
+  id: string,
+  undoes: string | null,
+  error: HostError,
+  previewOf: (id: string) => Promise<RestorePreview | null>,
+): Promise<Ask | null> {
+  console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
+  if (error.code !== "matter.file_locked" || !error.files?.length) return null;
+  const none: RestorePreview = { changes: [], added_since: [], kept: [], locked: [] };
+  const ask = await lockedRestore(
+    { act: "restore", id, preview: none, undoes, stage: "confirm", failed: null },
+    error,
+    previewOf,
+  );
+  return ask.stage === "word" || (ask.act === "restore" && ask.preview !== none) ? ask : null;
 }

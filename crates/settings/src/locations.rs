@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 /// and matches the identifier in the desktop crate's `tauri.conf.json`.
 pub const IDENTIFIER: &str = "ai.clauseo.desktop";
 
+/// The log folder's name under the data folder ([`Locations::log_dir`]).
+const LOGS_DIR: &str = "logs";
+
 /// The variable that moves the data folder, for `cli`, CI and by-hand runs. It never moves a
 /// policy path. With it set, the default matters folder moves beside the data folder too (see
 /// [`Locations::default_matters_dir`]), so a run with a scratch data folder creates its matters
@@ -20,6 +23,12 @@ pub const DATA_DIR_VAR: &str = "CLAUSEO_DATA_DIR";
 
 /// The name of the user's settings file, in the data folder.
 pub const SETTINGS_FILE: &str = "settings.json";
+
+/// The name of the updater's marker file, in the data folder ([`Locations::update_marker`]).
+const UPDATE_MARKER: &str = "update.json";
+
+/// The name of the updater's download folder, in the data folder ([`Locations::updates_dir`]).
+const UPDATES_DIR: &str = "updates";
 
 /// The folders Clauseo uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +113,13 @@ impl Locations {
         Self::with_data_dir(root.to_owned(), root.join("Documents").join("Clauseo"))
     }
 
+    /// The folders of a home at `root`, as a real one lays them out: the data folder is
+    /// `root/data` and new matters go in `root/Documents/Clauseo`, outside the data folder (a
+    /// matter inside it is refused). Reads nothing; for tests and `cli`.
+    pub fn under_home(root: &Path) -> Locations {
+        Self::with_data_dir(root.join("data"), root.join("Documents").join("Clauseo"))
+    }
+
     /// The data folder, which holds `settings.json` and the matters' history.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
@@ -125,6 +141,13 @@ impl Locations {
         &self.default_matters_dir
     }
 
+    /// The folder of the host's log file, `<data folder>/logs` (decision record 0047): it
+    /// follows `CLAUSEO_DATA_DIR`, so a test's log stays in its own data folder. Reads nothing
+    /// and makes nothing; the host makes it when it installs the log.
+    pub fn log_dir(&self) -> PathBuf {
+        self.data_dir.join(LOGS_DIR)
+    }
+
     /// The home Clauseo owns for agent `agent`: `<data folder>/agents/<agent>/home`. The host
     /// makes it at launch and runs Codex with it as `CODEX_HOME`, so Codex keeps its login
     /// there and never in the user's `~/.codex` (#160); the limits reader reads the same one.
@@ -142,6 +165,21 @@ impl Locations {
             "an agent id is [a-z0-9-]+"
         );
         self.data_dir.join("agents").join(agent).join("home")
+    }
+
+    /// The updater's marker file, `<data folder>/update.json` (task R23): the host writes there
+    /// the update it is about to install, and reads it at the next start to tell an install
+    /// that took from one that failed. In the data folder, so `CLAUSEO_DATA_DIR` moves it, and
+    /// never in a matters folder.
+    pub fn update_marker(&self) -> PathBuf {
+        self.data_dir.join(UPDATE_MARKER)
+    }
+
+    /// Where the updater keeps its downloads, `<data folder>/updates` (task R23), one folder per
+    /// version. In the data folder, never the temp folder or a matters folder, so a download
+    /// kept for the next start survives a temp cleaner and never shows among a lawyer's files.
+    pub fn updates_dir(&self) -> PathBuf {
+        self.data_dir.join(UPDATES_DIR)
     }
 
     pub(crate) fn resolve_for(

@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
+test-support = []
+
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
@@ -63,12 +67,23 @@ rustix = { workspace = true, features = ["fs", "process"] }
 
 # The proxy's listeners bind with SO_EXCLUSIVEADDRUSE (src/ports.rs).
 # The upstream lookup's WinHTTP calls (src/proxy/upstream/windows.rs).
+# The folder check's file, volume and security calls (src/windows.rs and its tests): CreateFileW,
+# GetFinalPathNameByHandleW, GetVolumePathNameW, GetDriveTypeW (DRIVE_REMOTE), the volume's
+# FILE_PERSISTENT_ACLS flag, GetFileSecurityW and AccessCheck on a duplicated token
+# (GetCurrentProcess and OpenProcessToken from Win32_System_Threading), and the test's SDDL and
+# SetNamedSecurityInfoW.
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_System_WindowsProgramming",
 ] }
 
 [dev-dependencies]

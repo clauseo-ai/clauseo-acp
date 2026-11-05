@@ -384,10 +384,17 @@ fn a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked() {
     };
     let cold = build();
     assert_eq!(rebuilt_besides(&cold, "app-desk"), ["dep (lib)"], "cold");
-    assert_eq!(
-        built_line(&cold),
-        "first build: rebuilt dep (lib), app-desk (lib); fresh: 0"
-    );
+    // cargo names a unit when it finishes, and with pipelining `app-desk` can finish before `dep`
+    // does (Windows, 2026-11-04), so the two come in either order.
+    let line = built_line(&cold);
+    let mut units: Vec<&str> = line
+        .strip_prefix("first build: rebuilt ")
+        .and_then(|rest| rest.strip_suffix("; fresh: 0"))
+        .unwrap_or_else(|| panic!("{line}"))
+        .split(", ")
+        .collect();
+    units.sort_unstable();
+    assert_eq!(units, ["app-desk (lib)", "dep (lib)"], "{line}");
     let warm = build();
     assert!(
         rebuilt_besides(&warm, "app-desk").is_empty() && rebuilt_besides(&warm, "dep").is_empty()

@@ -1,0 +1,248 @@
+/* The first run's sheet (design/03-system/src/pages/first-launch/first-launch.css): the first screen across the work,
+   the agent getting ready on the working line, and the gate in the composer's well. Every value comes from a token.
+   No animation runs at rest: the only motion is a screen arriving, once, and the working line's own pen while npm
+   puts the download together. */
+@layer components {
+  /* ---------- the first screen: the room's frame, its work reaching across until there are papers ---------- */
+  .room-window:has(.fl-welcome) .room-centre {
+    grid-column: 2 / 4;
+    margin-right: var(--s3);
+  }
+  .room-window:has(.fl-welcome) .room-pane {
+    display: none;
+  }
+  .fl-welcome {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--s8) var(--thread-pad) var(--s6);
+  }
+  /* the column stands on the well's own 540 px, so the lockup, the button and the working line share one edge */
+  .fl-col {
+    margin-block: auto;
+    width: min(100%, var(--measure));
+  }
+  /* one column the width of the well's measure: no word, the large button's included, sets it wider */
+  .fl-ask {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+    gap: var(--s6);
+  }
+  .fl-ask .fl-lockup {
+    display: block;
+    height: var(--s8);
+    width: auto;
+    /* the inline lockup takes its width from its height, as the design's image does */
+    aspect-ratio: 8163 / 1639;
+  }
+  .fl-lede {
+    @apply text-lead-narrow stretch-wide tracking-lead text-primary;
+    font-weight: var(--w-clauseo);
+    max-width: var(--measure);
+  }
+  .fl-open {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+    gap: var(--s3);
+  }
+  .fl-others {
+    display: grid;
+    justify-items: start;
+    gap: var(--s1);
+    /* the quiet buttons' words line up with the large button's icon above */
+    margin-left: calc(-1 * var(--s4));
+  }
+  .fl-refusal-head {
+    @apply text-ui font-chip text-primary;
+  }
+  .fl-counts {
+    align-items: flex-start;
+  }
+  .fl-counts-switch {
+    flex: none;
+    display: inline-flex;
+  }
+  .fl-inline-link {
+    color: var(--primary);
+    text-decoration: underline;
+    text-decoration-color: var(--ref-line-quiet);
+    text-underline-offset: var(--cite-offset);
+    border-radius: var(--r-ref);
+  }
+  /* a screen arriving in place of the last: it slides up 8 px and stops */
+  .fl-arrive {
+    animation: fl-rise var(--dur-arrive) var(--ease-arrive) backwards;
+  }
+
+  /* the foot, where the composer will stand: the agent getting ready on the working line, then the fine print */
+  /* the same gutter as the welcome's scroller above, so the working line keeps the lockup's and the button's edge where
+     scrollbars take room (Windows, Linux) */
+  .fl-foot {
+    flex: none;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    display: flex;
+    justify-content: center;
+    padding: var(--s2) var(--thread-pad) var(--s3);
+  }
+  .fl-foot-col {
+    width: min(100%, var(--measure));
+  }
+  .fl-foot-well > .working {
+    border-radius: var(--r-field);
+  }
+  .fl-ready {
+    @apply text-small-row text-muted;
+    min-height: var(--size-control);
+    align-items: center;
+    padding-left: var(--s4);
+  }
+  .fl-foot-line + .fl-foot-line {
+    margin-top: var(--s0-5);
+  }
+  .fl-done-tick {
+    color: var(--primary);
+  }
+  .fl-ready .fl-done-tick {
+    margin-top: 0;
+  }
+
+  /* the install's ways on and its bar stay in the well: inline where they fit, under the words where they don't */
+  .fl-install {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s1) var(--s2);
+    min-width: 0;
+  }
+  .fl-install:empty {
+    display: none;
+  }
+  /* the working line gives its acts their widest width; holding the install's buttons they may narrow and wrap instead,
+     inside the well */
+  .working-acts:has(> .fl-install) {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .fl-bar {
+    align-self: center;
+  }
+
+  /* ---------- the gate, in the composer's field row ---------- */
+  .fl-gate {
+    flex: 1;
+    min-width: 0;
+  }
+  .fl-gate-body {
+    display: grid;
+    gap: var(--s0-5);
+  }
+  .fl-gate-act {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s1) var(--s2);
+  }
+  .fl-gate-words {
+    @apply text-ui text-primary;
+    flex: 1 1 var(--working-text-min);
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) 0 var(--s2) var(--s2);
+  }
+  .fl-gate-cancel {
+    order: 3;
+  }
+  .fl-gate-why {
+    color: var(--muted);
+  }
+  .fl-gate-dot {
+    flex: none;
+    width: var(--size-dot-hint);
+    height: var(--size-dot-hint);
+    border-radius: var(--r-round);
+    background: var(--yellow);
+    box-shadow: inset 0 0 0 var(--hairline) var(--yellow-ring);
+  }
+  .fl-gate-ways {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 var(--s3);
+    padding: 0 0 var(--s0-5);
+    box-shadow: inset 0 var(--hairline) 0 var(--divide);
+  }
+  .fl-gate-note {
+    @apply text-small-row text-muted;
+    padding: var(--s1-5) 0 var(--s1-5) var(--s2);
+    max-width: 100%;
+  }
+  .fl-gate-pair {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .fl-gate-pair > .fl-way {
+    margin-left: calc(-1 * var(--s1));
+  }
+  .fl-way {
+    color: var(--primary);
+    padding-inline: var(--s2);
+  }
+  .fl-way-quiet {
+    color: var(--muted);
+  }
+  .fl-gate-input {
+    @apply text-field font-accepted;
+    flex: 1 1 var(--working-text-min);
+    min-width: 0;
+    height: var(--size-control);
+    padding: 0 var(--s3);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--set-in-field);
+    color: var(--primary);
+    font-family: var(--font-en);
+    /* the composer's well draws the one focus ring, as for its own field */
+    outline: none;
+  }
+  .fl-gate-input::placeholder {
+    @apply font-ui text-muted;
+    font-family: var(--font);
+  }
+  /* ChatGPT's device code: large, in the computer's own letters, then what to do with it */
+  .fl-device {
+    display: grid;
+    gap: var(--s1);
+    min-width: 0;
+  }
+  .fl-device-code {
+    @apply text-lead-narrow text-primary;
+    font-family: var(--font-en);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--tracking-lead);
+    overflow-wrap: anywhere;
+  }
+  /* signed in, on the room's line under the field */
+  .fl-signed {
+    align-items: center;
+  }
+}
+
+@keyframes fl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--shift-dialog));
+  }
+}

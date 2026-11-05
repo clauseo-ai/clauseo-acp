@@ -5,7 +5,7 @@
 #[cfg(test)]
 mod tests;
 
-use super::managed_prefs::{self, AGENTS_KEY, PlistValue, SOURCE};
+use super::managed_prefs::{self, AGENTS_KEY, PLANS_KEY, PlistValue, SOURCE};
 use super::{FilePolicy, PolicyRead, PolicySource};
 use crate::SystemFiles;
 use crate::leaf::KEYS;
@@ -51,7 +51,7 @@ impl ManagedPreferences {
         let domain = CFString::from_str(&self.domain);
         KEYS.iter()
             .map(|&(key, _)| key)
-            .chain([AGENTS_KEY])
+            .chain([AGENTS_KEY, PLANS_KEY])
             .filter_map(|key| {
                 let name = CFString::from_str(key);
                 let value = CFPreferencesCopyAppValue(&name, &domain)?;

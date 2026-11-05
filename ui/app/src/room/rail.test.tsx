@@ -6,8 +6,9 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
+import { settled } from "@clauseo/components/lib/late.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { header, reset, upsert, uuid } from "../testing/stream-script.ts";
 import type { ViewEntry } from "../transport/protocol.ts";
@@ -23,6 +24,13 @@ import { clockOf, localZone } from "./when.ts";
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+
+// a fixed instant (Tuesday 3 November 2026); a test that needs another day sets its own
+const NOW = Date.UTC(2026, 10, 3, 17, 0);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -60,6 +68,8 @@ async function mount(h: FakeHost) {
 }
 
 async function settle() {
+  // Find's results come in their own chunk
+  await act(async () => settled());
   for (let i = 0; i < 3; i += 1)
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
@@ -100,8 +110,7 @@ test("the scratch matter is never a row of the list: only the foot's row opens i
 });
 
 test("with a NextHost, a scratch matter with a date and a pin still stands only at the foot", async () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrow = new Date(NOW + 86_400_000);
   const pad = (n: number) => String(n).padStart(2, "0");
   // tomorrow on the computer's own calendar: the app's day is local, not UTC
   const next = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
@@ -186,13 +195,13 @@ test("without a NextHost: one group, No date yet, newest first; no Pinned, and f
   await act(async () => find()?.focus());
   expect(headings()).toEqual(["No date yet"]);
   await act(async () => type(find() as HTMLInputElement, "sharma"));
+  await settle();
   expect(names()).toEqual([B.name]);
+  // this host answers no search: nothing new shows, and the names still match
   await act(async () => type(find() as HTMLInputElement, "Asha"));
+  await settle();
   expect(names()).toEqual([]);
-  expect(rail()?.textContent).toContain("No matter matches 'Asha'.");
-  // it promises only what it searches: names
-  expect(findLabel()).toBe("Find a matter by its name");
-  expect(rail()?.textContent).toContain("Search covers names.");
+  expect(findLabel()).toBe("Find");
   expect(rail()?.textContent).not.toContain("client");
 });
 
@@ -211,13 +220,10 @@ test("with a NextHost: find by client, Pinned above the dates, and Recent by las
   expect(headings()).toEqual(["Recent"]);
   expect(names()).toEqual([A.name, C.name, B.name]);
   await act(async () => type(find() as HTMLInputElement, "asha"));
+  await settle();
   expect(names()).toEqual([A.name]);
   expect(rowOf(A.name)?.textContent).toContain("Client, Asha Rao");
-  // names and clients, never case numbers
-  expect(findLabel()).toBe("Find a matter by its name or client");
-  await act(async () => type(find() as HTMLInputElement, "zzz"));
-  expect(rail()?.textContent).toContain("Search covers names and clients.");
-  expect(rail()?.textContent).not.toContain("case number");
+  expect(findLabel()).toBe("Find");
 });
 
 test("Recent shows the five matters opened last", async () => {
@@ -383,7 +389,9 @@ test("U12's paused rail: the at-limit words muted, never yellow or red; a new vi
   // past midnight, the next view reads today again: the same reset is now today's, with no day
   vi.setSystemTime(new Date(2026, 10, 3, 0, 30));
   await act(async () =>
-    transport.appEvent({ matters_changed: { matters: paused({ pinned: true }) } }),
+    transport.appEvent({
+      matters_changed: { matters: paused({ pinned: true }), removed: [], all: true },
+    }),
   );
   expect(said(A.name)).toContain("Limit reached until 9:00 am");
   expect(said(A.name)).not.toContain("Tuesday");
@@ -394,7 +402,11 @@ test("matters_changed updates a row in place", async () => {
   expect(rowOf(A.name)?.dataset["state"]).toBe("idle");
   await act(async () =>
     transport.appEvent({
-      matters_changed: { matters: [detailed(A, { status: "needs_answer" }), detailed(B)] },
+      matters_changed: {
+        matters: [detailed(A, { status: "needs_answer" })],
+        removed: [],
+        all: false,
+      },
     }),
   );
   expect(rowOf(A.name)?.dataset["state"]).toBe("question");

@@ -24,7 +24,7 @@ use clauseo_protocol::{
 use futures::future::AbortHandle;
 
 use super::super::input::MatterTag;
-use super::super::{Actor, limits};
+use super::super::{Actor, counting, limits};
 use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
@@ -33,6 +33,7 @@ use super::{
     current, failure, host_stopping, known, matter_of, state, steps, updates,
 };
 use crate::error::Error;
+use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
@@ -85,8 +86,14 @@ pub(super) fn on_prompt_done(
             if current.limit.is_none() {
                 current.limit = answer.limit.as_ref().and_then(asks::limit_mark);
             }
+            // The agent cancelled the turn on the lawyer's refusal, not on a Stop.
+            let stop = if answer.stop == StopReason::Cancelled && current.refused {
+                StopReason::NotAllowed
+            } else {
+                answer.stop
+            };
             End {
-                stop: answer.stop,
+                stop,
                 failure: None,
                 expiry: ExpiryReason::TurnEnded,
                 detach: None,
@@ -111,7 +118,11 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
     if !prompting {
         return;
     }
-    tracing::warn!(%thread, %error, "a Codex prompt was refused before it was sent");
+    tracing::warn!(
+        %thread,
+        error = %Cause(error),
+        "a Codex prompt was refused before it was sent"
+    );
     if let Some(current) = current(actor, thread) {
         current.prompt_call = None;
     }
@@ -128,6 +139,7 @@ pub(super) fn on_prompt_refused(actor: &mut Actor, thread: ThreadId, turn: TurnI
 /// Steps 6 and 7: the held text and the expiries in one commit, then the after-turn
 /// checkpoint, whose answer logs the end.
 pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
+    cancel::sweep_leftovers(actor, thread, end.stop);
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -161,7 +173,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         out.send(actor, Then::Nothing)
     })();
     if let Err(error) = expired {
-        tracing::warn!(%thread, %error, "a turn's expiries were not logged");
+        tracing::warn!(%thread, error = %Cause(&error), "a turn's expiries were not logged");
     }
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.permissions.clear();
@@ -401,10 +413,24 @@ pub(super) fn after_events(
 }
 
 /// The turn is over: it lets go of the writer, which passes to the next queued turn; during
-/// shutdown the agent stops now.
+/// shutdown the agent stops now. Every turn ends here, whatever its stop, so the usage counts'
+/// `answer_ended` is counted here once, from the close `failure::closing_sent` just kept.
 pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
-    if let Some(state) = state(actor, thread) {
-        state.current = None;
+    let now = actor.now().mono;
+    let ended = state(actor, thread).and_then(|state| {
+        let current = state.current.take()?;
+        let close = &state.closing.as_ref()?.close;
+        // A turn ended with no close of its own (a host bug lost its matter) is not counted.
+        (close.turn == current.turn).then(|| counting::Ended {
+            started: current.started,
+            first_words: current.first_words,
+            now,
+            stop: close.stop,
+            failure: close.failure.as_ref().map(|(code, _)| *code),
+        })
+    });
+    if let Some(ended) = ended {
+        counting::answer_ended(actor, thread, &ended);
     }
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);

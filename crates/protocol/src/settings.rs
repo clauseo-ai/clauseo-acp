@@ -1,14 +1,22 @@
 //! The display settings as the window reads and changes them: [`SettingsView`] answers
 //! `HostQuery::GetSettings` and rides `HostEvent::SettingsChanged`; a [`UiPatch`] is what
 //! `HostCommand::SetUiSettings` carries. The tool switches are a [`ToolsSettingsView`] inside
-//! it, changed by a [`ToolsPatch`] in `HostCommand::SetToolSettings`.
+//! it, changed by a [`ToolsPatch`] in `HostCommand::SetToolSettings`. The privacy switches are a
+//! [`PrivacySettings`] inside it, changed by a [`PrivacyPatch`] in
+//! `HostCommand::SetPrivacySettings` and started by `HostCommand::FirstAct` (decision record 0036).
+//! Each agent's firm plan is a [`PlanView`]: its endpoint, provider and the names of its extra
+//! variables, never a value (decision record 0048); `SetupCommand::SetFirmEndpoint` changes it.
 //!
 //! These mirror the `ui` section of `clauseo-settings`, which this crate cannot depend on. That
 //! crate holds the rules (the font size range, which keys policy locks); the host turns these
 //! into its types and back. A test in `crates/host` fails when a key or a value is in one and
 //! not the other.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::{AgentId, EnvName};
 
 /// The colour theme.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -109,11 +117,54 @@ pub struct SettingsView {
     /// The tool switches in force. A session reads them at its start: a change reaches the
     /// next session started, and a session already running keeps its tools.
     pub tools: ToolsSettingsView,
+    /// The privacy switches in force, and whether the usage counts have started.
+    pub privacy: PrivacySettings,
     /// Every dotted key the firm's policy sets, such as `ui.theme`, sorted. The lawyer cannot
-    /// change these: a `SetUiSettings` or `SetToolSettings` naming one is refused with
-    /// `settings.locked`. It can also name keys outside `ui` and `tools`
-    /// (`matters.default_location`, `agents.<id>`).
+    /// change these: a `SetUiSettings`, `SetToolSettings` or `SetPrivacySettings` naming one is
+    /// refused with `settings.locked`. It can also name keys outside `ui`, `tools` and `privacy`
+    /// (`matters.default_location`, `agents.<id>`, `plans.<id>`). A key ending in `.` stands
+    /// for every key under it: `plans.` while a policy source cannot be read. So a client asks
+    /// whether a key is locked by prefix as well, not only by exact match: `plans.` locks
+    /// `plans.claude-acp` though that exact key is not in the list.
     pub locked: Vec<String>,
+    /// Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plans: BTreeMap<AgentId, PlanView>,
+}
+
+/// An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the
+/// names of the extra variables. Each name is an [`EnvName`], which cannot hold `=` or a value
+/// after it; the settings crate refuses a secret-shaped variable name.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PlanView {
+    /// The firm's gateway, an `https` URL (`plans.<id>.endpoint`); missing when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Whose service the plan uses (`plans.<id>.provider`); missing when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<PlanProvider>,
+    /// The names of the extra variables (`plans.<id>.env`), sorted; never their values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env_names: Vec<EnvName>,
+}
+
+/// Whose service a firm plan uses (`plans.<id>.provider`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum PlanProvider {
+    /// Anthropic's API, or a gateway that speaks it.
+    Anthropic,
+    /// Amazon Bedrock.
+    Bedrock,
+    /// Google Vertex AI.
+    Vertex,
+}
+
+impl PlanProvider {
+    /// Every value, in declaration order.
+    pub const ALL: [Self; 3] = [Self::Anthropic, Self::Bedrock, Self::Vertex];
 }
 
 /// The tool switches in force: the lawyer's, with policy's values over them.
@@ -124,6 +175,35 @@ pub struct ToolsSettingsView {
     pub web_search: bool,
     /// Whether the agent gets Clauseo's browser (`tools.browser`).
     pub browser: bool,
+}
+
+/// The privacy switches in force: the lawyer's, with policy's `false` over them (a policy can
+/// only turn them off; decision record 0036).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PrivacySettings {
+    /// Whether Clauseo keeps and sends its anonymous usage counts (`privacy.counts`).
+    pub counts: bool,
+    /// Whether Clauseo sends crash reports (`privacy.crash_reports`).
+    pub crash_reports: bool,
+    /// Whether the lawyer's first act has happened (`HostCommand::FirstAct`, or the first change
+    /// of `counts`). Before it nothing is saved or sent, so the switch shows on but not started.
+    pub counts_started: bool,
+}
+
+/// A change to the privacy switches: each field set is changed, the rest stay. A patch that
+/// names a locked key is refused whole with `settings.locked`, and changes nothing. Unknown
+/// fields are refused, as in every command.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PrivacyPatch {
+    /// The new usage counts switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts: Option<bool>,
+    /// The new crash reports switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crash_reports: Option<bool>,
 }
 
 /// A change to the tool switches: each field set is changed, the rest stay. A patch that names

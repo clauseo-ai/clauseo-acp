@@ -24,6 +24,7 @@ The code lives in `crates/fake_agent/src/`.
 - [Running](#running)
 - [Exit codes](#exit-codes)
 - [Generated scenarios](#generated-scenarios)
+- [Sign-in modes](#sign-in-modes)
 - [Add a scenario](#add-a-scenario)
 
 ## The file
@@ -87,7 +88,7 @@ a `respond` step sent, or of the last `session/load` request an `expect` matched
 | `delete_file` | `path`: relative path. | Deletes the file at `path` under the session cwd. Fails (exit 3) when it is not a file, or before any session. | As `write_file`. |
 | `move_file` | `from`, `to`: relative paths. | Moves `from` to `to` under the session cwd, creating `to`'s parent folders. Fails (exit 3) when `from` is not a file, or before any session. | Both paths as `write_file`. |
 | `stderr` | `line`: string. `repeat`: optional integer, default `1`. | Writes `line` and `\n` to stderr `repeat` times, in one write. | `repeat` is 0 to 100,000 (`MAX_REPEAT`). |
-| `spawn_child` | `pid_file`: relative path. | Starts `fake_agent --hold` with null stdio and never waits for it, writes its PID and `\n` to `pid_file`, then writes `fake_agent: child <pid>` to stderr. `pid_file` is relative to the agent's working directory (the process folder), not the session cwd, so it needs no session. | `pid_file` as `write_file`'s `path`. |
+| `spawn_child` | `pid_file`: relative path. `own_group`: optional boolean, default `false`. | Starts `fake_agent --hold` with null stdio and never waits for it, writes its PID and `\n` to `pid_file`, then writes `fake_agent: child <pid>` to stderr. `pid_file` is relative to the agent's working directory (the process folder), not the session cwd, so it needs no session. With `own_group: true` the child leads a process group of its own on Unix, as a command Codex starts in a session of its own does, so a signal to the agent's group misses it; on Windows the flag changes nothing (the child stays in the agent's job). | `pid_file` as `write_file`'s `path`. |
 | `exit` | `code`: integer. | Flushes stdout and exits with `code`. Later steps never run. | `code` is 0 to 255 and not 2 or 3, which `fake_agent` keeps for itself (see [Exit codes](#exit-codes)). |
 | `include` | A file name such as `"handshake.jsonl"`. | Never runs itself: at load, the included file's steps take its place. | See [Includes](#includes). |
 
@@ -350,6 +351,85 @@ disagree. To regenerate the file after a change to the generator, run this from 
 ```sh
 CLAUSEO_REGENERATE_SCOREBOARD=1 cargo nextest run -p clauseo-fake_agent scoreboard_file_matches_its_generator
 ```
+
+## Sign-in modes
+
+`fake_agent` also stands in for two CLIs' sign-in commands, for S18's engine tests in
+`crates/agents`. The mode is picked by the file name of argv[1], the script the engine runs
+(`src/signin.rs`), so the engine's argv is the same as in production, `<node> <script> <args>`.
+The script itself is never read: a test may make it an empty file with that name, in any folder.
+
+| Script file name | Mode | Invocations |
+|---|---|---|
+| `claude-cli` | Claude Code | `<script> --cli auth login [--claudeai\|--console]`, `<script> auth login`, `<script> --cli auth status --json`, `<script> --cli auth logout` (the `--cli` is optional) |
+| `codex.js` | Codex | `<script> login`, `<script> login --device-auth`, `<script> login status`, `<script> logout`, `<script> app-server` |
+
+Any other argv[1] is the usual command line above, unchanged. Each mode's home folder holds one
+marker file, `fake-signin-marker`, holding `{"authMethod": ..., "email": "test@example.com"}`. It
+is never a real credential. Login writes it, logout removes it, and the status commands read it.
+
+Claude's home folder is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` means `$HOME/.claude`),
+else `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's is `CODEX_HOME`
+when set and not empty, else `$HOME/.codex`.
+
+What each command does:
+
+- `claude-cli auth login`: runs `$BROWSER https://claude.com/cai/oauth/authorize?fake=1` when
+  `BROWSER` is set, and waits for it; its exit code is ignored. Then it prints these lines:
+
+  ```text
+  If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?redirect_uri=https://platform.claude.com/oauth/code/callback
+  Paste code here if prompted >
+  ```
+
+  then ends as `FAKE_SIGNIN` says (below). A login that succeeds writes the marker and prints
+  `Login successful.`, exit 0.
+- `claude-cli auth status --json`: prints
+  `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"test@example.com","subscriptionType":"max"}`
+  when the marker is there, and `{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}`
+  when it is not. Exit 0 either way. `authMethod` is the marker's.
+- `claude-cli auth logout`: removes the marker and prints `Successfully logged out from your Claude account.`
+- `codex.js login`: prints `Starting local login server on http://127.0.0.1:1455/auth/callback`,
+  binds nothing there, and then ends as `FAKE_SIGNIN` says. A login that succeeds writes the marker
+  and prints `Successfully logged in`, exit 0.
+- `codex.js login --device-auth`: prints
+  `To sign in, open https://auth.openai.com/codex/device and enter the code ABCD-EFGH`, then ends as
+  `FAKE_SIGNIN` says. Under `FAKE_SIGNIN=device-off` it prints Codex's refusal instead, exit 1:
+  `Enable device code sign-in for Codex, Excel, PowerPoint, and Word in ChatGPT Security Settings, then run codex login --device-auth again.`
+- `codex.js login status`: prints `Logged in using ChatGPT`, exit 0, when the marker is there;
+  `Not logged in`, exit 1, when it is not.
+- `codex.js logout`: removes the marker and prints `Successfully logged out`.
+- `codex.js app-server`: answers JSON-RPC on stdin and stdout, one object per line, and exits 0 when
+  stdin closes. `initialize` answers with `codexHome`, `platformFamily`, `platformOs` and
+  `userAgent` (`fake_agent codex-cli`). `account/read` answers
+  `{"account":{"type":"chatgpt","email":"test@example.com","planType":"plus"},"requiresOpenaiAuth":false}`
+  when the marker is there, and `{"account":null,"requiresOpenaiAuth":true}` when it is not (signed
+  out). A notification (no `id`) gets no reply. Any other method
+  gets error `-32601`.
+
+Bad arguments print the mode's usage line on stderr and exit 2.
+
+`FAKE_SIGNIN` scripts the login (`claude-cli auth login` and the `codex.js` logins):
+
+| Value | Effect |
+|---|---|
+| `ok-after:<ms>` | Waits `<ms>` milliseconds, writes the marker, exits 0. |
+| `cancel` | Prints `OAuth error: access_denied` after the lines above, exits 1. |
+| `never` | Waits until it is killed. |
+| `paste` | Reads one line from stdin. `FAKE-CODE` logs in. Anything else, or end of input, prints `Login failed: the code is not FAKE-CODE.` and exits 1. |
+| `device` | `login --device-auth` works. This is the default. |
+| `device-off` | `login --device-auth` refuses, as above. The browser `login` still works. |
+| `port-busy` | `codex.js login` prints `Port 1455 is already in use: another login is listening on 127.0.0.1:1455.` and exits 1, with no marker. |
+| `reuse:<authMethod>` | Writes the marker with that `authMethod` at startup, for any command. The login then works as `ok-after:0`. |
+
+Unset, empty and any other value mean `ok-after:0`.
+
+`FAKE_SIGNIN_ENV_OUT=<path>` makes either mode write the names of its own environment variables,
+sorted and one per line, to `<path>` before it does anything else. Names only, never values.
+
+The tests that run these modes are in `crates/fake_agent/tests/stdio/signin.rs` (the shared
+helpers and the env-names and usage tests), `signin/claude_cli.rs` and `signin/codex_cli.rs`. They set `HOME`
+to a temp folder, and remove the sign-in variables a host may have set before they set their own.
 
 ## Add a scenario
 

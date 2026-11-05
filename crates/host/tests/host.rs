@@ -23,14 +23,29 @@ mod write;
 #[path = "host/agent_name.rs"]
 mod agent_name;
 #[cfg(test)]
+#[path = "host/ask_user_question.rs"]
+mod ask_user_question;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]
 #[path = "host/browser.rs"]
 mod browser;
 #[cfg(test)]
+#[path = "host/browser_install.rs"]
+mod browser_install;
+#[cfg(test)]
 #[path = "host/cancel.rs"]
 mod cancel;
+#[cfg(test)]
+#[path = "host/cancel_leftovers.rs"]
+mod cancel_leftovers;
+#[cfg(test)]
+#[path = "host/claude_mode.rs"]
+mod claude_mode;
+#[cfg(test)]
+#[path = "host/clear_env.rs"]
+mod clear_env;
 #[cfg(test)]
 #[path = "host/codex.rs"]
 mod codex;
@@ -43,6 +58,21 @@ mod codex_plans;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
+#[cfg(test)]
+#[path = "host/counts.rs"]
+mod counts;
+#[cfg(test)]
+#[path = "host/e2e_scenarios.rs"]
+mod e2e_scenarios;
+#[cfg(test)]
+#[path = "host/folder_query.rs"]
+mod folder_query;
+#[cfg(test)]
+#[path = "host/folder_support.rs"]
+mod folder_support;
+#[cfg(test)]
+#[path = "host/forced_ask.rs"]
+mod forced_ask;
 #[cfg(test)]
 #[path = "host/forget.rs"]
 mod forget;
@@ -83,17 +113,29 @@ mod lists_folder;
 #[path = "host/locate.rs"]
 mod locate;
 #[cfg(test)]
+#[path = "host/log_file.rs"]
+mod log_file;
+#[cfg(test)]
 #[path = "host/matters.rs"]
 mod matters;
 #[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
 #[cfg(test)]
+#[path = "host/not_allowed.rs"]
+mod not_allowed;
+#[cfg(test)]
 #[path = "host/papers.rs"]
 mod papers;
 #[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
+#[cfg(test)]
+#[path = "host/plan_note.rs"]
+mod plan_note;
+#[cfg(test)]
+#[path = "host/privacy.rs"]
+mod privacy;
 #[cfg(test)]
 #[path = "host/profile.rs"]
 mod profile;
@@ -125,6 +167,12 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/search.rs"]
+mod search;
+#[cfg(test)]
+#[path = "host/search_review.rs"]
+mod search_review;
+#[cfg(test)]
 #[path = "host/settings.rs"]
 mod settings;
 #[cfg(test)]
@@ -142,15 +190,35 @@ mod tool_switches;
 #[cfg(test)]
 #[path = "host/tools.rs"]
 mod tools;
+
+#[cfg(test)]
+#[path = "host/titles.rs"]
+mod titles;
+#[cfg(test)]
+#[path = "host/triage.rs"]
+mod triage;
+#[cfg(test)]
+#[path = "host/triage_wake.rs"]
+mod triage_wake;
 #[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;
+#[cfg(test)]
+#[path = "host/undo_preview.rs"]
+mod undo_preview;
+#[cfg(test)]
+#[path = "host/update.rs"]
+mod update;
 #[cfg(test)]
 #[path = "host/versions.rs"]
 mod versions;
 #[cfg(test)]
 #[path = "host/word_open.rs"]
 mod word_open;
+
+#[cfg(test)]
+#[path = "host/word_round_trip.rs"]
+mod word_round_trip;
 #[cfg(test)]
 #[path = "host/writer.rs"]
 mod writer;

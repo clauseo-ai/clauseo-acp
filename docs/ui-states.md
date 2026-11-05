@@ -113,6 +113,7 @@ reported it.
 | Stopped at the agent's turn-request limit | `StopReason::MaxTurnRequests` | as above |
 | Agent refused | `StopReason::Refusal` | as above |
 | Cancelled (by the lawyer or by send now) | `StopReason::Cancelled` | as above; a queued prompt removed before it started gets no step card, only `UserMessageStatus::Removed` |
+| Ended by a refusal: the agent cancelled the turn right after the lawyer's Don't allow (Codex), with no Stop after it | `StopReason::NotAllowed` | as cancelled; the words say the lawyer did not allow it and the answer ended there |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
 | Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
@@ -129,6 +130,7 @@ reported it.
 | Undo disabled while a turn runs in this thread | `HeaderEntry.status` is `ThreadStatus::Starting`, `ThreadStatus::Running`, `ThreadStatus::NeedsYou` or `ThreadStatus::Queued` (the derived undo stays as it is) | the step |
 | Undo refused: a turn runs in another thread of the matter | the host checks when the command arrives: `ErrorCode::MatterTurnRunning` | the code only (retryable) |
 | Undo with a choice per file | `HostCommand::UndoStep` with `FileChoice::Undo`, `FileChoice::Keep` | the step's files |
+| Undo asks first: a file changed after Clauseo's edit | `HostQuery::PreviewUndo` returns `QueryResult::UndoPreview` | `edited_since`: the step's files whose content now differs from its after-turn checkpoint; empty means Undo needs no ask |
 
 ## 4. Approvals
 
@@ -147,6 +149,8 @@ reported it.
 | Permission answered | `PermissionState::Resolved` with `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
 | Permission cancelled | `PermissionState::Resolved` with `PermissionChoice::Cancelled` | by whom |
 | Permission refused because a program holds the file open (`held_open`): "Word has Brief.docx open. Close it in Word or save a copy, then ask again." | `PermissionState::Resolved` with `held_open` set; the choice is the reject-once option, or `PermissionChoice::Cancelled` when none was offered | the matter path a program holds open (Word, Excel or PowerPoint by an owner file, or any program on Windows); the lawyer was not asked |
+| Permission for the agent's own plan note, in its own config folder (not one of the lawyer's files) | `PermissionAbout::AgentPlan` in the entry's `about` | as a pending permission; asking and answering are unchanged |
+| Permission about something from a newer Clauseo | `PermissionAbout::Unknown` | as a permission without `about` |
 | Permission expired | `PermissionState::Expired` | one reason below |
 | Permission expired: the agent exited | `ExpiryReason::AgentExited` | the request |
 | Permission expired: the turn ended | `ExpiryReason::TurnEnded` | the request |
@@ -209,7 +213,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Preview a restore | `HostQuery::PreviewRestore` returns `QueryResult::RestorePreview` | `changes` (files written), `added_since` (left in place), `kept` (left as they are), `locked` (open in another program) |
 | Restore the whole matter | `RestoreRequest::Matter` | `HostCommand::RestoreVersion` |
 | Restore some files | `RestoreRequest::Files` | the chosen paths |
-| Restore refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable |
+| Restore or undo refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable; `HostError.files`, the files to close |
 | Restore refused: a turn runs in the matter | `ErrorCode::MatterTurnRunning` | retryable |
 | Folder missing (the locate-folder flow) | `ErrorCode::MatterFolderMissing` | the matter's name |
 | Checkpoint failed | `ErrorCode::MatterCheckpointFailed` | the turn is refused before it starts |
@@ -223,6 +227,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Existing folder | `MatterKind::Folder` from `MatterSource::ExistingFolder` | name, import summary: files, bytes, cloud-only files |
 | New folder in the default location, no picker | `MatterKind::Folder` from `MatterSource::DefaultLocation` | name |
 | Where new matters go, before a pick | `HostQuery::GetDefaultLocation` returns `QueryResult::DefaultLocation` | `display`, the folder below home |
+| Picked folder's support for Codex's sandbox (Windows), before the matter exists | `HostQuery::FolderSupport { source }` (the `CreateMatter` source) returns `QueryResult::FolderSupport`; `check_failed` when the check doesn't answer in 5 s; an existing folder create refuses gets create's `matter.folder_*` code | `support`: `network`, `no_permissions`, `cant_change_permissions`, `check_failed`, or missing |
 | Folder refused, one code per reason (`matter.folder_refused` before decision record 0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderInMattersRoot` | choose another folder |
 | Folder is already a matter's, or nested with one | `ErrorCode::MatterFolderIsMatter` | `HostError.matter`, the matter to name and offer to open |
 | Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display and status per matter |
@@ -290,13 +295,20 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Elicitation | `ErrorCode::ElicitationNotPending`, `ErrorCode::ElicitationInvalidValues` | no |
 | Agent | `ErrorCode::AgentLaunchFailed`, `ErrorCode::AgentExited` | yes |
 | Agent | `ErrorCode::AgentProtocolError`, `ErrorCode::AgentAuthRequired`, `ErrorCode::AgentUnsupportedVersion` | no |
+| Claude refused: its guard can't be set up in a forced-ask folder (reinstall) | `ErrorCode::AgentGuardMissing` | no |
 | Store | `ErrorCode::StoreIo` | yes |
 | Store | `ErrorCode::StoreDiskFull`, `ErrorCode::StoreCorrupt`, `ErrorCode::StoreLocked`, `ErrorCode::StoreNewerVersion` | no |
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
+| Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
 | Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot` | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked` | no |
+| Agent install (0048) | `ErrorCode::AgentInstallOffline`, `ErrorCode::AgentInstallDiskFull`, `ErrorCode::AgentInstallFailed` | yes |
+| Agent install (0048) | `ErrorCode::AgentInstallBlocked` | no |
+| Sign-in (0048) | `ErrorCode::SigninLinkExpired`, `ErrorCode::SigninPortBusy`, `ErrorCode::SigninFailed` | yes |
+| Sign-in (0048) | `ErrorCode::SigninCancelled`, `ErrorCode::SigninNoPlan`, `ErrorCode::SigninDeviceCodeOff`, `ErrorCode::SigninPolicyUnreadable` | no |
+| Update (0037) | `ErrorCode::UpdateFailed` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

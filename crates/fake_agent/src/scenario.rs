@@ -127,6 +127,9 @@ pub(crate) enum StepKind {
     },
     SpawnChild {
         pid_file: String,
+        /// Unix: the child leads a process group of its own, as a command an agent starts in a
+        /// session of its own does. No effect on Windows, where the child stays in the job.
+        own_group: bool,
     },
     Exit {
         code: i32,

@@ -284,10 +284,21 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
         [w, ..] if w.origin == Origin::Store { name: "broken".to_owned() }
             && matches!(&w.kind, WarningKind::InvalidValue { key, .. } if key == "mcp.servers")
     ));
-    // Other keys stay the user's: only security keys lock (the tools keys: `tools_tests.rs`).
+    // Other keys stay the user's: only security keys lock (the tools keys: `tools_tests.rs`;
+    // the privacy keys: `privacy_tests.rs`).
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
-        ["mcp.servers", "tools.browser", "tools.web_search"]
+        [
+            "install.bundle",
+            "install.registry",
+            "mcp.servers",
+            "plans.",
+            "privacy.counts",
+            "privacy.crash_reports",
+            "tools.browser",
+            "tools.web_search",
+            "update.mode"
+        ]
     );
 }
 

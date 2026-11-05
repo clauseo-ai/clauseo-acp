@@ -159,7 +159,14 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 - `HostQuery::PreviewRestore { matter, checkpoint, scope }` is new and additive (0002): it
   answers `QueryResult::RestorePreview { changes, added_since, kept, locked }` from
   `Matter::preview_restore` and writes nothing. `locked` lists the files a program holds, which a
-  `RestoreVersion` would refuse with `matter.file_locked`, its message naming them.
+  `RestoreVersion` would refuse with `matter.file_locked`, its `files` naming them (0003).
+- `HostQuery::PreviewUndo { thread, turn }` is new and additive (0002): it reads the thread's
+  log for the step as `UndoStep` does (refused as `command.invalid` when the turn has no step to
+  undo), then answers `QueryResult::UndoPreview { edited_since }` from `Matter::edited_since` on
+  the matter's thread: the step's files whose content differs from the after-turn checkpoint,
+  by the stat cache and else a blob hash. It writes nothing, logs nothing and takes no writer.
+  It is what Undo's "changed after Clauseo's edit" ask reads; a `FileChange`'s
+  `may_include_lawyer_edits` (no agent tool call named the path during the turn) is not.
 
 ### Cancel, reconciliation, shutdown
 
@@ -171,6 +178,28 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   arrives with no running turn, or while it is cancelling, is answered cancelled and not logged.
   Everything else the agent sends after `session/cancel` (text, tool calls) is dropped too: R10
   tags it `Late` and the host drops `Late` updates, keeping only what the cancel commit needs.
+- Stop ends what the turn started (clauseo-acp-private#359). An agent can keep a command running
+  past `session/cancel`: codex app-server keeps each background terminal on `turn/interrupt` by
+  design, and starts each command in a session of its own, outside the agent's process group. So
+  as the prompt goes out the host lists the agent's descendants (`process`'s `Descendants`,
+  each with its start time; off the actor, on a `clauseo-sweep` thread), and when the turn ends
+  `Cancelled` with the agent still attached it reads a cutoff on the actor (the clock process
+  starts are stamped with) before the turn lets go of the writer, then ends every descendant new
+  since the listing that started before the cutoff: on Unix SIGTERM (to the process's group when
+  it leads one), 2 s, then SIGKILL to those and to what they started meanwhile; on Windows
+  `TerminateProcess` within the agent's job, and again after 2 s. A queued prompt sent now
+  (`SendQueuedNow`), a Codex steer (a cancel and a new prompt) and any prompt sent right after a
+  Stop all start their turn after that cutoff, so nothing they start is ended; a process started
+  in the cutoff's own clock unit (10 ms on Linux, a timer tick on Windows) is spared too. The
+  agent and everything that ran before the prompt stay, and so does a new process running one of
+  the session's MCP server programs. No sweep runs while the host stops. The agent's stop
+  (restart, fallback, quit) lists the descendants off the actor first, and after the group or job
+  kill also kills those still running. Known gaps: a process that double-forks away from its
+  parent (Unix); an MCP server started or restarted mid-turn whose program is not an absolute path
+  the OS reports as such (`npx` runs as `node`), or any server under a firm's managed MCP
+  (`McpControl::Managed`, where the session gives the agent no servers and so nothing is kept);
+  a helper an agent starts only at its first prompt, which a first-turn cancel ends; and a wall
+  clock set back between the cutoff and a start (macOS, Windows).
 - Start-up reconciliation, before serving, once per thread with an open turn or pending request:
   expire with `HostRestarted`; a started turn gets an after-turn checkpoint and step 7 with
   `TurnFailed { thread.interrupted }`; `AgentSessionDetached { Closed }` when a session was
@@ -228,6 +257,8 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   inherited secret from stderr tails. An inherited name an agent or hook variable also names,
   ignoring case, is left out: on Windows `Path` and `PATH` are one variable, and the inherited
   one must not win.
+- The agent's launch spec is the child's whole environment, so the caller's launcher must clear
+  the environment (#384).
 - A prompt's file must resolve to a path inside the thread's matter folder, else
   `command.invalid`; it goes to the agent as a percent-encoded `file://` URI.
 
@@ -245,7 +276,14 @@ publishing `HostEvent::AccountLimitsChanged`. The restart supervisor comes with 
 the queue and steer came with H9 (above). The profile hook is called at each session start
 (clauseo-acp-private#123), and
 a session gets only the MCP servers the lawyer turned on (clauseo-acp-private#160):
-`crates/host/src/agent/loads.rs` holds the switches and their reasons.
+`crates/host/src/agent/loads.rs` holds the switches and their reasons. A Claude session runs in
+the `default` permission mode whatever the user's own `permissions.defaultMode` says: every
+session's `_meta` sends `allowDangerouslySkipPermissions: false`, and a session that starts in
+another mode gets `session/set_mode default` before its first prompt, or its launch fails
+(clauseo-acp-private#162). Known gap: the lawyer's personal Claude Code allow rules and user
+hooks still apply to Clauseo sessions until stage D's R20 gives each session Clauseo's own
+`CLAUDE_CONFIG_DIR` (clauseo-acp-private#285). Flag-tier ask rules could cover the allow rules
+until then, but were dropped: every `Bash` call would prompt.
 
 ## Status
 

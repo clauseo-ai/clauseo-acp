@@ -13,6 +13,8 @@ pub(crate) struct TestDir {
 impl TestDir {
     /// `<temp>/clauseo-matters-unit-<name>-<pid>`, emptied first if a crashed run left it.
     pub(crate) fn new(name: &str) -> Self {
+        // Owner files planted here stay held through the stale rule: no Word runs in a test.
+        crate::test_support::pretend_word_running_since_epoch();
         let path = std::env::temp_dir().join(format!(
             "clauseo-matters-unit-{name}-{}",
             std::process::id()
@@ -36,7 +38,7 @@ impl TestDir {
 impl Drop for TestDir {
     fn drop(&mut self) {
         if let Err(err) = write::remove_dir_all(&self.path) {
-            tracing::warn!(path = %self.path.display(), error = %err, "test folder left behind");
+            tracing::warn!(error = %err, "test folder left behind");
         }
     }
 }

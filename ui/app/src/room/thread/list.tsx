@@ -18,11 +18,14 @@ import { stamp } from "./clock.ts";
 import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
 import { useHasOlder, useQuestionWords } from "./live.ts";
+import { useJumpLanding, useJumpOrder } from "./jump-entry.ts";
 import { useOlder } from "./older.ts";
-import { pickQueued, useTimeOf } from "./time-of.ts";
 import { RowOf } from "./row-of.tsx";
+import { SourcesTransport, webPick } from "./sources.ts";
+import { WebSources } from "./sources.tsx";
 import { SteerNotesOf } from "./steer-rows.tsx";
 import { LiveAnswerRows } from "./step-groups.tsx";
+import { pickQueued, useTimeOf } from "./time-of.ts";
 
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
@@ -124,6 +127,41 @@ function Sections({
 const USER = "user_message:";
 const TOOL = "tool_call:";
 
+/** The web sources of an exchange's turn (sources.tsx): what its tool calls found, each entry's `web` in order, with the
+ * thread's agent from its header. Its tool call ids are taken once per id list, and an exchange with none draws and
+ * subscribes to nothing. */
+function ExchangeSources({
+  ids,
+  stream,
+  paged,
+}: {
+  ids: readonly EntryId[];
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+}) {
+  const tools = useMemo(() => ids.filter((id) => id.startsWith(TOOL)), [ids]);
+  return tools.length === 0 ? null : <ToolSources tools={tools} stream={stream} paged={paged} />;
+}
+
+function ToolSources({
+  tools,
+  stream,
+  paged,
+}: {
+  tools: readonly EntryId[];
+  stream: StreamId;
+  paged: ReadonlyMap<EntryId, ViewEntry>;
+}) {
+  // the calls that carry web, and only their web: the same array while none of them changes, so a flush that leaves
+  // them as they were renders nothing
+  const pick = useMemo(() => webPick(tools, paged), [tools, paged]);
+  const webs = useStreamPart(useViewStore(), stream, pick);
+  const agent = useStreamPart(useViewStore(), stream, pickAgent);
+  return <WebSources webs={webs} agent={agent} />;
+}
+
+const pickAgent = (v: StreamView | undefined) => v?.header?.header?.agent;
+
 /** One exchange, its rows live or from an older page: a turn can start on a page and go on in the window. */
 const LiveExchange = memo(
   function LiveExchange({
@@ -168,6 +206,7 @@ const LiveExchange = memo(
           paged={paged}
           sentNow={sentNow}
           latest={latest}
+          sources={<ExchangeSources ids={ids} stream={stream} paged={paged} />}
         />
       );
     // a steer's mark in the answer (a user message there) is where a tool call can carry on in the background
@@ -225,7 +264,10 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const { nodes } = useRoom();
   const hasOlder = useHasOlder(stream);
   const scroller = useCallback(() => nodes.get("thread"), [nodes]);
-  const older = useOlder(transport, store, stream, hasOlder, scroller);
+  // a Find result opens the thread at one of its entries: paged back to it, then scrolled to it
+  const reach = useJumpOrder(stream);
+  const older = useOlder(transport, store, stream, hasOlder, scroller, reach);
+  useJumpLanding(store, stream, reach, older.entries, scroller, older.start);
   // one grouping over the older pages and the window, built again as a page goes in
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);
@@ -236,30 +278,32 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
     // settles on its latest answer then. The log is busy until the first view lands and while an older page goes in,
     // so a screen reader doesn't read a whole reopened history, or a page put in above, as news
-    <Thread
-      question={question}
-      who={w.t("You")}
-      live={busy}
-      resting={!busy && exchanges.length > 0}
-      busy={(stream !== null && !landed) || older.loading}
-    >
-      {stream !== null &&
-        exchanges.map((g, i) => {
-          const b = i === 0 ? undefined : exchanges[i - 1];
-          return (
-            <LiveExchange
-              key={g.key}
-              ids={g.ids}
-              asked={g.asked}
-              sentNow={g.sentNow}
-              stream={stream}
-              paged={paged}
-              latest={i === exchanges.length - 1}
-              beforeAsked={b?.asked === true ? b.ids[0] : undefined}
-              beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
-            />
-          );
-        })}
-    </Thread>
+    <SourcesTransport value={transport}>
+      <Thread
+        question={question}
+        who={w.t("You")}
+        live={busy}
+        resting={!busy && exchanges.length > 0}
+        busy={(stream !== null && !landed) || older.loading}
+      >
+        {stream !== null &&
+          exchanges.map((g, i) => {
+            const b = i === 0 ? undefined : exchanges[i - 1];
+            return (
+              <LiveExchange
+                key={g.key}
+                ids={g.ids}
+                asked={g.asked}
+                sentNow={g.sentNow}
+                stream={stream}
+                paged={paged}
+                latest={i === exchanges.length - 1}
+                beforeAsked={b?.asked === true ? b.ids[0] : undefined}
+                beforeStep={b?.ids.find((id) => id.startsWith(STEP))}
+              />
+            );
+          })}
+      </Thread>
+    </SourcesTransport>
   );
 });

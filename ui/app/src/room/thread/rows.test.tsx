@@ -24,7 +24,7 @@ import {
 } from "../../testing/stream-script.ts";
 import type { FileChange, HostError, StepEntry, ViewEntry } from "../../transport/protocol.ts";
 import { clockTime, whenOf } from "./clock.ts";
-import { defaultOutcome, mountRoom, type Harness } from "./harness.ts";
+import { defaultOutcome, mountRoom, previewUndoScript, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -101,6 +101,11 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
     ["end_turn", undefined, ""],
     ["at_limit", undefined, ""],
     ["cancelled", undefined, th("en", "You stopped the answer. The answer so far is kept.")],
+    [
+      "not_allowed",
+      undefined,
+      th("en", "You didn't allow a request, so the answer stopped. The answer so far is kept."),
+    ],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
     [
       "max_turn_requests",
@@ -161,7 +166,9 @@ test("one paper reads in the singular", async () => {
 });
 
 test("a paper edited since asks first: Keep current sends nothing, Undo anyway undoes every file", async () => {
-  h = await mountRoom();
+  h = await mountRoom(
+    previewUndoScript(() => ({ undo_preview: { edited_since: ["Reply.docx"] } })),
+  );
   h.deliver([reset([changed({ files: [file("Notice.docx"), file("Reply.docx", true)] })])]);
   const button = (name: string) =>
     [...document.querySelectorAll("button")].find((b) => b.textContent === name);

@@ -6,8 +6,7 @@
 //!
 //! A window's entry lives from its page's `open_stream` until the window is destroyed
 //! (`close_window`, from `settings_window::on_destroyed`): then its channel, pumps, app pump and
-//! watchdog go. What a window may dispatch and query depends on its label (`admit`, `query`):
-//! `main` the allow-lists of 0019, `settings` only its own settings (0028).
+//! watchdog go. What a window may dispatch or query depends on its label (`admit.rs`, `query`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{MAIN_SEPARATOR, Path};
@@ -18,9 +17,8 @@ use std::time::Instant;
 use clauseo_host::HostHandle;
 use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
-    HostCommand, HostError, HostQuery, Language, MAX_PAGE_ENTRIES, MatterSource, PageLimit,
-    PermissionEntry, PermissionKind, PermissionRequestId, PermissionState, Principal, QueryResult,
-    RefreshWhy, StreamId, ThreadId, ViewEntry, ViewPosition,
+    HostCommand, HostError, HostQuery, Language, PermissionEntry, PermissionRequestId, Principal,
+    QueryResult, RefreshWhy, StreamId, ThreadId, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -30,7 +28,10 @@ use crate::host_start::HostCell;
 use crate::picked::{self, PickedFolder};
 use crate::settings_window::SETTINGS_WINDOW;
 
+mod admit;
+mod permission;
 mod pump;
+mod search;
 mod throttle;
 mod window;
 
@@ -38,14 +39,21 @@ use pump::Window;
 use throttle::RefreshThrottle;
 use window::{AckError, Feed};
 
+// The tests (`tests.rs`, `tests/permission.rs`) name these through this module.
+#[cfg(test)]
+use clauseo_protocol::{MatterSource, ViewEntry};
+#[cfg(test)]
+use permission::needs_confirm;
+
 /// The principal of every call: the desktop app on this computer.
 const PRINCIPAL: Principal = Principal::LocalDesktop;
 
 /// The option ids claude-agent-acp 0.89.1 offers when it leaves plan mode that switch the
 /// session to `bypassPermissions` (`exit-plan-bypass`, `exit-plan-clear-bypass`) or to auto
 /// mode (`exit-plan-auto`, `exit-plan-clear-auto`). Choosing one is a mode change, refused for
-/// the reason `SetMode` is (see `dispatch`). Follow-up: acp's session meta sends
-/// `allowDangerouslySkipPermissions: false`, so the bypass options are never offered.
+/// the reason `SetMode` is (see `dispatch`). The host's session meta sends
+/// `allowDangerouslySkipPermissions: false`, so the bypass options are no longer offered; the
+/// refusal stays for an adapter that offers them anyway, and for the auto options.
 const MODE_OPTIONS: [&str; 4] = [
     "exit-plan-bypass",
     "exit-plan-clear-bypass",
@@ -86,21 +94,6 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// A `command.invalid` failure with `message`.
 fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
-}
-
-/// Whether answering with an option of `kind` first needs the lawyer's native confirm. Fails
-/// closed: only the once kinds and `reject_always` skip it, `allow_always` needs it, and a
-/// kind this version does not know is refused with `command.invalid`.
-fn needs_confirm(kind: PermissionKind) -> Result<bool, HostError> {
-    match kind {
-        PermissionKind::AllowOnce | PermissionKind::RejectOnce | PermissionKind::RejectAlways => {
-            Ok(false)
-        }
-        PermissionKind::AllowAlways => Ok(true),
-        PermissionKind::Unknown => Err(invalid(
-            "an option of a kind this version does not know cannot be answered",
-        )),
-    }
 }
 
 impl Bridge {
@@ -179,6 +172,11 @@ impl Bridge {
     }
 
     /// Runs `command`, which the bridge itself makes, under a new command id.
+    /// Whether the window `label` may send `command` (`admit.rs`).
+    fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
+        admit::admit(self, label, command)
+    }
+
     async fn run(&self, command: HostCommand) -> Result<CommandOutcome, HostError> {
         let command_id =
             CommandId::new(uuid::Uuid::now_v7()).map_err(HostError::invalid_command)?;
@@ -190,97 +188,10 @@ impl Bridge {
         self.host().await?.dispatch(checked.into_envelope()).await
     }
 
-    /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
-    /// `settings` window `SetUiSettings`, `SetToolSettings` and, for its Plan and usage,
-    /// `RefreshLimits` (0028, U12; `dispatch_at` throttles it), any other window nothing.
-    fn admit(&self, label: &str, command: &HostCommand) -> Result<(), HostError> {
-        match label {
-            crate::MAIN_WINDOW => self.admit_main(command),
-            SETTINGS_WINDOW => match command {
-                // Plan and usage sends `Shown` as it opens and `TryAgain` from its button.
-                HostCommand::SetUiSettings { .. }
-                | HostCommand::SetToolSettings { .. }
-                | HostCommand::RefreshLimits { .. } => Ok(()),
-                _ => Err(invalid(
-                    "the settings window sends only set_ui_settings, set_tool_settings \
-                     and refresh_limits",
-                )),
-            },
-            _ => Err(invalid(format!("window {label} may send no command"))),
-        }
-    }
-
-    /// Whether `main` may send `command`: an allow-list, one arm per host command and no
-    /// catch-all, so a command the host adds does not compile here until the bridge rules on it
-    /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
-    /// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-    /// `SetConfigOption`), and a `CreateMatter` or `RelocateMatter` whose folder ref this run's
-    /// `pick_folder` did not issue.
-    fn admit_main(&self, command: &HostCommand) -> Result<(), HostError> {
-        match command {
-            HostCommand::CreateMatter { source, .. } => match source {
-                MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder } => {
-                    self.picked(*folder)
-                }
-                // The host's own default location: no folder ref, nothing to check.
-                MatterSource::DefaultLocation => Ok(()),
-            },
-            HostCommand::RelocateMatter { folder, .. } => self.picked(*folder),
-            // `UpdateMatter`, `OpenMatter` and `ForgetMatter` name a matter only.
-            HostCommand::UpdateMatter { .. }
-            | HostCommand::OpenMatter { .. }
-            | HostCommand::ForgetMatter { .. }
-            | HostCommand::CreateThread { .. }
-            | HostCommand::SendPrompt { .. }
-            | HostCommand::EditQueuedPrompt { .. }
-            | HostCommand::RemoveQueuedPrompt { .. }
-            | HostCommand::SendQueuedNow { .. }
-            | HostCommand::ResumeQueue { .. }
-            | HostCommand::Cancel { .. }
-            | HostCommand::RestartAgent { .. }
-            | HostCommand::AnswerElicitation { .. }
-            | HostCommand::RenameThread { .. }
-            | HostCommand::ArchiveThread { .. }
-            // H6: names a thread only.
-            | HostCommand::MarkSeen { .. }
-            | HostCommand::UndoStep { .. }
-            | HostCommand::RestoreVersion { .. }
-            | HostCommand::SetUiSettings { .. }
-            // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
-            // (`Bridge::shown`), not through here.
-            | HostCommand::RefreshLimits { .. } => Ok(()),
-            HostCommand::AnswerPermission { .. } => Err(invalid(
-                "a permission is answered with answer_permission, not dispatch",
-            )),
-            // A mode or option can widen what the agent may do without asking (Claude's
-            // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
-            // That path does not exist yet, and the window never sends either.
-            HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
-                "modes and config options are not settable from the window yet",
-            )),
-            // The tool switches live in the settings window only; the main window shows the
-            // tools and offers to open Settings, so it has no caller (least privilege).
-            HostCommand::SetToolSettings { .. } => Err(invalid(
-                "the tool switches are set from the settings window only",
-            )),
-        }
-    }
-
-    /// Whether this run's `pick_folder` issued `folder`: `command.invalid` when it did not.
-    fn picked(&self, folder: FolderRefId) -> Result<(), HostError> {
-        if lock(&self.issued).contains(&folder) {
-            Ok(())
-        } else {
-            Err(invalid(format!(
-                "folder ref {folder} was not picked in this run"
-            )))
-        }
-    }
-
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
-    /// until the bridge rules on it. The `settings` window reads the settings alone (0028), and
-    /// any other window nothing.
+    /// until the bridge rules on it. The `settings` window reads the settings (0028) and the
+    /// updater's state (0037) alone, and any other window nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -288,8 +199,12 @@ impl Bridge {
     ) -> Result<QueryResult, HostError> {
         match label {
             crate::MAIN_WINDOW => {}
-            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings) => {}
-            SETTINGS_WINDOW => return Err(invalid("the settings window reads only the settings")),
+            SETTINGS_WINDOW if matches!(query, HostQuery::GetSettings | HostQuery::GetUpdate) => {}
+            SETTINGS_WINDOW => {
+                return Err(invalid(
+                    "the settings window reads only the settings and the update state",
+                ));
+            }
             _ => return Err(invalid(format!("window {label} may send no query"))),
         }
         match &query {
@@ -299,11 +214,19 @@ impl Bridge {
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
             | HostQuery::PreviewRestore { .. }
+            // Undo's "changed after Clauseo's edit" ask (#360): reads the folder, writes nothing.
+            | HostQuery::PreviewUndo { .. }
             | HostQuery::ReadBlob { .. }
             | HostQuery::GetSettings
+            // The updater's state (0037): both windows show it.
+            | HostQuery::GetUpdate
             | HostQuery::ListAgents
             // H8's wall (#131): reads the folder's stats, and names files by refs.
             | HostQuery::ListPapers { .. } => {}
+            HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
+            // The New matter dialog's folder warning: only a ref this run's picker issued, as
+            // for `CreateMatter`.
+            HostQuery::FolderSupport { source } => admit::picked_source(self, source)?,
         }
         self.host().await?.query(PRINCIPAL, query).await
     }
@@ -446,6 +369,26 @@ impl Bridge {
         Ok(())
     }
 
+    /// Answers a permission request with `option`, which it must have offered (`permission.rs`).
+    pub(crate) async fn answer_permission(
+        &self,
+        confirm: &dyn Confirm,
+        thread: ThreadId,
+        request: PermissionRequestId,
+        option: AgentChoiceId,
+    ) -> Result<(), HostError> {
+        permission::answer(self, confirm, thread, request, option).await
+    }
+
+    /// The permission entry `request` of `thread`'s view, when it is pending (`permission.rs`).
+    async fn pending_permission(
+        &self,
+        thread: ThreadId,
+        request: PermissionRequestId,
+    ) -> Result<PermissionEntry, HostError> {
+        permission::pending(self, thread, request).await
+    }
+
     /// Records the window's ack, `messages` channel messages processed since `open_stream` and
     /// the stream positions in `positions` (maybe none), and passes each position of a stream
     /// the window follows on to the host. An ack naming a stream twice, or more messages than
@@ -471,96 +414,6 @@ impl Bridge {
                 .await?;
         }
         Ok(())
-    }
-
-    /// Answers a permission request with `option`, which it must have offered. An
-    /// `allow_always` option first goes past `confirm`; declined there, nothing is answered and
-    /// the call fails with `transport.unauthorized`. One of [`MODE_OPTIONS`], or an option of a
-    /// kind this version does not know, is refused with `command.invalid`.
-    pub(crate) async fn answer_permission(
-        &self,
-        confirm: &dyn Confirm,
-        thread: ThreadId,
-        request: PermissionRequestId,
-        option: AgentChoiceId,
-    ) -> Result<(), HostError> {
-        if MODE_OPTIONS.contains(&option.as_str()) {
-            return Err(invalid(format!(
-                "option {option} changes the session's mode, which the window cannot do yet"
-            )));
-        }
-        let entry = self.pending_permission(thread, request).await?;
-        let offered = entry
-            .options
-            .iter()
-            .find(|offered| offered.option_id.as_str() == option.as_str())
-            .ok_or_else(|| {
-                HostError::new(
-                    ErrorCode::PermissionUnknownOption,
-                    format!("permission request {request} did not offer option {option}"),
-                )
-            })?;
-        if needs_confirm(offered.kind)? && !confirm.confirm().await {
-            return Err(HostError::new(
-                ErrorCode::TransportUnauthorized,
-                "the lawyer declined to always allow",
-            ));
-        }
-        let answer = HostCommand::AnswerPermission {
-            thread,
-            request,
-            option_id: option,
-        };
-        self.run(answer).await?;
-        Ok(())
-    }
-
-    /// The permission entry `request` of `thread`'s view, when it is pending. Pages back from
-    /// the newest entry: a pending request is among the last.
-    async fn pending_permission(
-        &self,
-        thread: ThreadId,
-        request: PermissionRequestId,
-    ) -> Result<PermissionEntry, HostError> {
-        let not_pending = || {
-            HostError::new(
-                ErrorCode::PermissionNotPending,
-                format!("permission request {request} is not pending"),
-            )
-        };
-        let limit = PageLimit::new(MAX_PAGE_ENTRIES).map_err(HostError::invalid_command)?;
-        let mut before_order = None;
-        loop {
-            let page = HostQuery::PageEntries {
-                stream: StreamId::Thread(thread),
-                before_order,
-                limit,
-            };
-            let QueryResult::Entries(entries) = self.host().await?.query(PRINCIPAL, page).await?
-            else {
-                return Err(HostError::new(
-                    ErrorCode::Internal,
-                    "PageEntries answered with another kind of result",
-                ));
-            };
-            let found = entries.iter().rev().find_map(|entry| match entry {
-                ViewEntry::Permission(permission) if permission.request == request => {
-                    Some(permission)
-                }
-                _ => None,
-            });
-            if let Some(permission) = found {
-                return match permission.state {
-                    PermissionState::Pending => Ok(permission.clone()),
-                    _ => Err(not_pending()),
-                };
-            }
-            let full = u32::try_from(entries.len()).is_ok_and(|len| len >= limit.get());
-            match entries.first() {
-                Some(oldest) if full => before_order = Some(oldest.order()),
-                _ => return Err(not_pending()),
-            }
-        }
     }
 
     /// Asks `picker` for a folder and registers it, with the display `picked::display` gives

@@ -2,6 +2,7 @@
 // actions in a context menu, and, for the current matter, its conversations opened beneath it on one raised plane.
 import { ContextMenu } from "@base-ui/react/context-menu";
 import { Menu as BaseMenu } from "@base-ui/react/menu";
+import type { ReactNode } from "react";
 import { Button } from "../ui/button.tsx";
 import {
   MenuCheckboxItem,
@@ -32,7 +33,8 @@ import { tbt } from "../lib/words-toolbar.ts";
 import { Say } from "./say.tsx";
 import { ConversationList, type ConversationRowProps } from "./rail-conversations.tsx";
 import { RailMark } from "./rail-mark.tsx";
-import { MATTER_MARK } from "./rail-marks.ts";
+import type { Triage } from "./rail-triage.tsx";
+import { MATTER_MARK, SNOOZED } from "./rail-marks.ts";
 import { matterStatus, type MatterState } from "./rail-words.ts";
 
 export type { MatterState };
@@ -57,6 +59,8 @@ export type MatterRowProps = {
   moved?: boolean | undefined;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
+  /** Optional: in Needs you, the title of the conversation behind its status, quiet, beneath the status's words. */
+  where?: string | undefined;
   /** A line under the note saying why a search found it, where the name alone doesn't show: "Client, Asha Rao". */
   match?: string | undefined;
   /** Optional: protection is off for this matter, or couldn't be set up. The row's name line ends in the open
@@ -82,13 +86,22 @@ export type MatterRowProps = {
   conversationPlan?: string | undefined;
   /** Optional: a test id on New conversation. */
   newConversationTestId?: string | undefined;
+  /** Optional (U16b): snoozed whole where it stays in view (Pinned, or open), its words ("Snoozed until …"): its status
+   * line, muted, led by the alarm clock. */
+  snoozed?: string | undefined;
+  /** Optional (U16b): the current matter's done conversations, folded under its list (ConversationList's `done`). */
+  conversationsDone?: { count: number; rows: () => ReactNode } | undefined;
+  /** Optional (U16b): Snooze until… and Mark all done in its menu, for its conversations not done. */
+  triage?: Triage | undefined;
+  /** Optional (U16b): what stands in the row's place: the line after a snooze or Done, or the snooze picker. */
+  replace?: ReactNode;
 };
 
 /** A matter's actions: pin it to the top, show its folder in the computer's own file manager, or find a folder that
  * moved, and take it off the list, which leaves the folder where it is. */
 type ActionProps = Pick<
   MatterRowProps,
-  "name" | "pinned" | "state" | "moved" | "onPin" | "onLocate" | "onReveal" | "onRemove"
+  "name" | "pinned" | "state" | "moved" | "onPin" | "onLocate" | "onReveal" | "onRemove" | "triage"
 >;
 
 /** Whether the folder has moved, for the actions: the flag where given, else the moved state. */
@@ -96,8 +109,9 @@ const movedOf = (moved: boolean | undefined, state: MatterState | undefined) =>
   moved ?? state === "moved";
 
 /** Whether the row has any action to show: each item stands only with its handler. */
-const hasActions = ({ state, moved, onPin, onLocate, onReveal, onRemove }: ActionProps) =>
+const hasActions = ({ state, moved, onPin, onLocate, onReveal, onRemove, triage }: ActionProps) =>
   onPin !== undefined ||
+  triage !== undefined ||
   (movedOf(moved, state) && onLocate !== undefined) ||
   onReveal !== undefined ||
   onRemove !== undefined;
@@ -111,11 +125,13 @@ function MatterActions({
   onLocate,
   onReveal,
   onRemove,
+  triage,
 }: ActionProps) {
   const { lang, platform } = useDisplay();
   const moved = movedOf(movedFlag, state);
   const locate = moved ? onLocate : undefined;
-  const above = onPin !== undefined || locate !== undefined || onReveal !== undefined;
+  const above =
+    onPin !== undefined || triage !== undefined || locate !== undefined || onReveal !== undefined;
   return (
     <>
       {above && (
@@ -129,6 +145,7 @@ function MatterActions({
               onCheckedChange={(on) => onPin(on)}
             />
           )}
+          {triage?.items(true)}
           {locate !== undefined && (
             <MenuItem
               label={ui(lang, "Locate folder")}
@@ -180,19 +197,27 @@ function RowWords({
   match,
   state,
   status,
+  where,
   unprotected,
+  snoozed,
 }: {
   name: string;
   note: string;
   match?: string | undefined;
+  where?: string | undefined;
   state: MatterState;
   status: string | null;
   unprotected?: boolean | undefined;
+  snoozed?: string | undefined;
 }) {
   const w = useWords();
   // waiting on the lawyer, or an answer waiting to be opened: the status line speaks up
   const news =
-    state === "question" || state === "permission" || state === "ready" || state === "paused";
+    state === "question" ||
+    state === "permission" ||
+    state === "ready" ||
+    state === "paused" ||
+    state === "failed";
   // limit stays muted: nothing for the lawyer to choose, only a time to wait for
   return (
     <>
@@ -220,7 +245,15 @@ function RowWords({
           <Say>{match}</Say>
         </span>
       )}
-      {status !== null && state !== "idle" && (
+      {snoozed !== undefined && (
+        <span className="flex items-start gap-s1-5 text-small text-muted">
+          <RailMark mark={SNOOZED} className="room-matter-mark" />
+          <span className="min-w-0 deva-nudge">
+            <Say>{snoozed}</Say>
+          </span>
+        </span>
+      )}
+      {snoozed === undefined && status !== null && state !== "idle" && (
         <span
           className={cn(
             "flex items-start gap-s1-5 text-small",
@@ -230,6 +263,11 @@ function RowWords({
           <RailMark mark={MATTER_MARK[state]} className="room-matter-mark" />
           <span className="min-w-0 deva-nudge">
             <Say>{status}</Say>
+            {where !== undefined && (
+              <span className="room-matter-where" lang={langOfText(where)}>
+                <Say>{where}</Say>
+              </span>
+            )}
           </span>
         </span>
       )}
@@ -251,6 +289,7 @@ export function MatterRow({
   moved,
   pinned,
   match,
+  where,
   unprotected,
   onOpen,
   onPin,
@@ -262,10 +301,25 @@ export function MatterRow({
   onNewConversation,
   conversationPlan,
   newConversationTestId,
+  triage,
+  replace,
+  conversationsDone,
+  snoozed,
 }: MatterRowProps) {
   const w = useWords();
+  if (replace !== undefined && !(current && conversations !== undefined)) return <li>{replace}</li>;
   const status = matterStatus(w.lang, state, at, day);
-  const actions: ActionProps = { name, pinned, state, moved, onPin, onLocate, onReveal, onRemove };
+  const actions: ActionProps = {
+    name,
+    pinned,
+    state,
+    moved,
+    onPin,
+    onLocate,
+    onReveal,
+    onRemove,
+    triage,
+  };
   const menu = hasActions(actions);
   const button = (
     <button
@@ -281,9 +335,11 @@ export function MatterRow({
         name={name}
         note={note}
         match={match}
+        where={where}
         state={state}
         status={status}
         unprotected={unprotected}
+        snoozed={snoozed}
       />
     </button>
   );
@@ -293,8 +349,8 @@ export function MatterRow({
     return (
       <li className="room-house">
         <div className="room-house-head">
-          {button}
-          {menu && (
+          {replace ?? button}
+          {menu && replace === undefined && (
             <Menu>
               <MenuTrigger
                 render={
@@ -321,6 +377,7 @@ export function MatterRow({
             conversations={conversations}
             plan={conversationPlan}
             newTestId={newConversationTestId}
+            done={conversationsDone}
             {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
           />
         )}

@@ -79,7 +79,8 @@ test("the undo's line names what went back in the row's order, then what the hos
   await h.deliver(MATTER_STREAM, [upsert(version(4, "undo", { thread: THREAD, turn: TURN }))]);
   await h.deliver(STREAM, [upsert(undoneMarker(["brief.txt", "notes/a.txt"], ["old.txt"], 4))]);
   expect(papers()).toBe(went(`${iso("a.txt")} and ${iso("brief.txt")}`));
-});
+  // cold mount: the room and Versions' chunk load in this test, 0.9 s alone; 30 s for a loaded machine
+}, 30_000);
 
 test("the outside edits the host wrote with the undo, in one commit, keep the undo's line", async () => {
   h = await mountVersions(VERSIONS, STEPS, {

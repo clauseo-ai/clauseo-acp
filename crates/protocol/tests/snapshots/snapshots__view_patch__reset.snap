@@ -15,6 +15,7 @@ expression: "ViewPatchBody::Reset { view_window: Box::new(view_window()) }"
           "status": "idle",
           "queue_held": true,
           "steer_joins_turn": true,
+          "done": false,
           "mode_id": "plan",
           "config_options": [],
           "commands": [],

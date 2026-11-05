@@ -34,6 +34,7 @@ import type {
   RevealTarget,
   StreamId,
   ThreadId,
+  UiCount,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
@@ -108,6 +109,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     );
     this.#reader = new ChannelReader(
       (event: ChannelEvent) => {
+        // An `events` arm falls through unheard: the host subscribes no window to a thread's events. The web sources
+        // under an answer (room/thread/sources.tsx) come from the view's tool calls, each one's `web`.
         const failed = streamFailedOf(event);
         if (failed !== null) {
           this.#subs.fail(failed.stream, toHostError(failed.error));
@@ -118,7 +121,12 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           const view = limitsOf(event);
           if (view === null) warn("limits_view_changed carried no view");
           else this.#limits.deliver(view);
-        } else if ("settings_changed" in event && event.settings_changed !== undefined) {
+        } else if (
+          ("settings_changed" in event && event.settings_changed !== undefined) ||
+          ("matters_changed" in event && event.matters_changed !== undefined) ||
+          ("threads_changed" in event && event.threads_changed !== undefined) ||
+          ("browser_install" in event && event.browser_install !== undefined)
+        ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
             try {
@@ -171,7 +179,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`). The first listener subscribes the window's channel to them;
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`). The first listener subscribes the window's channel to them;
    * read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
@@ -279,6 +287,17 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
+  }
+  // A stub of R20's setup wire (store/setup.ts's SetupSource): desktop's `setup` command and stream arm come with
+  // stage D's P5. Until then no SetupEvent arrives, so the first run shows its first screen but no install line and no
+  // sign-in gate; with no state to act on no setup command can be pressed, and one sent anyway does nothing.
+  onSetup(): () => void {
+    return () => {};
+  }
+  async setup(): Promise<void> {}
+  /** Counts one event only the webview sees (S21's `count_ui`). */
+  async countUi(event: UiCount): Promise<void> {
+    await call(commands.countUi(event));
   }
 }
 

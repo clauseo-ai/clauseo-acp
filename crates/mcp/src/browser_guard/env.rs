@@ -31,21 +31,25 @@ pub(crate) const EXECUTABLE_PATH: &str = "AGENT_BROWSER_EXECUTABLE_PATH";
 /// `<socket dir>/namespaces/<ns>/run/<session>.sock` (`connection.rs:136-141`), past the Unix
 /// limit, and the socket folder is per session already.
 pub(crate) const SESSION: &str = "AGENT_BROWSER_SESSION";
-/// The socket folder: `/tmp/clauseo-ab-<session prefix>` on Unix, `<cwd>\run` on Windows.
+/// The socket folder. Unix: the host's folder (`/tmp/clauseo-ab-<16 random>`), from the
+/// guard's environment, which `socket.rs` checks. Windows: `<cwd>\run`, whatever the
+/// environment says.
 pub(crate) const SOCKET_DIR: &str = "AGENT_BROWSER_SOCKET_DIR";
-/// The prefix of the Unix socket folder; the first [`SOCKET_DIR_SESSION_CHARS`] characters of
-/// the session follow it.
-const UNIX_SOCKET_DIR_PREFIX: &str = "/tmp/clauseo-ab-";
-/// How much of the session names the Unix socket folder.
-const SOCKET_DIR_SESSION_CHARS: usize = 16;
+/// The stream server's port, claimed by the host for the session.
+pub(crate) const STREAM_PORT: &str = "AGENT_BROWSER_STREAM_PORT";
+/// Chrome's extra arguments: [`WEBRTC_ARG`], then `--remote-debugging-port=<--cdp-port>`, one
+/// per line (agent-browser splits the value at newlines, `flags.rs` `split_launch_args`, and
+/// Chrome takes the last of a repeated switch, so the port wins over agent-browser's own
+/// `--remote-debugging-port=0`).
+pub(crate) const ARGS: &str = "AGENT_BROWSER_ARGS";
+/// Keeps WebRTC's UDP off every path but the proxy.
+pub(crate) const WEBRTC_ARG: &str = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp";
+/// The lowest port the guard accepts from the host: below it are the privileged ports.
+pub(crate) const MIN_PORT: u16 = 1024;
 
 /// Values fixed in the guard, whatever its environment says.
 pub(crate) const FIXED: &[(&str, &str)] = &[
     ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
-    (
-        "AGENT_BROWSER_ARGS",
-        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-    ),
     ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
     ("AGENT_BROWSER_MAX_OUTPUT", "25000"),
     ("AGENT_BROWSER_DEFAULT_TIMEOUT", "30000"),
@@ -78,7 +82,7 @@ const PASS_WINDOWS: &[&str] = &[
 ];
 
 /// Folders under `--cwd`, each named by the variables that point at it. The Unix socket folder
-/// is not among them: see [`socket_dir`].
+/// is not among them: the host makes it (`socket.rs`).
 const FOLDERS_UNIX: &[(&str, &[&str])] = &[
     ("downloads", &["AGENT_BROWSER_DOWNLOAD_PATH"]),
     ("screenshots", &["AGENT_BROWSER_SCREENSHOT_DIR"]),
@@ -100,16 +104,9 @@ pub(crate) fn folders(os: Os, cwd: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Unix: `/tmp/clauseo-ab-<first 16 characters of the session>`, short enough for the socket
-/// path (`socket.rs` makes and checks it). Windows: `<cwd>\run`, one of [`folders`].
-pub(crate) fn socket_dir(os: Os, cwd: &Path, session: &str) -> PathBuf {
-    match os {
-        Os::Unix => {
-            let prefix = session.get(..SOCKET_DIR_SESSION_CHARS).unwrap_or(session);
-            PathBuf::from(format!("{UNIX_SOCKET_DIR_PREFIX}{prefix}"))
-        }
-        Os::Windows => cwd.join("run"),
-    }
+/// Windows: `<cwd>\run`, one of [`folders`], where agent-browser writes `<session>.port`.
+pub(crate) fn windows_socket_dir(cwd: &Path) -> PathBuf {
+    cwd.join("run")
 }
 
 fn folder_table(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
@@ -168,6 +165,8 @@ enum Problem {
     NotFile,
     NotProxy,
     NotSession,
+    NotAbsolute,
+    NotPort,
 }
 
 impl fmt::Display for EnvError {
@@ -185,16 +184,25 @@ impl fmt::Display for EnvError {
                  leading zero"
             ),
             Problem::NotSession => write!(f, "{name} must be 1 to 64 of A-Z a-z 0-9 _ -"),
+            Problem::NotAbsolute => write!(f, "{name} must be an absolute path"),
+            Problem::NotPort => write!(
+                f,
+                "{name} must be a port from {MIN_PORT} to 65535 with no leading zero"
+            ),
         }
     }
 }
 
-/// The child's whole environment. Fails on the first required variable that is missing or
-/// invalid, in the order config, proxy, executable path, session; never falls back.
+/// The child's whole environment, with `cdp_port` (`--cdp-port`, checked already) in
+/// [`ARGS`]. Fails on the first required variable that is missing or invalid, in the order
+/// config, proxy, executable path, session, socket folder (Unix only), stream port; never falls
+/// back. The Unix socket folder is checked here only for being absolute; `socket.rs` checks
+/// the folder itself.
 pub(crate) fn build(
     source: &Source,
     os: Os,
     cwd: &Path,
+    cdp_port: u16,
 ) -> Result<BTreeMap<String, OsString>, EnvError> {
     let config = required(source, os, CONFIG, is_local_file, Problem::NotFile)?;
     let proxy = required(
@@ -212,7 +220,25 @@ pub(crate) fn build(
         |v, _| is_session(v),
         Problem::NotSession,
     )?;
-    let session_text = session.to_str().unwrap_or_default();
+    let socket_dir = match os {
+        Os::Unix => required(
+            source,
+            os,
+            SOCKET_DIR,
+            |v, _| is_unix_absolute(v),
+            Problem::NotAbsolute,
+        )?
+        .to_owned(),
+        Os::Windows => windows_socket_dir(cwd).into_os_string(),
+    };
+    let stream_port = required(
+        source,
+        os,
+        STREAM_PORT,
+        |v, _| port_of(v).is_some(),
+        Problem::NotPort,
+    )?;
+    let args = format!("{WEBRTC_ARG}\n--remote-debugging-port={cdp_port}");
 
     let mut env = BTreeMap::new();
     let mut set = |name: &str, value: &OsStr| {
@@ -222,7 +248,9 @@ pub(crate) fn build(
     set(PROXY, proxy);
     set(EXECUTABLE_PATH, executable);
     set(SESSION, session);
-    set(SOCKET_DIR, socket_dir(os, cwd, session_text).as_os_str());
+    set(SOCKET_DIR, &socket_dir);
+    set(STREAM_PORT, stream_port);
+    set(ARGS, OsStr::new(&args));
     for (name, value) in FIXED {
         set(name, OsStr::new(value));
     }
@@ -319,6 +347,27 @@ pub(crate) fn is_loopback_proxy(value: &OsStr) -> bool {
         && port.bytes().all(|b| b.is_ascii_digit())
         && !port.starts_with('0')
         && port.parse::<u32>().is_ok_and(|n| (1..=65_535).contains(&n))
+}
+
+/// Absolute by Unix's rule, a leading `/`, whatever OS reads it: `Path::has_root`, which on
+/// Unix is `Path::is_absolute`, so the guard's own check is unchanged there, and the tests that
+/// model Unix read `/tmp/...` the same way on a Windows machine (where `is_absolute` wants a
+/// drive).
+fn is_unix_absolute(value: &OsStr) -> bool {
+    Path::new(value).has_root()
+}
+
+/// A port from [`MIN_PORT`] to 65535, in decimal with no sign and no leading zero.
+pub(crate) fn port_of(value: &OsStr) -> Option<u16> {
+    let text = value.to_str()?;
+    let plain = !text.is_empty()
+        && text.len() <= 5
+        && text.bytes().all(|b| b.is_ascii_digit())
+        && !text.starts_with('0');
+    if !plain {
+        return None;
+    }
+    text.parse::<u16>().ok().filter(|port| *port >= MIN_PORT)
 }
 
 /// 1 to 64 of `A-Z a-z 0-9 _ -`.

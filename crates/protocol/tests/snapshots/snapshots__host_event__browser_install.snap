@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::BrowserInstall\n{\n    state: BrowserInstallState::Failed\n    {\n        code: BrowserInstallFailure::SizeMismatch, message:\n        \"the zip is 10 bytes, its Content-Length 12\".to_owned(),\n    },\n}"
+---
+{
+  "browser_install": {
+    "state": {
+      "failed": {
+        "code": "size_mismatch",
+        "message": "the zip is 10 bytes, its Content-Length 12"
+      }
+    }
+  }
+}
