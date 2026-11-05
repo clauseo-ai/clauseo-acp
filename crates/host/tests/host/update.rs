@@ -529,3 +529,21 @@ fn last_runs_download_installs_at_start_in_auto_only() {
     assert_eq!(fake.downloads(), 0);
     assert_eq!(marker_text(&dir).as_deref(), Some(INSTALLING));
 }
+
+#[test]
+fn managed_counts_once_a_day_across_starts() {
+    // Review of R23 PR 4: the machine's once-a-day rule lives in memory, so each start would
+    // count it again; the open day's counts say whether it already was.
+    let dir = Dir::new("update_managed_daily", &[]);
+    let counts = open_counts(&dir, true);
+    let fake = FakeUpdater::new(&dir, InstallKind::Package, None, Download::Instant);
+    for run in 0..2 {
+        let host = start_updating_with(&dir, run, &fake, CURRENT, counting(&counts));
+        host.settle();
+        host.shutdown();
+    }
+    let managed = Update {
+        result: UpdateResult::Managed,
+    };
+    assert_eq!(cells(&counts.today().update), [(managed, 1)]);
+}

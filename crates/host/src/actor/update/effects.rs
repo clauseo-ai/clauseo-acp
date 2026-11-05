@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use clauseo_counts::schema::{Event, Update};
+use clauseo_counts::schema::{Event, Update, UpdateResult};
 use clauseo_protocol::HostEvent;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -64,8 +64,24 @@ pub(super) fn run(actor: &mut Actor, fx: Vec<Effect>) {
                     app::publish(actor, &changed);
                 }
             }
-            Effect::Count(result) => counting::bump(actor, Event::Update(Update { result })),
+            Effect::Count(result) => count(actor, result),
         }
+    }
+}
+
+/// Counts `update { result }`. `managed` counts once a day across starts too: the machine's
+/// once-a-day rule lives in memory, so the open day's counts say whether an earlier run already
+/// counted it. A background `failed` stays once a day per run (the machine's rule): it shares
+/// its key with the failures the lawyer asked for, which always count.
+fn count(actor: &Actor, result: UpdateResult) {
+    let update = Update { result };
+    let counted_today = result == UpdateResult::Managed
+        && actor
+            .counts
+            .as_ref()
+            .is_some_and(|counts| counts.today().update.iter().any(|cell| cell.key == update));
+    if !counted_today {
+        counting::bump(actor, Event::Update(update));
     }
 }
 
