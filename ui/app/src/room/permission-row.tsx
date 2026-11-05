@@ -99,7 +99,7 @@ function Permission({
         keys={keys}
         offered={offered}
         {...(m.asks ? { question: w.th("Clauseo asks before going on.") } : {})}
-        title={m.title}
+        title={m.label === null ? m.title : w.th(m.label)}
         {...(reason ? { reason: <FolderReason /> } : {})}
         kept={m.kept}
         done={m.done}

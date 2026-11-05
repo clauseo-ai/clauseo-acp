@@ -271,6 +271,39 @@ test("Every change is kept: for a change to files all inside the matter, not for
   );
 });
 
+test("a plan note (about agent_plan): the card says its line in place of the raw path, and Allow or Deny still answers", async () => {
+  const raw = "Write C:\\Users\\lawyer\\.claude\\plans\\the-plan.md";
+  const line = th(
+    "en",
+    "Claude wants to save its plan as a note in its own folder, not in this matter.",
+  );
+  const planNote = (): ViewEntry[] => [
+    callEntry(2, 1, { title: raw, locations: [{ outside: { display: raw } }] }),
+    perm(3, 1, { tool_call: uuid(1, 7), about: "agent_plan" }),
+  ];
+  h = await room(planNote());
+  expect(prompt()?.textContent).toContain(th("en", "Clauseo asks before going on."));
+  expect(prompt()?.textContent).toContain(line);
+  expect(prompt()?.textContent).not.toContain(raw);
+  expect(answers()).toEqual(KINDS.map((k) => `permission-${k}`));
+  await h.click(h.one("permission-allow_once"));
+  expect(answered()).toEqual(["opt-once"]);
+  await h.unmount();
+  h = await room(planNote());
+  await h.key({ key: "Escape" });
+  expect(answered()).toEqual(["opt-deny"]);
+});
+
+test("with about absent or unknown, the card keeps the raw title beneath its ask", async () => {
+  const raw = "Write C:\\Users\\lawyer\\.claude\\plans\\the-plan.md";
+  h = await room([
+    callEntry(2, 1, { title: raw, locations: [{ outside: { display: raw } }] }),
+    perm(3, 1, { tool_call: uuid(1, 7), about: "unknown" }),
+  ]);
+  expect(prompt()?.textContent).toContain(iso(raw));
+  expect(prompt()?.textContent).not.toContain("Claude wants to save its plan");
+});
+
 test("the folded line: saved only once the call completed, left as it was only while it didn't, and plain without a paper", async () => {
   const paper = iso("Notice to the bank");
   h = await room([
