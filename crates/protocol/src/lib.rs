@@ -137,6 +137,7 @@
 )]
 
 mod approval;
+mod browser_install;
 mod command;
 mod content;
 mod details;
@@ -192,6 +193,7 @@ wire_types! {
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
+    browser_install::{BrowserInstallFailure, BrowserInstallState},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
         RefreshWhy, RestoreRequest,

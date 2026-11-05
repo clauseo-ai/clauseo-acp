@@ -82,7 +82,11 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::FirstAct { .. }
         // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
         // (`Bridge::shown`), not through here.
-        | HostCommand::RefreshLimits { .. } => Ok(()),
+        | HostCommand::RefreshLimits { .. }
+        // The Chrome for Testing download (0029): the main window's consent dialog sends
+        // it after the lawyer agrees, and its Cancel button the cancel. No field to check.
+        | HostCommand::InstallBrowser {}
+        | HostCommand::CancelBrowserInstall {} => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

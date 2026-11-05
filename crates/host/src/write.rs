@@ -83,6 +83,18 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Removes the link or file `path` itself, never what a link points to: a leftover download's
+/// working entry that is not a real folder (`browser/install/archive.rs`). On Windows a link to
+/// a folder (or a junction) is removed as a folder, which removes the link only.
+pub(crate) fn remove_link(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if cfg!(windows) && std::fs::symlink_metadata(path).is_ok() => {
+            std::fs::remove_dir(path).map_err(|_dir| error)
+        }
+        other => other,
+    }
+}
+
 /// Sets the folder `path` to 0700 when it is not already (a link is left as it is).
 #[cfg(unix)]
 pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {

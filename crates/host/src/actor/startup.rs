@@ -66,6 +66,7 @@ pub(super) async fn open(
     let limits_reader = parts.limits_reader.unwrap_or_else(|| {
         super::limits::default_reader(&parts.effective, &parts.launcher, &parts.clock)
     });
+    let browser_install = super::browser_install::BrowserInstall::for_wiring(&parts.wiring);
     let mut actor = Actor {
         spawner,
         post,
@@ -84,6 +85,7 @@ pub(super) async fn open(
         wiring: parts.wiring,
         counts: parts.counts,
         count_on_commit: BTreeMap::new(),
+        browser_install,
         header_tools: super::header_tools::HeaderTools::default(),
         run_sweep: super::turn::RunSweep::default(),
         refused_folders: parts.refused_folders,
@@ -127,6 +129,7 @@ pub(super) async fn open(
     };
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
+    super::browser_install::start(&mut actor);
     Ok(actor)
 }
 

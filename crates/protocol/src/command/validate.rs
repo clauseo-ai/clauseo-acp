@@ -225,7 +225,10 @@ impl HostCommand {
                 thread: _,
                 done: _,
             }
-            | Self::SweepDone { day_start: _ } => Ok(()),
+            | Self::SweepDone { day_start: _ }
+            // No fields; a second download while one runs is the host's refusal (state).
+            | Self::InstallBrowser {}
+            | Self::CancelBrowserInstall {} => Ok(()),
         }
     }
 }

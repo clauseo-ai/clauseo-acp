@@ -121,6 +121,8 @@ golden! { HostCommand::name_of {
     };
     ScanFolder => scan_folder: HostCommand::ScanFolder { folder: folder_ref_id(2) };
     CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
+    InstallBrowser => install_browser: HostCommand::InstallBrowser {};
+    CancelBrowserInstall => cancel_browser_install: HostCommand::CancelBrowserInstall {};
 } }
 
 /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".

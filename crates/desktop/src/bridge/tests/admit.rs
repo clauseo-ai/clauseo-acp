@@ -4,6 +4,7 @@
 //! sends `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and `RefreshLimits` (Plan and
 //! usage, U12) and reads `GetSettings`, nothing else; `FirstAct` comes from `main` only; another
 //! label sends nothing (0028, 0036).
+//! The Chrome for Testing download's two commands are main's alone (0029).
 
 use clauseo_protocol::{MatterId, ThreadId};
 use serde_json::json;
@@ -362,4 +363,30 @@ fn review_a_reloaded_main_window_can_search_again() {
         ),
         "the reloaded page's first search: {after:?}"
     );
+}
+
+/// The Chrome for Testing download (0029) is the main window's: its consent dialog sends
+/// `install_browser` and its Cancel `cancel_browser_install`. The settings window and any other
+/// label are refused both with `command.invalid`, before the host sees them.
+#[test]
+fn only_the_main_window_starts_or_cancels_the_browser_download() {
+    let scratch = Scratch::new("admit-browser", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let install = command(json!({"install_browser": {}}));
+    let cancel = command(json!({"cancel_browser_install": {}}));
+    for browser in [&install, &cancel] {
+        assert!(bridge.admit(MAIN, browser).is_ok(), "{browser:?}");
+        for label in [SETTINGS, "other"] {
+            let refusal = block_on(bridge.dispatch(label, envelope(browser.clone()))).unwrap_err();
+            assert_eq!(
+                refusal.code(),
+                ErrorCode::CommandInvalid,
+                "{label} {browser:?}"
+            );
+        }
+    }
+    // With no download running, main's cancel reaches the host and does nothing.
+    let outcome = block_on(bridge.dispatch(MAIN, envelope(cancel)));
+    assert!(matches!(outcome, Ok(CommandOutcome::Done)), "{outcome:?}");
 }

@@ -15,6 +15,7 @@ use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use serde_json::{Map, Value};
 
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
@@ -136,6 +137,8 @@ pub(crate) struct LaunchWiring {
     /// The environment an agent's spec starts from, in place of the host's own
     /// (`std::env::vars_os` at launch), for tests; `None` reads the host's.
     pub(crate) inherited_env: Option<Vec<(OsString, OsString)>>,
+    /// The Chrome for Testing download's tools; `None` is `SystemTools` (curl, ditto, tar).
+    pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
 }
 
 impl Default for LaunchWiring {
@@ -149,6 +152,7 @@ impl Default for LaunchWiring {
             #[cfg(unix)]
             browser_socket_root: None,
             inherited_env: None,
+            install_tools: None,
         }
     }
 }
@@ -163,6 +167,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("browser_slots", &self.browser_slots)
             // Names and values stay out: the environment holds secrets.
             .field("inherited_env", &self.inherited_env.is_some())
+            .field("install_tools", &self.install_tools.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -362,6 +367,14 @@ impl HostConfig {
     #[cfg(all(unix, feature = "test-support"))]
     pub fn with_browser_socket_root(mut self, root: PathBuf) -> Self {
         self.wiring.browser_socket_root = Some(root);
+        self
+    }
+
+    /// The tools the Chrome for Testing download uses (default: `SystemTools`: curl, ditto or
+    /// tar, and the OS's signature check), for tests that run it without the network.
+    #[cfg(feature = "test-support")]
+    pub fn with_browser_install_tools(mut self, tools: Arc<dyn InstallTools>) -> Self {
+        self.wiring.install_tools = Some(tools);
         self
     }
 
