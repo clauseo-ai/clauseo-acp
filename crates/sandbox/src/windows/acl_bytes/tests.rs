@@ -252,6 +252,28 @@ fn a_child_inherits_its_parents_low_label_unless_it_has_its_own() {
     assert_eq!(Acl::parse(&gone).unwrap().aces().len(), 0);
 }
 
+/// The Windows run: a DACL written auto-inherited asks to stay so (`SE_DACL_AUTO_INHERIT_REQ`,
+/// `0x0100`), and protection is kept as given; one not auto-inherited doesn't ask.
+#[test]
+fn an_auto_inherited_dacl_is_written_with_the_request_to_keep_it() {
+    let dacl = render(2, &[&spec(POOL, Rights::Modify).bytes()]);
+    let control = |bytes: &[u8]| u16::from_le_bytes([bytes[2], bytes[3]]);
+    let kept = build_descriptor(DACL_AUTO_INHERITED, Some(&dacl), None);
+    assert_eq!(control(&kept), 0x8000 | 0x0400 | 0x0100 | 0x0004);
+    let protected = build_descriptor(DACL_PROTECTED | DACL_AUTO_INHERITED, Some(&dacl), None);
+    assert_eq!(
+        control(&protected),
+        0x8000 | 0x1000 | 0x0400 | 0x0100 | 0x0004
+    );
+    assert_eq!(
+        control(&build_descriptor(0, Some(&dacl), None)),
+        0x8000 | 0x0004
+    );
+    let sacl = render(2, &[&spec(LOW_LABEL_SID, Rights::LowLabel).bytes()]);
+    let label = build_descriptor(DACL_AUTO_INHERITED, None, Some(&sacl));
+    assert_eq!(control(&label) & 0x0100, 0, "no request without a DACL");
+}
+
 #[test]
 fn a_descriptor_is_built_and_read_back() {
     let dacl = render(2, &[&spec(POOL, Rights::Modify).bytes()]);
