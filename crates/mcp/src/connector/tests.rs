@@ -122,6 +122,9 @@ pub(super) fn run_mode(
 const ACCEPT_POLLS: u32 = 2000;
 /// The wait between two polls of the listener.
 const ACCEPT_POLL: Duration = Duration::from_millis(5);
+/// How long a test relay's read waits before it fails, naming what it waited for: a mode that
+/// keeps its socket open without writing fails the test here, not at the runner's 30 s kill.
+const READ_LIMIT: Duration = Duration::from_secs(10);
 
 /// Waits for `after`, without `thread::sleep` (`clippy.toml` bans it). The channel's sender is
 /// held, so nothing wakes the wait early.
@@ -134,13 +137,15 @@ pub(super) fn pause(after: Duration) {
 
 /// Accepts the mode's connection, or gives up after about 10 s and returns `None`. A mode that
 /// never connects (a refused token, say) then fails its test with its reply, instead of
-/// blocking the test in `accept` until the runner kills it. The stream is blocking again.
+/// blocking the test in `accept` until the runner kills it. The stream is blocking again, with
+/// reads bounded by [`READ_LIMIT`].
 pub(super) fn accept_within_limit(listener: &TcpListener) -> Option<TcpStream> {
     listener.set_nonblocking(true).unwrap();
     for _ in 0..ACCEPT_POLLS {
         match listener.accept() {
             Ok((stream, _)) => {
                 stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(READ_LIMIT)).unwrap();
                 return Some(stream);
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => pause(ACCEPT_POLL),
@@ -165,7 +170,9 @@ pub(super) fn relay<R: Send + 'static>(
         };
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut hello = String::new();
-        reader.read_line(&mut hello).unwrap();
+        reader
+            .read_line(&mut hello)
+            .expect("the relay read no hello within 10 seconds of the connection");
         match answer {
             Some(text) => {
                 let mut writer = &stream;
@@ -184,7 +191,10 @@ pub(super) fn lines_until_end(reader: &mut BufReader<TcpStream>) -> Vec<String> 
     let mut lines = Vec::new();
     loop {
         let mut line = String::new();
-        if reader.read_line(&mut line).unwrap() == 0 {
+        let read = reader
+            .read_line(&mut line)
+            .expect("the relay read nothing for 10 seconds: the mode kept the connection open");
+        if read == 0 {
             return lines;
         }
         lines.push(line);
