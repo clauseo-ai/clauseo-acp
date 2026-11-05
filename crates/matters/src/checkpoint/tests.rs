@@ -23,8 +23,9 @@ use crate::{PlaceholderProbe, write};
 
 /// Never cloud-only; when `grow` names a file, appends to it once, the first time the walk
 /// asks about it (after the walk took its stat). Each file of `vanish` is removed the first
-/// time the walk asks about it (once only), so its read finds it gone; the first time the walk
-/// asks about one file of `vanish_other`, the other is removed, so its stat finds it gone.
+/// time the walk asks about it (once only), so its read finds it gone, when the walk reads it
+/// ([`not_vouched`]); the first time the walk asks about one file of `vanish_other`, the other
+/// is removed, so its stat finds it gone.
 #[derive(Default)]
 struct Probe {
     grow: Option<(PathBuf, usize)>,
@@ -131,6 +132,15 @@ fn put_at(path: &Path, bytes: &[u8]) {
         Ok(())
     })
     .unwrap();
+}
+
+/// Gives the file at `path` an mtime long past and unlike any a cache holds for it, so the next
+/// walk reads it: its stat no longer matches the cached one. A file of a Probe's `vanish` goes
+/// only when the walk asks about it, and is found gone only if the walk then reads it; the cache
+/// vouches for a file whose stat is unchanged and older than the racy window, and writing many
+/// files can take a loaded machine longer than that window.
+fn not_vouched(path: &Path) {
+    write::set_mtime(path, in_2020(60)).unwrap();
 }
 
 fn cid(n: u64) -> CheckpointId {
@@ -354,6 +364,7 @@ fn a_file_swapped_in_while_the_walk_reads_it_is_changed_not_deleted() {
     let mut core = setup.create();
     setup.take(&mut core, 1, CheckpointKind::Import);
     let doc = setup.folder.join("doc.docx");
+    not_vouched(&doc);
     setup.settings.probe = Arc::new(Probe {
         vanish: vec![doc.clone()],
         ..Probe::default()
@@ -410,6 +421,7 @@ fn a_file_gone_for_good_is_deleted_after_the_waits() {
     setup.put("doc.docx", b"one");
     let mut core = setup.create();
     setup.take(&mut core, 1, CheckpointKind::Import);
+    not_vouched(&setup.folder.join("doc.docx"));
     setup.settings.probe = Arc::new(Probe {
         vanish: vec![setup.folder.join("doc.docx")],
         ..Probe::default()
@@ -433,8 +445,16 @@ fn many_files_gone_wait_no_longer_than_one() {
     for name in &names {
         setup.put(name, name.as_bytes());
     }
+    // Every file older than the cache by far, so the import's cache vouches for each one
+    // whatever the clock: as when writing 200 files took the test longer than the racy window.
+    for name in &names {
+        write::set_mtime(&setup.folder.join(name), in_2020(0)).unwrap();
+    }
     let mut core = setup.create();
     setup.take(&mut core, 1, CheckpointKind::Import);
+    for name in &names {
+        not_vouched(&setup.folder.join(name));
+    }
     setup.settings.probe = Arc::new(Probe {
         vanish: names.iter().map(|name| setup.folder.join(name)).collect(),
         ..Probe::default()
@@ -446,6 +466,9 @@ fn many_files_gone_wait_no_longer_than_one() {
     assert_eq!(waited, VANISHED_WAITS.iter().sum::<Duration>());
     assert!(waited <= Duration::from_millis(300));
     let changes = kinds(&checkpoint);
-    assert_eq!(changes.len(), 200);
-    assert!(changes.iter().all(|(_, kind)| *kind == ChangeKind::Deleted));
+    assert_eq!(changes.len(), 200, "{changes:?}");
+    assert!(
+        changes.iter().all(|(_, kind)| *kind == ChangeKind::Deleted),
+        "{changes:?}"
+    );
 }
