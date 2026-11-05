@@ -208,7 +208,12 @@ pub fn run(
         }
         Ok(_) => {}
         // An unknown free space does not stop the download: a full disk fails it later.
-        Err(error) => tracing::warn!(%error, "the free disk space was not read"),
+        Err(error) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the free disk space was not read"
+            );
+        }
     }
     cancel.check()?;
     manifest::check_versions_url(VERSIONS_URL)?;
@@ -224,7 +229,7 @@ pub fn run(
     let done = in_partial(job, tools, cancel, report, &download, &partial);
     // Whatever is left of the working folder goes, after success too (the zip).
     if let Err(error) = write::remove_tree(&partial) {
-        tracing::warn!(%error, folder = %partial.display(), "a working folder was not removed");
+        tracing::warn!(error = %crate::log_file::Cause(&error), "a working folder was not removed");
     }
     done
 }
@@ -281,7 +286,10 @@ fn in_partial(
     // The links once more where they now live: the walk above ran under another name.
     if let Err(failure) = archive::check_tree(&target) {
         if let Err(error) = write::remove_tree(&target) {
-            tracing::warn!(%error, folder = %target.display(), "a refused browser was not removed");
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "a refused browser was not removed"
+            );
         }
         return Err(failure);
     }
@@ -314,8 +322,8 @@ pub fn check_signature(required: bool, signed: Result<(), String>) -> Result<(),
             Ok(())
         }
         Err(said) if required => Err(Failure::new(BrowserInstallFailure::Signature, said)),
-        Err(said) => {
-            tracing::warn!(%said, "the Chrome for Testing signature check failed; not required");
+        Err(_) => {
+            tracing::warn!("the Chrome for Testing signature check failed; not required");
             Ok(())
         }
     }

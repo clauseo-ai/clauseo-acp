@@ -42,10 +42,10 @@ impl ChromeSearch {
         match crate::browser::write_config(data) {
             Ok(_) => Some(chrome),
             Err(error) => {
-                let file = data
-                    .join(crate::browser::CONFIG_DIR)
-                    .join(crate::browser::CONFIG_FILE);
-                tracing::warn!(file = %file.display(), %error, "agent-browser's config file was not written; the session has no browser");
+                tracing::warn!(
+                    error = %crate::log_file::Cause(&error),
+                    "agent-browser's config file was not written; the session has no browser"
+                );
                 None
             }
         }
@@ -77,8 +77,8 @@ impl BrowserPrep {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return (None, None);
         }
-        if let Some(missing) = self.sidecars.iter().find(|sidecar| !sidecar.is_file()) {
-            tracing::warn!(sidecar = %missing.display(), "a browser sidecar is missing; the session has no browser");
+        if self.sidecars.iter().any(|sidecar| !sidecar.is_file()) {
+            tracing::warn!("a browser sidecar is missing; the session has no browser");
             return (None, None);
         }
         let Some(chrome) = self.chrome.find_with_config(data) else {
@@ -99,7 +99,10 @@ impl BrowserPrep {
                 (Some(chrome), Some(Arc::new(session)))
             }
             Err(error) => {
-                tracing::warn!(%error, "the session has no browser");
+                tracing::warn!(
+                    error = %crate::log_file::Cause(&error),
+                    "the session has no browser"
+                );
                 (Some(chrome), None)
             }
         }

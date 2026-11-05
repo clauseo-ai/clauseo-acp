@@ -391,7 +391,10 @@ pub fn sweep_partials(browsers: &Path) {
             Err(error) => Err(error),
         };
         if let Err(error) = removed {
-            tracing::warn!(%error, path = %path.display(), "a leftover download was not removed");
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "a leftover download was not removed"
+            );
         }
     }
 }

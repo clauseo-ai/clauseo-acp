@@ -105,7 +105,10 @@ pub(crate) fn wake_committed(actor: &mut Actor, outcome: Result<(), &Failure>) {
     if let Err(failure) = outcome
         && failure.first
     {
-        tracing::warn!(error = %failure.error, "a snooze's wake was not stored");
+        tracing::warn!(
+            error = %crate::log_file::Cause(&failure.error),
+            "a snooze's wake was not stored"
+        );
     }
     actor.triage.busy = false;
     actor.triage.dirty = true;
@@ -208,7 +211,11 @@ fn wake(actor: &mut Actor) {
                     &mut actor.ids,
                 );
                 if let Err(error) = pushed {
-                    tracing::warn!(%thread, %error, "a snooze's wake was not logged");
+                    tracing::warn!(
+                        %thread,
+                        error = %crate::log_file::Cause(&error),
+                        "a snooze's wake was not logged"
+                    );
                 }
             }
             let sent = if draft.is_empty() {
@@ -222,7 +229,10 @@ fn wake(actor: &mut Actor) {
                 // meanwhile): no re-arm until a commit or a load says something moved, so a
                 // thread that cannot be woken does not spin the timer.
                 Some(Err(error)) => {
-                    tracing::warn!(%error, "a snooze's wake was not sent");
+                    tracing::warn!(
+                        error = %crate::log_file::Cause(&error),
+                        "a snooze's wake was not sent"
+                    );
                     actor.triage.busy = false;
                 }
                 None => actor.triage.busy = false,

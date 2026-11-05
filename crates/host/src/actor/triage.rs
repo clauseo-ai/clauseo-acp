@@ -290,7 +290,11 @@ fn load_all(actor: &mut Actor, threads: &[ThreadId], then: AllLoaded) {
                     let mut join = join.borrow_mut();
                     match result {
                         Ok(()) => join.loaded.push(thread),
-                        Err(error) => tracing::warn!(%thread, %error, "triage: no load"),
+                        Err(error) => tracing::warn!(
+                            %thread,
+                            error = %crate::log_file::Cause(&error),
+                            "triage: no load"
+                        ),
                     }
                     join.left = join.left.saturating_sub(1);
                     if join.left == 0 {

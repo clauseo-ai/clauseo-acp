@@ -99,7 +99,12 @@ pub(super) fn start(actor: &mut Actor) {
         .spawn(move || archive::sweep_partials(&browsers));
     match swept {
         Ok(thread) => actor.browser_install.sweep = Some(thread),
-        Err(error) => tracing::warn!(%error, "the leftover download sweep did not start"),
+        Err(error) => {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the leftover download sweep did not start"
+            );
+        }
     }
 }
 
@@ -164,13 +169,12 @@ impl LastState {
 
     fn send(mut self, result: Result<PathBuf, install::Failure>) {
         let state = match result {
-            Ok(folder) => {
-                tracing::info!(folder = %folder.display(), "Chrome for Testing is installed");
+            Ok(_) => {
+                tracing::info!("Chrome for Testing is installed");
                 BrowserInstallState::Done
             }
             Err(failure) => {
-                tracing::warn!(code = ?failure.code, message = %failure.message,
-                    "the Chrome for Testing download failed");
+                tracing::warn!(code = ?failure.code, "the Chrome for Testing download failed");
                 BrowserInstallState::Failed {
                     code: failure.code,
                     message: failure.message,
@@ -226,7 +230,10 @@ pub(super) fn on_state(actor: &mut Actor, state: BrowserInstallState) {
             && serving
             && let Err(error) = begin(actor)
         {
-            tracing::warn!(%error, "the download asked for after a cancel did not start");
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "the download asked for after a cancel did not start"
+            );
         }
     }
 }

@@ -71,6 +71,12 @@ pub(super) fn on_log(
         MatterTag::Query(reply),
     ) {
         Ok(()) => actor.work.matter_jobs += 1,
-        Err(error) => tracing::warn!(%matter, %error, "an undo preview was not sent"),
+        Err(error) => {
+            tracing::warn!(
+                %matter,
+                error = %crate::log_file::Cause(&error),
+                "an undo preview was not sent"
+            );
+        }
     }
 }

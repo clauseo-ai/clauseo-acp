@@ -116,7 +116,12 @@ pub(crate) async fn off_actor_or_undo<T: Send + 'static>(
             }
         });
     if let Err(error) = started {
-        tracing::warn!(what = job.what, matter = ?job.matter, %error, "could not start {THREAD_NAME}");
+        tracing::warn!(
+            what = job.what,
+            matter = ?job.matter,
+            error = %crate::log_file::Cause(&error),
+            "could not start {THREAD_NAME}"
+        );
         return Err(not_ready());
     }
     let waited = {

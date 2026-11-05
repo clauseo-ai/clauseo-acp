@@ -231,7 +231,10 @@ impl Taker<'_, '_> {
                         continue;
                     }
                     Err(err) => {
-                        tracing::warn!(path = %absolute.display(), error = %err, "left out a file that vanished and does not stat");
+                        tracing::warn!(
+                            error = %err,
+                            "left out a file that vanished and does not stat"
+                        );
                         continue;
                     }
                 };
