@@ -39,7 +39,7 @@ use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
 use super::record::current_user_sid;
-use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
+use super::writer::{AclWriter, Added, ApplyFailure, Found, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
 use walk::Mode;
 
@@ -193,6 +193,20 @@ impl AclWriter for NtfsAcl {
             return Ok(false);
         }
         Ok(a.file_id()? == b.file_id()?)
+    }
+
+    fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
+        // Interim: checked through a second open; round 2's N8 compares on add's own handle.
+        match self.same_file(grant.path(), expected) {
+            Ok(true) => self.add(grant),
+            Ok(false) => Err(ApplyFailure::Changed),
+            Err(error) => Err(ApplyFailure::Io(error.kind())),
+        }
+    }
+
+    fn found(&mut self) -> Vec<Found> {
+        // Interim: round 2's N1 collects them in the walk.
+        Vec::new()
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {

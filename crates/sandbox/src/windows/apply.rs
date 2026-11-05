@@ -192,7 +192,12 @@ fn write_all(
             .iter()
             .filter_map(|&i| grants.get(i).map(|g| (i, g)))
         {
-            match acl.add(grant).map_err(|f| (grant.kind(), f))? {
+            let added = match (grant.kind(), around.credentials()) {
+                (PathKind::CredentialLink, Some(expected)) => acl.add_expecting(grant, &expected),
+                (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
+                _ => acl.add(grant),
+            };
+            match added.map_err(|f| (grant.kind(), f))? {
                 Added::Written => run.written.push(i),
                 Added::AlreadyThere => {}
             }
