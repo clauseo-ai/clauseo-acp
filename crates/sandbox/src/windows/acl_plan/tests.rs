@@ -374,3 +374,66 @@ fn a_read_path_in_this_matters_own_state_folder_is_planned() {
         .unwrap();
     assert_eq!(refusal(&w, &policy), None);
 }
+
+#[test]
+fn a_runtime_inside_an_agents_install_folder_is_planned_read_only() {
+    let w = World::new("plan-agents-runtime");
+    w.dir.dir("data/agents/claude-acp/node");
+    let policy = w
+        .builder()
+        .runtime(w.at("data/agents/claude-acp/node"))
+        .build()
+        .unwrap();
+    assert_eq!(refusal(&w, &policy), None);
+    let grants = plan(
+        &admitted(&w, &policy, &[], &FakeGroups::default()),
+        &sids(),
+        matter_one(),
+    )
+    .unwrap();
+    let node = w.canonical("data/agents/claude-acp/node");
+    let on_node: Vec<&Grant> = grants.grants().iter().filter(|g| g.path == node).collect();
+    assert_eq!(on_node.len(), 2, "{on_node:#?}");
+    assert!(on_node.iter().all(|g| g.rights == Rights::ReadAndExecute));
+}
+
+#[test]
+fn a_writable_target_inside_an_agents_install_folder_is_refused() {
+    let w = World::new("plan-agents-writable");
+    w.dir.dir("data/agents/claude-acp/node");
+    let policy = w
+        .builder()
+        .notes(w.at("data/agents/claude-acp/node"))
+        .build()
+        .unwrap();
+    let want = (PathKind::Notes, FolderRefusal::OverlapsDataFolder);
+    assert_eq!(refusal(&w, &policy), Some(want));
+}
+
+#[test]
+fn an_agents_home_or_whole_folder_as_a_read_target_is_refused() {
+    let w = World::new("plan-agents-home");
+    w.dir.dir("data/agents/codex-acp/home/.codex");
+    for rel in [
+        "data/agents/codex-acp/home",
+        "data/agents/codex-acp/home/.codex",
+        "data/agents/codex-acp",
+    ] {
+        let policy = w.builder().read(w.at(rel)).build().unwrap();
+        let want = (PathKind::Read, FolderRefusal::OverlapsDataFolder);
+        assert_eq!(refusal(&w, &policy), Some(want), "{rel}");
+    }
+}
+
+#[test]
+fn a_claude_store_in_an_agents_home_is_planned() {
+    // Exactly the policy's Claude store: its folder and its allowed names, nothing around them.
+    let w = World::new("plan-agents-claude-store");
+    w.dir.dir("data/agents/claude-acp/home");
+    let policy = w
+        .builder()
+        .claude_store(w.at("data/agents/claude-acp/home"))
+        .build()
+        .unwrap();
+    assert_eq!(refusal(&w, &policy), None);
+}

@@ -20,8 +20,10 @@
 //!   right by name, and the lawyer's own Claude Code loads what is there. A policy that would
 //!   grant there is refused.
 //! - No entry on the profile folder or above it, none on, over or in `<data_dir>\sandbox\`
-//!   (the SID map, the ledger, the marker), and no read, runtime or allowed path over or in
-//!   `<data_dir>` outside this matter's own state and notes folders. Such a plan is refused.
+//!   (the SID map, the ledger, the marker); inside `<data_dir>\agents\` only read and run
+//!   grants, outside agents' homes, besides the Claude store and credential link themselves; and
+//!   no read, runtime or allowed path elsewhere over or in `<data_dir>` outside this matter's
+//!   own state and notes folders. Such a plan is refused (see [`check_target`]).
 //!
 //! The plan comes back as an [`AdmittedPlan`]: only [`plan`] makes one, from an [`Admitted`]
 //! only the gate makes, and only an `AdmittedPlan` reaches the ledger.
@@ -298,9 +300,16 @@ pub fn plan(admitted: &Admitted<'_>, sids: &Sids, matter: MatterId) -> Result<Ad
 /// - it is on the profile folder or a folder above it ([`FolderRefusal::HoldsTheProfile`]);
 /// - it is `<data_dir>\sandbox`, holds it, or is inside it
 ///   ([`FolderRefusal::OverlapsSandboxRecords`]);
-/// - it is a runtime, read or allowed path that is `<data_dir>`, holds it or is inside it, and
-///   isn't inside this matter's state or notes folder ([`FolderRefusal::OverlapsDataFolder`]):
-///   it would read other matters' state and notes, and the agents' sign-ins.
+/// - it is exactly the policy's Claude store folder, one of its files, or the credential link:
+///   allowed, wherever it is (these may sit in an agent's home);
+/// - it is inside `<data_dir>\agents`, where agents and their runtimes are installed: only a
+///   `ReadAndExecute` grant inside one agent's folder and outside its `home` is allowed; a
+///   writable grant there, the `agents` folder or an agent's folder itself (they hold homes),
+///   or anything in a home, is refused ([`FolderRefusal::OverlapsDataFolder`]): homes hold the
+///   agents' sign-ins;
+/// - it is a runtime, read or allowed path that is `<data_dir>`, holds it or is inside it
+///   elsewhere, and isn't inside this matter's state or notes folder
+///   ([`FolderRefusal::OverlapsDataFolder`]): it would read other matters' state and notes.
 fn check_target(admitted: &Admitted<'_>, grant: &Grant) -> Option<FolderRefusal> {
     let policy = admitted.policy();
     let path = &grant.path;
@@ -312,6 +321,22 @@ fn check_target(admitted: &Admitted<'_>, grant: &Grant) -> Option<FolderRefusal>
     if overlaps(&data.join(SANDBOX_DIR)) {
         return Some(FolderRefusal::OverlapsSandboxRecords);
     }
+    if is_claude_or_credential_target(policy, path) {
+        return None;
+    }
+    let agents = data.join(AGENTS_DIR);
+    if in_folder(path, &agents) {
+        let below: Vec<Component<'_>> = path
+            .components()
+            .skip(agents.components().count())
+            .collect();
+        let in_home = below
+            .get(1)
+            .is_some_and(|part| part.as_os_str().eq_ignore_ascii_case(AGENT_HOME_DIR));
+        let read_only = grant.rights == Rights::ReadAndExecute;
+        return (below.len() < 2 || in_home || !read_only)
+            .then_some(FolderRefusal::OverlapsDataFolder);
+    }
     let reads = matches!(
         grant.kind,
         PathKind::Runtime | PathKind::Read | PathKind::AllowedFolder
@@ -322,6 +347,21 @@ fn check_target(admitted: &Admitted<'_>, grant: &Grant) -> Option<FolderRefusal>
     }
     None
 }
+
+/// Whether `path` is exactly the policy's Claude store folder, one of its files, or its
+/// credential link.
+fn is_claude_or_credential_target(policy: &crate::Policy, path: &Path) -> bool {
+    let store = policy
+        .claude_store()
+        .is_some_and(|store| store.dir() == path || store.files().iter().any(|file| file == path));
+    store || policy.credential_link() == Some(path)
+}
+
+/// `<data_dir>\agents`: each agent's install folder, its runtime and its home.
+const AGENTS_DIR: &str = "agents";
+
+/// An agent's home in its install folder, `<data_dir>\agents\<agent>\home`: its sign-in.
+const AGENT_HOME_DIR: &str = "home";
 
 /// The entries planned so far.
 struct Plan<'s> {
