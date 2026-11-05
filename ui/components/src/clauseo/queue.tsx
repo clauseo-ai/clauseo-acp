@@ -253,7 +253,9 @@ export function QueueStrip({
       : w.m(
           held.kind === "stopped"
             ? "The queue is held. You stopped the answer at {time}, so nothing more is sent until you send."
-            : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
+            : held.kind === "not_allowed"
+              ? "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send."
+              : "The queue is held. The answer failed at {time}, so nothing more is sent until you send.",
           { time: w.clock(held.at) },
         );
   // what the host's region says: the head, then a refused press's words; nothing once the queue is empty

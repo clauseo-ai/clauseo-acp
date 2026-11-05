@@ -94,6 +94,9 @@ const OWN = {
   // two or more Word documents, named in one line (hi: later)
   "Close {files} in Word to undo the change.": null,
   "Close {files} in Word to restore it.": null,
+  // the second sentence under Word's lines: a Word that has crashed, with the file no longer open in it (hi: later)
+  "If it isn't open in Word, close Word and try again.": null, // hi: later
+  "If they aren't open in Word, close Word and try again.": null, // hi: later
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",

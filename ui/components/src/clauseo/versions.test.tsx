@@ -275,6 +275,9 @@ test("Word holding the file: close it in Word, and Try again", async () => {
   expect(one('[role="dialog"]').textContent).toContain(
     "Close 'Draft reply.docx' in Word to restore it.",
   );
+  expect(one('[role="dialog"]').textContent).toContain(
+    "If it isn't open in Word, close Word and try again.",
+  );
   await click(one(".ver-try"));
   expect(onTryAgain).toHaveBeenCalledTimes(1);
 });
@@ -292,6 +295,9 @@ test("Word holding two files: close them in Word, both named in one line", async
   );
   expect(one('[role="dialog"]').textContent).toContain(
     "Close 'Draft reply.docx' and 'Lease.docx' in Word to restore it.",
+  );
+  expect(one('[role="dialog"]').textContent).toContain(
+    "If they aren't open in Word, close Word and try again.",
   );
 });
 

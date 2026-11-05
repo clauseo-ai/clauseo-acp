@@ -63,6 +63,7 @@ test("an undo of one .docx refused with the lock: Word's stage, naming it, with 
   expect(dialog()?.textContent).toContain(
     "Close '\u2068notes.docx\u2069' in Word to undo the change.",
   );
+  expect(dialog()?.textContent).toContain("If it isn't open in Word, close Word and try again.");
   expect(h.one("dialog-try-again")).not.toBeNull();
 });
 
@@ -74,6 +75,7 @@ test("an undo of three files refused naming one .docx: Word's stage names only t
   expect(dialog()?.textContent).toContain(
     `Close ${named("Lease.docx")} in Word to undo the change.`,
   );
+  expect(dialog()?.textContent).toContain("If it isn't open in Word, close Word and try again.");
   expect(dialog()?.textContent).not.toContain("Notice.docx");
   expect(h.one("dialog-try-again")).not.toBeNull();
 });
@@ -86,6 +88,7 @@ test("an undo refused naming two Word documents: Word's stage names both, in one
   expect(dialog()?.textContent).toContain(
     `Close ${named("Lease.docx")} and ${named("Notice.docx")} in Word to undo the change.`,
   );
+  expect(dialog()?.textContent).toContain("If they aren't open in Word, close Word and try again.");
   expect(h.one("dialog-try-again")).not.toBeNull();
 });
 
@@ -168,9 +171,15 @@ for (const [name, preview, error, words] of [
       expect(dialog()?.textContent).toContain(
         `Close ${named(words[0] ?? "")} in Word to restore it.`,
       );
+      expect(dialog()?.textContent).toContain(
+        "If it isn't open in Word, close Word and try again.",
+      );
     } else {
       expect(dialog()?.textContent).toContain(
         `Close ${words.map(named).join(" and ")} in Word to restore it.`,
+      );
+      expect(dialog()?.textContent).toContain(
+        "If they aren't open in Word, close Word and try again.",
       );
     }
     expect(h.one("dialog-try-again")).not.toBeNull();

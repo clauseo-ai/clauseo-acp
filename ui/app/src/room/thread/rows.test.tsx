@@ -101,6 +101,11 @@ test("each stop: always a turn-stopped row with its reason, and its line where i
     ["end_turn", undefined, ""],
     ["at_limit", undefined, ""],
     ["cancelled", undefined, th("en", "You stopped the answer. The answer so far is kept.")],
+    [
+      "not_allowed",
+      undefined,
+      th("en", "You didn't allow a request, so the answer stopped. The answer so far is kept."),
+    ],
     ["max_tokens", undefined, th("en", "The answer stopped at its limit, before it finished.")],
     [
       "max_turn_requests",

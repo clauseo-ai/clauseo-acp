@@ -273,6 +273,14 @@ const U3: Entry[] = [
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(-2, 9, 0))] }),
   },
+  {
+    id: "U3-51",
+    words: threadWords(
+      "You didn't allow a request, so the answer stopped. The answer so far is kept.",
+    ),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "not_allowed" })] }),
+  },
 ];
 
 /* ---------- U2: the rail and matters ---------- */

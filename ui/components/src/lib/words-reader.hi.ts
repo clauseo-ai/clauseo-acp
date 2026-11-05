@@ -103,6 +103,7 @@ export const HI = {
     "ये बदलाव स्वीकार करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to reject these changes.":
     "ये बदलाव अस्वीकार करने के लिए Word में '{file}' बंद करें।",
+  "If it isn't open in Word, close Word and try again.": null, // hi: later
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",

@@ -81,6 +81,7 @@ test("an undo of one .docx refused with the lock names it in Word's lines, with 
   expect(lock()?.getAttribute("role")).toBe("alert");
   expect(lines()).toEqual([
     "Close '\u2068Reply.docx\u2069' in Word to undo the change.",
+    "If it isn't open in Word, close Word and try again.",
     "Word holds the file while it is open. Nothing has changed yet.",
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
@@ -96,6 +97,7 @@ test("in Hindi the lines are Versions' own, with the file's name isolated", asyn
   const file = "\u2068Reply.docx\u2069";
   expect(lines()).toEqual([
     vt("hi", "Close '{file}' in Word to undo the change.", { file }),
+    vt("hi", "If it isn't open in Word, close Word and try again."),
     vt("hi", "Word holds the file while it is open. Nothing has changed yet."),
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe(vt("hi", "Try again"));
@@ -109,6 +111,7 @@ test("an undo of three files refused naming one .docx names only that one, in Wo
   await press(h, "undo");
   expect(lines()).toEqual([
     "Close '\u2068Lease.docx\u2069' in Word to undo the change.",
+    "If it isn't open in Word, close Word and try again.",
     "Word holds the file while it is open. Nothing has changed yet.",
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
@@ -122,6 +125,7 @@ test("an undo refused naming two Word documents names both, in one line of Word'
   await press(h, "undo");
   expect(lines()).toEqual([
     "Close '\u2068Lease.docx\u2069' and '\u2068Notice.docx\u2069' in Word to undo the change.",
+    "If they aren't open in Word, close Word and try again.",
     "Word holds the file while it is open. Nothing has changed yet.",
   ]);
   expect(h.one("word-lock-retry")?.textContent).toBe("Try again");
@@ -187,6 +191,7 @@ test("a Try again refused with the lock again keeps the lines; refused otherwise
   await press(h, "undo");
   await press(h, "word-lock-retry");
   expect(lines()[0]).toBe("Close '\u2068Reply.docx\u2069' in Word to undo the change.");
+  expect(lines()[1]).toBe("If it isn't open in Word, close Word and try again.");
   expect(h.sent("undo_step")).toHaveLength(2);
   refusal = { code: "store.io", message: "x", retryable: true };
   await press(h, "word-lock-retry");

@@ -9,6 +9,7 @@ import type { Entry } from "./entry.ts";
 import { threadHost } from "./hosts.ts";
 import { versionsHost, type Matter } from "./registry-u8.tsx";
 import { RoomClicking, RoomFocusing } from "./states.tsx";
+import { WordLockDialog } from "@clauseo/components/clauseo/draft-review.tsx";
 import { readerWords, versionWords } from "./words.ts";
 
 /** A local time, `days` from today. */
@@ -76,11 +77,20 @@ const undoRefused = () => (
 
 /** U9's entries, each id written as it is: an id never moves when an entry is added or taken out. The brief's names
  * map to the numbers: 01 the undo's line, 02 the hold's line, 03 Try again, 04 the restore's line, 05 Open in Word, 06
- * the undo's line with two Word documents held, 07 the restore's (the id form is "U9-" and two digits, status.ts). */
+ * the undo's line with two Word documents held, 07 the restore's (the id form is "U9-" and two digits, status.ts), 08
+ * the sentence under one file's line, 09 the one under two files' lines, 10 the sentence under the draft's dialog (its
+ * words are the reader's). */
 export const U9: Entry[] = [
   {
     id: "U9-01",
     words: versionWords("Close '{file}' in Word to undo the change."),
+    screen: "room/thread",
+    ...WINDOW,
+    render: undoRefused,
+  },
+  {
+    id: "U9-08",
+    words: versionWords("If it isn't open in Word, close Word and try again."),
     screen: "room/thread",
     ...WINDOW,
     render: undoRefused,
@@ -125,6 +135,15 @@ export const U9: Entry[] = [
     ),
   },
   {
+    id: "U9-10",
+    words: readerWords("If it isn't open in Word, close Word and try again."),
+    screen: "room/reader",
+    ...WINDOW,
+    render: () => (
+      <WordLockDialog file={NOTICE} open act="accept" onClose={() => {}} onTryAgain={() => {}} />
+    ),
+  },
+  {
     id: "U9-06",
     words: versionWords("Close {files} in Word to undo the change."),
     screen: "room/thread",
@@ -145,6 +164,19 @@ export const U9: Entry[] = [
   {
     id: "U9-07",
     words: versionWords("Close {files} in Word to restore it."),
+    screen: "room/versions",
+    ...WINDOW,
+    render: () => (
+      <RoomClicking
+        host={() => versionsHost(LOCKED_TWO_RESTORE)}
+        clicks={[OPEN, EARLIER, RESTORE, CONFIRM]}
+        standIns={NO_STAND_INS}
+      />
+    ),
+  },
+  {
+    id: "U9-09",
+    words: versionWords("If they aren't open in Word, close Word and try again."),
     screen: "room/versions",
     ...WINDOW,
     render: () => (
