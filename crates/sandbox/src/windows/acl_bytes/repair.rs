@@ -3,7 +3,12 @@
 
 use std::io;
 
-use super::{DACL_PRESENT, Descriptor, SACL_PRESENT, SELF_RELATIVE, invalid, sid_at};
+#[cfg(any(windows, test))]
+use super::copies::is_copy;
+use super::{
+    Acl, DACL_AUTO_INHERITED, DACL_PRESENT, Descriptor, INHERITED, SACL_PRESENT, SELF_RELATIVE,
+    flags, invalid, render, sid_at,
+};
 
 /// The self-relative descriptor `bytes` again, with `owner` as its owner when given, `dacl`
 /// as its DACL when given, and the control bits `clear` cleared; its group and SACL kept. What
@@ -45,6 +50,66 @@ pub(crate) fn rebuild(
             }
         }
     }
+    if let Some(slot) = out.get_mut(2..4) {
+        slot.copy_from_slice(&control.to_le_bytes());
+    }
+    Ok(out)
+}
+
+/// `descriptor` with its DACL's inherited entries dropped; the DACL marked auto-inherited, the
+/// owner, group, SACL and other control bits kept. When the DACL is not marked auto-inherited,
+/// every explicit entry that copies an inherited one goes too ([`is_copy`]: equal but for the
+/// inherited flag to one of `due`'s inherited entries). `due` is the
+/// ACL the parent alone gives a new child of this kind and owner. The walk hands
+/// `CreatePrivateObjectSecurityEx` this for every child not protected, so its result holds the
+/// parent's entries once, all inherited.
+///
+/// Under a parent that isn't auto-inherited, NTFS writes a child's inherited copies without the
+/// inherited flag (flags `00` in the kernel's DACL; `icacls` and `Get-Acl` still show `(I)`):
+/// kept, they stay explicit, so a `Users` allow refused a strict walk (the Windows run 3, row
+/// 15, a plain `C:\m`) and a plain walk left each entry twice, explicit and inherited. Such a
+/// child's DACL is never marked auto-inherited. On an auto-inherited child an explicit entry is
+/// one somebody wrote, ours or the lawyer's, and stays: folded into an inherited one it would go
+/// with a later change to the parent (round 9). A descriptor with no DACL comes back as it is.
+#[cfg(any(windows, test))]
+pub(crate) fn without_inherited(descriptor: &[u8], due: &[u8]) -> io::Result<Vec<u8>> {
+    let now = Descriptor::parse(descriptor)?;
+    let Some(dacl) = now.dacl else {
+        return Ok(descriptor.to_vec());
+    };
+    let plain = now.control & DACL_AUTO_INHERITED == 0;
+    Acl::parse(dacl)?;
+    let due = Acl::parse(due)?;
+    keeping(descriptor, |ace| {
+        flags(ace) & INHERITED == 0 && !(plain && is_copy(ace, &due))
+    })
+}
+
+/// The descriptor a new child with `descriptor`'s owner and group is worked out from: an empty
+/// DACL marked auto-inherited. What its parent alone gives such a child is what
+/// `CreatePrivateObjectSecurityEx` makes of it, with `CREATOR OWNER` resolved to its owner.
+#[cfg(any(windows, test))]
+pub(crate) fn bare_child(descriptor: &[u8]) -> io::Result<Vec<u8>> {
+    keeping(descriptor, |_| false)
+}
+
+/// `descriptor` with only the DACL entries `keep` takes, marked auto-inherited; the owner, group,
+/// SACL and other control bits kept. A descriptor with no DACL comes back as it is.
+#[cfg(any(windows, test))]
+fn keeping(descriptor: &[u8], keep: impl Fn(&[u8]) -> bool) -> io::Result<Vec<u8>> {
+    let Some(dacl) = Descriptor::parse(descriptor)?.dacl else {
+        return Ok(descriptor.to_vec());
+    };
+    let dacl = Acl::parse(dacl)?;
+    let kept: Vec<&[u8]> = dacl
+        .aces()
+        .iter()
+        .copied()
+        .filter(|ace| keep(ace))
+        .collect();
+    let kept = render(dacl.revision.max(2), &kept);
+    let mut out = rebuild(descriptor, None, Some(&kept), 0)?;
+    let control = Descriptor::parse(&out)?.control | DACL_AUTO_INHERITED;
     if let Some(slot) = out.get_mut(2..4) {
         slot.copy_from_slice(&control.to_le_bytes());
     }
