@@ -43,7 +43,8 @@
 //!   [`Handle::shutdown`] takes the snapshot the caller listed (where it chose) for its kill.
 //!   With `test-support`, [`running`] says whether a pid still runs, [`started_before_now`]
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
-//!   process they did not start.
+//!   process they did not start; on Windows, `image_and_parent` reads one's executable and
+//!   parent pid.
 //! - [`processes_named`] (macOS and Windows): the starts of the running processes with a name,
 //!   or `None` when that is unknown. It blocks, and signals nothing.
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
@@ -137,4 +138,12 @@ pub fn started_before_now(pid: u32) -> bool {
 #[cfg(feature = "test-support")]
 pub fn kill(pid: u32) {
     os::kill_pid(pid);
+}
+
+/// Process `pid`'s executable (its full path) and parent pid, for tests that check what a
+/// process they did not start is, without starting PowerShell. `None` when either is unknown
+/// (it has exited, refuses to be opened, or the listing failed). Windows only.
+#[cfg(all(windows, feature = "test-support"))]
+pub fn image_and_parent(pid: u32) -> Option<(std::path::PathBuf, u32)> {
+    os::image_and_parent(pid)
 }

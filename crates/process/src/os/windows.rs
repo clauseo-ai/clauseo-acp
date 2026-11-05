@@ -252,6 +252,14 @@ pub(crate) fn started_before_now(pid: u32) -> bool {
     start.zip(now()).is_some_and(|(start, now)| start < now)
 }
 
+/// Process `pid`'s image path and parent pid, the handle open through the snapshot, for tests.
+#[cfg(feature = "test-support")]
+pub(crate) fn image_and_parent(pid: u32) -> Option<(PathBuf, u32)> {
+    let process = open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?;
+    let parent = parents().into_iter().find(|&(child, _)| child == pid)?.1;
+    Some((image(&process)?, parent))
+}
+
 /// Every process's (pid, parent pid) from a Toolhelp process snapshot; empty when the snapshot
 /// fails. A parent pid can name a process that has exited, or a pid reused since.
 fn parents() -> Vec<(u32, u32)> {
