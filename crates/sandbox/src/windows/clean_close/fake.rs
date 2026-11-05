@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::journal::{
     ATTRIBUTE_DIRECTORY, Change, Flow, Found, Journal, JournalError, JournalState, Listed,
-    RootFacts, Usn,
+    RootFacts, TreeError, Usn,
 };
 
 /// The fake's volume serial.
@@ -28,6 +28,8 @@ pub(crate) struct FakeJournal {
     pub(crate) query_fails: Option<JournalError>,
     pub(crate) read_fails: Option<JournalError>,
     pub(crate) tree_fails: bool,
+    /// The close records fail.
+    pub(crate) close_fails: bool,
     pub(crate) place_fails: bool,
     /// How many records the last read handed over.
     pub(crate) handed: std::cell::Cell<usize>,
@@ -50,6 +52,7 @@ impl FakeJournal {
             parent,
             reason,
             attributes: if folder { ATTRIBUTE_DIRECTORY } else { 0x20 },
+            time: 1_000_000 + usn,
         });
         self.next = usn + 1;
     }
@@ -106,9 +109,12 @@ impl Journal for FakeJournal {
         Ok(self.places.get(&id).cloned())
     }
 
-    fn tree(&self, root: &Path) -> io::Result<Vec<Listed>> {
+    fn tree(&self, root: &Path) -> Result<Vec<Listed>, TreeError> {
         if self.tree_fails {
-            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+            return Err(TreeError::Unreadable(io::ErrorKind::PermissionDenied));
+        }
+        if self.close_fails {
+            return Err(TreeError::CloseRecord(io::ErrorKind::PermissionDenied));
         }
         Ok(self.trees.get(root).cloned().unwrap_or_default())
     }

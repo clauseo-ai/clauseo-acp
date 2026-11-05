@@ -49,6 +49,8 @@ pub struct Change {
     pub reason: u32,
     /// The item's attributes at the record (`FILE_ATTRIBUTE_*`).
     pub attributes: u32,
+    /// When it was written (`TimeStamp`, 100 ns since 1601 UTC).
+    pub time: i64,
 }
 
 /// `FILE_ATTRIBUTE_DIRECTORY`.
@@ -77,6 +79,15 @@ pub enum JournalError {
     Lost,
     /// Another failure, of this kind.
     Failed(io::ErrorKind),
+}
+
+/// Why [`Journal::tree`] failed. Either means no record is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeError {
+    /// A folder couldn't be opened or listed, or an item opened, of this kind.
+    Unreadable(io::ErrorKind),
+    /// A close record couldn't be written for an item, of this kind.
+    CloseRecord(io::ErrorKind),
 }
 
 /// Whether a read goes on after a record.
@@ -136,5 +147,13 @@ pub trait Journal {
     /// Every name below `root`, each folder opened relative to its parent's handle and never
     /// through a link, with its file reference and its folder's. Any folder that can't be
     /// opened or listed is an error: an incomplete set must never be recorded.
-    fn tree(&self, root: &Path) -> io::Result<Vec<Listed>>;
+    ///
+    /// It also writes a close record (`FSCTL_WRITE_USN_CLOSE_RECORD`) for `root` and every
+    /// item below it, each opened as itself. NTFS logs a reason once per open period: while
+    /// another program (Explorer, say) holds an item open, a second change of a kind already
+    /// logged gets no new record until the last handle closes. A close record ends that period,
+    /// so any later change is logged afresh. This runs at session end after the repair and the
+    /// set-aside's pass, so their own writes are in the closed periods too. Any item it can't
+    /// do this for is [`TreeError::CloseRecord`].
+    fn tree(&self, root: &Path) -> Result<Vec<Listed>, TreeError>;
 }

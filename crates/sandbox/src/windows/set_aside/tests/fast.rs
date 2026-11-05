@@ -115,3 +115,23 @@ fn both_launch_passes_remove_the_clean_close_record() {
     launch_as(&volume(), &root, &data, "s3", &["s2"], launch()).unwrap();
     assert!(!path.exists());
 }
+
+/// Round 1: after the lawyer renames `sub`, a re-probe of the root drops what the record held
+/// under `sub`, so an agent that moves that `.git` back to `sub/.git` has it set aside, as
+/// the full pass would.
+#[test]
+fn a_reprobe_drops_what_was_under_a_folder_no_longer_there_so_a_move_back_is_caught() {
+    let (w, root, data) = closed("fast-renamed");
+    crate::windows::write::rename_new(&root.join("sub"), &root.join("renamed")).unwrap();
+    let touched: Vec<Touched> = vec![(Vec::new(), false), (key("renamed"), true)];
+    assert_eq!(fast(&root, &data, &touched), Some(Vec::new()));
+    let names = record(&data).names;
+    assert!(!names.contains_key(&key("sub/.git")), "{names:?}");
+    assert!(names.contains_key(&key("renamed/.git")));
+    // The agent's session: it moves the lawyer's `.git` back under its old name.
+    w.dir.dir("matter/sub");
+    crate::windows::write::rename_new(&root.join("renamed/.git"), &root.join("sub/.git")).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s2", exit()).unwrap();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].from, root.join("sub/.git"));
+}

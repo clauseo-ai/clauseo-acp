@@ -324,3 +324,83 @@ fn a_cursor_taken_before_the_repair_replays_what_changed_during_it() {
     assert_eq!(closed, Closed::Written);
     assert_eq!(s.launch_path(), LaunchPath::Targeted(1));
 }
+
+#[test]
+fn another_first_record_at_the_cursor_walks_in_full() {
+    // The repair wrote a record past the cursor before the clean-close record was written.
+    let mut s = Scene::new("clean-first-time");
+    let cursor = s.cursor();
+    s.journal.change(100_007, 100, WRITE_CLOSE, false);
+    let ok = (&Ok(Walked::default()), &Ok(Checked::default()));
+    assert_eq!(s.close_with(Some(&cursor), ok.0, ok.1), Closed::Written);
+    let mut restored = s.journal.clone();
+    // A restored image wrote another record at the same USN, then went on past the cursor.
+    restored.records[0].time += 1;
+    s.journal = restored;
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+
+    let mut s = Scene::new("clean-first-file");
+    let cursor = s.cursor();
+    s.journal.change(100_007, 100, WRITE_CLOSE, false);
+    assert_eq!(s.close_with(Some(&cursor), ok.0, ok.1), Closed::Written);
+    s.journal.records[0].file = 100_008;
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+
+    // The record seen at the cursor is gone, though the journal's next USN is past it.
+    let mut s = Scene::new("clean-first-gone");
+    let cursor = s.cursor();
+    s.journal.change(100_007, 100, WRITE_CLOSE, false);
+    assert_eq!(s.close_with(Some(&cursor), ok.0, ok.1), Closed::Written);
+    s.journal.records.clear();
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+
+    // The same record there: no change, a skip.
+    let mut s = Scene::new("clean-first-same");
+    let cursor = s.cursor();
+    s.journal.change(100_007, 100, WRITE_CLOSE, false);
+    assert_eq!(s.close_with(Some(&cursor), ok.0, ok.1), Closed::Written);
+    assert_eq!(s.launch_path(), LaunchPath::Skipped);
+}
+
+#[test]
+fn with_no_record_at_the_close_the_first_one_read_must_start_at_the_cursor() {
+    let mut s = closed("clean-first-none");
+    let cursor = s.journal.end();
+    s.journal.records.push(super::super::journal::Change {
+        usn: cursor + 8,
+        file: 9_999_999,
+        parent: 8_888_888,
+        reason: WRITE_CLOSE,
+        attributes: 0x20,
+        time: 5,
+    });
+    s.journal.next = cursor + 9;
+    assert_eq!(
+        s.launch_path(),
+        LaunchPath::Full(FullReason::FirstRecordDiffers)
+    );
+}
+
+#[test]
+fn a_close_record_that_cant_be_written_keeps_no_record() {
+    let mut s = Scene::new("clean-close-record");
+    s.journal.close_fails = true;
+    let closed = s.close();
+    assert_eq!(
+        closed,
+        Closed::NotWritten(NotWritten::CloseRecordFailed(
+            io::ErrorKind::PermissionDenied
+        ))
+    );
+    assert!(!s.record_exists());
+    assert_eq!(s.launch_path(), LaunchPath::Full(FullReason::NoRecord));
+}

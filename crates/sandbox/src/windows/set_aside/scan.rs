@@ -105,6 +105,9 @@ pub(super) struct Scan {
     /// The folders it couldn't open or list (the root, when it couldn't open that). When there
     /// is any, the scan was partial.
     pub(super) unscanned: Vec<PathBuf>,
+    /// The key of each folder (not a link) the listings it read gave, entered or not: what a
+    /// re-probe of one folder's own names knows of the folders in it.
+    pub(super) folders: Vec<Key>,
 }
 
 /// Scans the matter tree below `root` through `volume`; see the module's docs.
@@ -201,6 +204,11 @@ fn scan_from<V: Volume>(volume: &V, scan: &mut Scan, start: Visit<V::Folder>, be
             }
         };
         for child in listed {
+            if child.kind == Kind::Folder {
+                let mut key = parts.clone();
+                key.push(child.name.clone());
+                scan.folders.push(key);
+            }
             match child.kind {
                 Kind::Other => {}
                 Kind::Link => match probe(volume, &folder, &child.name) {

@@ -176,6 +176,12 @@ impl Object {
         })
     }
 
+    /// Its handle, for a call made elsewhere on what it is open on (the change journal's close
+    /// record, `clean_close/ntfs.rs`).
+    pub(in crate::windows) fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
     /// Whether it is a junction, symbolic link or other name surrogate.
     pub(in crate::windows) fn name_surrogate(&self) -> bool {
         self.tag.is_some_and(|tag| tag & NAME_SURROGATE != 0)

@@ -93,14 +93,21 @@ pub(super) fn before_launch_fast(
     };
     let mut unscanned = Vec::new();
     for ((parts, below), scan) in &scans {
-        // A folder gone takes everything below it from the record.
+        // A folder gone takes everything below it from the record. A re-probe of a folder's own
+        // names replaces them, and drops what the record holds under a folder in it that is no
+        // longer there (renamed or removed), so a name moved back later is new again.
         let replaced = |key: &Vec<OsString>| {
-            key.starts_with(parts)
-                && if *below || scan.is_none() {
-                    key.len() > parts.len()
-                } else {
-                    key.len() == parts.len() + 1
-                }
+            if !key.starts_with(parts) || key.len() <= parts.len() {
+                return false;
+            }
+            match scan {
+                None => true,
+                Some(_) if *below => true,
+                Some(_) if key.len() == parts.len() + 1 => true,
+                Some(scan) => key
+                    .get(..=parts.len())
+                    .is_none_or(|within| !scan.folders.iter().any(|f| f.as_slice() == within)),
+            }
         };
         seen.names.retain(|key, _| !replaced(key));
         seen.links.retain(|key, _| !replaced(key));

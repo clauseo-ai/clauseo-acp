@@ -212,6 +212,14 @@ pub fn forget_matter(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
 ) -> Result<Forgotten, Error> {
+    // The matter's clean-close record goes first: a forgotten matter has no clean close (S15
+    // `PR3d`). The ledger is `<data_dir>\sandbox\acl-ledger.json`, so its folder's folder is
+    // the data folder.
+    #[cfg(any(windows, test))]
+    if let Some(data_dir) = ledger.path().parent().and_then(Path::parent) {
+        crate::windows::clean_close::remove_record(data_dir, &matter)
+            .map_err(|e| Error::CleanClose(e.kind()))?;
+    }
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
     // Read the file again, so the trees and pool users are the ones listed now.
     ledger.pending().map_err(failed)?;
