@@ -51,7 +51,7 @@ export function NotProtectedNote({
                       { matter },
                     )
                   : w.v(
-                      "Protection couldn't be set up on this computer, so Clauseo asks before each change in this matter.",
+                      "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before each change.",
                     )}
               </Say>
             </span>

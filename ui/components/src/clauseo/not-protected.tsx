@@ -16,7 +16,7 @@ export function NotProtectedMark({
   short?: boolean;
   /** What Not protected means where it isn't protection switched off. When the workspace couldn't
    * be set up, or Windows was told no, Clauseo falls back to asking before each change, and the caller says so in its
-   * own words: "Clauseo asks before each change in this matter." Without it, the sentence about protection switched
+   * own words: "Clauseo can read any file on this computer and asks before each change." Without it, the sentence about protection switched
    * off stands. */
   meaning?: string;
 }) {
