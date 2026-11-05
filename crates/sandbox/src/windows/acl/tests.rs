@@ -7,6 +7,8 @@ use crate::windows::test_acl::{Place, grant, has, protected};
 use crate::windows::test_dacl::protect_with;
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
+use crate::windows::writer::Label;
+use walk::race::{HOOK, Stage};
 
 /// The pool user's `Modify` and another pool user's deny, both down the tree.
 fn fence(matter: &Path) -> [Grant; 2] {
@@ -200,4 +202,114 @@ fn a_protected_target_stays_protected() {
     assert!(has(&place.at("matter/doc.txt"), USER_SID, true));
     acl.remove(&fence(&place.at("matter"))[0]).unwrap();
     assert!(protected(&place.at("matter")));
+}
+
+/// Sets the walk's race hook to run `swap` once, at `stage` for the folder named `folder`.
+fn race_at(stage: Stage, folder: &'static str, swap: impl FnOnce() + 'static) {
+    let mut swap = Some(swap);
+    HOOK.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |at: Stage, path: &Path| {
+            let named = path.file_name().is_some_and(|name| name == folder);
+            if at == stage
+                && named
+                && let Some(swap) = swap.take()
+            {
+                swap();
+            }
+        }));
+    });
+}
+
+fn clear_race() {
+    HOOK.with(|hook| *hook.borrow_mut() = None);
+}
+
+/// H1: an agent swaps `matter\a` for a junction to a folder outside after the walk listed the
+/// matter. The walk opens the name relative to the matter's handle, so it gets the junction
+/// itself, skips it, and nothing outside gets the pool user's entries.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test plays the agent's rename"
+)]
+fn a_subfolder_swapped_for_a_junction_after_the_listing_is_never_passed_through() {
+    let place = Place::new("acl-race-listed");
+    place.dir.file("matter/a/doc.txt", "mine");
+    let secret = place.dir.file("out/secret.txt", "outside");
+    let (a, aside, out) = (place.at("matter/a"), place.at("matter-a"), place.at("out"));
+    race_at(Stage::Listed, "matter", move || {
+        std::fs::rename(&a, &aside).unwrap();
+        junction(&a, &out).unwrap();
+    });
+    let walked = put(&place.at("matter"), &fence(&place.at("matter")));
+    clear_race();
+    let walked = walked.unwrap();
+    assert!(walked.skipped >= 1, "{walked:?}");
+    for bare in [secret.as_path(), &place.at("out")] {
+        assert!(!has(bare, USER_SID, true), "{bare:?}");
+        assert!(!has(bare, OTHER_POOL_SIDS[0], true), "{bare:?}");
+    }
+}
+
+/// H1: an agent moves `matter\a` away after the walk opened it, and puts a junction in its
+/// place. The folder's final path is checked again before it is listed: the walk refuses, and
+/// nothing outside gets the pool user's entries.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test plays the agent's rename"
+)]
+fn a_subfolder_moved_after_its_check_refuses_the_walk() {
+    let place = Place::new("acl-race-listing");
+    place.dir.file("matter/a/doc.txt", "mine");
+    let secret = place.dir.file("out/secret.txt", "outside");
+    let (a, aside, out) = (place.at("matter/a"), place.at("matter-a"), place.at("out"));
+    race_at(Stage::Listing, "a", move || {
+        std::fs::rename(&a, &aside).unwrap();
+        junction(&a, &out).unwrap();
+    });
+    let walked = put(&place.at("matter"), &fence(&place.at("matter")));
+    clear_race();
+    assert_eq!(walked, Err(ApplyFailure::Changed));
+    assert!(!has(&secret, USER_SID, true));
+    assert!(!has(&place.at("matter-a/doc.txt"), USER_SID, true));
+}
+
+/// L3: reconcile asks about the planned target; a junction there now (pointing at the folder
+/// that holds the entry) is an error, not "missing", so the pending entry isn't dropped.
+#[test]
+#[expect(clippy::disallowed_methods, reason = "moves the matter away")]
+fn presence_through_a_swapped_name_is_an_error() {
+    let place = Place::new("acl-present");
+    place.dir.dir("matter");
+    let modify = grant(&place.at("matter"), USER_SID, Rights::Modify, Inherit::Tree);
+    let mut acl = NtfsAcl::new().unwrap();
+    acl.add(&modify).unwrap();
+    assert!(acl.present(&modify).unwrap());
+    std::fs::rename(place.at("matter"), place.at("moved")).unwrap();
+    junction(&place.at("matter"), &place.at("moved")).unwrap();
+    assert!(acl.present(&modify).is_err());
+}
+
+/// L4: the lawyer's own explicit label is read before ours replaces it, and put back.
+#[test]
+fn the_lawyers_own_label_is_put_back_after_ours() {
+    let place = Place::new("acl-own-label");
+    let matter = place.dir.dir("matter");
+    let matter = dunce::canonicalize(matter).unwrap();
+    let low = grant(&matter, LOW_LABEL_SID, Rights::LowLabel, Inherit::Tree);
+    let lawyers = Label {
+        level: 4096,
+        flags: 0,
+        mask: 0x3,
+    };
+    let mut acl = NtfsAcl::new().unwrap();
+    assert_eq!(acl.label(&matter).unwrap(), None);
+    acl.restore_label(&low, lawyers).unwrap();
+    assert_eq!(acl.label(&matter).unwrap(), Some(lawyers));
+    assert_eq!(acl.add(&low).unwrap(), Added::Written);
+    assert_ne!(acl.label(&matter).unwrap(), Some(lawyers));
+    acl.restore_label(&low, lawyers).unwrap();
+    assert_eq!(acl.label(&matter).unwrap(), Some(lawyers));
+    assert!(!acl.present(&low).unwrap());
 }

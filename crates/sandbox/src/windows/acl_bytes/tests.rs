@@ -157,6 +157,68 @@ fn an_explicit_allow_for_a_broad_group_or_a_watched_sid_beats_an_inherited_deny(
     assert!(!broad_allow(&Acl::parse(&deny).unwrap(), &[]));
 }
 
+/// An `ACCESS_ALLOWED_OBJECT_ACE` with no object type for `sid_text`: header, mask, the
+/// object flags (none), then the SID. Windows checks it as a plain allow (L1).
+fn object_allow(sid_text: &str) -> Vec<u8> {
+    let sid = sid_bytes(&sid(sid_text));
+    let size = u16::try_from(12 + sid.len()).unwrap();
+    let mut ace = vec![5, 0];
+    ace.extend_from_slice(&size.to_le_bytes());
+    ace.extend_from_slice(&0x0012_00a9_u32.to_le_bytes());
+    ace.extend_from_slice(&0_u32.to_le_bytes());
+    ace.extend_from_slice(&sid);
+    ace
+}
+
+#[test]
+fn an_explicit_object_allow_beats_an_inherited_deny_whoever_it_names() {
+    for named in ["S-1-1-0", "S-1-5-21-9-9-9-1001"] {
+        let acl = render(2, &[&object_allow(named)]);
+        assert!(broad_allow(&Acl::parse(&acl).unwrap(), &[]), "{named}");
+    }
+    let mut inherited = object_allow("S-1-1-0");
+    inherited[1] = INHERITED;
+    let acl = render(2, &[&inherited]);
+    assert!(!broad_allow(&Acl::parse(&acl).unwrap(), &[]));
+}
+
+#[test]
+fn an_explicit_allow_for_the_pool_machines_none_group_beats_an_inherited_deny() {
+    let none = "S-1-5-21-1-2-3-513";
+    let acl = render(2, &[&spec(none, Rights::ReadAndExecute).bytes()]);
+    let pool_user = [sid_bytes(&sid("S-1-5-21-1-2-3-1005"))];
+    assert!(broad_allow(&Acl::parse(&acl).unwrap(), &pool_user));
+    let elsewhere = [sid_bytes(&sid("S-1-5-21-7-8-9-1005"))];
+    assert!(!broad_allow(&Acl::parse(&acl).unwrap(), &elsewhere));
+}
+
+#[test]
+fn the_explicit_label_is_read_back_as_written() {
+    let medium = Label {
+        level: 8192,
+        flags: OBJECT_INHERIT,
+        mask: 0x3,
+    };
+    let inherited = {
+        let mut low = label_spec(Label {
+            level: 4096,
+            flags: 0,
+            mask: 1,
+        })
+        .bytes();
+        low[1] = INHERITED;
+        low
+    };
+    let sacl = render(2, &[&inherited, &label_spec(medium).bytes()]);
+    assert_eq!(explicit_label(&Acl::parse(&sacl).unwrap()), Some(medium));
+    let only_inherited = render(2, &[&inherited]);
+    assert_eq!(explicit_label(&Acl::parse(&only_inherited).unwrap()), None);
+    let ours = spec(LOW_LABEL_SID, Rights::LowLabel);
+    let ours_back =
+        label_spec(explicit_label(&Acl::parse(&render(2, &[&ours.bytes()])).unwrap()).unwrap());
+    assert_eq!(ours_back, ours);
+}
+
 #[test]
 fn a_child_inherits_its_parents_low_label_unless_it_has_its_own() {
     let low = spec(LOW_LABEL_SID, Rights::LowLabel);

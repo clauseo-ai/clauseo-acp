@@ -18,9 +18,12 @@ use std::io;
 
 use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
+use super::writer::Label;
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 pub(crate) const ALLOWED: u8 = 0;
+/// `ACCESS_ALLOWED_CALLBACK_ACE_TYPE`.
+const ALLOWED_CALLBACK: u8 = 9;
 /// `ACCESS_DENIED_ACE_TYPE`.
 pub(crate) const DENIED: u8 = 1;
 /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`.
@@ -54,6 +57,9 @@ pub(crate) const DACL_PROTECTED: u16 = 0x1000;
 pub(crate) const SACL_PROTECTED: u16 = 0x2000;
 /// `SE_SELF_RELATIVE`.
 const SELF_RELATIVE: u16 = 0x8000;
+
+/// The relative id of a machine's `None` group (`DOMAIN_GROUP_RID_USERS`).
+const NONE_RID: u32 = 513;
 
 /// `SYNCHRONIZE`: the one right an allow may give and still not count as access.
 const SYNCHRONIZE: u32 = 0x0010_0000;
@@ -89,7 +95,6 @@ pub(crate) fn sid_bytes(sid: &Sid) -> Vec<u8> {
 }
 
 /// The SID whose bytes start `bytes`, in [`Sid`]'s text form; `None` when they aren't one.
-#[cfg(test)]
 pub(crate) fn sid_text(bytes: &[u8]) -> Option<Sid> {
     let count = usize::from(*bytes.get(1)?);
     let mut authority = [0u8; 8];
@@ -244,22 +249,64 @@ pub(crate) fn empty_acl() -> Vec<u8> {
     render(2, &[])
 }
 
-/// Whether `dacl` holds an explicit allow, of any right but `SYNCHRONIZE`, for one of
-/// [`BROAD_SIDS`] or of `watched` (the pool group, the other pool users). An explicit entry is
-/// checked before every inherited one, so on a child it beats the inherited deny of a fence or
-/// a sibling; an inherit-only one does the same for the child's children.
+/// Whether `dacl` holds an explicit allow, of any right but `SYNCHRONIZE`, that may beat an
+/// inherited deny: a plain or callback allow for one of [`BROAD_SIDS`], of `watched` (the pool
+/// group, the other pool users) or of the `None` group of a watched SID's machine
+/// (`S-1-5-21-<machine>-513`, in every local account's token); or an allow of any other type
+/// (object and compound allows, whose SID sits elsewhere), whoever it names. An explicit entry
+/// is checked before every inherited one, so on a child it beats the inherited deny of a fence
+/// or a sibling; an inherit-only one does the same for the child's children.
 pub(crate) fn broad_allow(dacl: &Acl<'_>, watched: &[Vec<u8>]) -> bool {
-    let broad: Vec<Vec<u8>> = BROAD_SIDS
+    let mut broad: Vec<Vec<u8>> = BROAD_SIDS
         .iter()
         .filter_map(|s| Sid::parse(s).ok())
         .map(|s| sid_bytes(&s))
         .collect();
+    for sid in watched.iter().filter_map(|w| sid_text(w)) {
+        if let Some([a, b, c]) = sid.domain()
+            && let Ok(none) = Sid::parse(&format!("S-1-5-21-{a}-{b}-{c}-{NONE_RID}"))
+        {
+            broad.push(sid_bytes(&none));
+        }
+    }
     dacl.aces().iter().any(|ace| {
         flags(ace) & INHERITED == 0
-            && matches!(kind(ace), 0 | 5 | 9 | 11)
+            && is_allow_kind(kind(ace))
             && mask(ace).is_some_and(|m| m & !SYNCHRONIZE != 0)
-            && sid(ace).is_some_and(|s| broad.iter().chain(watched).any(|b| b == s))
+            && (!matches!(kind(ace), ALLOWED | ALLOWED_CALLBACK)
+                || sid(ace).is_some_and(|s| broad.iter().chain(watched).any(|b| b == s)))
     })
+}
+
+/// The explicit mandatory label in `sacl`, if it has one: the first, as Windows reads it.
+pub(crate) fn explicit_label(sacl: &Acl<'_>) -> Option<Label> {
+    let ace = sacl
+        .aces()
+        .iter()
+        .find(|ace| kind(ace) == LABEL && flags(ace) & INHERITED == 0)?;
+    let level = sid(ace).and_then(sid_text)?;
+    let level = level.as_str().strip_prefix("S-1-16-")?.parse().ok()?;
+    Some(Label {
+        level,
+        flags: flags(ace),
+        mask: mask(ace)?,
+    })
+}
+
+/// The entry that writes `label`, explicitly.
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "the label writes are Windows only")
+)]
+pub(crate) fn label_spec(label: Label) -> AceSpec {
+    let mut sid = vec![1, 1, 0, 0, 0, 0, 0, 16];
+    sid.extend_from_slice(&label.level.to_le_bytes());
+    AceSpec {
+        kind: LABEL,
+        flags: label.flags & !INHERITED,
+        mask: label.mask,
+        sid,
+    }
 }
 
 /// The SACL a child gets from its parent's label, or `None` when its own needs no change: a
@@ -398,6 +445,11 @@ fn render(revision: u8, aces: &[&[u8]]) -> Vec<u8> {
         out.extend_from_slice(ace);
     }
     out
+}
+
+/// Allow types: plain, compound, object, callback and callback object.
+fn is_allow_kind(kind: u8) -> bool {
+    matches!(kind, 0 | 4 | 5 | 9 | 11)
 }
 
 /// Deny types: plain, object, callback and callback object.
