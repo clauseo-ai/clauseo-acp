@@ -253,11 +253,13 @@ fn receipt_only(actor: &mut Actor, ctx: CommandCtx, thread: ThreadId) -> Result<
     out.send_tagged(actor, done_tag(ctx))
 }
 
-/// Whether `stop_agents` holds `thread`'s agent: `ResumeQueue` and `SendQueuedNow` then log
-/// their receipt and change nothing, so the queue stays held and marked and runs once, in order,
-/// at `restart_agents` (decision record 0048, P4d).
+/// Whether `Stop` is among `thread`'s holds (`hold.rs`), `stop_agents` holding its agent:
+/// `ResumeQueue` and `SendQueuedNow` then log their receipt and change nothing, `SignIn` not
+/// lifted either, so the queue stays held and marked and runs once, in order, at
+/// `restart_agents` (decision record 0048, P4d). Under `UpdateNow` or `SignIn` alone they act as
+/// usual, and `move_on` still starts nothing while `UpdateNow` is left.
 fn held_by_stop(actor: &Actor, thread: ThreadId) -> bool {
-    super::super::sign_in::holds(actor, thread)
+    super::hold::holds(actor, thread).stop()
 }
 
 /// `SendQueuedNow`: the turn moves to the head and starts once the current turn, cancelled
