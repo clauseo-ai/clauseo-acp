@@ -113,6 +113,7 @@ pub(super) fn session_loads(
         folders,
         seed_sites: SEED_SITES,
         forced_ask,
+        data: &run.data_deny,
     });
     let guard = actor
         .pre_write_guard

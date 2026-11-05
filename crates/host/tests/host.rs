@@ -81,6 +81,10 @@ mod connectors;
 #[cfg(test)]
 #[path = "host/counts.rs"]
 mod counts;
+// Its one test makes symlinks, so the module is Unix-only.
+#[cfg(all(test, unix))]
+#[path = "host/data_fence.rs"]
+mod data_fence;
 #[cfg(test)]
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;

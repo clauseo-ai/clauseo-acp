@@ -11,15 +11,16 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Limits, Matter,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Limits, Matter,
     MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored, Retention,
-    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at, matter_path_in,
+    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_in,
 };
 use clauseo_protocol::{
     CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
     RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
+use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
 use crate::agent::folder_support::CheckSource;
 use crate::error::Error;
 use crate::log_file::Cause;
@@ -150,10 +151,12 @@ pub(crate) enum MatterJob {
     },
     /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
     /// lies in `folder` and that Word or another program holds open, by
-    /// `clauseo_matters::held_open_at`. Needs no open matter.
+    /// `clauseo_matters::held_open_at`, after the data-folder check `fence`
+    /// (`agent/data_fence.rs`), when there is one. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
         paths: Vec<PathBuf>,
+        fence: Option<Box<FenceCheck>>,
     },
     /// `Matter::papers`: the folder as it is now, its first `limit` files.
     ListPapers { limit: usize },
@@ -245,7 +248,7 @@ pub(crate) enum MatterReply {
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
-    HeldOpen(Option<(MatterPath, HeldOpen)>),
+    HeldOpen(PathsChecked),
     Papers(Result<PaperList, Error>),
     EditedSince(Result<Vec<MatterPath>, Error>),
     /// The paths in the folder again.
@@ -490,11 +493,11 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             open(settings, slot)
                 .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
         ),
-        MatterJob::HeldOpen { folder, paths } => MatterReply::HeldOpen(
-            paths
-                .into_iter()
-                .find_map(|path| held_open_at(&folder, &path)),
-        ),
+        MatterJob::HeldOpen {
+            folder,
+            paths,
+            fence,
+        } => MatterReply::HeldOpen(check_paths(&folder, paths, fence.as_deref())),
         MatterJob::ListPapers { limit } => {
             MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
         }

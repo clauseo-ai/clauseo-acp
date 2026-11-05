@@ -71,6 +71,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         waiting,
         after_stop,
         stop_cause,
+        denied_data_folder,
         ..
     } = *agent;
     let unresponsive = matches!(
@@ -96,7 +97,14 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         }
     };
     let (kind, code) = reason_kind(&reason);
-    tracing::info!(target: LIFECYCLE, %thread, kind, ?code, "agent ended");
+    tracing::info!(
+        target: LIFECYCLE,
+        %thread,
+        kind,
+        ?code,
+        denied_data_folder,
+        "agent ended"
+    );
     let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);

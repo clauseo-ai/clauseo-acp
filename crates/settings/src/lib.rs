@@ -136,7 +136,8 @@ pub use error::Error;
 pub use files::{Files, SystemFiles};
 pub use leaf::{RESERVED_MCP_SERVERS, reserved_mcp_server};
 pub use locations::{
-    DATA_DIR_VAR, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs, SETTINGS_FILE,
+    DATA_DIR_VAR, DATA_ENTRIES, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs,
+    SETTINGS_FILE,
 };
 pub use lock_reason::{LockCause, LockReason, SourceKind};
 pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped, web_address_ok};

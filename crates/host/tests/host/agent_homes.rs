@@ -98,6 +98,15 @@ fn claude_and_codex_launch_with_clauseos_homes_not_the_lawyers() {
         let meta = std::fs::symlink_metadata(home).unwrap();
         assert!(meta.is_dir(), "{}", home.display());
     }
+    // Claude Code's user settings there turn off the account's synced claude.ai skills (G11).
+    let settings = std::fs::read(claude_home.join("settings.json")).unwrap();
+    let settings: serde_json::Value = serde_json::from_slice(&settings).unwrap();
+    assert_eq!(
+        settings["syncClaudeAiSkills"],
+        serde_json::json!(false),
+        "{settings}"
+    );
+    assert!(!codex_home.join("settings.json").exists());
     // An agent of no kind reads neither variable, and the host forces neither on it.
     assert_eq!(
         var(fake, "CLAUDE_CONFIG_DIR").as_deref(),

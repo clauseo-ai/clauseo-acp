@@ -334,6 +334,25 @@ Coming:
 - `nodejs.org` and `registry.npmjs.org`: Node and the agents' own downloads (task S17), unless
   `install.bundle` or `install.registry` points at your copy.
 
+## 8. Claude's personal skills
+
+A lawyer's personal claude.ai skills don't appear in Clauseo sessions. Clauseo runs Claude Code
+with its own Claude home and sets `syncClaudeAiSkills: false` there, so Claude Code neither
+syncs nor loads the account's claude.ai skills. There is no switch for it until it has been
+reviewed. Your firm's skills reach Clauseo as skill packs
+([decision 0040](decisions/0040-skill-packs.md)).
+
+### What the fence between matters is not
+
+On a machine without Clauseo's sandbox (tier C), there is no isolation between matters. The
+agent runs as the lawyer and can read any folder the lawyer can, including other matters'
+folders on disk. What Clauseo fences is its own data: other conversations in its search index,
+other sessions' working copies, other matters' notes and the agents' credentials. That is not
+a wall between matters. The agent may read Clauseo's `profile` folder: it holds only the
+built-in plugin, the same for every matter. Run folders and matters created after a session started are not in
+that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
+([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
+
 ## Later
 
 Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated

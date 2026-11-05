@@ -30,6 +30,22 @@ const UPDATE_MARKER: &str = "update.json";
 /// The name of the updater's download folder, in the data folder ([`Locations::updates_dir`]).
 const UPDATES_DIR: &str = "updates";
 
+/// The agents' folder under the data folder, which holds each [`Locations::agent_home`].
+const AGENTS_DIR: &str = "agents";
+
+/// Every entry of the data folder this file names: the log folder, the settings file, the
+/// updater's marker and download folder, and the agents' folder. The host's data folder fence
+/// checks that each is denied to agents or allowed for a stated reason, so a renamed one fails
+/// its guard test until the fence names it; and a test here checks that every entry `Locations`
+/// builds under the data folder (each `data_dir.join`) is listed, so a new one fails too.
+pub const DATA_ENTRIES: [&str; 5] = [
+    LOGS_DIR,
+    SETTINGS_FILE,
+    UPDATE_MARKER,
+    UPDATES_DIR,
+    AGENTS_DIR,
+];
+
 /// The folders Clauseo uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Locations {
@@ -164,7 +180,7 @@ impl Locations {
                     .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
             "an agent id is [a-z0-9-]+"
         );
-        self.data_dir.join("agents").join(agent).join("home")
+        self.data_dir.join(AGENTS_DIR).join(agent).join("home")
     }
 
     /// The updater's marker file, `<data folder>/update.json` (task R23): the host writes there

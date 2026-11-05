@@ -334,6 +334,12 @@ fn folders() -> Folders<'static> {
     }
 }
 
+/// No data folder deny rules: these tests are about the other keys.
+static NO_DENY: crate::agent::data_fence::LaunchDeny = crate::agent::data_fence::LaunchDeny {
+    spellings: Vec::new(),
+    targets: Vec::new(),
+};
+
 fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
     ClaudeKeys {
         web_search,
@@ -341,6 +347,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         folders: folders(),
         seed_sites: SEED_SITES,
         forced_ask: false,
+        data: &NO_DENY,
     }
 }
 

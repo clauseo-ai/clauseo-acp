@@ -2,7 +2,8 @@
 //! the live turn, else answered cancelled with nothing logged) and limit signals (a rejection
 //! or a stop marks the live turn; the first wins; a rate limit also feeds the limits model). A
 //! permission request that names a file of the matter a program holds open (Word, say) is
-//! answered for the lawyer, rejected, in the commit that logs it.
+//! answered for the lawyer, rejected, in the commit that logs it. One that touches Clauseo's own
+//! data folder (`agent/data_fence.rs`) is rejected with nothing logged: the lawyer never sees it.
 
 use std::path::PathBuf;
 
@@ -20,6 +21,7 @@ use super::super::{Actor, limits};
 use super::out::Out;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
+use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
@@ -44,11 +46,13 @@ pub(super) struct HeldOpenCheck {
 
 /// A permission request (`AcpEvent::PermissionRequested`). Outside the live turn it is
 /// answered `cancelled`. In it, when it names a path (or, naming none, its tool call has matter
-/// paths), the matter thread first resolves the paths into the matter folder and checks whether
-/// a program holds one open ([`on_held_open`]); otherwise, or when the check cannot be sent, it
-/// is logged `Live` for the lawyer at once. In forced ask it first loses the options
-/// `agent::forced_ask::keep_option` drops. A Claude request naming only its own plan note is
-/// marked `about: agent_plan` (`agent/plan_note.rs`), a label that changes nothing else.
+/// paths, or its `rawInput` has a path or a command with path words), the matter thread first
+/// checks the paths against Clauseo's data folder (`agent/data_fence.rs`), then resolves them
+/// into the matter folder and checks whether a program holds one open ([`on_held_open`]);
+/// otherwise, or when the check cannot be sent, it is logged `Live` for the lawyer at once. In
+/// forced ask it first loses the options `agent::forced_ask::keep_option` drops. A Claude request
+/// naming only its own plan note is marked `about: agent_plan` (`agent/plan_note.rs`), a label that
+/// changes nothing else.
 pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
     let AcpEvent::PermissionRequested {
         session,
@@ -56,6 +60,7 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         acp_tool_call_id,
         mut options,
         mut paths,
+        raw_input,
     } = event
     else {
         return;
@@ -79,17 +84,22 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
         cancel_outside_turn(actor, thread, &ask.session);
         return;
     };
+    let fence = fence_check(actor, thread, &paths, raw_input.as_ref());
     if paths.is_empty() {
         paths = tool_call_paths(actor, thread, &ask);
     }
-    if paths.is_empty() {
+    if paths.is_empty() && fence.is_none() {
         log_for_lawyer(actor, thread, ask);
         return;
     }
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let folder = PathBuf::from(&actor.check_matter(matter)?.row.folder_path);
-        let job = MatterJob::HeldOpen { folder, paths };
+        let job = MatterJob::HeldOpen {
+            folder,
+            paths,
+            fence,
+        };
         let check = HeldOpenCheck {
             ask: ask.clone(),
             turn,
@@ -112,6 +122,49 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
     }
 }
 
+/// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
+/// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
+/// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
+/// path and no command, or the thread has no agent.
+fn fence_check(
+    actor: &Actor,
+    thread: ThreadId,
+    paths: &[PathBuf],
+    raw_input: Option<&serde_json::Value>,
+) -> Option<Box<FenceCheck>> {
+    let paths = data_fence::candidates(paths, raw_input, cfg!(windows));
+    let words = data_fence::candidates_words(raw_input, cfg!(windows));
+    let roots = data_fence::candidates_roots(raw_input, cfg!(windows));
+    if paths.is_empty() && words.is_empty() && roots.is_empty() {
+        return None;
+    }
+    let turn = &actor.threads.get(&thread)?.turn;
+    let agent = turn.agent.as_deref()?;
+    let data = actor.effective.locations().data_dir().to_owned();
+    let mut allowed: Vec<PathBuf> = turn
+        .run
+        .iter()
+        .flat_map(|run| [run.root.clone(), run.notes.clone()])
+        .collect();
+    // Claude Code writes its plan note there (`agent/plan_note.rs`); a plans folder elsewhere
+    // in the data folder is not the session's.
+    let plans = agent.plan_notes.iter();
+    allowed.extend(
+        plans
+            .filter(|plans| data_fence::is_agent_plans(&data, plans))
+            .cloned(),
+    );
+    Some(Box::new(FenceCheck {
+        data,
+        allowed,
+        cwd: agent.folder.clone(),
+        home: std::env::home_dir(),
+        paths,
+        roots,
+        words,
+    }))
+}
+
 /// The matter paths the host has logged for the request's tool call (its in-matter locations
 /// and diffs), as paths relative to the matter folder: Codex's adapter may send a request whose
 /// `locations` are still empty.
@@ -129,15 +182,16 @@ fn tool_call_paths(actor: &Actor, thread: ThreadId, ask: &PermissionAsk) -> Vec<
     .unwrap_or_default()
 }
 
-/// The matter thread checked a permission request's paths. Still in the same live turn, a
-/// file held open gets the request refused for the lawyer ([`refuse_held_open`]); none, and
-/// the request is logged for the lawyer. Once that turn is over, that one request is answered
+/// The matter thread checked a permission request's paths. Still in the same live turn, a path
+/// in Clauseo's data folder gets the request rejected unseen ([`refuse_data_folder`]), a file
+/// held open gets it refused for the lawyer ([`refuse_held_open`]); neither, and the request is
+/// logged for the lawyer. Once that turn is over, that one request is answered
 /// `cancelled` (the others of the session, and any later turn, are left alone).
 pub(super) fn on_held_open(
     actor: &mut Actor,
     thread: ThreadId,
     check: HeldOpenCheck,
-    held: Option<(MatterPath, HeldOpen)>,
+    checked: PathsChecked,
 ) {
     let HeldOpenCheck { ask, turn } = check;
     if live_turn(actor, thread) != Some(turn) {
@@ -155,6 +209,13 @@ pub(super) fn on_held_open(
         }
         return;
     }
+    let held = match checked {
+        PathsChecked::DataFolder => {
+            refuse_data_folder(actor, thread, &ask);
+            return;
+        }
+        PathsChecked::Held(held) => held,
+    };
     match held {
         Some((path, held)) => {
             let why = "refused a permission request: a program holds the file open";
@@ -308,6 +369,30 @@ fn refuse_held_open(
         agent.run = None;
     }
     Ok(())
+}
+
+/// Rejects a request that touches Clauseo's data folder, with nothing logged and the lawyer never
+/// asked: the agent gets the reject-once option, else `cancelled`, and the agent's count for its
+/// `agent ended` line goes up. No path is logged. ACP's answer carries no reason, so the agent
+/// hears its adapter's own words for a refusal.
+fn refuse_data_folder(actor: &mut Actor, thread: ThreadId, ask: &PermissionAsk) {
+    let reject =
+        reject_option(&ask.options).and_then(|option| AgentChoiceId::new(&option.option_id).ok());
+    let Some(agent) = agent(actor, thread) else {
+        return;
+    };
+    agent.denied_data_folder = agent.denied_data_folder.saturating_add(1);
+    let client = agent.link.client.clone();
+    let key = ask.key;
+    spawn(actor, async move {
+        let answered = match reject {
+            Some(option) => client.answer_permission(key, option).await,
+            None => client.cancel_permission(key).await,
+        };
+        if let Err(error) = answered {
+            tracing::warn!(error = %Cause(&error), "a data-folder refusal did not reach the agent");
+        }
+    });
 }
 
 /// The option that rejects this request only: the first `RejectOnce`. A `RejectAlways` is

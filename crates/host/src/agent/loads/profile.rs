@@ -7,8 +7,12 @@
 //!   site; in forced ask (`agent/forced_ask.rs`) there is no `allowedTools` at all, the hook's
 //!   included. `additionalDirectories` gains the work folder and the matter notes folder, after any
 //!   hook entries. `settings` gains `disableSkillShellExecution: true` always, and
-//!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login; in forced ask it also
-//!   gains the `permissions.ask` rules and `sandbox.autoAllowBashIfSandboxed: false`.
+//!   `skipWebFetchPreflight: true` on a Bedrock, Vertex or Foundry login, and always
+//!   `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`), after any the
+//!   hook put there; in forced ask it also gains the `permissions.ask` rules and
+//!   `sandbox.autoAllowBashIfSandboxed: false`. These are flag settings: they outrank the user's
+//!   settings, and Claude Code merges every source's `permissions.deny`, so no user rule takes
+//!   one out.
 //! - Codex ([`codex_keys`]): of the hook's keys only `developer_instructions`
 //!   (`agent::codex::PROFILE_KEYS`), its tokens filled; then the host's `web_search` (`live` or
 //!   `disabled`) and both folders in `sandbox_workspace_write.writable_roots`.
@@ -137,6 +141,8 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The session runs in forced ask (`agent/forced_ask.rs`): no `allowedTools` at all, the
     /// hook's included, and the forced-ask `permissions.ask` rules in the flag settings.
     pub(crate) forced_ask: bool,
+    /// The data folder's deny rules (`RunFolders::data_deny`).
+    pub(crate) data: &'a crate::agent::data_fence::LaunchDeny,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -174,10 +180,36 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     if keys.login != Login::FirstParty {
         settings.insert("skipWebFetchPreflight".to_owned(), Value::Bool(true));
     }
+    deny_data_folder(&mut settings, keys.data);
     if keys.forced_ask {
         forced_ask_settings(&mut settings);
     }
     options.insert("settings".to_owned(), Value::Object(settings));
+}
+
+/// `permissions.deny` gains the data folder's rules (`agent/data_fence.rs`), and
+/// `permissions.allow` the Read of the built-in skills' folder, each after any the hook put
+/// there. A hook value at `permissions`, `deny` or `allow` of another type is replaced. With no
+/// spelling (a unit test's keys) nothing changes.
+fn deny_data_folder(
+    settings: &mut Map<String, Value>,
+    data: &crate::agent::data_fence::LaunchDeny,
+) {
+    if data.spellings.is_empty() {
+        return;
+    }
+    let mut permissions = take_object(settings, "permissions");
+    let mut deny = take_array(&mut permissions, "deny");
+    for rule in crate::agent::data_fence::claude_deny_rules(data) {
+        push_new(&mut deny, &rule);
+    }
+    permissions.insert("deny".to_owned(), Value::Array(deny));
+    let mut allow = take_array(&mut permissions, "allow");
+    for rule in crate::agent::data_fence::claude_allow_rules(data) {
+        push_new(&mut allow, &rule);
+    }
+    permissions.insert("allow".to_owned(), Value::Array(allow));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
 }
 
 /// Forced ask's second fence in the flag settings (`agent/forced_ask.rs` [`ASK_RULES`]):

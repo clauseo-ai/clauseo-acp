@@ -1,5 +1,6 @@
 //! Tests' directory junctions: [`junction`] makes one without admin rights, as `mklink /J` does,
-//! by setting a mount-point reparse point on a new empty folder. For this crate's tests only.
+//! by setting a mount-point reparse point on a new empty folder. For tests only: this crate's,
+//! and with `test-support` the host's.
 #![expect(
     unsafe_code,
     reason = "FFI to open a test folder and set its mount-point reparse point"
@@ -29,7 +30,7 @@ const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
 
 /// Makes `link` (which must not exist; `target` absolute, an existing folder) a directory
 /// junction to `target`.
-pub(crate) fn junction(link: &Path, target: &Path) -> io::Result<()> {
+pub fn junction(link: &Path, target: &Path) -> io::Result<()> {
     std::fs::create_dir(link)?;
     let made = set_mount_point(link, target);
     if made.is_err() {

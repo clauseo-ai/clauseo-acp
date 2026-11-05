@@ -4,10 +4,10 @@
 //! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the
 //! `.codex` refusal, the folder check, the home made and the home's `config.toml`; for a Claude
 //! agent the folder check, `agent/folder_support.rs`, and its home made, the folder it gets as
-//! `CLAUDE_CONFIG_DIR`). The work that waits for the
-//! agent is held on the thread's turn state meanwhile. Phase two, when they answer, launches
-//! the agent on the actor with what they found ([`agents::launch_now`]), or fails the waiting
-//! work.
+//! `CLAUDE_CONFIG_DIR`, with Claude Code's user settings written there, `agent/home.rs`). The
+//! work that waits for the agent is held on the thread's turn state meanwhile. Phase two, when
+//! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
+//! fails the waiting work.
 //!
 //! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
 //! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
@@ -46,6 +46,7 @@ use super::super::input::Input;
 use super::agents::{self, Waiting};
 use super::{TurnInput, host_stopping, state};
 
+use crate::agent::data_fence::{self, LaunchDeny};
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::login_link::{self, Checked, LoginCheck};
 use crate::agent::{codex, data_folder};
@@ -119,6 +120,11 @@ pub(crate) struct RunFolders {
     /// What the launch prep wrote into [`Self::skill_packs`]; none when it wrote nothing. This
     /// launch's `session_meta` and `codex_config` take it, and no other launch's.
     pub(crate) packs_written: Option<Arc<PacksWritten>>,
+    /// Claude's data folder deny rules (`agent/data_fence.rs`): the data folder's canonical
+    /// path, then the path as configured when it differs, and the patterns under it, every
+    /// entry that is not this session's own enumerated by the launch prep. Run folders and
+    /// matters' notes made after the launch are in no rule (the accepted residual).
+    pub(crate) data_deny: LaunchDeny,
 }
 
 impl RunFolders {
@@ -135,6 +141,7 @@ impl RunFolders {
             chrome: None,
             browser_session: None,
             packs_written: None,
+            data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
         }
     }
 
@@ -183,6 +190,48 @@ impl RunFolders {
             remove_tree(&self.root);
         }
     }
+}
+
+/// The data folder canonicalised, then as configured when that differs; as configured alone
+/// when it does not resolve (the data-folder refusal has refused that launch already).
+fn data_spellings(data: &Path) -> Vec<PathBuf> {
+    let mut spellings: Vec<PathBuf> = dunce::canonicalize(data).into_iter().collect();
+    if !spellings.iter().any(|canonical| canonical == data) {
+        spellings.push(data.to_owned());
+    }
+    spellings
+}
+
+/// Claude's data folder deny rules for this launch: every entry of `data` that is not the
+/// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
+/// the matter folder (`stored`, and the real path the agent works in).
+fn launch_deny(
+    run: &RunFolders,
+    stored: &Path,
+    data: &Path,
+    claude_home: Option<&Path>,
+) -> data_fence::LaunchDeny {
+    let own = own_folders(run, stored, claude_home);
+    let cwd = crate::agent::session_folder(stored);
+    let projects = claude_home.map_or_else(Vec::new, |home| {
+        data_fence::claude_projects(home, &[&cwd, stored])
+    });
+    data_fence::launch_deny(data_spellings(data), data, &own, &projects)
+}
+
+/// The session's own folders, which Claude's deny rules leave out: its run folder, this
+/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and, for Claude,
+/// the plans folder in its home.
+fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> Vec<PathBuf> {
+    let plans = claude_home.map(|home| home.join("plans"));
+    [
+        run.root.clone(),
+        run.notes.clone(),
+        crate::agent::session_folder(stored),
+    ]
+    .into_iter()
+    .chain(plans)
+    .collect()
 }
 
 /// `<data>/run`.
@@ -299,8 +348,15 @@ pub(super) fn prepare(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>
                 if let Some(home) = &claude_home {
                     answer = Some(check.run(&crate::agent::session_folder(&stored)));
                     codex::make_agent_home(&data, home, "Claude Code")?;
+                    if let Err(error) = crate::agent::home::write_claude_settings(home) {
+                        tracing::warn!(
+                            error = %Cause(&error),
+                            "Claude's home settings were not written"
+                        );
+                    }
                 }
                 run.make(&data, &sweep)?;
+                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
                 (run.chrome, run.browser_session) = browser.prepare(&data, &run.key.id());
                 let skills_written = write_skills(&skills);
                 let packs_skipped;

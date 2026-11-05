@@ -223,3 +223,10 @@ pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
+
+/// Makes `link` a symbolic link to the folder `target`; fails without the right to make links
+/// (Developer Mode or an elevated token). For unit tests.
+#[cfg(all(test, windows))]
+pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
+}

@@ -42,6 +42,9 @@ pub enum AcpEvent {
         /// strings, without repeats, as the agent wrote them (absolute, or relative to the
         /// session's `cwd`). Empty when it names none.
         paths: Vec<PathBuf>,
+        /// `toolCall.rawInput` as the agent sent it, when it did: the host reads the paths
+        /// and the shell command in it for its data-folder check (`agent/data_fence.rs`).
+        raw_input: Option<serde_json::Value>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {
