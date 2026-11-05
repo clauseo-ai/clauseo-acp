@@ -186,7 +186,7 @@ impl AgentsBackend {
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
                 if self.reused(&agent) {
-                    leave::leave_reused(self, &agent, None).await?;
+                    leave::leave_reused(self, &agent).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
@@ -201,7 +201,7 @@ impl AgentsBackend {
                         "{agent}'s login is not one you already had"
                     )));
                 }
-                leave::leave_reused(self, &agent, None).await?;
+                leave::leave_reused(self, &agent).await?;
             }
             SetupCommand::FindLogin { .. } => {
                 agents
@@ -241,7 +241,7 @@ impl AgentsBackend {
         }
         let left = self.reused(agent);
         if left {
-            leave::leave_reused(self, agent, None).await?;
+            leave::leave_reused(self, agent).await?;
         }
         let hold = leave::hold_reads(self, agent).await;
         let then = self.key_trigger(agent);
@@ -285,7 +285,7 @@ impl AgentsBackend {
         .await?;
         let left = url.is_some() && self.reused(agent);
         if left {
-            leave::leave_reused(self, agent, None).await?;
+            leave::leave_reused(self, agent).await?;
         }
         let firm = url.is_some() || info.provider;
         let hold = leave::hold_reads(self, agent).await;
@@ -389,11 +389,21 @@ impl AgentsBackend {
     ) -> Result<(), HostError> {
         let _gate = lock(&self.signin_gate);
         self.refuse_start(agent)?;
-        if let Some(hold) = hold {
-            self.wiring.waiters.put(agent, Waiter::Found(hold));
-        }
+        let token = match hold {
+            Some(hold) => Some(leave::wait_on(self, agent, Waiter::Found(hold)).ok_or_else(
+                || {
+                    HostError::new(
+                        ErrorCode::CommandConflict,
+                        format!("{agent}'s login is being left"),
+                    )
+                },
+            )?),
+            None => None,
+        };
         if let Err(error) = self.agents.use_found_login(agent) {
-            drop(self.wiring.waiters.take(agent));
+            if let Some(token) = token {
+                drop(self.wiring.waiters.take(agent, token));
+            }
             return Err(signin_error(&error));
         }
         self.replaced(agent);

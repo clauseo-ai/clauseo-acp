@@ -16,7 +16,8 @@
 //! host: the key slot the launch hook and the limits readers read, the readers, the reused
 //! logins the login check reads, and the plans snapshot. Once the backend is up a
 //! `clauseo-setup-host` thread follows the host's `SettingsChanged` (each one reads the
-//! settings again, `refresh.rs`) and its login splits (each one runs the leave order).
+//! settings again, `refresh.rs`), its login splits, and the automatic leaves (`leave/auto.rs`:
+//! a split, or a reuse S18 ended by itself), each on its own.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -269,7 +270,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
             let settings = follow_settings(&follower, &*reread);
-            futures::executor::block_on(join(settings, follow_splits(&follower)));
+            let leaves = super::leave::follow_auto_leaves(&follower);
+            futures::executor::block_on(join(settings, join(follow_splits(&follower), leaves)));
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
@@ -295,8 +297,8 @@ async fn follow_settings(backend: &AgentsBackend, reread: &(dyn Fn() -> Effectiv
     }
 }
 
-/// Each login split the host's check finds: the leave order, with S18's reason, until the host
-/// stops. A leave that fails is logged by its code.
+/// Each login split the host's check finds: an automatic leave, with S18's reason, until the
+/// host stops (`leave/auto.rs`: it tries again until it finishes).
 async fn follow_splits(backend: &AgentsBackend) {
     let splits = match backend.host.login_splits().await {
         Ok(splits) => splits,
@@ -311,10 +313,7 @@ async fn follow_splits(backend: &AgentsBackend) {
         } else {
             Found::CodexLinkSplit
         };
-        if let Err(error) = super::leave::leave_reused(backend, &split.agent, Some(why)).await {
-            let agent = &split.agent;
-            tracing::warn!(%agent, code = error.code().as_str(), "a split's leave failed");
-        }
+        backend.wiring.leaves.submit(&split.agent, Some(why));
     }
 }
 

@@ -7,9 +7,12 @@ mod endpoint;
 mod fakes;
 mod keys;
 mod leave;
+mod once;
 mod races;
 mod retry;
 mod signin;
+mod switching;
+mod timing;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
