@@ -52,7 +52,14 @@ The host reaches the plugin through a trait, as it reaches processes through
   plugin would ask for an administrator) or `Package` (Linux, and `NoUpdater`).
 - `check()` and `download(offer, progress)` run in the host's state machine. The download
   verifies the minisign signature and the signed version (the plugin's `Update::download`) and
-  goes into `<data_dir>/updates/<version>/`, never a matter folder.
+  goes into `<data_dir>/updates/<version>/`, never a matter folder. Both return
+  `BoxFuture<'static, _>`, so the actor's pool runs them without borrowing the updater.
+- The values: `Offer { version, handle }` and `Downloaded { version, path, handle }`, where
+  `handle` is an `Opaque` (a shared `Any`) holding whatever desktop needs (the plugin's
+  `Update`), which the host only moves; `UpdaterError` is `Network`, `Signature`, `Io` or
+  `Other`, each with a log line, and any of them fails the stage that was running.
+  `ProgressSink::post(received, total)` takes a running total and drops the value when the
+  bounded channel is full.
 - `install` is **not** the host's. On install the host shuts down cleanly and its join returns
   `Exit::Install(downloaded)`; desktop then calls the plugin's `install`, which verifies the
   bytes again (lands with PR 4 for the host, PR 5 for desktop).
@@ -63,15 +70,45 @@ The host reaches the plugin through a trait, as it reaches processes through
 - `HostConfig::with_updater` takes it; the default is `NoUpdater`, so tests and `cli` never touch
   the network.
 
-The state machine is pure, `step(state, input, now) -> (state, effects)` in the
-host's `update::machine` module, with time and a seeded jitter as inputs: the first check 1 to
-10 minutes after start, then every 60 minutes ± 10. Its transitions are R23's table: `idle` or
+The state machine is pure, `step(state, input, now) -> Result<(state, effects), Refusal>` in
+the host's `update::machine` module, with time and a seeded jitter (SplitMix64, seeded by the
+caller) as inputs: the first check 1 to 10 minutes after start, then every 60 minutes ± 10.
+`Machine::start` builds the first state from what start-up read (the install kind, the mode in
+force and its lock, `update.json`, last run's download and the seed), so no machine exists
+before start-up. The inputs: the timer, `CheckRequested`, `CheckDone`, `Progress`,
+`DownloadDone`, `InstallRequested(when)`, `CancelScheduled`, `ModeSet`, `PolicyChanged`,
+`TurnsRunning(bool)` (each time "any turn running" flips) and `TurnsCancelled`. The effects, in
+order: `StartCheck`, `StartDownload`, `CancelDownload`, `ArmTimer { at }` (one timer, each
+replacing the last), `CancelTurns`, `GateNewTurns(bool)`, `WriteMarker`, `ClearMarker`,
+`BeginInstall(downloaded)`, `Publish` (whenever the view changed) and `Count(result)`. A
+command in a state that does not take it is `Refusal::NotNow` (`command.invalid`);
+`SetUpdateMode` while policy locks `update.mode` is `Refusal::Locked` (`settings.locked`).
+An event a state no longer concerns (a check's result after the run became managed, a replaced
+timer) changes nothing. Its transitions are R23's table: `idle` or
 `failed` to `checking` on the timer or `CheckForUpdate`; `checking` to `idle` (nothing offered)
 or `downloading`; `downloading` to `ready`; `ready` to `installing` (`now`, after stopping turns)
 or `scheduled` (`after_turn` while a turn runs); `scheduled` to `installing` when the last turn
-ends, or back to `ready` on `CancelScheduledUpdate`; an error in `checking`, `downloading` or
-`installing` to `failed`; anything to `managed` when policy or the install kind says so (lands
-with PR 3).
+ends, or back to `ready` on `CancelScheduledUpdate`, which also takes back a `now` install still
+waiting for its cancelled turns and releases the gate; an error in `checking` or `downloading`
+to `failed`, and `installing` to `failed` at the next start through the marker; anything to
+`managed` when policy or the install kind says so, except an install whose `BeginInstall` has
+gone out (lands with PR 3). Further rules:
+
+- **Managed** is decided policy first (`none` in force gives `managed` by `policy`), then the
+  install kind. A managed run never emits `StartCheck`, and counts `managed` at most once a
+  day, at start and on a 24-hour timer.
+- **`now` and `after_turn`.** `now` with turns running gates new sends and cancels the turns,
+  and installs on `TurnsCancelled`. `after_turn` does not gate: new turns start, and the
+  install waits until no turn runs (`TurnsRunning(false)`), then counts `after_answer`.
+- **The marker.** Just before `BeginInstall` the machine has the marker
+  `{ from, to, state: "installing" }` written. At start, a marker with `to` equal to the running
+  version sets `updated_from` and counts `installed`; with `from` equal it is `failed` (stage
+  `install`) and counts `failed`. Any marker is then cleared, so it counts once.
+- **Last run's download.** In `auto`, start-up checks at once; an offer of the same version
+  installs from the file (`scheduled` while a turn runs). Offline, the check fails as any check
+  does and nothing installs; a later offer of that version is `ready` with no second download,
+  and installs on the lawyer's command or at the next start. In `notify` the file only saves
+  the download. After a failed install the file is never reused.
 
 ### The wire
 
@@ -133,14 +170,15 @@ on a policy-locked key gives `settings.locked` (lands with PR 1 for settings, PR
 The install takes the quit path:
 
 1. A running turn under `when = now` goes through Stop, so the descendant sweep runs; its
-   turn-end checkpoint finishes (shutdown already waits for the matter jobs). Under `after_turn`
-   new sends stay queued and stored, never dropped; cancelling the schedule releases them.
-2. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
+   turn-end checkpoint finishes (shutdown already waits for the matter jobs). Meanwhile new sends
+   stay queued and stored, never dropped; cancelling the install releases them. Under
+   `after_turn` nothing is held: new turns run, and the install waits for the last to end.
+2. The "installing <version>" marker (`{ from, to }`) is written to `update.json`
+   (`Locations::update_marker()`), off the actor, before the shutdown and so before the install.
+3. The host shuts down: imports and scans cancelled, search, snapshots and matter workers
    stopped, the store closed. Its exit is `Exit::Install(downloaded)`.
-3. Desktop's stopper thread flushes the host log (0047) right after `host_start::stop`.
-4. Desktop saves the counts and the window state.
-5. The "installing <version>" marker (`{ from, to }`) is written to `update.json`
-   (`Locations::update_marker()`), off the actor and before the install.
+4. Desktop's stopper thread flushes the host log (0047) right after `host_start::stop`.
+5. Desktop saves the counts and the window state.
 6. Desktop calls the plugin's `install`. Windows exits inside it; macOS swaps the `.app` and
    restarts.
 7. If `install` returns an error after the shutdown, desktop relaunches normally. The marker and
@@ -148,7 +186,7 @@ The install takes the quit path:
    at the next start; if NSIS dies after Windows exited, the next launch of the old exe does the
    same. With `to` equal to the running version it reports `updated_from` instead.
 
-Steps 1 and 2, and `read_update_marker`, land with PR 4; steps 3 to 7 with PR 5. S22's crash `Guard::clean_exit`
+Steps 1 to 3, and `read_update_marker`, land with PR 4; steps 4 to 7 with PR 5. S22's crash `Guard::clean_exit`
 call before `install` stays a no-op seam until S22 merges.
 
 ### The key's custody
@@ -178,6 +216,11 @@ call before `install` stays a no-op seam until S22 merges.
   unreadable flag yourself" step is dropped.
 - **S21 is already merged:** the counts events `Update` and `AppOpened { launch: after_update }`
   exist, and the host counts them (lands with PR 4), rather than a no-op until S21.
+- **The marker is written before the shutdown,** not after it: the machine emits it with
+  `BeginInstall`, so a shutdown that never reaches the install still reads `failed` at the
+  next start rather than nothing.
+- **A stale marker is cleared** once start-up has read it, so `installed` or `failed` counts
+  once; the brief does not say.
 - **`received` and `total` are `Count`,** not bare `u64`, by the protocol's rule for 64-bit
   numbers.
 
