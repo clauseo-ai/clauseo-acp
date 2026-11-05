@@ -8,7 +8,7 @@ use crate::windows::test_dacl::protect_with;
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::Label;
-use walk::race::{HOOK, Stage};
+use walk::race::{HOOK, REFUSE, Stage};
 
 /// The pool user's `Modify` and another pool user's deny, both down the tree.
 fn fence(matter: &Path) -> [Grant; 2] {
@@ -312,4 +312,51 @@ fn the_lawyers_own_label_is_put_back_after_ours() {
     acl.restore_label(&low, lawyers).unwrap();
     assert_eq!(acl.label(&matter).unwrap(), Some(lawyers));
     assert!(!acl.present(&low).unwrap());
+}
+
+/// H1 re-check: `a` moved away after it was listed. Its children open through its handle, so
+/// their final paths are no longer `matter\a\name`: the walk refuses before writing them.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test plays the agent's rename"
+)]
+fn a_subfolder_moved_after_its_own_listing_refuses_the_walk() {
+    let place = Place::new("acl-race-own-listing");
+    place.dir.file("matter/a/doc.txt", "mine");
+    let (a, aside) = (place.at("matter/a"), place.at("matter-a"));
+    race_at(Stage::Listed, "a", move || {
+        std::fs::rename(&a, &aside).unwrap();
+    });
+    let walked = put(&place.at("matter"), &fence(&place.at("matter")));
+    clear_race();
+    assert_eq!(walked, Err(ApplyFailure::Changed));
+    assert!(!has(&place.at("matter-a/doc.txt"), USER_SID, true));
+}
+
+/// A child whose open met a reparse point refuses a strict walk and is skipped by a plain one.
+#[test]
+fn an_open_refused_for_a_reparse_point_refuses_only_a_strict_walk() {
+    let place = Place::new("acl-reparse-refused");
+    place.dir.file("matter/a/doc.txt", "mine");
+    REFUSE.with(|refuse| *refuse.borrow_mut() = Some("a".into()));
+    let strict = put(&place.at("matter"), &fence(&place.at("matter")));
+    let plain = NtfsAcl::new()
+        .unwrap()
+        .propagate(&place.at("matter"), Reach::Tree, None);
+    REFUSE.with(|refuse| *refuse.borrow_mut() = None);
+    assert_eq!(strict, Err(ApplyFailure::Changed));
+    assert!(plain.unwrap().skipped >= 1);
+}
+
+/// A walk's root that is a junction now refuses, rather than walk nothing and pass.
+#[test]
+fn a_root_that_is_a_junction_now_refuses_the_walk() {
+    let place = Place::new("acl-root-junction");
+    place.dir.file("real/doc.txt", "x");
+    junction(&place.at("matter"), &place.at("real")).unwrap();
+    let walked = NtfsAcl::new()
+        .unwrap()
+        .propagate(&place.at("matter"), Reach::Tree, None);
+    assert_eq!(walked, Err(ApplyFailure::Changed));
 }

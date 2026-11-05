@@ -10,7 +10,9 @@
 //! path must be its folder's plus `\name` before anything is written on it. Before a folder is
 //! listed, its final path must still be the one checked. So a junction swapped in for a
 //! subfolder while the walk runs is opened itself (and skipped), never passed through, and a
-//! folder moved away after its check refuses the walk (`Changed`).
+//! folder moved away after its check refuses the walk (`Changed`). So does a root that is a
+//! junction now, and in a strict walk a child whose open met a reparse point (a plain walk skips
+//! it).
 
 #[cfg(test)]
 use std::ffi::OsString;
@@ -67,7 +69,10 @@ pub(super) fn walk(
     let io = |e: io::Error| ApplyFailure::Io(e.kind());
     let top = Object::open_folder(root).map_err(io)?;
     let mut seen = Walked::default();
-    if !top.folder || top.name_surrogate() {
+    if top.name_surrogate() {
+        return Err(ApplyFailure::Changed);
+    }
+    if !top.folder {
         return Ok(seen);
     }
     if !same_path(&top, root).map_err(io)? {
@@ -91,9 +96,13 @@ pub(super) fn walk(
             if reach == Reach::FilesOnly && child.folder {
                 continue;
             }
-            let object = match folder.object.open_child(&child.name, child.folder) {
+            let object = match race::open(&folder.object, &child) {
                 Ok(object) => object,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                // A strict walk can't leave a child bare that it couldn't open as itself.
+                Err(e) if reparse_refused(&e) && strict.is_some() => {
+                    return Err(ApplyFailure::Changed);
+                }
                 Err(e) if reparse_refused(&e) => {
                     seen.skipped += 1;
                     continue;
@@ -286,4 +295,28 @@ pub(super) mod race {
 
     #[cfg(not(test))]
     pub(super) fn point(_stage: Stage, _folder: &[u16]) {}
+
+    #[cfg(test)]
+    thread_local! {
+        /// A child name whose open fails as one that met a reparse point.
+        pub(crate) static REFUSE: std::cell::RefCell<Option<std::ffi::OsString>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Opens `child` in `folder`; in the tests, the name [`REFUSE`] holds fails as an open
+    /// that met a reparse point would.
+    pub(super) fn open(
+        folder: &super::Object,
+        child: &super::super::object::Child,
+    ) -> std::io::Result<super::Object> {
+        #[cfg(test)]
+        {
+            use std::os::windows::ffi::OsStringExt as _;
+            let name = std::ffi::OsString::from_wide(&child.name);
+            if REFUSE.with(|refuse| refuse.borrow().as_ref() == Some(&name)) {
+                return Err(std::io::Error::from_raw_os_error(4395));
+            }
+        }
+        folder.open_child(&child.name, child.folder)
+    }
 }
