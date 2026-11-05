@@ -122,6 +122,7 @@ mod locate;
 #[cfg(test)]
 #[path = "host/log_file.rs"]
 mod log_file;
+#[cfg(test)]
 #[path = "host/login_check.rs"]
 mod login_check;
 #[cfg(test)]
