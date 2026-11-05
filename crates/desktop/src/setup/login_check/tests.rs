@@ -30,6 +30,11 @@ impl Homes {
     fn agent(&self) -> PathBuf {
         self.scratch.path().join("agent-home")
     }
+}
+
+/// The paths and the check the unix tests use (the fake files need unix modes).
+#[cfg(unix)]
+impl Homes {
     fn lawyer(&self) -> PathBuf {
         self.scratch.path().join("lawyer")
     }

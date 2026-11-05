@@ -5,8 +5,10 @@
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
+#[cfg(unix)]
+use clauseo_agents::Found;
 use clauseo_agents::testing::installed;
-use clauseo_agents::{Found, SigninState, Source};
+use clauseo_agents::{SigninState, Source};
 use clauseo_host::AgentsStopped;
 use clauseo_protocol::{CommandOutcome, ErrorCode};
 use serde_json::json;
