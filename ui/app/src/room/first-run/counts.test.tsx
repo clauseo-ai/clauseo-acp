@@ -108,7 +108,7 @@ test("counts: a locked privacy.counts shows the switch off, with no control: not
   expect(onOf()).toBe("off");
   expect(sent(t, "set_privacy_settings")).toEqual([]);
   expect(text()).toContain("Send anonymous counts.");
-  expect(text()).toContain("Managed by your organisation");
+  expect(text()).toContain("Managed by firm");
   await press("Open the folder for a matter");
   expect(sent(t, "first_act")).toEqual([{ counts: false }]);
 });
