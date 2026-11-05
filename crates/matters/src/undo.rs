@@ -1,7 +1,7 @@
 //! Undoing a step: put back, file by file, what the step between two checkpoints changed.
 //! Everything moves forward: the result is a new `undo` checkpoint, so an undo can be undone.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use clauseo_protocol::{
@@ -12,8 +12,8 @@ use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::diff::content_id;
 use crate::history::{HistoryStore, Oid};
 use crate::no_download::NoDownload;
-use crate::stat::{EntryState, Stat, find_by_path};
-use crate::types::{CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
+use crate::stat::{CacheEntry, EntryState, Stat, find_by_path};
+use crate::types::{Checkpoint, CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
 use crate::writeback::{self, Names, Op, skipped, writable};
 use crate::{Error, locks};
 
@@ -259,8 +259,9 @@ pub(crate) fn undo(
         }
     }
     let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
-    writeback::apply(core, folder, &ops)?;
-    let checkpoint = core.take(
+    let deleted = writeback::apply(core, folder, &ops)?;
+    let (checkpoint, resurrected) = take_after_deletes(
+        core,
         folder,
         settings,
         &spec(
@@ -269,6 +270,7 @@ pub(crate) fn undo(
             request.turn,
             request,
         ),
+        &deleted,
     )?;
     let restored = acting.iter().map(|step| step.path.clone()).collect();
     kept.sort();
@@ -278,7 +280,51 @@ pub(crate) fn undo(
         restored,
         kept,
         edited_since,
+        resurrected,
     })
+}
+
+/// Takes the `undo` checkpoint after `writeback::apply` deleted `deleted`, walking without the
+/// cache's entries for those paths; the commit compares with the cache as it was. A sync client
+/// can put a just-deleted file back as a cloud-only placeholder (`OneDrive` on macOS, about 3 s
+/// later): found with its old entry, the walk would keep the old blob as `Unread` and the
+/// undo's own checkpoint would hold the file it deleted. Without the entry it is skipped, or,
+/// back and downloaded, read as what the folder holds. Also returns the paths of `deleted` the
+/// walk found there again, sorted by path bytes.
+fn take_after_deletes(
+    core: &mut Core,
+    folder: &Path,
+    settings: &Settings,
+    spec: &Spec<'_>,
+    deleted: &[MatterPath],
+) -> Result<(Checkpoint, Vec<MatterPath>), Error> {
+    if deleted.is_empty() {
+        return Ok((core.take(folder, settings, spec)?, Vec::new()));
+    }
+    // Before setting entries aside: a cache rebuilt from the tip would bring them back.
+    core.check_cache()?;
+    let gone: HashSet<&str> = deleted.iter().map(MatterPath::as_str).collect();
+    let (aside, kept): (Vec<CacheEntry>, Vec<CacheEntry>) = std::mem::take(&mut core.cache.entries)
+        .into_iter()
+        .partition(|entry| gone.contains(entry.path.as_str()));
+    core.cache.entries = kept;
+    let scanned = core.scan_folder(folder, settings, None, &mut |_| {});
+    if !aside.is_empty() {
+        core.cache.entries.extend(aside);
+        core.cache
+            .entries
+            .sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    }
+    let walked =
+        scanned?.ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))?;
+    let mut resurrected: Vec<MatterPath> = deleted
+        .iter()
+        .filter(|path| find_by_path(walked.entries(), path.as_str(), |e| e.path.as_str()).is_some())
+        .cloned()
+        .collect();
+    resurrected.sort_by(|a, b| a.as_str().as_bytes().cmp(b.as_str().as_bytes()));
+    resurrected.dedup();
+    Ok((core.commit(walked, spec)?, resurrected))
 }
 
 /// The checkpoint spec for an undo's `outside-edits` (no thread or turn) or `undo` checkpoint.
@@ -361,3 +407,6 @@ fn keep_respelled(
         });
     }
 }
+
+#[cfg(test)]
+mod tests;

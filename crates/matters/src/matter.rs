@@ -372,6 +372,9 @@ impl Matter {
     /// the files the step created, renames the temp files into place, and takes an `undo`
     /// checkpoint. A step whose target the `outside-edits` walk finds cloud-only or over the cap
     /// (it changed after the first check, or was not downloaded when read) is kept, not written.
+    /// A deleted file that a sync client puts back before or during the `undo` checkpoint's walk
+    /// is never recorded with its old content: cloud-only it is skipped, downloaded it is read;
+    /// either way [`Undone::resurrected`] names it.
     /// Its ids are single-use: see [`UndoRequest`] for retrying a failed undo.
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
