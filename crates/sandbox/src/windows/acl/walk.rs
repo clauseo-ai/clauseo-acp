@@ -37,7 +37,8 @@ use super::object::{Object, os_error, reparse_refused, words};
 use super::{NtfsAcl, READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    broad_allow, build_descriptor, inherited_label, sid_bytes, without_inherited,
+    bare_child, broad_allow, build_descriptor, empty_acl, inherited_label, sid_bytes,
+    without_inherited,
 };
 use crate::windows::acl_plan::Sid;
 use crate::windows::writer::{ApplyFailure, Reach, Walked};
@@ -161,24 +162,25 @@ fn settle(
 ) -> Result<Option<Vec<u8>>, ApplyFailure> {
     let io = |e: io::Error| ApplyFailure::Io(e.kind());
     let now = Descriptor::parse(current).map_err(io)?;
+    if watched.is_some() && now.dacl_protected() {
+        return Err(ApplyFailure::ProtectedChild);
+    }
+    // A DACL not protected loses its inherited entries, and the explicit copies of them, before
+    // it is checked or worked out again; see [`without_inherited`].
+    let creator = if now.dacl.is_some() && !now.dacl_protected() {
+        trimmed(acl, parent, current, child.folder).map_err(io)?
+    } else {
+        current.to_vec()
+    };
     if let Some(watched) = watched {
-        if now.dacl_protected() {
-            return Err(ApplyFailure::ProtectedChild);
-        }
-        let dacl = now.dacl.map(Acl::parse).transpose().map_err(io)?;
+        let dacl = Descriptor::parse(&creator).map_err(io)?.dacl;
+        let dacl = dacl.map(Acl::parse).transpose().map_err(io)?;
         if dacl.is_some_and(|dacl| broad_allow(&dacl, watched)) {
             return Err(ApplyFailure::BroadAllowChild);
         }
     }
     let mut changed = false;
     let bits = DACL_PROTECTED | DACL_AUTO_INHERITED;
-    // A DACL neither protected nor auto-inherited loses its inherited copies first, as
-    // `SetNamedSecurityInfoW`'s propagation does; see [`without_inherited`].
-    let creator = if now.dacl.is_some() && now.control & bits == 0 {
-        without_inherited(current).map_err(io)?
-    } else {
-        current.to_vec()
-    };
     let inherited = inherit(acl, parent, &creator, child.folder).map_err(io)?;
     let new = Descriptor::parse(&inherited).map_err(io)?;
     let mut want = new.control & bits;
@@ -220,6 +222,17 @@ fn settle(
         return Ok(None);
     }
     child.security(READ_ALL).map(Some).map_err(io)
+}
+
+/// `child` (a descriptor) without its inherited entries and the explicit copies of them
+/// ([`without_inherited`]), measured against what `parent` alone gives a new child of its kind
+/// and owner ([`bare_child`] worked out from `parent`).
+fn trimmed(acl: &NtfsAcl, parent: &[u8], child: &[u8], folder: bool) -> io::Result<Vec<u8>> {
+    let fresh = inherit(acl, parent, &bare_child(child)?, folder)?;
+    let due = Descriptor::parse(&fresh)?
+        .dacl
+        .map_or_else(empty_acl, <[u8]>::to_vec);
+    without_inherited(child, &due)
 }
 
 /// `child`'s descriptor with its inherited entries worked out again from `parent`'s

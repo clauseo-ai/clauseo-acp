@@ -19,6 +19,8 @@ use std::io;
 use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
+#[cfg(any(windows, test))]
+use copies::is_copy;
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 pub(crate) const ALLOWED: u8 = 0;
@@ -245,7 +247,7 @@ impl<'a> Acl<'a> {
 
 /// An empty ACL's bytes.
 #[cfg_attr(
-    not(windows),
+    not(any(windows, test)),
     expect(dead_code, reason = "the label writes are Windows only")
 )]
 pub(crate) fn empty_acl() -> Vec<u8> {
@@ -426,15 +428,43 @@ pub(crate) fn build_descriptor(control: u16, dacl: Option<&[u8]>, sacl: Option<&
     assemble(control, [None, None, sacl, dacl])
 }
 
-/// `descriptor` with its DACL's inherited entries dropped and the DACL marked auto-inherited;
-/// the owner, group, SACL and other control bits kept. A DACL not marked auto-inherited holds
-/// copies of its parent's entries that `CreatePrivateObjectSecurityEx` keeps as explicit when it
-/// works the child out again, so an inherited `Users` allow would become an explicit one and
-/// refuse a strict walk (the Windows run 2, row 15, a plain `C:\m`). As
-/// `SetNamedSecurityInfoW`'s propagation does, they go before the child is worked out from its
-/// parent. A descriptor with no DACL comes back as it is.
+/// `descriptor` with its DACL's inherited entries dropped, and with them every explicit entry
+/// that copies an inherited one ([`is_copy`]: equal but for the inherited flag to one of `due`'s
+/// inherited entries or one `descriptor` holds); the DACL marked auto-inherited, the owner,
+/// group, SACL and other control bits kept. `due` is the ACL the parent alone gives a new child
+/// of this kind and owner. The walk hands `CreatePrivateObjectSecurityEx` this for every child
+/// not protected, so its result holds the parent's entries once, all inherited.
+///
+/// Under a parent that isn't auto-inherited, NTFS writes a child's inherited copies without the
+/// inherited flag (flags `00` in the kernel's DACL; `icacls` and `Get-Acl` still show `(I)`):
+/// kept, they stay explicit, so a `Users` allow refused a strict walk (the Windows run 3, row
+/// 15, a plain `C:\m`) and a plain walk left each entry twice, explicit and inherited. An
+/// explicit entry the lawyer wrote that equals one the parent gives goes too: it comes back
+/// inherited, so the access is the same. A descriptor with no DACL comes back as it is.
 #[cfg(any(windows, test))]
-pub(crate) fn without_inherited(descriptor: &[u8]) -> io::Result<Vec<u8>> {
+pub(crate) fn without_inherited(descriptor: &[u8], due: &[u8]) -> io::Result<Vec<u8>> {
+    let Some(dacl) = Descriptor::parse(descriptor)?.dacl else {
+        return Ok(descriptor.to_vec());
+    };
+    let held = Acl::parse(dacl)?;
+    let due = Acl::parse(due)?;
+    keeping(descriptor, |ace| {
+        flags(ace) & INHERITED == 0 && !is_copy(ace, &due, &held)
+    })
+}
+
+/// The descriptor a new child with `descriptor`'s owner and group is worked out from: an empty
+/// DACL marked auto-inherited. What its parent alone gives such a child is what
+/// `CreatePrivateObjectSecurityEx` makes of it, with `CREATOR OWNER` resolved to its owner.
+#[cfg(any(windows, test))]
+pub(crate) fn bare_child(descriptor: &[u8]) -> io::Result<Vec<u8>> {
+    keeping(descriptor, |_| false)
+}
+
+/// `descriptor` with only the DACL entries `keep` takes, marked auto-inherited; the owner, group,
+/// SACL and other control bits kept. A descriptor with no DACL comes back as it is.
+#[cfg(any(windows, test))]
+fn keeping(descriptor: &[u8], keep: impl Fn(&[u8]) -> bool) -> io::Result<Vec<u8>> {
     let now = Descriptor::parse(descriptor)?;
     let Some(dacl) = now.dacl else {
         return Ok(descriptor.to_vec());
@@ -444,7 +474,7 @@ pub(crate) fn without_inherited(descriptor: &[u8]) -> io::Result<Vec<u8>> {
         .aces()
         .iter()
         .copied()
-        .filter(|ace| flags(ace) & INHERITED == 0)
+        .filter(|ace| keep(ace))
         .collect();
     let dacl = render(dacl.revision.max(2), &kept);
     let sid_at = |offset_at: usize| -> io::Result<Option<&[u8]>> {
@@ -551,5 +581,7 @@ fn invalid(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Er
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
 
+#[cfg(any(windows, test))]
+mod copies;
 #[cfg(test)]
 mod tests;

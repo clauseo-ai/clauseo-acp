@@ -11,6 +11,8 @@ use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID};
 use crate::windows::writer::Label;
 use walk::race::{HOOK, REFUSE, Stage};
 
+mod round8;
+
 /// The pool user's `Modify` and another pool user's deny, both down the tree.
 fn fence(matter: &Path) -> [Grant; 2] {
     [
@@ -398,9 +400,10 @@ fn auto(path: &Path) -> bool {
 const USERS: &str = "S-1-5-32-545";
 
 /// Gives `path` the DACL a folder or file under a plain `C:\m` has: copies of `C:\`'s
-/// entries marked inherited (owner rights, `SYSTEM` and `Administrators` full control,
-/// `Users` read and execute), without the auto-inherited mark. Written raw, so nothing
-/// propagates and no mark is added.
+/// entries (owner rights, `SYSTEM` and `Administrators` full control, `Users` read and
+/// execute) without the inherited flag, as NTFS writes them under a parent that isn't
+/// auto-inherited (flags `00` on a file, the Windows run 3), and without the auto-inherited
+/// mark. Written raw, so nothing propagates and no mark is added.
 fn plain_inherited(path: &Path, folder: bool) {
     let passed = if folder {
         OBJECT_INHERIT | CONTAINER_INHERIT
@@ -416,7 +419,7 @@ fn plain_inherited(path: &Path, folder: bool) {
     ] {
         let ace = AceSpec {
             kind: ALLOWED,
-            flags: passed | INHERITED,
+            flags: passed,
             mask,
             sid: sid_bytes(&Sid::parse(sid).unwrap()),
         };
@@ -429,11 +432,11 @@ fn plain_inherited(path: &Path, folder: bool) {
         .unwrap();
 }
 
-/// The Windows run 2, row 15: a matter under a plain `C:\m`, its files there before the first
-/// launch, every DACL a copy of `C:\`'s entries without the auto-inherited mark. The walk must
-/// not turn the inherited `Users` allow into an explicit one: the first strict launch passes,
-/// every DACL ends auto-inherited with `Users` still inherited, and a second launch writes
-/// nothing (and doesn't refuse).
+/// The Windows runs 2 and 3, row 15: a matter under a plain `C:\m`, its files there before the
+/// first launch, every DACL a copy of `C:\`'s entries without the inherited flag or the
+/// auto-inherited mark. The walk must take the explicit `Users` copy for an inherited one: the
+/// first strict launch passes, every child ends auto-inherited with `Users` inherited only, and a
+/// second launch writes nothing (and doesn't refuse). The matter's own copies stay explicit.
 #[test]
 fn files_under_a_root_not_auto_inherited_pass_the_strict_launch_and_end_auto_inherited() {
     let place = Place::new("acl-plain-root");
@@ -448,13 +451,14 @@ fn files_under_a_root_not_auto_inherited_pass_the_strict_launch_and_end_auto_inh
     ] {
         plain_inherited(path, folder);
         assert!(
-            !auto(path) && has(path, USERS, true),
+            !auto(path) && has(path, USERS, false) && !has(path, USERS, true),
             "{path:?} starts plain"
         );
     }
     let grants = fence(&matter);
     put(&matter, &grants).unwrap();
-    for path in [&matter, &sub, &doc, &lawyer] {
+    assert!(auto(&matter));
+    for path in [&sub, &doc, &lawyer] {
         assert!(auto(path), "{path:?} ends auto-inherited");
         assert!(has(path, USERS, true), "{path:?}");
         assert!(

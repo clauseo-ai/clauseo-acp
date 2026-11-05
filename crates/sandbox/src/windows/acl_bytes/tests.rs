@@ -308,7 +308,7 @@ fn a_dacl_not_auto_inherited_loses_its_inherited_copies_before_the_walk_works_it
     let sacl = render(2, &[&spec(LOW_LABEL_SID, Rights::LowLabel).bytes()]);
     let before = assemble(0, [Some(&owner), Some(&group), Some(&sacl), Some(&dacl)]);
 
-    let after = without_inherited(&before).unwrap();
+    let after = without_inherited(&before, &empty_acl()).unwrap();
     let read = Descriptor::parse(&after).unwrap();
     assert_eq!(read.dacl, Some(render(2, &[&explicit]).as_slice()));
     assert_eq!(read.sacl, Some(sacl.as_slice()));
@@ -320,5 +320,78 @@ fn a_dacl_not_auto_inherited_loses_its_inherited_copies_before_the_walk_works_it
     assert_eq!(sid_at(4), owner);
     assert_eq!(sid_at(8), group);
     let bare = build_descriptor(0, None, Some(&sacl));
-    assert_eq!(without_inherited(&bare).unwrap(), bare);
+    assert_eq!(without_inherited(&bare, &empty_acl()).unwrap(), bare);
+}
+
+/// An entry of `kind` with `flags`, `mask` and `sid_text`, as bytes.
+fn ace(kind: u8, flags: u8, mask: u32, sid_text: &str) -> Vec<u8> {
+    AceSpec {
+        kind,
+        flags,
+        mask,
+        sid: sid_bytes(&sid(sid_text)),
+    }
+    .bytes()
+}
+
+/// The Windows run 3, row 15: under a plain `C:\m`, NTFS writes a child's inherited copies with
+/// flags `00`. Explicit entries equal but for the inherited flag to what the parent gives (on a
+/// file, its object-inherit entries with the flags cleared; on a folder, as inherited onto a
+/// container), or to an inherited entry the child holds, go; the rest stay.
+#[test]
+fn explicit_copies_of_inherited_entries_are_dropped_and_the_rest_kept() {
+    let (owner, users, everyone) = (POOL, "S-1-5-32-545", "S-1-1-0");
+    let due = render(
+        2,
+        &[
+            &ace(ALLOWED, INHERITED, 0x001f_01ff, "S-1-5-18"),
+            &ace(ALLOWED, INHERITED, 0x0012_00a9, users),
+            &ace(ALLOWED, INHERITED, 0x001f_01ff, owner),
+            // Not marked inherited: a default DACL's entry, not the parent's.
+            &ace(ALLOWED, 0, 0x0012_00a9, everyone),
+        ],
+    );
+    let copies = [
+        ace(ALLOWED, 0, 0x001f_01ff, "S-1-5-18"),
+        ace(ALLOWED, 0, 0x0012_00a9, users),
+        ace(ALLOWED, 0, 0x001f_01ff, owner),
+        ace(DENIED, 0, 0x1, OTHER),
+    ];
+    let kept = [
+        ace(ALLOWED, 0, 0x0012_00a9, everyone),
+        ace(ALLOWED, 0, 0x0012_0089, users),
+        ace(ALLOWED, OBJECT_INHERIT, 0x001f_01ff, "S-1-5-18"),
+    ];
+    let held = ace(DENIED, INHERITED, 0x1, OTHER);
+    let mut all: Vec<&[u8]> = copies.iter().chain(&kept).map(Vec::as_slice).collect();
+    all.push(&held);
+    let before = build_descriptor(0, Some(&render(2, &all)), None);
+    let after = without_inherited(&before, &due).unwrap();
+    let want: Vec<&[u8]> = kept.iter().map(Vec::as_slice).collect();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(render(2, &want).as_slice()));
+    assert_eq!(read.control & DACL_AUTO_INHERITED, DACL_AUTO_INHERITED);
+
+    let folder_due = render(2, &[&ace(ALLOWED, 0x3 | INHERITED, 0x001f_01ff, users)]);
+    let on_folder = ace(ALLOWED, 0x3, 0x001f_01ff, users);
+    let files_only = ace(ALLOWED, OBJECT_INHERIT, 0x001f_01ff, users);
+    let before = build_descriptor(0, Some(&render(2, &[&on_folder, &files_only])), None);
+    let after = without_inherited(&before, &folder_due).unwrap();
+    let read = Descriptor::parse(&after).unwrap();
+    assert_eq!(read.dacl, Some(render(2, &[&files_only]).as_slice()));
+}
+
+/// Round 8: what a new child's descriptor is worked out from keeps the owner and group and has
+/// an empty DACL, marked auto-inherited.
+#[test]
+fn a_bare_child_keeps_its_owner_and_has_no_entries() {
+    let owner = sid_bytes(&sid(POOL));
+    let dacl = render(2, &[&spec(POOL, Rights::Modify).bytes()]);
+    let before = assemble(0, [Some(&owner), None, None, Some(&dacl)]);
+    let bare = bare_child(&before).unwrap();
+    let read = Descriptor::parse(&bare).unwrap();
+    assert_eq!(read.dacl, Some(empty_acl().as_slice()));
+    assert_eq!(read.control & DACL_AUTO_INHERITED, DACL_AUTO_INHERITED);
+    let offset = usize::try_from(read_u32(&bare, 4).unwrap()).unwrap();
+    assert_eq!(&bare[offset..offset + owner.len()], owner.as_slice());
 }
