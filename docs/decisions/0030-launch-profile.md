@@ -481,6 +481,27 @@ change from the settings window as `ui` does.
   answers `check_failed`, never an error: `agent.launch_failed` reads as a broken thread in the
   app. No log line names the folder (`actor/query/folder_support.rs`).
 
+### The model across mode changes
+
+- **2026-11-05 (measured by stage C on win-01, claude-agent-acp 0.89.1; private
+  `measurements/folder-rights/live-checks/mode-model.md`, PR #385).** With Haiku chosen,
+  entering plan mode moves the session to Sonnet, and leaving plan moves it back to Haiku. This
+  happens whichever way the mode is set: `session/set_mode plan` or `default`,
+  `SetConfigOption` for the `mode` option, and forced ask's switch back to `default` after a
+  plan exit. The answer to the mode call doesn't show the move: `session/set_mode` answers
+  `{}`, and `set_config_option` still lists `model: haiku`. The `config_option_update`
+  notifications do show it, and the next prompt runs on the model they name.
+- **Decision (2026-11-05, orchestrator).** The host lets Claude Code pick its plan-mode model
+  and doesn't set the lawyer's model back after a mode change. The thread records the model
+  in use, because the host logs each `config_option_update` as `ConfigOptionsReplaced`
+  (`actor/turn/updates.rs`). The app's composer has no model picker yet. The model option is
+  received but not shown, so a lawyer can't choose Haiku in Clauseo today. When a model picker
+  is built, a provisional line goes beside it for Rohan's batch: "Claude may use a stronger
+  model while it plans."
+- **Rejected:** holding the chosen model in every mode by watching `config_option_update` and
+  setting the model back. Plans would run on the weaker model, and setting it back could fight
+  the adapter if the adapter re-applies its plan model.
+
 ### Deviations from the brief (PR-A)
 
 - **The skills API.** The brief's `write_skills(stetdoc, claude_dir, codex_home)` method is
