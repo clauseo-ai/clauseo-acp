@@ -15,7 +15,7 @@ use clauseo_protocol::{
 };
 use futures::channel::oneshot;
 
-use crate::actor::input::{Input, Request, SignInRequest};
+use crate::actor::input::{Input, PlanWrite, Request, SignInRequest};
 use crate::agent::login_link;
 use crate::agent::login_splits::{self, LoginSplits};
 use crate::config::HostConfig;
@@ -320,7 +320,21 @@ impl HostHandle {
         agent: AgentId,
         plan: Option<clauseo_settings::Plan>,
     ) -> Result<(), HostError> {
-        let plan = plan.map(Box::new);
+        let plan = PlanWrite::Whole(plan.map(Box::new));
+        self.call(|reply| Request::SetPlan { agent, plan, reply })
+            .await
+    }
+
+    /// Sets `plans.<agent>.endpoint` to `endpoint`, or removes it with `None`, keeping the
+    /// plan's provider and variables (decision record 0048): desktop's `SetFirmEndpoint`, after
+    /// its confirm. A plan left empty is removed. Read and written on the actor, so no other
+    /// settings write falls between; refused as [`HostHandle::set_plan`] is.
+    pub async fn set_plan_endpoint(
+        &self,
+        agent: AgentId,
+        endpoint: Option<String>,
+    ) -> Result<(), HostError> {
+        let plan = PlanWrite::Endpoint(endpoint);
         self.call(|reply| Request::SetPlan { agent, plan, reply })
             .await
     }

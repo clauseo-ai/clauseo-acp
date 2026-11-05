@@ -3,6 +3,7 @@
 //! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, the join under a key
 //! or an endpoint, no key in a log, and the two launchers.
 
+mod endpoint;
 mod fakes;
 mod keys;
 mod retry;
@@ -19,7 +20,7 @@ use clauseo_protocol::{
     AgentId, CommandOutcome, ErrorCode, InstallProgress, SetupEvent, SignIn, SignInMethod,
     SignInSource,
 };
-use clauseo_settings::{AgentLaunch, Plan};
+use clauseo_settings::AgentLaunch;
 use serde_json::json;
 
 use self::fakes::{HostCall, command, home, rig, setup_events};
@@ -32,6 +33,9 @@ use crate::test_support::block_on;
 const MAIN: &str = crate::MAIN_WINDOW;
 const SETTINGS: &str = crate::settings_window::SETTINGS_WINDOW;
 const KEY: &str = "sk-ant-api03-NEVER-IN-A-LOG-0b5e";
+const CODE: &str = "PASTE-CODE-NEVER-LOGGED-7c1d";
+const ENDPOINT_HOST: &str = "gw-never-logged-4e2a.firm.example";
+const ENDPOINT: &str = "https://gw-never-logged-4e2a.firm.example";
 
 fn claude() -> AgentId {
     AgentId::new("claude-acp").unwrap()
@@ -102,12 +106,9 @@ fn an_accepted_install_and_endpoint_run_and_the_endpoint_shows_firm() {
     assert_eq!(rig.calls(), [("install", claude())]);
     assert_eq!(
         rig.host.calls(),
-        [HostCall::SetPlan(
+        [HostCall::SetEndpoint(
             claude(),
-            Some(Plan {
-                endpoint: Some("https://gateway.firm.example".to_owned()),
-                ..Plan::default()
-            })
+            Some("https://gateway.firm.example".to_owned())
         )]
     );
     assert!(matches!(
@@ -387,15 +388,25 @@ fn no_key_reaches_a_log_line_an_event_or_a_debug() {
             &json!({ "key": format!("{KEY} x") }),
         );
         let _refused = block_on(setup.run(SETTINGS, bad));
+        let paste = command("paste_sign_in_code", &claude(), &json!({ "code": CODE }));
+        let _pasted = block_on(setup.run(MAIN, paste));
+        for url in [ENDPOINT.to_owned(), format!("{ENDPOINT}/?{CODE}")] {
+            let endpoint = command("set_firm_endpoint", &codex(), &json!({ "url": url }));
+            let _endpoint = block_on(setup.run(SETTINGS, endpoint));
+        }
     });
     let text = String::from_utf8(lock(&lines.0).clone()).unwrap();
     assert!(
         text.contains("settings.key_stored") && text.contains("command.invalid"),
         "{text}"
     );
-    assert!(!text.contains(KEY), "{text}");
+    for secret in [KEY, CODE, ENDPOINT_HOST] {
+        assert!(!text.contains(secret), "{secret}: {text}");
+    }
     let events = format!("{:?}", setup_events(&mut feed));
-    assert!(!events.contains(KEY), "{events}");
+    for secret in [KEY, CODE, ENDPOINT_HOST] {
+        assert!(!events.contains(secret), "{secret}: {events}");
+    }
     assert!(!format!("{:?}", rig.backend.keys).contains(KEY));
     assert_eq!(
         rig.backend

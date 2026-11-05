@@ -35,7 +35,7 @@ use clauseo_protocol::{
     AgentId, AgentKind, CommandOutcome, Count, ErrorCode, HostError, InstallLog, InstallProgress,
     SetupCommand, SetupEvent, SignInSource,
 };
-use clauseo_settings::{AgentLaunch, EntryWrite, Plan};
+use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::{Stream, StreamExt as _};
 
 use super::compose::Compose;
@@ -57,6 +57,10 @@ pub(crate) struct AgentInfo {
     pub(crate) hosts: Vec<String>,
     /// Its home, `Locations::agent_home`.
     pub(crate) home: PathBuf,
+    /// Whether policy sets its `plans.<id>` (`SetFirmEndpoint` is then `settings.locked`).
+    pub(crate) plan_locked: bool,
+    /// Whether its plan names a provider, which keeps it on the firm's service with no endpoint.
+    pub(crate) provider: bool,
 }
 
 /// The agent installed at first run when nothing is installed and nothing is managed.
@@ -179,25 +183,43 @@ impl AgentsBackend {
                 self.keys.clear(&agent, then).await?;
             }
             SetupCommand::SetFirmEndpoint { url, .. } => {
-                let url = url.as_deref().map(checked_endpoint).transpose()?;
-                if url.is_some() {
-                    self.refuse_leaving_reused(&agent)?;
-                }
-                let name = info.name.clone();
-                self.ask(Ask::Endpoint {
-                    name,
-                    url: url.clone(),
-                })
-                .await?;
-                let firm = url.is_some();
-                let plan = url.map(|endpoint| Plan {
-                    endpoint: Some(endpoint),
-                    ..Plan::default()
-                });
-                self.host.set_plan(agent.clone(), plan).await?;
-                self.compose.set_firm(&agent, firm);
+                self.set_endpoint(&agent, info, url).await?;
             }
         }
+        Ok(())
+    }
+
+    /// `SetFirmEndpoint`: every check before the confirm, so a refused endpoint asks nothing and
+    /// a page cannot write its own words into the dialog: `signin.policy_unreadable` while
+    /// policy is unreadable for a firm plan, `settings.locked` for a plan policy sets, and
+    /// `command.invalid` for an address the settings crate would refuse. Then the confirm, then
+    /// the endpoint alone written, the plan's provider and variables kept.
+    async fn set_endpoint(
+        &self,
+        agent: &AgentId,
+        info: &AgentInfo,
+        url: Option<String>,
+    ) -> Result<(), HostError> {
+        self.refuse_blocked(agent)?;
+        if info.plan_locked {
+            return Err(HostError::new(
+                ErrorCode::SettingsLocked,
+                format!("the firm's policy sets plans.{agent}"),
+            ));
+        }
+        let url = url.as_deref().map(checked_endpoint).transpose()?;
+        if url.is_some() {
+            self.refuse_leaving_reused(agent)?;
+        }
+        let name = info.name.clone();
+        self.ask(Ask::Endpoint {
+            name,
+            url: url.clone(),
+        })
+        .await?;
+        let firm = url.is_some() || info.provider;
+        self.host.set_endpoint(agent.clone(), url).await?;
+        self.compose.set_firm(agent, firm);
         Ok(())
     }
 
@@ -472,10 +494,16 @@ fn plan_method(agent: &AgentId, console: bool) -> Result<Method, HostError> {
     }
 }
 
-/// The endpoint `url` as the confirm shows it and the plan stores it: an `https` URL with a
-/// host and no user name or password, else `command.invalid` before any confirm. The settings
-/// crate checks it again when it is written.
+/// The endpoint `url` as the confirm shows it and the plan stores it: an address the settings
+/// crate takes (`web_address_ok`: ASCII only, no space, line break, control character, `?`,
+/// `#`, `@` or backslash) that parses as an `https` URL with a host and no user name or
+/// password, else `command.invalid` before any confirm. The message never repeats it.
 fn checked_endpoint(url: &str) -> Result<String, HostError> {
+    if !clauseo_settings::web_address_ok(url) {
+        return Err(invalid(
+            "the endpoint must be an https address of plain characters, with no query or fragment",
+        ));
+    }
     let parsed = url::Url::parse(url).map_err(|_error| invalid("the endpoint is not a URL"))?;
     if parsed.scheme() != "https"
         || parsed.host_str().is_none()
@@ -499,11 +527,12 @@ fn signin_error(error: &SigninError) -> HostError {
     HostError::new(code, error.to_string())
 }
 
-/// The answer to what needs 0048's leave order, R20 P5b piece B's.
+/// The answer to what needs 0048's leave order (R20 P5b piece B adds it); the words name no
+/// plan stage.
 fn leave_order_missing() -> HostError {
     HostError::new(
         ErrorCode::Internal,
-        "leaving a reused login needs the leave order (R20 P5b piece B)",
+        "leaving a login you already had is not available yet in this version of Clauseo",
     )
 }
 
