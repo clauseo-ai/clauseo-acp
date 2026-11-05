@@ -37,6 +37,19 @@ pub enum Error {
         /// What the folder check said.
         support: crate::windows::FolderRefusal,
     },
+    /// Windows tier B can't fence another registered matter (`windows::admit`): one of its
+    /// folders exists but can't take the deny entries that close it to this launch's agent, so
+    /// the launch is refused rather than leave a readable neighbour. Names the matter by its id
+    /// and the folder by its kind, never a path. Nothing was planned or written.
+    #[error("the sandbox can't fence matter {matter}: {path_kind}: {support}")]
+    NeighbourUnfenceable {
+        /// The other matter.
+        matter: clauseo_protocol::MatterId,
+        /// Which of its folders.
+        path_kind: crate::windows::PathKind,
+        /// What the check said.
+        support: crate::windows::FolderRefusal,
+    },
 }
 
 impl Error {
@@ -49,7 +62,8 @@ impl Error {
             Error::Policy(_)
             | Error::ProxyConfig(_)
             | Error::ProxyStart(_)
-            | Error::FolderUnsupported { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::FolderUnsupported { .. }
+            | Error::NeighbourUnfenceable { .. } => ErrorCode::AgentLaunchFailed,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }

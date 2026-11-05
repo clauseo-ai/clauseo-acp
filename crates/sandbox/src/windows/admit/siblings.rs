@@ -11,19 +11,28 @@ use crate::windows::acl_plan::in_folder;
 use crate::windows::fence::Neighbours;
 use crate::{Error, Policy};
 
-/// The siblings the plan denies the pool group reading: see the gate's step 3.
+/// What the walk found: the siblings, and the parent when its files are denied too.
+pub(super) struct Walked {
+    pub(super) siblings: Vec<PathBuf>,
+    pub(super) parent_files: Option<PathBuf>,
+}
+
+/// The siblings the plan denies the pool group reading, and the parent whose files it denies:
+/// see the gate's step 3. `neighbours` is already resolved.
 pub(super) fn siblings(
     policy: &Policy,
     data: &Path,
     neighbours: &Neighbours,
     check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
     folders: &dyn FolderList,
-) -> Result<Vec<PathBuf>, Error> {
+) -> Result<Walked, Error> {
     let matter = policy.matter();
     let Some(parent) = matter.parent().filter(|parent| parent.parent().is_some()) else {
-        return Ok(Vec::new());
+        return Ok(Walked {
+            siblings: Vec::new(),
+            parent_files: None,
+        });
     };
-    let canonical = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_missing| p.to_owned());
     // Paths a deny may not touch at all, nor anything above them: this policy's own.
     let mut kept: Vec<PathBuf> = vec![policy.state().to_owned(), data.to_owned()];
     kept.extend(policy.notes().map(Path::to_owned));
@@ -38,17 +47,21 @@ pub(super) fn siblings(
     let mut protected: Vec<PathBuf> = neighbours
         .registered
         .iter()
-        .map(|other| canonical(&other.folders.root))
+        .map(|other| other.folders.root.clone())
         .collect();
-    protected.extend(neighbours.reach.iter().map(|p| canonical(p)));
+    protected.extend(neighbours.reach.iter().cloned());
     let walk = Walk {
         matter,
         kept,
         protected,
     };
+    let parent_files = walk.parent_files(parent, data, policy, check)?;
     let mut found = Vec::new();
     walk.folder(parent, check, folders, &mut found)?;
-    Ok(found)
+    Ok(Walked {
+        siblings: found,
+        parent_files,
+    })
 }
 
 /// What the walk leaves alone.
@@ -59,6 +72,40 @@ struct Walk<'p> {
 }
 
 impl Walk<'_> {
+    /// Whether the files directly in `parent` get the group's deny (one entry on the parent,
+    /// object-inherit, inherit-only, no propagation: files there, no folder): not when the
+    /// parent is or sits inside a path left alone, holds the profile, the data folder or the
+    /// sandbox records (a grant there is refused), or has one of the paths left alone as a file
+    /// directly in it (its own allow would still win over an inherited deny, but it is left out
+    /// to be sure). Checked like a sibling.
+    fn parent_files(
+        &self,
+        parent: &Path,
+        data: &Path,
+        policy: &Policy,
+        check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
+    ) -> Result<Option<PathBuf>, Error> {
+        let all = || self.kept.iter().chain(&self.protected);
+        let inside = all().any(|k| in_folder(parent, k));
+        let holds_records = policy
+            .home()
+            .into_iter()
+            .chain([data])
+            .any(|p| in_folder(p, parent));
+        let file_in_it = all().any(|k| k.parent().is_some_and(|p| p == parent) && k.is_file());
+        if inside || holds_records || file_in_it {
+            return Ok(None);
+        }
+        match check(parent) {
+            Ok(FolderSupport::Ok) => Ok(Some(parent.to_owned())),
+            Ok(FolderSupport::Network) => Ok(None),
+            answer => match refusal(answer) {
+                Some(refusal) => Err(refused(PathKind::ParentFiles, refusal)),
+                None => Ok(None),
+            },
+        }
+    }
+
     /// Takes each folder in `dir`: denied, left out, or (holding a protected path) walked into.
     fn folder(
         &self,

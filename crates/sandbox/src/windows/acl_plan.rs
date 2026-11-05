@@ -24,8 +24,9 @@
 //!   recorded under that matter's id ([`AdmittedPlan::owners`]).
 //! - Sibling folders: on each folder beside the matter in its parent that the gate listed
 //!   ([`Admitted::siblings`]), an inherited deny of reads for the `ClauseoSandboxUsers` group,
-//!   which holds every pool user. The parent itself is left alone, so its listing still shows the
-//!   names (a known limit).
+//!   which holds every pool user; and one more on the parent for the files directly in it
+//!   ([`Inherit::FilesInFolder`]). The parent's own listing still shows the names (a known
+//!   limit).
 //! - Nothing in the lawyer's `<profile>\.claude`, in any letter case: NTFS can't limit a create
 //!   right by name, and the lawyer's own Claude Code loads what is there. A policy that would
 //!   grant there is refused.
@@ -44,7 +45,7 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
 use super::admit::{Admitted, PathKind};
-use super::fence::{MatterFolders, plan_fence};
+use super::fence::{MatterFolders, fence_grants, plan_fence};
 use super::ledger::EntryId;
 pub use super::sids::Sid;
 use crate::policy::under;
@@ -143,6 +144,9 @@ pub enum Inherit {
     ThisOnly,
     /// The path and everything under it.
     Tree,
+    /// Only the files directly in the folder: object inherit, inherit only, no propagation. The
+    /// folder itself and every folder in it are untouched.
+    FilesInFolder,
 }
 
 /// One permission entry to write. Made only inside this crate: by [`plan`], or read back from
@@ -318,18 +322,30 @@ pub fn plan(
         let (group, kind) = (subjects.pool_group.clone(), PathKind::Sibling);
         plan.push(sibling, group, Rights::DenyRead, Inherit::Tree, kind);
     }
-    // Every registered matter whose fence the ledger doesn't list as applied: its entries are
-    // its own (the ledger records them under its id).
+    if let Some(parent) = admitted.parent_files() {
+        let (group, kind) = (subjects.pool_group.clone(), PathKind::ParentFiles);
+        plan.push(
+            parent,
+            group,
+            Rights::DenyRead,
+            Inherit::FilesInFolder,
+            kind,
+        );
+    }
+    // Every registered matter whose fence the ledger doesn't list as applied, as the gate
+    // checked it: its entries are its own (the ledger records them under its id).
     let mut owners = vec![matter; plan.grants.len()];
-    for other in &admitted.neighbours().registered {
-        if other.fenced {
-            continue;
-        }
+    for fence in admitted.fences() {
         let before = plan.grants.len();
-        for grant in plan_fence(&other.folders, &other.pool_user, &pool) {
+        let folders: Vec<(&Path, PathKind)> = fence
+            .folders
+            .iter()
+            .map(|(p, k)| (p.as_path(), *k))
+            .collect();
+        for grant in fence_grants(&folders, &fence.pool_user, &pool) {
             plan.push_grant(grant);
         }
-        owners.resize(owners.len() + plan.grants.len() - before, other.id);
+        owners.resize(owners.len() + plan.grants.len() - before, fence.id);
     }
     if let Some(home) = policy.home() {
         let claude = home.join(".claude");
@@ -367,7 +383,9 @@ impl Plan<'_> {
     /// The Low labels: inherited on this matter's own folders and the Claude store folder, and
     /// on the credential link file itself. The Low token writes no object labelled above Low,
     /// so the store and the link the agent writes get it too; the side effect, accepted, is that
-    /// the lawyer's own Low processes can write them as well.
+    /// the lawyer's own Low processes can write them as well. The credential link is a hard link
+    /// by design, and a hard link shares its file's security descriptor: labelling it relabels
+    /// the lawyer's own credential file (PR6's VM row checks it).
     fn labels(&mut self, policy: &Policy, own: &[(&Path, PathKind)]) -> Result<(), Error> {
         let low = Sid::parse(LOW_LABEL_SID).map_err(|error| Error::Policy(error.to_string()))?;
         for &(folder, kind) in own {
