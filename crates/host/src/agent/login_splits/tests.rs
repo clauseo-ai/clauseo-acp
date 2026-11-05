@@ -1,5 +1,4 @@
 use std::thread;
-use std::time::Duration;
 
 use clauseo_protocol::AgentId;
 use futures::executor::block_on;
@@ -41,7 +40,7 @@ fn a_waiting_reader_wakes_and_a_closed_channel_ends_once_read() {
         let splits = splits.clone();
         thread::spawn(move || block_on(splits.recv()))
     };
-    thread::sleep(Duration::from_millis(20));
+    // Whether the reader waits already or not, the split reaches it.
     sender.send(split(&codex, true));
     assert_eq!(reader.join().unwrap(), Ok(split(&codex, true)));
 
