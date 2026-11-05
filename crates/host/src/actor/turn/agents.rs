@@ -153,13 +153,17 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
 /// writes) off the actor first (`launch_checks.rs`). A launch the sign-in refuses fails what
-/// waits for it (`sign_in::launch_refusal`).
+/// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
+/// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
-    if let Some(refused) = super::sign_in::launch_refusal(actor, thread) {
+    let keys_wait = super::sign_in::keys_wait(actor, thread);
+    if keys_wait.is_none()
+        && let Some(refused) = super::sign_in::launch_refusal(actor, thread)
+    {
         fail_all(actor, thread, waiting, &refused);
         return;
     }
@@ -168,7 +172,7 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
-    launch_checks::prepare(actor, thread, waiting);
+    launch_checks::prepare(actor, thread, waiting, keys_wait);
 }
 
 /// The launch on the actor, with what its checks found (`prepared`), and `initialize`.

@@ -116,6 +116,9 @@ mod import;
 #[path = "host/key_retry.rs"]
 mod key_retry;
 #[cfg(test)]
+#[path = "host/keys_loading.rs"]
+mod keys_loading;
+#[cfg(test)]
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
 #[cfg(test)]

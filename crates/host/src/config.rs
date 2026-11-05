@@ -7,7 +7,7 @@ use std::sync::Arc;
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
-use clauseo_protocol::{MatterId, ThreadId};
+use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
 use crate::agent::login_link::{LoginCheck, SignIn, SignInAgain};
@@ -474,6 +474,23 @@ impl HostConfig {
     /// default), only `agent.auth_required` itself is.
     pub fn with_sign_in_again(mut self, again: SignInAgain) -> Self {
         self.wiring.sign_in.again = Some(again);
+        self
+    }
+
+    /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
+    /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
+    /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys. As
+    /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
+    /// is a bug: debug builds assert, and release builds log it and set nothing.
+    #[must_use]
+    pub fn with_launch_refused(mut self, agent: AgentId, code: ErrorCode) -> Self {
+        debug_assert!(
+            crate::agent::launch_refusals::taken(code),
+            "with_launch_refused takes no {code:?}"
+        );
+        if let Err(error) = self.wiring.sign_in.refused.set(agent, Some(code)) {
+            tracing::warn!(code = error.code().as_str(), "a launch refusal was not set");
+        }
         self
     }
 

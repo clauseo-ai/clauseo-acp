@@ -30,13 +30,10 @@ use std::time::Duration;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId};
 
 use super::codex::prepare::{Job, off_actor};
+use super::launch_refusals::LaunchRefusals;
 use super::login_splits::{self, LoginSplits, SplitSender};
 use crate::clock::Clock;
 use crate::error::Error;
-
-/// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
-/// launches.
-pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 1] = [ErrorCode::SigninPolicyUnreadable];
 
 /// How long a launch waits for the hook's answer.
 pub(crate) const CHECK_WAIT: Duration = Duration::from_secs(5);
@@ -152,8 +149,8 @@ pub(crate) struct SignIn {
     /// launches, and their prompts queue held. In memory only: a host restart clears it.
     pub(crate) held: BTreeSet<AgentId>,
     /// The agents whose new launches desktop refuses, with the code their turns fail with
-    /// (`HostHandle::set_launch_refused`). In memory only.
-    pub(crate) refused: BTreeMap<AgentId, ErrorCode>,
+    /// (`HostHandle::set_launch_refused`, `HostConfig::with_launch_refused`). In memory only.
+    pub(crate) refused: LaunchRefusals,
 }
 
 impl Default for SignIn {
@@ -167,7 +164,7 @@ impl Default for SignIn {
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
             held: BTreeSet::new(),
-            refused: BTreeMap::new(),
+            refused: LaunchRefusals::default(),
         }
     }
 }
