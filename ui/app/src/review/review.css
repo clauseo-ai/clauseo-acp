@@ -159,6 +159,20 @@
   padding: 8px;
 }
 
+/* ---------- a sentence shown by itself (U6F's nameless lines): centred in the whole frame ---------- */
+.review-alone {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: var(--s4);
+  background: var(--ground);
+}
+.review-alone p {
+  max-width: 36rem;
+  text-align: center;
+}
+
 /* ---------- H11's mock of the desktop's native link confirm (confirm-mock.tsx) ---------- */
 .review-confirm-ground {
   display: grid;

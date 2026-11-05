@@ -96,35 +96,38 @@ function QueueItem({
       </li>
     );
   }
-  // Edit and Remove come in under the pointer or with focus, as the answer's Accept does; Send now stays in view
+  // Edit and Remove come in under the pointer or with focus, over the line's end before Send now, which stays in
+  // view; at rest they take no width, and they stay first in the tab order
   return (
     <li className="queue-item" data-testid={testIds?.row} data-turn={item.turn}>
       <p className="queue-text">
         <Say>{item.text}</Say>
       </p>
       <span className="queue-acts">
-        <Button
-          kind="quiet"
-          size="small"
-          className="queue-more-act"
-          data-testid={testIds?.edit}
-          ref={editButton}
-          onClick={() => {
-            setDraft(item.text);
-            setEditing(true);
-          }}
-        >
-          {w.m("Edit")}
-        </Button>
-        <Button
-          kind="quiet"
-          size="small"
-          className="queue-more-act"
-          data-testid={testIds?.remove}
-          onClick={() => onRemove(item.id)}
-        >
-          {w.m("Remove")}
-        </Button>
+        <span className="queue-more">
+          <Button
+            kind="quiet"
+            size="small"
+            className="queue-more-act"
+            data-testid={testIds?.edit}
+            ref={editButton}
+            onClick={() => {
+              setDraft(item.text);
+              setEditing(true);
+            }}
+          >
+            {w.m("Edit")}
+          </Button>
+          <Button
+            kind="quiet"
+            size="small"
+            className="queue-more-act"
+            data-testid={testIds?.remove}
+            onClick={() => onRemove(item.id)}
+          >
+            {w.m("Remove")}
+          </Button>
+        </span>
         <Button
           kind="quiet"
           size="small"

@@ -194,6 +194,8 @@ export function PermissionPrompt({
     kept ? `${id}-kept` : null,
   ].filter(Boolean);
   const keysOn = keys && !busy && !confirming;
+  // the lines under the ask stand past its icon, or under its first word when it has none
+  const indent = paper !== null ? " pl-(--perm-indent)" : "";
   const shortcut = (a: PermissionAnswer) =>
     a === "once" ? "Enter" : a === "always" ? (mac ? "Meta+Enter" : "Control+Enter") : "Escape";
   const cap = (a: PermissionAnswer) =>
@@ -206,6 +208,7 @@ export function PermissionPrompt({
       aria-labelledby={`${id}-ask`}
       aria-describedby={described.length > 0 ? described.join(" ") : undefined}
       data-confirming={confirming ? "" : undefined}
+      data-plain={paper === null ? "" : undefined}
       onFocus={() => {
         focusInside.current = true;
       }}
@@ -222,18 +225,12 @@ export function PermissionPrompt({
         </span>
       </p>
       {title ? (
-        <p
-          className="perm-title text-small text-quiet mt-(--s0-5) pl-(--perm-indent)"
-          id={`${id}-title`}
-        >
+        <p className={`perm-title text-small text-quiet mt-(--s0-5)${indent}`} id={`${id}-title`}>
           <bdi>{title}</bdi>
         </p>
       ) : null}
       {reason ? (
-        <p
-          className="perm-reason text-small text-quiet mt-(--s0-5) pl-(--perm-indent)"
-          id={`${id}-reason`}
-        >
+        <p className={`perm-reason text-small text-quiet mt-(--s0-5)${indent}`} id={`${id}-reason`}>
           {reason}
         </p>
       ) : null}
@@ -243,7 +240,8 @@ export function PermissionPrompt({
         </p>
       ) : null}
       {/* held, never inert: an inert row leaves the thread's scroller nothing to focus */}
-      <div className="perm-actions">
+      {/* all four answers: two columns, the allows over the refusals, in the same reading order */}
+      <div className={shown.length === 4 ? "perm-actions perm-actions-pairs" : "perm-actions"}>
         {shown.map((a) => {
           const withKey = keys && a !== "never";
           return (
@@ -275,7 +273,7 @@ export function PermissionPrompt({
         </p>
       )}
       {error ? (
-        <p className="perm-error text-small text-quiet mt-(--s2) pl-(--perm-indent)" role="status">
+        <p className={`perm-error text-small text-quiet mt-(--s2)${indent}`} role="status">
           <Say>{error}</Say>
         </p>
       ) : null}
