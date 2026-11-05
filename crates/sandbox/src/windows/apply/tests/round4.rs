@@ -39,12 +39,16 @@ fn reported(path: &Path) -> PathBuf {
     PathBuf::from(format!(r"\\?\{}", path.display()))
 }
 
-/// Round 4: a verbatim path compares with its plain form, on either side.
+/// Round 4: a verbatim path compares with its plain form, on either side. On Windows the paths
+/// are drive paths, as the walk reports there; a `/`-rooted one isn't (round 9).
 #[test]
 fn a_verbatim_path_compares_with_its_plain_form() {
     use crate::windows::acl_plan::in_folder;
-    let matter = PathBuf::from("/m/matter");
-    let verbatim = PathBuf::from(r"\\?\/m/matter/x.txt");
-    assert!(in_folder(&verbatim, &matter));
-    assert!(in_folder(&matter, &PathBuf::from(r"\\?\/m/matter")));
+    #[cfg(windows)]
+    let [plain, file, folder] = [r"C:\m\matter", r"\\?\C:\m\matter\x.txt", r"\\?\C:\m\matter"];
+    #[cfg(not(windows))]
+    let [plain, file, folder] = ["/m/matter", r"\\?\/m/matter/x.txt", r"\\?\/m/matter"];
+    let matter = PathBuf::from(plain);
+    assert!(in_folder(&PathBuf::from(file), &matter));
+    assert!(in_folder(&matter, &PathBuf::from(folder)));
 }
