@@ -170,25 +170,100 @@ next launch writes the pack's checked bytes again. Integrity does not rely on th
 `packs::load` returns the loaded packs and the skipped ones with a `Skip` reason
 (`Refused(code)`, `Changed`, `TooMany`).
 
-### Settings
+### Settings (PR-B)
 
-A new `skills` section (PR-B). `skills.extra`, `skills.allow_scripts` and `skills.curated` are
-security keys (`leaf::SECURITY_KEYS`). A policy source that cannot be read locks them at `off`,
-`false` and the empty list. A malformed policy value does the same, as for `tools.*`.
+A new `skills` section in `settings`. `skills.extra`, `skills.allow_scripts` and
+`skills.curated` are security keys (`leaf::SECURITY_KEYS`); `skills.enabled` is not.
 
-| Key | Values | Default | Who sets it |
-|---|---|---|---|
-| `skills.extra` | `off`, `curated`, `any` | `off` | The lawyer; a policy value locks it |
-| `skills.curated` | list of pack ids | empty | **Policy only**: a `settings.json` value is ignored with a warning |
-| `skills.allow_scripts` | boolean | `false` | The lawyer; a policy value locks it |
-| `skills.enabled` | map from pack id to hash | empty | The lawyer, through `SetSkillPack`; a policy value locks it |
+| Key | Values | Default | Who sets it | Fails closed to |
+|---|---|---|---|---|
+| `skills.extra` | `off`, `curated`, `any` | `off` | The lawyer in `settings.json`; a policy value locks it | `off`, locked |
+| `skills.curated` | list of pack ids (`REG_MULTI_SZ` in the registry) | empty | **Policy only** (`leaf::POLICY_ONLY_KEYS`) | empty, locked |
+| `skills.allow_scripts` | boolean | `false` | The lawyer in `settings.json`; a policy value locks it | `false`, locked |
+| `skills.enabled` | map from pack id to `sha256:<64 lowercase hex>` | empty | The lawyer, through `Effective::set_skill_pack` (`SetSkillPack`, PR-E); a policy value replaces the whole map and locks it | not a security key |
 
-`skills.curated` being policy-only needs a small mechanism in `settings` (PR-B): a list of
-policy-only keys whose `settings.json` value is ignored with a warning, beside the off-only keys.
-`off` loads no extra pack. `curated` loads only ids on `skills.curated`; without a policy that list
-is empty, so `curated` admits nothing. `any` loads every pack that passes validation. Built-ins
-load whatever these say. An entry of `skills.enabled` with a bad id or hash is dropped with a
-warning.
+- **Any policy value locks its key.** A policy source that cannot be read, or a policy value that
+  does not type, locks `extra` at `off`, `allow_scripts` at `false` and `curated` empty, as for
+  `tools.*`. A `curated` list with any entry that is no pack id is malformed whole: what the firm
+  meant to admit is unknown, so it admits nothing.
+- **Misnamed keys.** `skills.*` goes through the misnamed-key pass (`leaf/misnamed.rs`) like
+  `update.*` and `plans.*`: a policy that names the section in a form this version cannot read
+  (`"skills": "any"`, `Skills`, `skills.enbld`, a top-level `skills.extra`) locks each security
+  key it could stand for off, all three when it could stand for any. A name whose first segment
+  is a known section is about that section, and what follows it is read by the rule below as
+  well: `{"ui": {"tools": {...}}}`, `privacy.mcp` and `matters.install_bundle` lock `tools`,
+  `mcp` and `install`, as on main (the orchestrator's review of #450; an earlier draft let a
+  known first segment hide them). A known section's own keys never lock another (a test runs
+  every key of the schema through the rule). Any other name is read shape-free: normalised (NFKC,
+  format characters such as a zero-width space dropped, lowercase, everything but letters and
+  digits dropped), it locks a security section's keys off when it holds the section's name,
+  when a segment at a section's place (the top level, directly under an unknown wrapper, or
+  directly under a known section with no security key, such as `ui`) still holds a character
+  outside ASCII (`ѕkіlls` with Cyrillic letters, failing closed with no table of look-alike
+  letters to keep; a top-level `टिप्पणी` locks every security key; a deeper key such as
+  `{"_comment": {"note": {"café": 1}}}`, or a key under a security section, is read by the
+  other rules alone, orchestrator's review of #450), or when, from its start or the start of any word
+  in it (after any character that is not a letter or digit, or at a capital after a small
+  letter), its first `n - 1`, `n` or `n + 1` characters are near the section, `n` being the
+  section's length: `skill`, `skils`, `tool`, `instal`, `mpc`, `clauseo.skills.extra`,
+  `skill_extra`, `SkillExtra`, `skill:extra`, `ToolBrowser`, `x.skils.extra`. Near means
+  within 1 edit for a section of 4 characters or fewer (`mcp`, so `app` and `tmp` lock
+  nothing) and 2 above, where an edit inserts, deletes or replaces one character or swaps two
+  adjacent ones (host's re-check of #450). The security sections come from `SECURITY_KEYS`,
+  and a test keeps every two known sections further apart than either's distance, and no known
+  section starting like or holding another security section. This over-locks on purpose,
+  failing closed: `foo.tools_note`, `toolbar` and `skillful` lock their sections, since what
+  such a name meant is unknown; any shape left past this rule is accepted residue. The keys nested in
+  an unknown `policy.json` section, through objects and arrays, count as later segments too, so
+  `{"clauseo": [{"skills": {...}}]}` locks `skills` with the same reason; an unknown section
+  whose value cannot be read whole (a number too big for an `f64`, nesting past 128 levels)
+  makes the file malformed. Managed preferences run the same rule: the shim asks for every key
+  the domain's files in `/Library/Managed Preferences` hold (where forced values live), not only
+  the known names, and a forced misnamed key or a
+  forced dictionary such as `skills` holding `extra` locks the section, nested dictionaries
+  included. The files read are the computer's and the login user's; one that exists but cannot
+  be read or is no property list dictionary makes managed preferences unreadable, so every
+  security key locks off (`source_unreadable`); a symlinked file is read through the link. The names come from one read of the files
+  and the values from a later read through CFPreferences, so a configuration profile added
+  between the two can miss a misnamed key until the next load. Policy sources only: in the lawyer's `settings.json` a misspelt section stays a
+  warning.
+- **Duplicate keys.** A key twice in one object, at any level of a `policy.json`, makes the source
+  malformed, as a syntax error does: it is dropped whole and every security key locks off
+  (`Error::DuplicateKey`, naming the place, never the key). So is a `policy.json` the duplicate
+  check cannot walk to its end, though it parses (`1e400`, nesting past 128 levels): a duplicate
+  behind that place would go unseen. A registry `REG_SZ` JSON value (`mcp.servers`,
+  `plans.<id>`) that holds a duplicate locks that key's section's security keys off
+  (`mcp.servers` empty, no plan at all), with a `duplicate_key` reason; the rest of the
+  registry stands. Managed preferences cannot hold duplicates. In the lawyer's `settings.json`
+  the last copy wins, with a warning. On main both the misspelt-section rule and the duplicate
+  rule failed open (a misspelt security section in a policy locked nothing, and a key written
+  twice in `policy.json` silently took its last copy); those two gaps predate this record and
+  affect `tools.*` on main as well.
+- **Lock reasons.** `Effective::lock_reasons` gives one `LockReason` per cause, never English:
+  the keys it locked, the cause (`source_unreadable`, `malformed_value`, `misnamed_section`,
+  `duplicate_key`; a plain policy value has none), the source by kind (`policy.json`,
+  `registry`, `managed preferences`, never a path, 0047), the section only when it is a plain
+  word (`[a-z][a-z0-9_]{0,31}`, #411's rule) and its place: the index of its entry among the
+  source's entries in document order, from 1 (the registry's and managed preferences' values,
+  `policy.json`'s top-level entries, so a key inside a section takes the section's place), or the
+  second copy's line for a duplicate in `policy.json`. The host logs one `warn` line per
+  cause at start-up, and again only when the set changes. A later protocol change mirrors it for
+  the app as `LockReason { keys, cause, source }`.
+- **Policy-only keys.** `skills.curated` is the first entry of `leaf::POLICY_ONLY_KEYS`, beside
+  `OFF_ONLY_KEYS`: a `settings.json` value is ignored, with a warning where it sits, and never
+  admits anything. Without a policy the list is empty, so `extra: curated` admits nothing.
+- **`skills.enabled` is typed in the leaf.** Each id follows the id rule above (a private copy of
+  `profile`'s `is_pack_id` in `settings`, held to `profile`'s accept and refuse table by
+  `the_pack_id_rule_matches_profile` until PR-C moves the rule to `PackId`), and each value is
+  `sha256:<64 lowercase hex>`; anything else is refused. A bad entry is dropped with a warning and
+  the rest load. The warning follows #411's rule: it quotes the id only when it is id-shaped,
+  else gives the entry's place (`skills.enabled.<id 2>`), and never quotes a hash or pasted text.
+- `Effective::set_skill_pack(files, id, Option<hash>)` records or removes one entry in the user's
+  `settings.json`, then in memory. It is refused with `Error::Locked` while `skills.enabled` is
+  locked, and with `Error::Refused` (naming the key, never the value) for a bad id or hash.
+
+`off` loads no extra pack. `curated` loads only ids on `skills.curated`. `any` loads every pack
+that passes validation. Built-ins load whatever these say.
 
 ### Per matter
 
@@ -264,12 +339,16 @@ workspace's dev profile compiles dependencies, `sha2` among them, without optimi
   reads, checks and hashes the pack off the actor (`packs::inspect`), then writes `skills.enabled`
   on the actor, as `SetToolSettings` writes. It is refused with a code when policy does not admit
   the pack, the pack is invalid, or `skills.enabled` is locked. Turning off removes the entry.
+  PR-E names the refusal code: either stage D's `settings.refused` (#436), with the reason in
+  `ListSkillPacks`'s status, or a new `skills.pack_refused`. The choice is made with the host
+  before PR-E.
 - `Query::ListSkillPacks` (PR-E) gives each installed pack's manifest fields, its current hash and
   its state: `On`, `Off`, `Changed`, `NotAdmitted` or `Refused(code)`. The later UI reads it.
 - **A skipped pack:** a host log line holding the id and the reason code, with no path or pack text
-  (0047). Plus one `Notice` warning in the thread per launch that skipped any packs, naming each by
-  id: "Skill pack nda-kit was not loaded: it changed since you turned it on." The thread view
-  already shows notices.
+  (0047), once per launch. Plus one `Notice` warning in the thread naming each skipped pack by id:
+  "Skill pack nda-kit was not loaded: it changed since you turned it on." The notice is shown once
+  per thread session, not per launch, so an agent that restarts in a loop does not repeat it; the
+  log line stays per launch. The thread view already shows notices.
 
 ### Windows
 

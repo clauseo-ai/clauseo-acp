@@ -203,7 +203,31 @@ fails) is skipped and **locks each security key off**: `mcp.servers` empty, `too
 `install.registry` unset, and no `plans.<id>` at all. The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
-serve mixed versions. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
+serve mixed versions, **unless its name looks like a security section's** (a section holding a
+key marked **Security key** below). A policy key that starts with or contains something like a
+security section's name locks that section's security keys off, whatever its punctuation or
+case: `tool.web_search`, `skill_extra`, `SkillExtra`, `skill:extra`, `ToolBrowser`,
+`clauseo.skills.extra`, `{"clauseo": {"skills": …}}` (through lists too), even `foo.tools_note`,
+`toolbar` and `skillful`. Any word of the name counts, not just its first. "Like" means one
+letter off for `mcp` (`mpc`, not `app`) and two for the longer sections, a swap of two letters
+counting as one. Invisible characters such as a zero-width space are ignored, full-width letters
+read as plain ones, and a top-level key with any other non-ASCII letter (`ѕkіlls` with
+Cyrillic letters, or a Hindi `टिप्पणी`) counts as like every security section, as does one
+directly inside an unknown section or inside `ui`, `matters` or `agents`; deeper keys, such as
+`{"_comment": {"note": {"café": 1}}}`, are only compared by their letters. A key inside a known section counts
+too: `{"ui": {"tools": …}}` locks `tools`, and `privacy.mcp` locks `mcp.servers`. Clauseo cannot tell what such a key meant, so it fails closed. Keep policy key names in plain
+English and away from the section names; a key with other letters at the top level locks every
+security setting. Other names that lock, for example: `clauseo` locks `plans.<id>`, `cpu_limit`,
+`map` and `acp` lock `mcp.servers`, and `instance_id` locks `install.*`. This holds for managed
+preferences too: Clauseo reads every forced key in the `ai.clauseo.desktop` domain, not only the
+ones in the table, so a misspelt key or a `skills` dictionary there locks the section; a
+managed preferences file Clauseo cannot read or parse locks every security key off. A key
+written twice anywhere in `policy.json` makes that file count as malformed, and every security
+key locks off; so does a number too large to read (`1e400`) or nesting deeper than 128 levels,
+which would hide a duplicate behind it. A registry JSON value (`mcp.servers`, `plans.<id>`)
+holding a key twice locks that key's section off (`mcp.servers` empty, no plan), and the rest of
+the registry still applies. Either way the host log names the cause, the source (`policy.json`,
+the registry or managed preferences) and the section, never a value or a path. (`Leaf::parse`, `refuse` and `SECURITY_KEYS` in
 [`crates/settings/src/leaf.rs`](../crates/settings/src/leaf.rs); `lock_security_keys` in
 [`crates/settings/src/effective.rs`](../crates/settings/src/effective.rs).)
 
@@ -267,6 +291,10 @@ it.
 | Key | Task | Note |
 |---|---|---|
 | `update.mode` (`auto`, `notify`, `none`) | R23 | `none` for managed fleets; locks at `none` if a policy source is unreadable. Per-machine installs never update themselves anyway |
+| `skills.extra` (`off`, `curated`, `any`) | 0040 | Read and locked now; nothing loads a pack until the launch wiring lands. **Security key**: `off` if a source is unreadable or the value does not type |
+| `skills.curated` (list of pack ids; `REG_MULTI_SZ`) | 0040 | Policy only: a `settings.json` value is ignored. **Security key**: empty if a source is unreadable or any entry is no pack id |
+| `skills.allow_scripts` (boolean) | 0040 | Scripts are copied, never run. **Security key**: `false` if a source is unreadable or the value does not type |
+| `skills.enabled` (object: pack id to `sha256:<64 hex>`) | 0040 | The lawyer's turned-on packs; a policy value replaces the whole map and locks it |
 | `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
 
 ## 7. Hosts Clauseo reaches
