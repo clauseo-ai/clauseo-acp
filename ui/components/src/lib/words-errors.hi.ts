@@ -106,7 +106,7 @@ export const HI = {
   // hi: later
   "Codex can't work on a network drive. Move the matter to this computer.": null,
   "Codex can't work on a drive without file permissions. Move the matter to this computer.": null,
-  "This matter's folder is too deep for Windows to start programs in it. Move the folder nearer the top of its drive, or choose a higher folder as the matter.":
+  "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
     null,
   // hi: later
   "The update didn't install. Try again.": null,
