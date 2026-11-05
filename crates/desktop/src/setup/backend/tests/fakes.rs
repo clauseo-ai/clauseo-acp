@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Clock, InstallState, Installed, Method, PasteCode, SigninError, SigninState};
+use clauseo_host::AgentsStopped;
 use clauseo_protocol::{AgentId, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use serde_json::json;
@@ -184,8 +185,9 @@ impl SetupHost for RecordingHost {
     fn restart_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
         self.record(HostCall::RestartAgents(agent))
     }
-    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<(), HostError>> {
-        self.record(HostCall::StopAgents(agent))
+    fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        lock(&self.0).push(HostCall::StopAgents(agent));
+        Box::pin(std::future::ready(Ok(AgentsStopped::Exited)))
     }
     fn set_reused_login(
         &self,
