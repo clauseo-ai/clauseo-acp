@@ -56,6 +56,9 @@ unicode-normalization = { workspace = true }
 # The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
+# The data folder fence's `~user` paths (agent/data_fence/resolve.rs): the user's home from the
+# user database.
+nix = { workspace = true, features = ["user"] }
 
 # The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
@@ -69,6 +72,8 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# Directory junctions for the data folder fence's Windows test (`agent/data_fence/tests.rs`).
+clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
 clauseo-host = { path = ".", features = ["test-support"] }
 clauseo-fake_agent = { path = "../fake_agent" }

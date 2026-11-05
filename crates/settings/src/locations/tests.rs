@@ -371,3 +371,38 @@ fn under_home_keeps_new_matters_outside_the_data_folder() {
     );
     assert!(!at.default_matters_dir().starts_with(at.data_dir()));
 }
+
+/// Every folder or file `Locations` builds under the data folder (each `data_dir.join(…)` in
+/// `locations.rs`) names a const listed in `DATA_ENTRIES`, which the host's data folder fence
+/// checks against its deny rules. A new accessor under the data folder whose entry is not
+/// listed, or that names it by a literal, fails here.
+#[test]
+fn every_entry_locations_builds_under_the_data_folder_is_in_data_entries() {
+    let source = include_str!("../locations.rs");
+    let listed = source
+        .split_once("pub const DATA_ENTRIES")
+        .and_then(|(_, rest)| rest.split_once("= ["))
+        .and_then(|(_, rest)| rest.split_once("];"))
+        .map(|(list, _)| list)
+        .expect("DATA_ENTRIES's list");
+    let listed: Vec<&str> = listed
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    assert_eq!(listed.len(), super::DATA_ENTRIES.len(), "{listed:?}");
+    let mut built = Vec::new();
+    for marker in ["data_dir.join(", "data_dir().join("] {
+        for (at, _) in source.match_indices(marker) {
+            let rest = &source[at + marker.len()..];
+            let name = rest.split([')', ',']).next().unwrap_or_default().trim();
+            built.push(name);
+        }
+    }
+    assert!(built.len() >= 5, "{built:?}");
+    let unlisted: Vec<&&str> = built.iter().filter(|name| !listed.contains(name)).collect();
+    assert!(
+        unlisted.is_empty(),
+        "built under the data folder but not in DATA_ENTRIES: {unlisted:?}"
+    );
+}

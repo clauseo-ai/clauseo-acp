@@ -162,8 +162,11 @@ use clauseo_protocol::MatterPath;
 use serde_json::Value;
 
 use codex::{has_codex_part, in_codex_folder, patch_targets};
+// The data folder fence reads a command's `sh -c` scripts as this guard does
+// (`agent/data_fence/command.rs`).
+pub(crate) use shell::script as shell_script;
 use shell::{resolutions, shell_targets};
-use words::Escape;
+pub(crate) use words::Escape;
 
 /// The first argument that makes the desktop binary run [`run`] on its stdin and stderr and
 /// exit, before anything else starts. The hook entry passes it (`agent/loads.rs`).

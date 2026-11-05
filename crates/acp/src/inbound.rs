@@ -202,6 +202,7 @@ impl Inbound {
                         acp_tool_call_id: request.acp_tool_call_id,
                         options: request.options,
                         paths: request.paths,
+                        raw_input: request.raw_input,
                     }
                 }
                 Request::Elicitation(request) => {
@@ -235,6 +236,8 @@ struct PermissionRequest {
     options: Vec<PermissionOption>,
     /// The paths the request names, as [`permission_paths`] reads them.
     paths: Vec<PathBuf>,
+    /// `toolCall.rawInput`, when the request has one.
+    raw_input: Option<Value>,
 }
 
 /// Checks a `session/request_permission`. Refuses (-32602) one that does not decode, that offers
@@ -243,6 +246,11 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
     let kinds = permission_kinds(&params)
         .map_err(|kind| invalid_params(&format!("unknown option kind {kind}")))?;
     let paths = permission_paths(&params);
+    let raw_input = params
+        .get("toolCall")
+        .and_then(|call| call.get("rawInput"))
+        .filter(|input| !input.is_null())
+        .cloned();
     let request = acp::RequestPermissionRequest::deserialize(params)
         .map_err(|error| invalid_params(&error.to_string()))?;
     let session = AgentSessionId::new(&request.session_id.0)
@@ -264,6 +272,7 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         acp_tool_call_id: CompactString::from(&*request.tool_call.tool_call_id.0),
         options,
         paths,
+        raw_input,
     })
 }
 

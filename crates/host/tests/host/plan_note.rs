@@ -28,14 +28,20 @@ const OTHER: &str = "fake-agent";
 /// The guard program the tests' hosts name; the fake agent never runs it.
 const GUARD: &str = "/opt/clauseo/clauseo-desktop";
 
-/// `claude-plan-note` written for `dir`: its plan note in Claude's home under `dir`'s data
-/// folder, `<data>/agents/claude-acp/home`, where the scenario file has `{{cwd}}/claude-config`.
-fn scenario(dir: &Dir) -> Scenario {
+/// `claude-plan-note` written for `dir` and `agent`: for Claude its plan note in Claude's home
+/// under `dir`'s data folder, `<data>/agents/claude-acp/home`, where the scenario file has
+/// `{{cwd}}/claude-config`. For another agent the same name under `dir`'s home: a request of
+/// its into Clauseo's data folder is rejected unseen (`agent/data_fence.rs`), never logged.
+fn scenario(dir: &Dir, agent: &str) -> Scenario {
     let source = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/scenarios/claude-plan-note.jsonl"
     );
-    let home = dir.data().join("agents").join(CLAUDE).join("home");
+    let home = if agent == CLAUDE {
+        dir.data().join("agents").join(CLAUDE).join("home")
+    } else {
+        dir.home().join("claude-config")
+    };
     let text = std::fs::read_to_string(source)
         .unwrap()
         .replace("{{cwd}}/claude-config", &escaped(&path_text(&home)));
@@ -49,7 +55,7 @@ fn scenario(dir: &Dir) -> Scenario {
 /// requests allow-once, and returns each logged request's `about`.
 fn abouts(test: &str, agent: &str) -> Vec<Option<PermissionAbout>> {
     let dir = Dir::new(test, &[]);
-    dir.set_agents(&[(agent, scenario(&dir))]);
+    dir.set_agents(&[(agent, scenario(&dir, agent))]);
     let files = [("brief.txt", "x\n")];
     let folder = dir.folder("m", &files);
     // The spelling the agent's `{{cwd}}` has: the folder the session runs in. Were the plans

@@ -442,6 +442,20 @@ This settles the code question above: **no new error code.** It supersedes the f
   id (folders and `skills.enabled` ids together); the rest are left out of the answer and logged
   by count alone, never by name or path (`MAX_LISTED`, `crates/host/src/actor/query/skill_packs.rs`).
 
+### Tier C: the source folder
+
+With no sandbox (tier C) the pack's source under `<data>/skill-packs` is fenced off by
+Claude's deny rules and the host's auto-deny (decision record 0030, "The data folder fence").
+The deny rules cover Claude's file tools and the file commands Claude Code recognises in Bash,
+not a script Claude writes that opens the file itself. Only the jail (tiers A and B, which hide
+`<data>`) or an OS sandbox stops that. The launch's own copy under `<data>/run/<id>` stays
+readable.
+
+Each Claude launch also writes `syncClaudeAiSkills: false` into Claude Code's user settings in
+Clauseo's own Claude home (`<data>/agents/claude-acp/home/settings.json`, G11), keeping any
+other key there, so the account's claude.ai skills are neither synced nor loaded beside the
+packs. There is no switch for it.
+
 ### Windows
 
 Beyond the rules above: any reparse point is refused, the link count and final path are read from

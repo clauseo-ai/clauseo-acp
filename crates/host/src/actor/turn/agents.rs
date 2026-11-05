@@ -108,6 +108,9 @@ pub(super) struct Agent {
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
+    /// Its permission requests the host rejected for touching Clauseo's data folder
+    /// (`agent/data_fence.rs`), logged as a count on its `agent ended` line.
+    pub(super) denied_data_folder: u32,
 }
 
 /// What a Codex agent's launch recorded.
@@ -230,6 +233,7 @@ pub(super) fn launch_now(
         mcp_commands: Vec::new(),
         forced_ask,
         plan_notes,
+        denied_data_folder: 0,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));

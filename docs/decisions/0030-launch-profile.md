@@ -481,6 +481,150 @@ change from the settings window as `ui` does.
   answers `check_failed`, never an error: `agent.launch_failed` reads as a broken thread in the
   app. No log line names the folder (`actor/query/folder_support.rs`).
 
+### The data folder fence (tier C)
+
+Under the jail (tiers A and B) stage C hides `<data>` outside the session's own folders. With no
+sandbox (tier C) an agent could read it: stage B's live run had Claude `cat` a skipped skill
+pack's source at `<data>/skill-packs/<id>/skills/…/SKILL.md`. Approved by the orchestrator
+after that run, two lines stand in (`crates/host/src/agent/data_fence.rs`).
+
+**Tier C has no isolation between matters.** The agent runs as the user and can read any
+folder the user can, other matters' own folders on disk included. The fence protects
+Clauseo's internals: other conversations (every matter's prompts and answers in the search
+index, `search.sqlite`), other sessions' run folders and copies, other matters' notes, the
+store and the agents' credentials. It is not a wall between matters. Its residual: a run
+folder, a matter's notes or another matter's Claude project made after a Claude session
+launched is in none of that session's deny rules (its transcripts are). The host's auto-deny
+refuses a request for one when Claude asks. Per Claude Code's docs, rules apply in the order
+deny, ask, allow, and an allow can't carve out a deny; Read, Glob and Grep outside the working
+folders ask in the default, `acceptEdits` and `plan` modes, so there the auto-deny refuses
+them. They read without asking in exactly three cases: in `auto` mode, under a matching allow
+rule (Clauseo adds only the built-in skills' Read allow below), and inside an
+`additionalDirectories` folder. The guard hook, which already runs before every tool in forced
+ask, could close even those: a later option, not this change.
+
+- **Claude's deny rules.** Every Claude session's flag settings get `permissions.deny` rules,
+  `Read(//<data>/<x>)` and `Edit(//<data>/<x>)`, for the Clauseo-only subtrees (`browser`,
+  `counts`, `limits`, `logs`, `matters`, `sandbox`, `skill-packs`, `updates`, each `/**`),
+  files (`settings.json`, `update.json`, `first_act_done`, `state.sqlite*`,
+  `search.sqlite*`) and, under
+  `agents`, Codex's home, the installs, runtime, npm and sign-in folders, and in Claude's own
+  home its login, settings, skills and plugins, every project's transcripts, subagent
+  transcripts and memory (`projects/*/*.jsonl`, `projects/*/*/subagents/**`,
+  `projects/*/memory/**`), and what it keeps across sessions, so across matters:
+  `history.jsonl`, `file-history`, `todos` and `shell-snapshots` (`DENIED` in the module). These rules bind the model's tools only, not
+  Claude Code's own writes there.
+  `agents` isn't denied whole: Claude Code writes its plan note to `plans` in its home with
+  its Edit tool.
+  `<data>` is the canonical path, then the configured one when it differs; on Windows the path
+  is forward-slashed with the drive as `/c`, as Claude Code normalises it, and a path to this
+  machine's own share (`\\localhost\c$\…`, `\\127.0.0.1\c$\…`, `\\?\UNC\localhost\c$\…`,
+  `\\?\C:\…`) is put in its drive form first. They go in after
+  any the hook sent, forced ask or not, beside `disableSkillShellExecution`: flag settings
+  outrank the user's, and Claude Code merges every source's deny rules, so no user rule removes
+  one. Claude Code has no allow rule that beats a deny, so the session's own folders can't be
+  carved out of a broad rule. Instead the launch prep enumerates `<data>` at each launch and
+  denies every entry that exists then and isn't the session's own: other run folders
+  (`run/<id>/**`) and set-aside `run.old-*` entries, other matters' state
+  (`agent-state/<m>/**`, and this matter's entries beside `notes`), the rest of Claude's
+  home beside `plans`, and anything else, named or not. A link is denied as itself and as a
+  folder. In Claude's `projects` every other project's folder that exists is denied whole,
+  and in this session's own (`projects/<key>`, the key Claude Code derives from the matter
+  folder: each UTF-16 unit not an ASCII letter or digit made `-`, past 200 cut and hashed)
+  every entry but its sessions' `tool-results` folders. Claude Code saves a tool result too
+  large to return in `projects/<key>/<session id>/tool-results` and has the model Read it
+  back; its own allowance for that read comes after the deny rules (Claude Code 0.3.293's
+  bundled cli), so `projects/**` would refuse it. Another matter's tool results made after
+  the launch are part of the residual above. The session's own are its run folder (the pack copy, the browser folders), this
+  matter's notes, Claude's `plans` folder and the matter folder when it sits in `<data>`.
+  `profile` is neither denied nor listed, for every session (`SHARED` in the module): it holds
+  only the built-in plugin, the same for every matter, and the model must Read files in its
+  skills (legal-drafting's `section-checklists.md`). Codex's fence keeps it readable for the
+  same reason. Built-in skill assets are readable without a prompt: the flag settings'
+  `permissions.allow` gains `Read(//<data>/profile/claude-plugin/skills/**)` for each spelling
+  of `<data>`, Read only and nothing wider. A guard test checks that every data folder entry `Locations` names, the
+  store's database and the search index is in `DENIED` or on an allow list with its reason
+  (`agents`: it holds the plans folder; `profile`: the built-in plugin).
+- **The host's auto-deny.** Before a permission request is shown, the matter thread reads the
+  paths it touches: its locations and diffs, `rawInput`'s `file_path`, `notebook_path`,
+  `path`, `paths` and `cwd`, every other string anywhere in `rawInput` shaped like a path
+  (absolute, `~`, `./`, `../`, a `file://` URL) under any key but the text Claude's own tools
+  write or match (`content`, `old_string`, `new_string`, `new_source`, `prompt`,
+  `description`, `plan`, `pattern`, `glob`), the words of `rawInput.command` (a string, or each string of an array) that start with `~` or
+  `$HOME`, hold a separator, or are `..`, the targets of an `ln` in it taken from the link's
+  own folder (and as written), and any path that starts, inside a command word, where the data
+  folder's text does (its configured and canonical paths and their `~/` form, so
+  `python3 -c "open('<data>/…')"`, `grep -f<data>/…` and `curl file://<data>/…` are read).
+  It also reads the folders a request may search the whole of: a Glob's or Grep's `path` (the
+  matter folder without one), each folder a Glob's `pattern` or a Grep's `glob` may start in
+  (braces expanded, cut at the first part holding `*`, `?`, `[` or `{`, climbed by each `..`
+  after it), and each operand of a recursive command, with the working folder (`rg`, `find`,
+  `du`, `tree`, `tar`, `rsync`, `zip`, `fd`, `ag`, `ack`, `7z`, `robocopy`, `xcopy`;
+  `grep`, `cp`, `rm`, `chmod`, `chown`, `chgrp`, `scp` and `diff` with `-r`, `-R` or
+  `--recursive`, `grep -d recurse` and `--directories=recurse`; `ls -R`, `cp -a`; anything
+  given `-Recurse`; past `sudo`, `env`, `xargs` and the like), and each folder a command's path
+  word holding a glob or a brace may match in, read like a Glob's pattern from the matter
+  folder, as the shell expands it (so `cat <parent>/dat*/settings.json` is refused, and so is
+  `cat ~/*.txt` when `<data>` is under the home folder). A script a command gives to `sh`,
+  `bash`, `zsh`, `dash` or `ksh` with `-c` (or `-lc`, `-ec` and the like), to PowerShell's
+  `-Command` or to `eval` is read the same way, one level down, as the pre-write guard reads
+  it. A Grep is told from a Glob by a key only Grep takes (`glob`, `output_mode`,
+  `type`, …); one with none has its regular expression read as a glob, so a Grep for `/.*`
+  from outside the working folders may be refused.
+  Each is made absolute (from the matter folder, the home for `~`, the user's home from the
+  user database for `~user`, or every known home when that user isn't known, never the
+  matter folder) and resolved part by part: `..` takes the parent of what is resolved so far,
+  each existing prefix is canonicalised with `dunce`, a link that doesn't resolve (a missing
+  target) is read and its target walked in its place, a relative target from the link's own
+  folder, and a missing tail is kept under its deepest existing ancestor. More than 40 links,
+  or a loop, counts as inside `<data>`. On Windows a path to this machine's own share is put in
+  its drive form first. A request with a path inside the canonical `<data>` and outside the
+  session's own folders, or with a search root that resolves to `<data>` or a folder holding
+  it (whatever its pattern), is answered with its reject-once option (else `cancelled`), with
+  nothing logged in the thread: the lawyer never sees it. So `grep -r x <parent>`,
+  `find ~ -name …` and a Glob from the home folder are refused, while a search in the matter
+  folder, in a folder that doesn't hold `<data>` or in the session's own folders passes. Every
+  string of `rawInput` is read, not a list of keys, because a third-party tool's path key
+  can't be known; only a string shaped like a path counts, so free text passes, and a
+  third-party tool's free text that starts with a `<data>` path is refused. The own folders
+  are the session's run folder, this
+  matter's notes, a Claude agent's plans folder in Clauseo's Claude home and `profile`, each
+  only while it
+  resolves to exactly its place under `<data>`'s canonical path, so one swapped for a link
+  counts for nothing and what is under it is judged by where it leads; and the matter folder,
+  unless it holds `<data>` or is a link into it. The plans folder is shared by every matter's
+  Claude sessions, so another matter's plan notes stay reachable through it. The comparison
+  ignores case on Windows and macOS. The agent's
+  `agent ended` log line carries `denied_data_folder=<n>`, with no path.
+- **The reason the agent sees.** ACP's answer to `session/request_permission` carries an
+  outcome and no message, and the adapters tell the model only that the user refused. For the
+  subtrees the deny rules name, Claude Code refuses first with its own message naming the rule.
+  Known limit: should ACP add a reason field to the permission answer, the host should send
+  "Clauseo's own data folder is off-limits." in it.
+- **What it can't catch.** These gaps are accepted:
+  - a command fed its folders on standard input (`… | xargs grep -r x`);
+  - a command that moves first, then works relative to where it moved
+    (`cd <parent> && grep -r x .`);
+  - a path through a variable other than `$HOME` (`$PWD/..`, `$TMPDIR/..`);
+  - a script that builds a path in parts or at run time (`python -c` joining `<data>` from
+    pieces; a script naming `<data>`'s text whole is read);
+  - a script nested deeper than one `-c` level (`bash -c "sh -c '…'"`).
+
+  Beyond those, the auto-deny never sees a path the agent doesn't ask about (an allowed tool,
+  an `additionalDirectories` folder, the three cases above) or a request whose check can't be
+  sent to the matter thread (then it is shown, as before), and it doesn't walk a searched
+  folder for links inside it, read a recursive command not named above, or read a path in a
+  key Claude's tools use for text or one a third-party tool writes relative without `./`. On
+  Windows nothing tests an 8.3 short name (`CLAUSE~1`) or a name with trailing dots or spaces
+  in a part of the path that doesn't exist yet (an existing part is canonicalised to its real
+  name), or a folder with NTFS per-directory case sensitivity (the check ignores case there);
+  links are tested only where the user may make them, junctions always. Only the jail or an
+  OS sandbox stops those.
+- **Codex.** Codex 0.162.1's config schema has filesystem entries with a `deny` access mode
+  (`FileSystemAccessMode` in `codex-rs/core/config.schema.json`), part of its permission
+  profiles and enforced by its own sandbox. No Codex change is made here; the auto-deny covers
+  Codex's requests too.
+
 ### The model across mode changes
 
 - **2026-11-05 (measured by stage C on win-01, claude-agent-acp 0.89.1; private
