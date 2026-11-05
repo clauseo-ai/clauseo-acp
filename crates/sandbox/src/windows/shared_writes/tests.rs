@@ -8,7 +8,7 @@ use super::*;
 use crate::test_support::TempDir;
 use crate::windows::acl_plan::Sid;
 use crate::windows::test_world::{GROUP_SID, OTHER_POOL_SIDS, USER_SID};
-use crate::windows::writer::{Label, Walked};
+use crate::windows::writer::{FileId, Label, Strict, Walked};
 
 /// Records each call. The `fail_at`-th add (1-based) fails; the `already_at`-th add answers
 /// [`Added::AlreadyThere`]; the `fail_walk_at`-th walk fails. Each walk reports `walk_skips`
@@ -17,7 +17,7 @@ use crate::windows::writer::{Label, Walked};
 struct Fake {
     adds: Vec<Grant>,
     removes: Vec<Grant>,
-    walks: Vec<(PathBuf, Reach, Option<Vec<Sid>>)>,
+    walks: Vec<(PathBuf, Reach, Option<Strict>)>,
     walk_skips: u64,
     fail_at: Option<usize>,
     already_at: Option<usize>,
@@ -50,10 +50,9 @@ impl AclWriter for Fake {
         &mut self,
         root: &Path,
         reach: Reach,
-        strict: Option<&[Sid]>,
+        strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure> {
-        self.walks
-            .push((root.to_owned(), reach, strict.map(<[Sid]>::to_vec)));
+        self.walks.push((root.to_owned(), reach, strict.cloned()));
         if self.fail_walk_at == Some(self.walks.len()) {
             return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
         }
@@ -61,6 +60,26 @@ impl AclWriter for Fake {
             skipped: self.walk_skips,
             ..Walked::default()
         })
+    }
+
+    fn same_file(&mut self, _a: &Path, _b: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+
+    fn file_id(&mut self, _path: &Path) -> io::Result<Option<FileId>> {
+        Ok(None)
+    }
+
+    fn add_expecting(&mut self, grant: &Grant, _expected: &Path) -> Result<Added, ApplyFailure> {
+        self.add(grant)
+    }
+
+    fn refused_at(&mut self) -> Option<PathBuf> {
+        None
+    }
+
+    fn reclaim(&mut self, _root: &Path, _pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        Ok(Walked::default())
     }
 
     fn label(&mut self, _path: &Path) -> io::Result<Option<Label>> {
@@ -207,7 +226,7 @@ fn a_failed_add_rolls_back_only_its_own_target_and_the_rest_carry_on() {
 }
 
 #[test]
-fn a_failed_walk_rolls_back_its_own_entry_unwalked_and_the_rest_carry_on() {
+fn a_failed_walk_keeps_its_target_and_the_rest_carry_on() {
     let (_dir, paths) = folders("shared-walk-fail", &["a", "b", "c"]);
     let grants = plan(&paths);
     // Walks in order: a, then b (the second), which fails.
@@ -223,10 +242,27 @@ fn a_failed_walk_rolls_back_its_own_entry_unwalked_and_the_rest_carry_on() {
             ApplyFailure::Io(io::ErrorKind::PermissionDenied)
         )]
     );
-    assert_eq!(fake.removes, [grants[1].clone()]);
-    // b's undo walks with no strict SIDs: it removes a deny, it refuses nothing.
-    assert_eq!(fake.walks[2], (paths[1].clone(), Reach::Tree, None));
-    assert_eq!(done.added, [grants[0].clone(), grants[2].clone()]);
+    // b's deny stays: nothing is removed, and all three grants are listed as written.
+    assert_eq!(fake.removes, Vec::<Grant>::new());
+    assert_eq!(fake.walks.len(), 3);
+    assert_eq!(done.added, grants);
+}
+
+#[test]
+fn a_walk_repairs_the_children_a_pool_user_owns() {
+    let (_dir, paths) = folders("shared-repair", &["a"]);
+    let grants = plan(&paths);
+    let mut fake = Fake::default();
+    apply_shared_write_denies(&mut fake, &grants, &pool());
+    // Repair mode: every pool user is an owner whose children are repaired, not refused, and the
+    // group and the pool users are watched for explicit allows.
+    let (_, _, strict) = &fake.walks[0];
+    let strict = strict.as_ref().unwrap();
+    assert_eq!(strict.pool, pool());
+    assert_eq!(
+        strict.watched,
+        [group(), sid(USER_SID), sid(OTHER_POOL_SIDS[0])]
+    );
 }
 
 #[test]
@@ -235,11 +271,14 @@ fn every_walk_is_strict_with_the_group_and_every_pool_user() {
     let grants = plan(&paths);
     let mut fake = Fake::default();
     apply_shared_write_denies(&mut fake, &grants, &pool());
-    let want = Some(vec![group(), sid(USER_SID), sid(OTHER_POOL_SIDS[0])]);
+    let want = Strict {
+        watched: vec![group(), sid(USER_SID), sid(OTHER_POOL_SIDS[0])],
+        pool: pool(),
+    };
     assert_eq!(fake.walks.len(), 3);
     for (_, reach, strict) in &fake.walks {
         assert_eq!(*reach, Reach::Tree);
-        assert_eq!(strict, &want);
+        assert_eq!(strict, &Some(want.clone()));
     }
 }
 
@@ -322,8 +361,10 @@ fn remove_ignores_a_missing_target() {
 mod ntfs {
     use super::*;
     use crate::windows::NtfsAcl;
+    use crate::windows::acl::descriptor;
     use crate::windows::acl_bytes::INHERITED;
-    use crate::windows::test_acl::{Place, entries};
+    use crate::windows::acl_bytes::owner_sid;
+    use crate::windows::test_acl::{Place, entries, grant, has};
 
     /// `ACCESS_DENIED_ACE_TYPE`.
     const DENIED: u8 = 1;
@@ -350,6 +391,36 @@ mod ntfs {
             "{}: flags {flags:#x}",
             path.display()
         );
+    }
+
+    #[test]
+    fn a_child_a_pool_user_owns_is_repaired_and_gets_the_inherited_denies() {
+        let place = Place::new("shared-repair-ntfs");
+        place
+            .dir
+            .file("AppData/LocalLow/Microsoft/Sub/doc.txt", "made");
+        let target = place.at("AppData/LocalLow");
+        let child = place.at("AppData/LocalLow/Microsoft/Sub");
+        // The test's own user stands in for the pool user: it owns the child, and an explicit
+        // allow of its own sits on the child, as a file the agent made carries.
+        let pool_user = owner_sid(&descriptor(&child).unwrap()).unwrap();
+        let mut acl = NtfsAcl::new().unwrap();
+        acl.add(&grant(
+            &child,
+            pool_user.as_str(),
+            Rights::Modify,
+            Inherit::Tree,
+        ))
+        .unwrap();
+        assert!(has(&child, pool_user.as_str(), false));
+
+        let grants = plan(std::slice::from_ref(&target));
+        let done = apply_shared_write_denies(&mut acl, &grants, std::slice::from_ref(&pool_user));
+        assert_eq!(done.failed, Vec::<(PathBuf, ApplyFailure)>::new());
+        // The repair strips the explicit allow, and the walk gives the child both denies.
+        assert!(!has(&child, pool_user.as_str(), false));
+        assert_deny(&child, GROUP_SID, true);
+        assert_deny(&child, OWNER_RIGHTS_SID, true);
     }
 
     #[test]
