@@ -9,19 +9,16 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::{IDENTIFIER, KnownFolder, PlatformDirs};
 
-use super::{DELETED, FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
+use super::{DELETED, FAILED, KEPT_AND_FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, Mode, ops, say};
 
 /// The sandbox's folder under the local data folder: S15's records (its ledger, the matter
 /// SIDs, and the clean-close records of S15's third PR, part d), which its `--remove` needs.
 /// Kept whole unless `--sandbox-removed`, so a record added there later is kept too.
 pub(super) const SANDBOX_DIR: &str = clauseo_sandbox::windows::matters::SANDBOX_DIR;
-/// The set-aside's own name, under [`SANDBOX_DIR`].
-// TODO(#465): use clauseo_sandbox::windows::SET_ASIDE_DIR
-pub(super) const SET_ASIDE_DIR: &str = "set-aside";
 /// Where tier B moves the lawyer's protected names aside, under the local data folder, one name
 /// per level: `<data>\sandbox\set-aside\<matter>\<timestamp>\…` (S15, #464). The one place
 /// its location is written; the hook's message path is held to it by a test.
-pub(super) const SET_ASIDE_PATH: [&str; 2] = [SANDBOX_DIR, SET_ASIDE_DIR];
+pub(super) const SET_ASIDE_PATH: [&str; 2] = [SANDBOX_DIR, clauseo_sandbox::windows::SET_ASIDE_DIR];
 
 /// Deletes both data folders as `mode` says, the known folders from `dirs`; answers the exit
 /// code.
@@ -77,11 +74,12 @@ pub(crate) fn delete(dirs: &dyn PlatformDirs, mode: Mode, stderr: &mut dyn Write
         }
     }
     // With --sandbox-removed only the set-aside can stay; without it, `sandbox`.
-    match kept {
-        Some(_) if mode.sandbox_removed => KEPT_SET_ASIDE,
-        Some(_) => KEPT_SANDBOX,
-        None if report.failures > 0 => FAILED,
-        None => DELETED,
+    match (kept, report.failures > 0) {
+        (Some(_), true) => KEPT_AND_FAILED,
+        (Some(_), false) if mode.sandbox_removed => KEPT_SET_ASIDE,
+        (Some(_), false) => KEPT_SANDBOX,
+        (None, true) => FAILED,
+        (None, false) => DELETED,
     }
 }
 

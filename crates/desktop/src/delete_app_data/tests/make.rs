@@ -9,24 +9,51 @@
 use std::io;
 use std::path::Path;
 
-/// Makes `link` (which must not exist) a link to the folder `target`: a junction on Windows.
+/// Makes `link` (which must not exist) a link to the folder `target`: a junction on Windows,
+/// which needs no privilege, so failing to make one fails the test. Both paths go to `cmd` with
+/// backslashes only (it reads a `/` as a switch) and in quotes, as one raw argument.
 #[cfg(windows)]
 pub(super) fn folder_link(target: &Path, link: &Path) {
+    use std::os::windows::process::CommandExt as _;
+    let native = |path: &Path| path.components().collect::<std::path::PathBuf>();
+    let (link, target) = (native(link), native(target));
+    let line = format!(
+        "/C mklink /J \"{}\" \"{}\"",
+        link.display(),
+        target.display()
+    );
     let made = std::process::Command::new("cmd")
-        .arg("/C")
-        .arg("mklink")
-        .arg("/J")
-        .arg(link)
-        .arg(target)
+        .raw_arg(&line)
         .status()
         .unwrap();
-    assert!(made.success(), "mklink /J {}", link.display());
+    assert!(made.success(), "cmd {line}");
+    // A reparse point (FILE_ATTRIBUTE_REPARSE_POINT), not a plain folder.
+    let attributes = std::os::windows::fs::MetadataExt::file_attributes(
+        &std::fs::symlink_metadata(&link).unwrap(),
+    );
+    assert!(attributes & 0x400 != 0, "cmd {line} made no junction");
 }
 
 /// Makes `link` (which must not exist) a symbolic link to the folder `target`.
 #[cfg(not(windows))]
 pub(super) fn folder_link(target: &Path, link: &Path) {
     std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// Whether `made` made its symbolic link. The one failure that skips: Windows without the
+/// privilege to make one (`ERROR_PRIVILEGE_NOT_HELD`), said on stderr. Any other failure fails
+/// the test.
+pub(super) fn made_or_unprivileged(made: io::Result<()>) -> bool {
+    /// `ERROR_PRIVILEGE_NOT_HELD`.
+    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+    match made {
+        Ok(()) => true,
+        Err(error) if cfg!(windows) && error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+            eprintln!("skipped: no privilege to make a symbolic link here ({error})");
+            false
+        }
+        Err(error) => panic!("the symbolic link was not made: {error}"),
+    }
 }
 
 /// Makes `link` a directory symbolic link to `target`; Windows may refuse without the privilege.

@@ -34,11 +34,12 @@
 //!   `--remove` needs to take its access rules back off the lawyer's folders); with it,
 //!   `sandbox\set-aside` (the lawyer's own files that tier B moved aside) unless it is a real,
 //!   empty folder. A `sandbox` that is a link goes as a link and nothing behind it is kept.
-//! - Exit codes: [`KEPT_SANDBOX`] or [`KEPT_SET_ASIDE`] whenever that folder stays, whatever else
-//!   failed (the uninstaller then names the kept folder, never the whole one to delete by hand);
-//!   else [`FAILED`] for a refusal or anything left (locked, or refused by an access rule an
-//!   agent made: the rest is deleted, nothing is retried elevated); else [`DELETED`] when both
-//!   folders are gone or never were. One stderr line per failure.
+//! - Exit codes: [`KEPT_SANDBOX`] or [`KEPT_SET_ASIDE`] when that folder stays and all else
+//!   went; [`KEPT_AND_FAILED`] when one stays and something else could not be deleted (the
+//!   uninstaller names both, in one message: never "delete the whole folder" alone, which holds
+//!   the kept one); [`FAILED`] for a refusal or anything left with nothing kept (locked, or
+//!   refused by an access rule an agent made: the rest is deleted, nothing is retried elevated);
+//!   [`DELETED`] when both folders are gone or never were. One stderr line per failure.
 //! - Windows only: elsewhere it says so and exits [`FAILED`]. The walk builds on every OS for the
 //!   tests, with symbolic links standing in for junctions off Windows.
 
@@ -69,6 +70,10 @@ pub(crate) const KEPT_SANDBOX: i32 = 2;
 /// `<local data folder>\sandbox\set-aside` stays: it holds the lawyer's files.
 #[cfg(any(windows, test))]
 pub(crate) const KEPT_SET_ASIDE: i32 = 3;
+/// A folder stays ([`KEPT_SANDBOX`]'s or [`KEPT_SET_ASIDE`]'s) and something else could not be
+/// deleted.
+#[cfg(any(windows, test))]
+pub(crate) const KEPT_AND_FAILED: i32 = 4;
 
 /// Whether `first`, the first argument after the program, is exactly [`FLAG`].
 pub(crate) fn requested(first: &OsStr) -> bool {

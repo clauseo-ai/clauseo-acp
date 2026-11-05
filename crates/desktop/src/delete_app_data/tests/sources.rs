@@ -6,7 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::delete_app_data::walk::{SANDBOX_DIR, SET_ASIDE_PATH};
-use crate::delete_app_data::{FLAG, KEPT_SANDBOX, KEPT_SET_ASIDE, SANDBOX_REMOVED};
+use crate::delete_app_data::{
+    FLAG, KEPT_AND_FAILED, KEPT_SANDBOX, KEPT_SET_ASIDE, SANDBOX_REMOVED,
+};
 
 fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -114,11 +116,25 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
         &[&format!("${{FileExists}} \"$R9\\{SANDBOX_DIR}\\*.*\"")],
     );
     line_with(body, &[&format!("StrCpy $R8 \"$R9\\{SANDBOX_DIR}\"")]);
-    // The Kept line whenever a folder stays, the Failed line only when none does.
-    let kept = line_with(body, &["$(deleteAppDataKept)"]);
+    // After --sandbox-removed, a keep with a failure is the set-aside's.
+    let kept_and_failed = line_with(body, &["${ElseIf} $R7 = ${CLAUSEO_KEPT_AND_FAILED}"]);
+    assert_eq!(body[kept_and_failed + 1], "${AndIf} $R5 = 1");
+    assert!(
+        body[kept_and_failed + 2].ends_with("\\set-aside\""),
+        "{body:?}"
+    );
+    // One box: Failed only when no folder stays; Kept when one stays and all else went (2, 3);
+    // KeptFailed, naming both, otherwise (4, or a failure with `sandbox` still there).
     let failed = line_with(body, &["$(deleteAppDataFailed)"]);
-    assert_eq!(body[kept - 1], "${If} $R8 != \"\"");
-    assert_eq!(body[failed - 1], "${Else}");
+    let kept = line_with(body, &["$(deleteAppDataKept)\""]);
+    let both = line_with(body, &["$(deleteAppDataKeptFailed)"]);
+    assert_eq!(body[failed - 1], "${If} $R8 == \"\"");
+    assert_eq!(body[kept - 2], "${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}");
+    assert_eq!(body[kept - 1], "${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}");
+    assert_eq!(body[both - 1], "${Else}");
+    assert_eq!(body[both + 1], "${EndIf}");
+    let boxes = body.iter().filter(|line| line.starts_with("MessageBox"));
+    assert_eq!(boxes.count(), 3, "{body:?}");
 }
 
 #[test]
@@ -128,6 +144,7 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
         ("CLAUSEO_DELETED", super::DELETED),
         ("CLAUSEO_KEPT_SANDBOX", KEPT_SANDBOX),
         ("CLAUSEO_KEPT_SET_ASIDE", KEPT_SET_ASIDE),
+        ("CLAUSEO_KEPT_AND_FAILED", KEPT_AND_FAILED),
     ] {
         line_with(&code, &[&format!("!define {name} {value}")]);
     }
@@ -144,6 +161,22 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
             .unwrap_or_else(|| panic!("{key}"));
         assert!(line.ends_with(&format!(".$\\n$\\n{register}\"")), "{line}");
     }
+    // The combined box names the kept folder, then the rest.
+    line_with(
+        &code,
+        &[
+            "MessageBox MB_OK|MB_ICONEXCLAMATION",
+            "$(deleteAppDataKeptFailed)",
+        ],
+    );
+    let both = english
+        .lines()
+        .find_map(|line| line.strip_prefix("LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "))
+        .unwrap();
+    assert!(
+        both.contains("kept:$\\n$R8$\\n") && both.ends_with("data:$\\n$R9\""),
+        "{both}"
+    );
     // The messages never show under /S.
     line_with(&code, &["${IfNot} ${Silent}"]);
 }

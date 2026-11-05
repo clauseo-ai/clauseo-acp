@@ -68,24 +68,37 @@ impl World {
         }
     }
 
-    /// `rel` under the scratch folder.
+    /// `rel` (`/`-separated) under the scratch folder, joined name by name so every separator
+    /// is the OS's own (`cmd` reads a `/` as a switch).
     fn at(&self, rel: &str) -> PathBuf {
-        self.scratch.path().join(rel)
+        under(self.scratch.path(), rel)
+    }
+
+    /// The local data folder, `Local\ai.clauseo.desktop`.
+    fn local_root(&self) -> PathBuf {
+        self.scratch.path().join("Local").join(DATA)
+    }
+
+    /// The roaming data folder, `Roaming\ai.clauseo.desktop`.
+    fn roaming_root(&self) -> PathBuf {
+        self.scratch.path().join("Roaming").join(DATA)
     }
 
     /// `rel` under the local data folder.
     fn data(&self, rel: &str) -> PathBuf {
-        self.at(&format!("Local/{DATA}/{rel}"))
+        under(&self.local_root(), rel)
     }
 
     /// Makes the folder `rel` under the local data folder.
     fn data_dir(&self, rel: &str) -> PathBuf {
-        self.scratch.dir(&format!("Local/{DATA}/{rel}"))
+        self.scratch.dir(&format!("Local/{DATA}/{rel}"));
+        self.data(rel)
     }
 
     /// Writes the file `rel` under the local data folder (its folder must exist).
     fn data_file(&self, rel: &str) -> PathBuf {
-        self.scratch.file(&format!("Local/{DATA}/{rel}"), b"data")
+        self.scratch.file(&format!("Local/{DATA}/{rel}"), b"data");
+        self.data(rel)
     }
 
     fn canary(&self) -> PathBuf {
@@ -115,8 +128,7 @@ impl World {
 
     /// Both data folders are gone.
     fn assert_both_gone(&self) {
-        for known in ["Local", "Roaming"] {
-            let root = self.at(&format!("{known}/{DATA}"));
+        for root in [self.local_root(), self.roaming_root()] {
             assert!(
                 std::fs::symlink_metadata(&root).is_err(),
                 "{}",
@@ -124,6 +136,12 @@ impl World {
             );
         }
     }
+}
+
+/// `rel` (`/`-separated) under `base`, joined name by name.
+fn under(base: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .fold(base.to_owned(), |path, name| path.join(name))
 }
 
 fn exists(path: &Path) -> bool {
@@ -221,8 +239,10 @@ fn a_folder_link_two_levels_down_goes_as_a_link_and_its_target_survives() {
 fn a_file_link_in_the_data_folder_goes_as_a_link_and_its_target_survives() {
     let world = World::new("dad-file-link");
     let link = world.data("secret-link.txt");
-    if let Err(error) = make::symlink_file(&world.canary().join("secret.txt"), &link) {
-        eprintln!("skipped: this machine may not make file symbolic links here ({error})");
+    if !make::made_or_unprivileged(make::symlink_file(
+        &world.canary().join("secret.txt"),
+        &link,
+    )) {
         return;
     }
     let (code, stderr) = world.delete(false);
@@ -234,7 +254,7 @@ fn a_file_link_in_the_data_folder_goes_as_a_link_and_its_target_survives() {
 #[test]
 fn a_data_folder_that_is_a_link_is_refused_and_nothing_is_deleted() {
     let world = World::new("dad-root-link");
-    let local = world.at(&format!("Local/{DATA}"));
+    let local = world.local_root();
     make::remove_dir(&local);
     make::folder_link(&world.canary(), &local);
     let (code, stderr) = world.delete(false);
@@ -243,9 +263,7 @@ fn a_data_folder_that_is_a_link_is_refused_and_nothing_is_deleted() {
     assert!(exists(&local), "the link itself is left alone");
     world.assert_canary_whole();
     // The other folder, checked first or not, is untouched too.
-    assert!(exists(
-        &world.at(&format!("Roaming/{DATA}/.window-state.json"))
-    ));
+    assert!(exists(&world.roaming_root().join(".window-state.json")));
 }
 
 #[test]
@@ -301,7 +319,7 @@ fn a_known_folder_windows_cannot_give_refuses_and_nothing_is_deleted() {
 #[test]
 fn folders_never_made_are_already_deleted() {
     let world = World::new("dad-absent");
-    make::remove_dir(&world.at(&format!("Local/{DATA}")));
+    make::remove_dir(&world.local_root());
     assert_eq!(world.delete(false), (DELETED, String::new()));
     assert_eq!(world.delete(true), (DELETED, String::new()));
     world.assert_both_gone();
@@ -322,7 +340,7 @@ fn without_sandbox_removed_the_sandbox_folder_stays_whole_and_the_rest_goes() {
     assert!(exists(&world.data("sandbox/set-aside")));
     assert!(exists(&world.data("sandbox/agent-link")));
     assert!(!exists(&world.data("store.sqlite")));
-    assert!(!exists(&world.at(&format!("Roaming/{DATA}"))));
+    assert!(!exists(&world.roaming_root()));
     world.assert_canary_whole();
 }
 
@@ -421,13 +439,13 @@ fn what_cannot_be_deleted_is_reported_and_the_rest_still_goes() {
     ));
     assert!(!exists(&world.data("store.sqlite")));
     assert!(!exists(&world.data("logs")));
-    assert!(!exists(&world.at(&format!("Roaming/{DATA}"))));
+    assert!(!exists(&world.roaming_root()));
 }
 
 #[cfg(not(windows))]
 #[test]
-fn a_kept_folder_is_the_answer_even_when_something_else_failed() {
-    // The uninstaller then names the kept folder, never the whole one with its records.
+fn a_kept_folder_and_a_failure_together_have_their_own_code() {
+    // The uninstaller then names both in one message: the kept folder, and the rest.
     let world = World::new("dad-partial-kept");
     let locked = world.data_dir("agents/claude/.claude");
     world.data_file("agents/claude/.claude/credentials-copy");
@@ -441,7 +459,7 @@ fn a_kept_folder_is_the_answer_even_when_something_else_failed() {
     }
     let (code, stderr) = world.delete(false);
     make::set_mode(&locked, 0o755);
-    assert_eq!(code, KEPT_SANDBOX);
+    assert_eq!(code, super::KEPT_AND_FAILED);
     assert!(stderr.contains("could not delete it"), "{stderr}");
     assert!(exists(&world.data("sandbox/acl-ledger.json")));
 }
@@ -468,7 +486,13 @@ fn a_path_without_a_verbatim_prefix_is_left_as_it_is() {
 #[test]
 fn the_folder_names_are_the_sandboxs() {
     assert_eq!(walk::SANDBOX_DIR, "sandbox");
+    // The hook writes these names out; S15 writes them as its constants.
     assert_eq!(walk::SET_ASIDE_PATH, ["sandbox", "set-aside"]);
-    // TODO(#465): compare with clauseo_sandbox::windows::SET_ASIDE_DIR once it is exported.
-    assert_eq!(walk::SET_ASIDE_DIR, "set-aside");
+    assert_eq!(
+        walk::SET_ASIDE_PATH,
+        [
+            clauseo_sandbox::windows::matters::SANDBOX_DIR,
+            clauseo_sandbox::windows::SET_ASIDE_DIR
+        ]
+    );
 }

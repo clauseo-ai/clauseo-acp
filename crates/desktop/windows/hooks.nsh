@@ -34,6 +34,7 @@
 !define CLAUSEO_DELETED 0
 !define CLAUSEO_KEPT_SANDBOX 2
 !define CLAUSEO_KEPT_SET_ASIDE 3
+!define CLAUSEO_KEPT_AND_FAILED 4
 
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
@@ -102,21 +103,29 @@
           StrCpy $R7 1
         ${EndIf}
       ${EndIf}
-      ; The kept folder: the set-aside (3), else `sandbox` whenever it is still there (kept, or
-      ; left by a failure, a refusal or a missing app), so the lawyer is never told to delete its
-      ; records with the rest. None: the whole folder is named instead.
+      ; The kept folder: the set-aside (3, or 4 after --sandbox-removed), else `sandbox` whenever
+      ; it is still there (kept, or left by a failure, a refusal or a missing app), so the lawyer
+      ; is never told to delete its records with the rest. None: only the whole folder is named.
       StrCpy $R8 ""
       ${If} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
+        StrCpy $R8 "$R9\sandbox\set-aside"
+      ${ElseIf} $R7 = ${CLAUSEO_KEPT_AND_FAILED}
+      ${AndIf} $R5 = 1
         StrCpy $R8 "$R9\sandbox\set-aside"
       ${ElseIf} ${FileExists} "$R9\sandbox\*.*"
         StrCpy $R8 "$R9\sandbox"
       ${EndIf}
+      ; One message: nothing kept, the whole folder (Failed); a folder kept and all else gone
+      ; (Kept); a folder kept and something else left, both folders in one box (KeptFailed).
       ${IfNot} ${Silent}
       ${AndIf} $R7 <> ${CLAUSEO_DELETED}
-        ${If} $R8 != ""
+        ${If} $R8 == ""
+          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
+        ${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}
+        ${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
           MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKept)"
         ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKeptFailed)"
         ${EndIf}
       ${EndIf}
     ${EndIf}

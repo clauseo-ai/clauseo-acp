@@ -6,15 +6,14 @@ use std::path::Path;
 
 use super::{DATA, World, exists, make};
 use crate::delete_app_data::walk::{check, plain};
-use crate::delete_app_data::{DELETED, FAILED, ops};
+use crate::delete_app_data::{DELETED, FAILED, KEPT_AND_FAILED, ops};
 
 #[test]
 fn a_directory_symbolic_link_goes_as_a_link_and_its_target_survives() {
     let world = World::new("dad-symlink-dir");
     world.data_dir("EBWebView");
     let link = world.data("EBWebView/linked");
-    if let Err(error) = make::symlink_dir(&world.canary(), &link) {
-        eprintln!("skipped: no privilege to make a directory symbolic link ({error})");
+    if !make::made_or_unprivileged(make::symlink_dir(&world.canary(), &link)) {
         return;
     }
     let (code, stderr) = world.delete(false);
@@ -29,10 +28,11 @@ fn a_junction_to_a_file_link_and_a_folder_all_at_once() {
     let world = World::new("dad-every-link");
     world.data_dir("a/b");
     make::folder_link(&world.canary(), &world.data("a/b/junction"));
-    let symlinks = make::symlink_dir(&world.canary(), &world.data("a/dir-link"))
-        .and_then(|()| make::symlink_file(&world.canary().join("secret.txt"), &world.data("f")));
-    if let Err(error) = symlinks {
-        eprintln!("symbolic links not made ({error}); the junction alone is checked");
+    // The junction needs no privilege and must be made; the symbolic links skip only without it.
+    let dir_link = make::symlink_dir(&world.canary(), &world.data("a/dir-link"));
+    let file_link = make::symlink_file(&world.canary().join("secret.txt"), &world.data("f"));
+    if !make::made_or_unprivileged(dir_link) || !make::made_or_unprivileged(file_link) {
+        return;
     }
     let (code, stderr) = world.delete(false);
     assert_eq!((code, stderr.as_str()), (DELETED, ""));
@@ -70,7 +70,22 @@ fn a_locked_file_is_reported_and_the_rest_still_goes() {
     assert!(exists(&held));
     assert!(!exists(&world.data("store.sqlite")));
     assert!(!exists(&world.data("logs")));
-    assert!(!exists(&world.at(&format!("Roaming/{DATA}"))));
+    assert!(!exists(&world.roaming_root()));
+}
+
+#[test]
+fn a_locked_file_beside_a_kept_sandbox_has_its_own_code() {
+    let world = World::new("dad-locked-kept");
+    world.data_dir("agents");
+    let held = world.data_file("agents/held.log");
+    world.data_dir("sandbox");
+    world.data_file("sandbox/acl-ledger.json");
+    let lock = make::lock(&held);
+    let (code, stderr) = world.delete(false);
+    drop(lock);
+    assert_eq!(code, KEPT_AND_FAILED);
+    assert!(stderr.contains("agents: could not delete it"), "{stderr}");
+    assert!(exists(&world.data("sandbox/acl-ledger.json")));
 }
 
 #[test]
@@ -82,7 +97,7 @@ fn a_pinned_folder_cannot_be_renamed_nor_can_the_folder_above_it() {
     world.data_file("sandbox/acl-ledger.json");
     let pinned = ops::pin_folder(&sandbox).unwrap();
     assert!(make::rename(&sandbox, &world.data("moved")).is_err());
-    let root = world.at(&format!("Local/{DATA}"));
+    let root = world.local_root();
     assert!(make::rename(&root, &world.at("Local/moved")).is_err());
     drop(pinned);
     make::rename(&sandbox, &world.data("moved")).unwrap();
@@ -108,8 +123,9 @@ fn a_data_folder_past_260_characters_is_still_its_known_folders() {
     let world = World::new("dad-long");
     let base = world.at("Local").as_os_str().len();
     let name = "k".repeat(250 - base - 1);
-    let known = world.scratch.dir(&format!("Local/{name}"));
-    let root = world.scratch.dir(&format!("Local/{name}/{DATA}"));
+    world.scratch.dir(&format!("Local/{name}/{DATA}"));
+    let known = world.at("Local").join(&name);
+    let root = known.join(DATA);
     assert!(known.as_os_str().len() < 260 && root.as_os_str().len() > 260);
     assert!(
         dunce::canonicalize(&root).unwrap().as_os_str().len()

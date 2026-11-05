@@ -4,7 +4,7 @@
 ; No byte order mark: the bundler adds one when it copies the file.
 
 ; Clauseo's wording: the one line whose words differ from Tauri's (approved by Rohan, 2026-11-03),
-; then the two lines windows/hooks.nsh adds after the app deletes its data (S20, 2026-11-05).
+; then the three lines windows/hooks.nsh shows after the app deletes its data (S20, 2026-11-05).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -16,6 +16,9 @@ LangString deleteAppData ${LANG_ENGLISH} "Also delete conversations, saved versi
 ; 2026-11-05).
 LangString deleteAppDataFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. You can delete this folder yourself.$\n$\n$R9"
 LangString deleteAppDataKept ${LANG_ENGLISH} "Clauseo kept this folder because it may hold files you still need. Look through it before you delete it.$\n$\n$R8"
+; deleteAppDataKeptFailed: a folder stays ($R8, as deleteAppDataKept) and something else in the
+; data folder ($R9) could not be deleted: one box for both. Provisional (app thread, 2026-11-05).
+LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It kept one folder because it may hold files you still need. Look through that folder before you delete anything.$\n$\nThe folder it kept:$\n$R8$\n$\nThe rest of its data:$\n$R9"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
