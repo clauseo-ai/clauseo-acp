@@ -5,7 +5,9 @@
 use clauseo_protocol::{
     DomainEvent, MessageId, ThreadId, TurnId, TurnQueued, TurnStarted, ViewEntry,
 };
-use clauseo_reducer::{StreamState, apply, queued_order};
+use clauseo_reducer::{
+    Error, REDUCER_SCHEMA_VERSION, Snapshot, SnapshotRef, StreamState, apply, queued_order,
+};
 
 use crate::fixtures::{Log, thread_created, turn_ended, user_message};
 use crate::helpers::{fold, round_trip};
@@ -100,4 +102,30 @@ fn without_at_head_the_queue_keeps_order() {
     // Nothing is marked, so the entries serialise as before.
     let json = serde_json::to_string(&state.entries().values().collect::<Vec<_>>()).unwrap();
     assert!(!json.contains("at_head"), "{json}");
+}
+
+/// Schema 9 folds `at_head` into the view: a snapshot schema 8 wrote (a build that ignored the
+/// mark) is refused, so the stream is refolded from its log and the put-back turn goes first.
+#[test]
+fn a_schema_8_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 9);
+    let (mut log, mut state, thread, first, [two, three]) = two_queued();
+    let (again, again_message) = prompt(&mut log, &mut state, "One");
+    push(&mut log, &mut state, queued(thread, again, first, true));
+    let old = SnapshotRef {
+        reducer_schema: 8,
+        state: &state,
+    };
+    let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
+    assert!(
+        matches!(
+            read,
+            Err(Error::SchemaMismatch {
+                found: 8,
+                expected: 9
+            })
+        ),
+        "{read:?}"
+    );
+    assert_eq!(order(&fold(log.events())), [again_message, two, three]);
 }
