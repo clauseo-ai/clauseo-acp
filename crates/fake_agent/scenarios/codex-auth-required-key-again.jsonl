@@ -1,0 +1,8 @@
+{"scenario":"codex-auth-required-key-again","description":"Codex launched with a key answers the first prompt with auth_required (JSON-RPC -32000); the host's one authenticate with api-key succeeds, but the prompt sent again gets auth_required too, so the turn fails and is held for the sign-in. Any second authenticate is a mismatch","on_stdin_close":"exit"}
+{"include":"codex-handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","error":{"code":-32000,"message":"Authentication required"}}}
+{"note":"codex-acp's authenticate(\"api-key\") reads the key from CODEX_API_KEY when the request has no _meta (research 22 §2.4); the host sends only the method id.","expect":{"method":"authenticate","as":"auth","params":{"methodId":"api-key"},"off":["/_meta"]}}
+{"respond":{"to":"auth","result":{}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p2","error":{"code":-32000,"message":"Authentication required"}}}

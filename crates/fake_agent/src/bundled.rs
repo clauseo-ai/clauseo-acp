@@ -53,6 +53,8 @@ bundled! {
         "claude-steer-injected",
         "claude-tool-calls",
         "codex-auth-required",
+        "codex-auth-required-key",
+        "codex-auth-required-key-again",
         "codex-deny-ends-turn",
         "codex-files",
         "codex-handshake",
