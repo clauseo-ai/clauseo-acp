@@ -5,10 +5,12 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::run::timestamp;
+use super::run::Volume as _;
+use super::time::timestamp;
 use super::{Reason, SetAsideFailure, after_session, before_launch, list_set_aside};
 use super::{restore_set_aside, set_aside_path};
 use crate::Error;
+use crate::windows::Found;
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{World, matter_one};
 use crate::windows::write::rename_new;
@@ -39,11 +41,11 @@ fn a_lawyer_folder_renamed_to_git_is_set_aside_by_its_file_id() {
     w.dir.file("matter/CLAUDE.md", "# the lawyer's\n");
     let policy = w.builder().build().unwrap();
     let data = w.canonical("data");
-    before_launch(&policy, &data, &matter_one(), launch()).unwrap();
+    before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
 
     let root = policy.matter();
     rename_new(&root.join("Precedents"), &root.join(".git")).unwrap();
-    let moved = after_session(&policy, &data, &matter_one(), exit()).unwrap();
+    let moved = after_session(&policy, &data, &matter_one(), "s1", &[], exit()).unwrap();
 
     let names: Vec<_> = moved.iter().map(|e| (e.name.as_str(), e.reason)).collect();
     assert_eq!(names, [(".git", Reason::New)], "CLAUDE.md kept its file ID");
@@ -64,14 +66,14 @@ fn a_junction_named_git_is_moved_as_itself() {
     let target = w.dir.file("elsewhere/Precedents/keep.txt", "kept");
     let policy = w.builder().build().unwrap();
     let data = w.canonical("data");
-    before_launch(&policy, &data, &matter_one(), launch()).unwrap();
+    before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
 
     junction(
         &policy.matter().join(".git"),
         &w.canonical("elsewhere/Precedents"),
     )
     .unwrap();
-    let moved = after_session(&policy, &data, &matter_one(), exit()).unwrap();
+    let moved = after_session(&policy, &data, &matter_one(), "s1", &[], exit()).unwrap();
 
     assert_eq!(moved.len(), 1);
     assert!(std::fs::symlink_metadata(&moved[0].to).is_ok());
@@ -85,14 +87,20 @@ fn a_junction_at_the_pass_folder_is_refused_and_nothing_moves_through_it() {
     let decoy = w.dir.dir("elsewhere/decoy");
     let policy = w.builder().build().unwrap();
     let data = w.canonical("data");
-    before_launch(&policy, &data, &matter_one(), launch()).unwrap();
+    before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
     w.dir.file("matter/.mcp.json", "{}");
 
     junction(&base(&data).join(timestamp(exit())), &decoy).unwrap();
-    let error = after_session(&policy, &data, &matter_one(), exit()).unwrap_err();
+    let error = after_session(&policy, &data, &matter_one(), "s1", &[], exit()).unwrap_err();
 
     assert!(
-        matches!(error, Error::SetAside(SetAsideFailure::Changed)),
+        matches!(
+            error,
+            Error::SetAside {
+                failure: SetAsideFailure::Changed,
+                ..
+            }
+        ),
         "{error:?}"
     );
     assert!(policy.matter().join(".mcp.json").is_file());
@@ -106,7 +114,7 @@ fn a_junction_at_the_set_aside_folder_is_refused_and_nothing_moves_through_it() 
         let decoy = w.dir.dir("elsewhere/decoy");
         let policy = w.builder().build().unwrap();
         let data = w.canonical("data");
-        before_launch(&policy, &data, &matter_one(), launch()).unwrap();
+        before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
         w.dir.file("matter/.mcp.json", "{}");
 
         let planted = if part == "set-aside" {
@@ -116,9 +124,9 @@ fn a_junction_at_the_set_aside_folder_is_refused_and_nothing_moves_through_it() 
         };
         rename_new(&planted, &data.join("sandbox/was")).unwrap();
         junction(&planted, &decoy).unwrap();
-        let error = after_session(&policy, &data, &matter_one(), exit()).unwrap_err();
+        let error = after_session(&policy, &data, &matter_one(), "s1", &[], exit()).unwrap_err();
 
-        assert!(matches!(error, Error::SetAside(_)), "{part}: {error:?}");
+        assert!(matches!(error, Error::SetAside { .. }), "{part}: {error:?}");
         assert!(policy.matter().join(".mcp.json").is_file(), "{part}");
         assert!(is_empty(&decoy), "{part}");
     }
@@ -129,10 +137,10 @@ fn restore_moves_back_through_the_real_renames_and_never_overwrites() {
     let w = World::new("ntfs-aside-restore");
     let policy = w.builder().build().unwrap();
     let data = w.canonical("data");
-    before_launch(&policy, &data, &matter_one(), launch()).unwrap();
+    before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
     w.dir
         .file("matter/.claude/settings.json", "{\"agent\": true}");
-    let entry = after_session(&policy, &data, &matter_one(), exit())
+    let entry = after_session(&policy, &data, &matter_one(), "s1", &[], exit())
         .unwrap()
         .remove(0);
 
@@ -170,4 +178,55 @@ fn the_walks_item_is_set_aside_and_restored() {
     assert!(entry.to.is_file());
     restore_set_aside(&data, &entry).unwrap();
     assert!(path.is_file());
+}
+
+/// What the walk reports for `path`, with its real file ID.
+fn found(path: &Path) -> Found {
+    let id = super::ntfs::Ntfs.file_id(path).unwrap().unwrap();
+    Found {
+        path: path.to_owned(),
+        volume: id.volume,
+        id: id.id,
+    }
+}
+
+/// N1: a lawyer folder renamed to `sub\.git` after launch is set aside, its hooks with it, at
+/// its own path in the pass's folder, through the real NTFS calls and file IDs; the
+/// rename itself is `NtSetInformationFile` with a `RootDirectory`, which the VM showed
+/// `SetFileInformationByHandle` refuses.
+#[test]
+fn a_lawyer_folder_renamed_to_a_nested_git_is_set_aside_by_its_file_id() {
+    let w = World::new("ntfs-aside-nested");
+    w.dir
+        .file("matter/Precedents/hooks/pre-commit", "exit 0\r\n");
+    w.dir.file("matter/sub/.git/HEAD", "ref: refs/heads/main\n");
+    w.dir.file("matter/other/.mcp.json", "{}");
+    let policy = w.builder().build().unwrap();
+    let data = w.canonical("data");
+    let root = policy.matter().to_owned();
+    let at_launch = [
+        found(&root.join("sub/.git")),
+        found(&root.join("other/.mcp.json")),
+    ];
+    before_launch(&policy, &data, &matter_one(), "s1", &at_launch, launch()).unwrap();
+
+    rename_new(&root.join("sub/.git"), &root.join("sub/old-git")).unwrap();
+    rename_new(&root.join("Precedents"), &root.join("sub/.git")).unwrap();
+    let at_exit = [
+        found(&root.join("sub/.git")),
+        found(&root.join("other/.mcp.json")),
+    ];
+    let moved = after_session(&policy, &data, &matter_one(), "s1", &at_exit, exit()).unwrap();
+
+    let seen: Vec<_> = moved.iter().map(|e| (e.from.clone(), e.reason)).collect();
+    assert_eq!(seen, [(root.join("sub").join(".git"), Reason::Changed)]);
+    assert_eq!(
+        moved[0].to,
+        base(&data).join(timestamp(exit())).join("sub").join(".git")
+    );
+    assert!(moved[0].to.join("hooks/pre-commit").is_file());
+    assert!(root.join("sub/old-git/HEAD").is_file());
+    assert!(root.join("other/.mcp.json").is_file(), "unchanged");
+    restore_set_aside(&data, &moved[0]).unwrap();
+    assert!(root.join("sub/.git/hooks/pre-commit").is_file());
 }
