@@ -358,6 +358,107 @@ on, treats any failed target as a set-up failure, and keeps what was written. Un
 the `LocalLow` denies before it deletes each profile, then the account, then `DeviceSync`'s deny
 (`shared_writes.rs`).
 
+### Fast later launches (PR3d)
+
+A later launch spent its time on the strict walk of the matter, state and notes trees and on the
+set-aside's scan: 633 ms at 5,000 files and 5.0 s at 50,000, warm, and 12 s cold at 50,000. Both
+are deterministic in four inputs: the plan's walk inputs (the own roots, the matter's grants on
+them, the strict sets), each root's descriptor and identity, the trees' names and file IDs, and
+each child's descriptor. If none changed since a walk that passed, walking again changes nothing
+and refuses nothing. The NTFS change journal says whether any did (`clean_close.rs`).
+
+**The record.** At a clean session end PR6 writes `<data_dir>\sandbox\clean\<matter>.bin`:
+- the walk inputs as the session-end repair used them (kept whole, not hashed: an exact
+  comparison);
+- each own root's path, volume serial and 64-bit file ID;
+- each volume's journal ID and cursor (`NextUsn`), read before the repair starts, so anything
+  the repair or anyone else changes while it runs is replayed at the next launch;
+- every name below the roots: its file reference, its folder's, and whether it is a folder,
+  read through each folder's handle after the repair, never through a link;
+- a format version.
+
+A session end is clean only when the repair passed, `after_session` passed with a complete scan,
+no session of the matter is open (checked under the set-aside lock the record is written under),
+no ledger entry on, in or above an own root is `pending` or `removing`, no hand-back is owed for
+the matter, each root is still the folder the cursor was taken for, and every folder could be
+listed. Otherwise no record is written.
+
+**Spent at every launch.** `check_launch` reads the record and removes it under the matter's
+set-aside lock before it decides anything. A removal that fails refuses the launch
+(`Error::CleanClose`). The set-aside's launch pass removes it again, under the same lock, as it
+adds the session, so a record written by a session end racing a launch never stands while that
+launch's agent runs.
+
+**The check** (on the host, at the lawyer's Medium token) walks in full when any of these holds:
+1. there is no record, it can't be read, it is another matter's, or another version's;
+2. a session of the matter is open;
+3. the plan's walk inputs differ from the record's;
+4. a ledger entry on, in or above an own root is `pending` or `removing`, or a hand-back is owed;
+5. a root can't be opened by its path as itself, or has another file ID or volume;
+6. a root's drive is removable (`DRIVE_REMOVABLE`, any type but `DRIVE_FIXED`, a USB, 1394, SD
+   or MMC bus, or a bus query that fails);
+7. the volume isn't NTFS, or its file IDs don't fit 64 bits (ReFS);
+8. the volume has no journal, or the query or read fails or isn't supported;
+9. the journal ID differs (the journal was deleted and made again);
+10. the cursor is below the journal's lowest readable USN (it wrapped), or records past it are
+    lost during the read;
+11. the cursor is past the journal's next USN (a reset, a restored or rolled-back volume);
+12. a record touches an own root itself (its descriptor or its name);
+13. more changed items than 2,000, or 5% of the trees' names if fewer: past that, walking the
+    changed folders one by one costs about what the full walk does, since each changed item's
+    folder is listed and its children worked out (about 0.1 ms each) and a folder holds about ten
+    names;
+14. a changed folder's place can't be read.
+
+Otherwise it keeps the journal records past the cursor whose file is a recorded name or whose
+folder is a recorded folder, or one such a record brought in. Data writes, closes, basic
+information, extended attributes, object IDs, indexing, streams, compression and integrity can't
+change a walk's result and are passed over; every other reason bit counts, an unknown one too.
+With none left the launch skips the own-tree walks and the set-aside scan; grants not yet written
+are still written and walked. With some, it walks each changed item's folder's children
+(`Reach::Children`), and the whole subtree of a changed folder that isn't a link (one moved in
+brings its contents with no records of their own), strictly, setting aside and refusing as any
+walk does. The set-aside re-probes those folders in the matter and keeps the rest of its record.
+A file whose DACL changed through a hard link outside the trees has its record's folder outside,
+so every folder the record holds it in is walked. A folder swapped in for a root has the root's
+parent as its parent, outside the trees, which is why each root's file ID is checked by path.
+
+**Why the pool user can't make a launch skip.** Every input is out of its reach:
+- the record and the set-aside record live in the sandbox folder, whose protected DACL names only
+  the desktop user, `SYSTEM` and `Administrators`, and each is checked before it is read;
+- the journal is the kernel's: every change to the volume is logged whoever made it, deleting or
+  resizing it needs admin, and a read with a journal ID checks it is the same journal;
+- what an agent can do to the journal is fill it so it wraps, which means the full walk;
+- the ledger and the plan come from the protected folder and the launcher;
+- no agent runs between a clean close and the next launch: the record is written once PR5's job
+  object is empty and spent before the next agent starts;
+- the root facts come from opening each root by path with `FILE_FLAG_OPEN_REPARSE_POINT`, and the
+  drive type and bus from the OS.
+
+**What the skip doesn't change.** A change made after the check reads the journal and before the
+agent starts is not seen until the session-end repair. That window is the one today's walk has
+between visiting a folder and the agent's start.
+
+**Accepted risk: changes made by another OS while the volume was offline.** The journal sees only
+what Windows mounted. A fixed disk changed under another OS (dual boot, Linux `ntfs-3g`) can carry
+a descriptor change no record shows, so the next launch may skip a walk it needed. Removable
+drives always walk in full. The session-end repair still walks everything at each session end.
+
+**The unprivileged read.** `FSCTL_READ_UNPRIVILEGED_USN_JOURNAL` reads the journal through a
+folder handle without admin rights, and gives records without names, including those of files the
+caller can't open. Microsoft Learn has no page for it. The Windows SDK's `winioctl.h` defines it
+from SDK 10.0.14393.0 under `#if (_WIN32_WINNT >= _WIN32_WINNT_WIN10_RS1)`, which is Windows 10
+1607, build 14393; SDK 10.0.10240.0 lacks it
+(<https://raw.githubusercontent.com/tpn/winsdk-10/master/Include/10.0.14393.0/um/winioctl.h>, a
+mirror of the SDK headers, not a Microsoft page). This is the header's guard, not a Microsoft
+statement of support, and it was measured only on Windows Server 2025 (build 26100). Where the
+call fails, the launch walks in full.
+
+**For PR4's set-up.** The elevated set-up enlarges the journal on each volume that holds a matter
+(`FSCTL_CREATE_USN_JOURNAL`) to at most 256 MB (`MaximumSize` 256 MB, `AllocationDelta` 32 MB), and
+never shrinks a journal already larger. The default 32 MB held about 400,000 records in S15's
+measurements; a wrap only costs a full walk, so a larger journal makes them rarer.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
