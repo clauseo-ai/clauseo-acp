@@ -155,9 +155,9 @@
     "en": "Claude wants to save its plan as a note in its own folder, not in this matter.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "stage C #418: Claude's plan note in its own folder"
+    "by": "Rohan",
+    "note": "stage C #418: Claude's plan note in its own folder; Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }

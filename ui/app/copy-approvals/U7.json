@@ -228,8 +228,9 @@
     "en": "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }

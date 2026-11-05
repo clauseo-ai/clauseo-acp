@@ -146,148 +146,153 @@
     "en": "Snoozed",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-03": {
     "en": "Next back {when}",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "cut from \"The next is back at {time}\"; {when} is \"6:00 pm\", \"tomorrow 9:00 am\" or \"Monday 9:00 am\""
+    "by": "Rohan",
+    "note": "cut from \"The next is back at {time}\"; {when} is \"6:00 pm\", \"tomorrow 9:00 am\" or \"Monday 9:00 am\"; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-04": {
     "en": "Back sooner if Clauseo needs you or an answer finishes.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "behind the open shelf's info icon"
+    "by": "Rohan",
+    "note": "behind the open shelf's info icon; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-05": {
     "en": "Until {when}",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "one line for the brief's three: {when} carries tomorrow (RO-33) or the day"
+    "by": "Rohan",
+    "note": "one line for the brief's three: {when} carries tomorrow (RO-33) or the day; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-06": {
     "en": "Whole matter",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "cut from \"The whole matter\""
+    "by": "Rohan",
+    "note": "cut from \"The whole matter\"; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-07": {
     "en": "Snooze until",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-08": {
     "en": "Tomorrow {time} / Monday {time} / Choose a day and time",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-09": {
     "en": "Before the next date",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-10": {
     "en": "Snoozed until {when} / Undo",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved"
+    "by": "Rohan",
+    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-11": {
     "en": "Snoozed until {when}",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "the alarm clock's words, under the pointer and to assistive technology"
+    "by": "Rohan",
+    "note": "the alarm clock's words, under the pointer and to assistive technology; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-12": {
     "en": "Wake now",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "the up arrow's name, under the pointer and to assistive technology"
+    "by": "Rohan",
+    "note": "the up arrow's name, under the pointer and to assistive technology; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-13": {
     "en": "Snooze / Mark as done / Mark as not done",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "the alarm clock's, the tick's and the undo arrow's names; Snooze also the conversation's context menu's item"
+    "by": "Rohan",
+    "note": "the alarm clock's, the tick's and the undo arrow's names; Snooze also the conversation's context menu's item; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-14": {
     "en": "Marked as done / Undo",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved"
+    "by": "Rohan",
+    "note": "the line's full stop dropped; Undo is words.ts's own, its Hindi approved; Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-15": {
     "en": "Snooze until / Mark all done",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "RO-07's \"Snooze until\" on the submenu's row, its \"…\" dropped (the row's chevron says it opens)"
+    "by": "Rohan",
+    "note": "RO-07's \"Snooze until\" on the submenu's row, its \"…\" dropped (the row's chevron says it opens); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-16": {
     "en": "Done",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "Rohan",
+    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-17": {
     "en": "Conversations you've read, with nothing waiting, move here each morning.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "behind the open fold's info icon; the brief's line, kept whole (the cut read as an instruction)"
+    "by": "Rohan",
+    "note": "behind the open fold's info icon; the brief's line, kept whole (the cut read as an instruction); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "RO-33": {
     "en": "tomorrow {time}",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-05",
-    "by": "app track (provisional; Rohan batch review)",
-    "note": "split from RO-05 and RO-10: a time tomorrow inside them"
+    "by": "Rohan",
+    "note": "split from RO-05 and RO-10: a time tomorrow inside them; Rohan, running-page batch 2026-11-05 (written by app track)"
   }
 }
