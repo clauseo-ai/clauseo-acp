@@ -447,20 +447,22 @@ fn sandbox_folder(test: &str) -> (TempDir, PathBuf) {
 }
 
 #[test]
-fn a_record_file_with_an_explicit_entry_keeps_only_what_it_inherits() {
-    let (temp, _folder) = sandbox_folder("record-file-ace");
-    let file = temp.file("sandbox/matters.json", "{}");
+fn record_files_get_the_folders_three_entries_as_their_own() {
+    use super::matters::MatterSids;
+
+    let (temp, folder) = sandbox_folder("record-file-ace");
+    let file = temp.file("sandbox/matters.json", r#"{"version":1,"matters":{}}"#);
     test_dacl::protect_with(&file, "D:P(A;;FA;;;WD)").unwrap();
     assert!(dacl_sddl(&file).contains(";WD)"));
-    super::write::check_owned_file(&file).unwrap();
-    let sddl = dacl_sddl(&file);
-    assert!(!sddl.starts_with("D:P"), "{sddl}");
-    assert!(!sddl.contains(";WD)"), "{sddl}");
-    for ace in sddl.split('(').skip(1) {
-        let flags = ace.split(';').nth(1).unwrap();
-        assert!(flags.contains("ID"), "an explicit entry is left: {sddl}");
+    let mut sids = MatterSids::load(temp.path()).unwrap();
+    // Twice: the first save replaces matters.json with a new file, which the second checks.
+    for matter in [MATTER_A, "0190f5c8-7b1a-7c3d-8e4f-0123456789ac"] {
+        sids.sid_for(&matter.parse().unwrap()).unwrap();
+        assert_private(&folder.join("matters.json"));
+        assert_private(&folder.join("matters.lock"));
     }
-    assert_eq!(sddl.split('(').count() - 1, 3, "{sddl}");
+    assert_eq!(MatterSids::load(temp.path()).unwrap().len(), 2);
+    drop(file);
 }
 
 #[test]

@@ -179,6 +179,8 @@ impl MatterSids {
         sids.insert(*matter, sid.clone());
         save(&file, &sids)?;
         self.sids = sids;
+        // The save put a new file in place; it gets the same explicit DACL.
+        write::check_owned_file(&file).map_err(failed)?;
         Ok(sid)
     }
 }

@@ -72,12 +72,18 @@ pub fn path(data_dir: &Path) -> PathBuf {
     data_dir.join(SANDBOX_DIR).join(SETUP_FILE)
 }
 
-/// Reads `<data_dir>\sandbox\setup.json` for the Windows user `user`. The user is checked
+/// Reads `<data_dir>\sandbox\setup.json` for the Windows user `user`, after
+/// `write::check_owned_file` (a link, a second hard link or an owner that can't be taken back is
+/// [`MarkerState::Unreadable`]). The user is checked
 /// before the version, so another user's marker is [`MarkerState::OtherUser`] whatever its
 /// version; then a lower version is [`MarkerState::Older`], a higher one
 /// [`MarkerState::Newer`], and this version must parse whole to be [`MarkerState::Current`].
 pub fn read(data_dir: &Path, user: &Sid) -> MarkerState {
-    let bytes = match std::fs::read(path(data_dir)) {
+    let file = path(data_dir);
+    if let Err(error) = write::check_owned_file(&file) {
+        return MarkerState::Unreadable(error.to_string());
+    }
+    let bytes = match std::fs::read(&file) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return MarkerState::Missing,
         Err(error) => return MarkerState::Unreadable(error.to_string()),
@@ -102,7 +108,8 @@ pub fn read(data_dir: &Path, user: &Sid) -> MarkerState {
 }
 
 /// Writes `marker` as `<data_dir>\sandbox\setup.json`, atomically, making the folder if
-/// missing. Set-up's last step (S15 PR4).
+/// missing and checking the old file first (`write::check_owned_file`), and the new one after.
+/// Set-up's last step (S15 PR4).
 pub fn write(data_dir: &Path, marker: &Marker) -> Result<(), SetupError> {
     let file = path(data_dir);
     let failed = |why: String| SetupError::Failed(format!("{}: {why}", file.display()));
@@ -111,7 +118,10 @@ pub fn write(data_dir: &Path, marker: &Marker) -> Result<(), SetupError> {
     if let Some(folder) = file.parent() {
         write::make_sandbox_dir(folder).map_err(|error| failed(error.to_string()))?;
     }
-    write::write_atomic(&file, &bytes).map_err(|error| failed(error.to_string()))
+    write::check_owned_file(&file).map_err(|error| failed(error.to_string()))?;
+    write::write_atomic(&file, &bytes).map_err(|error| failed(error.to_string()))?;
+    // The new file in place gets the same explicit DACL.
+    write::check_owned_file(&file).map_err(|error| failed(error.to_string()))
 }
 
 /// The machine's records under `HKLM\SOFTWARE\Clauseo\Sandbox` that the set-up state reads: a
@@ -428,5 +438,19 @@ mod tests {
             state(MarkerState::Unreadable("bad".to_owned())),
             SetupState::Failed(_)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_marker_is_unreadable_and_not_written() {
+        let temp = TempDir::new("marker-hard-link");
+        write(temp.path(), &marker(SETUP_VERSION, LAWYER)).unwrap();
+        let outside = temp.hard_link("outside.json", &path(temp.path()));
+        assert!(matches!(
+            read(temp.path(), &sid(LAWYER)),
+            MarkerState::Unreadable(why) if why.contains("hard links")
+        ));
+        assert!(write(temp.path(), &marker(SETUP_VERSION, LAWYER)).is_err());
+        drop(outside);
     }
 }
