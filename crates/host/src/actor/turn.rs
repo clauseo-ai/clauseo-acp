@@ -35,9 +35,9 @@ mod state;
 mod steps;
 mod text;
 mod undo;
-mod undo_preview;
+pub(crate) mod undo_preview;
 mod updates;
-mod wide;
+pub(crate) mod wide;
 mod writer;
 
 use std::collections::VecDeque;
@@ -68,8 +68,6 @@ pub(crate) use restore::{
 };
 pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
-pub(crate) use undo_preview::preview_undo;
-pub(crate) use wide::TurnPath;
 pub(crate) use writer::{
     hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
@@ -305,7 +303,7 @@ enum TimerKind {
     LimitRead(TurnId),
     /// A steer's answer did not come in time (`queue/steer.rs`).
     Steer(clauseo_protocol::MessageId),
-    /// A `stop_agents` wait ran out (`sign_in/stops.rs`); the thread is any of its agent's.
+    /// A `stop_agents` wait ran out (`sign_in/stops.rs`), for any thread of its agent.
     StopWait(u64),
 }
 

@@ -127,7 +127,7 @@ pub(crate) struct Actor {
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
-    pub(crate) turn_path: turn::TurnPath,
+    pub(crate) turn_path: turn::wide::TurnPath,
     pub(crate) refused_folders: Vec<PathBuf>,
     /// The lawyer's home folder as configured, for `matter.folder_is_home` (the refused list
     /// names it the same way).

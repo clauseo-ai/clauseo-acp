@@ -106,7 +106,7 @@ pub(super) fn query(
             matter_query(actor, matter, vec![checkpoint], job, reply);
         }
         HostQuery::PreviewUndo { thread, turn } => {
-            super::turn::preview_undo(actor, thread, turn, reply);
+            super::turn::undo_preview::preview_undo(actor, thread, turn, reply);
         }
         HostQuery::Search(ref request) => actor.search.query(
             crate::search::QUERY_WINDOW,
