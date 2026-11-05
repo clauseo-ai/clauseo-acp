@@ -13,10 +13,12 @@ workspace = true
 name = "clauseo-mcp"
 path = "src/main.rs"
 
-# serde_json only (it brings serde), and `windows` on Windows (below): the guard reads JSON-RPC
-# lines as `serde_json::Value`. No HTTP client, socket crate, async runtime or tauri; `tests/guard/deps.rs` fails on any of them, and
-# ARCHITECTURE.md's row bans them.
+# serde and serde_json, and `windows` on Windows (below): the guard reads JSON-RPC lines as
+# `serde_json::Value`, and the connector reads only a line's `id` and `method` (`connector/head.rs`),
+# through serde's derive. No HTTP client, socket crate, async runtime or tauri; `tests/guard/deps.rs`
+# fails on any of them, and ARCHITECTURE.md's row bans them.
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 # Windows only: agent-browser runs in a Job Object the guard owns, so a refused port, and the
