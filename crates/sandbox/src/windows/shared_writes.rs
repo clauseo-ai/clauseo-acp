@@ -13,11 +13,12 @@
 //! a file an agent makes there with its own DACL would outlive the session.
 //!
 //! The deny applies even though allows to the group don't: deny entries are matched against the
-//! token's normal groups, which the pool group is one of. The owner always has `WRITE_DAC`, and
-//! each pool user owns its `LocalLow`, so that `LocalLow` also gets an `OWNER RIGHTS` deny
-//! ([`OWNER_RIGHTS_SID`]): it replaces the owner's implied rights, so the owner loses
-//! `WRITE_DAC` and `WRITE_OWNER`. `DeviceSync` is owned by `SYSTEM`, which Windows writes to, so
-//! it gets no `OWNER RIGHTS` deny.
+//! token's normal groups, which the pool group is one of. The owner always has `WRITE_DAC`. The
+//! files a pool user makes in its `LocalLow` are that user's own, so each `LocalLow` also gets
+//! an `OWNER RIGHTS` deny ([`OWNER_RIGHTS_SID`]) that replaces the owner's implied rights: the
+//! owner loses `WRITE_DAC` and `WRITE_OWNER` on what is below. The deny is inherit-only
+//! ([`Inherit::Below`]): `LocalLow` itself is SYSTEM's, and keeps SYSTEM's rights there.
+//! `DeviceSync` is SYSTEM's too, and Windows writes to it, so it gets no `OWNER RIGHTS` deny.
 //!
 //! Each grant is written, then walked down (`propagate`) with the pool group and every pool user
 //! watched, and the pool users as the owners to repair. So what's already there inherits the
@@ -34,7 +35,8 @@
 //!
 //! Set-up (PR4) applies these with admin rights after it creates each pool user's profile and
 //! logs the user on, and treats any failed target as a set-up failure, keeping what was written.
-//! Uninstall removes them: profile, then account, then the entries (fix 5's order).
+//! Uninstall removes them in this order: the `LocalLow` denies, then each profile, then the
+//! account, then `DeviceSync`'s deny. A `LocalLow` deny stays up until its profile is gone.
 //!
 //! The planning and the apply take an [`AclWriter`], so they build and test on every OS; the
 //! real-NTFS test is Windows-only (`tests.rs`).
@@ -81,27 +83,28 @@ pub fn shared_write_targets(program_data: &Path, pool_profiles: &[PathBuf]) -> V
 }
 
 /// The grants for `targets`, in order: each target gets `group`'s `DenyWrite`, inherited to the
-/// tree; a `LocalLow` target also gets an [`OWNER_RIGHTS_SID`] `DenyWrite`, right after its
-/// group's. Refuses only if [`OWNER_RIGHTS_SID`] doesn't parse, which it does.
+/// tree; a `LocalLow` target also gets an [`OWNER_RIGHTS_SID`] `DenyWrite` right after its
+/// group's, inherit-only ([`Inherit::Below`]). Refuses only if [`OWNER_RIGHTS_SID`] doesn't parse,
+/// which it does.
 pub fn plan_shared_write_denies(group: &Sid, targets: &[PathBuf]) -> Result<Vec<Grant>, NotASid> {
     let owner_rights = Sid::parse(OWNER_RIGHTS_SID)?;
     let mut grants = Vec::new();
     for path in targets {
-        grants.push(deny(path, group.clone()));
+        grants.push(deny(path, group.clone(), Inherit::Tree));
         if is_local_low(path) {
-            grants.push(deny(path, owner_rights.clone()));
+            grants.push(deny(path, owner_rights.clone(), Inherit::Below));
         }
     }
     Ok(grants)
 }
 
-/// One `DenyWrite` for `sid` on `path`, inherited to the tree.
-fn deny(path: &Path, sid: Sid) -> Grant {
+/// One `DenyWrite` for `sid` on `path`, inherited as `inherit` says.
+fn deny(path: &Path, sid: Sid, inherit: Inherit) -> Grant {
     Grant {
         path: path.to_owned(),
         sid,
         rights: Rights::DenyWrite,
-        inherit: Inherit::Tree,
+        inherit,
         kind: PathKind::SharedWrite,
     }
 }
