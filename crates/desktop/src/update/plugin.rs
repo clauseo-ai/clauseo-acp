@@ -65,11 +65,7 @@ impl Source {
         &self,
         app: &AppHandle<R>,
     ) -> Result<tauri_plugin_updater::Updater, PluginError> {
-        let builder = app.updater_builder().configure_client(|client| {
-            client
-                .connect_timeout(CONNECT_TIMEOUT)
-                .read_timeout(READ_TIMEOUT)
-        });
+        let builder = app.updater_builder().configure_client(client);
         let builder = match self {
             Source::Config => builder,
             Source::Endpoint { url, pubkey } => {
@@ -78,6 +74,19 @@ impl Source {
         };
         builder.build()
     }
+}
+
+/// The settings every request of the updater gets (`configure_client`, which the plugin applies
+/// to the check's client and the download's): the timeouts, and HTTPS only, so neither an
+/// `http://` URL nor a redirect from HTTPS to HTTP is ever followed. The plugin refuses an
+/// `http://` endpoint in a release build but only warns for a download URL, and checks neither
+/// after a redirect. Every build, `e2e` included: its test release is on GitHub, over HTTPS,
+/// and no test serves an update over HTTP.
+pub(super) fn client(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
+        .https_only(true)
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
 }
 
 /// What an [`Offer`]'s handle holds, and so the [`Downloaded`] made from it: the plugin's update,
@@ -226,9 +235,12 @@ impl Drop for AbortOnDrop {
 }
 
 /// Saves `bytes`, the installer of `version`, as the only file of `<updates>/<version>/`, which
-/// the host offers again at the next start (`find_cached`): written to `<updates>/.<version>.part`
-/// and synced, then the version's folder emptied and the file moved in, so the folder holds a
-/// whole file or none. Refuses a version that is not plain dotted numbers, the only form a
+/// the host offers again at the next start (`find_cached`): written to a temporary file of its
+/// own, `<updates>/.<version>.<uuid>.part` ([`temp_name`]), so two downloads of one version never
+/// write the same file, and synced, then the version's folder emptied and the file moved in, so
+/// the folder holds a whole file or none. A temporary file a crash left is removed by the host's
+/// next start, which keeps nothing in `updates/` but the folder it offers. Refuses a version
+/// that is not plain dotted numbers, the only form a
 /// Clauseo release takes, so the folder's name is always one the host reads.
 #[expect(
     clippy::disallowed_methods,
@@ -243,7 +255,7 @@ pub(super) fn save_download(updates: &Path, version: &str, bytes: &[u8]) -> io::
         ));
     }
     fs::create_dir_all(updates)?;
-    let temp = updates.join(format!(".{version}.part"));
+    let temp = updates.join(temp_name(version));
     let written = fs::File::create(&temp).and_then(|mut file| {
         file.write_all(bytes)?;
         file.sync_all()
@@ -269,6 +281,12 @@ pub(super) fn save_download(updates: &Path, version: &str, bytes: &[u8]) -> io::
             Err(error)
         }
     }
+}
+
+/// A download's temporary name in `updates/`: `.<version>.<uuid>.part`, a new UUID (v7: time and
+/// random bits) each time. The leading dot keeps it from reading as a version's folder.
+pub(super) fn temp_name(version: &str) -> String {
+    format!(".{version}.{}.part", uuid::Uuid::now_v7().simple())
 }
 
 /// Syncs `folder`, so the rename into it survives a power cut (Unix; Windows has no folder

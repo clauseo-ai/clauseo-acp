@@ -276,6 +276,62 @@ fn a_check_that_cannot_connect_is_a_network_failure_naming_no_url() {
     );
 }
 
+/// Every request is HTTPS only: a check of an `http://` endpoint fails before any connection
+/// is made, though something listens there (the plugin itself allows such an endpoint in a debug
+/// build, with a warning, and never checks a redirect's or a download's scheme). The client's
+/// settings (`plugin::client`) refuse it on their own too.
+#[test]
+fn a_request_over_http_is_refused_before_it_connects() {
+    let app = app();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}/latest.json");
+    let source = Source::Endpoint {
+        url: url.parse().unwrap(),
+        pubkey: fixture_key(),
+    };
+    let scratch = Scratch::new("update-http", &[]);
+    let updater = PluginUpdater::new(
+        app.handle().clone(),
+        source,
+        InstallKind::CurrentUser,
+        scratch.path().join("updates"),
+    );
+    let failed = block_on(updater.check()).unwrap_err();
+    assert!(matches!(failed, UpdaterError::Network(_)), "{failed:?}");
+    assert_eq!(
+        listener.accept().map(|_accepted| ()).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "a connection reached the listener"
+    );
+
+    let client = plugin::client(reqwest::Client::builder()).build().unwrap();
+    let refused = tauri::async_runtime::block_on(client.get(&url).send()).unwrap_err();
+    assert!(refused.is_builder(), "{refused:?}");
+    assert_eq!(
+        listener.accept().map(|_accepted| ()).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "a connection reached the listener"
+    );
+}
+
+/// A download's temporary file has a name of its own each time, in `updates/` and never read as
+/// a version's folder, so two downloads of one version never share one.
+#[test]
+fn each_download_writes_a_temporary_file_of_its_own() {
+    let first = plugin::temp_name("0.4.1");
+    let second = plugin::temp_name("0.4.1");
+    assert_ne!(first, second);
+    for name in [&first, &second] {
+        assert!(
+            name.starts_with(".0.4.1.") && name.rsplit('.').next() == Some("part"),
+            "{name}"
+        );
+        assert!(!name.contains('/') && !name.contains('\\'), "{name}");
+    }
+}
+
 /// Dropping the future the host holds aborts the task on Tauri's runtime.
 #[test]
 fn dropping_the_future_aborts_its_task() {
