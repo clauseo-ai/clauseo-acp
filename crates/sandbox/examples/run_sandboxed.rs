@@ -19,11 +19,12 @@
 //! `--browser-sockets` (Unix) makes the browser's socket folder, `/tmp/clauseo-ab-<id>`, allows it
 //! in the jail, and sets `AGENT_BROWSER_SOCKET_DIR` to it for `cmd`; the folder's path is printed
 //! on stderr and the folder is removed when the command has exited. `--browser-sockets` refuses an
-//! `AGENT_BROWSER_SOCKET_DIR` from `--env` or `--env-file`. Each denial prints as one JSON line on
-//! stderr, for a second after the command ends (the watcher's lines arrive within a few tens of
-//! milliseconds). `--print-spec` first prints the profile and its `-D` arguments as one JSON object
-//! on stdout. The exit code is the command's (128 plus the signal when a signal ended it); 2 for a
-//! usage error or a refused policy. macOS only until S15 adds Windows.
+//! `AGENT_BROWSER_SOCKET_DIR` from `--env` or `--env-file`. SIGTERM, SIGINT or SIGHUP to this
+//! process ends the command's whole process group (SIGTERM, then SIGKILL after 3 s). Each denial
+//! prints as one JSON line on stderr, for a second after the command ends (the watcher's lines
+//! arrive within a few tens of milliseconds). `--print-spec` first prints the profile and its `-D`
+//! arguments as one JSON object on stdout. The exit code is the command's (128 plus the signal when
+//! a signal ended it); 2 for a usage error or a refused policy. macOS only until S15 adds Windows.
 
 use std::process::ExitCode;
 
@@ -44,33 +45,42 @@ fn main() -> ExitCode {
 }
 
 #[cfg(target_os = "macos")]
+#[path = "run_sandboxed/env.rs"]
+mod env;
+
+#[cfg(target_os = "macos")]
 mod jail {
-    use std::collections::BTreeMap;
     use std::ffi::OsString;
-    use std::fs::File;
-    use std::io::{Read, Write as _};
+    use std::io::Write as _;
     use std::path::{Path, PathBuf};
     use std::process::ExitCode;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
     use std::time::Duration;
 
+    use super::env::{
+        SOCKET_DIR_VAR, launch_env, parse_env_file_text, parse_env_pair, read_env_file,
+    };
     use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher, SpawnOptions};
     use clauseo_sandbox::{
         BrowserSocketDir, Denial, DenialSink, Loopback, Policy, SeatbeltLauncher,
     };
     use futures::io::{AllowStdIo, AsyncWriteExt as _};
-    use rustix::fs::{FileType, Mode, OFlags};
-    use rustix::io::Errno;
-    use rustix::process::geteuid;
+    use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, Signal, killpg, sigaction};
+    use nix::unistd::Pid;
 
     /// How long denials keep printing after the command ends.
     const DENIAL_GRACE: Duration = Duration::from_secs(1);
 
-    /// Most bytes an `--env-file` may hold.
-    const ENV_FILE_CAP: u64 = 64 * 1024;
+    /// How long the agent's group has after SIGTERM before SIGKILL.
+    const TERM_GRACE: Duration = Duration::from_secs(3);
 
-    /// The variable `--browser-sockets` sets, which `--env` and `--env-file` may not.
-    const SOCKET_DIR_VAR: &str = "AGENT_BROWSER_SOCKET_DIR";
+    /// How often the watcher checks for a caught signal.
+    const WATCH_POLL: Duration = Duration::from_millis(50);
+
+    /// The last termination signal caught, or 0. The handler only stores it.
+    static CAUGHT: AtomicI32 = AtomicI32::new(0);
 
     /// The parsed command line.
     #[derive(Default)]
@@ -107,117 +117,62 @@ mod jail {
         }
     }
 
-    /// Why `key` and `value` cannot be one variable, or `None` when they can. The reason
-    /// never names the value. (`=` cannot be in `key`: the caller splits at the first one.)
-    fn bad_pair(key: &str, value: &str) -> Option<&'static str> {
-        if key.is_empty() {
-            Some("needs a non-empty key before the '='")
-        } else if key.contains('\0') || value.contains('\0') {
-            Some("has a NUL byte")
-        } else {
-            None
-        }
+    /// The signal handler: it stores the signal number and nothing else, the one thing allowed
+    /// in signal context here.
+    extern "C" fn catch(signal: std::ffi::c_int) {
+        CAUGHT.store(signal, Ordering::SeqCst);
     }
 
-    /// One `K=V` from `--env`: the key is what precedes the first `=`, and the value keeps any
-    /// `=` after it.
-    fn parse_env_pair(pair: &str) -> Result<(String, String), String> {
-        let Some((key, value)) = pair.split_once('=') else {
-            return Err("--env needs K=V".to_owned());
-        };
-        match bad_pair(key, value) {
-            Some(why) => Err(format!("--env {why}")),
-            None => Ok((key.to_owned(), value.to_owned())),
-        }
-    }
-
-    /// The variables in an `--env-file`'s text: one `K=V` a line, with no quoting or escapes.
-    /// Blank lines and lines starting with `#` are skipped, and a trailing `\r` is dropped. An
-    /// error names the line number only, never the line.
-    fn parse_env_file_text(text: &str) -> Result<Vec<(String, String)>, String> {
-        let mut pairs = Vec::new();
-        for (index, line) in text.split('\n').enumerate() {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            if line.trim().is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let number = index + 1;
-            let Some((key, value)) = line.split_once('=') else {
-                return Err(format!("--env-file line {number} is not K=V"));
-            };
-            match bad_pair(key, value) {
-                Some(why) => return Err(format!("--env-file line {number} {why}")),
-                None => pairs.push((key.to_owned(), value.to_owned())),
-            }
-        }
-        Ok(pairs)
-    }
-
-    /// Reads at most `ENV_FILE_CAP` bytes from `from`; more is an error.
-    fn read_capped(from: impl Read) -> Result<Vec<u8>, String> {
-        let mut bytes = Vec::new();
-        from.take(ENV_FILE_CAP + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("--env-file: {e}"))?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > ENV_FILE_CAP {
-            return Err("--env-file is larger than 64 KiB".to_owned());
-        }
-        Ok(bytes)
-    }
-
-    /// Removes the `--env-file` at `path`, a link itself and never what it points to. A file
-    /// that stays would keep the secret, so a failure stops the run.
+    /// Catches SIGTERM, SIGINT and SIGHUP, so that the watcher ends the agent's group and this
+    /// process stays up to do it. A caught signal is reset to its default on exec, so the agent
+    /// starts with the defaults.
     #[expect(
-        clippy::disallowed_methods,
-        reason = "the --env-file is removed right after it is read, so no secret outlives the read"
+        unsafe_code,
+        reason = "sigaction, to catch the termination signals with a handler that only stores them"
     )]
-    fn remove_secret(path: &Path) -> Result<(), String> {
-        std::fs::remove_file(path).map_err(|e| format!("--env-file could not be removed: {e}"))
-    }
-
-    /// Reads the `--env-file` at `path`: a regular file owned by us with no group or other
-    /// bits, opened without following a link. Once it passes those checks it is removed, before
-    /// anything is parsed. A file that fails them is left alone.
-    fn read_env_file(path: &Path) -> Result<String, String> {
-        const REFUSED: &str = "--env-file must be a regular file only you can read";
-        // O_NONBLOCK keeps a FIFO from holding the open; the fstat below refuses it.
-        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
-        let fd = rustix::fs::open(path, flags, Mode::empty()).map_err(|e| match e {
-            Errno::LOOP => REFUSED.to_owned(),
-            other => format!("--env-file: {other}"),
-        })?;
-        let stat = rustix::fs::fstat(&fd).map_err(|e| format!("--env-file: {e}"))?;
-        let regular = FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile;
-        let group_or_other = stat.st_mode & 0o077;
-        if !regular || group_or_other != 0 || stat.st_uid != geteuid().as_raw() {
-            return Err(REFUSED.to_owned());
+    fn catch_termination() -> Result<(), String> {
+        let action = SigAction::new(
+            SigHandler::Handler(catch),
+            SaFlags::SA_RESTART,
+            SigSet::empty(),
+        );
+        for signal in [Signal::SIGTERM, Signal::SIGINT, Signal::SIGHUP] {
+            // SAFETY: `catch` only stores an atomic, which is async-signal-safe, and the action
+            // blocks no signal while it runs.
+            unsafe { sigaction(signal, &action) }
+                .map_err(|e| format!("cannot catch {}: {e}", signal.as_str()))?;
         }
-        let mut file = File::from(fd);
-        let bytes = read_capped(&mut file);
-        // The file is ours and passed its checks, so it is spent whatever the read found.
-        remove_secret(path)?;
-        String::from_utf8(bytes?)
-            .map_err(|e| format!("--env-file is not UTF-8: {}", e.utf8_error()))
+        Ok(())
     }
 
-    /// The command's environment: the `--env-file` variables, then the `--env` pairs, so a
-    /// later key wins. With `--browser-sockets` the folder's variable is set by the caller,
-    /// so a given one is a refusal.
-    fn launch_env(
-        from_file: Vec<(String, String)>,
-        from_args: Vec<(String, String)>,
-        browser_sockets: bool,
-    ) -> Result<BTreeMap<OsString, OsString>, String> {
-        let mut env = BTreeMap::new();
-        for (key, value) in from_file.into_iter().chain(from_args) {
-            if browser_sockets && key == SOCKET_DIR_VAR {
-                return Err(format!(
-                    "--browser-sockets sets {SOCKET_DIR_VAR}; drop it from --env or --env-file"
-                ));
+    /// Sends `signal` to the agent's group `group`; a group already gone is no failure.
+    fn signal_group(group: Pid, signal: Signal) {
+        match killpg(group, signal) {
+            Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
+            Err(error) => say(&format!("run_sandboxed: {}: {error}\n", signal.as_str())),
+        }
+    }
+
+    /// Waits for a caught signal, then ends the agent's group: SIGTERM, and SIGKILL unless `stop`
+    /// is dropped within `TERM_GRACE`. It returns at once when `stop` is dropped first, as when
+    /// the command has ended on its own.
+    fn end_group(group: Pid, stop: &Receiver<()>) {
+        loop {
+            let caught = CAUGHT.load(Ordering::SeqCst);
+            if caught != 0 {
+                let name = Signal::try_from(caught).map_or("a signal", Signal::as_str);
+                say(&format!("run_sandboxed: {name} ends the command's group\n"));
+                break;
             }
-            env.insert(OsString::from(key), OsString::from(value));
+            match stop.recv_timeout(WATCH_POLL) {
+                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) | Ok(()) => {}
+            }
         }
-        Ok(env)
+        signal_group(group, Signal::SIGTERM);
+        if let Err(RecvTimeoutError::Timeout) = stop.recv_timeout(TERM_GRACE) {
+            signal_group(group, Signal::SIGKILL);
+        }
     }
 
     fn parse(mut raw: impl Iterator<Item = OsString>) -> Result<Args, String> {
@@ -311,6 +266,8 @@ mod jail {
     }
 
     fn run(args: Args) -> Result<ExitCode, String> {
+        // Before anything starts: a termination signal from here on ends the agent's group.
+        catch_termination()?;
         // Read first: a file that passed its checks is spent even if a later step refuses.
         let from_file = match &args.env_file {
             Some(path) => parse_env_file_text(&read_env_file(path)?)?,
@@ -365,7 +322,11 @@ mod jail {
             print_spec(&launcher)?;
         }
         let launched = launcher.launch(&spec).map_err(|e| e.to_string())?;
+        let group = Pid::from_raw(i32::try_from(launched.handle.pid()).map_err(|e| e.to_string())?);
+        let (finished, watching) = mpsc::channel::<()>();
+        drop(std::thread::spawn(move || end_group(group, &watching)));
         let code = async_io::block_on(drive(launched, args.stdin));
+        drop(finished);
         // The watcher's lines come a little after the denial itself.
         async_io::block_on(async_io::Timer::after(DENIAL_GRACE));
         drop(launcher);
@@ -438,86 +399,30 @@ mod jail {
 
     #[cfg(test)]
     mod tests {
-        use std::ffi::OsStr;
+        use std::collections::BTreeMap;
+
+        use clauseo_process::spawn_in_tree;
 
         use super::*;
 
-        fn pair(key: &str, value: &str) -> (String, String) {
-            (key.to_owned(), value.to_owned())
-        }
-
         #[test]
-        fn an_env_pair_splits_at_the_first_equals() {
-            assert_eq!(parse_env_pair("FOO=bar").unwrap(), pair("FOO", "bar"));
-            assert_eq!(parse_env_pair("FOO=").unwrap(), pair("FOO", ""));
-            assert_eq!(parse_env_pair("FOO=a=b=").unwrap(), pair("FOO", "a=b="));
-        }
-
-        #[test]
-        fn a_bad_env_pair_is_refused_without_its_value() {
-            for bad in ["FOO", "=bar", "FOO\0=1", "FOO=secret\0x"] {
-                let why = parse_env_pair(bad).expect_err(bad);
-                assert!(!why.contains("secret"), "{why}");
-                assert!(why.starts_with("--env "), "{why}");
-            }
-        }
-
-        #[test]
-        fn env_file_lines_are_pairs_with_blanks_and_comments_skipped() {
-            let text = "\n# a note\n   \nFOO=bar\n#BAR=no\nBAZ=a=b\n";
-            assert_eq!(
-                parse_env_file_text(text).unwrap(),
-                vec![pair("FOO", "bar"), pair("BAZ", "a=b")]
-            );
-        }
-
-        #[test]
-        fn env_file_crlf_lines_lose_their_carriage_return() {
-            assert_eq!(
-                parse_env_file_text("FOO=bar\r\nBAZ=1\r").unwrap(),
-                vec![pair("FOO", "bar"), pair("BAZ", "1")]
-            );
-        }
-
-        #[test]
-        fn a_bad_env_file_line_is_named_by_number_only() {
-            for (text, line) in [
-                ("A=1\nNOEQUALS\n", 2),
-                ("A=1\n=secret\n", 2),
-                ("A=1\n\nB=s\0x\n", 3),
-            ] {
-                let why = parse_env_file_text(text).expect_err(text);
-                assert!(why.contains(&format!("line {line}")), "{why}");
-                assert!(
-                    !why.contains("secret") && !why.contains("NOEQUALS"),
-                    "{why}"
-                );
-            }
-        }
-
-        #[test]
-        fn the_env_file_cap_is_64_kib() {
-            let at_cap = vec![b'a'; 64 * 1024];
-            assert_eq!(read_capped(at_cap.as_slice()).unwrap().len(), 64 * 1024);
-            let over = vec![b'a'; 64 * 1024 + 1];
-            assert!(read_capped(over.as_slice()).is_err());
-        }
-
-        #[test]
-        fn the_last_of_a_key_wins_and_args_beat_the_file() {
-            let args = vec![pair("FOO", "a"), pair("FOO", "b")];
-            let env = launch_env(Vec::new(), args, false).unwrap();
-            assert_eq!(env.get(OsStr::new("FOO")), Some(&OsString::from("b")));
-            let env = launch_env(vec![pair("FOO", "1")], vec![pair("FOO", "2")], false).unwrap();
-            assert_eq!(env.get(OsStr::new("FOO")), Some(&OsString::from("2")));
-        }
-
-        #[test]
-        fn browser_sockets_refuses_a_given_socket_dir() {
-            let given = vec![pair(SOCKET_DIR_VAR, "x")];
-            assert!(launch_env(Vec::new(), given.clone(), true).is_err());
-            assert!(launch_env(given.clone(), Vec::new(), true).is_err());
-            assert!(launch_env(Vec::new(), given, false).is_ok());
+        fn a_child_starts_with_the_termination_signals_at_their_defaults() {
+            catch_termination().unwrap();
+            let spec = LaunchSpec::new(
+                PathBuf::from("/bin/sh"),
+                vec![
+                    OsString::from("-c"),
+                    OsString::from("kill -TERM $$; echo survived"),
+                ],
+                BTreeMap::new(),
+                PathBuf::from("/"),
+            )
+            .unwrap();
+            let mut launched = spawn_in_tree(&spec, &SpawnOptions::new()).unwrap();
+            let report = async_io::block_on(launched.handle.exited());
+            // Had the child inherited the caught handler, or an ignored SIGTERM, it would have
+            // survived and exited 0.
+            assert_eq!(report.signal(), Some(Signal::SIGTERM as i32));
         }
     }
 }
