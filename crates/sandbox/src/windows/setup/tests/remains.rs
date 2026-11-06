@@ -213,3 +213,30 @@ fn a_crash_inside_the_run_still_gives_the_lock_back() {
     assert!(crashed.is_err());
     assert_eq!(machine.calls.last().map(String::as_str), Some("unlock"));
 }
+
+#[test]
+fn secrets_bin_that_cant_be_written_in_a_rollback_stays_as_it_was() {
+    let mut machine = FakeMachine::new("setup-rerun-secrets-fail");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let old = machine.state.secrets.clone();
+    // Step 10 fails, then the rollback's own write of the new passwords fails too.
+    machine.fail("protect_for_owner 1001,1002,1003,1004");
+    machine.fail("protect_for_owner 1001,1002,1003,1004");
+    let req = request(&machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    assert_eq!(failure.step, Step::Secrets);
+    assert!(!failure.rolled_back);
+    assert!(
+        failure.cause.contains("secrets.bin") && failure.cause.contains("run set-up again"),
+        "{}",
+        failure.cause
+    );
+    let tries = machine
+        .calls
+        .iter()
+        .filter(|c| c.starts_with("protect_for_owner"))
+        .count();
+    assert_eq!(tries, 3, "the fresh run's, step 10's and the rollback's");
+    assert_eq!(machine.state.secrets, old, "the old secrets.bin stays");
+}
