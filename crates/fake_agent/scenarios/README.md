@@ -344,6 +344,7 @@ The script itself is never read: a test may make it an empty file with that name
 |---|---|---|
 | `claude-cli` | Claude Code | `<script> --cli auth login [--claudeai\|--console]`, `<script> auth login`, `<script> --cli auth status --json`, `<script> --cli auth logout` (the `--cli` is optional) |
 | `codex.js` | Codex | `<script> login`, `<script> login --device-auth`, `<script> login status`, `<script> logout`, `<script> app-server` |
+| `index.js` under `codex-acp/dist/` | codex-acp's adapter, run by mistake | any arguments: each JSON-RPC request on stdin gets an error (`initialize` -32602, any other method -32601), nothing else is printed, and it exits 0 once stdin closes |
 
 Any other argv[1] is the usual command line above, unchanged. Each mode's home folder holds one
 marker file, `fake-signin-marker`, holding `{"authMethod": ..., "email": "test@example.com"}`. It
@@ -377,8 +378,8 @@ What each command does:
   `To sign in, open https://auth.openai.com/codex/device and enter the code ABCD-EFGH`, then ends as
   `FAKE_SIGNIN` says. Under `FAKE_SIGNIN=device-off` it prints Codex's refusal instead, exit 1:
   `Enable device code sign-in for Codex, Excel, PowerPoint, and Word in ChatGPT Security Settings, then run codex login --device-auth again.`
-- `codex.js login status`: prints `Logged in using ChatGPT`, exit 0, when the marker is there;
-  `Not logged in`, exit 1, when it is not.
+- `codex.js login status`: prints `Logged in using ChatGPT` on stderr, exit 0, when the marker is
+  there; `Not logged in` on stderr, exit 1, when it is not.
 - `codex.js logout`: removes the marker and prints `Successfully logged out`.
 - `codex.js app-server`: answers JSON-RPC on stdin and stdout, one object per line, and exits 0 when
   stdin closes. `initialize` answers with `codexHome`, `platformFamily`, `platformOs` and
@@ -401,6 +402,8 @@ Bad arguments print the mode's usage line on stderr and exit 2.
 | `device` | `login --device-auth` works. This is the default. |
 | `device-off` | `login --device-auth` refuses, as above. The browser `login` still works. |
 | `port-busy` | `codex.js login` prints `Port 1455 is already in use: another login is listening on 127.0.0.1:1455.` and exits 1, with no marker. |
+| `app-server-error` | `codex.js app-server` answers every request with an error, as the adapter does. Logins work as `ok-after:0`. |
+| `adapter` | `codex.js` behaves as codex-acp's adapter (above) for every command. |
 | `reuse:<authMethod>` | Writes the marker with that `authMethod` at startup, for any command. The login then works as `ok-after:0`. |
 
 Unset, empty and any other value mean `ok-after:0`.
