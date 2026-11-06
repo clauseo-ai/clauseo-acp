@@ -463,10 +463,13 @@ fn the_relay_refuses_once_the_agent_is_stopped_and_the_file_goes_after() {
     assert!(kept, "the token file went before the agent ended");
     let removal = removals.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(removal, (true, CLOSED.to_owned()));
-    assert!(
-        !file.exists(),
-        "the token file stays after the run folder's removal"
-    );
+    // The shutdown can answer before the removal ends: the ladder's mover advances the manual
+    // clock past the removal's wait too, and the removal's thread goes on on its own.
+    crate::support::wait("the token file to go with the run folder", async {
+        while file.exists() {
+            async_io::Timer::after(Duration::from_millis(10)).await;
+        }
+    });
 }
 
 /// An agent that exits on its own is never stopped: the run folder's removal itself revokes
