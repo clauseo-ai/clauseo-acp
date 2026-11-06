@@ -12,9 +12,10 @@
 //!   shows at the next start.
 //! - **Recorded** at each sign-in or reuse made through Clauseo ([`Identities::expect`] marks
 //!   one under way, for the sign-in run's own bound at most; its `SignedIn` records first,
-//!   before anything compares), and, when nothing is recorded (first run, trusted on first use),
-//!   from a status read before any launch of the agent passed the launch gate; after one, an
-//!   account with no record is unknown.
+//!   before anything compares; a change of its files meanwhile refuses until it lands), and,
+//!   when nothing is recorded (first run, trusted on first use), from a status read before any
+//!   launch of the agent passed the launch gate; after one, an account with no record is
+//!   unknown.
 //! - **A `SignedIn` that is not one of those** (S18's status check, at start or when a window
 //!   shows Plans) is compared: another account is [`Verdict::Changed`]. Before R17 the pump
 //!   took such a state as a new sign-in and restarted the agents on it.
@@ -42,6 +43,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -58,85 +60,27 @@ pub(crate) use self::check::{exempt, exemption_changed};
 #[cfg(test)]
 pub(crate) use self::gate::gate;
 pub(crate) use self::gate::{GateSlot, launch_gate};
-#[cfg(test)]
-pub(crate) use self::watch::poll_once;
+pub(crate) use self::verdict::Verdict;
 pub(crate) use self::watch::{fail_closed, follow_identity};
+#[cfg(test)]
+pub(crate) use self::watch::{poll_once, stamps};
 
 mod check;
 mod gate;
 mod store;
+mod verdict;
 mod watch;
 
 /// How often the login files are looked at (metadata only).
 pub(crate) const POLL: Duration = Duration::from_secs(2);
 /// How old the last check of a Keychain-only Claude login may be before a launch checks again.
 pub(crate) const KEYCHAIN_STALE: Duration = Duration::from_mins(10);
-/// How long after an unknown verdict the check runs again by itself.
+/// How long after an unknown verdict from a status that failed or timed out the check runs
+/// again by itself.
 pub(crate) const UNKNOWN_AGAIN: Duration = Duration::from_secs(30);
 /// The most one check may take, past the status runs' own limits (5 s each, and 10 s for
 /// Codex's app-server): then it is unknown.
 pub(crate) const CHECK_BOUND: Duration = Duration::from_secs(20);
-
-/// What desktop knows of an agent's login's account now. Watched means a change of a login
-/// file's stamps checks it; a pending sign-in through Clauseo is watched by none of them until
-/// it ends or its bound passes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum Verdict {
-    /// Not signed in (S18's resting state is not `SignedIn`), or a first-run status named no
-    /// account. Refuses nothing. Watched; with an account recorded, also checked again on the
-    /// macOS Keychain timer.
-    #[default]
-    Idle,
-    /// A check is due: every agent at start until its startup check answers (first run
-    /// included), a key login that ended, or a stale macOS Keychain check, which waits for a
-    /// launch to ask. Refuses `agent.identity_checking`.
-    Due,
-    /// A check runs. Refuses `agent.identity_checking`; a change during it shows at the next
-    /// look, against the stamps taken before its read.
-    Checking,
-    /// The status named the recorded account. Refuses nothing. Watched, and on the macOS
-    /// Keychain timer.
-    Same,
-    /// The status failed, timed out or named no account while one is recorded; an account
-    /// with no record after a launch; or the record cannot be read. Refuses
-    /// `agent.identity_unknown`. Watched, and checked again every [`UNKNOWN_AGAIN`].
-    Unknown,
-    /// The status named another account: the agents were stopped. Refuses
-    /// `signin.account_changed` until a sign-in through Clauseo records again; not watched.
-    Changed,
-    /// The launch env carries a credential that replaces the shared login (a stored API key,
-    /// or a Claude provider), so a swapped file cannot redirect the launches: not checked, not
-    /// watched, and no refusal while it holds (`setup/refusal.rs` filters this one's). Once it
-    /// ends the login is what launches use again: due a check, as [`Verdict::Due`], first.
-    KeyLogin,
-}
-
-impl Verdict {
-    /// The launch refusal this verdict puts on the agent, if any.
-    pub(crate) fn refusal(self) -> Option<ErrorCode> {
-        match self {
-            Verdict::Idle | Verdict::Same => None,
-            Verdict::Due | Verdict::Checking | Verdict::KeyLogin => {
-                Some(ErrorCode::AgentIdentityChecking)
-            }
-            Verdict::Unknown => Some(ErrorCode::AgentIdentityUnknown),
-            Verdict::Changed => Some(ErrorCode::SigninAccountChanged),
-        }
-    }
-
-    /// The log's fixed word for it.
-    pub(crate) fn kind(self) -> &'static str {
-        match self {
-            Verdict::Idle => "idle",
-            Verdict::Due => "due",
-            Verdict::Checking => "checking",
-            Verdict::Same => "same",
-            Verdict::Unknown => "unknown",
-            Verdict::Changed => "changed",
-            Verdict::KeyLogin => "key_login",
-        }
-    }
-}
 
 /// What one login file's stat found: its stamp, none there, or the stat's error kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +115,12 @@ struct Entry {
     /// A launch of the agent passed the launch gate: from then on an account with no record is
     /// never trusted on first use.
     launched: bool,
+    /// The login files moved from `pending` while the sign-in was pending: the verdict is due
+    /// (`agent.identity_checking`) until the record lands; past the bound, unknown and checked.
+    held: bool,
+    /// An unknown verdict is checked again every [`UNKNOWN_AGAIN`]: it came from a status that
+    /// failed or timed out, or from a panic (`fail_closed`).
+    again: bool,
 }
 
 impl Entry {
@@ -179,10 +129,31 @@ impl Entry {
         self.expect.is_some_and(|until| now < until)
     }
 
-    /// A pending sign-in is no longer under way.
-    fn expect_end(&mut self) {
+    /// A pending sign-in is no longer under way: whether its files had moved (`held`).
+    fn expect_end(&mut self) -> bool {
         self.expect = None;
         self.pending = None;
+        std::mem::take(&mut self.held)
+    }
+
+    /// At a look or a launch while a sign-in is pending, the login files at `stamps`: when
+    /// they differ from those the sign-in took, a verdict that refuses nothing becomes due,
+    /// held until the record lands (R17 review M1). Whether it did now.
+    fn hold_if_moved(&mut self, stamps: &[Stamp]) -> bool {
+        let rests = matches!(
+            self.verdict,
+            Verdict::Idle | Verdict::Same | Verdict::SignedOut
+        );
+        let moved = self
+            .pending
+            .as_deref()
+            .is_none_or(|before| before != stamps);
+        if rests && moved {
+            self.verdict = Verdict::Due;
+            self.held = true;
+            self.generation += 1;
+        }
+        rests && moved
     }
 }
 
@@ -198,6 +169,9 @@ struct Inner {
     /// S18 last said these are signed in with no email: a status naming no account then is
     /// unknown, not "nothing signed in", even with nothing recorded.
     nameless: BTreeSet<AgentId>,
+    /// Signed out through Clauseo since the last record: a status naming no account is
+    /// [`Verdict::SignedOut`], not unknown.
+    signed_out: BTreeSet<AgentId>,
 }
 
 /// A check that began: its agent's generation then.
@@ -216,6 +190,10 @@ pub(crate) struct Identities {
     inner: Mutex<Inner>,
     asks: UnboundedSender<AgentId>,
     asked: Mutex<Option<UnboundedReceiver<AgentId>>>,
+    /// The followers panicked past their restarts (`setup/supervise.rs`): every agent on the
+    /// shared login is refused `agent.identity_unknown` (a changed one keeps its refusal),
+    /// whatever its verdict, until Clauseo starts again.
+    dead: AtomicBool,
 }
 
 impl Identities {
@@ -268,6 +246,7 @@ impl Identities {
             inner: Mutex::new(inner),
             asks,
             asked: Mutex::new(Some(asked)),
+            dead: AtomicBool::new(false),
         }
     }
 
@@ -287,11 +266,73 @@ impl Identities {
             .unwrap_or_default()
     }
 
-    /// The launch refusal `agent`'s verdict puts on it, if any.
+    /// The launch refusal `agent`'s verdict puts on it, if any; `agent.identity_unknown` for
+    /// any but a changed account once the followers are dead.
     pub(crate) fn refusal(&self, agent: &AgentId) -> Option<ErrorCode> {
-        self.verdict(agent).refusal()
+        let verdict = self.verdict(agent);
+        if self.dead.load(Ordering::SeqCst) && verdict != Verdict::Changed {
+            return Some(ErrorCode::AgentIdentityUnknown);
+        }
+        verdict.refusal()
     }
 
+    /// The followers will not run again (`setup/supervise.rs`): every refusal is pinned, as
+    /// `dead` says.
+    pub(crate) fn die(&self) {
+        self.dead.store(true, Ordering::SeqCst);
+    }
+
+    /// A sign-out through Clauseo of `agent` starts (`true`), or was refused (`false`).
+    pub(crate) fn signing_out(&self, agent: &AgentId, on: bool) {
+        let mut inner = lock(&self.inner);
+        if on {
+            inner.signed_out.insert(agent.clone());
+        } else {
+            inner.signed_out.remove(agent);
+        }
+    }
+
+    /// Whether `agent` was signed out through Clauseo since its last record.
+    pub(super) fn is_signed_out(&self, agent: &AgentId) -> bool {
+        lock(&self.inner).signed_out.contains(agent)
+    }
+
+    /// A status named an account for `agent`: a sign-out through Clauseo is over.
+    pub(super) fn named(&self, agent: &AgentId) {
+        lock(&self.inner).signed_out.remove(agent);
+    }
+
+    /// S18 says `agent` is signed in with no email (`true`), or no longer signed in.
+    pub(super) fn nameless(&self, agent: &AgentId, nameless: bool) {
+        let mut inner = lock(&self.inner);
+        if nameless {
+            inner.nameless.insert(agent.clone());
+        } else {
+            inner.nameless.remove(agent);
+        }
+    }
+
+    /// Whether an account is recorded for `agent` now, or the record cannot be read (which is
+    /// watched as one).
+    pub(super) fn recorded_now(&self, agent: &AgentId) -> bool {
+        let inner = lock(&self.inner);
+        inner.recorded.contains_key(agent) || inner.unreadable.contains(agent)
+    }
+
+    /// The stamps `agent`'s verdict holds for.
+    #[cfg(test)]
+    pub(crate) fn held_stamps(&self, agent: &AgentId) -> Option<Vec<Stamp>> {
+        lock(&self.inner)
+            .agents
+            .get(agent)
+            .and_then(|entry| entry.stamps.clone())
+    }
+
+    /// `agent`'s recorded account.
+    #[cfg(test)]
+    pub(crate) fn recorded(&self, agent: &AgentId) -> Option<AccountHash> {
+        lock(&self.inner).recorded.get(agent).cloned()
+    }
     /// A sign-in or reuse through Clauseo starts for `agent` at `now`, the login files at
     /// `stamps`: its `SignedIn` records, until `now + bound` (the sign-in run's own).
     pub(crate) fn expect(
@@ -326,7 +367,10 @@ impl Identities {
 
     /// The call that would have signed `agent` in was refused: nothing is under way.
     pub(crate) fn expect_none(&self, agent: &AgentId) {
-        self.entry(agent, Entry::expect_end);
+        // Held, it stays due, and the next look checks: its files moved.
+        self.entry(agent, |entry| {
+            let _held = entry.expect_end();
+        });
     }
 
     /// A launch met `agent.identity_checking`: the follower runs the check when it is due.
@@ -359,6 +403,7 @@ impl Identities {
         let mut inner = lock(&self.inner);
         inner.unreadable.remove(agent);
         inner.nameless.remove(agent);
+        inner.signed_out.remove(agent);
         let verdict = match hash {
             Some(hash) => {
                 inner.recorded.insert(agent.clone(), hash);
@@ -368,7 +413,8 @@ impl Identities {
         };
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = verdict;
-        entry.expect_end();
+        entry.again = false;
+        let _held = entry.expect_end();
         if stamps.is_some() {
             entry.stamps = stamps;
         }
@@ -408,6 +454,9 @@ impl Identities {
             (AccountRead::Account(hash), None) => Judged::Record(hash.clone()),
             (AccountRead::NoAccount, None) if !inner.nameless.contains(agent) => {
                 Judged::Is(Verdict::Idle)
+            }
+            (AccountRead::NoAccount, Some(_)) if inner.signed_out.contains(agent) => {
+                Judged::Is(Verdict::SignedOut)
             }
             _ => Judged::Is(Verdict::Unknown),
         }
@@ -462,9 +511,10 @@ impl Identities {
         inner.unreadable.remove(agent);
         inner.recorded.remove(agent);
         inner.nameless.insert(agent.clone());
+        inner.signed_out.remove(agent);
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = Verdict::Due;
-        entry.expect_end();
+        let _held = entry.expect_end();
         entry.checked_at = Some(now);
         entry.generation += 1;
         let recorded = inner.recorded.clone();
@@ -472,29 +522,6 @@ impl Identities {
         if let Err(error) = self.store.save(&recorded) {
             tracing::warn!(%agent, kind = ?error.kind(), "the identity record was not written");
         }
-    }
-
-    /// S18 says `agent` is signed in with no email (`true`), or no longer signed in.
-    fn nameless(&self, agent: &AgentId, nameless: bool) {
-        let mut inner = lock(&self.inner);
-        if nameless {
-            inner.nameless.insert(agent.clone());
-        } else {
-            inner.nameless.remove(agent);
-        }
-    }
-
-    /// Whether an account is recorded for `agent` now, or the record cannot be read (which is
-    /// watched as one).
-    fn recorded_now(&self, agent: &AgentId) -> bool {
-        let inner = lock(&self.inner);
-        inner.recorded.contains_key(agent) || inner.unreadable.contains(agent)
-    }
-
-    /// `agent`'s recorded account.
-    #[cfg(test)]
-    pub(crate) fn recorded(&self, agent: &AgentId) -> Option<AccountHash> {
-        lock(&self.inner).recorded.get(agent).cloned()
     }
 }
 

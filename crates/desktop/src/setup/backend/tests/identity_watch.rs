@@ -33,14 +33,14 @@ fn claude_store() -> String {
     clippy::disallowed_methods,
     reason = "test set-up swaps and removes dummy login files in its scratch folder"
 )]
-mod files {
+pub(super) mod files {
     use std::path::Path;
 
     pub(super) fn rename(from: &Path, to: &Path) {
         std::fs::rename(from, to).unwrap();
     }
 
-    pub(super) fn remove(path: &Path) {
+    pub(crate) fn remove(path: &Path) {
         std::fs::remove_file(path).unwrap();
     }
 }
