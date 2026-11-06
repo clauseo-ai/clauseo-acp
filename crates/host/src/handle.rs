@@ -19,7 +19,7 @@ use futures::channel::oneshot;
 use futures::future::Shared;
 
 use crate::actor::input::{Input, PlanWrite, Request, SignInRequest};
-use crate::agent::login_link;
+use crate::agent::login_link::{self, StopFor};
 use crate::agent::login_splits::{self, LoginSplits};
 use crate::config::HostConfig;
 use crate::error::Error;
@@ -383,7 +383,8 @@ impl HostHandle {
     /// Step 1 of the leave order (decision record 0048, ruling 1): cancels each turn of
     /// `agent` through the Cancel path, puts it back at the head of its queue held for the
     /// sign-in, and stops every live agent of that id, launches being prepared included, so no
-    /// process of it runs while the login link changes. Rust only.
+    /// process of it runs while the login link changes. Rust only. The same as
+    /// [`Self::stop_agents_for`] with [`StopFor::LoginSwitch`].
     ///
     /// Answers once every process of the id has exited ([`AgentsStopped::Exited`]), or after
     /// the bounded wait (10 s, past the shutdown ladder's 7 s) or a process that outlived its
@@ -396,7 +397,20 @@ impl HostHandle {
     /// [`AgentsStopped::Exited`]: crate::AgentsStopped::Exited
     /// [`AgentsStopped::TimedOut`]: crate::AgentsStopped::TimedOut
     pub async fn stop_agents(&self, agent: AgentId) -> Result<crate::AgentsStopped, HostError> {
-        self.call(|reply| Request::SignIn(SignInRequest::Stop { agent, reply }))
+        self.stop_agents_for(agent, StopFor::LoginSwitch).await
+    }
+
+    /// [`Self::stop_agents`] with the reason it gives: the same cancel, stop, wait and hold, but
+    /// the held queues show `switching` for [`StopFor::LoginSwitch`] and `sign_in` for
+    /// [`StopFor::SignInAgain`], the account on the shared login having changed, so the app
+    /// asks for a sign-in. A second call while held sets the reason again: the latest wins.
+    /// Rust only.
+    pub async fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> Result<crate::AgentsStopped, HostError> {
+        self.call(|reply| Request::SignIn(SignInRequest::Stop { agent, why, reply }))
             .await
     }
 

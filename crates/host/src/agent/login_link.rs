@@ -113,6 +113,18 @@ pub enum AgentsStopped {
     TimedOut,
 }
 
+/// Why `HostHandle::stop_agents_for` stops an agent: it sets the reason its held queues show
+/// (`queue_held_reason`, `turn/queue/held.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopFor {
+    /// The login is switching (what `HostHandle::stop_agents` does): the held queues show
+    /// `switching` until `restart_agents`.
+    LoginSwitch,
+    /// The account on the shared login changed: the held queues show `sign_in`, so the app
+    /// asks the user to sign in again. The questions stay held and run after the new sign-in.
+    SignInAgain,
+}
+
 /// What a launch's check found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Seen {
@@ -145,9 +157,10 @@ pub(crate) struct SignIn {
     pub(crate) reused: BTreeSet<AgentId>,
     /// What each Codex agent's last launch's check found.
     pub(crate) seen: BTreeMap<AgentId, Checked>,
-    /// The agents `HostHandle::stop_agents` holds until `restart_agents`: none of them
-    /// launches, and their prompts queue held. In memory only: a host restart clears it.
-    pub(crate) held: BTreeSet<AgentId>,
+    /// The agents `HostHandle::stop_agents_for` holds until `restart_agents`, each with why: none
+    /// of them launches, and their prompts queue held. The latest stop's reason wins. In memory
+    /// only: a host restart clears it.
+    pub(crate) held: BTreeMap<AgentId, StopFor>,
     /// The agents whose new launches desktop refuses, with the code their turns fail with
     /// (`HostHandle::set_launch_refused`, `HostConfig::with_launch_refused`). In memory only.
     pub(crate) refused: LaunchRefusals,
@@ -163,7 +176,7 @@ impl Default for SignIn {
             receiver,
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
-            held: BTreeSet::new(),
+            held: BTreeMap::new(),
             refused: LaunchRefusals::default(),
         }
     }
