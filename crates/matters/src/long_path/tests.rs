@@ -1,6 +1,6 @@
 //! [`verbatim`] on every OS, and [`long_path`] where it is the identity.
 
-use super::verbatim;
+use super::{plain, verbatim};
 
 /// `text` in UTF-16 units.
 fn wide(text: &str) -> Vec<u16> {
@@ -84,5 +84,30 @@ fn long_path_is_the_identity_off_windows() {
     use std::path::Path;
     for text in ["/a/b", "relative/x", "/a/../b", r"C:\x"] {
         assert_eq!(super::long_path(Path::new(text)), Path::new(text));
+    }
+}
+
+/// The plain form of `text` as a string.
+fn plain_of(text: &str) -> String {
+    String::from_utf16(&plain(&wide(text))).unwrap()
+}
+
+#[test]
+fn a_verbatim_volume_root_turns_plain() {
+    assert_eq!(plain_of(r"\\?\C:\"), r"C:\");
+    assert_eq!(plain_of(r"\\?\z:\"), r"z:\");
+    assert_eq!(plain_of(r"\\?\UNC\srv\share\"), r"\\srv\share\");
+}
+
+#[test]
+fn a_volume_guid_or_plain_root_is_left_as_it_is() {
+    for text in [
+        r"\\?\Volume{0b1c}\",
+        r"C:\",
+        r"\\srv\share\",
+        r"\\.\C:\",
+        "",
+    ] {
+        assert_eq!(plain_of(text), text, "{text}");
     }
 }

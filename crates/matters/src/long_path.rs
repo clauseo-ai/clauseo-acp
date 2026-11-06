@@ -69,6 +69,30 @@ pub(crate) fn verbatim(absolute: &[u16]) -> Option<Vec<u16>> {
     }
 }
 
+/// The plain form of a short verbatim path, such as the volume root `GetVolumePathNameW` gives
+/// for a verbatim path: `\\?\C:\` is `C:\`, `\\?\UNC\srv\share\` is `\\srv\share\`. Any other
+/// form (a volume GUID path `\\?\Volume{..}\`, a plain path) comes back as it is. Only for a
+/// path known to be short: the plain form gets Win32's path cleanup and the 260 limit back.
+#[cfg(any(windows, test))]
+pub(crate) fn plain(path: &[u16]) -> Vec<u16> {
+    const PREFIX: [u16; 4] = [BACKSLASH, BACKSLASH, QUESTION, BACKSLASH];
+    let Some(rest) = path.strip_prefix(&PREFIX[..]) else {
+        return path.to_vec();
+    };
+    let unc: Vec<u16> = "UNC\\".encode_utf16().collect();
+    if let Some(share) = rest.strip_prefix(&unc[..]) {
+        return [BACKSLASH, BACKSLASH]
+            .iter()
+            .chain(share)
+            .copied()
+            .collect();
+    }
+    match rest {
+        [drive, COLON, ..] if is_ascii_letter(*drive) => rest.to_vec(),
+        _ => path.to_vec(),
+    }
+}
+
 /// Whether `unit` is `A`-`Z` or `a`-`z`: a drive letter.
 #[cfg(any(windows, test))]
 fn is_ascii_letter(unit: u16) -> bool {
