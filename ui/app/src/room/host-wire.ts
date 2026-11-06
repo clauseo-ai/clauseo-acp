@@ -215,6 +215,8 @@ function appEventOf(event: HostEvent): AppEvent | null {
   }
   if (event.threads_changed !== undefined) return { threads_changed: event.threads_changed };
   if (event.browser_install !== undefined) return { browser_install: event.browser_install };
+  if (event.connectors_changed !== undefined)
+    return { connectors_changed: event.connectors_changed };
   return null;
 }
 

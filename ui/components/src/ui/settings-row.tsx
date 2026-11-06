@@ -76,7 +76,8 @@ export function SettingRow({
 export type RadioChoice<V extends string> = {
   value: V;
   label: string;
-  note: string;
+  /** Optional: the choice's line; a choice its label says whole, such as a pack's "2,000 credits, ₹236", has none. */
+  note?: string;
   disabled?: boolean;
 };
 
@@ -137,9 +138,11 @@ export function RadioSetting<V extends string>({
                 <Field.Label className={settingLabel}>
                   <Mixed>{c.label}</Mixed>
                 </Field.Label>
-                <Field.Description className={settingNote}>
-                  <Mixed>{c.note}</Mixed>
-                </Field.Description>
+                {c.note !== undefined && (
+                  <Field.Description className={settingNote}>
+                    <Mixed>{c.note}</Mixed>
+                  </Field.Description>
+                )}
               </div>
             </Field.Item>
           ))}

@@ -137,3 +137,19 @@ test("a section given an icon shows it before its name, hidden from assistive te
   expect(withIcon?.querySelector(".set-nav-name")?.textContent).toBe("Language");
   expect(without?.querySelector(".set-nav-icon")).toBeNull();
 });
+
+test("each rise of focusHead focuses the open section's head; none at 0, and a section change alone moves no focus", async () => {
+  const el = await mount(frame());
+  const head = () => el.querySelector("h2");
+  expect(head()?.tabIndex).toBe(-1);
+  expect(document.activeElement).not.toBe(head());
+  await mount(frame({ current: "appearance" }));
+  expect(document.activeElement).not.toBe(head());
+  await mount(frame({ current: "about", focusHead: 1 }));
+  expect(head()?.textContent).toBe("About");
+  expect(document.activeElement).toBe(head());
+  (document.activeElement as HTMLElement).blur();
+  await mount(frame({ current: "language", focusHead: 2 }));
+  expect(document.activeElement).toBe(head());
+  expect(head()?.textContent).toBe("Language");
+});

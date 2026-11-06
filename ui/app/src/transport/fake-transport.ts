@@ -30,6 +30,7 @@ import type {
   RefreshWhy,
   CommandEnvelope,
   CommandOutcome,
+  ConnectorCommand,
   FileRefId,
   HostError,
   HostQuery,
@@ -306,6 +307,14 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return this.only("dispatch").flatMap(({ command }) => {
       const refresh = command.command.refresh_limits;
       return refresh === undefined ? [] : [{ agent: refresh.agent, why: refresh.why }];
+    });
+  }
+
+  /** The connector commands dispatched (`{ connector: ... }`, U15), in order. */
+  connectorCommands(): ConnectorCommand[] {
+    return this.only("dispatch").flatMap(({ command }) => {
+      const sent = command.command.connector;
+      return sent === undefined ? [] : [sent];
     });
   }
 

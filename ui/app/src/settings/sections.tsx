@@ -9,14 +9,22 @@ import {
   IconAppearance,
   IconLanguage,
   IconPlanLimit,
+  IconSearch,
   IconSend,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
+import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import type { DisplayStore } from "../room/display-store.ts";
 import type { UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import type { LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
+import { NO_CONNECTORS } from "../store/connectors.ts";
+import type {
+  ConnectorsState,
+  LimitsView,
+  ToolsPatch,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
 import { About } from "./sections/about.tsx";
@@ -24,13 +32,15 @@ import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
 import { Privacy } from "./sections/privacy.tsx";
 import { Usage } from "./sections/usage.tsx";
+import { ConnectorsSection } from "./sections/connectors-load.tsx";
+import { connectorsNote } from "./sections/connectors-note.ts";
 import { usageNote } from "./sections/usage-note.ts";
 
 /** Every section the design has, in its order; only those with an entry in SECTIONS show. */
 export const SECTION_ORDER = [
   "plans",
   "usage",
-  "kanoon",
+  "connectors",
   "matters",
   "workspace",
   "language",
@@ -59,18 +69,22 @@ export type SectionContext = {
   choose: <K extends keyof UiSettings>(key: K, value: UiSettings[K]) => void;
   /** Whether a firm's policy locks a tool's switch (`tools.web_search`, `tools.browser`). */
   toolLocked: (key: keyof ToolsSettingsView) => boolean;
-  /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. */
-  chooseTool: (key: keyof ToolsSettingsView, value: boolean) => void;
+  /** The connectors' state from the window's connectors store (store/connectors.ts): Connectors reads it, and shows
+   * only while it lists a connector. */
+  connectors: ConnectorsState;
+  /** The lawyer's choice of a tool's switch: one patch, unless the key is locked or already holds the value. The
+   * connectors' switch (`connectors`, U15) reads both from the connectors' state, since ToolsSettingsView has none. */
+  chooseTool: (key: keyof ToolsPatch, value: boolean) => void;
 };
 
 export type SectionEntry = {
   id: SectionId;
-  /** The section's name, on the side and as the pane's head. */
-  name: SettingsKey;
+  /** The section's name, on the side and as the pane's head: a settings string, or a later section's own words. */
+  name: SettingsKey | ((lang: Lang) => string);
   /** Its icon, before the name on the side. */
   icon: ComponentType<IconProps>;
   /** Optional: the line under the pane's head. */
-  lead?: SettingsKey;
+  lead?: SettingsKey | ((lang: Lang) => string);
   /** Optional: where the section stands now, under its name on the side; nothing when it gives undefined. */
   note?: (ctx: SectionContext, lang: Lang) => string | undefined;
   /** Optional: whether the section shows now; always, when left out. */
@@ -87,6 +101,15 @@ export const SECTIONS: readonly SectionEntry[] = [
     lead: "What each plan has left, and when it resets.",
     note: (ctx, lang) => usageNote(ctx.limits, lang),
     Body: Usage,
+  },
+  {
+    id: "connectors",
+    name: (lang) => cw(lang, "Connectors"),
+    icon: IconSearch,
+    lead: (lang) => cw(lang, "Paid sources Clauseo can search while it answers."),
+    note: (ctx, lang) => connectorsNote(ctx.connectors, lang),
+    shown: (ctx) => ctx.connectors.connectors.length > 0,
+    Body: ConnectorsSection,
   },
   {
     id: "language",
@@ -132,6 +155,7 @@ export function contextOf(
   display: Display,
   limits: LimitsView = {},
   releaseDate: string | null = null,
+  connectors: ConnectorsState = NO_CONNECTORS,
 ): SectionContext {
   const locked = (key: keyof UiSettings) => settings.locked.includes(lockKey(key));
   const toolLocked = (key: keyof ToolsSettingsView) => settings.locked.includes(`tools.${key}`);
@@ -142,6 +166,7 @@ export function contextOf(
     display,
     limits,
     releaseDate,
+    connectors,
     locked,
     choose: (key, value) => {
       if (locked(key) || settings.ui[key] === value) return;
@@ -149,6 +174,11 @@ export function contextOf(
     },
     toolLocked,
     chooseTool: (key, value) => {
+      if (key === "connectors") {
+        if (connectors.locked || connectors.available === value) return;
+        store.setTools({ connectors: value });
+        return;
+      }
       if (toolLocked(key) || settings.tools === undefined || settings.tools[key] === value) return;
       store.setTools({ [key]: value });
     },

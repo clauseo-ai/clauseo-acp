@@ -180,6 +180,10 @@ export const BARE_CHUNKS = [
   "words-hi",
 ];
 
+/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx)
+ * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
+export const SETTINGS_BARE_CHUNKS = ["connectors"];
+
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
  * the first load with New matter's dialog (room.tsx, lazy), these three import them: New matter, change-note-ask and
@@ -195,7 +199,10 @@ const DEPS = ", __VITE_PRELOAD__)";
  * `import("./<chunk>-` for a chunk in BARE_CHUNKS replaced by `<body>`. The body can run past the import
  * (`import(...).then(...)`), so its end is found by counting brackets, skipping string literals.
  */
-export function unwrapPreloads(code: string, chunks: readonly string[] = BARE_CHUNKS): string {
+export function unwrapPreloads(
+  code: string,
+  chunks: readonly string[] = [...BARE_CHUNKS, ...SETTINGS_BARE_CHUNKS],
+): string {
   let out = "";
   let at = 0;
   for (;;) {

@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
 import {
   BARE_CHUNKS,
+  SETTINGS_BARE_CHUNKS,
   devCsp,
   metaCsp,
   PAGES,
@@ -108,6 +109,15 @@ test(
     for (const frame of ["room/room.tsx", "room/rail.tsx", "main.tsx", "App.tsx"])
       expect(modules(settings[0]!)).not.toContain(frame);
     expect(settings[0]!.code).not.toContain("room-window");
+    // Connectors' body (U15) is a chunk of its own, imported bare: no preload helper, so its CSS is the entry's
+    const lazy = pages["settings.html"]!.chunks.filter((c) =>
+      SETTINGS_BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
+    );
+    expect(lazy.map((c) => c.isDynamicEntry)).toEqual([true]);
+    expect(settings[0]!.dynamicImports).toContain(lazy[0]!.fileName);
+    expect(settings[0]!.code).not.toMatch(/__vitePreload\(\(\) => import\(.\.\/connectors-/);
+    expect(settings[0]!.code).toMatch(/import\(.\.\/connectors-/);
+    expect(modules(settings[0]!)).not.toContain("settings/sections/connectors.tsx");
   },
 );
 

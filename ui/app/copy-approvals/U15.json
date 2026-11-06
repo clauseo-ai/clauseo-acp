@@ -1,0 +1,507 @@
+{
+  "U15-01": {
+    "en": "Connectors",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-02": {
+    "en": "Paid sources Clauseo can search while it answers.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-03": {
+    "en": "Indian Kanoon",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design",
+    "note": "Identical to the design's approved name (U15 brief, Words: pre-approved by design)"
+  },
+  "U15-04": {
+    "en": "Judgments of the Supreme Court, the High Courts and tribunals, with statutes.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-05": {
+    "en": "Not added",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-06": {
+    "en": "Credits are bought in packs, from {price}, including GST.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-07": {
+    "en": "Add",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-08": {
+    "en": "Your browser opens to sign in.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-09": {
+    "en": "Use an API key instead",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-10": {
+    "en": "Signing in",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-11": {
+    "en": "Finish signing in on the page your browser opened.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-12": {
+    "en": "Open the sign-in page again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-13": {
+    "en": "Ready to search.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-14": {
+    "en": "{credits} credits left",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-17": {
+    "en": "Balance not read yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-18": {
+    "en": "Check balance",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-19": {
+    "en": "Running low. Add credits to keep searching.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-20": {
+    "en": "Add credits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-21": {
+    "en": "Sign out",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-22": {
+    "en": "Remove",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-23": {
+    "en": "Recent spend",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-24": {
+    "en": "Today",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-25": {
+    "en": "{credits} credits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-26": {
+    "en": "Nothing spent yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-27": {
+    "en": "Out of credit",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-28": {
+    "en": "No credits left. Case-law searches stop until you add more.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-29": {
+    "en": "Signed out",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-30": {
+    "en": "Signed out. Sign in to search case law again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-31": {
+    "en": "Sign in",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-32": {
+    "en": "Key no longer works",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-33": {
+    "en": "This API key no longer works. Add a new key, or sign in instead.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-34": {
+    "en": "Add a new key",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-35": {
+    "en": "Sign-in failed",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-36": {
+    "en": "The sign-in didn't go through. Try again, or use an API key instead.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-37": {
+    "en": "Try again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-38": {
+    "en": "Details",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-39": {
+    "en": "Turned off by your firm",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-40": {
+    "en": "Turned off by your firm.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-41": {
+    "en": "Choose a pack",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-42": {
+    "en": "{credits} credits, {rupees}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-43": {
+    "en": "Prices include GST.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-44": {
+    "en": "Continue to payment",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-45": {
+    "en": "Cancel",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-46": {
+    "en": "The payment page is open in your browser.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-47": {
+    "en": "Your balance updates here once the payment goes through.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-48": {
+    "en": "Open the payment page again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-49": {
+    "en": "API key",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-50": {
+    "en": "Your firm's key for Clauseo's case-law service. Kept on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-51": {
+    "en": "Add key",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-52": {
+    "en": "What each search sends",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-53": {
+    "en": "The words of each search go to Clauseo's server, which sends them on to Indian Kanoon.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-54": {
+    "en": "Papers aren't sent. Clauseo asks {name} to keep client names and confidential facts out of its searches.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-55": {
+    "en": "Clauseo's server deletes the words of each search after 7 days.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-56": {
+    "en": "Indian Kanoon sees Clauseo's server, never you.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-57": {
+    "en": "Each search and each judgment read costs credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-67": {
+    "en": "Turned off on this computer",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-68": {
+    "en": "Turned off on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-69": {
+    "en": "Turn on",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-70": {
+    "en": "On this computer",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-71": {
+    "en": "Case-law searches",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-72": {
+    "en": "Turning off stops case-law searches on this computer. Your credits stay.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-73": {
+    "en": "Turn off",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-74": {
+    "en": "Open the payment page",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

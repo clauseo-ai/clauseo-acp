@@ -7,6 +7,7 @@
    window's frame sheets would hide Matters in the room's 1000-1199 px band */
 @import "../settings/usage.css";
 @import "../settings/privacy.css";
+@import "../settings/connectors.css";
 @source "../room";
 @source "../settings";
 @source not "../room/**/*.test.*";
