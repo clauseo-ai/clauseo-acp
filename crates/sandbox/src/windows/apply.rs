@@ -47,7 +47,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::FolderSupport;
-use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
+use super::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
 #[cfg(any(windows, test, feature = "test-support"))]
@@ -312,6 +312,8 @@ fn write_all(
         .filter(|e| e.state == EntryState::Pending && plan.entries().contains(&e.id))
         .map(|e| e.id)
         .collect();
+    let strict = strict_for(plan);
+    let own = own_roots(plan);
     let mut by_path: BTreeMap<(usize, &Path), Vec<usize>> = BTreeMap::new();
     for (i, grant) in grants.iter().enumerate() {
         let depth = grant.path().components().count();
@@ -322,6 +324,14 @@ fn write_all(
             .iter()
             .filter_map(|&i| grants.get(i).map(|g| (i, g)))
         {
+            // S15 `PR4a2`: an owner gets `WRITE_DAC` before any deny is read, so a protected
+            // item a pool user owns (one the lawyer restored or renamed) goes to the lawyer
+            // first, as forget hands it back. Nothing is recorded: the lawyer owning it is where
+            // forget leaves it too, and a launch refused later doesn't hand it back to the pool.
+            if protected(grant) {
+                let handed = acl.hand_back(grant.path(), &strict.pool);
+                handed.map_err(|f| Refused::new(grant.kind(), f))?;
+            }
             let added = match (grant.kind(), around.credentials()) {
                 (PathKind::CredentialLink, Some(expected)) => acl.add_expecting(grant, &expected),
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
@@ -338,8 +348,21 @@ fn write_all(
             }
         }
     }
-    let strict = strict_for(plan);
-    let own = own_roots(plan);
+    // A protected folder denied by this run: what a pool user owns in it goes to the lawyer too,
+    // by forget's walk, so no owner below the deny can take its inherited copy off.
+    let new_trees: Vec<&Grant> = run
+        .written
+        .iter()
+        .filter_map(|&i| grants.get(i))
+        .filter(|g| protected(g) && g.inherit() == Inherit::Tree)
+        .collect();
+    for grant in new_trees {
+        let (path, kind) = (grant.path(), grant.kind());
+        let seen = clearing(acl, around, &own, kind, |acl| {
+            acl.reclaim(path, &strict.pool)
+        })?;
+        run.walked.add(seen);
+    }
     let unwalked = |i: usize| {
         run.written.contains(&i) || plan.entries().get(i).is_some_and(|id| pending.contains(id))
     };
@@ -363,6 +386,12 @@ fn write_all(
     ledger
         .mark_walked(plan.entries())
         .map_err(|e| ledger_failed(PathKind::Matter, e))
+}
+
+/// Whether `grant` is a read-only path's deny in the matter: a protected name, every `.git`,
+/// an over-cap file.
+fn protected(grant: &Grant) -> bool {
+    grant.kind() == PathKind::ReadOnlyInMatter && grant.rights() == Rights::DenyWrite
 }
 
 /// The credentials file the credential link must be, by its path (its folder canonical, as the

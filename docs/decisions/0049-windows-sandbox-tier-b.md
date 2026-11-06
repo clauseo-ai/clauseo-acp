@@ -207,8 +207,17 @@ build 26100):
     or replace one that exists at launch, and the lawyer's copy stays as it is. The ledger
     records each deny, and forget hands it back like any other. A link with one of these names
     that leads into the matter is listed too, as a `.git` link is, so the permission write
-    refuses the launch there, as at the root. macOS reads the same list: its profile gains one
-    subpath parameter per item.
+    refuses the launch there, as at the root, with `Error::ProtectedLink` naming the item
+    relative to the matter (`matter.protected_link`). macOS reads the same list: its profile
+    gains one subpath parameter per item.
+  - An owner gets `WRITE_DAC` before any deny is read, so a protected item a pool user owns (one
+    the lawyer restored from the set-aside or renamed, or one made before PR4a) is handed to the
+    desktop user before its deny is written, as forget hands it back (`AclWriter::hand_back`,
+    forget's reclaim settle for the item itself); and when a protected folder's deny is first
+    written, what a pool user owns in it goes the same way (`AclWriter::reclaim`). Nothing is
+    recorded for it: the lawyer owning it is where forget leaves it too. `restore_set_aside`
+    hands the restored item to the desktop user as well. An `OWNER RIGHTS` deny was ruled out:
+    it binds the lawyer too when the lawyer owns the item.
   - The policy's walk runs at every launch, whatever the launch check (PR3d) decides: the check
     leaves out only the own-tree walks and the set-aside's scan. Every read-only deny is checked
     at every launch and written if it is missing, with its own walk (`apply_checked`). So a
@@ -334,6 +343,13 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   stops the agent making one; what stops it loading in a later session is the set-aside
   (accepted). One that exists at launch can't be edited, renamed or deleted by the agent (S15
   PR4a2, below).
+- **A hard-linked file inside a nested `.claude`** (or any denied folder) that the lawyer owns
+  stays bare: the walk leaves a file with more than one link alone unless a pool user owns it
+  (`acl/walk.rs`), since its DACL belongs to every name. Making a new hard link to a denied
+  file needs `FILE_WRITE_ATTRIBUTES`, which the deny takes away (accepted).
+- **A deny on an item the lawyer renamed away from a protected name** stays after forget: the
+  explicit entry goes with the file, and forget removes entries by path. This predates S15
+  PR4a2, for the root names and nested `.git` (accepted).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
@@ -343,7 +359,11 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   even where the lawyer protected it on purpose; the lawyer's own explicit entries are kept
   (accepted).
 - **An item set aside keeps its own permissions**, so an agent they grant could still open it by
-  its full path under the data folder.
+  its full path under the data folder. Since S15 PR4a2 an item another user owns (the agent's)
+  is handed to the desktop user once it is moved and listed, as forget hands back a pool user's
+  items, and is worked out again from the set-aside folder, so the entries it inherited in the
+  matter go; its manifest entry keeps the owner it had. A lawyer's own item keeps its
+  permissions as they were. A hand-back that fails is logged and leaves the item set aside.
 
 ### Accepted risk: two hijacked agents at once
 

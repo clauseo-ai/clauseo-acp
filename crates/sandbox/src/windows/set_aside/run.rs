@@ -60,6 +60,11 @@ pub(super) trait Volume {
         name: &OsStr,
     ) -> Result<(), SetAsideFailure>;
 
+    /// Hands `path` itself (never what a link at it names) to the desktop user when another
+    /// user owns it, as forget hands back a pool user's item: a restored item comes back the
+    /// lawyer's, so no pool user owns a protected name the next launch denies (S15 `PR4a2`).
+    fn own(&self, path: &Path) -> io::Result<()>;
+
     /// Moves `name` in the folder `parts` below `sandbox` (opened as for
     /// [`Volume::move_into`], never made) back to `to`, whose folder's final path must be
     /// `to`'s parent. Never replaces.
@@ -235,7 +240,14 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         &found.from,
     )?;
     tracing::info!(reason = ?found.reason, "a set-aside item was restored");
-    Ok(place.write_manifest(&manifest)?)
+    place.write_manifest(&manifest)?;
+    // The item is back and listed no more, so a failure here doesn't undo the restore; the
+    // next launch's apply hands a pool user's protected item back before its deny anyway.
+    if let Err(error) = volume.own(&found.from) {
+        let error = error.kind();
+        tracing::warn!(%error, "a restored item wasn't handed to the desktop user");
+    }
+    Ok(())
 }
 
 /// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.

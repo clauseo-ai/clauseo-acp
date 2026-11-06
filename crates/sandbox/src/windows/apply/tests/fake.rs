@@ -75,7 +75,13 @@ pub(super) struct FakeAcl {
     pub(super) vanished: BTreeSet<PathBuf>,
     /// A write on this path fails with this failure, as `NtfsAcl` would (S15 `PR4a2`).
     pub(super) fail_add_with: Option<(PathBuf, ApplyFailure)>,
+    /// Each file's owner, by SID; [`LAWYER`] once handed back. A file not listed is the
+    /// lawyer's.
+    pub(super) owners: BTreeMap<PathBuf, String>,
 }
+
+/// The owner the fake's hand-back gives: the desktop user.
+pub(super) const LAWYER: &str = "lawyer";
 
 impl FakeAcl {
     /// The file `path` names.
@@ -242,7 +248,23 @@ impl AclWriter for FakeAcl {
             return Err(ApplyFailure::ChildShut);
         }
         self.reclaimed.push((root.to_owned(), pool.to_vec()));
+        for (path, owner) in &mut self.owners {
+            if path != root && path.starts_with(root) && pool.iter().any(|p| p.as_str() == owner) {
+                LAWYER.clone_into(owner);
+            }
+        }
         Ok(Walked::default())
+    }
+
+    fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure> {
+        let Some(owner) = self.owners.get_mut(path) else {
+            return Ok(false);
+        };
+        if !pool.iter().any(|p| p.as_str() == owner) {
+            return Ok(false);
+        }
+        LAWYER.clone_into(owner);
+        Ok(true)
     }
 
     /// Two paths with one file name are one file. From then on `b` (and its canonical form),

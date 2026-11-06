@@ -200,6 +200,13 @@ impl AclWriter for NtfsAcl {
         )
     }
 
+    fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure> {
+        let me = current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?;
+        let me = sid_bytes(&me);
+        let pool: Vec<Vec<u8>> = pool.iter().map(sid_bytes).collect();
+        walk::hand_back(&self.token, path, &pool, &me)
+    }
+
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>> {
         let Some(target) = open_planned(path)? else {
             return Ok(None);
@@ -356,6 +363,22 @@ fn open_planned(path: &Path) -> Result<Option<Object>, ApplyFailure> {
         return Err(ApplyFailure::Changed);
     }
     Ok(Some(target))
+}
+
+/// `path` handed to this process's user, as forget hands back a pool user's items, when any
+/// other user owns it: the item itself ([`AclWriter::hand_back`]), then what that same user
+/// owns below it ([`AclWriter::reclaim`]). Each is worked out again from its new folder, so the
+/// entries it inherited where it was go. For the set-aside's moves and `restore_set_aside`, so
+/// an item the agent made is the lawyer's wherever it goes (S15 `PR4a2`).
+pub(crate) fn own(path: &Path) -> io::Result<()> {
+    let owner = owner(path)?;
+    if owner == current_user_sid()? {
+        return Ok(());
+    }
+    let pool = [owner];
+    let mut acl = NtfsAcl::new()?;
+    acl.hand_back(path, &pool).map_err(io::Error::from)?;
+    acl.reclaim(path, &pool).map(drop).map_err(io::Error::from)
 }
 
 /// The owner of `path`, read without following a link: for the set-aside.

@@ -33,7 +33,7 @@ fn volume() -> super::ntfs::Ntfs {
 
 #[cfg(unix)]
 fn volume() -> posix::Posix {
-    posix::Posix { fold: true }
+    posix::Posix::new(true)
 }
 
 /// 2025-11-05 10:15:00.123 UTC.
@@ -300,7 +300,11 @@ fn restore_refuses_a_taken_name_and_restores_to_a_free_one() {
     assert_eq!(list(&data), std::slice::from_ref(&entry));
 
     rename_new(&root.join("CLAUDE.md"), &root.join("lawyer.md")).unwrap();
-    run::restore(&volume(), &data, &entry).unwrap();
+    // S15 `PR4a2`: the restored item is handed to the desktop user.
+    let restoring = volume();
+    run::restore(&restoring, &data, &entry).unwrap();
+    #[cfg(unix)]
+    assert_eq!(*restoring.owned.borrow(), [root.join("CLAUDE.md")]);
     assert_eq!(
         std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
         "# the agent's\n"

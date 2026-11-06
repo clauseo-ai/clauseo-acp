@@ -22,7 +22,7 @@ use super::world;
 )]
 fn timed(root: &Path, nested: &[&str]) -> Duration {
     let started = std::time::Instant::now();
-    let scan = scan_probing(&Posix { fold: false }, root, nested);
+    let scan = scan_probing(&Posix::new(false), root, nested);
     let took = started.elapsed();
     assert_eq!(scan.unscanned, Vec::<std::path::PathBuf>::new());
     took

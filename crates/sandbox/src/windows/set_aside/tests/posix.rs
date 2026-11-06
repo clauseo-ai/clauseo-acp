@@ -4,6 +4,7 @@
 //! source) that isn't there exactly is matched ignoring ASCII case, as NTFS would open it, so
 //! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
 
+use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
@@ -19,9 +20,19 @@ pub(super) struct Posix {
     /// Whether a name not there exactly is matched ignoring ASCII case; off only for the
     /// timing test on a case-insensitive volume, where the extra listing would be measured.
     pub(super) fold: bool,
+    /// Each path [`Volume::own`] handed to the desktop user, in order: every file here is the
+    /// test user's already, so the stand-in only records it.
+    pub(super) owned: RefCell<Vec<PathBuf>>,
 }
 
 impl Posix {
+    pub(super) fn new(fold: bool) -> Posix {
+        Posix {
+            fold,
+            owned: RefCell::default(),
+        }
+    }
+
     /// `path` as this volume opens it: through [`on_disk`] when folding.
     fn at(&self, path: &Path) -> PathBuf {
         if self.fold {
@@ -119,6 +130,11 @@ impl Volume for Posix {
             "uid {}",
             std::fs::symlink_metadata(self.at(path))?.uid()
         ))
+    }
+
+    fn own(&self, path: &Path) -> io::Result<()> {
+        self.owned.borrow_mut().push(path.to_owned());
+        Ok(())
     }
 
     fn move_into(

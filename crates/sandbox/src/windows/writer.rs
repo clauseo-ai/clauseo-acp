@@ -235,6 +235,13 @@ pub trait AclWriter {
     /// the next hand-back takes again (N13). A pool user's child whose handle lacks
     /// `WRITE_DAC` or `WRITE_OWNER` is refused as [`ApplyFailure::ChildShut`] (N3).
     fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
+    /// [`AclWriter::reclaim`]'s hand-back for `path` itself (never what a link at it names):
+    /// when one of `pool` owns it, it is handed to the desktop user and cleaned as a reclaimed
+    /// child is, against its folder's entries. Whether it was. `Ok(false)` when another user
+    /// owns it, or when `path` is missing, a link or not at its final path, which the write
+    /// that follows refuses. An owner gets `WRITE_DAC` before any deny is read, so a pool
+    /// user's protected item goes to the lawyer before its deny is written (S15 `PR4a2`).
+    fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure>;
     /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
     /// path is missing. Read before a label grant is written over it.
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>>;

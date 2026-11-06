@@ -22,6 +22,8 @@ enum Stop {
     CrashAfter,
     /// The move fails with this.
     Fail(SetAsideFailure),
+    /// The process dies while the moved item is handed to the desktop user (S15 `PR4a2`).
+    CrashAtOwn,
 }
 
 /// The tests' volume whose moves stop as [`Stop`] says.
@@ -61,6 +63,13 @@ impl<V: Volume> Volume for Stopping<V> {
         self.inner.owner(path)
     }
 
+    fn own(&self, path: &Path) -> io::Result<()> {
+        if matches!(self.stop, Stop::CrashAtOwn) {
+            panic!("the process dies during the hand-back");
+        }
+        self.inner.own(path)
+    }
+
     fn move_into(
         &self,
         from: &Path,
@@ -75,6 +84,7 @@ impl<V: Volume> Volume for Stopping<V> {
                 panic!("the process dies after the move")
             }
             Stop::Fail(failure) => Err(failure),
+            Stop::CrashAtOwn => self.inner.move_into(from, sandbox, parts, name),
         }
     }
 
@@ -201,4 +211,42 @@ fn a_set_aside_that_cant_happen_refuses_naming_the_item() {
         assert_eq!(walked, Err(named), "{failure:?}");
         assert_eq!(list(&data), none(), "no entry for a move that failed");
     }
+}
+
+/// S15 `PR4a2`: the hand-back to the desktop user comes after the move and its finished entry,
+/// so a crash during it leaves the item set aside and listed, never outside both places.
+#[test]
+fn a_crash_during_the_hand_back_leaves_the_item_set_aside_and_listed() {
+    let (w, root, data) = world("aside-crash-own");
+    before(&root, &data, launch()).unwrap();
+    w.dir.file("matter/sub/CLAUDE.md", "# the agent's\n");
+
+    crash_at_exit(&root, &data, Stop::CrashAtOwn);
+    let left = Place::new(&data, &matter_one()).read_manifest().unwrap();
+    assert_eq!(left.intents, none());
+    assert_eq!(left.entries.len(), 1, "{left:?}");
+    assert!(left.entries[0].to.is_file());
+    assert!(!root.join("sub/CLAUDE.md").exists());
+}
+
+/// S15 `PR4a2`: each item moved is handed to the desktop user, and its entry keeps the owner it
+/// had, for the lawyer to see who made it.
+#[cfg(unix)]
+#[test]
+fn each_item_set_aside_is_handed_to_the_desktop_user() {
+    let (w, root, data) = world("aside-owned");
+    before(&root, &data, launch()).unwrap();
+    w.dir.file("matter/sub/AGENTS.md", "# the agent's\n");
+    let volume = super::posix::Posix::new(true);
+
+    let moved = exit_as(&volume, &root, &data, "s1", exit()).unwrap();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(*volume.owned.borrow(), [moved[0].to.clone()]);
+    assert!(
+        moved[0]
+            .owner
+            .as_deref()
+            .is_some_and(|o| o.starts_with("uid "))
+    );
+    assert_eq!(list(&data), moved);
 }
