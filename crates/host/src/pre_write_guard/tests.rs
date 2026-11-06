@@ -381,6 +381,47 @@ fn a_file_held_with_a_deny_write_share_mode_is_refused() {
     );
 }
 
+/// Windows: a document Word holds with no owner file beside it (Word opens a document through a
+/// short folder path when the full path is over 259 units, and makes none) is refused to a Claude
+/// `Edit` or `Write` naming it by path, and to a Codex `apply_patch` updating it, and let through
+/// once Word lets go. Only the path layer's sharing probe finds it: the names backstop lists
+/// held files through owner files alone.
+#[cfg(windows)]
+#[test]
+fn a_held_document_with_no_owner_file_is_refused_to_edit_write_and_apply_patch() {
+    let fx = Fixture::new("share-no-owner");
+    let free = fx.path("m/Free.docx");
+    let patch =
+        "*** Begin Patch\n*** Update File: Free.docx\n@@\n-a\n+b\n*** End Patch\n".to_owned();
+    let handle = write::open_deny_write(std::path::Path::new(&free)).unwrap();
+    for (tool, input) in [
+        (
+            "Edit",
+            json!({"file_path": free, "old_string": "a", "new_string": "b"}),
+        ),
+        ("Write", json!({"file_path": free, "content": "new"})),
+        ("apply_patch", json!({"command": patch})),
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook(tool, &input)),
+            deny("Free.docx"),
+            "{tool} {input}"
+        );
+    }
+    drop(handle);
+    assert_eq!(
+        guard_json(&fx.hook(
+            "Edit",
+            &json!({"file_path": free, "old_string": "a", "new_string": "b"})
+        )),
+        ""
+    );
+    assert_eq!(
+        guard_json(&fx.hook("apply_patch", &json!({"command": patch}))),
+        ""
+    );
+}
+
 /// A held file spelled through a symlink to the matter folder is refused, by the permission
 /// check's own rule (`held_open_at` resolves both sides), with the matter path it names.
 #[cfg(unix)]
