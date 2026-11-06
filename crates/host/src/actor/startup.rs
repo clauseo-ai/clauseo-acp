@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 
-use clauseo_protocol::{MatterId, MatterKind, StreamId, ThreadId};
+use clauseo_protocol::{AccountLimits, MatterId, MatterKind, StreamId, ThreadId};
 use clauseo_store::{Store, StoreOptions};
 use futures::executor::LocalSpawner;
 
@@ -18,7 +18,7 @@ use crate::error::Error;
 use crate::ids::Ids;
 use crate::log_file::Cause;
 use crate::matter_worker::matter_settings;
-use crate::pipeline::{Pipeline, Post, spawn_feeder};
+use crate::pipeline::{FeederTx, Pipeline, Post, spawn_feeder};
 use crate::snapshot::SnapshotWorker;
 use crate::write;
 
@@ -51,15 +51,7 @@ pub(super) async fn open(
         forgotten,
         threads,
     } = registry(&store).await?;
-    let commits = post.clone();
-    let feeder_post: Post = Rc::new(move |ticket, result| {
-        let _gone = commits.try_send(Input::Committed { ticket, result });
-    });
-    let feeder = spawn_feeder(&spawner, store.clone(), feeder_post)?;
-    let snapshot_post = post.clone();
-    let snapshots = SnapshotWorker::start(Box::new(move |snapshot| {
-        let _gone = snapshot_post.try_send(Input::Snapshot(snapshot));
-    }))?;
+    let (feeder, snapshots) = start_writers(&spawner, &store, &post)?;
     let cached_limits = store.account_limits().await.unwrap_or_else(|error| {
         tracing::warn!(error = %Cause(&error), "the stored account limits were not read");
         Vec::new()
@@ -138,13 +130,39 @@ pub(super) async fn open(
         #[cfg(test)]
         failed_sends: 0,
     };
+    start_services(&mut actor, cached_limits);
+    Ok(actor)
+}
+
+/// The feeder that commits the pipeline's writes, and the snapshot thread: both post their
+/// results back to the loop through `post`.
+fn start_writers(
+    spawner: &LocalSpawner,
+    store: &Store,
+    post: &async_channel::Sender<Input>,
+) -> Result<(FeederTx, SnapshotWorker), Error> {
+    let commits = post.clone();
+    let feeder_post: Post = Rc::new(move |ticket, result| {
+        let _gone = commits.try_send(Input::Committed { ticket, result });
+    });
+    let feeder = spawn_feeder(spawner, store.clone(), feeder_post)?;
+    let snapshot_post = post.clone();
+    let snapshots = SnapshotWorker::start(Box::new(move |snapshot| {
+        let _gone = snapshot_post.try_send(Input::Snapshot(snapshot));
+    }))?;
+    Ok((feeder, snapshots))
+}
+
+/// Starts what `open` leaves running: the agents' hold bound, the limits model with its
+/// `cached` limits, the browser install and the lock causes; then logs the start.
+fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     // `agent.keys_loading`'s bound starts with the host (`agent/launch_refusals.rs`).
     let now = actor.clock.now().mono;
     actor.wiring.sign_in.refused.start_load_bound(now);
     // The limits model and its first reads; nothing waits on them.
-    super::limits::start(&mut actor, cached_limits);
-    super::browser_install::start(&mut actor);
-    super::connectors::start(&mut actor);
+    super::limits::start(actor, cached);
+    super::browser_install::start(actor);
+    super::connectors::start(actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     tracing::info!(
         target: crate::log_file::LIFECYCLE,
@@ -152,7 +170,6 @@ pub(super) async fn open(
         threads = actor.threads.len(),
         "host started"
     );
-    Ok(actor)
 }
 
 /// Queues the start-up work: the Scratch matter when there is none, and the load and
