@@ -184,6 +184,10 @@ fn the_hook_names_a_kept_folder_only_when_it_is_a_real_folder() {
         body[checked_set_aside + 2],
         format!("!insertmacro CLAUSEO_REAL_FOLDER \"$R9\\{SANDBOX_DIR}\"")
     );
+    // The set-aside's check reads through `sandbox`: it counts only when `sandbox` is real
+    // too, the two joined with AND after both checks and before any name.
+    let anded = checked_set_aside + 3;
+    assert_eq!(body[anded], "IntOp $R2 $R2 & $R4", "{body:?}");
     // Each name only under its folder's check.
     let names = body
         .iter()
@@ -191,7 +195,7 @@ fn the_hook_names_a_kept_folder_only_when_it_is_a_real_folder() {
         .filter(|(_, line)| line.starts_with("StrCpy $R8 \"$R9"));
     let mut seen = 0;
     for (at, line) in names {
-        assert!(checked_set_aside < at, "{body:?}");
+        assert!(anded < at, "{body:?}");
         let guard = if line.ends_with("\\set-aside\"") {
             "${AndIf} $R2 = 1"
         } else {

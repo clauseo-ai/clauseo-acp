@@ -131,6 +131,8 @@
       !insertmacro CLAUSEO_REAL_FOLDER "$R9\sandbox\set-aside"
       StrCpy $R2 $R4
       !insertmacro CLAUSEO_REAL_FOLDER "$R9\sandbox"
+      ; The set-aside's attributes come through a `sandbox` link: it counts only under a real one.
+      IntOp $R2 $R2 & $R4
       ${If} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
       ${AndIf} $R2 = 1
         StrCpy $R8 "$R9\sandbox\set-aside"
