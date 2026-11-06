@@ -99,8 +99,7 @@ pub(crate) async fn until_startable<T: Timer>(queue: &Queue<'_, T>) -> Gate {
 fn online(config: &AgentsConfig, agent: &clauseo_protocol::AgentId) -> bool {
     let proxy = config
         .install
-        .proxy
-        .as_deref()
+        .signin_proxy_for(agent)
         .and_then(|proxy| ureq::Proxy::new(proxy).ok());
     let (host, port) = if let Some(proxy) = &proxy {
         (proxy.host().to_owned(), proxy.port())

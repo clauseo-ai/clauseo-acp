@@ -1,9 +1,10 @@
 //! The run's environment, and on macOS and Linux the `BROWSER` shim: what the child sees, which
 //! address becomes `OpenUrl`, and the URL file's mode and end.
 
-use std::ffi::OsStr;
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 
-use clauseo_agents::{Method, SigninCode, SigninState};
+use clauseo_agents::{Method, Network, SigninCode, SigninState};
 
 use crate::support::{Fixture, REMOTE_HINTS, claude, now};
 
@@ -59,6 +60,61 @@ fn the_remote_hints_in_the_base_environment_never_reach_the_child() {
     }
     #[cfg(windows)]
     assert!(!names.iter().any(|name| name == "CLAUSEO_SIGNIN_URL_FILE"));
+    agents.cancel_sign_in(&claude()).unwrap();
+    assert_eq!(events.until_end().1, cancelled());
+}
+
+/// `Agents::set_network` while `Agents` runs reaches the next sign-in: its run gets the new
+/// `HTTPS_PROXY` and Claude's CA variable, where the start's config had neither.
+#[test]
+fn a_network_set_while_running_reaches_the_next_sign_in() {
+    let fx = Fixture::new("signin-network", "never");
+    let (agents, events) = fx.start();
+    let ca = fx.data.path().join("firm-ca.pem");
+    agents.set_network(Network {
+        proxy: Some("http://proxy.firm.example:3128".to_owned()),
+        signin_proxy: BTreeMap::new(),
+        ca_certs: [(claude(), ca.clone())].into(),
+    });
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    events.until(|state| matches!(state, SigninState::Waiting { .. }));
+    crate::support::eventually("the login started", || !fx.runs_of("login").is_empty());
+    let login = fx
+        .runs_of("login")
+        .into_iter()
+        .next()
+        .expect("the login ran");
+    assert_eq!(
+        login.env.get(OsStr::new("HTTPS_PROXY")),
+        Some(&OsString::from("http://proxy.firm.example:3128"))
+    );
+    assert_eq!(
+        login.env.get(OsStr::new("NODE_EXTRA_CA_CERTS")),
+        Some(&ca.into_os_string())
+    );
+    agents.cancel_sign_in(&claude()).unwrap();
+    assert_eq!(events.until_end().1, cancelled());
+}
+
+/// An agent's own sign-in proxy wins over the installs' proxy, and `None` signs in with none.
+#[test]
+fn an_agents_own_sign_in_proxy_wins_and_none_means_direct() {
+    let fx = Fixture::new("signin-network-direct", "never");
+    let (agents, events) = fx.start();
+    agents.set_network(Network {
+        proxy: Some("http://proxy.firm.example:3128".to_owned()),
+        signin_proxy: [(claude(), None)].into(),
+        ca_certs: BTreeMap::new(),
+    });
+    agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
+    events.until(|state| matches!(state, SigninState::Waiting { .. }));
+    crate::support::eventually("the login started", || !fx.runs_of("login").is_empty());
+    let login = fx
+        .runs_of("login")
+        .into_iter()
+        .next()
+        .expect("the login ran");
+    assert_eq!(login.env.get(OsStr::new("HTTPS_PROXY")), None);
     agents.cancel_sign_in(&claude()).unwrap();
     assert_eq!(events.until_end().1, cancelled());
 }

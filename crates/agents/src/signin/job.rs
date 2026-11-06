@@ -263,7 +263,7 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             vendor: self.vendor,
             kind,
             os: self.config.platform.os,
-            proxy: self.config.install.proxy.as_deref(),
+            proxy: self.config.install.signin_proxy_for(&self.ticket.agent),
             ca_file: self
                 .config
                 .install
