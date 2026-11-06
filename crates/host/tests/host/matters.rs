@@ -449,6 +449,7 @@ fn without_a_documents_folder_new_matter_asks_for_a_folder() {
         host.matters()
     );
     // The form's folder line has nothing to show, so it asks for a folder.
+    // (`with_no_documents_a_set_location_still_makes_scratch` covers a set location.)
     let error = host.query(HostQuery::GetDefaultLocation).unwrap_err();
     assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
     let create = |source| HostCommand::CreateMatter {
@@ -478,6 +479,45 @@ fn without_a_documents_folder_new_matter_asks_for_a_folder() {
 }
 
 /// `GetDefaultLocation`'s display.
+/// No Documents folder, but `matters.default_location` set (as the Windows e2e fixture sets it):
+/// the host still makes its Scratch matter there, and New matter shows that folder, asking
+/// for none (issue #365 keeps a set default working).
+#[test]
+fn with_no_documents_a_set_location_still_makes_scratch() {
+    let dir = Dir::new("no_documents_set_location", &[]);
+    let location = dir.home().join("matters");
+    dir.set_settings(
+        &[],
+        serde_json::json!({ "matters": { "default_location": location.display().to_string() } }),
+    );
+    let host = dir.start_without_documents(0);
+    let matters = host.matters();
+    assert_eq!(matters.len(), 1, "{matters:?}");
+    assert_eq!(matters[0].kind, MatterKind::Scratch);
+    assert!(
+        location
+            .join("Scratch")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    assert_eq!(default_display(&host), location.display().to_string());
+    created(host.dispatch(HostCommand::CreateMatter {
+        name: Title::new("Acme").unwrap(),
+        source: MatterSource::DefaultLocation,
+        client: None,
+        next_date: None,
+    }));
+    assert!(
+        location
+            .join("Acme")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    host.shutdown();
+}
+
 fn default_display(host: &Running) -> String {
     match host.query(HostQuery::GetDefaultLocation).unwrap() {
         clauseo_protocol::QueryResult::DefaultLocation(location) => location.display,
