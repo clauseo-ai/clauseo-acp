@@ -8,6 +8,7 @@ use clauseo_protocol::AgentId;
 use futures::future::{Either, select};
 
 use super::{Judged, Ticket, Verdict, signed_in_account};
+use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::compose::is_running;
 use crate::setup::refusal;
@@ -32,9 +33,11 @@ pub(crate) enum Seen {
 
 /// S18's new `state` for `agent`, before the pump handles it. A `SignedIn` of a sign-in or
 /// reuse through Clauseo records its account first, so nothing compares it with the account it
-/// replaced; another `SignedIn` is compared with the record ([`Seen::Changed`] runs
-/// [`account_changed`]). A resting state that is not `SignedIn` ends any sign-in under way and
-/// leaves nothing to check, but a changed account stays until a sign-in records again.
+/// replaced (with no email, the record goes and a check that may name an id records it);
+/// another `SignedIn` is compared with the record ([`Seen::Changed`] runs [`account_changed`]),
+/// unless a key login makes it moot, or it names no email, when a check is asked for. A resting
+/// state that is not `SignedIn` ends any sign-in under way and leaves nothing to check, but a
+/// changed account stays until a sign-in records again.
 pub(crate) async fn on_state(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -59,14 +62,31 @@ pub(crate) async fn on_state(
     };
     let expected = identity.entry(agent, |entry| entry.expect);
     let seen = if expected {
-        let hash = match read {
-            AccountRead::Account(hash) => Some(hash),
-            _ => None,
-        };
-        identity.record(agent, hash, now);
-        tracing::info!(%agent, kind = "recorded", "identity");
+        if let AccountRead::Account(hash) = read {
+            identity.record(agent, Some(hash), now);
+            tracing::info!(%agent, kind = "recorded", "identity");
+        } else {
+            // No email: the status may name the account by its id; the check records it.
+            identity.forget(agent, now);
+            identity.ask(agent);
+            tracing::info!(%agent, kind = "no_email", "identity");
+        }
         backend.compose.set_account_changed(agent, false);
         Seen::SignedIn
+    } else if exempt(backend, agent) {
+        if identity.key_login(agent) {
+            tracing::info!(%agent, kind = "key_login", "identity: not checked");
+        }
+        Seen::Checked
+    } else if read == AccountRead::NoAccount {
+        // A state with no email cannot tell; the check's status may name an id.
+        identity.entry(agent, |entry| {
+            if entry.verdict != Verdict::Changed {
+                entry.verdict = Verdict::Due;
+            }
+        });
+        identity.ask(agent);
+        Seen::Checked
     } else {
         let had = identity.recorded_now(agent);
         match settle(backend, agent, &read, None, now) {
@@ -83,14 +103,27 @@ pub(crate) async fn on_state(
     seen
 }
 
-/// One check of `agent`'s account: `agent.identity_checking` while S18's read runs (bounded by
-/// [`super::CHECK_BOUND`]), then the verdict: the refusal lifted when it is the recorded
+/// Whether `agent` launches with a stored API key, or an endpoint or a provider: the launch
+/// hook's env, not the shared login file, so the identity check does not apply.
+pub(super) fn exempt(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    backend.keys.has(agent) || lock(&backend.wiring.applied).firm.contains(agent)
+}
+
+/// One check of `agent`'s account (none while it is [`exempt`]: a key login, not checked):
+/// `agent.identity_checking` while S18's read runs (bounded by [`super::CHECK_BOUND`]), then the
+/// verdict: the refusal lifted when it is the recorded
 /// account, `agent.identity_unknown` when the read failed, timed out or named none,
 /// [`account_changed`] when it named another. Nothing when the agent has nothing to check, a
 /// check runs, or a sign-in is under way; a check that a record or a sign-out overtook leaves
 /// their verdict.
 pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
     let identity = &backend.wiring.identity;
+    if exempt(backend, agent) {
+        if identity.key_login(agent) {
+            tracing::info!(%agent, kind = "key_login", "identity: not checked");
+        }
+        return identity.verdict(agent);
+    }
     let stamps = super::watch::stamps(backend, agent);
     let Some(ticket) = identity.begin(agent, stamps) else {
         return identity.verdict(agent);

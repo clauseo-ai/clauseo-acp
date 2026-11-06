@@ -585,10 +585,14 @@ changes (`setup/identity.rs`).
 - *Where the identity comes from.* Only the agents' own status output: S18's `SignedIn {
   email }`, and `Agents::read_account` (Claude's `auth status --json`, Codex's `login status`
   then `account/read`, under the environment a session of that login sees; it changes no
-  sign-in state). Never a token or a credential file's contents. The email is kept only as its
-  SHA-256 (trimmed, lower-cased), in `<data_dir>/agents/identity.json` (agent id to hash,
-  written atomically, not at all when unchanged), so a swap while Clauseo is closed shows at the
-  next start.
+  sign-in state). Never a token or a credential file's contents. The email names the account;
+  with none, the account id does, when the status gives one (Claude's `accountUuid`; Codex's
+  `account/read` has no id at the pinned schema), so an id is enough. It is kept only as the
+  SHA-256 of that identity (trimmed, lower-cased), in `<data_dir>/agents/identity.json` (agent
+  id to hash, written atomically, not at all when unchanged), so a swap while Clauseo is closed
+  shows at the next start. A `SignedIn` with no email cannot tell, so it asks for a check, whose
+  status may give the id; a sign-in through Clauseo with no email drops the old record and the
+  check records the id. **Neither an email nor an id is unknown** (refused, retryable).
 - *When it is recorded.* At a sign-in or reuse made through Clauseo (`StartSignIn`,
   `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
   anything compares it, so a new account chosen in Clauseo never reads as a swap. And at the
@@ -622,8 +626,13 @@ changes (`setup/identity.rs`).
   records an account again and `restart_agents` runs as for any new sign-in. A reused login
   also gets S18's status check, which ends the reuse as `ReusedChanged`. The stop goes through
   one desktop function, `stop_for_account_change`, which takes the host's
-  `stop_agents_for(agent, StopFor::SignInAgain)` once it lands. With an API key stored, or an
-  endpoint or a provider, the launches do not use the login, so the identity refuses nothing.
+  `stop_agents_for(agent, StopFor::SignInAgain)` once it lands.
+- *A key login is not checked* (the orchestrator's ruling, 2026-11-06). While Clauseo holds a
+  stored API key for the agent, the key is what its launches use, through the launch hook's env,
+  from Clauseo's own store, not from the shared login file, so a swapped file cannot redirect
+  it: no status runs, nothing is refused or stopped, and the verdict reads "key login, not
+  checked". An endpoint or a provider is treated alike. Once the key goes, the login is what
+  launches use again: `agent.identity_checking` at once, and the check runs.
 - *At start.* An agent with an account recorded waits (`agent.identity_checking`) until the
   first status answers; a record that cannot be read counts as unknown for every agent with a
   login (refused, retryable), never as the same, until a sign-in through Clauseo writes it

@@ -14,7 +14,8 @@
 //!
 //! A change of any stamp (a file that appears, goes, is replaced or is written, a token refresh
 //! included) checks at once, whether or not sessions run. An unknown verdict is checked again
-//! every [`UNKNOWN_AGAIN`].
+//! every [`UNKNOWN_AGAIN`]. While a stored API key (or an endpoint) is what launches use, nothing
+//! is looked at: a key login, not checked; once it ends, the login is checked at once.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -25,6 +26,7 @@ use clauseo_protocol::{AgentId, AgentKind};
 use futures::StreamExt as _;
 use futures::future::{Either, select};
 
+use super::check::exempt;
 use super::{KEYCHAIN_STALE, POLL, Stamp, UNKNOWN_AGAIN, Verdict, check};
 use crate::setup::backend::AgentsBackend;
 use crate::setup::login_check::{LAWYER_CODEX, LOGIN_FILE};
@@ -87,6 +89,8 @@ enum Look {
     Check,
     /// A Keychain-only login's last check is stale: due before the next launch.
     Stale,
+    /// A stored key (or an endpoint) is what launches use now: not checked.
+    KeyLogin,
 }
 
 /// One look at every agent's login files at `now` (the clock's monotonic time): a check for
@@ -105,6 +109,10 @@ pub(crate) async fn poll_once(backend: &AgentsBackend, now: Duration) {
                 tracing::info!(%agent, kind = "keychain_stale", "identity");
                 refusal::sync(backend, agent).await;
             }
+            Look::KeyLogin => {
+                tracing::info!(%agent, kind = "key_login", "identity: not checked");
+                refusal::sync(backend, agent).await;
+            }
         }
     }
 }
@@ -115,7 +123,23 @@ fn look(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Look {
     let keychain = identity.keychain_fallback
         && AgentKind::of(agent) == Some(AgentKind::Claude)
         && stamps.iter().all(|stamp| *stamp == Stamp::Missing);
+    let exempt = exempt(backend, agent);
     identity.entry(agent, |entry| {
+        if exempt {
+            let checked = matches!(
+                entry.verdict,
+                Verdict::Due | Verdict::Same | Verdict::Unknown
+            );
+            if checked {
+                entry.verdict = Verdict::KeyLogin;
+                return Look::KeyLogin;
+            }
+            return Look::Nothing;
+        }
+        if entry.verdict == Verdict::KeyLogin && !entry.expect {
+            // The key or the endpoint is gone: the login is what launches use again.
+            return Look::Check;
+        }
         if entry.expect || !matches!(entry.verdict, Verdict::Same | Verdict::Unknown) {
             return Look::Nothing;
         }
@@ -150,7 +174,8 @@ pub(crate) async fn follow_identity(backend: &AgentsBackend) {
         let tick = std::pin::pin!(AsyncIoTimer.after(POLL));
         match select(asks.next(), tick).await {
             Either::Left((Some(agent), _)) => {
-                if backend.wiring.identity.verdict(&agent) == Verdict::Due {
+                let verdict = backend.wiring.identity.verdict(&agent);
+                if matches!(verdict, Verdict::Due | Verdict::KeyLogin) {
                     tracing::info!(%agent, kind = "launch_asked", "identity");
                     check(backend, &agent).await;
                 }

@@ -19,12 +19,13 @@ fn status(auth_method: &str, api_provider: Option<&str>) -> ClaudeStatus {
         api_provider: api_provider.map(str::to_owned),
         email: Some("lawyer@firm.example".to_owned()),
         subscription_type: Some("pro".to_owned()),
+        account_uuid: None,
     }
 }
 
 #[test]
 fn claude_status_parses_with_unknown_fields_ignored() {
-    let table: [(&str, Option<ClaudeStatus>); 5] = [
+    let table: [(&str, Option<ClaudeStatus>); 6] = [
         (
             SIGNED_IN,
             Some(ClaudeStatus {
@@ -33,6 +34,7 @@ fn claude_status_parses_with_unknown_fields_ignored() {
                 api_provider: Some("firstParty".to_owned()),
                 email: Some("test@example.com".to_owned()),
                 subscription_type: Some("max".to_owned()),
+                account_uuid: None,
             }),
         ),
         (
@@ -48,6 +50,15 @@ fn claude_status_parses_with_unknown_fields_ignored() {
             Some(ClaudeStatus {
                 logged_in: true,
                 auth_method: Some("api_key".to_owned()),
+                ..ClaudeStatus::default()
+            }),
+        ),
+        (
+            r#"{"loggedIn":true,"authMethod":"claude.ai","accountUuid":"uuid-1"}"#,
+            Some(ClaudeStatus {
+                logged_in: true,
+                auth_method: Some("claude.ai".to_owned()),
+                account_uuid: Some("uuid-1".to_owned()),
                 ..ClaudeStatus::default()
             }),
         ),
@@ -138,6 +149,7 @@ fn claude_signed_in_reads_the_account_and_plan() {
     let identity = Identity {
         email: Some("lawyer@firm.example".to_owned()),
         plan: Some("pro".to_owned()),
+        account_id: None,
     };
     let table = [
         (
@@ -202,6 +214,7 @@ fn account_read_gives_a_chatgpt_account_alone() {
         Some(Identity {
             email: email.map(str::to_owned),
             plan: Some(plan.to_owned()),
+            account_id: None,
         })
     };
     let table = [

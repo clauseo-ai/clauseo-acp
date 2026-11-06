@@ -70,6 +70,24 @@ fn claude_reads_the_account_its_status_names_and_sees_a_swap() {
     ));
 }
 
+/// R17: a Claude status with no email but an `accountUuid` names the account by its id; one with
+/// neither names none.
+#[test]
+fn claude_reads_an_id_only_account_and_sees_another_id() {
+    let fx = Fixture::new("account-claude-id", "ok-after:0");
+    let agents = signed_in(&fx, &claude(), Method::ClaudeAi);
+    let marker = |text: &str| write_file(&fake_marker(&fx, &claude()), text.as_bytes()).unwrap();
+    marker(r#"{"authMethod":"claude.ai","email":null,"accountUuid":"uuid-1"}"#);
+    assert_eq!(block_on(agents.read_account(&claude())), account("uuid-1"));
+    marker(r#"{"authMethod":"claude.ai","email":null,"accountUuid":"uuid-2"}"#);
+    assert_eq!(block_on(agents.read_account(&claude())), account("uuid-2"));
+    marker(r#"{"authMethod":"claude.ai","email":null}"#);
+    assert_eq!(
+        block_on(agents.read_account(&claude())),
+        AccountRead::NoAccount
+    );
+}
+
 #[test]
 fn codex_reads_the_account_from_account_read_and_sees_a_swap() {
     let fx = Fixture::new("account-codex", "ok-after:0");

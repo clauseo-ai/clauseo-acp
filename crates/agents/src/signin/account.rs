@@ -3,9 +3,10 @@
 //! with no change to the sign-in state, and the account it names as an [`AccountHash`].
 //!
 //! - Claude: `auth status --json` with the session's environment ([`RunKind::Own`] for
-//!   Clauseo's own login, [`RunKind::Reused`] for the lawyer's), its `email`.
+//!   Clauseo's own login, [`RunKind::Reused`] for the lawyer's), its `email`, else its
+//!   `accountUuid` (an id is enough).
 //! - Codex: `login status` (exit 0 is signed in), then `account/read` through the app-server,
-//!   its `ChatGPT` `email`.
+//!   its `ChatGPT` `email` (the pinned schema's account has no id).
 //!
 //! The identity comes only from that output: nothing here opens a credential. The email is
 //! hashed at once ([`AccountHash::of`]) and never kept, logged or shown. A read's runs keep their
@@ -21,7 +22,7 @@ use crate::integrity::to_hex;
 use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
 use crate::signin::{claude, codex, found};
-use crate::status::codex_logged_in;
+use crate::status::{Identity, codex_logged_in};
 
 /// The SHA-256, lowercase hex, of an account's normalised identity (its email or account id,
 /// trimmed and lower-cased). Clauseo records and compares this, never the email. Its `Debug`
@@ -90,23 +91,25 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
         Vendor::Claude => match claude::status_as(job, cancel, kind).await {
             None => AccountRead::Failed,
             Some(None) => AccountRead::NoAccount,
-            Some(Some(identity)) => named(identity.email.as_deref()),
+            Some(Some(identity)) => named(&identity),
         },
         Vendor::Codex => match codex::status_run(job, cancel, kind, &job.home).await {
             None => AccountRead::Failed,
             Some(code) if !codex_logged_in(code) => AccountRead::NoAccount,
             Some(_) => match codex::identity::read_as(job, cancel, kind, &job.home).await {
                 None => AccountRead::Failed,
-                Some(identity) => named(identity.email.as_deref()),
+                Some(identity) => named(&identity),
             },
         },
     }
 }
 
-/// [`AccountRead::Account`] for an email the status gave, else [`AccountRead::NoAccount`].
-fn named(email: Option<&str>) -> AccountRead {
+/// [`AccountRead::Account`] for the email the status gave, else for its account id; else
+/// [`AccountRead::NoAccount`].
+fn named(identity: &Identity) -> AccountRead {
+    let email = identity.email.as_deref().and_then(AccountHash::of);
     email
-        .and_then(AccountHash::of)
+        .or_else(|| identity.account_id.as_deref().and_then(AccountHash::of))
         .map_or(AccountRead::NoAccount, AccountRead::Account)
 }
 

@@ -427,9 +427,9 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
     )
 }
 
-/// [`rig`] with each agent's home `<homes>/<id>` and `identity` as its identity check (R17).
-pub(super) fn rig_identity(homes: &Path, identity: Identities) -> Rig {
-    let keychain = Keychain::memory();
+/// [`rig`] with each agent's home `<homes>/<id>`, `identity` as its identity check (R17), and
+/// its keys loaded from `keychain` (a memory one).
+pub(super) fn rig_identity(homes: &Path, identity: Identities, keychain: Keychain) -> Rig {
     let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
     rig_full(true, keychain, keys, false, Some(homes), identity)
 }

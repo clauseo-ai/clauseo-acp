@@ -1,6 +1,7 @@
 //! The account hash: normalised, hex, never shown; and what a status's email reads as.
 
 use super::{AccountHash, AccountRead, named};
+use crate::status::Identity;
 
 #[test]
 fn the_hash_is_of_the_trimmed_lower_cased_identity() {
@@ -34,12 +35,30 @@ fn debug_shows_no_digit_of_the_hash() {
     assert!(!shown.contains(&hash.as_hex()[..8]), "{shown}");
 }
 
+fn identity(email: Option<&str>, id: Option<&str>) -> Identity {
+    Identity {
+        email: email.map(str::to_owned),
+        plan: None,
+        account_id: id.map(str::to_owned),
+    }
+}
+
 #[test]
-fn a_status_with_no_email_names_no_account() {
-    assert_eq!(named(None), AccountRead::NoAccount);
-    assert_eq!(named(Some(" ")), AccountRead::NoAccount);
+fn the_email_names_the_account_else_the_id_else_none() {
+    let hash = |text: &str| AccountRead::Account(AccountHash::of(text).unwrap());
     assert_eq!(
-        named(Some("a@b.c")),
-        AccountRead::Account(AccountHash::of("a@b.c").unwrap())
+        named(&identity(Some("a@b.c"), Some("uuid-1"))),
+        hash("a@b.c")
+    );
+    assert_eq!(
+        named(&identity(None, Some("uuid-1"))),
+        hash("uuid-1"),
+        "an id is enough"
+    );
+    assert_eq!(named(&identity(Some(" "), Some("uuid-1"))), hash("uuid-1"));
+    assert_eq!(named(&identity(None, None)), AccountRead::NoAccount);
+    assert_eq!(
+        named(&identity(Some(" "), Some(""))),
+        AccountRead::NoAccount
     );
 }
