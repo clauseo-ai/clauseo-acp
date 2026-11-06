@@ -113,7 +113,8 @@ fn prepare(
 ) -> Result<LaunchSpec, String> {
     let (located, helper) = paths::claude(launch).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
-    write::replace_if_differs(&helper, HELPER.as_bytes()).map_err(|err| err.to_string())?;
+    write::replace_if_differs(paths::CLAUDE_ID, &helper, HELPER.as_bytes())
+        .map_err(|err| err.to_string())?;
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = claude_home.map(|home| (OsStr::new(CLAUDE_CONFIG_DIR), home.as_os_str()));
