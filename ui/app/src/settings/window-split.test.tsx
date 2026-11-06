@@ -5,7 +5,7 @@
 // the case-law hint and the out-of-credit note pressed in every state, it holds none but those two; no file under
 // room/ or the room's entry imports the settings window's connector code, and only room/connectors/main-commands.ts
 // dispatches a connector command; Settings' command type can't carry the room's dismiss_case_law_hint, and the room's
-// can't carry a settings-only command.
+// can't carry a settings-only command. UC: the room sends only retry_protection; Settings also remove_sandbox_setup.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
@@ -25,6 +25,8 @@ import type { MainConnectorCommand } from "../room/connectors/main-commands.ts";
 import { mountRoom } from "../room/thread/harness.ts";
 import { agentText, reset, step, THREAD, TURN, userMessage } from "../testing/stream-script.ts";
 import type { SettingsConnectorCommand } from "./connector-commands.ts";
+import type { RoomProtectionCommand } from "../room/protection/commands.ts";
+import type { SettingsProtectionCommand } from "./sections/workspace-commands.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
@@ -166,4 +168,21 @@ test("Settings' command type has no dismiss_case_law_hint", () => {
   // @ts-expect-error: the room's command, which the host refuses from the settings window
   const room: SettingsConnectorCommand = { dismiss_case_law_hint: { matter: uuid(1, 2) } };
   expect([ok, room]).toHaveLength(2);
+});
+
+test("UC's split: the room's protection command is the set-up alone; Settings has both; no room file imports Settings' Safe workspace", () => {
+  const room: RoomProtectionCommand = { retry_protection: {} };
+  // @ts-expect-error: removing protection's set-up is Settings' alone
+  const notRoom: RoomProtectionCommand = { remove_sandbox_setup: {} };
+  const settings: SettingsProtectionCommand[] = [
+    { retry_protection: {} },
+    { remove_sandbox_setup: {} },
+  ];
+  expect([room, notRoom, ...settings]).toHaveLength(4);
+  const src = join(import.meta.dirname, "..");
+  const roomFiles = readdirSync(join(src, "room"), { recursive: true })
+    .map((f) => join(src, "room", String(f)))
+    .filter((f) => /\.(ts|tsx)$/.test(f));
+  for (const file of [...roomFiles, join(src, "main.tsx"), join(src, "App.tsx")])
+    expect(readFileSync(file, "utf8"), file).not.toMatch(/settings\/sections\/workspace/);
 });

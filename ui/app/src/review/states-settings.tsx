@@ -5,7 +5,7 @@ import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
 import { nextHostOf } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
-import { FakeTransport } from "../transport/fake-transport.ts";
+import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
   ConnectorsState,
   LimitsView,
@@ -36,6 +36,7 @@ export function SettingsOver({
   connectors,
   setup,
   plans,
+  protection,
 }: {
   section: SectionId;
   lang: Lang;
@@ -50,6 +51,8 @@ export function SettingsOver({
   setup?: CellSetup;
   /** Each agent's firm plan the host sends (SettingsView.plans). */
   plans?: SettingsView["plans"];
+  /** UC's protection wire; none when left out, and the Safe workspace doesn't show. */
+  protection?: FakeProtectionHost;
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -69,6 +72,7 @@ export function SettingsOver({
         },
         first: () => (connectors === undefined ? [] : [{ connectors_changed: connectors }]),
       },
+      ...(protection === undefined ? {} : { protection }),
       ...(setup === undefined
         ? {}
         : {

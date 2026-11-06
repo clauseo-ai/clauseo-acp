@@ -122,6 +122,12 @@ export const HI = {
     null,
   "If this goes on, quit Clauseo and open it again.": null,
   "Clauseo is still switching accounts. Try again in a moment.": null,
+
+  // UC: the Safe workspace step, the design's own words with its Hindi (UC-10, UC-13, UC-16)
+  "Windows asks once for permission to set up the Safe workspace.":
+    "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
+  "Not now": "अभी नहीं",
+  Settings: "सेटिंग्स",
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

@@ -220,6 +220,9 @@ function appEventOf(event: HostEvent): AppEvent | null {
     return { connectors_changed: event.connectors_changed };
   if (event.case_law_hint !== undefined) return { case_law_hint: event.case_law_hint };
   if (event.folder_scanned !== undefined) return { folder_scanned: event.folder_scanned };
+  // UC: as they came; protection_view_changed is R17 PR-B's, not in HostEvent yet
+  if (event.protection_changed !== undefined || "protection_view_changed" in event)
+    return event as AppEvent;
   return null;
 }
 

@@ -429,6 +429,11 @@ export class Matters {
         const change = event.matters_changed;
         matters = change.all ? change.matters : merged(matters, change.matters, change.removed);
         changed = true;
+      } else if ("protection_changed" in event) {
+        // UC: a matter's protection now, on its row, so the rail's mark and the room's line change with it
+        const { matter, protection } = event.protection_changed;
+        matters = matters.map((m) => (m.matter === matter ? { ...m, protection } : m));
+        changed = true;
       }
       // threads_changed is the conversations' (conversations.ts); a matter row's status is H5's
     }

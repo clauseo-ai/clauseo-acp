@@ -18,6 +18,7 @@ import {
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
+import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
@@ -40,7 +41,42 @@ const FIRST_READ_TITLE_EN = "First read";
 import { holderOf, provideExpiredCard, type Hold } from "./hold.ts";
 import { ExpiredCard } from "../signin-expired/expired-card.tsx";
 import { CaseLawSlot } from "./case-law.tsx";
-import { workspaceStep } from "./workspace.ts";
+import { stepAllowsRead, stepDue, workspaceStep } from "./workspace.ts";
+import {
+  carriesProtection,
+  protectionStoreOf,
+  type ProtectionState,
+  type ProtectionStore,
+} from "../../store/protection.ts";
+import { loadProtectionNote } from "../protection/note-load.ts";
+
+/** UC: the Safe workspace step's parts, from the note's chunk (note-load.ts), so the two share no chunk of their own. */
+type StepParts = Pick<
+  Awaited<ReturnType<typeof loadProtectionNote>>,
+  | "WorkspaceOff"
+  | "WorkspaceStep"
+  | "failedWords"
+  | "retryProtection"
+  | "pw"
+  | "asksAdmin"
+  | "computerCause"
+  | "inProgress"
+>;
+
+/** The step's words: the first run's own, and protection's from the chunk. */
+const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
+  ask: fl(lang, "Windows asks once for permission to set up the Safe workspace."),
+  unknown: pw(
+    lang,
+    "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to set up protection.",
+  ),
+  setUp: pw(lang, "Set up protection"),
+  notNow: fl(lang, "Not now"),
+  waiting: pw(lang, "Choose Yes in the window Windows shows."),
+  wait: pw(lang, "Setting up the Safe workspace."),
+  tryAgain: fl(lang, "Try again"),
+  settings: fl(lang, "Settings"),
+});
 import { gateView, installView, refusalView } from "./views.ts";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
@@ -155,8 +191,26 @@ const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copi
   setCopied: (what: "message" | "log") => store.set({ copied: what }),
 });
 
+const noSubscribe = () => () => {};
+
 /** The room's side of the hold: the plan the send uses, and how times and words are said. */
 type RoomSide = { agent: AgentId; zone: string; lang: Lang; platform: string };
+
+/** UC: the Safe workspace step's acts over the window's protection store. */
+function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepParts) {
+  return {
+    setUp: () =>
+      void parts.retryProtection(transport, store).then(() => store.set({ step: "done" })),
+    notNow: () => store.set({ step: "done" }),
+    retry: () => store.set({ step: "ask", failed: null }),
+    // Settings opens at its first section: the wire's SettingsSection has no protection section yet
+    // PR-B1: open "protection"
+    settings:
+      transport.openSettings === undefined
+        ? undefined
+        : () => void transport.openSettings?.(null).catch(() => {}),
+  };
+}
 
 /** The composer's hold for this setup state: the gate until the plan the send uses is signed in, the install's working
  * line, and the room's line under the field. A plain function of the store's state and the room's side, so the composer
@@ -166,6 +220,7 @@ function holdOf(
   transport: HostTransport,
   state: SetupState,
   room: RoomSide,
+  shield: { store: ProtectionStore; state: ProtectionState; parts: StepParts } | null,
 ): Hold | null {
   const { agent, lang } = room;
   const plan = planOf(agent);
@@ -206,13 +261,43 @@ function holdOf(
       line: <DocumentsLine name={NAME[plan]} />,
     };
   }
-  // the Safe workspace step stands after the first sign-in, once UC merges (workspace.ts); none is needed today
-  if (
-    workspaceStep() === null &&
-    typeof signedIn === "object" &&
-    signedIn.signed_in !== undefined &&
-    setup?.signedHere === true
-  )
+  // the Safe workspace step stands after the first sign-in (UC, workspace.ts): in the gate's place while it asks or
+  // waits, and as the room's line once it ended without protection
+  const signedHere =
+    typeof signedIn === "object" && signedIn.signed_in !== undefined && setup?.signedHere === true;
+  const step = signedHere ? workspaceStep(shield?.state ?? null, shield?.parts ?? null) : null;
+  if (shield !== null && (step === "ask" || step === "waiting" || step === "wait")) {
+    const acts = stepActs(transport, shield.store, shield.parts);
+    const { WorkspaceStep } = shield.parts;
+    return {
+      gate: (
+        <WorkspaceStep
+          state={step}
+          words={stepWords(lang, shield.parts.pw)}
+          onSetUp={acts.setUp}
+          onNotNow={acts.notNow}
+        />
+      ),
+      working,
+    };
+  }
+  if (shield !== null && step === "off") {
+    const acts = stepActs(transport, shield.store, shield.parts);
+    const { WorkspaceOff } = shield.parts;
+    return {
+      working,
+      line: (
+        <WorkspaceOff
+          plan={plan}
+          words={stepWords(lang, shield.parts.pw)}
+          failed={shield.parts.failedWords(lang, shield.state)}
+          onRetry={acts.retry}
+          onSettings={acts.settings}
+        />
+      ),
+    };
+  }
+  if (typeof signedIn === "object" && signedIn.signed_in !== undefined && signedHere)
     return {
       working,
       line: (
@@ -249,6 +334,31 @@ export function FirstRun({
   const [store] = useState(() => setupStoreOf(transport as HostTransport & SetupSource));
   useEffect(() => store.start(), [store]);
   const state = useSyncExternalStore(store.subscribe, store.state, store.state);
+  // UC: the window's protection, where the transport carries its wire; null keeps the first run as before UC
+  const [shields] = useState(() =>
+    carriesProtection(transport) ? protectionStoreOf(transport) : null,
+  );
+  // the step's parts ride in the note's chunk, loaded once where the wire is
+  const [parts, setParts] = useState<StepParts | null>(null);
+  useEffect(() => {
+    if (shields === null) return;
+    let live = true;
+    loadProtectionNote().then(
+      (m) => {
+        if (live) setParts(m);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [shields]);
+  const readShield = () => shields?.state() ?? null;
+  const shieldState = useSyncExternalStore(
+    shields?.subscribe ?? noSubscribe,
+    readShield,
+    readShield,
+  );
   const { lang, platform } = useDisplay();
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
   const agent = talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent;
@@ -267,23 +377,45 @@ export function FirstRun({
   useEffect(() => {
     const holder = holderOf(transport);
     const room: RoomSide = { agent, zone, lang, platform };
-    let cache: [SetupState, Hold | null] | null = null;
+    let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
+    const withParts = (shield: ProtectionState | null) =>
+      shields === null || shield === null || parts === null
+        ? null
+        : { store: shields, state: shield, parts };
     holder.read = () => {
       const now = store.state();
-      if (cache === null || cache[0] !== now) cache = [now, holdOf(store, transport, now, room)];
-      return cache[1];
+      const shield = shields?.state() ?? null;
+      if (cache === null || cache[0] !== now || cache[1] !== shield)
+        cache = [now, shield, holdOf(store, transport, now, room, withParts(shield))];
+      return cache[2];
     };
     const notify = () => {
       for (const heard of holder.heard) heard();
     };
     const stop = store.subscribe(notify);
+    const stopShield = shields?.subscribe(notify);
     notify();
     return () => {
       stop();
+      stopShield?.();
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, agent, zone, lang, platform]);
+  }, [transport, store, shields, parts, agent, zone, lang, platform]);
+  // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up asks no administrator
+  // it is sent at once, with no confirm, and the step is its wait
+  const chosenSetup = state.agents[state.chosen];
+  const enter =
+    shields !== null &&
+    parts !== null &&
+    stepDue(shieldState, parts) &&
+    isSignedIn(chosenSetup?.signIn) &&
+    chosenSetup?.signedHere === true;
+  useEffect(() => {
+    if (!enter || shields === null || parts === null) return;
+    shields.set({ step: "ask" });
+    if (!parts.asksAdmin(shields.state().view)) stepActs(transport, shields, parts).setUp();
+  }, [enter, shields, parts, transport]);
   // a matter made from the rail while the first screen stood is the first act too; the matter it opens is the one
   // added during the first run, whose first read starts once signed in (UD2)
   const wasWelcome = useRef(welcome);
@@ -302,7 +434,9 @@ export function FirstRun({
   // UD2's first read: once the chosen plan is signed in (and, after UC, the workspace step has its outcome), for each
   // matter added during the first run and not yet read; its chunk loads only then
   const chosen = state.chosen;
-  const signedIn = isSignedIn(state.agents[chosen]?.signIn) && workspaceStep() === null;
+  const signedIn =
+    isSignedIn(state.agents[chosen]?.signIn) &&
+    (chosenSetup?.signedHere !== true || stepAllowsRead(workspaceStep(shieldState, parts)));
   useEffect(() => {
     if (!signedIn || welcome) return;
     const due = Object.entries(firstReadMarks()).filter(

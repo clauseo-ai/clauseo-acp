@@ -1,0 +1,423 @@
+{
+  "UC-01": {
+    "en": "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+    "hi": "सुरक्षित कार्यक्षेत्र। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-02": {
+    "en": "Not protected.",
+    "hi": "संरक्षित नहीं।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-03": {
+    "en": "Clauseo asks before each change in this matter.",
+    "hi": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-04": {
+    "en": "Clauseo can change files in this matter without asking. It asks before going beyond it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-05": {
+    "en": "Clauseo can reach beyond this matter's folder without asking.",
+    "hi": "Clauseo बिना पूछे इस मामले के फ़ोल्डर से बाहर पहुँच सकता है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-06": {
+    "en": "Not protected",
+    "hi": "संरक्षित नहीं",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-10": {
+    "en": "Windows asks once for permission to set up the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-11": {
+    "en": "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to set up protection.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-12": {
+    "en": "Set up protection",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-13": {
+    "en": "Not now",
+    "hi": "अभी नहीं",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-14": {
+    "en": "Choose Yes in the window Windows shows.",
+    "hi": "Windows जो विंडो दिखाता है, उसमें Yes चुनें।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-15": {
+    "en": "Setting up the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार हो रहा है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-16": {
+    "en": "Settings",
+    "hi": "सेटिंग्स",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-20": {
+    "en": "This matter is not protected",
+    "hi": "यह मामला संरक्षित नहीं है",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-21": {
+    "en": "Protection is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+    "hi": "{matter} के लिए संरक्षण बंद है। यहाँ काम करते समय Clauseo बिना पहले पूछे इस कंप्यूटर पर कहीं भी फ़ाइलें पढ़ और बदल सकता है।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-22": {
+    "en": "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file on this computer, and asks before changing anything outside this matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-23": {
+    "en": "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-24": {
+    "en": "Windows didn't allow the protected space on this computer.",
+    "hi": "Windows ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-25": {
+    "en": "This computer can't give Clauseo's protection, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-26": {
+    "en": "Every change inside the matter's folder is still kept, and Versions can undo it.",
+    "hi": "मामले के फ़ोल्डर के भीतर हर बदलाव अब भी रखा जाता है, और संस्करण उसे पूर्ववत कर सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-27": {
+    "en": "All {size} of this computer's protected spaces are in use, so this matter works without protection for now. It's protected again once one is free.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-28": {
+    "en": "In use by other open matters: {n}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-29": {
+    "en": "Kept by matters with nothing open: {n}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-30": {
+    "en": "Freed the next time Clauseo starts work: {n}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-31": {
+    "en": "Still holding files set aside: {n}",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-32": {
+    "en": "To free one now, end a conversation in another matter.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-33": {
+    "en": "Windows policy on this computer doesn't let Clauseo's protection accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-34": {
+    "en": "Clauseo can add room for 4 more. Windows asks for permission first.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-35": {
+    "en": "Add room",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-36": {
+    "en": "Clauseo's protection isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-37": {
+    "en": "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-38": {
+    "en": "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-40": {
+    "en": "Set up protection?",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-41": {
+    "en": "Remove protection's set-up?",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-42": {
+    "en": "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to remove protection's set-up.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-43": {
+    "en": "Afterwards, Clauseo works on this computer without protection until you set it up again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-44": {
+    "en": "Remove set-up",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-50": {
+    "en": "Your firm requires protection on this computer. Set it up once, then ask here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-51": {
+    "en": "Your firm requires protection, and all of this computer's protected spaces are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-60": {
+    "en": "Safe workspace",
+    "hi": "सुरक्षित कार्यक्षेत्र",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-61": {
+    "en": "Clauseo can't show this computer's protection here yet.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-62": {
+    "en": "On for every matter",
+    "hi": "हर मामले के लिए चालू",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-63": {
+    "en": "macOS keeps Clauseo inside each matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-64": {
+    "en": "Windows keeps Clauseo inside each matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-65": {
+    "en": "Set up with Windows' permission.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-66": {
+    "en": "Not protected",
+    "hi": "संरक्षित नहीं",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-67": {
+    "en": "Protection isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-68": {
+    "en": "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-69": {
+    "en": "Set up on {date}, with Windows' permission.",
+    "hi": "{date} को Windows की अनुमति से सेट किया गया।",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-70": {
+    "en": "Protection couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-71": {
+    "en": "This computer can't give Clauseo's protection, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-72": {
+    "en": "Clauseo's protection isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-73": {
+    "en": "Set up again",
+    "hi": "फिर से सेट करें",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UC-74": {
+    "en": "Your firm requires protection, so Clauseo doesn't answer on this computer until it's protected.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-76": {
+    "en": "Your firm doesn't allow Clauseo to work without asking on this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  }
+}

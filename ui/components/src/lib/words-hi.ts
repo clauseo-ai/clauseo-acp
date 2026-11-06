@@ -18,6 +18,7 @@ import { HI as list } from "./words-list.hi.ts";
 import { HI as matterForm } from "./words-matter-form.hi.ts";
 import { HI as matters } from "./words-matters.hi.ts";
 import { HI as planCard } from "./words-plan-card.hi.ts";
+import { HI as protection } from "./words-protection.hi.ts";
 import { HI as reader } from "./words-reader.hi.ts";
 import { HI as room } from "./words-room.hi.ts";
 import { HI as scan } from "./words-scan.hi.ts";
@@ -55,6 +56,7 @@ export const HINDI = {
   "matter-form": matterForm,
   matters,
   "plan-card": planCard,
+  protection,
   reader,
   room,
   scan,

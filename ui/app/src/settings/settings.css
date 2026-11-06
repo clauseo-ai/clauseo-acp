@@ -11,5 +11,7 @@
 /* Plans (UD2): its blocks, and UD1's sign-in gate it shows inline; its body is a bare chunk, so its CSS is the entry's */
 @import "@clauseo/components/clauseo/first-launch/first-launch.css";
 @import "./plans.css";
+/* the Safe workspace (UC): its body is a bare chunk too */
+@import "./workspace.css";
 @source ".";
 @source not "./**/*.test.*";

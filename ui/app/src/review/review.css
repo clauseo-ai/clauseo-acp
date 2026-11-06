@@ -9,6 +9,7 @@
 @import "../settings/privacy.css";
 @import "../settings/connectors.css";
 @import "../settings/plans.css";
+@import "../settings/workspace.css";
 @source "../room";
 @source "../settings";
 @source not "../room/**/*.test.*";

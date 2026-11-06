@@ -83,6 +83,33 @@ export const HI = {
   // what a search for the CLI's login found, once the host says (stage D's FoundLogin none_found and reuse_off)
   "No {app} sign-in on this computer.": null, // hi: later
   "Clauseo isn't using {app}'s sign-in here.": null, // hi: later
+  // UC: the Safe workspace (settings.html#workspace); the design's own words keep its Hindi
+  "Safe workspace": "सुरक्षित कार्यक्षेत्र",
+  "On for every matter": "हर मामले के लिए चालू",
+  "Not protected": "संरक्षित नहीं",
+  "Set up again": "फिर से सेट करें",
+  "Set up on {date}, with Windows' permission.": "{date} को Windows की अनुमति से सेट किया गया।",
+  "Clauseo can't show this computer's protection here yet.": null, // hi: later
+  "macOS keeps Clauseo inside each matter's folder.": null, // hi: later
+  "Windows keeps Clauseo inside each matter's folder.": null, // hi: later
+  "Set up with Windows' permission.": null, // hi: later
+  "Protection isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "Protection couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "This computer can't give Clauseo's protection, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "Clauseo's protection isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "Clauseo's protection isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.":
+    null, // hi: later
+  "Your firm requires protection, so Clauseo doesn't answer on this computer until it's protected.":
+    null, // hi: later
+  "Your firm doesn't allow Clauseo to work without asking on this computer.": null, // hi: later
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

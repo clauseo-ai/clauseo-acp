@@ -357,6 +357,13 @@
   .np-mark[data-short] .np-icon {
     margin-top: 0;
   }
+  /* UC: on the toolbar the short mark is a button where it explains protection; it sits in the drag region, so it
+     opts out of dragging */
+  button.np-mark {
+    border-radius: var(--r-small);
+    -webkit-app-region: no-drag;
+    @apply is-hover:bg-hover;
+  }
   /* Not protected on a rail row: the open lock alone, 14 px, at the end of the name line, in concrete */
   .room-matter-np {
     display: inline-flex;
