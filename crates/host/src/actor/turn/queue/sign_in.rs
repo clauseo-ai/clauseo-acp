@@ -117,11 +117,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
 /// queue is held for the sign-in. Nothing starts until `restart_agents` (or the lawyer, for the
 /// second), so a prompt queues held.
 pub(super) fn applies(actor: &Actor, thread: ThreadId) -> bool {
-    super::super::sign_in::holds(actor, thread)
-        || actor.threads.get(&thread).is_some_and(|entry| {
-            let queue = &entry.turn.queue;
-            queue.held && queue.sign_in.is_some()
-        })
+    super::hold::holds(actor, thread).sign_ins()
 }
 
 /// `restart_agents`' part for `thread`: a queue held for the sign-in moves on, once.

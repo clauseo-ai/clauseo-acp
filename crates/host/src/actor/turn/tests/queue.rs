@@ -1,6 +1,7 @@
-//! The queue against the thread's undo and a failed remove: a queue resumed while the undo holds
-//! the matter's writer starts only once the undo is logged, and a remove whose commit fails keeps
-//! the turn queued.
+//! The queue against the thread's undo and failed commits: a queue resumed while the undo holds
+//! the matter's writer starts only once the undo is logged, a remove whose commit fails keeps
+//! the turn queued, and a send under an install's hold whose commit fails leaves a held queue
+//! held.
 
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, DomainEvent, FileChoice, FileDecision, HostCommand,
@@ -13,6 +14,7 @@ use super::rig::{Rig, command_id};
 use crate::actor::Actor;
 use crate::actor::input::{Input, Request};
 use crate::actor::turn::{End, Holder, TurnPhase, end, queue};
+use crate::actor::update;
 
 /// Queues a prompt behind the running turn of `thread` as command `n`; returns its turn.
 fn queue_prompt(rig: &mut Rig, n: u128, thread: clauseo_protocol::ThreadId) -> TurnId {
@@ -196,4 +198,73 @@ fn a_remove_whose_commit_fails_keeps_the_turn_queued() {
         Some(first)
     );
     rig.finish();
+}
+
+/// A held queue, an install's hold on new sends, and a send with `delivery` whose commit the
+/// store refuses: once the install is taken back the queue is still held and nothing starts.
+fn refused_under_the_install_leaves_the_queue_held(
+    test: &str,
+    delivery: clauseo_protocol::DeliveryRequest,
+) {
+    let mut rig = Rig::start(test, "");
+    let thread = rig.thread();
+    rig.running_turn(thread);
+    let queued = queue_prompt(&mut rig, 30, thread);
+    end::end_turn(&mut rig.actor, thread, End::cancelled(None));
+    until_ended(&mut rig, thread);
+    rig.settle_commits();
+    assert!(
+        queue::queue_held(&rig.actor, thread),
+        "a cancel holds the queue"
+    );
+
+    update::hold_sends(&mut rig.actor, true);
+    rig.fail(1, |event| matches!(event, DomainEvent::UserMessage(_)));
+    let sent = rig.dispatch(
+        31,
+        HostCommand::SendPrompt {
+            thread,
+            content: vec![PromptBlock::Text {
+                text: "And clause 6?".to_owned(),
+            }],
+            delivery,
+        },
+    );
+    assert!(sent.is_err(), "{sent:?}");
+    rig.settle_commits();
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [queued]);
+    assert!(
+        queue::queue_held(&rig.actor, thread),
+        "the refusal keeps it held"
+    );
+
+    // The install is taken back: the queue still waits for the lawyer.
+    update::hold_sends(&mut rig.actor, false);
+    rig.settle_commits();
+    assert!(
+        rig.actor.threads[&thread].turn.current.is_none(),
+        "nothing starts"
+    );
+    assert_eq!(queue::queued_turns(&rig.actor, thread), [queued]);
+    assert!(
+        queue::queue_held(&rig.actor, thread),
+        "still held after the hold lifts"
+    );
+    rig.finish();
+}
+
+#[test]
+fn a_queued_send_refused_under_the_install_leaves_the_held_queue_held() {
+    refused_under_the_install_leaves_the_queue_held(
+        "queue-held-update-queue-refused",
+        clauseo_protocol::DeliveryRequest::Queue,
+    );
+}
+
+#[test]
+fn a_send_now_refused_under_the_install_leaves_the_held_queue_held() {
+    refused_under_the_install_leaves_the_queue_held(
+        "queue-held-update-now-refused",
+        clauseo_protocol::DeliveryRequest::SendNow,
+    );
 }
