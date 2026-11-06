@@ -5,11 +5,14 @@
 //! one lock, a whole line at a time, so a refusal never lands inside a line of the child's.
 //!
 //! When the agent closes stdin, the guard asks agent-browser to close its browser (one
-//! `agent_browser_close` call, whose reply is not relayed), waits up to [`CLOSE_WAIT`] for that
-//! reply, closes the child's stdin and waits up to [`EXIT_WAIT`] for its stdout to end, then
-//! kills it. agent-browser's daemon is a detached process (`setsid`, or `DETACHED_PROCESS` on
-//! Windows), so closing it here is best-effort; the host's session end and the idle timeout end
-//! it otherwise. When the child ends first, the guard exits at once.
+//! `agent_browser_close` call, whose reply is not relayed; for the guard's Chrome that only
+//! disconnects), waits up to [`CLOSE_WAIT`] for that reply, closes the child's stdin and waits
+//! up to [`EXIT_WAIT`] for its stdout to end, then kills it. When the child ends first, the
+//! guard exits at once. When Chrome exits (`chrome.rs`) or the guard's parent goes
+//! (`parent.rs`), agent-browser is ended at once and the guard exits 1. Chrome is also looked at
+//! once the relay ends: had it died unnoticed (between two of its watcher's looks) while
+//! agent-browser ended, the guard still exits 1. Whatever ends the relay, `browser_guard.rs`
+//! then ends agent-browser's detached daemon and Chrome.
 //!
 //! The child's lines are capped at [`CHILD_MAX_LINE_BYTES`]: a longer one kills the child and
 //! the guard exits 1 (fail closed). A last line cut off by the child's end is dropped, with a
@@ -17,10 +20,13 @@
 //!
 //! After each line it relays, the stdout pump checks the port files (`port_file.rs`): the stream
 //! server's on every OS and the daemon's on Windows, for the session's whole life. A listener on
-//! any other port ends agent-browser and the guard exits 1. On Windows agent-browser runs in a
-//! Job Object the guard owns (`job.rs`), so that end, and the guard's own exit, take its
-//! detached daemon and Chrome too. On Unix the end kills the direct child only: the daemon
-//! leaves the process group (`setsid`) and lives until its idle timeout (G17 item 6).
+//! any other port ends agent-browser and the guard exits 1. On Windows agent-browser runs in the
+//! Job Object the guard owns (`job.rs`) beside Chrome, so that end, and the guard's own exit,
+//! take its detached daemon too. On Unix agent-browser leads a process group of its own, and
+//! every end, its own exit included, kills that group before agent-browser is reaped: a CLI
+//! call of its that still runs could otherwise start a daemon after the guard's cleanup. The
+//! daemon itself leaves the group (`setsid`), and `reaper.rs`'s `kill_daemon` ends it
+//! afterwards; the reaper also learns agent-browser's pid, for a guard that is killed.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -35,7 +41,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::chrome::Chrome;
 use super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
+use super::note;
+use super::parent::Parent;
 use super::port_file::{Expected, Status};
 /// The request sent when the agent closes stdin.
 pub(crate) const CLOSE_REQUEST: &str = r#"{"jsonrpc":"2.0","id":"clauseo-guard-close","method":"tools/call","params":{"name":"agent_browser_close","arguments":{}}}"#;
@@ -49,7 +58,7 @@ pub(crate) const CHILD_MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Windows: the child gets no console window (agent-browser issue #1644).
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// The guard's stdout, shared by both pumps.
 type Out = Arc<Mutex<io::Stdout>>;
@@ -67,6 +76,10 @@ enum Event {
     CloseAnswered,
     /// A listener is not on its claimed port; the reason.
     PortRefused(String),
+    /// The guard's Chrome exited.
+    ChromeExited,
+    /// The guard's parent has gone.
+    ParentGone,
 }
 
 /// How the relay ended.
@@ -79,6 +92,10 @@ pub(crate) enum Outcome {
     /// A port file named another port, or could not be trusted, and agent-browser was ended
     /// (its whole job on Windows). The reason.
     PortRefused(String),
+    /// Chrome exited and agent-browser was ended.
+    ChromeExited,
+    /// The guard's parent went and agent-browser was ended.
+    ParentGone,
 }
 
 /// What [`wait_for_end`] saw.
@@ -87,28 +104,60 @@ enum End {
     ChildOversize,
     ExitTimedOut,
     PortRefused(String),
+    ChromeExited,
+    ParentGone,
 }
 
-/// Starts agent-browser and relays until it exits, checking each of `port_checks` after every
-/// relayed line.
+/// What agent-browser runs as, and beside what.
+pub(crate) struct Agent<'a> {
+    pub(crate) program: &'a Path,
+    pub(crate) args: &'a [OsString],
+    pub(crate) cwd: &'a Path,
+    pub(crate) env: &'a BTreeMap<String, OsString>,
+    /// Checked after every relayed line.
+    pub(crate) port_checks: Vec<Expected>,
+    /// Given agent-browser's pid (on Unix also its process group's id) once it runs: the guard
+    /// tells the reaper.
+    pub(crate) on_spawn: &'a mut dyn FnMut(u32),
+    /// Called once the guard has killed agent-browser's group, just before it reaps
+    /// agent-browser: the guard tells the reaper, which then leaves that group alone.
+    pub(crate) on_reap: &'a mut dyn FnMut(),
+}
+
+/// Starts agent-browser and relays until it exits, Chrome exits or the guard's parent goes.
 pub(crate) fn run(
-    program: &Path,
-    args: &[OsString],
-    cwd: &Path,
-    env: &BTreeMap<String, OsString>,
-    port_checks: Vec<Expected>,
+    spec: Agent<'_>,
+    chrome: &mut Chrome,
+    parent: &Parent,
+    #[cfg(windows)] job: &super::job::Job,
 ) -> io::Result<Outcome> {
-    // On Windows in its job, which ends what is left of the tree when `run` returns.
+    let Agent {
+        program,
+        args,
+        cwd,
+        env,
+        port_checks,
+        on_spawn,
+        on_reap,
+    } = spec;
+    // On Windows in the guard's job, which ends what is left of the tree when the guard exits.
     #[cfg(windows)]
     let mut child = {
         let mut child = spawn_child(program, args, cwd, env)?;
-        let job = super::job::Job::adopt(&mut child)?;
-        Tree { child, job }
+        job.adopt(&mut child, "agent-browser")?;
+        Tree {
+            child,
+            job,
+            on_reap,
+        }
     };
     #[cfg(not(windows))]
     let mut child = Tree {
         child: spawn_child(program, args, cwd, env)?,
+        job: std::marker::PhantomData,
+        on_reap,
     };
+    on_spawn(child.child.id());
     let stdout = child
         .child
         .stdout
@@ -118,6 +167,14 @@ pub(crate) fn run(
     let out: Out = Arc::new(Mutex::new(io::stdout()));
     let closing = Arc::new(AtomicBool::new(false));
     let (events, inbox) = mpsc::channel();
+    {
+        let events = events.clone();
+        chrome.watch(move || send(&events, Event::ChromeExited));
+    }
+    {
+        let events = events.clone();
+        parent.watch(move || send(&events, Event::ParentGone));
+    }
 
     let child_pump = {
         let (out, closing, events) = (Arc::clone(&out), Arc::clone(&closing), events.clone());
@@ -141,12 +198,20 @@ pub(crate) fn run(
         }));
     }
 
-    match wait_for_end(&inbox, &to_child) {
+    let end = wait_for_end(&inbox, &to_child);
+    // Before anything here ends Chrome (the job's end on Windows): a Chrome that is gone now
+    // died by itself.
+    let chrome_died = chrome.exited();
+    match end {
         End::ChildEnded => {
             if child_pump.join().is_err() {
                 return Err(io::Error::other("the stdout relay thread panicked"));
             }
-            Ok(Outcome::Exited(child.child.wait()?.code().unwrap_or(1)))
+            let code = child.reap()?.code().unwrap_or(1);
+            if chrome_died || chrome.exited() {
+                return Ok(Outcome::ChromeExited);
+            }
+            Ok(Outcome::Exited(code))
         }
         End::ChildOversize => {
             stop(&mut child)?;
@@ -156,37 +221,67 @@ pub(crate) fn run(
             stop(&mut child)?;
             Ok(Outcome::PortRefused(reason))
         }
+        End::ChromeExited => {
+            stop(&mut child)?;
+            Ok(Outcome::ChromeExited)
+        }
+        End::ParentGone => {
+            stop(&mut child)?;
+            Ok(Outcome::ParentGone)
+        }
         End::ExitTimedOut => {
             note(&format!(
                 "agent-browser did not exit within {} s of its stdin closing; killed it",
                 EXIT_WAIT.as_secs()
             ));
-            Ok(Outcome::Exited(stop(&mut child)?.code().unwrap_or(1)))
+            let code = stop(&mut child)?.code().unwrap_or(1);
+            if chrome_died {
+                return Ok(Outcome::ChromeExited);
+            }
+            Ok(Outcome::Exited(code))
         }
     }
 }
 
-/// agent-browser, and on Windows the job that holds it and all it starts.
-struct Tree {
+/// agent-browser, and on Windows the job that holds it, all it starts, and Chrome.
+struct Tree<'a> {
     child: Child,
     #[cfg(windows)]
-    job: super::job::Job,
+    job: &'a super::job::Job,
+    #[cfg(not(windows))]
+    job: std::marker::PhantomData<&'a ()>,
+    on_reap: &'a mut dyn FnMut(),
+}
+
+impl Tree<'_> {
+    /// Ends agent-browser's group ([`end_group`]), calls the reap hook, and reaps agent-browser.
+    fn reap(&mut self) -> io::Result<std::process::ExitStatus> {
+        end_group(&mut self.child);
+        (self.on_reap)();
+        self.child.wait()
+    }
 }
 
 /// Ends agent-browser and reaps it: on Windows the whole job (its daemon and Chrome too), on
-/// Unix the child alone (it may have exited already). The stdout pump is not joined: a
+/// Unix its process group (it may have exited already). The stdout pump is not joined: a
 /// grandchild could still hold the pipe open.
-fn stop(tree: &mut Tree) -> io::Result<std::process::ExitStatus> {
+fn stop(tree: &mut Tree<'_>) -> io::Result<std::process::ExitStatus> {
     #[cfg(windows)]
     if !tree.job.kill() {
         note("Windows refused to end agent-browser's job; killing agent-browser alone");
     }
-    let child = &mut tree.child;
-    if child.try_wait()?.is_none() {
-        // It may exit between the two calls; `wait` below reaps it either way.
-        drop(child.kill());
-    }
-    child.wait()
+    tree.reap()
+}
+
+/// Kills agent-browser and, on Unix, whatever is left in its process group. Called only while
+/// agent-browser is unreaped, so the group's id (its pid) cannot have been reused; a child that
+/// exited already keeps its exit code.
+fn end_group(child: &mut Child) {
+    #[cfg(unix)]
+    super::chrome::kill_group(child.id());
+    #[cfg(not(unix))]
+    // It may have exited already; nothing is left to kill then.
+    drop(child.kill());
 }
 
 /// The phase of the shutdown.
@@ -224,6 +319,8 @@ fn wait_for_end(inbox: &mpsc::Receiver<Event>, to_child: &ToChild) -> End {
             Event::ChildEnded => return End::ChildEnded,
             Event::ChildOversize => return End::ChildOversize,
             Event::PortRefused(reason) => return End::PortRefused(reason),
+            Event::ChromeExited => return End::ChromeExited,
+            Event::ParentGone => return End::ParentGone,
             Event::AgentEnded => {
                 if phase == Phase::Running {
                     phase = Phase::Closing;
@@ -259,6 +356,12 @@ fn spawn_child(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // A group of its own, which `end_group` kills whole.
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -316,12 +419,6 @@ pub(crate) fn refusal(checks: &[Expected]) -> Option<String> {
         Status::Pending | Status::Matches => None,
         Status::Refused(reason) => Some(reason),
     })
-}
-
-/// One line on the guard's stderr. Diagnostics only; a failed write has nowhere to go.
-fn note(text: &str) {
-    let mut stderr = io::stderr().lock();
-    if writeln!(stderr, "clauseo-mcp browser-guard: {text}").is_err() {}
 }
 
 fn is_close_reply(line: &[u8]) -> bool {
@@ -465,77 +562,4 @@ fn send(events: &mpsc::Sender<Event>, event: Event) {
 mod port_tests;
 
 #[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-
-    use super::{Line, Overflow, read_line};
-
-    fn lines(input: &[u8], max: usize) -> Vec<(Line, Vec<u8>)> {
-        lines_with(input, max, Overflow::Skip)
-    }
-
-    fn lines_with(input: &[u8], max: usize, overflow: Overflow) -> Vec<(Line, Vec<u8>)> {
-        let mut input = std::io::BufReader::with_capacity(4, Cursor::new(input.to_vec()));
-        let mut buf = Vec::new();
-        let mut found = Vec::new();
-        loop {
-            let line = read_line(&mut input, &mut buf, max, overflow).unwrap();
-            if line == Line::Eof {
-                return found;
-            }
-            let stop = overflow == Overflow::Stop && line == Line::Oversize;
-            found.push((line, buf.clone()));
-            if stop {
-                return found;
-            }
-        }
-    }
-
-    #[test]
-    fn lines_split_on_newline_across_reads() {
-        let found = lines(b"abcdefgh\n\nxyz", 100);
-        assert_eq!(
-            found,
-            [
-                (Line::Whole, b"abcdefgh".to_vec()),
-                (Line::Whole, Vec::new()),
-                (Line::Partial, b"xyz".to_vec()),
-            ]
-        );
-    }
-
-    #[test]
-    fn stop_returns_at_the_limit_without_reading_on() {
-        let mut input =
-            std::io::BufReader::with_capacity(4, Cursor::new(b"ok\n123456789\nmore".to_vec()));
-        let mut buf = Vec::new();
-        assert_eq!(
-            read_line(&mut input, &mut buf, 4, Overflow::Stop).unwrap(),
-            Line::Whole
-        );
-        assert_eq!(
-            read_line(&mut input, &mut buf, 4, Overflow::Stop).unwrap(),
-            Line::Oversize
-        );
-        assert_eq!(buf, b"");
-        let mut rest = Vec::new();
-        std::io::Read::read_to_end(&mut input, &mut rest).unwrap();
-        assert!(rest.ends_with(b"\nmore") && rest.len() < b"123456789\nmore".len());
-        assert_eq!(lines_with(b"1234\n12345", 4, Overflow::Stop).len(), 2);
-    }
-
-    #[test]
-    fn a_line_over_the_limit_is_skipped_whole() {
-        let found = lines(b"12345\n1234\n123456789\nok", 4);
-        assert_eq!(
-            found,
-            [
-                (Line::Oversize, Vec::new()),
-                (Line::Whole, b"1234".to_vec()),
-                (Line::Oversize, Vec::new()),
-                (Line::Partial, b"ok".to_vec()),
-            ]
-        );
-        assert_eq!(lines(b"123456789", 4), [(Line::Oversize, Vec::new())]);
-    }
-}
+mod tests;

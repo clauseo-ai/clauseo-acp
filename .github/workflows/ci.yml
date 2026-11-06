@@ -468,6 +468,31 @@ jobs:
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass --no-run
 
+      # The guard's real-Chrome regression test (crates/mcp/tests/guard/real_chrome.rs) opens a page
+      # through `clauseo-mcp browser-guard`, the pinned agent-browser and the runner's Google Chrome.
+      # The binary is fetched here, before the network goes, and checked against the desktop's pin
+      # (crates/desktop/agent-browser.toml); the test skips, with a note, only without these values.
+      - name: Fetch agent-browser for the guard's real-Chrome test
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: |
+          pin=crates/desktop/agent-browser.toml
+          value() {
+            awk -v table="[$TARGET]" -v key="$1" '
+              $0 == table { inside = 1; next }
+              /^\[/ { inside = 0 }
+              inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+          }
+          url=$(value url)
+          sum=$(value sha256)
+          test -n "$url" && test -n "$sum"
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/agent-browser" "$url"
+          echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/agent-browser"
+          test -x /usr/bin/google-chrome
+          echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
+          echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+
       # The desktop crate's tests run a second time with the marks feature (the speed scoreboard's
       # build): its portable cases on every Linux run, so the merge queue tests them; the macOS job
       # runs the macOS ones on main.

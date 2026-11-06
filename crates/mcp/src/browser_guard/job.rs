@@ -1,12 +1,12 @@
-//! Windows only: agent-browser's tree in a Job Object the guard owns.
+//! Windows only: Chrome and agent-browser's tree in one Job Object the guard owns.
 //!
 //! agent-browser starts its daemon with `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
-//! (`connection.rs:963-983`), and the daemon starts Chrome; killing the direct child leaves
-//! both. So the guard starts agent-browser suspended, puts it in a new job with
-//! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (and no breakaway allowed, so nothing it starts can
-//! leave), and only then resumes it. Ending the job ends the daemon and Chrome; so does the
-//! job's last handle closing when the guard exits, however it exits. The guard itself runs in
-//! the agent's job (`clauseo-process`); jobs nest.
+//! (`connection.rs:963-983`); killing the direct child leaves it. So the guard makes a job with
+//! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (and no breakaway allowed, so nothing in it can start a
+//! process outside it), starts Chrome (`chrome.rs`) and then agent-browser suspended, adds each
+//! to the job, and only then resumes it. Ending the job ends Chrome, agent-browser and its
+//! daemon; so does the job's last handle closing when the guard exits, however it exits. The
+//! guard itself runs in the agent's job (`clauseo-process`); jobs nest.
 //!
 //! `clauseo-process` has the same steps, but for its async child and with dependencies this
 //! crate may not take (`ARCHITECTURE.md`), so the few calls are repeated here.
@@ -33,47 +33,41 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PCWSTR;
 
-/// The creation flag that starts agent-browser suspended, for [`Job::adopt`].
+/// The creation flag that starts a process suspended, for [`Job::adopt`].
 pub(crate) const START_SUSPENDED: u32 = CREATE_SUSPENDED.0;
 
 /// The exit code the job's end gives its processes.
 const TERMINATED: u32 = 1;
 
-/// agent-browser's job. Dropping it closes the handle, which ends what is left of the tree.
+/// The guard's job. Dropping it closes the handle, which ends what is left in it.
 #[derive(Debug)]
 pub(crate) struct Job {
     job: OwnedHandle,
 }
 
 impl Job {
-    /// The job of `child`, just started with [`START_SUSPENDED`]: a new job holds it, then its
-    /// threads resume. When a step fails the child is killed (still suspended, it started
-    /// nothing) and the error returned: agent-browser never runs outside the job.
-    pub(crate) fn adopt(child: &mut Child) -> io::Result<Job> {
-        let job = match Job::new() {
-            Ok(job) => job,
-            Err(error) => {
-                drop(child.kill());
-                return Err(error);
-            }
-        };
+    /// Puts `child` (`what`, for errors), just started with [`START_SUSPENDED`], in the job,
+    /// then resumes its threads. When a step fails the child is killed (still suspended, it
+    /// started nothing) and the error returned: nothing the guard starts runs outside the job.
+    pub(crate) fn adopt(&self, child: &mut Child, what: &str) -> io::Result<()> {
+        let job = self;
         let process = HANDLE(child.as_raw_handle());
         // SAFETY: `job.handle()` is the job handle `job` owns, and `process` the child's own
         // process handle, open while `child` lives, with the full rights std opens it with.
         if let Err(error) = unsafe { AssignProcessToJobObject(job.handle(), process) } {
             drop(child.kill());
             return Err(io::Error::other(format!(
-                "could not put agent-browser in its job: {error}"
+                "could not put {what} in the guard's job: {error}"
             )));
         }
-        if let Err(error) = resume(child.id()) {
-            job.kill();
+        if let Err(error) = resume(child.id(), what) {
+            drop(child.kill());
             return Err(error);
         }
-        Ok(job)
+        Ok(())
     }
 
-    /// Ends every process in the job: agent-browser, its daemon and Chrome. Returns whether
+    /// Ends every process in the job: Chrome, agent-browser and its daemon. Returns whether
     /// Windows took the call.
     pub(crate) fn kill(&self) -> bool {
         // SAFETY: `self.handle()` is the job handle `self` owns, open until `self` drops.
@@ -86,7 +80,7 @@ impl Job {
 
     /// A new job that ends its processes when its last handle closes. No breakaway flag is
     /// set, so a process in it cannot start one outside it.
-    fn new() -> io::Result<Job> {
+    pub(crate) fn new() -> io::Result<Job> {
         // SAFETY: no security attributes and no name are valid arguments; the handle returned
         // is owned by the `Job` built from it, which closes it once.
         let raw = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
@@ -117,7 +111,7 @@ impl Job {
 /// Resumes every thread of process `pid`, which started suspended. Std gives no thread handle,
 /// so the threads are found with a Toolhelp snapshot. Fails unless at least one thread was
 /// suspended and resumed.
-fn resume(pid: u32) -> io::Result<()> {
+fn resume(pid: u32, what: &str) -> io::Result<()> {
     let mut entry = THREADENTRY32 {
         dwSize: u32::try_from(size_of::<THREADENTRY32>()).map_err(io::Error::other)?,
         ..THREADENTRY32::default()
@@ -140,9 +134,9 @@ fn resume(pid: u32) -> io::Result<()> {
     // SAFETY: `snapshot` is a handle this function owns and closes only here.
     drop(unsafe { CloseHandle(snapshot) });
     if resumed == 0 {
-        return Err(io::Error::other(
-            "agent-browser started suspended and no thread of it resumed",
-        ));
+        return Err(io::Error::other(format!(
+            "{what} started suspended and no thread of it resumed"
+        )));
     }
     Ok(())
 }

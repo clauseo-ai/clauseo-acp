@@ -335,6 +335,17 @@ crates/mcp/tests/guard/support.rs Guard::start clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs write clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs run clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs start clippy::disallowed_methods
+crates/mcp/src/browser_guard.rs pause clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
+crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
+crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
+crates/mcp/src/write/windows.rs - unsafe_code
+crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods
+crates/mcp/examples/daemon_stub.rs daemon clippy::disallowed_methods
+crates/mcp/examples/parent_stub.rs main clippy::disallowed_methods
+crates/mcp/tests/guard/lifecycle.rs within clippy::disallowed_methods
+crates/mcp/tests/guard/lifecycle.rs throughout clippy::disallowed_methods
+crates/mcp/tests/guard/real_chrome.rs - clippy::disallowed_methods
 # R21: clauseo-profile's write module (the skills folders it owns) and its skills tests' write module.
 crates/profile/src/write.rs - clippy::disallowed_methods
 crates/profile/tests/skills/write.rs - clippy::disallowed_methods

@@ -1,10 +1,10 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use super::{Os, Source, build, is_local_file, is_loopback_proxy, is_session, port_of};
+use super::{
+    Os, Source, build, chrome_env, is_local_file, is_loopback_proxy, is_session, port_of, set_cdp,
+};
 
-/// The `--cdp-port` the tests pass.
-const CDP: u16 = 61_101;
 /// The socket folder the tests' host made.
 const SOCKET: &str = "/tmp/clauseo-ab-0123456789abcdef";
 
@@ -132,7 +132,7 @@ fn ports_are_1024_to_65535_in_plain_decimal() {
 fn each_required_variable_missing_is_named() {
     for os in [Os::Unix, Os::Windows] {
         for (name, _) in required(os) {
-            let error = build(&source_for(os, &[], name), os, Path::new(&abs("cwd")), CDP)
+            let error = build(&source_for(os, &[], name), os, Path::new(&abs("cwd")))
                 .unwrap_err()
                 .to_string();
             assert_eq!(
@@ -210,7 +210,7 @@ fn each_required_variable_invalid_is_named() {
     ];
     for (name, bad, words) in cases {
         let source = source_with(&[(name, bad)], name);
-        let error = build(&source, Os::Unix, Path::new(&cwd), CDP)
+        let error = build(&source, Os::Unix, Path::new(&cwd))
             .unwrap_err()
             .to_string();
         assert!(error.starts_with(&format!("{name} {words}")), "{error}");
@@ -235,7 +235,7 @@ fn unix_map_is_exactly_the_allow_list() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Unix, cwd, CDP).unwrap();
+    let env = build(&source, Os::Unix, cwd).unwrap();
     let mut names: Vec<&str> = env.keys().map(String::as_str).collect();
     names.sort_unstable();
     assert_eq!(
@@ -273,7 +273,11 @@ fn unix_map_is_exactly_the_allow_list() {
     assert_eq!(get(&env, "AGENT_BROWSER_IDLE_TIMEOUT_MS"), "600000");
     assert_eq!(
         get(&env, "AGENT_BROWSER_ARGS"),
-        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port=61101"
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+    );
+    assert!(
+        !env.contains_key("AGENT_BROWSER_CDP"),
+        "set once Chrome is up"
     );
     assert_eq!(get(&env, "LANG"), "en_IN.UTF-8");
     assert_eq!(get(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
@@ -300,7 +304,7 @@ fn windows_names_match_without_case_and_appear_once() {
         "",
     );
     let cwd = Path::new("/state/browser");
-    let env = build(&source, Os::Windows, cwd, CDP).unwrap();
+    let env = build(&source, Os::Windows, cwd).unwrap();
     // The first match in the OS's order wins, under the allow-list's spelling.
     assert_eq!(get(&env, "SystemRoot"), r"D:\Win");
     assert_eq!(get(&env, "ComSpec"), r"D:\Win\system32\cmd.exe");
@@ -339,7 +343,6 @@ fn windows_path_falls_back_to_c_windows() {
         &source_for(Os::Windows, &[], ""),
         Os::Windows,
         Path::new("/s"),
-        CDP,
     )
     .unwrap();
     assert_eq!(get(&env, "PATH"), r"C:\Windows\System32;C:\Windows");
@@ -349,7 +352,7 @@ fn windows_path_falls_back_to_c_windows() {
 #[test]
 fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
     let cwd = Path::new("/state/browser");
-    let env = build(&source_with(&[], ""), Os::Unix, cwd, CDP).unwrap();
+    let env = build(&source_with(&[], ""), Os::Unix, cwd).unwrap();
     assert_eq!(get(&env, "AGENT_BROWSER_SOCKET_DIR"), SOCKET);
     // On Windows a socket folder in the guard's environment is ignored.
     let windows = source_for(
@@ -357,7 +360,7 @@ fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
         &[("AGENT_BROWSER_SOCKET_DIR", r"C:\elsewhere")],
         "",
     );
-    let env = build(&windows, Os::Windows, cwd, CDP).unwrap();
+    let env = build(&windows, Os::Windows, cwd).unwrap();
     assert_eq!(
         &env["AGENT_BROWSER_SOCKET_DIR"],
         cwd.join("run").as_os_str()
@@ -366,21 +369,45 @@ fn unix_takes_the_hosts_socket_folder_and_windows_keeps_cwd_run() {
 }
 
 #[test]
-fn the_stream_port_and_the_cdp_argument_pass_through_on_both() {
+fn the_stream_port_passes_through_and_the_cdp_port_is_no_longer_pinned() {
     let cwd = Path::new("/state/browser");
     for os in [Os::Unix, Os::Windows] {
-        let env = build(&source_for(os, &[], ""), os, cwd, 1024).unwrap();
+        let mut env = build(&source_for(os, &[], ""), os, cwd).unwrap();
         assert_eq!(get(&env, "AGENT_BROWSER_STREAM_PORT"), "61100", "{os:?}");
-        let args: Vec<&str> = get(&env, "AGENT_BROWSER_ARGS").split('\n').collect();
         assert_eq!(
-            args,
-            [
-                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-                "--remote-debugging-port=1024"
-            ],
+            get(&env, "AGENT_BROWSER_ARGS"),
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             "{os:?}"
         );
+        let endpoint = "ws://127.0.0.1:1024/devtools/browser/0-a";
+        set_cdp(&mut env, endpoint);
+        assert_eq!(get(&env, "AGENT_BROWSER_CDP"), endpoint, "{os:?}");
     }
+}
+
+#[test]
+fn chrome_gets_the_child_map_without_agent_browser_variables() {
+    let cwd = Path::new("/state/browser");
+    let env = build(&source_with(&[("LANG", "en")], ""), Os::Unix, cwd).unwrap();
+    let chrome = chrome_env(&env);
+    let mut names: Vec<&str> = chrome.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "ALL_PROXY",
+            "HOME",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "LANG",
+            "PATH",
+            "TMPDIR",
+            "all_proxy",
+            "http_proxy",
+            "https_proxy",
+        ]
+    );
+    assert_eq!(&chrome["HOME"], cwd.join("home").as_os_str());
 }
 
 #[test]
