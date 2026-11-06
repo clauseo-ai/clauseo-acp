@@ -125,6 +125,9 @@ mod data_fence;
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
 #[cfg(test)]
+#[path = "host/egress.rs"]
+mod egress;
+#[cfg(test)]
 #[path = "host/elicitation_withheld.rs"]
 mod elicitation_withheld;
 #[cfg(test)]

@@ -30,7 +30,8 @@
 //! claim leaves the browser out (`BrowserNotInstalled`) with a log line, and the launch goes
 //! on. The claims ride on [`RunFolders`] and drop with the run folder, off the actor, once the
 //! agent's process tree has been killed (or the agent never started). The session's case-law
-//! relay and its token file (R24, [`relay`]) are made on the same thread and ride the same way.
+//! relay and its token file (R24, [`relay`]) are made on the same thread and ride the same way,
+//! and so does its egress proxy ([`egress`]), opened there and closed in the same removal.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -136,6 +137,11 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
+    /// session can get the browser; none otherwise, or when it did not open (`NoProxy`). Closed
+    /// once, in [`discard`]'s off-actor removal after the agent's tree was killed, or by
+    /// [`undo_late`]. Stage C's R17 adds its ports to the session's policy (`proxy_ports`).
+    pub(crate) egress: Option<egress::Egress>,
 }
 
 impl RunFolders {
@@ -155,6 +161,7 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
+            egress: None,
         }
     }
 
@@ -334,19 +341,26 @@ pub(super) fn prepare(
     });
 }
 
-/// The session's browser claims and case-law relay (`claims`), made on the launch-prep thread.
-fn claim(run: &mut RunFolders, data: &Path, claims: (browser::BrowserPrep, relay::CaseLawPrep)) {
-    let (browser, case_law) = claims;
+/// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
+/// launch-prep thread.
+fn claim(run: &mut RunFolders, data: &Path, claims: Claims) {
+    let Claims {
+        browser,
+        case_law,
+        egress,
+    } = claims;
+    run.egress = egress.open(run.key);
     (run.chrome, run.browser_session) = browser.prepare(data, &run.key.id());
     run.case_law = case_law.open(run);
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the
-/// run folder with the token file.
+/// run folder with the token file. No agent was started, so its proxy closes here too.
 fn undo_late(late: Prepared) {
-    let Prepared { run, .. } = late;
+    let Prepared { mut run, .. } = late;
     relay::end(&run);
     run.remove();
+    egress::close(&mut run);
     // Its claims and relay go now, after the folder.
     drop(run);
 }
@@ -481,12 +495,16 @@ fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
     let hook = actor.wiring.run_removal_hook.clone();
     actor.spawn_post(async move {
         let removed = codex::prepare::off_actor(clock, job, move || {
+            let mut run = run;
             // The token is revoked before its file goes with the folder.
             relay::end(&run);
             if let Some(hook) = &hook {
                 hook(&run.root);
             }
             run.remove();
+            // The proxy closes once the agent's tree was killed (or it never started), so no
+            // child of the agent outlives its port.
+            egress::close(&mut run);
             // The browser claims and the case-law relay go here, off the actor and after the
             // agent's tree was killed: the socket folder is removed, the relay stops listening
             // and the ports are free for the next session.
@@ -519,6 +537,8 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 }
 
 mod browser;
+mod egress;
+use paths::Claims;
 pub(super) mod relay;
 mod sweep;
 pub(crate) use sweep::RunSweep;

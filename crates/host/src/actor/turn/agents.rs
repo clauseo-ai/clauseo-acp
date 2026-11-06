@@ -307,6 +307,9 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         Some(env) => env.clone(),
         None => std::env::vars_os().collect(),
     };
+    // Tier C (no jail) leaves the agent's environment alone: none of the session proxy's
+    // variables (`ProxyHandle::env`) go here, and only the browser entry reaches the proxy. The
+    // proxy is advisory there, since nothing enforces it without a jail; R17 PR-D sets them.
     let spec = agent::launch_spec(
         settings,
         hook,

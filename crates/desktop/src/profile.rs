@@ -309,8 +309,7 @@ impl ProfileHook for DesktopProfile {
 
 /// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
 /// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
-/// profile (it could not be built) the hook adds only setup's variables. No egress proxy yet:
-/// stage C's is not wired, so the browser shows `NoProxy` (0030).
+/// profile (it could not be built) the hook adds only setup's variables.
 pub(crate) fn with_profile(
     config: HostConfig,
     profile: Option<DesktopProfile>,

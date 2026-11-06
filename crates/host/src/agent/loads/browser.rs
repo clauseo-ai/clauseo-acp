@@ -9,7 +9,8 @@
 //! 2. The firm's `managed-mcp.json` ([`McpControl::Managed`]): no Clauseo server at all goes,
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
-//! 4. No proxy port for the session: `NoProxy` (every session until stage C's proxy).
+//! 4. No proxy port for the session: `NoProxy` (no proxy set, or the session's did not open,
+//!    `actor/turn/launch_checks/egress.rs`).
 //! 5. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //!

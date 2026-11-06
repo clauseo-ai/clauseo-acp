@@ -164,11 +164,11 @@ pub(super) fn session_loads(
         switch: browser_switch,
         control,
         slot_free: actor.wiring.browser_slots.free_for(run.key),
-        port: actor
-            .wiring
-            .proxy
+        // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
+        port: run
+            .egress
             .as_ref()
-            .and_then(|proxy| proxy.port_for(run.key)),
+            .and_then(|egress| egress.port_for(run.key)),
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
         claims: run.browser_session.as_deref().map(Claims::of),
