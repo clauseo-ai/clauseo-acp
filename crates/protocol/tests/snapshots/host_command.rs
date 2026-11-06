@@ -133,6 +133,8 @@ golden! { HostCommand::name_of {
     InstallUpdate => install_update: HostCommand::InstallUpdate { when: InstallWhen::AfterTurn };
     CancelScheduledUpdate => cancel_scheduled_update: HostCommand::CancelScheduledUpdate {};
     SetUpdateMode => set_update_mode: HostCommand::SetUpdateMode { mode: UpdateMode::Notify };
+    RetryProtection => retry_protection: HostCommand::RetryProtection {};
+    RemoveSandboxSetup => remove_sandbox_setup: HostCommand::RemoveSandboxSetup {};
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }

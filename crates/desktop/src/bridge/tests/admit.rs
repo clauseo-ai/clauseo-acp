@@ -533,3 +533,29 @@ fn list_skill_packs_from_main_and_settings_is_admitted() {
     let other = block_on(bridge.query("other", read(json!("list_skill_packs")))).unwrap_err();
     assert_eq!(other.code(), ErrorCode::CommandInvalid);
 }
+
+/// Decision record 0051, PR-A: the host does not answer the protection query or run its two
+/// commands yet, so the bridge refuses all three from every window with `command.invalid`,
+/// before the host sees them.
+#[test]
+fn the_protection_query_and_commands_are_refused_from_every_window() {
+    let scratch = Scratch::new("admit-protection", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    for label in [MAIN, SETTINGS, "other"] {
+        for body in [
+            json!({"retry_protection": {}}),
+            json!({"remove_sandbox_setup": {}}),
+        ] {
+            let refused = bridge.admit(label, &command(body.clone())).unwrap_err();
+            assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}: {body}");
+        }
+        let refused = block_on(bridge.query(label, read(json!("protection")))).unwrap_err();
+        assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{label}");
+    }
+    let refused = block_on(bridge.query(MAIN, HostQuery::Protection)).unwrap_err();
+    assert!(
+        refused.to_string().contains("not admitted yet"),
+        "{refused}"
+    );
+}

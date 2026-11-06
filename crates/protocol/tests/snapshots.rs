@@ -65,10 +65,13 @@ use clauseo_protocol::{
     MatterStatus,
     MatterSummary,
     MattersChanged,
+    NotProtectedCause,
     PackId,
     PackList,
     PatchBatch,
     PromptBlock,
+    Protection,
+    ProtectionTier,
     RefreshWhy,
     RestoreRequest,
     StopReason,
@@ -376,6 +379,11 @@ mod host_event {
                 folder_display: "Documents/Clauseo/Smith v Jones".to_owned(),
                 folder_state: FolderState::Missing,
                 folder_support: Some(FolderSupportKind::CantChangePermissions),
+                protection: Some(Protection::NotProtected {
+                    cause: NotProtectedCause::SwitchedOff {
+                        at: Timestamp::new(1_760_000_007_000).unwrap(),
+                    },
+                }),
             }],
             removed: vec![matter_id(3)],
             all: false,
@@ -423,6 +431,10 @@ mod host_event {
             matter: matter_id(1),
             thread: thread_id(2),
             turn: turn_id(3),
+        };
+        ProtectionChanged => protection_changed: HostEvent::ProtectionChanged {
+            matter: matter_id(1),
+            protection: Protection::Protected { tier: ProtectionTier::B },
         };
     } }
 }

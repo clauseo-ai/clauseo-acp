@@ -190,3 +190,46 @@ fn refuse_unsets_the_install_keys_and_leaves_no_plan() {
     assert_eq!(settings.install.registry, None);
     assert_eq!(abs_str("bundle"), abs("bundle").display().to_string());
 }
+
+// Decision record 0051: refused, `allow_unprotected_auto` locks at `false` though its default is
+// on, `required` at its default `false`, and the `network` keys unset or empty; a refused value
+// from `settings.json` goes back to each default instead.
+#[test]
+fn refuse_locks_the_sandbox_and_network_keys_at_their_safe_values() {
+    let set = || {
+        let mut settings = Settings::default();
+        settings.sandbox.required = true;
+        settings.sandbox.allow_unprotected_auto = true;
+        settings.network.upstream_proxy = Some("http://proxy.firm.example:8080".to_owned());
+        settings
+            .network
+            .ca_certs
+            .insert("claude-acp".to_owned(), abs("ca.pem"));
+        settings.network.allowed_domains = vec!["docs.firm.example".to_owned()];
+        settings
+    };
+    let mut settings = set();
+    assert!(refuse("sandbox.allow_unprotected_auto", &mut settings));
+    assert!(!settings.sandbox.allow_unprotected_auto);
+    assert!(settings.sandbox.required);
+    let mut settings = set();
+    assert!(refuse("sandbox.", &mut settings));
+    assert!(!settings.sandbox.required && !settings.sandbox.allow_unprotected_auto);
+    assert!(settings.network.upstream_proxy.is_some());
+    let mut settings = set();
+    assert!(refuse("network.", &mut settings));
+    assert_eq!(settings.network, crate::schema::NetworkSettings::default());
+    assert!(settings.sandbox.required);
+    let mut settings = set();
+    Leaf::Refused("sandbox.allow_unprotected_auto".to_owned()).apply_policy(&mut settings);
+    assert!(!settings.sandbox.allow_unprotected_auto);
+    let mut settings = set();
+    settings.sandbox.allow_unprotected_auto = false;
+    Leaf::Refused("sandbox.allow_unprotected_auto".to_owned()).apply(&mut settings);
+    assert!(settings.sandbox.allow_unprotected_auto);
+    for key in ["sandbox", "network", "sandbox.require", "networks."] {
+        let mut settings = set();
+        assert!(!refuse(key, &mut settings), "{key}");
+        assert_eq!(settings, set(), "{key}");
+    }
+}

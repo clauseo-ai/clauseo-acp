@@ -415,4 +415,32 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (386, 0x133d_7e2e_0e29_6d5e),
         (287, 0x15f4_b1f6_5587_e5ab),
     ),
+    (
+        "added/turn_failed-SandboxSetupRefused",
+        include_bytes!("added/turn_failed-SandboxSetupRefused.jsonl"),
+        include_bytes!("added/turn_failed-SandboxSetupRefused.msgpack"),
+        (357, 0xdc9f_1679_e1b9_99c6),
+        (259, 0x81c1_2594_ace2_36bf),
+    ),
+    (
+        "added/turn_failed-SandboxSetupFailed",
+        include_bytes!("added/turn_failed-SandboxSetupFailed.jsonl"),
+        include_bytes!("added/turn_failed-SandboxSetupFailed.msgpack"),
+        (343, 0xcba8_1731_6fdc_9fe3),
+        (244, 0x0cfd_e254_0d70_c0d5),
+    ),
+    (
+        "added/turn_failed-SandboxSetupRequired",
+        include_bytes!("added/turn_failed-SandboxSetupRequired.jsonl"),
+        include_bytes!("added/turn_failed-SandboxSetupRequired.msgpack"),
+        (351, 0x7572_7a51_5ae3_4703),
+        (252, 0x3fc8_2a7c_2fb8_e809),
+    ),
+    (
+        "added/turn_failed-SandboxRequired",
+        include_bytes!("added/turn_failed-SandboxRequired.jsonl"),
+        include_bytes!("added/turn_failed-SandboxRequired.msgpack"),
+        (372, 0x0628_bffb_8100_b51f),
+        (274, 0x1ed4_7c46_29a5_cdfd),
+    ),
 ];

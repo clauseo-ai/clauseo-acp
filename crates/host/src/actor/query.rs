@@ -32,6 +32,21 @@ use crate::principal::{Access, authorize};
 mod folder_support;
 mod skill_packs;
 
+/// Where new matters go, for display (`GetDefaultLocation`).
+fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
+    let display =
+        super::rail::folder_display(actor.effective.default_matters_dir(), &actor.home_spellings);
+    let answer = QueryResult::DefaultLocation(clauseo_protocol::DefaultLocation { display });
+    let _gone = reply.send(Ok(answer));
+}
+
+/// A query the host does not answer yet (`Protection`: decision record 0051 answers it once the
+/// sandbox seams come, in its next step): `command.invalid`.
+fn not_built(reply: Reply<QueryResult>) {
+    let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
+    let _gone = reply.send(Err(refusal));
+}
+
 /// Answers one query.
 pub(super) fn query(
     actor: &mut Actor,
@@ -118,21 +133,14 @@ pub(super) fn query(
         HostQuery::FolderSupport { ref source } => {
             folder_support::folder_support(actor, source, reply);
         }
-        HostQuery::GetDefaultLocation => {
-            let display = super::rail::folder_display(
-                actor.effective.default_matters_dir(),
-                &actor.home_spellings,
-            );
-            let answer =
-                QueryResult::DefaultLocation(clauseo_protocol::DefaultLocation { display });
-            let _gone = reply.send(Ok(answer));
-        }
+        HostQuery::GetDefaultLocation => default_location(actor, reply),
         HostQuery::GetSettings => {
             let view = super::settings::view(actor);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
         }
         HostQuery::GetUpdate => super::update::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
+        HostQuery::Protection => not_built(reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));

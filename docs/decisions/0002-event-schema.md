@@ -140,6 +140,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `limits_view_changed` (`HostEvent`) | `LimitsView`, the whole view after a change | limits, through the host | no | none; `subscribe_limits` subscribers only |
 | `connectors_changed` (`HostEvent`) | `ConnectorsState`, the whole state after a change (R24) | host | no | none; app subscribers, and every app catch-up |
 | `case_law_hint` (`HostEvent`) | matter, thread, turn; an offer, once per matter (R24) | host | no | none; app subscribers only |
+| `protection_changed` (`HostEvent`) | matter, protection (`Protection`); a matter's sandbox state after a change (0051) | host | no | none; app subscribers only, no catch-up (`ListMatters` has it) |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
   started. `turn_failed` and `turn_stopped_at_limit` add detail and never replace it;
@@ -630,7 +631,7 @@ A new variant of an open enum:
    `ALL` the macro writes.
 2. If `tests/events/unknown_variants.rs` checks the enum with `unit_enum`, its
    `(Variant, "wire_name")` case, in `ALL` order: that test asserts the cases follow `ALL`.
-3. If the enum is one of the 15 that `every_listed_variant_is_in_ui_states` (tests/ui_states.rs)
+3. If the enum is one of the 21 that `every_listed_variant_is_in_ui_states` (tests/ui_states.rs)
    lists, `ThreadStatus`, `ToolKind` and `ErrorCode` among them, a row naming `Type::Variant` in
    the second column of a table in sections 1 to 9 of `docs/ui-states.md`: that test. The same
    holds for a new variant of a closed enum on that list.

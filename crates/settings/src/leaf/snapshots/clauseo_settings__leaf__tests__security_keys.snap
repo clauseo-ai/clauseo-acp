@@ -15,5 +15,10 @@ expression: SECURITY_KEYS
   "plans.",
   "skills.extra",
   "skills.allow_scripts",
-  "skills.curated"
+  "skills.curated",
+  "sandbox.required",
+  "sandbox.allow_unprotected_auto",
+  "network.upstream_proxy",
+  "network.ca_certs",
+  "network.allowed_domains"
 ]

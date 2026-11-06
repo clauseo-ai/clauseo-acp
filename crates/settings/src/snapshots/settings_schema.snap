@@ -193,6 +193,36 @@ source: crates/settings/src/schema/tests.rs
         }
       ]
     },
+    "NetworkSettings": {
+      "description": "The `network` section (decision record 0051). Every key is a security key: a policy source\nthat cannot be read leaves no proxy (so the OS's), no CA file and no added domain.",
+      "properties": {
+        "allowed_domains": {
+          "default": [],
+          "description": "Host names (`*.` before one allows the names under it) added to every matter's\nallowlist. Set by policy only; empty by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ca_certs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "A CA file per agent id, as an absolute path, that the agent's network clients trust\nbesides the system's. Empty by default.",
+          "type": "object"
+        },
+        "upstream_proxy": {
+          "default": null,
+          "description": "The firm's proxy, which the egress proxy and agent installs send traffic through: an\n`http` or `https` URL with a host, and no user name, password, query or fragment. Unset\nby default: the proxy the OS is set to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Plan": {
       "description": "One agent's firm plan (`plans.<id>`): a gateway or a cloud provider instead of the plan\nlogin. A security key: a policy source that cannot be read leaves no plan at all, so no\nendpoint the lawyer chose stands in for the firm's (decision record 0048).",
       "properties": {
@@ -255,6 +285,22 @@ source: crates/settings/src/schema/tests.rs
         "crash_reports": {
           "default": false,
           "description": "Whether Clauseo sends crash reports. Off by default.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SandboxSettings": {
+      "description": "The `sandbox` section (decision record 0051). Both keys are security keys: a policy source\nthat cannot be read leaves `required` `false` and locks `allow_unprotected_auto` `false`, so\nan agent outside the sandbox runs only in the ask modes.",
+      "properties": {
+        "allow_unprotected_auto": {
+          "default": true,
+          "description": "Whether an agent outside the sandbox may still run in an auto mode; when off, it runs\nonly in the ask modes. On by default.",
+          "type": "boolean"
+        },
+        "required": {
+          "default": false,
+          "description": "Whether the firm requires the sandbox: on a computer that cannot give it, no agent starts.\nOff by default.",
           "type": "boolean"
         }
       },
@@ -454,6 +500,15 @@ source: crates/settings/src/schema/tests.rs
       },
       "description": "The MCP servers a lawyer can turn on for their agents' sessions."
     },
+    "network": {
+      "$ref": "#/$defs/NetworkSettings",
+      "default": {
+        "allowed_domains": [],
+        "ca_certs": {},
+        "upstream_proxy": null
+      },
+      "description": "The firm's network: its proxy, CA files and allowed domains (decision record 0051)."
+    },
     "plans": {
       "additionalProperties": {
         "$ref": "#/$defs/Plan"
@@ -469,6 +524,14 @@ source: crates/settings/src/schema/tests.rs
         "crash_reports": false
       },
       "description": "What Clauseo may count and send about its own use (decision record 0036)."
+    },
+    "sandbox": {
+      "$ref": "#/$defs/SandboxSettings",
+      "default": {
+        "allow_unprotected_auto": true,
+        "required": false
+      },
+      "description": "Whether the firm requires the agent sandbox, and what runs without it (decision record\n0051)."
     },
     "skills": {
       "$ref": "#/$defs/SkillsSettings",

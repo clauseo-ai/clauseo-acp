@@ -534,6 +534,14 @@ pub enum HostCommand {
     /// receipt; each answers `Done`, and the state reaches app subscribers as
     /// `HostEvent::ConnectorsChanged`. JSON: `{"connector": {"add": {"id": "case-law"}}}`.
     Connector(ConnectorCommand),
+    /// Try the sandbox's set-up or check again (decision record 0051); each matter whose
+    /// protection changes gets `HostEvent::ProtectionChanged`. No receipt. Until the host
+    /// builds it, `command.invalid`. JSON: `{"retry_protection": {}}`.
+    RetryProtection {},
+    /// Remove the sandbox's set-up from this computer, after one administrator prompt (decision
+    /// record 0051); each matter then gets `HostEvent::ProtectionChanged`. No receipt. Until
+    /// the host builds it, `command.invalid`. JSON: `{"remove_sandbox_setup": {}}`.
+    RemoveSandboxSetup {},
 }
 
 /// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same

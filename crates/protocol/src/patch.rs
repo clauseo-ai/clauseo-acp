@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AccountLimits, BrowserInstallState, ConnectorsState, Cursor, EntryId, Envelope, FolderScanned,
-    HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId, Seq,
-    SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView, ViewEntry, ViewEpoch,
+    HeaderEntry, LimitsView, MatterHeaderEntry, MatterId, MattersChanged, MessageId, Protection,
+    Seq, SettingsView, StreamId, ThreadId, ThreadsChanged, TurnId, UpdateView, ViewEntry,
+    ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -179,6 +180,16 @@ pub enum HostEvent {
         thread: ThreadId,
         /// The turn whose searches fired it.
         turn: TurnId,
+    },
+    /// A matter's protection changed (decision record 0051): the sandbox came or went, or why it
+    /// is off changed. App-wide, never logged and in no stream: it reaches app subscribers
+    /// only, and a catch-up carries none, since `ListMatters` gives each matter's current one
+    /// (`MatterSummary::protection`).
+    ProtectionChanged {
+        /// The matter.
+        matter: MatterId,
+        /// Its protection now.
+        protection: Protection,
     },
 }
 

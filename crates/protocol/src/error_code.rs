@@ -230,6 +230,15 @@ error_codes! {
         name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a \
         shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the \
         agent is not started; the lawyer moves or deletes it.";
+    SandboxSetupRefused = "sandbox.setup_refused", retryable: true, meaning: "The sandbox's set-up \
+        was not done: the lawyer declined the administrator prompt, or Windows refused to raise \
+        it; asking again can succeed.";
+    SandboxSetupFailed = "sandbox.setup_failed", retryable: true, meaning: "The sandbox's set-up, \
+        or the check that the sandbox works, failed; trying again can succeed.";
+    SandboxSetupRequired = "sandbox.setup_required", retryable: false, meaning: "An agent \
+        launch needs the sandbox's one-time set-up, which is not done, so no agent was started.";
+    SandboxRequired = "sandbox.required", retryable: false, meaning: "The firm requires the \
+        sandbox (sandbox.required) and this computer cannot give it now, so no agent was started.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

@@ -241,6 +241,9 @@ mod profile;
 #[path = "host/profile_rig.rs"]
 mod profile_rig;
 #[cfg(test)]
+#[path = "host/protection.rs"]
+mod protection;
+#[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
 #[cfg(test)]

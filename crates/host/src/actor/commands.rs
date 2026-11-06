@@ -295,10 +295,15 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             super::update::command(actor, ctx, Asked::CancelScheduled);
         }
         HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
+        // Decision record 0051: the sandbox seams that run them come in its next step.
+        HostCommand::RetryProtection {} | HostCommand::RemoveSandboxSetup {} => {
+            not_built(actor, ctx);
+        }
     }
 }
 
-/// A command the host does not run yet (`RestartAgent`):
+/// A command the host does not run yet (`RestartAgent`, `RetryProtection`,
+/// `RemoveSandboxSetup`):
 /// `command.invalid`, with no receipt.
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");

@@ -74,7 +74,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::Search(_)
         | QueryResult::FolderSupport(_)
         | QueryResult::SkillPacks(_)
-        | QueryResult::Update(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::Update(_)
+        | QueryResult::Protection(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -124,7 +125,8 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::BrowserInstall { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
-            | HostEvent::CaseLawHint { .. }) => panic!("unexpected {other:?}"),
+            | HostEvent::CaseLawHint { .. }
+            | HostEvent::ProtectionChanged { .. }) => panic!("unexpected {other:?}"),
         }
     }
 }

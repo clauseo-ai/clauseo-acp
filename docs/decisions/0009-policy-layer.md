@@ -87,7 +87,10 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   unreadable source too** (Rohan, 2026-11-02): what the source held for it is unknown, so the key
   is locked at its default, with a warning, unless a stronger source already set it. Today that is
   only `mcp.servers` (`SECURITY_KEYS` in `crates/settings/src/leaf.rs`), so a broken firm file
-  turns every MCP server off. Other keys keep the user's value.
+  turns every MCP server off. Other keys keep the user's value. *Amended 2026-11-06 (decision
+  record 0051):* the `sandbox` and `network` keys are security keys too, each locked at its safe
+  value, which is not always its default: `sandbox.allow_unprotected_auto` locks at false,
+  `sandbox.required` at its default false (0051 gives why), the `network` keys unset or empty.
 - **`ARCHITECTURE.md`.** The `settings` row becomes `exists`, and its "May depend on" cell lists
   the normal dependencies the crate uses: `serde, serde_json, serde_json_lenient, schemars;
   windows (Windows only); objc2-core-foundation (macOS only)`.

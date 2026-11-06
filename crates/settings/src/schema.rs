@@ -15,8 +15,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 10] = [
+pub(crate) const SECTIONS: [&str; 12] = [
     "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install", "skills",
+    "sandbox", "network",
 ];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
@@ -46,6 +47,11 @@ pub struct Settings {
     pub install: InstallSettings,
     /// The extra skill packs Clauseo may load (decision record 0040).
     pub skills: SkillsSettings,
+    /// Whether the firm requires the agent sandbox, and what runs without it (decision record
+    /// 0051).
+    pub sandbox: SandboxSettings,
+    /// The firm's network: its proxy, CA files and allowed domains (decision record 0051).
+    pub network: NetworkSettings,
 }
 
 /// The `matters` section.
@@ -128,6 +134,46 @@ pub struct InstallSettings {
     /// A firm npm mirror: an `https` URL with a host, and no user name, password, query or
     /// fragment. Unset by default.
     pub registry: Option<String>,
+}
+
+/// The `sandbox` section (decision record 0051). Both keys are security keys: a policy source
+/// that cannot be read leaves `required` `false` and locks `allow_unprotected_auto` `false`, so
+/// an agent outside the sandbox runs only in the ask modes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct SandboxSettings {
+    /// Whether the firm requires the sandbox: on a computer that cannot give it, no agent starts.
+    /// Off by default.
+    pub required: bool,
+    /// Whether an agent outside the sandbox may still run in an auto mode; when off, it runs
+    /// only in the ask modes. On by default.
+    pub allow_unprotected_auto: bool,
+}
+
+impl Default for SandboxSettings {
+    fn default() -> Self {
+        Self {
+            required: false,
+            allow_unprotected_auto: true,
+        }
+    }
+}
+
+/// The `network` section (decision record 0051). Every key is a security key: a policy source
+/// that cannot be read leaves no proxy (so the OS's), no CA file and no added domain.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct NetworkSettings {
+    /// The firm's proxy, which the egress proxy and agent installs send traffic through: an
+    /// `http` or `https` URL with a host, and no user name, password, query or fragment. Unset
+    /// by default: the proxy the OS is set to.
+    pub upstream_proxy: Option<String>,
+    /// A CA file per agent id, as an absolute path, that the agent's network clients trust
+    /// besides the system's. Empty by default.
+    pub ca_certs: BTreeMap<String, PathBuf>,
+    /// Host names (`*.` before one allows the names under it) added to every matter's
+    /// allowlist. Set by policy only; empty by default.
+    pub allowed_domains: Vec<String>,
 }
 
 /// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are

@@ -108,6 +108,10 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `agent.key_unreadable` | A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. | yes | host (a launch for an agent whose stored API key could not be read, decision record 0048) |
 | `matter.document_path_too_long` | A Word document's path is too long for Word to open, even with its folders' short names (Windows): move the matter's folder nearer the top of its drive, or shorten its folder names. | no | desktop (`open_file` for a Word document on Windows, decision record 0026) |
 | `matter.protected_link` | A protected name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the agent is not started; the lawyer moves or deletes it. | no | sandbox (`windows::apply` on Windows, `Error::ProtectedLink` with the item's path relative to the matter; S15 PR4a2) |
+| `sandbox.setup_refused` | The sandbox's set-up was not done: the lawyer declined the administrator prompt, or Windows refused to raise it; asking again can succeed. | yes | host (the set-up's administrator prompt, decision record 0051) |
+| `sandbox.setup_failed` | The sandbox's set-up, or the check that the sandbox works, failed; trying again can succeed. | yes | host (the set-up or its check, decision record 0051) |
+| `sandbox.setup_required` | An agent launch needs the sandbox's one-time set-up, which is not done, so no agent was started. | no | host (a launch before the set-up, decision record 0051) |
+| `sandbox.required` | The firm requires the sandbox (sandbox.required) and this computer cannot give it now, so no agent was started. | no | host (a launch at tier C under `sandbox.required`, decision record 0051) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

@@ -19,6 +19,8 @@ mod policy_shape_tests;
 #[cfg(test)]
 mod privacy_tests;
 #[cfg(test)]
+mod sandbox_tests;
+#[cfg(test)]
 mod set_tests;
 #[cfg(test)]
 mod skills_tests;
@@ -96,11 +98,13 @@ impl Effective {
     /// source that cannot be read also locks each security key off (`mcp.servers` empty, each
     /// `tools` and `privacy` key `false`, `update.mode` `none`, each `install` key unset, no
     /// plan at all, `skills.extra` `off`, `skills.allow_scripts` `false`, `skills.curated`
-    /// empty), with a warning, since its value is unknown (2026-11-02, R21; 0036; R23; 0048;
-    /// 0040). A `settings.json` value for a key only a policy sets (`skills.curated`) is
-    /// ignored with a warning. A plan a stronger source set stands. A policy `true` for a
-    /// `privacy` key is ignored with a warning and locks nothing: a policy can only turn those
-    /// off (0036). A policy may set `update.mode` to any value, and it locks.
+    /// empty, `sandbox.required` and `sandbox.allow_unprotected_auto` `false`, each `network`
+    /// key unset or empty), with a warning, since its value is unknown (2026-11-02, R21; 0036;
+    /// R23; 0048; 0040; 0051). A `settings.json` value for a key only a policy sets
+    /// (`skills.curated`, `network.allowed_domains`) is ignored with a warning. A plan a
+    /// stronger source set stands. A policy `true` for a `privacy` key is ignored with a warning
+    /// and locks nothing: a policy can only turn those off (0036). A policy may set
+    /// `update.mode` to any value, and it locks.
     pub fn load(
         locations: &Locations,
         files: &dyn Files,

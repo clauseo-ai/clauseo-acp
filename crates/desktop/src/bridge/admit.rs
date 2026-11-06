@@ -131,6 +131,10 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetSkillPack { .. } => Err(invalid(
             "skill packs are turned on and off from the settings window only",
         )),
+        // Decision record 0051: the host does not run them yet; its next step rules here.
+        HostCommand::RetryProtection {} | HostCommand::RemoveSandboxSetup {} => Err(invalid(
+            "the protection commands are not admitted yet",
+        )),
         // R24: the room's hint and the balance only; the rest is the settings window's.
         HostCommand::Connector(connector) => connector_main(connector),
     }

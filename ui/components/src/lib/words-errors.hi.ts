@@ -123,6 +123,14 @@ export const HI = {
   // hi: later
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
     null,
+  "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.":
+    null,
+  "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
+    null,
+  "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.":
+    null,
+  "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
