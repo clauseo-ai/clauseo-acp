@@ -7,6 +7,7 @@ fail-fast = false
 # inherit it; CI's elevated step also passes --test-threads 1.
 [test-groups]
 elevated = { max-threads = 1 }
+real-chrome = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'test(/(^|::)elevated_/)'
@@ -110,8 +111,6 @@ filter = 'package(clauseo-mcp) & binary(guard) & test(/^real_chrome::/)'
 slow-timeout = { period = "30s", terminate-after = 4 }
 test-group = 'real-chrome'
 
-[test-groups]
-real-chrome = { max-threads = 1 }
 
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
