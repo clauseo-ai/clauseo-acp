@@ -19,6 +19,7 @@ mod close;
 mod end;
 mod failure;
 mod forced_mode;
+mod idle;
 mod inputs;
 mod key_retry;
 mod known;
@@ -65,6 +66,7 @@ pub(crate) use came_back::{
 pub(crate) use close::{closing, log_limit_stop};
 pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
+pub(crate) use idle::{on_due as idle_due, tick as idle_tick};
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;

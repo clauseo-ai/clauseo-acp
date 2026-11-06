@@ -21,6 +21,9 @@ pub(super) enum StopCause {
     Asked,
     /// It starts again in its matter's new folder: `Restarting`.
     Restarting,
+    /// It had nothing pending for the idle limit, or the live-agents cap needed its place
+    /// (`idle.rs`): `IdleStopped`.
+    IdleStopped,
     /// Its connection was already gone when the stop came, which only ends a process that
     /// outlived its pipes: the exit report's reason, as if it had exited first.
     Closed,
@@ -57,6 +60,17 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     launch_checks::relay::end_for(actor, thread);
 }
 
+/// Stops `thread`'s agent for idling (`idle.rs`) with the shutdown ladder: its `Ended` logs
+/// `AgentSessionDetached { reason: IdleStopped }`, unless its connection was already gone.
+pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage != Stage::Stopping
+    {
+        agent.stop_cause = StopCause::IdleStopped;
+    }
+    stop(actor, thread);
+}
+
 /// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
 /// agent for work that came while it stopped.
 pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
@@ -65,6 +79,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
+    super::super::idle::ended(actor, thread);
     // Its pending questions went with it.
     super::super::super::limits::asking_changed(actor);
     launch_checks::remove_run(actor, thread);
@@ -93,6 +108,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             match stop_cause {
                 StopCause::Asked => DetachReason::Closed,
                 StopCause::Restarting => DetachReason::Restarting,
+                StopCause::IdleStopped => DetachReason::IdleStopped,
                 // It was gone before the stop: the exit is its own, not a close.
                 StopCause::Closed => report,
             }

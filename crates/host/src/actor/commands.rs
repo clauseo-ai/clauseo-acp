@@ -37,6 +37,19 @@ pub(crate) struct PendingCommand {
     pub(super) matter: Option<Box<PendingMatter>>,
 }
 
+/// Whether a command for `thread` that gives its agent work (a prompt, a config option, a mode)
+/// waits for its receipt check, so has not run yet: the idle stop leaves that agent alone.
+pub(crate) fn arriving_for(actor: &Actor, thread: ThreadId) -> bool {
+    actor.commands.values().any(|pending| {
+        pending.command.as_ref().is_some_and(|command| {
+            matches!(command.command(),
+                HostCommand::SendPrompt { thread: of, .. }
+                | HostCommand::SetConfigOption { thread: of, .. }
+                | HostCommand::SetMode { thread: of, .. } if *of == thread)
+        })
+    })
+}
+
 /// What a command's code needs to build its receipt and answer.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CommandCtx {
