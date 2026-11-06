@@ -2,7 +2,7 @@
 // The settings window's frame: the sections down the side, the open one marked; the open section's name as the
 // pane's h2 under the window's one h1; the pane back at its top on a new section; the caption buttons off the Mac and
 // the corner lights on it.
-import { act, type ReactNode } from "react";
+import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { SettingsWindow, type SettingsNavItem } from "./settings-window.tsx";
@@ -152,4 +152,36 @@ test("each rise of focusHead focuses the open section's head; none at 0, and a s
   await mount(frame({ current: "language", focusHead: 2 }));
   expect(document.activeElement).toBe(head());
   expect(head()?.textContent).toBe("Language");
+});
+
+function Gone() {
+  const [here, setHere] = useState(true);
+  return here ? (
+    <button type="button" data-testid="gone" onClick={() => setHere(false)}>
+      Sign out
+    </button>
+  ) : (
+    <p>Signed out.</p>
+  );
+}
+
+test("a control in the pane that takes itself away leaves focus on the section's head, not the page", async () => {
+  const node = await mount(
+    <SettingsWindow
+      platform="mac"
+      title="Settings"
+      sections={SECTIONS}
+      current="language"
+      onSection={() => {}}
+    >
+      <Gone />
+    </SettingsWindow>,
+  );
+  const button = node.querySelector<HTMLElement>('[data-testid="gone"]')!;
+  button.focus();
+  await act(async () => button.click());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  const head = node.querySelector<HTMLElement>(".set-pane h2");
+  expect(head?.getAttribute("tabindex")).toBe("-1");
+  expect(document.activeElement).toBe(head);
 });

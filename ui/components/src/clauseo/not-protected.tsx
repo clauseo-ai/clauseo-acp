@@ -31,7 +31,12 @@ export function NotProtectedMark({
       data-short={short ? "" : undefined}
       {...(onPress === undefined
         ? {}
-        : { type: "button" as const, onClick: onPress, "data-testid": "protection-mark" })}
+        : {
+            type: "button" as const,
+            onClick: onPress,
+            "aria-haspopup": "dialog" as const,
+            "data-testid": "protection-mark",
+          })}
     >
       <IconNotProtected size={14} className="np-icon" />
       <span className="np-words">

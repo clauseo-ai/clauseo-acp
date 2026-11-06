@@ -12,6 +12,25 @@ import { PlaceNotice } from "./place-notice.tsx";
 import { cloudOnlyLine, countsLine } from "./scan-words.ts";
 import { serviceOf, type Scan } from "./use-scan.ts";
 
+const FOCUSABLE = "button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href]";
+
+/** A press that takes its own part away (Stop takes the lines, Got it the notice): focus inside that part goes on to
+ * the next control after it in the dialog, as Tab would, never to the page. */
+const away = (part: string, then: () => void) => () => {
+  const at = document.activeElement;
+  const going = at instanceof HTMLElement ? at.closest(part) : null;
+  const plane = going?.closest("[data-dialog-plane]");
+  if (going != null && plane != null) {
+    const next = [...plane.querySelectorAll<HTMLElement>(FOCUSABLE)].find(
+      (el) =>
+        !going.contains(el) &&
+        (going.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    );
+    next?.focus();
+  }
+  then();
+};
+
 /** The lines for one scan; nothing before its first event, after a refusal (the form's error line says it), or once
  * cancelled. */
 export function ScanLines({
@@ -53,15 +72,17 @@ export function ScanLines({
             size="small"
             className="scan-stop"
             data-testid="scan-stop"
-            onClick={onStop}
+            onClick={away(".scan", onStop)}
           >
             <span className="deva-nudge">{t(lang, "Stop")}</span>
           </Button>
         )}
       </p>
-      {service !== null && !scan.gotIt && <PlaceNotice service={service} onGotIt={onGotIt} />}
+      {service !== null && !scan.gotIt && (
+        <PlaceNotice service={service} onGotIt={away(".scan-place", onGotIt)} />
+      )}
       {cloud !== null && (
-        <p className="scan-line" data-testid="scan-cloud-only">
+        <p className="scan-line" role="status" data-testid="scan-cloud-only">
           <Say>{cloud}</Say>
         </p>
       )}

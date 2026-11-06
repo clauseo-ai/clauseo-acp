@@ -19,9 +19,12 @@ const OutOfCreditNote = lazy(() =>
 export function OutOfCredit({
   transport,
   conversation,
+  onFocusField,
 }: {
   transport: HostTransport;
   conversation: string | null;
+  /** Puts the focus in the composer's field: Hide takes its own button away. */
+  onFocusField: () => void;
 }) {
   const store = connectorsStoreOf(transport);
   const id = useOutOfCredit(store, conversation);
@@ -39,7 +42,14 @@ export function OutOfCredit({
         onAdd={
           open === undefined ? null : () => void open.call(transport, "connectors").catch(() => {})
         }
-        onHide={conversation === null ? null : () => store.hide(conversation)}
+        onHide={
+          conversation === null
+            ? null
+            : () => {
+                onFocusField();
+                store.hide(conversation);
+              }
+        }
       />
     </Suspense>
   );

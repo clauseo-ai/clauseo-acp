@@ -288,14 +288,14 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
           </>
         )}
         {recharge !== undefined && (
-          <p className="set-note" data-testid="connectors-recharge">
+          <p className="set-note" role="status" data-testid="connectors-recharge">
             {w(recharge)}
           </p>
         )}
         {payUrl !== undefined &&
           (opened === payUrl ? (
             <div className="set-cn-pay" data-testid="connectors-paying">
-              <p className="text-ui text-primary">
+              <p className="text-ui text-primary" role="status">
                 {w("The payment page is open in your browser.")}
               </p>
               <p className="set-note">

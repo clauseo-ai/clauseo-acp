@@ -88,6 +88,8 @@ describe("the limit's note", () => {
     expect(txt(limit?.querySelector(".lim-word"))).toContain("Waiting for you");
     // the line follows the actions unless it's a confirmation
     expect(limit?.querySelector(".lim-note-go")?.lastElementChild?.className).toBe("lim-note-line");
+    // said as it comes: a refused press's words land there
+    expect(limit?.querySelector(".lim-note-line")?.getAttribute("role")).toBe("status");
     expect(txt(limit?.querySelector(".lim-note-other"))).toContain("Ask ChatGPT instead");
     // a note with nothing to do draws no action row
     expect(choice?.querySelector(".lim-note-go")).toBeNull();

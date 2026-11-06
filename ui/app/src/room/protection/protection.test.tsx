@@ -136,6 +136,26 @@ test("a press of the line, or of the toolbar's mark, opens that cause's note", a
   expect(note()?.dataset["cause"]).toBe("set_up_refused");
 });
 
+test("keys: the line says it opens a dialog; the note takes focus, and Escape closes it and gives focus back", async () => {
+  explained();
+  await mount(PROT.refused);
+  expect(line()?.getAttribute("aria-haspopup")).toBe("dialog");
+  expect(h!.one("protection-mark")?.getAttribute("aria-haspopup")).toBe("dialog");
+  line()?.focus();
+  await h!.click(line());
+  await waitNote();
+  expect(note()?.contains(document.activeElement)).toBe(true);
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  await waitNote();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+  expect(note()).toBeNull();
+  expect(document.activeElement).toBe(line());
+});
+
 test("the toolbar's mark shows for a folder reason or a Not protected matter, not for protected", async () => {
   explained();
   await mount(PROT.a, {

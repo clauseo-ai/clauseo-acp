@@ -165,12 +165,13 @@ export function NotProtectedNote({
                 <Say>{line}</Say>
               </span>
             ))}
+            {/* a list, by role: the body is the dialog's description, a <p>, which holds no <ul> */}
             {counts.some(([n]) => n > 0) && (
-              <span className="np-note-counts" data-testid="np-pool">
+              <span className="np-note-counts" role="list" data-testid="np-pool">
                 {counts
                   .filter(([n]) => n > 0)
                   .map(([, line]) => (
-                    <span key={line}>
+                    <span key={line} role="listitem">
                       <Say>{line}</Say>
                     </span>
                   ))}
