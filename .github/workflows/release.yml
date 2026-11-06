@@ -126,8 +126,8 @@ jobs:
               fail "$tag is on $GITHUB_SHA, which is on no release-test/* branch"
           fi
 
-          # A v* release never builds a test or measuring feature: none is asked for here, and
-          # the desktop crate's default features reach none of them.
+          # A v* release never builds a test, measuring or test-server feature: none is asked for
+          # here, and the desktop crate's default features reach none of them.
           default=$(python3 - <<'PY'
           import tomllib
           features = tomllib.load(open("crates/desktop/Cargo.toml", "rb")).get("features", {})
@@ -137,7 +137,9 @@ jobs:
               if name not in seen:
                   seen.add(name)
                   todo += features.get(name, [])
-          print(" ".join(sorted(seen & {"e2e", "marks", "crash_test"})))
+          print(" ".join(sorted(seen & {
+              "e2e", "marks", "crash_test", "staging-connector", "local-connector",
+          })))
           PY
           )
           [ -z "$default" ] || fail "the desktop crate's default features turn on $default"
@@ -382,6 +384,27 @@ jobs:
             fi
           done
           echo "$exe holds no form of the test updater key"
+
+      # The case-law connector's test servers are compiled only into desktop's staging-connector
+      # and local-connector builds (docs/connector-staging.md). Every other run's app binary holds
+      # neither host, in ASCII or UTF-16 (the NULs are dropped first): the bare host covers its
+      # https:// or http:// form and any path. This scan, not the desktop test
+      # tests/staging_host.rs (a debug test build), is the control for the shipped binary.
+      - name: The app binary holds no connector test host
+        run: |
+          set -euo pipefail
+          exe=$RELEASE_DIR/Clauseo; [ "$RUNNER_OS" = Windows ] && exe=$exe.exe
+          [ -f "$exe" ] || { echo "::error::no app binary at $exe"; exit 1; }
+          for pair in "staging-connector data-staging.clauseo.chat" "local-connector 127.0.0.1:8793"; do
+            feature=${pair%% *} host=${pair#* }
+            case " ${FEATURES//,/ } " in *" $feature "*) echo "built with $feature: $host expected"; continue;; esac
+            found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$host") || [ $? -eq 1 ]
+            if [ "$found" != 0 ]; then
+              echo "::error::$exe holds $host, which only a $feature build may"
+              exit 1
+            fi
+          done
+          echo "$exe holds no connector test host"
 
       # A dry run's updater key: made here, with a random password, and gone with the runner.
       - name: Make a throwaway updater key (dry run)

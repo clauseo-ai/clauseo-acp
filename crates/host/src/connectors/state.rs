@@ -11,7 +11,8 @@
 //! - No token, key or account id is held here: the credential is the connectors crate's.
 
 use clauseo_connectors::{
-    Account, CredentialKind, CredentialStatus, KnownConnector, Liveness, Pack, PayUrl, Pricing,
+    Account, CredentialKind, CredentialStatus, KnownConnector, Liveness, Origin, Pack, PayUrl,
+    Pricing,
 };
 use clauseo_protocol::{
     Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, ConnectorView,
@@ -88,14 +89,16 @@ pub(crate) struct CaseLaw {
 
 impl CaseLaw {
     /// The pay link `OpenPayLink` may open: only the one `AddCredits` got from the recharge API,
-    /// a `PayUrl` the connectors crate built, and only while it still reads as the production
-    /// form (https, host exactly `data.clauseo.chat`, path `/pay/<id>`). Out of credit's link
-    /// came from a tool result the relay passed on, so it is shown, never opened from here; nor
-    /// is any URL from relay output, a tool result or the agent.
-    pub(crate) fn pay_link(&self) -> Option<&PayUrl> {
-        self.pay_url.as_ref().filter(|url| {
-            PayUrl::parse(&clauseo_connectors::CASE_LAW, url.as_str()).as_ref() == Some(*url)
-        })
+    /// a `PayUrl` the connectors crate built, and only while it still reads as `origin`'s form
+    /// (https, path `/pay/<id>`, host exactly `data.clauseo.chat` in a production build or
+    /// `data-staging.clauseo.chat` in a staging one). `origin` is the wired `Connectors`'
+    /// own, which desktop fixes at compile time. Out of credit's link came from a tool result
+    /// the relay passed on, so it is shown, never opened from here; nor is any URL from relay
+    /// output, a tool result or the agent.
+    pub(crate) fn pay_link(&self, origin: &Origin) -> Option<&PayUrl> {
+        self.pay_url
+            .as_ref()
+            .filter(|url| url.is_for(&clauseo_connectors::CASE_LAW, origin))
     }
 
     /// Whether the credential is a usable one.

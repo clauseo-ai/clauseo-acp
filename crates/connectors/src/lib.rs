@@ -53,6 +53,8 @@ pub use connectors::ListenerLoad;
 pub use connectors::{ConnectorHandle, Connectors};
 pub use credential::{CredentialKind, CredentialStatus, SignOutReport};
 pub use error::{AuthError, Error, SignInError, StoreError};
+#[cfg(feature = "local")]
+pub use known::LOCAL_ORIGIN;
 pub use known::{CASE_LAW, CLIENT_ID, KEYCHAIN_SERVICE, KNOWN, KnownConnector, PRICING_URL, known};
 pub use mcp::{
     McpBody, McpReply, McpRequestHeaders, ToolOutcome, classify_tool_result,

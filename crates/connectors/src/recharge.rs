@@ -139,13 +139,36 @@ impl PayUrl {
             return None;
         }
         match origin {
-            Origin::Production | Origin::Staging => Some(PayUrl(url.into())),
+            Origin::Production => Some(PayUrl(url.into())),
+            #[cfg(feature = "staging")]
+            Origin::Staging => Some(PayUrl(url.into())),
+            #[cfg(feature = "local")]
+            Origin::Local => Some(PayUrl(url.into())),
             #[cfg(feature = "test-support")]
             Origin::Fake(_) => Some(PayUrl(format!(
                 "{PRODUCTION_ORIGIN}{}",
                 &url[Position::BeforePath..]
             ))),
         }
+    }
+
+    /// Whether this link still reads as a pay link of `origin`, as [`PayUrl::parse_for`] would
+    /// return it: under `Production` only `https://data.clauseo.chat/pay/<id>`, under `Staging`
+    /// only `https://data-staging.clauseo.chat/pay/<id>`, under `Local` only
+    /// `http://127.0.0.1:8793/pay/<id>` (that exact origin). Under `Fake` the link was rewritten
+    /// to the production form, so it is checked as production. `OpenPayLink`'s check before it
+    /// opens.
+    pub fn is_for(&self, connector: &KnownConnector, origin: &Origin) -> bool {
+        let reparsed = match origin {
+            Origin::Production => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "staging")]
+            Origin::Staging => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "local")]
+            Origin::Local => PayUrl::parse_for(connector, origin, &self.0),
+            #[cfg(feature = "test-support")]
+            Origin::Fake(_) => PayUrl::parse(connector, &self.0),
+        };
+        reparsed.as_ref() == Some(self)
     }
 
     /// The link.

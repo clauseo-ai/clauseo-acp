@@ -179,8 +179,11 @@ Like `SetSkillPack`, by window (`desktop/src/bridge/admit.rs`):
 `ConnectorCommand::OpenPayLink { id }` (this PR, settings window only) opens one link: the
 https `PayUrl` that `add_credits` got from the recharge API, which the connectors crate built
 and checked against our host, held in the connector state (`CaseLaw::pay_link`). Before it
-opens, the host parses it again as a production pay link (https, host exactly
-`data.clauseo.chat`, no port or user info, path `/pay/<id>`); anything else is refused
+opens, the host parses it again as a pay link of the wired connectors' origin (https, no port or
+user info, path `/pay/<id>`, host exactly `data.clauseo.chat`, or `data-staging.clauseo.chat`
+in a build with desktop's compile-time `staging-connector` feature; `http://127.0.0.1:8793`, the
+connector's local test server, plain http and that exact origin only, with `local-connector`);
+anything else is refused
 (`command.invalid`), and so is the command when there is no such link.
 
 - It is never a URL from relay output, a tool result or the agent. Out of credit's link reached
@@ -333,6 +336,13 @@ What a later change must respect:
 
 Left for others: R17's policy entries and port (stage C), S15's WFP permit, the Settings section,
 hint and banner screens (U15), and the live connector's result shapes for the sources join.
+
+Not verified yet: real Claude and Codex calling case law through the connector on macOS and
+Windows (the release-checklist row). Its recipe, on a `staging-connector` build, or before
+staging on a `local-connector` build against the connector's local test server
+(`http://127.0.0.1:8793`), is [docs/connector-staging.md](../connector-staging.md); it waits for
+the connector's staging deploy (or the local server) and a test account. Neither build's
+address is compiled into any other build (`crates/desktop/tests/staging_host.rs`).
 
 ## Links
 

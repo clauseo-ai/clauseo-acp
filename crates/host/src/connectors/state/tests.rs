@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use clauseo_connectors::{
-    Account, CASE_LAW, CredentialKind, CredentialStatus, DaySpend, Liveness, Pack, Pricing,
-    PricingStatus,
+    Account, CASE_LAW, CredentialKind, CredentialStatus, DaySpend, Liveness, Origin, Pack, PayUrl,
+    Pricing, PricingStatus,
 };
 use clauseo_protocol::{
     Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, PackView, RechargeOutcome,
@@ -418,4 +418,26 @@ fn the_last_recharge_goes_with_the_credential() {
     assert_eq!(last(&state), Some(RechargeOutcome::Expired));
     state.set_credential(CredentialStatus::SignedOut);
     assert_eq!(last(&state), None);
+}
+
+/// `OpenPayLink`'s check (`CaseLaw::pay_link`) takes the origin it is given. The staging
+/// origin's cases are `PayUrl::is_for`'s (clauseo-connectors, `--features staging`) and
+/// desktop's `staging-connector` tests: the host's tests build without the staging host.
+#[test]
+fn the_pay_link_is_checked_against_the_origin_given() {
+    let production = PayUrl::parse(&CASE_LAW, "https://data.clauseo.chat/pay/rch_1").unwrap();
+    let held = |url: &PayUrl| CaseLaw {
+        pay_url: Some(url.clone()),
+        ..CaseLaw::default()
+    };
+    assert_eq!(
+        held(&production).pay_link(&Origin::Production),
+        Some(&production)
+    );
+    // The fake's link comes back in the production form and is checked as production.
+    let fake = Origin::Fake(url::Url::parse("http://127.0.0.1:4321").unwrap());
+    let from_fake = PayUrl::parse_for(&CASE_LAW, &fake, "http://127.0.0.1:4321/pay/rch_1").unwrap();
+    assert_eq!(held(&from_fake).pay_link(&fake), Some(&from_fake));
+    // No link held, nothing to open.
+    assert_eq!(CaseLaw::default().pay_link(&Origin::Production), None);
 }
