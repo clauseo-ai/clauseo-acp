@@ -41,9 +41,11 @@
 # label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
 # start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
 # is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
-# its jobs are skipped under another name (`..., no change`), because the newest check run of a
-# name decides it and a skipped one counts as passed. The expression is repeated in the concurrency
-# group and each job's `name` and `if` (a workflow env reaches neither); keep the copies equal.
+# e2e-changes says so (`relevant`): smoke then only skips, on ubuntu, under another name
+# (`smoke, no change`). It is not skipped as a job: the newest check run of a name decides it and a
+# skipped one counts as passed, and a skipped job's name shows unevaluated. The expression is
+# repeated in the concurrency group and in e2e-changes' RELEVANT (a workflow env reaches neither);
+# keep the two copies equal.
 
 name: e2e-windows
 
@@ -91,8 +93,7 @@ concurrency:
 jobs:
   # Not named changes (ci.yml's required check). The same script decides for both workflows.
   e2e-changes:
-    name: ${{ ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'e2e-changes' || 'e2e-changes, no change' }}
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
+    name: e2e-changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     # pull-requests: the reviews, for `ready`.
@@ -103,7 +104,15 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       product: ${{ steps.filter.outputs.product }}
       ready: ${{ steps.ready.outputs.ready }}
+      relevant: ${{ steps.relevant.outputs.relevant }}
     steps:
+      # The note at the top: a label or review that cannot change the result is not relevant.
+      - name: Decide whether this event is relevant
+        id: relevant
+        env:
+          RELEVANT: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
+        run: echo "relevant=$RELEVANT" | tee -a "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -166,16 +175,16 @@ jobs:
           ready false
 
   smoke:
-    name: ${{ ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('smoke ({0})', matrix.runner) || 'smoke, no change' }}
+    name: ${{ needs.e2e-changes.outputs.relevant == 'false' && 'smoke, no change' || format('smoke ({0})', matrix.runner) }}
     needs: e2e-changes
     # Not in a merge group (2026-11-04): smoke left the merge-group requirement for main's nightly
     # run, to cut the time from approval to merge; it still runs on pull requests that change the
     # app, nightly and on demand, and a red one on main goes to its owner.
-    # Skipped too in a run that is not relevant (the note at the top).
-    if: ${{ !cancelled() && github.event_name != 'merge_group' && ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) }}
+    # In a run that is not relevant it only skips, on ubuntu (the note at the top).
+    if: ${{ !cancelled() && github.event_name != 'merge_group' }}
     # A pull request that leaves the app alone or is not ready only skips, on an ubuntu runner,
     # which starts faster than a Windows one. A failed e2e-changes runs everything on Windows.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && (needs.e2e-changes.outputs.app != 'true' || needs.e2e-changes.outputs.ready == 'false') && 'ubuntu-24.04' || matrix.runner }}
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && (needs.e2e-changes.outputs.relevant == 'false' || needs.e2e-changes.outputs.app != 'true' || needs.e2e-changes.outputs.ready == 'false') && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -190,7 +199,7 @@ jobs:
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
       # A failed decision runs everything, so the check always reports.
-      RUN: ${{ needs.e2e-changes.result != 'success' || (needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.ready != 'false') }}
+      RUN: ${{ needs.e2e-changes.result != 'success' || (needs.e2e-changes.outputs.relevant != 'false' && needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.ready != 'false') }}
       TARGET: ${{ matrix.target }}
       # LTO off and 16 codegen units on a pull request, a merge group and the nightly run (x64), so
       # the nightly run saves the Rust cache under the key pull requests look up (rust-cache hashes
@@ -212,8 +221,11 @@ jobs:
         if: env.RUN != 'true'
         env:
           APP: ${{ needs.e2e-changes.outputs.app }}
+          RELEVANT: ${{ needs.e2e-changes.outputs.relevant }}
         run: |
-          if [ "$APP" != true ]; then
+          if [ "$RELEVANT" = false ]; then
+            echo "A label or review that cannot change the result; smoke keeps this pull request's last result."
+          elif [ "$APP" != true ]; then
             echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test."
           else
             echo "The pull request has neither the label ready nor an approval of its head; smoke runs once it has one."
