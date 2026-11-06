@@ -103,9 +103,13 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
         journals: false,
     };
     let dir = TempDir::new("setup-exe-elevated");
-    let data = dir.path().join("data");
     let owner = Owner::of_this_process().unwrap();
     let me = owner.sid().clone();
+    // The app makes its data folder as the lawyer, who owns it. An elevated test process makes
+    // folders owned by Administrators (its token's default owner), so hand this one to the user,
+    // as the set-up's data-folder check requires.
+    let data = dir.dir("data");
+    crate::windows::test_dacl::give_owner(&data, &me).unwrap();
 
     let exit = run_set_up(names.clone(), owner, &data, 1);
     let result = result_file::read(&data);
