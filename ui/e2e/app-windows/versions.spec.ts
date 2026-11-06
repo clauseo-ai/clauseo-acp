@@ -1,4 +1,5 @@
-// fake_agent `claude-files-one-turn`: one turn creates notes/a.txt, edits brief.txt and deletes old.txt in
+// fake_agent `claude-files-one-turn` (scenarios/claude-files-one-turn.jsonl), after the matter's first
+// read (finishFirstRead): one turn creates notes/a.txt, edits brief.txt and deletes old.txt in
 // the matter folder. Versions lists the turn's version (`after_turn`) with its paper; Undo from that
 // version's band, confirmed in the dialog, puts the folder back as it was and adds an `undo` version.
 // While the panel is open the rail of matters stands out of the page; closing the panel brings it back.
@@ -6,18 +7,26 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, openMatter, sendPrompt, showRail } from "./flow.ts";
+import {
+  FILES_SCENARIO,
+  expectTurnEnded,
+  finishFirstRead,
+  openMatter,
+  sendPrompt,
+  showRail,
+} from "./flow.ts";
 import { readTree } from "./scratch.ts";
 import { window, type Window } from "./selectors.ts";
 
 /** The scenario's description asks for these two files first. */
 const BEFORE = { "brief.txt": "Clause 4 draft\n", "old.txt": "Old terms\n" };
 
-test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
+test.use({ scenario: FILES_SCENARIO, matterFiles: BEFORE });
 
 /** Opens the matter and plays the scenario's one turn. */
 async function playTurn(w: Window): Promise<void> {
   await openMatter(w);
+  await finishFirstRead(w);
   await sendPrompt(w, "Finalise clause 4");
   await expect(w.agentMessages.last()).toHaveText(
     "Created one note, edited the brief and deleted the old file.",

@@ -1,7 +1,7 @@
 // Two turns' Undo refused while Word holds a file, then landed once it is closed. Each test plays
 // its own fake_agent scenario:
 //
-// - `files-one-turn`: three files change, so the lock block shows the general line. Word holds
+// - `files-one-turn` (scenarios/claude-files-one-turn.jsonl): three files change, so the lock block shows the general line. Word holds
 //   brief.txt open: the file is open, shared for reading only, and its owner file `~$brief.txt`
 //   sits beside it (word-hold.ts; since #409 an owner file alone is stale). Undo on that turn
 //   writes three files, so it is refused whole and writes nothing; the room shows the lock block
@@ -10,13 +10,22 @@
 // - `word-one-docx` (scenarios/word-one-docx.jsonl): one turn changes one `.docx`, Petition.docx, so
 //   the lock block names that Word document. Word holds it open, with its owner file
 //   `~$tition.docx` beside it.
+//
+// Both matters start with papers, so each spec waits for the matter's first read before its own
+// turn (finishFirstRead).
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { expectTurnEnded, openMatter, sendPrompt } from "./flow.ts";
+import {
+  FILES_SCENARIO,
+  expectTurnEnded,
+  finishFirstRead,
+  openMatter,
+  sendPrompt,
+} from "./flow.ts";
 import { readTree } from "./scratch.ts";
 import { window } from "./selectors.ts";
 
@@ -50,7 +59,7 @@ const WORD_LINE = /Close '\u2068?Petition\.docx\u2069?' in Word to undo the chan
 const WORD_NOTE = "Word holds the file while it is open. Nothing has changed yet.";
 
 test.describe("files-one-turn", () => {
-  test.use({ scenario: "claude-files-one-turn", matterFiles: BEFORE });
+  test.use({ scenario: FILES_SCENARIO, matterFiles: BEFORE });
 
   test("Undo waits while Word holds a file, then lands once it is closed", async ({
     app,
@@ -59,6 +68,7 @@ test.describe("files-one-turn", () => {
   }) => {
     const w = window(app.page);
     await openMatter(w);
+    await finishFirstRead(w);
     await sendPrompt(w, "Finalise clause 4");
     await expect(w.agentMessages.last()).toHaveText(
       "Created one note, edited the brief and deleted the old file.",
@@ -104,6 +114,7 @@ test.describe("word-one-docx", () => {
   }) => {
     const w = window(app.page);
     await openMatter(w);
+    await finishFirstRead(w);
     await sendPrompt(w, "Finalise the petition");
     await expect(w.agentMessages.last()).toHaveText("Edited the petition.");
     await expectTurnEnded(w, "end_turn");

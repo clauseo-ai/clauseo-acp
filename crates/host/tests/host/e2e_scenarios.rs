@@ -53,11 +53,13 @@ fn specs_dir() -> PathBuf {
 }
 
 /// The constants a spec passes as `scenario:` instead of a name, with the scenario each names:
-/// the scoreboard's (`ui/e2e/scoreboard/session.ts`) and word-locked's file.
+/// the scoreboard's (`ui/e2e/scoreboard/session.ts`), word-locked's file, and flow.ts's copy of
+/// `claude-files-one-turn` that answers the first read.
 fn constant(name: &str) -> Option<Scenario> {
     match name {
         "SCENARIO" => Some(Scenario::Bundled("scoreboard")),
         "WORD_SCENARIO" => Some(Scenario::Ui("word-one-docx")),
+        "FILES_SCENARIO" => Some(Scenario::Ui("claude-files-one-turn")),
         _ => None,
     }
 }

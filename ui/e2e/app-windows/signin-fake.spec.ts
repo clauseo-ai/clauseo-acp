@@ -7,7 +7,7 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import { openMatter } from "./flow.ts";
+import { openGatedMatter } from "./flow.ts";
 import { window } from "./selectors.ts";
 
 const CLAUDE = "claude-acp";
@@ -17,7 +17,7 @@ test.describe("a scripted sign-in that succeeds", () => {
 
   test("Sign in walks Waiting, then the room says it is signed in", async ({ app }) => {
     const w = window(app.page);
-    await openMatter(w);
+    await openGatedMatter(w);
     const gate = app.page.getByTestId("signin");
     const state = app.page.getByTestId("signin-state");
     await expect(gate).toHaveAttribute("data-agent", "claude");
@@ -37,7 +37,7 @@ test.describe("a scripted sign-in that fails", () => {
 
   test("Sign in walks Waiting, then the gate says it failed", async ({ app }) => {
     const w = window(app.page);
-    await openMatter(w);
+    await openGatedMatter(w);
     const gate = app.page.getByTestId("signin");
     const state = app.page.getByTestId("signin-state");
     // the starting state: the sign-in card is up, signed out, before Sign in is pressed
