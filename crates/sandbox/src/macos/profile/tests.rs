@@ -156,6 +156,34 @@ fn with_read_only_paths_in_the_matter() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
+/// S15 `PR4a2`: a nested `.mcp.json` is in `read_only_in_matter` and comes out as a subpath in
+/// the profile's write deny of the matter's read-only paths.
+#[test]
+fn a_nested_mcp_json_is_write_denied() {
+    let w = World::new("profile-nested-mcp");
+    w.dir.file("matter/sub/.mcp.json", "{}");
+    let policy = w.builder().build().unwrap();
+    let mcp = dunce::canonicalize(w.at("matter"))
+        .unwrap()
+        .join("sub/.mcp.json");
+    let rule = PathRule::Subpath(mcp.clone());
+    assert!(policy.read_only_in_matter().contains(&rule));
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    let (name, _) = profile
+        .params()
+        .iter()
+        .find(|(name, path)| name.starts_with("READ_ONLY_") && *path == mcp)
+        .unwrap();
+    let text = profile.text();
+    let (_, block) = text.split_once("; Read-only in the matter").unwrap();
+    let (block, _) = block.split_once("(with message").unwrap();
+    assert!(block.contains("(deny file-write*"), "{block}");
+    assert!(
+        block.contains(&format!("(subpath (param \"{name}\"))")),
+        "{block}"
+    );
+}
+
 #[test]
 fn with_the_claude_store() {
     let w = World::new("profile-claude-store");
