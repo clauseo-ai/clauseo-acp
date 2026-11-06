@@ -498,6 +498,10 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             super::turn::case_law::found(actor, session.thread, found);
             return;
         }
+        RelayEvent::Call { session, call } => {
+            super::turn::idle_relay_call(actor, session, call);
+            return;
+        }
         RelayEvent::PaidResult { .. } => {
             // A paid call went through: there is credit.
             actor.connectors.state.out_of_credit = None;

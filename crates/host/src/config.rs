@@ -28,7 +28,7 @@ use crate::window::PATCH_WINDOW_BYTES;
 
 mod idle;
 pub(crate) use idle::IdleStop;
-pub use idle::{IDLE_LIMIT, LIVE_AGENTS};
+pub use idle::{CAP_MIN_IDLE, IDLE_LIMIT, LIVE_AGENTS};
 mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
 mod wiring;
@@ -346,6 +346,14 @@ impl HostConfig {
     /// [`LIVE_AGENTS`], 2), the memory from [`Self::with_machine_memory`].
     pub fn with_live_agents(mut self, agents: usize) -> Self {
         self.idle.live_agents = agents;
+        self
+    }
+
+    /// How long an agent must have been idle before the live-agents cap may stop it to make
+    /// room for another thread's launch (default [`CAP_MIN_IDLE`], 60 s); tests shorten it.
+    /// With no agent idle that long, the launch goes ahead past the cap.
+    pub fn with_cap_min_idle(mut self, min_idle: std::time::Duration) -> Self {
+        self.idle.cap_min_idle = min_idle;
         self
     }
 

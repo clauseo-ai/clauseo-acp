@@ -13,7 +13,8 @@ use std::sync::{Arc, OnceLock};
 
 use clauseo_connectors::Connectors;
 
-use super::{RelayEvent, RelayEvents};
+use super::{RelayCall, RelayEvent, RelayEvents};
+use crate::config::SessionKey;
 
 /// Opens the host's own links in the lawyer's browser. Desktop passes `open_url_unconfirmed` and
 /// H11's `open_external`; tests a stand-in that drives the fake connector's pages.
@@ -90,5 +91,9 @@ impl RelayEvents for ConnectorEvents {
         } else {
             tracing::debug!("a relay event before the host started was dropped");
         }
+    }
+
+    fn call(&self, session: SessionKey, call: RelayCall) {
+        self.event(RelayEvent::Call { session, call });
     }
 }

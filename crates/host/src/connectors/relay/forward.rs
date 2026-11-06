@@ -25,7 +25,7 @@ use clauseo_connectors::{AuthError, Error, McpReply, McpRequestHeaders};
 use serde_json::{Map, Value, json};
 
 use super::super::limits::{Cap, Spend, Taken, local_date};
-use super::super::{CredentialEnd, RelayEvent, texts};
+use super::super::{CredentialEnd, RelayCall, RelayEvent, texts};
 use super::conn::Conn;
 use super::{Phase, Session, lock};
 
@@ -81,6 +81,8 @@ pub(super) fn message(conn: &Conn, line: &[u8]) {
         refund(&conn.session, &call);
         return;
     }
+    // From here to the last answer the agent is at work: the idle stop counts it (R20b).
+    let _busy = Busy::start(&conn.session);
     let body = texts::line(&value);
     drop(value);
     let headers = {
@@ -107,6 +109,23 @@ pub(super) fn message(conn: &Conn, line: &[u8]) {
     }
     let after = hub.clock.now().mono.saturating_sub(received);
     hub.events.overhead(before.saturating_add(after));
+}
+
+/// A forwarded message in flight, for the idle stop: `Started` when made, `Ended` when dropped,
+/// so a message that unwinds still ends.
+struct Busy<'a>(&'a Session);
+
+impl<'a> Busy<'a> {
+    fn start(session: &'a Session) -> Self {
+        session.hub.events.call(session.key, RelayCall::Started);
+        Self(session)
+    }
+}
+
+impl Drop for Busy<'_> {
+    fn drop(&mut self) {
+        self.0.hub.events.call(self.0.key, RelayCall::Ended);
+    }
 }
 
 /// Writes one line; a write that fails means the agent is gone, and its reader ends.

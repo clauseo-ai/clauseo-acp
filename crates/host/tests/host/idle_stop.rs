@@ -12,7 +12,7 @@ use crate::observe::Events;
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 
 /// The idle limit these tests set, the by-hand check's.
-const LIMIT: Duration = Duration::from_secs(60);
+pub(crate) const LIMIT: Duration = Duration::from_secs(60);
 
 /// The host config with the idle stop off: no idle limit and no live-agents cap, for every test
 /// that is not about it (`support.rs`).
@@ -23,7 +23,7 @@ pub(crate) fn off(config: HostConfig) -> HostConfig {
 }
 
 /// A host whose fake agent plays `scenario`, with the idle stop on at [`LIMIT`].
-fn start(test: &str, scenario: &'static str) -> (Dir, Running) {
+pub(crate) fn start(test: &str, scenario: &'static str) -> (Dir, Running) {
     let dir = Dir::new(test, &[(FAKE, Scenario::Local(scenario))]);
     let host = dir.start_with(0, |config| {
         config.with_idle_limit(LIMIT).with_live_agents(2)
@@ -32,7 +32,7 @@ fn start(test: &str, scenario: &'static str) -> (Dir, Running) {
 }
 
 /// Whether `event` is the idle stop's detach.
-fn idle_stopped(event: &DomainEvent) -> bool {
+pub(crate) fn idle_stopped(event: &DomainEvent) -> bool {
     matches!(event, DomainEvent::AgentSessionDetached(detached)
         if detached.reason == DetachReason::IdleStopped)
 }

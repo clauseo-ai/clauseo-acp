@@ -43,6 +43,8 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
         tracing::debug!(%thread, "an event from an agent the thread no longer has");
         return;
     };
+    // The agent is at work, in a turn or between turns: its idle clock starts again (R20b).
+    super::idle::active(&mut agent.idle);
     if agent.stage == Stage::Loading
         && match *event {
             AcpEvent::Update {

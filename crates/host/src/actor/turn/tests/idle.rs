@@ -18,7 +18,7 @@ use crate::actor::input::{Input, Request};
 use crate::actor::turn::agents::Stage;
 use crate::actor::turn::idle::{Pending, pending, pending_in};
 use crate::agent::{AgentInput, Ended, StopStep};
-use crate::config::IDLE_LIMIT;
+use crate::config::{HostConfig, IDLE_LIMIT};
 use crate::pipeline::tests::support::TempDir;
 
 /// One prompt answered, then a second one answered.
@@ -35,17 +35,21 @@ pub(super) const MS: Duration = Duration::from_millis(1);
 
 /// A rig with the idle stop at its default limit and no cap; the agent does `on_stdin_close`.
 pub(super) fn rig(test: &str, steps: &str, on_stdin_close: &str) -> Rig {
-    start_idle(test, steps, on_stdin_close, (IDLE_LIMIT, usize::MAX))
+    start_idle(test, steps, on_stdin_close, |config| {
+        config
+            .with_idle_limit(IDLE_LIMIT)
+            .with_live_agents(usize::MAX)
+    })
 }
 
-/// [`Rig::start`] with the idle stop on: the idle limit and the live-agents cap given to the
-/// host config, and the agent doing `on_stdin_close` (`"exit"` or `"hang"`) when its stdin
-/// closes.
+/// [`Rig::start`] with the idle stop on: `adjust` sets the idle limit, the live-agents cap and
+/// the cap's minimum idle in the host config, and the agent does `on_stdin_close` (`"exit"` or
+/// `"hang"`) when its stdin closes.
 pub(super) fn start_idle(
     test: &str,
     steps: &str,
     on_stdin_close: &str,
-    (limit, live_agents): (Duration, usize),
+    adjust: impl FnOnce(HostConfig) -> HostConfig,
 ) -> Rig {
     let dir = TempDir::new(test);
     Rig::prepare(dir.path(), test, steps, None);
@@ -57,9 +61,7 @@ pub(super) fn start_idle(
         1,
     );
     crate::write::write_file(&scenario, text.as_bytes()).unwrap();
-    Rig::open_with(dir, 0, None, |config| {
-        config.with_idle_limit(limit).with_live_agents(live_agents)
-    })
+    Rig::open_with(dir, 0, None, adjust)
 }
 
 /// When `thread`'s agent's idle clock started, if it has one.

@@ -155,6 +155,9 @@ mod hold_reasons;
 #[path = "host/idle_stop.rs"]
 mod idle_stop;
 #[cfg(test)]
+#[path = "host/idle_stop_during.rs"]
+mod idle_stop_during;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]

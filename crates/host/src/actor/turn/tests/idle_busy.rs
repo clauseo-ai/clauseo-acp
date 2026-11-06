@@ -23,9 +23,9 @@ use crate::actor::turn::{AgentReply, TurnInput, TurnPhase};
 use crate::config::IDLE_LIMIT;
 
 /// Twice the limit passes and `thread`'s agent stays live, its idle clock not started, for
-/// `why`.
-fn kept_past_the_limit(rig: &mut Rig, thread: ThreadId, why: Pending) {
-    assert_eq!(pending_of(&rig.actor, thread), Some(why));
+/// `why`. The behaviour is checked before the label, so a check missing from `idle::pending`
+/// fails here as a stop.
+pub(super) fn kept_past_the_limit(rig: &mut Rig, thread: ThreadId, why: Pending) {
     advance(rig, IDLE_LIMIT * 2);
     let stage = rig.actor.threads[&thread]
         .turn
