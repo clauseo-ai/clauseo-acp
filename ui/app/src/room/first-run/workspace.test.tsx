@@ -169,7 +169,7 @@ test("needs_set_up on Windows: the Windows screen, which is the confirm; the fir
   expect(step()?.textContent).toContain(
     fl("en", "Windows asks once for permission to set up the Safe workspace."),
   );
-  expect(step()?.textContent).toContain("it may show the publisher as unknown");
+  expect(step()?.textContent).toContain("It will say the publisher is unknown");
   expect(t.protectionCommands()).toEqual([]);
   expect(reads(t)).toBe(0);
   await press(byId("protection-setup"));

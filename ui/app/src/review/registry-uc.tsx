@@ -208,7 +208,7 @@ export const UC: Entry[] = [
   first(
     "UC-11",
     pw(
-      "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to set up protection.",
+      "Windows will ask to let Clauseo set up its protection. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   ),
   first("UC-12", pw("Set up protection")),
@@ -336,7 +336,7 @@ export const UC: Entry[] = [
   settings(
     "UC-42",
     pw(
-      "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to remove protection's set-up.",
+      "Windows will ask to let Clauseo remove its protection's set-up. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
     held(P.b),
     ['[data-testid="protection-remove"]'],

@@ -9,13 +9,13 @@ export const HI = {
   "Setting up the Safe workspace.": "सुरक्षित कार्यक्षेत्र तैयार हो रहा है।",
   // the set-up confirm (UC-11, UC-12, UC-40)
   "Set up protection?": "संरक्षण सेट अप करें?",
-  "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to set up protection.":
-    "Windows पूछेगा कि क्या आप बदलावों की अनुमति देना चाहते हैं, और वह प्रकाशक को अज्ञात दिखा सकता है। ऐसा होना अपेक्षित है। संरक्षण सेट अप करने के लिए Yes चुनें।",
+  "Windows will ask to let Clauseo set up its protection. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
+    "Windows, Clauseo को उसका संरक्षण सेट अप करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
   "Set up protection": "संरक्षण सेट अप करें",
   // the remove confirm (UC-41 to UC-44)
   "Remove protection's set-up?": "संरक्षण का सेटअप हटाएँ?",
-  "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to remove protection's set-up.":
-    "Windows पूछेगा कि क्या आप बदलावों की अनुमति देना चाहते हैं, और वह प्रकाशक को अज्ञात दिखा सकता है। ऐसा होना अपेक्षित है। संरक्षण का सेटअप हटाने के लिए Yes चुनें।",
+  "Windows will ask to let Clauseo remove its protection's set-up. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
+    "Windows, Clauseo को उसके संरक्षण का सेटअप हटाने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
   "Afterwards, Clauseo works on this computer without protection until you set it up again.":
     "इसके बाद, जब तक आप इसे फिर से सेट अप नहीं करते, Clauseo इस कंप्यूटर पर बिना संरक्षण के काम करेगा।",
   "Remove set-up": "सेटअप हटाएँ",

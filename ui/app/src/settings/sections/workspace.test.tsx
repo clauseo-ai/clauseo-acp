@@ -240,7 +240,7 @@ test("Remove set-up always confirms first: Cancel sends nothing, confirming send
   const confirm = one("protection-confirm");
   expect(confirm?.dataset["act"]).toBe("remove");
   expect(confirm?.textContent).toContain(pw("en", "Remove protection's set-up?"));
-  expect(confirm?.textContent).toContain("it may show the publisher as unknown");
+  expect(confirm?.textContent).toContain("It will say the publisher is unknown");
   expect(confirm?.textContent).toContain(
     pw(
       "en",
