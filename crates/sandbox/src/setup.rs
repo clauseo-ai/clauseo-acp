@@ -57,7 +57,8 @@ pub enum SetupState {
 /// Why a set-up step failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SetupError {
-    /// The lawyer declined the prompt, or Windows refused to raise it (error 1385).
+    /// The lawyer declined the prompt (`ERROR_CANCELLED`, 1223). A logon type not granted (1385)
+    /// is a [`SetupError::Failed`] naming the right (D-B4).
     #[error("sandbox set-up was refused")]
     Refused,
     /// Anything else; what failed.

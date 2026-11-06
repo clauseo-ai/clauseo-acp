@@ -1,0 +1,162 @@
+//! The [`Machine`] seam: every call the set-up makes outside the permission writes, one method
+//! per thing it asks Windows (or the owner's files) for. `WindowsMachine` (S15 `PR4e` to `PR4g`)
+//! is the real one; the tests use a fake that records each call.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use zeroize::Zeroizing;
+
+use crate::windows::apply::Surroundings;
+use crate::windows::ledger::Ledger;
+use crate::windows::marker::{Marker, MarkerState};
+use crate::windows::pool::MachineRecord;
+use crate::windows::sids::Sid;
+
+/// A pool user's password: wiped from memory when dropped.
+pub type Password = Zeroizing<String>;
+
+/// Why a [`Machine`] call failed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum MachineError {
+    /// A Windows call failed with this error code.
+    #[error("{call} failed (error {code})")]
+    Os {
+        /// The call, as Windows names it (`NetUserAdd`).
+        call: &'static str,
+        /// Its error code (`GetLastError`, or the `NET_API_STATUS`).
+        code: u32,
+    },
+    /// Another set-up holds the machine-wide set-up lock.
+    #[error("another set-up is running on this computer")]
+    LockHeld,
+    /// The call isn't built yet: `WindowsMachine` gains its methods over S15 `PR4e` to `PR4g`.
+    #[error("{0} isn't built yet")]
+    Unsupported(&'static str),
+    /// Anything else; what failed.
+    #[error("{0}")]
+    Other(String),
+}
+
+/// How the Secondary Logon service (`seclogon`) starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStart {
+    /// It starts with Windows.
+    Automatic,
+    /// It starts when asked, as it does on a default install.
+    Manual,
+    /// It never starts: no pool user can be logged on through it.
+    Disabled,
+}
+
+/// Whether Windows' local policy lets the `Users` group log on interactively, as far as a check
+/// short of a logon can tell (the logon in step 6 is the real test).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogonRight {
+    /// Nothing refuses it.
+    Allowed,
+    /// "Deny log on locally" (`SeDenyInteractiveLogonRight`) names `Users`.
+    Refused,
+}
+
+/// The profile a logon loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileDir {
+    /// The profile's folder: `C:\Users\ClauseoSbNN`.
+    pub path: PathBuf,
+    /// Windows gave a temporary profile (its `ProfileList` state says so, or the folder is
+    /// under `C:\Users\TEMP`): the `LocalLow` the deny would close is not the user's own.
+    pub temporary: bool,
+}
+
+/// Everything the set-up asks of the machine besides the permission writes
+/// ([`AclWriter`](crate::windows::AclWriter)), one method per step of
+/// [`set_up`](super::set_up). Each is one Windows call or one file the owner keeps, so the
+/// engine's order and rollback are tested on every OS against a fake.
+///
+/// Account methods take the account's name (`ClauseoSbNN`), as the `Net*` calls do; the profile
+/// methods take its SID, as `DeleteProfileW` does.
+pub trait Machine {
+    /// Takes the machine-wide set-up lock (a named mutex in `Global\`). Another set-up holding
+    /// it is [`MachineError::LockHeld`].
+    fn lock(&mut self) -> Result<(), MachineError>;
+    /// Gives the lock back. Called once for every `lock` that succeeded.
+    fn unlock(&mut self);
+    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing.
+    fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
+    /// Writes `record` as the whole key, replacing every value.
+    fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
+    /// Deletes the key: only when a fresh set-up rolls back to nothing.
+    fn delete_record(&mut self) -> Result<(), MachineError>;
+    /// How the Secondary Logon service starts.
+    fn seclogon(&mut self) -> Result<ServiceStart, MachineError>;
+    /// Whether local policy refuses the interactive logon right to `Users`.
+    fn logon_right(&mut self) -> Result<LogonRight, MachineError>;
+    /// The SID of the account named `name`, if one exists.
+    fn account_sid(&mut self, name: &str) -> Result<Option<Sid>, MachineError>;
+    /// The name of the account whose SID is `sid`, if one exists.
+    fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
+    /// The SID of the local group `ClauseoSandboxUsers`, if it exists.
+    fn group(&mut self) -> Result<Option<Sid>, MachineError>;
+    /// Makes the local group `ClauseoSandboxUsers`; its SID.
+    fn create_group(&mut self) -> Result<Sid, MachineError>;
+    /// How many members the group `group` has.
+    fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
+    /// Deletes the group `group`.
+    fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// A new random password for a pool user (`PR4e`'s generator).
+    fn new_password(&mut self) -> Password;
+    /// Makes the local account `name` with `password`, `UF_DONT_EXPIRE_PASSWD |
+    /// UF_PASSWD_CANT_CHANGE`; its SID. An account by that name already there is an error,
+    /// never adopted (D-B5).
+    fn create_user(&mut self, name: &str, password: &Password) -> Result<Sid, MachineError>;
+    /// Sets `name`'s password to `password` (a re-run, D-B6).
+    fn set_password(&mut self, name: &str, password: &Password) -> Result<(), MachineError>;
+    /// Puts `name` in the group `group`, and in `Users` where the account isn't already; a
+    /// membership already there is `Ok`.
+    fn add_to_group(&mut self, name: &str, group: &Sid) -> Result<(), MachineError>;
+    /// Hides `name` from the sign-in screen (its `SpecialAccounts\UserList` value).
+    fn hide(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Deletes the account `name` and its sign-in screen value.
+    fn delete_user(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Logs `name` on once with `password`, its profile loaded (made from Default the first
+    /// time, `AppData\LocalLow` included), then unloads it. `ERROR_LOGON_TYPE_NOT_GRANTED`
+    /// (1385) is [`MachineError::Os`] with that code.
+    fn log_on_once(&mut self, name: &str, password: &Password) -> Result<ProfileDir, MachineError>;
+    /// The profile Windows lists for `sid` (`ProfileList`), if any: for a pool user an extend
+    /// doesn't log on.
+    fn profile_of(&mut self, sid: &Sid) -> Result<Option<ProfileDir>, MachineError>;
+    /// Deletes `sid`'s profile (`DeleteProfileW`).
+    fn delete_profile(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// `%ProgramData%`, which holds `Microsoft\DeviceSync`.
+    fn program_data(&mut self) -> Result<PathBuf, MachineError>;
+    /// The owner's `setup.json`, read as `marker::read` reads it for the owner.
+    fn read_marker(&mut self) -> MarkerState;
+    /// Writes the owner's `setup.json`, as the owner.
+    fn write_marker(&mut self, marker: &Marker) -> Result<(), MachineError>;
+    /// Whether any matter of the owner's has an open session (the set-aside record's
+    /// open-sessions sets).
+    fn sessions_open(&mut self) -> Result<bool, MachineError>;
+    /// The owner's ledger, `<data_dir>\sandbox\acl-ledger.json`, opened trusting `trusted` (the
+    /// pool users and the group) against this machine's reserved accounts.
+    fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger>;
+    /// What the fence's walks need from around the matters (the folder check, the set-aside).
+    fn surroundings(&mut self) -> &mut dyn Surroundings;
+    /// The volumes whose change journal set-up enlarges (D-B12): the fixed NTFS volumes holding
+    /// any of `roots`, `%SystemDrive%` and the profiles' volume; never a removable one.
+    fn journal_volumes(&mut self, roots: &[&Path]) -> Result<Vec<PathBuf>, MachineError>;
+    /// The change journal's `MaximumSize` on `volume`; `None` when it has no journal.
+    fn journal_size(&mut self, volume: &Path) -> Result<Option<u64>, MachineError>;
+    /// Creates or enlarges `volume`'s change journal to `max` bytes, growing by `delta`.
+    fn grow_journal(&mut self, volume: &Path, max: u64, delta: u64) -> Result<(), MachineError>;
+    /// Writes `<data_dir>\sandbox\secrets.bin` as the owner, protected for the owner: each of
+    /// `secrets`, and for every other SID of `pool` the blob the file holds now (an extend
+    /// leaves the existing users' passwords as they are).
+    fn protect_for_owner(
+        &mut self,
+        secrets: &[(Sid, Password)],
+        pool: &[Sid],
+    ) -> Result<(), MachineError>;
+    /// The time now, in seconds since the Unix epoch, for the marker.
+    fn now(&mut self) -> u64;
+}

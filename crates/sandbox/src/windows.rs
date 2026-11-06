@@ -16,6 +16,8 @@
 //!   on Windows, the machine's record of the pool (`sandbox_pool_sids`, `sandbox_group_sid`,
 //!   `sandbox_owner_sid`, `sandbox_data_dir`) and the set-up state they give (`setup_state`).
 //! - [`pool`]: the pool users' names (`ClauseoSbNN`) and the machine record's shape.
+//! - `setup` (S15 `PR4d`): the elevated set-up's steps and rollback over its `Machine` seam,
+//!   with the setup exe's exit codes (`SetupExit`).
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
 //!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
@@ -66,6 +68,9 @@ mod private_dir;
 #[cfg(windows)]
 mod record;
 mod set_aside;
+// Set-up's engine calls `fence_registered`, which builds where it does.
+#[cfg(any(windows, test, feature = "test-support"))]
+pub mod setup;
 pub mod shared_writes;
 pub mod sids;
 #[cfg(test)]
