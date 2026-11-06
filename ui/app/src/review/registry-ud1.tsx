@@ -158,6 +158,9 @@ const blocked = install(CLAUDE, {
 const failedInstall = install(CLAUDE, {
   failed: { code: "agent.install_failed", hosts: HOSTS, log: LOG },
 });
+const offline = install(CLAUDE, {
+  waiting: { code: "agent.install_offline", hosts: HOSTS, log: LOG },
+});
 
 /** Each string, the scene that shows it, in the order the brief lists the screens. Its place is its id (UD1-<n>), so a
  * retired string leaves a null where it stood and no id moves. */
@@ -501,6 +504,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ],
   // UD1-84: the refusal line for any other code (REFUSAL, below), whose words are words-errors.ts's
   null,
+  // UD1-85 to UD1-87: the Offline and Failed views' Try again and Use the system proxy, added after the null above so
+  // no id moves
+  ["Try again", { first: true, events: [offline] }, "dl-offline"],
+  ["Use the system proxy", { first: true, events: [offline] }, "dl-offline"],
+  ["Use the system proxy", { first: true, events: [failedInstall] }, "dl-error"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
