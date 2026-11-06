@@ -119,7 +119,7 @@ Developer ID.
   first and Tauri's 26 other messages as 2.12.2 ships them, except that three name the product
   with `${PRODUCTNAME}` where Tauri's file has a literal `{{product_name}}` (language files are
   included, not rendered). On a Tauri upgrade, copy its `English.nsh` again and keep that fix;
-  tests count the 27 keys (29 since S20 added the uninstall hook's two lines, below), refuse any
+  tests count the 27 keys (31 since S20 added the uninstall hook's four lines, below), refuse any
   `{{`, and hold the label to one line (60 characters; the box is 400 x 25 px).
 - **The dialog's look** (from the Windows 11 VM's run): `cxWidth` 280 dialog units, so the main
   instruction fits on one line, and the exe's own icon (tauri-build's
@@ -252,7 +252,9 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   (exit 1) and the box names nothing outside the data folder. The hook's `ShellExecuteExW` adds
   `SEE_MASK_FLAG_NO_UI`, so a declined or blocked elevation (1223, 1260) shows no error box of
   Windows' own; the consent prompt still shows, and a denial keeps `sandbox\` as a failed
-  `--remove` does.
+  `--remove` does. The hook names a kept folder only when `GetFileAttributesW` says a real
+  folder, and shows no box when the data folder is gone (exit 1 after an unlink-only run); when
+  the data folder is itself a link (refused, so kept) its box names no path.
 
 ## Status
 
