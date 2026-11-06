@@ -75,6 +75,16 @@ export const ids = {
    */
   turnStopped: "turn-stopped",
   /**
+   * The first read's line under the composer (UD2), shown while its "First read" conversation is
+   * open, with `data-state`: reading, read or stopped.
+   */
+  firstRead: "first-read",
+  /**
+   * The first run's sign-in card, which stands in the composer's place while the conversation's
+   * plan is signed out, with `data-agent`.
+   */
+  signIn: "signin",
+  /**
    * The working line once Claude stopped mid-answer (limits/stopped), with `data-code`: shown for
    * a break this window saw arrive, until the next question.
    */
@@ -309,6 +319,8 @@ export function window(page: Page) {
     permissionButton: (card: Locator, kind: OptionKind): Locator =>
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),
+    firstRead: id(ids.firstRead),
+    signIn: id(ids.signIn),
     agentStopped: id(ids.agentStopped),
     restart: id(ids.restart),
     streamFailed: id(ids.streamFailed),
