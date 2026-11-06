@@ -1,7 +1,8 @@
 //! The set-up lock on Windows: exclusive across threads, given back on drop, and taken when
-//! abandoned. These run in CI's ordinary test step (not the `elevated_` one): the hosted runner's
-//! token is elevated (split §8). On an unelevated token they skip, since only an elevated token
-//! may make an object in `Global\` or open one with the lock's DACL.
+//! abandoned, each taker going through the private namespace bounded by Administrators as the
+//! set-up does. These run in CI's ordinary test step (not the `elevated_` one, since they change
+//! nothing on the machine): the hosted runner's token is elevated (split §8). On an unelevated
+//! token they skip, since only a token with Administrators enabled may open the namespace.
 
 use std::sync::mpsc;
 use std::thread;
@@ -11,14 +12,14 @@ use super::machine::{Machine, MachineError};
 use super::windows_machine::{Names, WindowsMachine};
 use crate::windows::test_dacl::elevated;
 
-/// A mutex name in `Global\` no other test or run uses; `None` (the test skips) on an
-/// unelevated token.
+/// A mutex name in the set-up's namespace that no other test or run uses; `None` (the test
+/// skips) on an unelevated token.
 pub(super) fn unique_mutex() -> Option<String> {
     if !elevated() {
         eprintln!("skipped: the set-up lock needs an elevated token");
         return None;
     }
-    Some(format!("Global\\ClauseoSandboxSetupTest-{}", suffix()))
+    Some(format!("SetupLockTest-{}", suffix()))
 }
 
 /// A short random suffix: six hex digits from the OS's random source.
@@ -124,7 +125,7 @@ fn the_machines_lock_refuses_a_second_set_up_until_unlocked() {
 }
 
 #[test]
-fn the_real_lock_name_is_in_the_global_namespace() {
-    assert_eq!(Names::production().mutex, "Global\\ClauseoSandboxSetup");
-    assert!(Names::production().mutex.starts_with("Global\\"));
+fn the_real_lock_is_named_inside_the_private_namespace() {
+    assert_eq!(Names::production().mutex, "SetupLock");
+    assert!(!Names::production().mutex.contains('\\'));
 }

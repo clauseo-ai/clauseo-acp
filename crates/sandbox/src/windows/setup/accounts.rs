@@ -480,7 +480,7 @@ fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
 }
 
 /// A buffer the `Net*` calls allocated; freed with `NetApiBufferFree` on drop.
-struct NetBuffer(*mut u8);
+pub(super) struct NetBuffer(pub(super) *mut u8);
 
 impl Drop for NetBuffer {
     fn drop(&mut self) {
@@ -493,10 +493,11 @@ impl Drop for NetBuffer {
 }
 
 /// A SID `ConvertStringSidToSidW` allocated; freed with `LocalFree` on drop.
-struct LocalSid(PSID);
+pub(super) struct LocalSid(pub(super) PSID);
 
 impl LocalSid {
-    fn parse(sid: &Sid) -> Result<LocalSid, MachineError> {
+    /// The SID `sid` spells, allocated for the Win32 calls.
+    pub(super) fn parse(sid: &Sid) -> Result<LocalSid, MachineError> {
         let text = HSTRING::from(sid.as_str());
         let mut parsed = PSID::default();
         // SAFETY: the text is NUL-terminated and lives for the call; `parsed` is a live

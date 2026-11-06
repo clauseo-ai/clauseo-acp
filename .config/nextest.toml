@@ -2,6 +2,16 @@
 slow-timeout = { period = "10s", terminate-after = 3 } # unit tests are fast; 30 s kills a hung test
 fail-fast = false
 
+# The `elevated_` tests (D-B16, split §8) make and delete local accounts, groups and HKLM keys,
+# so they run one at a time whatever --test-threads says. Set in default, so ci and quarantine
+# inherit it; CI's elevated step also passes --test-threads 1.
+[test-groups]
+elevated = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/(^|::)elevated_/)'
+test-group = 'elevated'
+
 # The store's tests wait on real syncs (synchronous=FULL), so they run at the disk's speed, not
 # the CPU's. On the Windows runner the disk once stalled for about 140 s (issue #83, run
 # 41131302912 attempt 1): store tests were 25 to 57 times slower from 21:37:38 to 21:39:16, and

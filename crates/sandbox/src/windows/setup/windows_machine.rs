@@ -32,7 +32,7 @@ pub struct Names {
     pub record_key: String,
     /// The pool group: `ClauseoSandboxUsers`.
     pub group: String,
-    /// The set-up lock's mutex: `Global\ClauseoSandboxSetup`.
+    /// The set-up lock's mutex, named inside the set-up's private namespace: `SetupLock`.
     pub mutex: String,
 }
 
