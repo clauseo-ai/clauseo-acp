@@ -101,6 +101,10 @@ impl AclWriter for Fake {
         Ok(false)
     }
 
+    fn hand_back_tree(&mut self, _root: &Path, _pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        Ok(Walked::default())
+    }
+
     fn label(&mut self, _path: &Path) -> io::Result<Option<Label>> {
         Ok(None)
     }

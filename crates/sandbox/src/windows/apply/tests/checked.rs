@@ -2,7 +2,7 @@
 //! keeps, and the record it removes whatever happens next.
 
 use super::*;
-use crate::windows::clean_close::fake::{FakeJournal, journal_for};
+use crate::windows::clean_close::fake::{FakeJournal, found, journal_for};
 use crate::windows::clean_close::{
     Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch, session_cursor,
     write_clean_close,
@@ -309,4 +309,27 @@ fn forgetting_the_matter_hands_back_its_nested_denies() {
         assert_eq!(nested_deny(&l, rel), (None, false), "{rel}");
     }
     assert_eq!(l.ledger.entries().count(), 0);
+}
+
+/// S15 `PR4a2`: a pool user's file the lawyer moved into the existing, denied
+/// `.claude/commands` between sessions: the targeted launch's owner pass over that folder,
+/// inside a protected tree, hands it to the lawyer.
+#[test]
+fn a_pool_owned_file_moved_into_a_denied_folder_is_handed_back_on_a_targeted_launch() {
+    let mut l = Launched::with("checked-owners-targeted", &[".claude/commands/review.md"]);
+    let commands = l.roots[0].join(".claude/commands");
+    // Folder 101 of the fake journal is `.claude/commands` here.
+    l.journal.places.insert(101, found(commands.clone()));
+    let moved =
+        l.w.dir
+            .file("matter/.claude/commands/agent.md", "the agent's\n");
+    let moved = dunce::canonicalize(moved).unwrap();
+    l.acl.owners.insert(moved.clone(), USER_SID.to_owned());
+    l.journal.change(100_902, 101, CREATE, false);
+    l.acl.handed_trees.clear();
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Targeted(1));
+    l.apply(&check).unwrap();
+    assert_eq!(l.acl.owners[&moved], super::fake::LAWYER);
+    assert_eq!(l.acl.handed_trees, [commands]);
 }

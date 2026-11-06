@@ -213,11 +213,19 @@ build 26100):
   - An owner gets `WRITE_DAC` before any deny is read, so a protected item a pool user owns (one
     the lawyer restored from the set-aside or renamed, or one made before PR4a) is handed to the
     desktop user before its deny is written, as forget hands it back (`AclWriter::hand_back`,
-    forget's reclaim settle for the item itself); and when a protected folder's deny is first
-    written, what a pool user owns in it goes the same way (`AclWriter::reclaim`). Nothing is
-    recorded for it: the lawyer owning it is where forget leaves it too. `restore_set_aside`
-    hands the restored item to the desktop user as well. An `OWNER RIGHTS` deny was ruled out:
-    it binds the lawyer too when the lawyer owns the item.
+    forget's reclaim settle for the item itself). What a pool user owns below a deny goes the
+    same way, by an owner pass (`AclWriter::hand_back_tree`: each owner read through its
+    folder's handle, never following a link, only a pool user's item written): over each
+    protected tree whose deny the launch writes or finds still pending (a crash between the deny
+    and its pass), over every protected tree on a full walk, and over each touched folder inside
+    one on a targeted walk (a file the lawyer moved into `.claude\commands` or `.git\hooks`).
+    A skipped launch needs none: nothing changed, and no pool user can add a child below a deny.
+    Nothing is recorded for it: the lawyer owning it is where forget leaves it too.
+    `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
+    as well, whoever owns its top (a lawyer's folder the agent filled and renamed to `.git`). An
+    `OWNER RIGHTS` deny was ruled out: it binds the lawyer too when the lawyer owns the item.
+    Accepted: a running session of the same matter could swap an item between its hand-over
+    and its deny; the set-aside's file-ID check catches the swapped item.
   - The policy's walk runs at every launch, whatever the launch check (PR3d) decides: the check
     leaves out only the own-tree walks and the set-aside's scan. Every read-only deny is checked
     at every launch and written if it is missing, with its own walk (`apply_checked`). So a

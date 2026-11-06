@@ -233,6 +233,58 @@ pub(super) fn walks(
         .collect()
 }
 
+/// The trees the owner pass goes over (S15 `PR4a2`), outermost first and none inside another:
+/// an owner gets `WRITE_DAC` before any deny is read, so a child a pool user owns below a deny
+/// could take the deny's inherited copy off.
+/// - Each protected tree (a read-only path's deny in the matter, for the tree) whose entry this
+///   run wrote or found still pending (`unwalked`): a crash between the deny and its pass
+///   leaves it pending.
+/// - On a full walk (`own`), every protected tree.
+/// - On a targeted one, each touched folder (`extra`) inside a protected tree: a file the lawyer
+///   moved into `.claude\commands` or `.git\hooks` between sessions.
+///
+/// A skipped launch has none: nothing in the trees changed since a clean close, and no pool user
+/// can add a child below a deny.
+pub(super) fn owner_passes(
+    plan: &AdmittedPlan,
+    unwalked: impl Fn(usize) -> bool,
+    own: bool,
+    extra: &[Walk],
+) -> Vec<PathBuf> {
+    let is_tree = |g: &&crate::windows::acl_plan::Grant| {
+        g.kind() == PathKind::ReadOnlyInMatter
+            && g.rights() == Rights::DenyWrite
+            && g.inherit() == Inherit::Tree
+    };
+    let trees: Vec<&Path> = plan
+        .grants()
+        .iter()
+        .filter(is_tree)
+        .map(crate::windows::acl_plan::Grant::path)
+        .collect();
+    let mut roots: Vec<PathBuf> = plan
+        .grants()
+        .iter()
+        .enumerate()
+        .filter(|(i, g)| is_tree(g) && (own || unwalked(*i)))
+        .map(|(_, g)| g.path().to_owned())
+        .collect();
+    let touched = extra.iter().map(|walk| &walk.root);
+    roots.extend(
+        touched
+            .filter(|root| trees.iter().any(|tree| in_folder(root, tree)))
+            .cloned(),
+    );
+    roots.sort();
+    roots.dedup();
+    let outermost = |root: &PathBuf| !roots.iter().any(|o| o != root && in_folder(root, o));
+    roots
+        .iter()
+        .filter(|root| outermost(root))
+        .cloned()
+        .collect()
+}
+
 /// The farther of two reaches: the whole tree, then every child, then the files alone.
 fn wider(a: Reach, b: Reach) -> Reach {
     let rank = |r: Reach| match r {

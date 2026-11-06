@@ -5,6 +5,7 @@
 //! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
@@ -20,8 +21,10 @@ pub(super) struct Posix {
     /// Whether a name not there exactly is matched ignoring ASCII case; off only for the
     /// timing test on a case-insensitive volume, where the extra listing would be measured.
     pub(super) fold: bool,
-    /// Each path [`Volume::own`] handed to the desktop user, in order: every file here is the
-    /// test user's already, so the stand-in only records it.
+    /// Items another user owns, by inode: every file here is the test user's, so the stand-in
+    /// keeps who else owns one here. [`Volume::owner`] says `uid other` for them.
+    pub(super) foreign: RefCell<BTreeSet<u64>>,
+    /// Each path [`Volume::own`] handed to the desktop user (one of `foreign`), in order.
     pub(super) owned: RefCell<Vec<PathBuf>>,
 }
 
@@ -29,8 +32,15 @@ impl Posix {
     pub(super) fn new(fold: bool) -> Posix {
         Posix {
             fold,
+            foreign: RefCell::default(),
             owned: RefCell::default(),
         }
+    }
+
+    /// Marks the item at `path` as another user's.
+    pub(super) fn foreign(&self, path: &Path) {
+        let ino = std::fs::symlink_metadata(path).unwrap().ino();
+        self.foreign.borrow_mut().insert(ino);
     }
 
     /// `path` as this volume opens it: through [`on_disk`] when folding.
@@ -126,14 +136,27 @@ impl Volume for Posix {
     }
 
     fn owner(&self, path: &Path) -> io::Result<String> {
-        Ok(format!(
-            "uid {}",
-            std::fs::symlink_metadata(self.at(path))?.uid()
-        ))
+        let meta = std::fs::symlink_metadata(self.at(path))?;
+        if self.foreign.borrow().contains(&meta.ino()) {
+            return Ok("uid other".to_owned());
+        }
+        Ok(format!("uid {}", meta.uid()))
     }
 
+    /// Every item in `path`'s tree another user owns, never through a link, handed back.
     fn own(&self, path: &Path) -> io::Result<()> {
-        self.owned.borrow_mut().push(path.to_owned());
+        let mut stack = vec![self.at(path)];
+        while let Some(at) = stack.pop() {
+            let meta = std::fs::symlink_metadata(&at)?;
+            if self.foreign.borrow_mut().remove(&meta.ino()) {
+                self.owned.borrow_mut().push(at.clone());
+            }
+            if meta.is_dir() {
+                for entry in std::fs::read_dir(&at)? {
+                    stack.push(entry?.path());
+                }
+            }
+        }
         Ok(())
     }
 

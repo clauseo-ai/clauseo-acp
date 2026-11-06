@@ -47,7 +47,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::FolderSupport;
-use super::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, in_folder};
+use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
 #[cfg(any(windows, test, feature = "test-support"))]
@@ -62,7 +62,7 @@ mod walk;
 
 pub use back::{forget_matter, reconcile};
 pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
-use walk::{Refused, Walk, clearing, inside_any, own_roots, walks};
+use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, walks};
 
 /// What [`apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -348,21 +348,6 @@ fn write_all(
             }
         }
     }
-    // A protected folder denied by this run: what a pool user owns in it goes to the lawyer too,
-    // by forget's walk, so no owner below the deny can take its inherited copy off.
-    let new_trees: Vec<&Grant> = run
-        .written
-        .iter()
-        .filter_map(|&i| grants.get(i))
-        .filter(|g| protected(g) && g.inherit() == Inherit::Tree)
-        .collect();
-    for grant in new_trees {
-        let (path, kind) = (grant.path(), grant.kind());
-        let seen = clearing(acl, around, &own, kind, |acl| {
-            acl.reclaim(path, &strict.pool)
-        })?;
-        run.walked.add(seen);
-    }
     let unwalked = |i: usize| {
         run.written.contains(&i) || plan.entries().get(i).is_some_and(|id| pending.contains(id))
     };
@@ -370,6 +355,14 @@ fn write_all(
         OwnWalks::All => (true, &[]),
         OwnWalks::Only(targets) => (false, targets),
     };
+    // What a pool user owns below a deny goes to the lawyer, before the walks (`owner_passes`).
+    for root in owner_passes(plan, unwalked, all_own, extra) {
+        let kind = PathKind::ReadOnlyInMatter;
+        let seen = clearing(acl, around, &own, kind, |acl| {
+            acl.hand_back_tree(&root, &strict.pool)
+        })?;
+        run.walked.add(seen);
+    }
     for walk in walks(plan, unwalked, all_own, extra) {
         let Walk {
             root,

@@ -60,9 +60,10 @@ pub(super) trait Volume {
         name: &OsStr,
     ) -> Result<(), SetAsideFailure>;
 
-    /// Hands `path` itself (never what a link at it names) to the desktop user when another
-    /// user owns it, as forget hands back a pool user's item: a restored item comes back the
-    /// lawyer's, so no pool user owns a protected name the next launch denies (S15 `PR4a2`).
+    /// Hands `path` and every item below it that another user owns to the desktop user, as
+    /// forget hands back a pool user's items, never following a link (S15 `PR4a2`): an item
+    /// set aside or restored is the lawyer's throughout, whoever owns its top, so no pool user
+    /// keeps an owner's `WRITE_DAC` in it once it serves another matter.
     fn own(&self, path: &Path) -> io::Result<()>;
 
     /// Moves `name` in the folder `parts` below `sandbox` (opened as for

@@ -302,6 +302,8 @@ fn restore_refuses_a_taken_name_and_restores_to_a_free_one() {
     rename_new(&root.join("CLAUDE.md"), &root.join("lawyer.md")).unwrap();
     // S15 `PR4a2`: the restored item is handed to the desktop user.
     let restoring = volume();
+    #[cfg(unix)]
+    restoring.foreign(&entry.to);
     run::restore(&restoring, &data, &entry).unwrap();
     #[cfg(unix)]
     assert_eq!(*restoring.owned.borrow(), [root.join("CLAUDE.md")]);
