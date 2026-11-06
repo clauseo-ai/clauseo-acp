@@ -159,6 +159,10 @@ test(
     expect(decoders.length).toBe(1);
     expect(decoders[0]!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
     expect(entry!.code).not.toContain("startStream");
+    // U17: a tool result's parser, block and blob read ride in the result chunk alone, loaded on the first press
+    const parser = "/room/thread/tool-result/parse.ts";
+    const holding = chunks.filter((c) => c.moduleIds.some((id) => id.endsWith(parser)));
+    expect(holding.map((c) => c.fileName.split("-")[0])).toEqual(["assets/result"]);
     // no preload list anywhere but in the importers of a PRELOADED_CHUNKS chunk: every other dynamic import in the build
     // is a bare one. (The helper itself stays in the entry, exported, since the chunks are linked before renderChunk
     // unwraps its calls.)

@@ -137,10 +137,62 @@
     overflow-wrap: anywhere;
   }
   .step-row[data-status="failed"] .step-row-mark,
-  .step-row[data-status="cancelled"] .step-row-mark {
+  .step-row[data-status="cancelled"] .step-row-mark,
+  .step-row[data-failed] .step-row-mark {
     color: var(--primary);
   }
   .step-row-thought .step-row-text > * {
     margin-top: 0;
+  }
+  /* what came back (U17): a quiet text button after the row's words and mark, in the row's tone and size, and under
+     the words, indented to their start, the block it opens: no border, no fill, nothing animates */
+  .step-row-press {
+    margin-inline-start: var(--s2);
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--ref-line-quiet);
+    text-underline-offset: var(--cite-offset);
+    @apply is-hover:text-primary;
+  }
+  /* with its result open the row grows: the icon stays on the words' first line */
+  .step-row[data-result="open"] .step-icon {
+    align-self: start;
+    margin-top: var(--icon-line-drop);
+  }
+  .step-row-press:disabled {
+    text-decoration: none;
+    cursor: default;
+  }
+  .step-row-result {
+    display: block;
+    margin: var(--s1) 0 var(--s1-5);
+  }
+  /* the text as plain text: its own line breaks kept, a long line broken anywhere, never cut */
+  .step-row-result-text {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--primary);
+  }
+  /* JSON and text that isn't JSON: the code face (tokens-type.css), as an answer's code is, small and muted */
+  .step-row-result[data-face="code"] .step-row-result-text {
+    font-family: var(--font-code);
+    font-size: var(--t13);
+    line-height: var(--lh-small);
+    color: var(--muted);
+  }
+  /* an error in the primary ink, never red */
+  .step-row-result[data-error] .step-row-result-text {
+    color: var(--primary);
+  }
+  .step-row-result-note {
+    display: block;
+    color: var(--muted);
+  }
+  .step-row-result > .step-row-press {
+    margin-inline-start: 0;
   }
 }
