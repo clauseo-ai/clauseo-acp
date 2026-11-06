@@ -445,8 +445,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     A read that fails with the keychain's error still refuses the agent, marked or not.
   - *The residual.* A key stored by a build without the marker, or removed outside Clauseo,
     leaves the marker stale until a read answers. A stale "on" only refuses the agent, so it
-    fails closed; "off" with a key stored can only happen for a key Clauseo never stored. No
-    released install predates the marker.
+    fails closed; "off" with a key stored can only happen for a key Clauseo never stored, or
+    one stored by a build before the marker (dev builds only: no released install predates
+    it).
   - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
     agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
     with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read
