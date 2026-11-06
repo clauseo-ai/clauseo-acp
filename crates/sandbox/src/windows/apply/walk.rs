@@ -146,10 +146,39 @@ pub(crate) fn strict_for(plan: &AdmittedPlan) -> Strict {
     strict_from(&items)
 }
 
-/// [`strict_for`] of a matter's ledger entries.
+/// [`strict_for`] of a matter's ledger entries, for a walk of its own trees: with its subjects
+/// (the SIDs of its own folders' `Modify` entries) as the assigned ones.
 pub(crate) fn strict_of(entries: &[Entry]) -> Strict {
     let items: Vec<(Rights, &Sid)> = entries.iter().map(|e| (e.rights, &e.sid)).collect();
-    strict_from(&items)
+    let assigned: BTreeSet<Sid> = entries
+        .iter()
+        .filter(|e| OWN_KINDS.contains(&e.kind) && e.rights == Rights::Modify)
+        .map(|e| e.sid.clone())
+        .collect();
+    Strict {
+        assigned: assigned.into_iter().collect(),
+        ..strict_from(&items)
+    }
+}
+
+/// `strict` for a walk of `root`: in a matter's tree (inside one of `own`, the closest), with
+/// the subjects `assigned` gives that matter, so a child another pool user owns is handed back
+/// (S15 `PR4h`); outside every matter's tree, as it is.
+pub(super) fn strict_at(
+    strict: &Strict,
+    own: &[OwnRoot],
+    root: &Path,
+    assigned: impl FnOnce(MatterId) -> Vec<Sid>,
+) -> Strict {
+    let matter = own
+        .iter()
+        .filter(|(tree, _)| in_folder(root, tree))
+        .max_by_key(|(tree, _)| tree.components().count())
+        .map(|(_, matter)| *matter);
+    Strict {
+        assigned: matter.map(assigned).unwrap_or_default(),
+        ..strict.clone()
+    }
 }
 
 fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
@@ -165,6 +194,7 @@ fn strict_from(items: &[(Rights, &Sid)]) -> Strict {
     Strict {
         watched: sids(&|r| matches!(r, Rights::DenyReadWrite | Rights::DenyRead)),
         pool: sids(&|r| !r.is_label()),
+        assigned: Vec::new(),
     }
 }
 

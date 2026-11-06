@@ -31,7 +31,9 @@
 //!    the lawyer can't open is set aside ([`Surroundings::set_aside`]) if it is inside the
 //!    launch's own matter, state or notes tree, or a registered matter's whose fence this
 //!    launch applies (into that matter's set-aside, round 6), and refuses it anywhere else
-//!    (`walk.rs`).
+//!    (`walk.rs`). In those matters' trees, a child a pool user other than the matter's own
+//!    owns is handed to the desktop user, and refuses as [`ApplyFailure::PoolOwned`] (`Child`)
+//!    only if that hand-back fails ([`Strict`]'s `assigned`, S15 `PR4h`).
 //! 6. Only then are the entries marked `applied`.
 //! 7. Only after all that succeeds does a folder that is now a registered matter lose the
 //!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
@@ -71,7 +73,7 @@ pub use back::{forget_matter, reconcile};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use fence::{FencedEach, fence_each, fence_registered};
 pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
-use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, walks};
+use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, strict_at, walks};
 
 /// What [`apply`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -395,9 +397,9 @@ fn write_all(
             strict: is_strict,
             kind,
         } = &walk;
-        let strict = is_strict.then_some(&strict);
+        let strict = is_strict.then(|| strict_at(&strict, &own, root, |m| plan.assigned_to(m)));
         let seen = clearing(acl, around, &own, *kind, |acl| {
-            acl.propagate(root, *reach, strict)
+            acl.propagate(root, *reach, strict.as_ref())
         })?;
         run.walked.add(seen);
     }

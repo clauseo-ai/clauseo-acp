@@ -299,6 +299,7 @@ fn every_walk_is_strict_with_the_group_and_every_pool_user() {
     let want = Strict {
         watched: vec![group(), sid(USER_SID), sid(OTHER_POOL_SIDS[0])],
         pool: pool(),
+        assigned: Vec::new(),
     };
     assert_eq!(fake.walks.len(), 3);
     for (_, reach, strict) in &fake.walks {

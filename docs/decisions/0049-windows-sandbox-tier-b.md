@@ -230,8 +230,16 @@ build 26100):
     get the protected items' hand-back too. Only a root whose hand-back fails (the lawyer's
     handle got no `WRITE_OWNER` or `WRITE_DAC`) refuses the launch, as
     `PoolOwned { owned: Root }`, naming it; set-up's fence of the registered matters skips such a
-    matter, reports it (`SetupReport::fence_skipped`) and fences the rest. **Tier B still needs
-    PR4i**: its elevated hand-back takes ownership of what the lawyer's own hand-back can't.
+    matter, reports it (`SetupReport::fence_skipped`) and fences the rest.
+  - In a strict walk of a matter's own tree, or of a registered matter's fenced tree, a file or
+    folder at any depth that a pool user other than that matter's own owns (one the lawyer moved
+    in from another matter, say) keeps that user's `WRITE_DAC`, and that user reaches it by its
+    path. It is handed to the desktop user and cleaned as forget's reclaim does; its owner comes
+    from the descriptor the walk reads anyway. Only a child whose hand-back fails refuses the
+    launch, as `PoolOwned { owned: Child }`, naming it, and the launch's entries roll back. The
+    matter's own pool user owning its files is expected, and a child the lawyer can't open takes
+    the set-aside path below. **Tier B still needs PR4i**: its elevated hand-back takes ownership
+    of the roots and children the lawyer's own hand-back can't.
     `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
     as well, whoever owns its top (a lawyer's folder the agent filled and renamed to `.git`). An
     `OWNER RIGHTS` deny was ruled out: it binds the lawyer too when the lawyer owns the item.

@@ -40,7 +40,7 @@ use crate::windows::acl_bytes::{
     Write, bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label,
     lacking, owner_bytes, owner_descriptor, rebuild, without_broad, without_inherited, writes,
 };
-use crate::windows::writer::{ApplyFailure, Reach, Walked};
+use crate::windows::writer::{ApplyFailure, Owned, Reach, Walked};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
@@ -63,10 +63,12 @@ struct Folder {
 pub(super) enum Mode<'a> {
     /// Nothing more.
     Plain,
-    /// Held to [`Strict`](crate::windows::writer::Strict): `watched` and `pool` as bytes.
+    /// Held to [`Strict`](crate::windows::writer::Strict): `watched` and `pool` as bytes, and
+    /// in a matter's tree its subjects and the desktop user ([`Foreign`]).
     Strict {
         watched: &'a [Vec<u8>],
         pool: &'a [Vec<u8>],
+        foreign: Option<Foreign<'a>>,
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned.
     Reclaim { pool: &'a [Vec<u8>], me: &'a [u8] },
@@ -74,6 +76,23 @@ pub(super) enum Mode<'a> {
     /// as [`Mode::Reclaim`] settles it; every other child is only read, never written, so a
     /// colleague's or `Administrators`' file is never touched. With `pool` empty, nothing is.
     HandBack { pool: &'a [Vec<u8>], me: &'a [u8] },
+}
+
+/// A strict walk of a matter's tree (S15 `PR4h`): a child one of the walk's pool SIDs owns
+/// that isn't one of `assigned` (the matter's subjects) goes to `me`, the desktop user.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Foreign<'a> {
+    pub(super) assigned: &'a [Vec<u8>],
+    pub(super) me: &'a [u8],
+}
+
+impl Foreign<'_> {
+    /// Whether `descriptor`'s owner is one of `pool` and not one of the matter's subjects.
+    fn owns(self, descriptor: &[u8], pool: &[Vec<u8>]) -> bool {
+        owner_bytes(descriptor).is_some_and(|owner| {
+            pool.iter().any(|p| p == owner) && !self.assigned.iter().any(|a| a == owner)
+        })
+    }
 }
 
 impl Mode<'_> {
@@ -178,21 +197,8 @@ pub(super) fn walk(
                 return Err(refuse(ApplyFailure::Changed));
             }
             let current = object.security(READ_ALL).map_err(io)?;
-            let settled = match mode {
-                // The owner pass reads every child's owner and settles only a pool user's.
-                Mode::HandBack { pool, me } if mode.owned(&current) => {
-                    let reclaim = Mode::Reclaim { pool, me };
-                    settle(token, &object, &folder.descriptor, &current, reclaim)
-                }
-                Mode::HandBack { .. } => Ok(Settled {
-                    written: None,
-                    repaired: false,
-                }),
-                Mode::Plain | Mode::Strict { .. } | Mode::Reclaim { .. } => {
-                    settle(token, &object, &folder.descriptor, &current, mode)
-                }
-            }
-            .map_err(refuse)?;
+            let settled =
+                settle_in(token, &object, &folder.descriptor, &current, mode).map_err(refuse)?;
             seen.visited += 1;
             if settled.repaired {
                 seen.repaired += 1;
@@ -216,6 +222,50 @@ pub(super) fn walk(
         "tier B walked a tree"
     );
     Ok(seen)
+}
+
+/// One child of a walk in `mode`: the owner pass settles only a pool user's child, and in a
+/// matter's tree another pool user's child goes to the desktop user, as forget hands it back,
+/// refused as [`ApplyFailure::PoolOwned`] when that lacks a right (S15 `PR4h`); everything else
+/// is [`settle`]d in `mode`.
+fn settle_in(
+    token: &Handle,
+    child: &Object,
+    parent: &[u8],
+    current: &[u8],
+    mode: Mode<'_>,
+) -> Result<Settled, ApplyFailure> {
+    match mode {
+        Mode::HandBack { pool, me } if mode.owned(current) => {
+            settle(token, child, parent, current, Mode::Reclaim { pool, me })
+        }
+        Mode::HandBack { .. } => Ok(Settled {
+            written: None,
+            repaired: false,
+        }),
+        Mode::Strict {
+            pool,
+            foreign: Some(foreign),
+            ..
+        } if foreign.owns(current, pool) => {
+            let reclaim = Mode::Reclaim {
+                pool,
+                me: foreign.me,
+            };
+            settle(token, child, parent, current, reclaim).map_err(|failure| {
+                if failure == ApplyFailure::ChildShut {
+                    ApplyFailure::PoolOwned {
+                        owned: Owned::Child,
+                    }
+                } else {
+                    failure
+                }
+            })
+        }
+        Mode::Plain | Mode::Strict { .. } | Mode::Reclaim { .. } => {
+            settle(token, child, parent, current, mode)
+        }
+    }
 }
 
 /// [`AclWriter::hand_back`](crate::windows::writer::AclWriter::hand_back) with `token`:

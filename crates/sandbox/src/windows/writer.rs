@@ -56,12 +56,24 @@ pub struct Walked {
 /// all is refused as [`ApplyFailure::ChildShut`], and so is a pool user's child the walk needs
 /// to write whose handle got no `WRITE_DAC` (or no `WRITE_OWNER`, for a label), so it is set
 /// aside rather than left as it is (N3).
+///
+/// In a matter's tree (`assigned` not empty, S15 `PR4h`), a child (file or folder, at any
+/// depth) one of `pool` owns that isn't one of `assigned` is handed to the desktop user and
+/// cleaned as [`AclWriter::reclaim`] does: that pool user keeps `WRITE_DAC` on it, so another
+/// matter's agent could open it by its path whatever we deny. Its owner is read from the
+/// descriptor the walk reads anyway. When that hand-back is refused for want of a right (no
+/// `WRITE_OWNER`), the walk refuses as [`ApplyFailure::PoolOwned`] ([`Owned::Child`]) before
+/// writing anything on it; a child the lawyer can't open stays [`ApplyFailure::ChildShut`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Strict {
     /// Whose explicit allow beats an inherited deny, besides the broad groups.
     pub watched: Vec<Sid>,
     /// Every pool user: the owners whose children are repaired.
     pub pool: Vec<Sid>,
+    /// The subjects of the matter whose tree is walked (its own, state or notes folder): its
+    /// pool user, and its matter SID when set; the pool owners its children may have. Empty
+    /// outside a matter's tree (a sibling, the parent's files, the shared folders).
+    pub assigned: Vec<Sid>,
 }
 
 impl Walked {
@@ -146,6 +158,11 @@ pub enum Owned {
     /// (its Properties, Security, Advanced, Owner), or runs set-up again once its elevated
     /// hand-back lands (S15 `PR4i`); then launches again.
     Root,
+    /// A file or folder inside a matter's tree that a pool user other than the matter's own
+    /// owns (one the lawyer moved in from another matter, say), whose hand-back failed. That
+    /// user could open whatever is added there later. Remedy: as for [`Owned::Root`], on the
+    /// item the refusal names.
+    Child,
 }
 
 impl fmt::Display for ApplyFailure {
@@ -166,6 +183,11 @@ impl fmt::Display for ApplyFailure {
             ApplyFailure::PoolOwned { owned: Owned::Root } => {
                 f.write_str("a sandbox user owns the folder and it couldn't be handed back")
             }
+            ApplyFailure::PoolOwned {
+                owned: Owned::Child,
+            } => f.write_str(
+                "another sandbox user owns an item in it and it couldn't be handed back",
+            ),
         }
     }
 }

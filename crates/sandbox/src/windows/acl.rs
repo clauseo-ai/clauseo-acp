@@ -44,7 +44,7 @@ use super::ledger::RecordedFile;
 use super::record::current_user_sid;
 use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
-use walk::Mode;
+use walk::{Foreign, Mode};
 
 pub(in crate::windows) mod object;
 mod walk;
@@ -151,9 +151,21 @@ impl AclWriter for NtfsAcl {
         };
         let watched: Vec<Vec<u8>> = strict.watched.iter().map(sid_bytes).collect();
         let pool: Vec<Vec<u8>> = strict.pool.iter().map(sid_bytes).collect();
+        // In a matter's tree, the desktop user another pool user's child is handed to (S15
+        // `PR4h`): read once a walk, only there.
+        let assigned: Vec<Vec<u8>> = strict.assigned.iter().map(sid_bytes).collect();
+        let me = if assigned.is_empty() {
+            Vec::new()
+        } else {
+            sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?)
+        };
         let mode = Mode::Strict {
             watched: &watched,
             pool: &pool,
+            foreign: (!assigned.is_empty()).then_some(Foreign {
+                assigned: &assigned,
+                me: &me,
+            }),
         };
         self.run(root, reach, mode)
     }

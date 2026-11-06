@@ -16,6 +16,7 @@ use crate::windows::test_world::{
 use crate::windows::writer::Label;
 
 mod checked;
+mod child_owners;
 mod fake;
 mod owners;
 mod protected_link;
