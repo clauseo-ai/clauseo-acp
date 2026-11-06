@@ -286,7 +286,7 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   missing, `latest.json` has no `darwin-*` key, and a macOS asset in the folder fails the job.
   `SHA256SUMS.txt` and the attestations cover what was built. The release notes do not list the
   macOS assets as missing tier 2 builds; they say instead, in English only: "This beta is for
-  Windows. The Mac version follows once Apple has notarised it."
+  Windows. The Mac version follows once Apple has checked it."
 - **`publish`** runs on `ubuntu-24.04` instead of `macos-15`, skips the notarisation check (it says
   so in the log), and refuses a draft that holds any `.dmg`, `.app.tar.gz` or `.app.tar.gz.sig`.
 - **Turning macOS back on.** S20a's Apple secrets (Developer ID signing and notarisation) go into
