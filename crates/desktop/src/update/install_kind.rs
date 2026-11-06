@@ -77,7 +77,8 @@ pub(super) fn mac_kind(exe: Option<&Path>, writable: impl Fn(&Path) -> bool) -> 
 
 /// The folder holding the bundle `exe` runs from: `/Applications` for
 /// `/Applications/Clauseo.app/Contents/MacOS/Clauseo`. None when `exe` is not inside an `.app`.
-#[cfg(any(test, target_os = "macos"))]
+/// Only the tests use it: `mac_kind` checks the bundle and its folder through `bundle`.
+#[cfg(test)]
 pub(super) fn bundle_folder(exe: &Path) -> Option<&Path> {
     bundle(exe)?.parent()
 }
