@@ -40,6 +40,8 @@ mod backend;
 mod compose;
 mod confirm;
 mod events;
+#[cfg(feature = "e2e")]
+mod fake_signin;
 mod firm_policy;
 mod hook;
 mod host_calls;

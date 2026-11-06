@@ -14,6 +14,9 @@
 //!   as the firm's (`Managed`), as a firm policy locking `agents.<id>` does: the e2e app's agents
 //!   are `fake_agent`, so nothing is installed and no first-run download starts. Unset or empty
 //!   manages none.
+//! - Setup plays a scripted sign-in for the agents `E2E_FAKE_SIGNIN` names
+//!   (`claude-acp=ok,codex-acp=fail`; `setup/fake_signin.rs`), its `Waiting` held for
+//!   `E2E_FAKE_SIGNIN_HOLD_MS`: `Queued`, `Waiting`, then `SignedIn` or `Failed`.
 //! - The speed scoreboard's measures (docs/decisions/0012-desktop-bridge.md):
 //!   - each channel event that fits one message wrapped goes as
 //!     `{"timed":{"received_ms":<f64>,"event":<event>}}`, the time the bridge received it from
