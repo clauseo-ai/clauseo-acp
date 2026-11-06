@@ -143,6 +143,9 @@ mod hindi;
 #[path = "host/hold_appends.rs"]
 mod hold_appends;
 #[cfg(test)]
+#[path = "host/hold_reasons.rs"]
+mod hold_reasons;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]

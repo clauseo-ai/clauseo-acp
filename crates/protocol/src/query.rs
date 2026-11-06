@@ -10,8 +10,9 @@ use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    PackList, PackStatus, RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView,
-    SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    PackList, PackStatus, QueueHoldReason, RestoreRequest, SearchAnswer, SearchRequest, Seq,
+    SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView,
+    ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -436,6 +437,11 @@ pub struct ThreadSummary {
     /// missing reads as `false`.
     #[serde(default)]
     pub queue_held: bool,
+    /// Why its queue waits, as
+    /// [`HeaderEntry::queue_held_reason`](crate::HeaderEntry::queue_held_reason); set only while
+    /// `queue_held` is true. Missing reads as `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_held_reason: Option<QueueHoldReason>,
     /// Whether the lawyer has seen how its last turn ended: true when no turn ended after its
     /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
     #[serde(default = "seen_default")]

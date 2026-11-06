@@ -10,13 +10,13 @@ use std::sync::{Arc, Mutex};
 
 use clauseo_host::AgentsStopped;
 use clauseo_protocol::{
-    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, MatterId, StopReason,
-    StreamHeader, StreamId, ThreadId, TurnId, ViewPatchBody,
+    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, HostCommand, MatterId, QueueHoldReason,
+    StopReason, StreamHeader, StreamId, ThreadId, TurnId, ViewPatchBody,
 };
 
 use crate::codex::Recording;
 use crate::observe::Events;
-use crate::queue::{held, send, settle, starts, until_queued};
+use crate::queue::{held, hold_reason, send, settle, starts, until_queued};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text, wait};
 
 /// The first prompt.
@@ -201,8 +201,14 @@ fn three_prompts_sent_while_stop_agents_holds_run_in_order_after_one_restart() {
         "Three",
         DeliveryRequest::Queue,
     );
+    // The stop's hold, with the sign-in's mark on the queue, shows the login switching.
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Switching)
+    );
     restart_sends_once(&host, &mut events, &[one, two, three]);
     assert!(!held(&host, matter, thread));
+    assert_eq!(hold_reason(&host, matter, thread), None);
     assert_eq!(failures(&events), 0, "{}", events.dump());
     let started = events.count(|event| matches!(event, DomainEvent::TurnStarted(_)));
     assert_eq!(started, 4, "{}", events.dump());
@@ -234,6 +240,10 @@ fn prompts_sent_while_a_turn_is_held_for_the_sign_in_run_after_it_after_one_rest
         .unwrap();
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "{}", events.dump());
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::SignIn)
+    );
     assert_eq!(failures(&events), 1);
 
     // Two more prompts, one sent now: both queue behind the held turn, which stays held.
@@ -248,9 +258,14 @@ fn prompts_sent_while_a_turn_is_held_for_the_sign_in_run_after_it_after_one_rest
         DeliveryRequest::Queue,
     );
     assert_eq!(starts(&events, again), 0, "{}", events.dump());
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::SignIn)
+    );
 
     restart_sends_once(&host, &mut events, &[again, two, three]);
     assert!(!held(&host, matter, thread));
+    assert_eq!(hold_reason(&host, matter, thread), None);
     assert_eq!(failures(&events), 1, "{}", events.dump());
     host.shutdown();
 }
@@ -284,6 +299,10 @@ fn command_changes_nothing_while_held(
     settle(&host, &mut events);
     assert!(view_held(&host, thread), "the view: {}", events.dump());
     assert!(held(&host, matter, thread), "{}", events.dump());
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Switching)
+    );
     for turn in &turns {
         assert_eq!(starts(&events, *turn), 0, "{}", events.dump());
     }

@@ -224,6 +224,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: false,
+        queue_held_reason: None,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),
         tools: Vec::new(),
         snoozed_until: None,

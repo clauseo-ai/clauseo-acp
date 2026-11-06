@@ -136,6 +136,7 @@ pub(super) fn hold_prompt(
             if holds.sign_ins() {
                 queue.turns.push_back(queued);
                 queue.held = true;
+                queue.held_for_limit = false;
                 let first = queue.turns.front().map_or(turn, |head| head.turn);
                 queue.sign_in.get_or_insert(first);
                 return After::Held {

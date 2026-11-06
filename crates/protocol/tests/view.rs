@@ -384,12 +384,14 @@ fn an_unknown_tool_reason_or_availability_decodes() {
 
 #[test]
 fn queue_held_defaults_to_false() {
-    // A stored header or thread summary from before `queue_held` decodes with it false.
+    // A stored header or thread summary from before `queue_held` and its reason decodes so.
     let header = serde_json::to_value(header()).unwrap();
     let mut fields = header["header"].as_object().unwrap().clone();
     assert!(fields.remove("queue_held").is_some());
+    assert!(fields.remove("queue_held_reason").is_some());
     let entry: HeaderEntry = serde_json::from_value(fields.into()).unwrap();
     assert!(!entry.queue_held);
+    assert_eq!(entry.queue_held_reason, None);
     let summary = format!(
         r#"{{"thread":"{}","matter":"{}","agent":"claude-acp","status":"idle"}}"#,
         v7(1),

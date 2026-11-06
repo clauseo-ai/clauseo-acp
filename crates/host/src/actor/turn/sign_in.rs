@@ -100,6 +100,8 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
         queue::resume_sign_in(actor, thread);
         // A head sent now that the hold kept back starts too.
         queue::move_on(actor, thread);
+        // A queue still held shows why, `stop_agents`' hold gone.
+        queue::sync_held(actor, thread);
     }
 }
 
@@ -123,6 +125,8 @@ fn stop(actor: &mut Actor, agent: &AgentId) {
             agents::fail_all(actor, thread, preparing.waiting, &Error::Closed);
         }
         agents::stop(actor, thread);
+        // A held queue now waits for the login's switch.
+        queue::sync_held(actor, thread);
     }
 }
 
