@@ -70,18 +70,16 @@ pub(super) enum Mode<'a> {
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned.
     Reclaim { pool: &'a [Vec<u8>], me: &'a [u8] },
-    /// The owner pass over a protected tree (S15 `PR4a2`): what one of `pool` owns, or with
-    /// `pool` empty what anyone but `me` owns, is settled as [`Mode::Reclaim`] settles it;
-    /// every other child is only read, never written.
+    /// The owner pass over a protected tree (S15 `PR4a2`): what one of `pool` owns is settled
+    /// as [`Mode::Reclaim`] settles it; every other child is only read, never written, so a
+    /// colleague's or `Administrators`' file is never touched. With `pool` empty, nothing is.
     HandBack { pool: &'a [Vec<u8>], me: &'a [u8] },
 }
 
 impl Mode<'_> {
     /// Whether `descriptor`'s owner is one of the pool users this mode repairs or hands back.
+    /// Only a pool SID counts: never "anyone but the desktop user".
     fn owned(self, descriptor: &[u8]) -> bool {
-        if let Mode::HandBack { pool: [], me } = self {
-            return owner_bytes(descriptor).is_some_and(|owner| owner != me);
-        }
         let pool = match self {
             Mode::Plain => return false,
             Mode::Strict { pool, .. }
@@ -159,8 +157,9 @@ pub(super) fn walk(
                 seen.skipped += 1;
                 continue;
             }
-            // A file with another name elsewhere: its DACL belongs to the file, so one a pool
-            // user owns is repaired or handed back like any other (N2); the rest are left bare.
+            // A file with another name elsewhere (`links`, FILE_STANDARD_INFO's NumberOfLinks):
+            // its DACL belongs to the file, so one a pool user owns is repaired or handed back
+            // like any other (N2); the rest, a colleague's linked in included, are left bare.
             if !object.folder && object.links > 1 {
                 let owner = object.security(OWNER_SECURITY_INFORMATION.0).map_err(io)?;
                 if !mode.owned(&owner) {
@@ -182,16 +181,6 @@ pub(super) fn walk(
             let settled = match mode {
                 // The owner pass reads every child's owner and settles only a pool user's.
                 Mode::HandBack { pool, me } if mode.owned(&current) => {
-                    // With no pool named, the child's own owner is the one handed back.
-                    let owner: Vec<Vec<u8>> = owner_bytes(&current)
-                        .map(<[u8]>::to_vec)
-                        .into_iter()
-                        .collect();
-                    let pool = if pool.is_empty() {
-                        owner.as_slice()
-                    } else {
-                        pool
-                    };
                     let reclaim = Mode::Reclaim { pool, me };
                     settle(token, &object, &folder.descriptor, &current, reclaim)
                 }

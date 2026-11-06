@@ -5,7 +5,7 @@
 //! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
@@ -21,12 +21,18 @@ pub(super) struct Posix {
     /// Whether a name not there exactly is matched ignoring ASCII case; off only for the
     /// timing test on a case-insensitive volume, where the extra listing would be measured.
     pub(super) fold: bool,
-    /// Items another user owns, by inode: every file here is the test user's, so the stand-in
-    /// keeps who else owns one here. [`Volume::owner`] says `uid other` for them.
-    pub(super) foreign: RefCell<BTreeSet<u64>>,
+    /// Items another user owns, by inode, with that owner: every file here is the test user's,
+    /// so the stand-in keeps who else owns one here. [`Volume::owner`] says so for them.
+    pub(super) foreign: RefCell<BTreeMap<u64, String>>,
     /// Each path [`Volume::own`] handed to the desktop user (one of `foreign`), in order.
     pub(super) owned: RefCell<Vec<PathBuf>>,
+    /// The machine record's pool, as [`Volume::pool`] reads it: `None` is a record that can't
+    /// be read. [`POOL_USER`] alone unless a test says otherwise.
+    pub(super) pool: RefCell<Option<Vec<String>>>,
 }
+
+/// The owner [`Posix::foreign`] gives an item: a pool user the record names.
+pub(super) const POOL_USER: &str = "uid other";
 
 impl Posix {
     pub(super) fn new(fold: bool) -> Posix {
@@ -34,13 +40,19 @@ impl Posix {
             fold,
             foreign: RefCell::default(),
             owned: RefCell::default(),
+            pool: RefCell::new(Some(vec![POOL_USER.to_owned()])),
         }
     }
 
-    /// Marks the item at `path` as another user's.
+    /// Marks the item at `path` as a pool user's ([`POOL_USER`]).
     pub(super) fn foreign(&self, path: &Path) {
+        self.foreign_as(path, POOL_USER);
+    }
+
+    /// Marks the item at `path` (and every name linked to it) as `owner`'s.
+    pub(super) fn foreign_as(&self, path: &Path, owner: &str) {
         let ino = std::fs::symlink_metadata(path).unwrap().ino();
-        self.foreign.borrow_mut().insert(ino);
+        self.foreign.borrow_mut().insert(ino, owner.to_owned());
     }
 
     /// `path` as this volume opens it: through [`on_disk`] when folding.
@@ -137,20 +149,34 @@ impl Volume for Posix {
 
     fn owner(&self, path: &Path) -> io::Result<String> {
         let meta = std::fs::symlink_metadata(self.at(path))?;
-        if self.foreign.borrow().contains(&meta.ino()) {
-            return Ok("uid other".to_owned());
+        if let Some(owner) = self.foreign.borrow().get(&meta.ino()) {
+            return Ok(owner.clone());
         }
         Ok(format!("uid {}", meta.uid()))
     }
 
-    /// Every item in `path`'s tree another user owns, never through a link, handed back.
-    fn own(&self, path: &Path) -> io::Result<()> {
+    fn pool(&self) -> io::Result<Vec<String>> {
+        self.pool
+            .borrow()
+            .clone()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))
+    }
+
+    /// Every item in `path`'s tree one of `pool` owns, never through a link, handed back; a
+    /// file with another name too only when one of `pool` owns it, as the NTFS walk does.
+    fn own(&self, path: &Path, pool: &[String]) -> io::Result<()> {
         let mut stack = vec![self.at(path)];
         while let Some(at) = stack.pop() {
             let meta = std::fs::symlink_metadata(&at)?;
-            if self.foreign.borrow_mut().remove(&meta.ino()) {
+            let mut foreign = self.foreign.borrow_mut();
+            let pooled = foreign
+                .get(&meta.ino())
+                .is_some_and(|owner| pool.contains(owner));
+            if pooled {
+                foreign.remove(&meta.ino());
                 self.owned.borrow_mut().push(at.clone());
             }
+            drop(foreign);
             if meta.is_dir() {
                 for entry in std::fs::read_dir(&at)? {
                     stack.push(entry?.path());

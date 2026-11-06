@@ -307,9 +307,10 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 /// longer there (or no longer listed) is [`SetAsideFailure::Gone`]. PR6 passes back the
 /// manifest's own `Entry`, as [`list_set_aside`] gave it, never one simplified for display: its
 /// paths may be verbatim (`\\?\C:\…`), and the item is found by them. The item restored is
-/// then handed to the desktop user when another user owns it, as forget hands back a pool
-/// user's item, so a restored agent's `CLAUDE.md` comes back the lawyer's (S15 `PR4a2`); a
-/// hand-back that fails is logged, and the next launch hands it back before its deny.
+/// then handed to the desktop user when a pool user the machine's record names owns it, as
+/// forget hands back a pool user's item, so a restored agent's `CLAUDE.md` comes back the
+/// lawyer's (S15 `PR4a2`); a hand-back that fails, or a record unreadable or empty, is logged,
+/// and the next launch hands it back before its deny.
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)

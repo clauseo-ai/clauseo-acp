@@ -12,7 +12,7 @@ use clauseo_protocol::MatterId;
 
 use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
-use super::moves::{load, set_aside};
+use super::moves::{hand_over, load, set_aside};
 use super::scan::{Listed, scan};
 use super::{Checked, Entry, Reason, SetAsideFailure};
 
@@ -60,11 +60,16 @@ pub(super) trait Volume {
         name: &OsStr,
     ) -> Result<(), SetAsideFailure>;
 
-    /// Hands `path` and every item below it that another user owns to the desktop user, as
+    /// Every pool user's SID as text, from the machine's record (`sandbox_pool_sids` on
+    /// Windows); empty when no pool is recorded.
+    fn pool(&self) -> io::Result<Vec<String>>;
+
+    /// Hands `path` and every item below it that one of `pool` owns to the desktop user, as
     /// forget hands back a pool user's items, never following a link (S15 `PR4a2`): an item
     /// set aside or restored is the lawyer's throughout, whoever owns its top, so no pool user
-    /// keeps an owner's `WRITE_DAC` in it once it serves another matter.
-    fn own(&self, path: &Path) -> io::Result<()>;
+    /// keeps an owner's `WRITE_DAC` in it once it serves another matter. What anyone else owns
+    /// (a colleague, `Administrators`) keeps its owner and DACL, a hard-linked file included.
+    fn own(&self, path: &Path, pool: &[String]) -> io::Result<()>;
 
     /// Moves `name` in the folder `parts` below `sandbox` (opened as for
     /// [`Volume::move_into`], never made) back to `to`, whose folder's final path must be
@@ -244,10 +249,7 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     place.write_manifest(&manifest)?;
     // The item is back and listed no more, so a failure here doesn't undo the restore; the
     // next launch's apply hands a pool user's protected item back before its deny anyway.
-    if let Err(error) = volume.own(&found.from) {
-        let error = error.kind();
-        tracing::warn!(%error, "a restored item wasn't handed to the desktop user");
-    }
+    hand_over(volume, &found.from, "a restored item");
     Ok(())
 }
 

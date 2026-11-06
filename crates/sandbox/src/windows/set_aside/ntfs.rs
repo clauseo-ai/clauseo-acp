@@ -126,8 +126,18 @@ impl Volume for Ntfs {
         crate::windows::acl::owner(path).map(|sid| sid.to_string())
     }
 
-    fn own(&self, path: &Path) -> io::Result<()> {
-        crate::windows::acl::own(path)
+    fn pool(&self) -> io::Result<Vec<String>> {
+        let pool = crate::windows::sandbox_pool_sids().map_err(io::Error::other)?;
+        Ok(pool.iter().map(ToString::to_string).collect())
+    }
+
+    fn own(&self, path: &Path, pool: &[String]) -> io::Result<()> {
+        let pool = pool
+            .iter()
+            .map(|sid| crate::windows::acl_plan::Sid::parse(sid))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        crate::windows::acl::own(path, &pool)
     }
 
     fn move_into(
