@@ -5,6 +5,8 @@
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
 #   and leaves a draft GitHub Release; `publish` waits for Rohan's approval (environment
 #   `release-publish`), refuses unless every DMG is notarised and stapled, then publishes it.
+#   While MACOS_IN_RELEASE (below) is "false", a release builds no macOS leg, and `publish`
+#   instead refuses a draft that holds any macOS asset.
 # - test: a pushed tag test-v<X.Y.Z> on a commit of a release-test/* branch. Builds with the
 #   `e2e` feature under `release-test`, signs the updater files with the throwaway test key, and
 #   makes a public pre-release (a draft's assets need a signed-in download) for the updater's
@@ -36,7 +38,8 @@
 #   sidecars.generated.json (bundle.externalBin only, gitignored), which every `tauri build` and
 #   `tauri bundle` of a shipped build passes last.
 # - Tier 1 is macOS Apple silicon and Windows x64; tier 2 (Intel macOS, Windows ARM64, Linux) is
-#   continue-on-error, and the release notes name a tier 2 asset that is missing.
+#   continue-on-error, and the release notes name a tier 2 asset that is missing. A release
+#   without macOS leaves both macOS legs out and says so in its notes instead.
 
 name: release
 
@@ -58,6 +61,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Whether a v* release builds and ships macOS. "false" until macOS can be notarised: the first
+  # release is a Windows beta (Rohan, 2026-11-06). Turning it to "true" needs S20a's Apple secrets
+  # in the environment `release` (Developer ID signing and notarisation), since `publish` then
+  # refuses any DMG that is not notarised and stapled. It is a committed value, not a dispatch
+  # input, so a release is reproducible from its tag. Dry and test runs build macOS either way.
+  # docs/decisions/0035-release-builds.md, "A release without macOS".
+  MACOS_IN_RELEASE: "false"
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
@@ -78,6 +88,8 @@ jobs:
       environment: ${{ steps.mode.outputs.environment }}
       features: ${{ steps.mode.outputs.features }}
       release_date: ${{ steps.mode.outputs.release_date }}
+      macos: ${{ steps.matrix.outputs.macos }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -178,6 +190,38 @@ jobs:
             echo "release_date=$release_date"
           } | tee -a "$GITHUB_OUTPUT"
 
+      # The build matrix, here only. macos is "true" unless this is a release and MACOS_IN_RELEASE
+      # is "false"; then both macOS legs are left out. Dry and test runs keep every leg, so they
+      # go on exercising macOS.
+      - name: The build matrix, and whether this run ships macOS
+        id: matrix
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          legs='[
+            { "target": "aarch64-apple-darwin", "runner": "macos-15", "tier": 1, "signs": true, "arch": "aarch64", "rustflags": "-C force-frame-pointers=yes" },
+            { "target": "x86_64-apple-darwin", "runner": "macos-15", "tier": 2, "signs": true, "arch": "x64", "rustflags": "-C force-frame-pointers=yes" },
+            { "target": "x86_64-pc-windows-msvc", "runner": "windows-2025", "tier": 1, "signs": false, "arch": "x64", "rustflags": "-C force-frame-pointers=yes" },
+            { "target": "aarch64-pc-windows-msvc", "runner": "windows-11-arm", "tier": 2, "signs": false, "arch": "arm64", "rustflags": "-C force-frame-pointers=yes" },
+            { "target": "x86_64-unknown-linux-gnu", "runner": "ubuntu-22.04", "tier": 2, "signs": false, "arch": "amd64", "rustflags": "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
+          ]'
+          case "$MACOS_IN_RELEASE" in
+            true | false) ;;
+            *) echo "::error::MACOS_IN_RELEASE is \"$MACOS_IN_RELEASE\", not \"true\" or \"false\""; exit 1 ;;
+          esac
+          macos=true
+          if [ "$MODE" = release ] && [ "$MACOS_IN_RELEASE" = false ]; then
+            macos=false
+            echo "::notice::MACOS_IN_RELEASE is false: this release builds no macOS leg (aarch64-apple-darwin, x86_64-apple-darwin) and ships no macOS asset"
+          fi
+          matrix=$(jq -c --argjson macos "$macos" \
+            '{include: [.[] | select($macos or (.target | endswith("-apple-darwin") | not))]}' <<< "$legs")
+          {
+            echo "macos=$macos"
+            echo "matrix=$matrix"
+          } | tee -a "$GITHUB_OUTPUT"
+
       # The overlays may hold only what they are for. Every sidecar, S15's included, goes through
       # .github/scripts/sidecars.mjs and its generated overlay, which the seam checks.
       - name: The release overlays hold only their own keys
@@ -259,7 +303,8 @@ jobs:
           path: ${{ runner.temp }}/ui-sourcemaps
           if-no-files-found: error
 
-  # Every target from the one commit. macOS builds, bundles and signs the updater archive here;
+  # Every target from the one commit, from check's matrix (a release without macOS has no macOS
+  # leg). macOS builds, bundles and signs the updater archive here;
   # Windows builds the exe once (sign-windows bundles it); Linux bundles .deb and .rpm, which never
   # update themselves, so it signs nothing and holds no secret. Only the macOS legs take the
   # environment, since only they sign here.
@@ -274,13 +319,7 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { target: aarch64-apple-darwin, runner: macos-15, tier: 1, signs: true, arch: aarch64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: x86_64-apple-darwin, runner: macos-15, tier: 2, signs: true, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, tier: 2, signs: false, arch: amd64, rustflags: "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
+      matrix: ${{ fromJSON(needs.check.outputs.matrix) }}
     env:
       TARGET: ${{ matrix.target }}
       MODE: ${{ needs.check.outputs.mode }}
@@ -728,6 +767,7 @@ jobs:
       MODE: ${{ needs.check.outputs.mode }}
       VERSION: ${{ needs.check.outputs.version }}
       TAG: ${{ needs.check.outputs.tag }}
+      MACOS: ${{ needs.check.outputs.macos }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -762,12 +802,15 @@ jobs:
           done
           # A dry run publishes nothing; its URLs point at a tag that does not exist.
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/${TAG:-dry-run}"
-          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > missing.txt
+          # A release without macOS: no macOS asset is required, named missing or let through.
+          no_macos=(); [ "$MACOS" = false ] && no_macos=(--no-macos)
+          node .github/scripts/latest-json.mjs "${no_macos[@]}" dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > missing.txt
           # Nothing but the table's assets, their .sig and latest.json.
           known=$(node --input-type=module -e "
             import { assets } from './.github/scripts/latest-json.mjs';
-            for (const a of assets(process.argv[1])) console.log(a.platforms ? a.name + '\n' + a.name + '.sig' : a.name);
-          " "$VERSION")
+            const macos = process.argv[2] !== 'false';
+            for (const a of assets(process.argv[1], { macos })) console.log(a.platforms ? a.name + '\n' + a.name + '.sig' : a.name);
+          " "$VERSION" "$MACOS")
           for file in dist/*; do
             name=$(basename "$file")
             [ "$name" = latest.json ] || grep -qxF "$name" <<< "$known" ||
@@ -779,6 +822,10 @@ jobs:
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
             echo "Check a download with \`sha256sum -c SHA256SUMS.txt --ignore-missing\`."
+            if [ "$MACOS" = false ]; then
+              echo
+              echo "This beta is for Windows. The Mac version follows once Apple has notarised it."
+            fi
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
@@ -814,13 +861,15 @@ jobs:
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag "$kind" \
             --title "Clauseo $VERSION" --notes-file notes.md
 
-  # Publishes a v* draft once Rohan approves it (environment release-publish). Refuses while a DMG
-  # is missing or not notarised and stapled: no release before the Apple account (QF.2 (a)).
+  # Publishes a v* draft once Rohan approves it (environment release-publish). With macOS in the
+  # release, refuses while a DMG is missing or not notarised and stapled (QF.2 (a)). Without it
+  # (MACOS_IN_RELEASE "false"), runs on Linux, has nothing to notarise, and refuses a draft that
+  # holds any macOS asset.
   publish:
     name: publish
     needs: [check, assemble]
     if: needs.check.outputs.mode == 'release'
-    runs-on: macos-15
+    runs-on: ${{ needs.check.outputs.macos == 'false' && 'ubuntu-24.04' || 'macos-15' }}
     timeout-minutes: 20
     environment: release-publish
     permissions:
@@ -834,6 +883,7 @@ jobs:
           persist-credentials: false
 
       - name: Every DMG is notarised and stapled
+        if: needs.check.outputs.macos != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -844,6 +894,22 @@ jobs:
           for dmg in "$RUNNER_TEMP"/dmg/*.dmg; do
             xcrun stapler validate "$dmg" || { echo "::error::$(basename "$dmg") is not notarised and stapled"; exit 1; }
           done
+
+      - name: No macOS asset in the draft (a release without macOS)
+        if: needs.check.outputs.macos == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "MACOS_IN_RELEASE is false: no DMG to notarise, so the notarisation check is skipped"
+          names=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          [ -n "$names" ] || { echo "::error::the draft $TAG has no assets"; exit 1; }
+          mac=$(grep -E '\.dmg$|\.app\.tar\.gz(\.sig)?$' <<< "$names") || [ $? -eq 1 ]
+          if [ -n "$mac" ]; then
+            echo "::error::the draft $TAG holds macOS assets, and this release has no macOS: $(tr '\n' ' ' <<< "$mac")"
+            exit 1
+          fi
+          echo "the draft $TAG holds no macOS asset"
 
       - name: Publish the draft
         env:

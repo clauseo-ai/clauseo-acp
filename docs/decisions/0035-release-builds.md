@@ -23,6 +23,8 @@ Developer ID.
   - `release`: tag `vX.Y.Z` on a commit on `main`. The jobs that sign use the environment `release`;
     `assemble` leaves a draft GitHub Release; `publish` (environment `release-publish`, Rohan as
     required reviewer) refuses unless every DMG passes `xcrun stapler validate`, then publishes it.
+    While `MACOS_IN_RELEASE` is `"false"` a release has no macOS at all ("A release without macOS"
+    below).
   - `test`: tag `test-vX.Y.Z` on a commit of a `release-test/*` branch (a branch from `main` with only
     the version bumped, deleted after the run). Built with the `e2e` feature under the environment
     `release-test`, its updater files signed with the throwaway test key, published as a pre-release,
@@ -262,6 +264,40 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   `--remove` does. The hook names a kept folder only when `GetFileAttributesW` says a real
   folder, and shows no box when the data folder is gone (exit 1 after an unlink-only run); when
   the data folder is itself a link (refused, so kept) its box names no path.
+
+## A release without macOS (Windows beta, 2026-11-06)
+
+- **Why.** Rohan, 2026-11-06: launch first. The first release, `0.1.0` (QF.1), is a Windows beta.
+  macOS waits until it can be notarised under Rohan's Apple account. Until now a `v*` release
+  could not go out without macOS: `publish` refused a draft with no notarised, stapled
+  `Clauseo_<v>_aarch64.dmg`, and `build (aarch64-apple-darwin)` is tier 1, so a macOS leg that
+  GitHub cancelled for want of a free arm64 runner failed the whole run (dry run 42235156214).
+- **The switch** is a workflow-level `env` in `release.yml`: `MACOS_IN_RELEASE: "false"`. It is
+  committed, not a run input, so the commit decides and a release is reproducible from its tag.
+  QF.2's first wording named a `windows_only` input on `workflow_dispatch`; a dispatched run is
+  always a dry run here, so the switch lives in the file instead. `check` refuses any value but
+  `"true"` or `"false"`.
+- **What it changes, in a `release` run only.** `check` outputs `macos` and the build matrix as
+  JSON (the five legs live only there); `build` takes it with
+  `fromJSON(needs.check.outputs.matrix)`. With the switch off, a release's matrix leaves out both
+  macOS legs, and `check` logs a `::notice::` saying so. Dry and test runs keep all five legs and
+  `macos` `true`, so they go on exercising macOS.
+- **`assemble`** runs `latest-json.mjs --no-macos`: the macOS assets are neither required nor named
+  missing, `latest.json` has no `darwin-*` key, and a macOS asset in the folder fails the job.
+  `SHA256SUMS.txt` and the attestations cover what was built. The release notes do not list the
+  macOS assets as missing tier 2 builds; they say instead, in English only: "This beta is for
+  Windows. The Mac version follows once Apple has notarised it."
+- **`publish`** runs on `ubuntu-24.04` instead of `macos-15`, skips the notarisation check (it says
+  so in the log), and refuses a draft that holds any `.dmg`, `.app.tar.gz` or `.app.tar.gz.sig`.
+- **Turning macOS back on.** S20a's Apple secrets (Developer ID signing and notarisation) go into
+  the environment `release`, with S20a's steps that sign and notarise the macOS legs; then a commit
+  sets `MACOS_IN_RELEASE: "true"`. Everything is then as before this section: macOS legs in every
+  run, `publish` on `macos-15` refusing any DMG that is not notarised and stapled. Turning it on
+  without the secrets gives a release that `publish` refuses, since the ad hoc DMG is not
+  notarised.
+- **Updates across the switch.** A `latest.json` without `darwin-*` keys only matters to a Mac
+  install, and there is none from a release while the switch is off. When macOS ships, its first
+  release's `latest.json` has the keys again.
 
 ## Status
 

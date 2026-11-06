@@ -19,8 +19,9 @@
 // to passing the generated sidecar overlay last.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -28,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { assets, buildManifest, manifestProblems, signedVersion } from "./latest-json.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const SCRIPT = join(here, "latest-json.mjs");
 const RELEASE_YML = join(here, "..", "workflows", "release.yml");
 
 /** A `.sig` as tauri signer writes it, with <comment> as the trusted comment. */
@@ -61,11 +63,11 @@ function release(version, { leave = [], signedFor = version, comment } = {}) {
 const BASE = "https://github.com/clauseo-ai/clauseo-acp/releases/download/v1.2.3";
 const DATE = "2026-11-02T10:00:00Z";
 
-/** buildManifest over a scratch release, removed afterwards. */
-function build(version, options) {
+/** buildManifest over a scratch release, removed afterwards; <macos> false is a release without macOS. */
+function build(version, options, { macos = true } = {}) {
   const dir = release(version, options);
   try {
-    return buildManifest(dir, version, BASE, DATE);
+    return buildManifest(dir, version, BASE, DATE, { macos });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -145,6 +147,80 @@ test("manifestProblems names each way a manifest is wrong", () => {
   assert.deepEqual(manifestProblems({ ...manifest, extra: 1 }, "1.2.3"), [
     "latest.json has the keys extra,notes,platforms,pub_date,version, not notes, platforms, pub_date and version",
   ]);
+});
+
+/** The macOS assets of release <version>: what a release without macOS leaves out. */
+const macosAssets = (version) => assets(version).filter((asset) => asset.macos).map((asset) => asset.name);
+
+test("a release without macOS lists only what was built, and names no macOS asset missing", () => {
+  assert.deepEqual(macosAssets("1.2.3"), [
+    "Clauseo_1.2.3_aarch64.dmg",
+    "Clauseo_1.2.3_aarch64.app.tar.gz",
+    "Clauseo_1.2.3_x64.dmg",
+    "Clauseo_1.2.3_x64.app.tar.gz",
+  ]);
+  assert.deepEqual(
+    assets("1.2.3", { macos: false }).map((asset) => asset.name),
+    assets("1.2.3").map((asset) => asset.name).filter((name) => !macosAssets("1.2.3").includes(name)),
+  );
+  const leave = macosAssets("1.2.3");
+  const { manifest, missing, problems } = build("1.2.3", { leave }, { macos: false });
+  assert.deepEqual(problems, []);
+  assert.deepEqual(missing, []);
+  assert.deepEqual(Object.keys(manifest.platforms).sort(), [
+    "windows-aarch64",
+    "windows-aarch64-nsis",
+    "windows-x86_64",
+    "windows-x86_64-nsis",
+  ]);
+  assert.deepEqual(manifestProblems(manifest, "1.2.3", { macos: false }), []);
+  // The same manifest in a release with macOS lacks its tier 1 platform...
+  assert.deepEqual(manifestProblems(manifest, "1.2.3"), ["platforms has no darwin-aarch64-app (tier 1)"]);
+  // ...and the same folder is refused there.
+  assert.ok(build("1.2.3", { leave }).problems.includes("Clauseo_1.2.3_aarch64.dmg is missing (tier 1)"));
+  // A tier 2 asset missing beside it is still named, and still only it.
+  const partial = build("1.2.3", { leave: [...leave, "Clauseo_1.2.3_amd64.deb"] }, { macos: false });
+  assert.deepEqual(partial.problems, []);
+  assert.deepEqual(partial.missing, ["Clauseo_1.2.3_amd64.deb"]);
+  // A tier 1 Windows asset is still required.
+  assert.deepEqual(
+    build("1.2.3", { leave: [...leave, "Clauseo_1.2.3_x64-machine-setup.exe"] }, { macos: false }).problems,
+    ["Clauseo_1.2.3_x64-machine-setup.exe is missing (tier 1)"],
+  );
+});
+
+test("a release without macOS refuses a macOS asset or a darwin key", () => {
+  const leave = macosAssets("1.2.3").filter((name) => name !== "Clauseo_1.2.3_x64.app.tar.gz");
+  assert.deepEqual(build("1.2.3", { leave }, { macos: false }).problems, [
+    "Clauseo_1.2.3_x64.app.tar.gz is a macOS asset, and this release has no macOS",
+    "Clauseo_1.2.3_x64.app.tar.gz.sig is a macOS asset, and this release has no macOS",
+  ]);
+  const { manifest } = build("1.2.3");
+  assert.deepEqual(manifestProblems(manifest, "1.2.3", { macos: false }), [
+    "platforms has the unknown key darwin-aarch64-app",
+    "platforms has the unknown key darwin-x86_64-app",
+  ]);
+});
+
+test("the command line's --no-macos writes latest.json for a Windows release, as assemble runs it", () => {
+  const dir = release("1.2.3", { leave: macosAssets("1.2.3") });
+  try {
+    const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+    const without = run("--no-macos", dir, "1.2.3", BASE, DATE);
+    assert.equal(without.status, 0, without.stderr);
+    assert.equal(without.stdout, "");
+    const manifest = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8"));
+    assert.deepEqual(manifestProblems(manifest, "1.2.3", { macos: false }), []);
+    assert.equal(Object.keys(manifest.platforms).some((key) => key.startsWith("darwin-")), false);
+    rmSync(join(dir, "latest.json"));
+    const withMacos = run(dir, "1.2.3", BASE, DATE);
+    assert.equal(withMacos.status, 1);
+    assert.match(withMacos.stderr, /Clauseo_1\.2\.3_aarch64\.dmg is missing \(tier 1\)/);
+    assert.equal(existsSync(join(dir, "latest.json")), false);
+    assert.equal(run("--no-macos", dir, "1.2.3", BASE).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---- release.yml ----
@@ -439,7 +515,9 @@ test("the release's latest.json is right and every platforms URL downloads", { s
     return Buffer.from(await response.arrayBuffer());
   };
   const manifest = JSON.parse((await get(`${base}/latest.json`)).toString("utf8"));
-  assert.deepEqual(manifestProblems(manifest, version), []);
+  // A release without macOS (release.yml's MACOS_IN_RELEASE "false") has no darwin key at all.
+  const macos = Object.keys(manifest.platforms ?? {}).some((key) => key.startsWith("darwin-"));
+  assert.deepEqual(manifestProblems(manifest, version, { macos }), []);
   const sums = new Map(
     (await get(`${base}/SHA256SUMS.txt`))
       .toString("utf8")
