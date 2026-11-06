@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::connectors::{ConnectorHandle, Slot, lock};
 use crate::credential::{Credential, OAuthTokens};
 use crate::error::AuthError;
-use crate::http::{self, SendBody};
+use crate::http::{self, Route, SendBody};
 use crate::oauth::{encode_form, oauth_error_code, parse_token_answer};
 use crate::secret::{Bearer, Secret};
 use crate::state::Ended;
@@ -24,12 +24,18 @@ pub(crate) const REFRESH_MARGIN: Duration = Duration::from_mins(5);
 /// minutes left, refreshed first when it has less. No I/O when no refresh is due. Callers on
 /// other threads wait for a running refresh and then get its token.
 pub(crate) fn bearer(handle: &ConnectorHandle) -> Result<Bearer, AuthError> {
+    // Asked before the lock: a slow proxy lookup never holds the credential.
+    let route = handle.inner.shared.agent.route();
     let mut slot = lock(&handle.inner.slot);
-    fresh_token(handle, &mut slot).map(Bearer)
+    fresh_token(handle, &mut slot, &route).map(Bearer)
 }
 
-/// The current token, refreshed when due; the slot is locked by the caller.
-pub(crate) fn fresh_token(handle: &ConnectorHandle, slot: &mut Slot) -> Result<Secret, AuthError> {
+/// The current token, refreshed on `route` when due; the slot is locked by the caller.
+pub(crate) fn fresh_token(
+    handle: &ConnectorHandle,
+    slot: &mut Slot,
+    route: &Route,
+) -> Result<Secret, AuthError> {
     let horizon = handle
         .inner
         .shared
@@ -40,13 +46,17 @@ pub(crate) fn fresh_token(handle: &ConnectorHandle, slot: &mut Slot) -> Result<S
         Credential::OAuth(tokens) if tokens.access_expires_at > horizon => {
             Ok(tokens.access_token.clone())
         }
-        Credential::OAuth(_) => refresh_locked(handle, slot, true),
+        Credential::OAuth(_) => refresh_locked(handle, slot, true, route),
     }
 }
 
 /// After a 401 with `used`: an API key is revoked (the item goes, no refresh); an access
-/// token that is still the current one is refreshed, else the newer one is taken.
-pub(crate) fn after_401(handle: &ConnectorHandle, used: &Secret) -> Result<Secret, AuthError> {
+/// token that is still the current one is refreshed (on `route`), else the newer one is taken.
+pub(crate) fn after_401(
+    handle: &ConnectorHandle,
+    used: &Secret,
+    route: &Route,
+) -> Result<Secret, AuthError> {
     let mut slot = lock(&handle.inner.slot);
     match handle.current(&mut slot)? {
         Credential::ApiKey(_) => {
@@ -56,7 +66,7 @@ pub(crate) fn after_401(handle: &ConnectorHandle, used: &Secret) -> Result<Secre
         Credential::OAuth(tokens) if tokens.access_token != *used => {
             Ok(tokens.access_token.clone())
         }
-        Credential::OAuth(_) => refresh_locked(handle, &mut slot, false),
+        Credential::OAuth(_) => refresh_locked(handle, &mut slot, false, route),
     }
 }
 
@@ -87,6 +97,7 @@ fn refresh_locked(
     handle: &ConnectorHandle,
     slot: &mut Slot,
     keep_on_network_error: bool,
+    route: &Route,
 ) -> Result<Secret, AuthError> {
     let current = match handle.current(slot)? {
         Credential::OAuth(tokens) => tokens.clone(),
@@ -108,7 +119,7 @@ fn refresh_locked(
             current.access_token.clone()
         })
     };
-    let metadata = match crate::oauth::metadata(handle) {
+    let metadata = match crate::oauth::metadata_on(handle, route) {
         Ok(metadata) => metadata,
         Err(err) => {
             let why = format!("discovery: {err}");
@@ -128,8 +139,8 @@ fn refresh_locked(
     );
     let form = encode_form(&pairs);
     let shared = &handle.inner.shared;
-    let reply = match http::send(
-        &shared.agent,
+    let reply = match http::send_on(
+        route,
         "POST",
         metadata.token.as_str(),
         &[("Accept", "application/json")],
@@ -256,9 +267,14 @@ fn persist(handle: &ConnectorHandle, tokens: &OAuthTokens) {
     handle.inner.persist_failed.store(true, Ordering::Relaxed);
 }
 
-/// `POST /revoke` for the refresh token; whether the connector answered 200.
+/// `POST /revoke` for the refresh token; whether the connector answered 200. No lock held.
 pub(crate) fn revoke(handle: &ConnectorHandle, refresh_token: &Secret) -> bool {
-    let metadata = match crate::oauth::metadata(handle) {
+    revoke_on(handle, refresh_token, &handle.inner.shared.agent.route())
+}
+
+/// [`revoke`] on a route asked for before the caller's lock.
+pub(crate) fn revoke_on(handle: &ConnectorHandle, refresh_token: &Secret, route: &Route) -> bool {
+    let metadata = match crate::oauth::metadata_on(handle, route) {
         Ok(metadata) => metadata,
         Err(err) => {
             tracing::info!(connector = handle.id(), error = %err, "no revocation endpoint");
@@ -271,8 +287,8 @@ pub(crate) fn revoke(handle: &ConnectorHandle, refresh_token: &Secret) -> bool {
         ("client_id", &handle.inner.urls.client_id),
     ]);
     let shared = &handle.inner.shared;
-    match http::send(
-        &shared.agent,
+    match http::send_on(
+        route,
         "POST",
         metadata.revocation.as_str(),
         &[],

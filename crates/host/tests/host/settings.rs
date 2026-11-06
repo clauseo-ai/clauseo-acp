@@ -269,6 +269,7 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
     let patch = ToolsPatch {
         web_search: Some(false),
         browser: None,
+        connectors: None,
     };
     assert_eq!(
         host.dispatch_as(id, set_tools(patch.clone())).unwrap(),
@@ -326,6 +327,7 @@ fn a_tool_patch_naming_a_locked_key_is_refused_whole() {
         set_tools(ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: None,
         }),
         ErrorCode::SettingsLocked,
     );

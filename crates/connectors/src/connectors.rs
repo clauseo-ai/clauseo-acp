@@ -17,7 +17,7 @@ use crate::cancel::CancelFlag;
 use crate::config::{Config, ConnectorUrls};
 use crate::credential::{Credential, CredentialKind, CredentialStatus, SignOutReport};
 use crate::error::{AuthError, Error, SignInError, StoreError};
-use crate::http::{self, SendBody};
+use crate::http;
 use crate::known::{CASE_LAW, KNOWN, KnownConnector};
 use crate::mcp::{McpReply, McpRequestHeaders};
 use crate::oauth::Metadata;
@@ -38,7 +38,7 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// file's contents and the liveness cache.
 pub(crate) struct Shared {
     pub(crate) config: Config,
-    pub(crate) agent: ureq::Agent,
+    pub(crate) agent: http::Agents,
     pub(crate) store: Arc<dyn SecretStore>,
     /// The state file as last read or written.
     pub(crate) state: Mutex<State>,
@@ -89,7 +89,7 @@ impl Connectors {
         if !config.origin.allowed() {
             return Err(Error::BadOrigin);
         }
-        let agent = http::agent(&config)?;
+        let agent = http::Agents::new(&config)?;
         let state = State::load(&config.state_file)?;
         let case_law = config.origin.urls(&CASE_LAW);
         let shared = Arc::new(Shared {
@@ -324,48 +324,15 @@ impl ConnectorHandle {
     /// Adds a firm's pasted API key: refuses anything that is not `cdk_live_` and 32 base62
     /// characters before any request, then checks it with one account read and stores it.
     pub fn add_api_key(&self, key: &str) -> Result<(), Error> {
-        if !crate::credential::is_api_key(key) {
-            return Err(Error::BadKeyFormat);
-        }
-        let key = Secret::from(key);
-        let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
-        let url = self.account_url();
-        let headers = [
-            ("Authorization", auth.as_str()),
-            ("Accept", "application/json"),
-        ];
-        let shared = &self.inner.shared;
-        let reply = http::send(
-            &shared.agent,
-            "GET",
-            &url,
-            &headers,
-            SendBody::None,
-            shared.timeout(),
-        )
-        .map_err(Error::Network)?;
-        match reply.status {
-            // A 402 is a valid key on an empty account.
-            200 | 402 => {}
-            401 => return Err(Error::Auth(AuthError::KeyRevoked)),
-            status => return Err(Error::Http { status }),
-        }
-        let credential = Credential::ApiKey(key);
-        self.store_new(credential, CredentialKind::ApiKey)?;
-        if reply.status == 200 {
-            let now = shared.config.clock.now();
-            let parsed = crate::account::parse_account(
-                &reply.body,
-                self.inner.known,
-                &shared.config.origin,
-                now,
-            );
-            if let Ok(account) = parsed {
-                let generation = self.inner.generation.load(Ordering::SeqCst);
-                *lock(&self.inner.account) = Some((generation, account));
-            }
-        }
-        Ok(())
+        self.add_api_key_while(key, &|| true)
+    }
+
+    /// As [`add_api_key`](Self::add_api_key), storing the key only if `still` answers `true`
+    /// when asked under the credential's lock, just before the store: a caller whose sign-out
+    /// or switch-off came in while the key was checked gets `Error::Cancelled`, and nothing is
+    /// stored.
+    pub fn add_api_key_while(&self, key: &str, still: &dyn Fn() -> bool) -> Result<(), Error> {
+        crate::calls::add_api_key(self, key, still)
     }
 
     /// Signs out: revokes the refresh token (`POST /revoke`; an API key has no revoke call),
@@ -375,6 +342,8 @@ impl ConnectorHandle {
         if let Some((_, pending)) = lock(&self.inner.pending).take() {
             pending.cancel();
         }
+        // Asked before the lock: a slow proxy lookup never holds the credential.
+        let route = self.inner.shared.agent.route();
         let mut slot = lock(&self.inner.slot);
         let credential = match self.load(&mut slot) {
             Ok(credential) => credential.cloned(),
@@ -384,7 +353,9 @@ impl ConnectorHandle {
             }
         };
         let revoked = match &credential {
-            Some(Credential::OAuth(tokens)) => crate::refresh::revoke(self, &tokens.refresh_token),
+            Some(Credential::OAuth(tokens)) => {
+                crate::refresh::revoke_on(self, &tokens.refresh_token, &route)
+            }
             Some(Credential::ApiKey(_)) | None => false,
         };
         let deleted = self.inner.shared.store.delete(self.id());
@@ -515,14 +486,21 @@ impl ConnectorHandle {
     /// old credential as they were. Once the lock is released, the OAuth refresh tokens the new
     /// credential replaced (in memory or in the keychain) are revoked, best effort: a failure is
     /// logged without the token. The new credential's own token is never revoked.
+    ///
+    /// `still` is asked under the slot's lock first: `false` stores nothing and answers
+    /// `Ok(false)` (the caller's credential ended while it was being made).
     pub(crate) fn store_new(
         &self,
         credential: Credential,
         kind: CredentialKind,
-    ) -> Result<(), StoreError> {
+        still: &dyn Fn() -> bool,
+    ) -> Result<bool, StoreError> {
         let bytes = credential.encode()?;
         let replaced = {
             let mut slot = lock(&self.inner.slot);
+            if !still() {
+                return Ok(false);
+            }
             let replaced = self.replaced_refresh_tokens(&mut slot, &credential);
             self.inner.shared.store.set(self.id(), &bytes)?;
             self.save_state(|state| state.add(self.id(), kind))?;
@@ -539,7 +517,7 @@ impl ConnectorHandle {
                 );
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// The OAuth refresh tokens `new` replaces: the one in memory and the one in the keychain,

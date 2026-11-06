@@ -7,8 +7,10 @@
 //!   though it missed events (0017's subscribe-then-read rule). H4's `matters_changed` and
 //!   `threads_changed` (not merged) go through as they come; when they land, the restart also
 //!   needs their current lists, unless the host makes a subscription's first frame `all: true`.
-//!   The settings window gets `settings_changed` alone of it, and any other label none
-//!   ([`AppEvents`], 0028).
+//!   The settings window gets `settings_changed` and `connectors_changed` (its Connectors
+//!   section, R24) of it, and any other label none ([`AppEvents`], 0028). The host's own
+//!   catch-up after a subscribe carries the whole connector state, so a restart reads nothing
+//!   for it.
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows for `main` and
 //!   the settings window (U12). The host starts
 //!   every limits subscription with the current `limits_view_changed`, so a restart needs no
@@ -37,13 +39,15 @@ use crate::setup::SetupEvents;
 
 /// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
 /// `main` carries them all. The settings window carries the limits (U12) and, of the app feed,
-/// `settings_changed` alone, so it never gets the matter and thread lists (0023) or an app
-/// event the host adds later. Any other label carries neither, whatever it follows.
+/// `settings_changed` and `connectors_changed` (R24), so it never gets the matter and thread
+/// lists (0023) or an app event the host adds later. Any other label carries neither, whatever
+/// it follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppEvents {
     /// Every app and limits event: `main`.
     All,
-    /// The app feed's `settings_changed` only, and the limits: the settings window.
+    /// The app feed's `settings_changed` and `connectors_changed` only, and the limits: the
+    /// settings window.
     SettingsAndLimits,
     /// No app or limits event: any other label.
     Nothing,
@@ -67,7 +71,10 @@ impl AppEvents {
             (_, Self::All) | (Feed::Limits | Feed::Setup, Self::SettingsAndLimits) => true,
             // `update_changed` (0037) joins here in R23 PR 5, with a feed restart that reads
             // `GetUpdate` as it reads `GetSettings`; until then only main carries it.
-            (Feed::App, Self::SettingsAndLimits) => json.starts_with(r#"{"settings_changed":"#),
+            (Feed::App, Self::SettingsAndLimits) => {
+                json.starts_with(r#"{"settings_changed":"#)
+                    || json.starts_with(r#"{"connectors_changed":"#)
+            }
             (_, Self::Nothing) => false,
         }
     }

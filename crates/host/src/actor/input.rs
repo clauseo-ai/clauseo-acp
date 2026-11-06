@@ -244,6 +244,8 @@ pub(crate) enum Input {
     SkillPack(Box<super::settings::packs::PackRead>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
     Update(super::update::UpdateInput),
+    /// A connector command's work, or a relay's event (`connectors.rs`).
+    Connector(Box<super::connectors::ConnectorInput>),
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
@@ -273,6 +275,7 @@ impl std::fmt::Debug for Input {
             Self::BrowserInstall(_) => "BrowserInstall",
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",
+            Self::Connector(_) => "Connector",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };

@@ -22,7 +22,7 @@ use crate::cancel::CancelFlag;
 use crate::connectors::{ConnectorHandle, lock};
 use crate::credential::{Credential, CredentialKind, OAuthTokens, WireSecret};
 use crate::error::SignInError;
-use crate::http::{self, SendBody};
+use crate::http::{self, Route, SendBody};
 use crate::net::bind_loopback_exclusive;
 use crate::pkce::s256_challenge;
 use crate::secret::Secret;
@@ -104,6 +104,14 @@ impl PendingSignIn {
     /// the code and stores the credential (the keychain, then the state file), and only then
     /// answers the browser: the success page, or the failure page with 400.
     pub fn finish(self) -> Result<(), SignInError> {
+        self.finish_while(&|| true)
+    }
+
+    /// As [`finish`](Self::finish), storing the credential only if the cancel flag is still
+    /// clear and `still` answers `true` when asked under the credential's lock, just before
+    /// the store. Otherwise nothing is stored, the new refresh token is revoked (best effort)
+    /// and the answer is `Cancelled`.
+    pub fn finish_while(self, still: &dyn Fn() -> bool) -> Result<(), SignInError> {
         let PendingSignIn {
             handle,
             metadata,
@@ -135,7 +143,14 @@ impl PendingSignIn {
             browser.failed();
             return Err(SignInError::Cancelled);
         }
-        match exchange(&handle, &metadata, &code, &redirect_uri, &verifier) {
+        let still = || !cancel.is_cancelled() && still();
+        let made = Made {
+            metadata: &metadata,
+            code: &code,
+            redirect_uri: &redirect_uri,
+            verifier: &verifier,
+        };
+        match exchange(&handle, &made, &still) {
             Ok(()) => {
                 browser.signed_in();
                 Ok(())
@@ -242,22 +257,30 @@ fn random<const N: usize>(handle: &ConnectorHandle) -> Zeroizing<[u8; N]> {
     bytes
 }
 
-/// The discovery metadata, fetched and checked once per process.
+/// The discovery metadata, fetched and checked once per process. No lock held.
 pub(crate) fn metadata(handle: &ConnectorHandle) -> Result<Arc<Metadata>, SignInError> {
+    metadata_on(handle, &handle.inner.shared.agent.route())
+}
+
+/// [`metadata`], fetched (if not yet) on a route asked for before any lock.
+pub(crate) fn metadata_on(
+    handle: &ConnectorHandle,
+    route: &Route,
+) -> Result<Arc<Metadata>, SignInError> {
     let mut cached = lock(&handle.inner.metadata);
     if let Some(metadata) = cached.as_ref() {
         return Ok(Arc::clone(metadata));
     }
-    let metadata = Arc::new(discover(handle)?);
+    let metadata = Arc::new(discover(handle, route)?);
     *cached = Some(Arc::clone(&metadata));
     Ok(metadata)
 }
 
 /// Steps 2 and 3: the protected resource metadata, then the authorization server's.
-fn discover(handle: &ConnectorHandle) -> Result<Metadata, SignInError> {
+fn discover(handle: &ConnectorHandle, route: &Route) -> Result<Metadata, SignInError> {
     let urls = &handle.inner.urls;
     let what = "protected resource metadata";
-    let prm = get_json(handle, &urls.protected_resource_metadata, what)?;
+    let prm = get_json(handle, route, &urls.protected_resource_metadata, what)?;
     if prm.get("resource").and_then(Value::as_str) != Some(urls.mcp_url.as_str()) {
         return Err(refused(what, "resource is not the MCP URL"));
     }
@@ -265,7 +288,7 @@ fn discover(handle: &ConnectorHandle) -> Result<Metadata, SignInError> {
         return Err(refused(what, "authorization_servers lacks the issuer"));
     }
     let what = "authorization server metadata";
-    let asm = get_json(handle, &urls.authorization_server_metadata, what)?;
+    let asm = get_json(handle, route, &urls.authorization_server_metadata, what)?;
     if asm.get("issuer").and_then(Value::as_str) != Some(urls.issuer.as_str()) {
         return Err(refused(what, "issuer differs"));
     }
@@ -318,10 +341,15 @@ fn endpoint(handle: &ConnectorHandle, asm: &Value, name: &str) -> Result<Url, Si
 }
 
 /// A metadata document: 200 and a JSON object.
-fn get_json(handle: &ConnectorHandle, url: &str, what: &str) -> Result<Value, SignInError> {
+fn get_json(
+    handle: &ConnectorHandle,
+    route: &Route,
+    url: &str,
+    what: &str,
+) -> Result<Value, SignInError> {
     let shared = &handle.inner.shared;
-    let reply = http::send(
-        &shared.agent,
+    let reply = http::send_on(
+        route,
         "GET",
         url,
         &[("Accept", "application/json")],
@@ -340,13 +368,25 @@ fn get_json(handle: &ConnectorHandle, url: &str, what: &str) -> Result<Value, Si
 
 /// Steps 8 and 9: the code for tokens (both resources, no secret), then the keychain, then
 /// the state file.
+/// What the code's exchange needs of the sign-in.
+struct Made<'a> {
+    metadata: &'a Metadata,
+    code: &'a Secret,
+    redirect_uri: &'a str,
+    verifier: &'a Secret,
+}
+
 fn exchange(
     handle: &ConnectorHandle,
-    metadata: &Metadata,
-    code: &Secret,
-    redirect_uri: &str,
-    verifier: &Secret,
+    made: &Made<'_>,
+    still: &dyn Fn() -> bool,
 ) -> Result<(), SignInError> {
+    let Made {
+        metadata,
+        code,
+        redirect_uri,
+        verifier,
+    } = *made;
     let urls = &handle.inner.urls;
     let mut pairs = vec![
         ("grant_type", "authorization_code"),
@@ -362,7 +402,7 @@ fn exchange(
     );
     let form = encode_form(&pairs);
     let shared = &handle.inner.shared;
-    let reply = http::send(
+    let reply = http::send_via(
         &shared.agent,
         "POST",
         metadata.token.as_str(),
@@ -380,7 +420,17 @@ fn exchange(
     }
     let tokens =
         parse_token_answer(&reply.body, shared.unix_now(), None).map_err(SignInError::Exchange)?;
-    handle.store_new(Credential::OAuth(tokens), CredentialKind::OAuth)?;
+    let refresh_token = tokens.refresh_token.clone();
+    if !handle.store_new(Credential::OAuth(tokens), CredentialKind::OAuth, still)? {
+        // Ended while the code was exchanged: the tokens are never used.
+        if !crate::refresh::revoke(handle, &refresh_token) {
+            tracing::warn!(
+                connector = handle.id(),
+                "the unused refresh token could not be revoked"
+            );
+        }
+        return Err(SignInError::Cancelled);
+    }
     Ok(())
 }
 

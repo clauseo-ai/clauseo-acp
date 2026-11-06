@@ -89,6 +89,8 @@ pub(super) async fn open(
         codex_hooks: parts.codex_hooks,
         folder_check: parts.folder_check,
         pre_write_guard: parts.pre_write_guard,
+        // Before `wiring` moves.
+        connectors: super::connectors::ConnectorsOnActor::new(parts.wiring.connectors.clone()),
         wiring: parts.wiring,
         counts: parts.counts,
         update,
@@ -139,6 +141,7 @@ pub(super) async fn open(
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
     super::browser_install::start(&mut actor);
+    super::connectors::start(&mut actor);
     super::settings::log_lock_causes(&mut actor.lock_causes, &actor.effective);
     tracing::info!(
         target: crate::log_file::LIFECYCLE,

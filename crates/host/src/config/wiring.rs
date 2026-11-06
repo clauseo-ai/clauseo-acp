@@ -47,6 +47,8 @@ pub(crate) struct LaunchWiring {
     pub(crate) pack_read_hook: Option<PackReadHook>,
     /// The case-law connector's relays (R24); `None`: no session gets case law.
     pub(crate) relays: Option<crate::connectors::Relays>,
+    /// The connector commands' wiring (R24, `with_connectors`); `None`: each is refused.
+    pub(crate) connectors: Option<crate::connectors::ConnectorsWiring>,
     /// Run off the actor with a run folder's path just before the folder is removed, for tests
     /// (`launch_checks::discard`).
     pub(crate) run_removal_hook: Option<RunRemovalHook>,
@@ -67,6 +69,7 @@ impl Default for LaunchWiring {
             sign_in: SignIn::default(),
             pack_read_hook: None,
             relays: None,
+            connectors: None,
             run_removal_hook: None,
         }
     }
@@ -85,6 +88,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("install_tools", &self.install_tools.is_some())
             .field("sign_in", &self.sign_in)
             .field("relays", &self.relays)
+            .field("connectors", &self.connectors)
             .finish_non_exhaustive()
     }
 }

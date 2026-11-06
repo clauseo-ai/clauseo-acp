@@ -160,14 +160,14 @@ fn the_state_and_the_hint_read_back() {
         connectors: vec![ConnectorView {
             id: "case-law".to_owned(),
             name: "Indian case law".to_owned(),
-            price_text: None,
+            price_paise: None,
             packs: Vec::new(),
             recent_spend: None,
             status: ConnectorStatus::SignedIn {
                 account_label: None,
                 balance: Some(Balance {
                     credits: 180,
-                    rupees: "₹180".to_owned(),
+                    paise: Some(18_000),
                 }),
                 low: true,
             },

@@ -51,11 +51,15 @@ beside `main`, so on Windows and Linux it gets the caption buttons' four. Not gr
 **What the bridge admits.** From `settings`, `dispatch` takes only `SetUiSettings`,
 `SetToolSettings` (0030, "Tool switches over the wire"), `SetPrivacySettings` (0036),
 `SetSkillPack` (0040; refused from `main`), `RefreshLimits`, `SetUpdateMode` (0037) and
-`CheckForUpdate` (0037), and `query` only `GetSettings`, `GetUpdate` (0037) and
+`CheckForUpdate` (0037), the connector commands but `DismissCaseLawHint` (R24: Check, Add,
+AddApiKey, AddCredits, SignOut, Remove, RefreshBalance; `main` sends only `DismissCaseLawHint`
+and `RefreshBalance`, so the window that shows agent output never adds a key or spends credits),
+and `query` only `GetSettings`, `GetUpdate` (0037) and
 `ListSkillPacks` (0040; `main` reads it too, for the matter picker) (`Bridge::admit`, `Bridge::query`, keyed on the calling
 webview's label); everything else is `command.invalid` before the host sees it. A window of any other label is refused every
 command and read. Of the app feed (`subscribe_app`), whose first frames carry the whole matter
-and thread lists since 0023, a window other than `main` gets `settings_changed` alone: the
+and thread lists since 0023, the settings window gets `settings_changed` and, for its Connectors section (R24),
+`connectors_changed`, and any other window none of it: the
 bridge drops every other app event before it is sent or counted toward acks (`AppEvents` in
 `bridge/pump/feeds.rs`, an allow-list keyed on the label, so an app event the host adds later
 stays out). A settings section that needs more (plans, matters) widens these lists in its own
@@ -85,7 +89,10 @@ get no menu: it would be a bar on the undecorated window.
   page could already close `main` outright. `main`'s page cannot set any title.
 - XSS in the settings page reaches the settings and nothing else of the host: no matter, thread,
   folder, file, link or permission answer. That holds for the app feed because the bridge filters
-  the settings window's to `settings_changed`; U12 and U15 widen it when their sections read more.
+  the settings window's to `settings_changed` and `connectors_changed` (R24's connector state,
+  which holds no token or key); U12 and U15 widen it when their sections read more. XSS there
+  can add a connector, paste a key or open a pay link's recharge (each through the host's own
+  checks, the pay link only through the native confirm); the main window cannot.
 - Main-only behaviour stays keyed on `MAIN_WINDOW`: the scoreboard's capabilities, the limits
   subscription `open_stream` starts (`Bridge::open_stream` follows the limits for `main` alone)
   and the focus refresh (`on_window_event` in `lib.rs` dispatches `Shown` for `main` alone).

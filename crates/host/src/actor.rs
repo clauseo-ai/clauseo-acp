@@ -35,6 +35,7 @@ mod app;
 mod app_lists;
 mod browser_install;
 mod commands;
+mod connectors;
 pub(crate) mod counting;
 mod folder_state;
 pub(crate) mod header_tools;
@@ -126,6 +127,8 @@ pub(crate) struct Actor {
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
     pub(crate) browser_install: browser_install::BrowserInstall,
+    /// The connector state and the commands' work in flight (R24).
+    pub(crate) connectors: connectors::ConnectorsOnActor,
     /// The tools each thread's header shows, laid over the header unlogged.
     pub(crate) header_tools: header_tools::HeaderTools,
     /// The turn path's host-wide state: the start-up `run/` sweep, `stop_agents`' waits.
@@ -453,6 +456,7 @@ impl Actor {
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
+            Input::Connector(input) => connectors::on_input(self, *input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

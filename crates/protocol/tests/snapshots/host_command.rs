@@ -110,6 +110,7 @@ golden! { HostCommand::name_of {
         patch: ToolsPatch {
             web_search: Some(false),
             browser: Some(true),
+            connectors: Some(false),
         },
     };
     SetSkillPack => set_skill_pack: HostCommand::SetSkillPack {

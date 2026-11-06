@@ -17,20 +17,25 @@ pub struct ToolsPatch {
     /// The new `tools.browser`, if it changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<bool>,
+    /// The new `tools.connectors`, if it changes (R24).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connectors: Option<bool>,
 }
 
 impl ToolsPatch {
-    /// The dotted keys this patch sets, in field order (web search, browser). A key the patch
-    /// leaves out is not in the list, so an empty list means an empty patch.
+    /// The dotted keys this patch sets, in field order (web search, browser, connectors). A key
+    /// the patch leaves out is not in the list, so an empty list means an empty patch.
     pub(crate) fn keys(&self) -> Vec<&'static str> {
         // Every field is named here, so a new field does not compile until it is listed.
         let ToolsPatch {
             web_search,
             browser,
+            connectors,
         } = self;
         [
             ("tools.web_search", web_search.is_some()),
             ("tools.browser", browser.is_some()),
+            ("tools.connectors", connectors.is_some()),
         ]
         .into_iter()
         .filter_map(|(key, set)| set.then_some(key))
@@ -46,12 +51,16 @@ impl ToolsSettings {
         let ToolsPatch {
             web_search,
             browser,
+            connectors,
         } = patch;
         if let Some(web_search) = web_search {
             self.web_search = *web_search;
         }
         if let Some(browser) = browser {
             self.browser = *browser;
+        }
+        if let Some(connectors) = connectors {
+            self.connectors = *connectors;
         }
     }
 }

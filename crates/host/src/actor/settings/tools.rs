@@ -42,6 +42,10 @@ fn apply(actor: &mut Actor, ctx: &CommandCtx, patch: &ToolsPatch) -> Result<(), 
         let changed = HostEvent::SettingsChanged(super::view(actor));
         super::super::app::publish(actor, &changed);
     }
+    // The switch is part of the connector state the app shows (`available`).
+    if patch.connectors.is_some() {
+        super::super::connectors::switch_changed(actor);
+    }
     super::receipt(actor, ctx)
 }
 
@@ -51,9 +55,11 @@ fn patch_in(patch: &ToolsPatch) -> settings::ToolsPatch {
     let ToolsPatch {
         web_search,
         browser,
+        connectors,
     } = patch;
     settings::ToolsPatch {
         web_search: *web_search,
         browser: *browser,
+        connectors: *connectors,
     }
 }

@@ -398,7 +398,9 @@ two dependencies, `profile` and `tracing`.
 ### Tool switches over the wire
 
 Added by the R21 follow-up. The lawyer's two switches, `tools.web_search` and `tools.browser`,
-change from the settings window as `ui` does.
+change from the settings window as `ui` does. R24 (PR5) adds a third to the patch,
+`tools.connectors` (the lawyer's own off for data connectors); it reaches the app as
+`ConnectorsState.available` and `locked`, not in `ToolsSettingsView`.
 
 - **Command.** `HostCommand::SetToolSettings { patch: ToolsPatch }` sets the fields the patch
   names, each optional, and leaves the rest. Unknown fields are refused. It answers `Done`, and

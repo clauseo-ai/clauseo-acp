@@ -1,7 +1,8 @@
-//! R24's connector commands at the host, before the host runs them: each is refused, none stores
-//! a receipt (decision D2), and `AddApiKey`'s key reaches no refusal, receipt, log or file under
-//! the data folder. And the tool switches on the wire against the settings crate's, which now
-//! hold `tools.connectors` too.
+//! R24's connector commands at the host with no connectors wired: each is refused, none stores a
+//! receipt (decision D2), a reused id is a conflict, and `AddApiKey`'s key reaches no refusal,
+//! receipt or file under the data folder. With them wired (PR5): after `AddApiKey` ran, a
+//! distinctive key is in no file of the log, the agent homes, the policy file or anywhere under
+//! the data folder. And the tool switches on the wire against the settings crate's.
 
 use std::path::Path;
 
@@ -24,7 +25,7 @@ fn add_key() -> HostCommand {
 }
 
 /// Every file under `dir` whose bytes hold `needle`.
-fn files_holding(dir: &Path, needle: &[u8]) -> Vec<String> {
+pub(crate) fn files_holding(dir: &Path, needle: &[u8]) -> Vec<String> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(next) = stack.pop() {
@@ -52,9 +53,7 @@ fn connector_commands_are_refused_with_no_receipt_and_the_key_lands_nowhere() {
     let error = host.dispatch_as(id, add_key()).unwrap_err();
     assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
     assert!(!format!("{error:?}").contains(KEY), "{error:?}");
-    // Today the host refuses every connector command, and a refusal stores no receipt, so the
-    // same id with another body is refused the same way. That says nothing yet about D2's
-    // no-receipt rule for commands that run; PR5 tests that.
+    // A connector command's id is never used again: `command.conflict`, whatever the body.
     let again = host
         .dispatch_as(
             id,
@@ -63,7 +62,7 @@ fn connector_commands_are_refused_with_no_receipt_and_the_key_lands_nowhere() {
             }),
         )
         .unwrap_err();
-    assert_eq!(again.code(), ErrorCode::CommandInvalid, "{again}");
+    assert_eq!(again.code(), ErrorCode::CommandConflict, "{again}");
     let matter = MatterId::new(foreign_uuid(9)).unwrap();
     for command in [
         ConnectorCommand::Check {},
@@ -111,10 +110,12 @@ fn the_tool_switches_mirror_the_settings_crate() {
     let settings_patch = clauseo_settings::ToolsPatch {
         web_search: Some(false),
         browser: Some(true),
+        connectors: Some(false),
     };
     let wire_patch = ToolsPatch {
         web_search: Some(false),
         browser: Some(true),
+        connectors: Some(false),
     };
     assert_eq!(
         serde_json::to_value(settings_patch).unwrap(),

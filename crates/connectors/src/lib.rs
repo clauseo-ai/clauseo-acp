@@ -47,7 +47,7 @@ pub use calls::ACCOUNT_MIN_INTERVAL;
 pub use cancel::CancelFlag;
 #[cfg(feature = "test-support")]
 pub use config::ManualClock;
-pub use config::{Clock, Config, Origin, ProxyChoice, SystemClock};
+pub use config::{Clock, Config, Origin, ProxyChoice, ProxyRefused, ProxyResolver, SystemClock};
 #[cfg(feature = "test-support")]
 pub use connectors::ListenerLoad;
 pub use connectors::{ConnectorHandle, Connectors};

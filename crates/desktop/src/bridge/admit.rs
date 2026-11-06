@@ -7,17 +7,21 @@
 //! the privacy switches. Of the updater's four (0037), `main` sends `InstallUpdate`,
 //! `CancelScheduledUpdate` and `CheckForUpdate` (its "Restart to update" row), and the settings
 //! window `SetUpdateMode` and `CheckForUpdate`: settings never installs, main never changes the
-//! mode.
+//! mode. Of the connector commands (R24, `connector_main` and `connector_settings`), `main`
+//! sends only `DismissCaseLawHint` and `RefreshBalance`: it shows agent output, so it never adds
+//! a connector or a key, spends credits, signs out or removes; its hint and banner open Settings
+//! at the connector, whose window sends the rest.
 
-use clauseo_protocol::{FolderRefId, HostCommand, HostError, MatterSource};
+use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
 use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 
 /// Whether the window `label` may send `command`: `main` what `admit_main` admits, the
 /// `settings` window `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`, for its Skills
 /// pane `SetSkillPack` (0040), for its
-/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), and for its
-/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), any other window nothing.
+/// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
+/// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
+/// the connector commands but the hint's (R24), any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -34,10 +38,11 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             // Updates (0037): the mode and "Check now"; installing is the main window's.
             | HostCommand::SetUpdateMode { .. }
             | HostCommand::CheckForUpdate {} => Ok(()),
+            HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
-                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode and \
-                 check_for_update",
+                 set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
+                 check_for_update and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -125,9 +130,44 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         HostCommand::SetSkillPack { .. } => Err(invalid(
             "skill packs are turned on and off from the settings window only",
         )),
-        // R24: the connector commands are not wired in the host yet; which window sends which
-        // (the setup card, Settings, the hint) is ruled on when they are.
-        HostCommand::Connector(_) => Err(invalid("the connector commands are not wired yet")),
+        // R24: the room's hint and the balance only; the rest is the settings window's.
+        HostCommand::Connector(connector) => connector_main(connector),
+    }
+}
+
+/// The connector commands `main` may send (R24, the app review of #470): dismissing the case-law
+/// hint and refreshing the balance. One arm per command and no catch-all, as in `admit_main`.
+fn connector_main(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::DismissCaseLawHint { .. } | ConnectorCommand::RefreshBalance { .. } => {
+            Ok(())
+        }
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. } => Err(invalid(
+            "the main window sends only dismiss_case_law_hint and refresh_balance of the \
+             connector commands; the rest are sent from Settings",
+        )),
+    }
+}
+
+/// The connector commands the settings window's Connectors section may send: all but the
+/// room's hint, which it never shows. One arm per command and no catch-all.
+fn connector_settings(command: &ConnectorCommand) -> Result<(), HostError> {
+    match command {
+        ConnectorCommand::Check {}
+        | ConnectorCommand::Add { .. }
+        | ConnectorCommand::AddApiKey { .. }
+        | ConnectorCommand::AddCredits { .. }
+        | ConnectorCommand::SignOut { .. }
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::RefreshBalance { .. } => Ok(()),
+        ConnectorCommand::DismissCaseLawHint { .. } => Err(invalid(
+            "the case-law hint is dismissed from the main window",
+        )),
     }
 }
 
