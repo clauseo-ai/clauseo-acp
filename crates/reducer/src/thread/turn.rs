@@ -34,7 +34,15 @@ pub(super) fn settled_status(state: &ThreadState) -> ThreadStatus {
     }
 }
 
-pub(super) fn detached(state: &mut ThreadState, reason: &DetachReason, out: &mut Applied) {
+/// The agent's session detached at `ts`. A thread idle-stopped while its next prompt waited
+/// for the agent (the prompt came during the stop, so the thread is `Starting`) stays
+/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`.
+pub(super) fn detached(
+    state: &mut ThreadState,
+    reason: &DetachReason,
+    ts: Timestamp,
+    out: &mut Applied,
+) {
     let status = match reason {
         DetachReason::Exited { .. } | DetachReason::Unknown { .. } => ThreadStatus::AgentExited,
         DetachReason::Closed => ThreadStatus::Idle,
@@ -46,6 +54,12 @@ pub(super) fn detached(state: &mut ThreadState, reason: &DetachReason, out: &mut
     };
     if state.running.is_some() {
         state.after_turn = Some(status);
+        return;
+    }
+    if status == ThreadStatus::IdleStopped && state.status() == ThreadStatus::Starting {
+        update_header(state, "agent_session_detached", out, |h| {
+            h.resuming_since.is_none() && set(&mut h.resuming_since, Some(ts))
+        });
         return;
     }
     match state.status() {
