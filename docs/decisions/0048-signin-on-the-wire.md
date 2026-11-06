@@ -97,6 +97,8 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   `limits`' plan words; desktop turns S18's raw plan string into it. Times are `Timestamp`s. A
   device code is shown to the lawyer, so it is a plain string, not a `Secret`.
 
+A second `FindLogin` replaces the first (`agents` `signin/job.rs`, `Task::supersedes`), and two searches in flight can end in one `SignInChanged`, because compose keeps one waiting flag per agent; the UI reads the latest state, so that is harmless.
+
 Install and sign-in failures carry an `ErrorCode`, never `agents`' own kinds. These enums are
 closed: setup events are never logged, and window and desktop ship together.
 
