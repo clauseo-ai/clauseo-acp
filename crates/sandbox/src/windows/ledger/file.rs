@@ -101,12 +101,32 @@ impl State {
         })
     }
 
+    /// Whether an entry names `sid`: a trusted one whose SID it is, or a kept one holding it as
+    /// any string value at any depth, compared without ASCII case, since a kept entry's shape is
+    /// unknown.
+    pub(super) fn names_sid(&self, sid: &Sid) -> bool {
+        self.slots.iter().any(|slot| match slot {
+            Slot::Known(known) => known.entry.sid == *sid,
+            Slot::SetAside(value) => holds_text(value, sid.as_str()),
+        })
+    }
+
     /// The hand-backs owed this version reads and trusts.
     pub(super) fn owed(&self) -> impl Iterator<Item = &HandbackOwed> {
         self.handbacks.iter().filter_map(|slot| match slot {
             OwedSlot::Known(known) => Some(&known.owed),
             OwedSlot::SetAside(_) => None,
         })
+    }
+}
+
+/// Whether `value` is, or holds at any depth, a string equal to `text` without ASCII case.
+fn holds_text(value: &Value, text: &str) -> bool {
+    match value {
+        Value::String(s) => s.eq_ignore_ascii_case(text),
+        Value::Array(items) => items.iter().any(|item| holds_text(item, text)),
+        Value::Object(map) => map.values().any(|item| holds_text(item, text)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
 }
 

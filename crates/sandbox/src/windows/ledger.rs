@@ -394,6 +394,13 @@ impl Ledger {
         owed::owed_for(&self.state, pool)
     }
 
+    /// Whether any entry names `sid`, in any state, as last read: a trusted entry whose SID it
+    /// is, or a kept one holding it as any string value. The pool-user reuse check (S15 `PR4c`,
+    /// R14) refuses a pool user while this returns true.
+    pub fn names_sid(&self, sid: &Sid) -> bool {
+        self.state.names_sid(sid)
+    }
+
     /// The hand-backs still owed, as last read: each names a matter whose `forget_matter` must
     /// be run again.
     pub fn handbacks_owed(&self) -> Vec<HandbackOwed> {
