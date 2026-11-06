@@ -84,6 +84,9 @@ Developer ID.
   compiled in as `CLAUSEO_RELEASE_DATE` for `release` and `test` builds only; `build.rs` fails on a
   malformed value, and `display_info` returns it as `release_date`, `null` in dev, CI and dry-run
   builds.
+- **The test build** is `display_info`'s `test_build`, true exactly in a build with the `e2e`
+  feature (`test-v*` pre-releases ship with it, publicly). The rail's foot and Settings' About then
+  show a muted "Test build" label; the window title does not change.
 - **`latest.json`** is `{ version, notes, pub_date, platforms }`, with `darwin-aarch64-app`,
   `darwin-x86_64-app`, `windows-x86_64-nsis` and `windows-aarch64-nsis`; each Windows entry is
   repeated under plain `windows-<arch>`, since an exe bundled with `--no-binary-patching` carries no

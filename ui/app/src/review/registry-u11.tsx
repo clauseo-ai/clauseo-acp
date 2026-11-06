@@ -1,6 +1,7 @@
 // U11's copy review entries (the settings window), apart from registry.tsx to keep that file under the size limit:
 // each string in the real window (settings-app.tsx) over FakeTransport, at the window's own size, open at the section
 // that shows it. The locked row's note shows with the theme locked by a firm's policy.
+import { TestBuildTag } from "@clauseo/components/clauseo/test-build.tsx";
 import type { SectionId } from "../settings/sections.tsx";
 import type { Entry } from "./entry.ts";
 import { SettingsOver } from "./states-settings.tsx";
@@ -65,5 +66,10 @@ export const U11: Entry[] = [
   {
     ...entry("U11-50", settingsWords("Released {date}"), "about"),
     render: (lang) => <SettingsOver section="about" lang={lang} releaseDate={RELEASE_DATE_SHOWN} />,
+  },
+  // the Test build label, beside About's version in a test build (and at the rail's foot): shown as its own tag
+  {
+    ...entry("U11-51", uiWords("Test build"), "about"),
+    render: (lang) => <TestBuildTag lang={lang} />,
   },
 ];

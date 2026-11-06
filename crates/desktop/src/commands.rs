@@ -96,6 +96,9 @@ pub(crate) struct DisplayInfo {
     pub(crate) platform: Platform,
     /// The date of this release (`YYYY-MM-DD`, UTC), from its tag; `None` in dev and CI builds.
     pub(crate) release_date: Option<&'static str>,
+    /// Whether this is a test build: an `e2e` build, which `test-v*` pre-releases ship with
+    /// and anyone can install.
+    pub(crate) test_build: bool,
 }
 
 /// Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
@@ -219,13 +222,14 @@ pub(crate) async fn pick_folder<R: Runtime>(
     bridge.pick_folder(&picker, home.as_deref()).await
 }
 
-/// The OS the host runs on, and this build's release date.
+/// The OS the host runs on, this build's release date, and whether it is a test build.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<DisplayInfo, HostError> {
     Ok(DisplayInfo {
         platform: Platform::CURRENT,
         release_date: RELEASE_DATE,
+        test_build: cfg!(feature = "e2e"),
     })
 }
 

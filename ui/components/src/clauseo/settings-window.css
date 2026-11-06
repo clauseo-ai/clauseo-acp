@@ -262,6 +262,10 @@
   .set-lockup {
     width: var(--size-search);
   }
+  /* a test build's label beside the version: the tag's own look (shell.css, .test-build), in line with the version */
+  .set-about .test-build {
+    margin-inline: var(--s2) 0;
+  }
 
   /* the window is the viewport: its side of sections stands at its own 960 px and down to where side and pane still
      fit in Hindi at text size 20 (breakpoint-side); narrower, the sections make a row over the pane */

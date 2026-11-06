@@ -3,7 +3,7 @@ import { guessPlatform } from "../platform.ts";
 import { PLATFORMS } from "./options.ts";
 
 /** The first look from the page's query: theme=night, lang=hi, lite=1, motion=reduced, platform=windows|linux|mac,
- * size=18. Without a platform, the computer's own. */
+ * size=18. Without a platform, the computer's own; no test build. */
 export function displayFromQuery(search: string): Display {
   const q = new URLSearchParams(search);
   const size = Number(q.get("size"));
@@ -14,5 +14,6 @@ export function displayFromQuery(search: string): Display {
     motion: q.get("motion") === "reduced" ? "reduced" : "full",
     platform: PLATFORMS.find((p) => p.value === q.get("platform"))?.value ?? guessPlatform(),
     textSize: TEXT_SIZES.find((s) => s === size) ?? DEFAULT_DISPLAY.textSize,
+    testBuild: DEFAULT_DISPLAY.testBuild,
   };
 }

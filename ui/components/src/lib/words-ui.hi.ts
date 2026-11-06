@@ -23,6 +23,8 @@ export const HI = {
   // settings, in sections
   Settings: "सेटिंग्स",
   Matters: "मामले",
+  // a build with the e2e feature, at the rail's foot and in Settings' About
+  "Test build": "टेस्ट बिल्ड",
   // lite, in settings: until the host reports remote desktops, On and Off only
   "Lite mode": "सादा मोड",
   "Takes away every shadow and all motion.": "सभी छायाएँ और सारी हलचल हटा देता है।",

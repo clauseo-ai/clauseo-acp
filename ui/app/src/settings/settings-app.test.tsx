@@ -66,9 +66,14 @@ const HOST: Settings = {
 };
 
 /** A transport whose host has H7's settings, answering get_settings with `settings`, and reports `releaseDate`. */
-const withHost = (settings: Settings = HOST, releaseDate: string | null = null) =>
+const withHost = (
+  settings: Settings = HOST,
+  releaseDate: string | null = null,
+  testBuild = false,
+) =>
   new FakeTransport({
     releaseDate,
+    testBuild,
     next: {
       query: (query) => {
         if (query === "get_settings") return { settings };
@@ -376,6 +381,29 @@ test("About shows no release line for a date that isn't YYYY-MM-DD", async () =>
   history.replaceState(null, "", "/settings.html#about");
   const { el } = await mount(new FakeTransport({ releaseDate: "3 November 2026" }));
   expect(el.querySelector('[data-testid="settings-release-date"]')).toBeNull();
+});
+
+test("About's version line carries the Test build label in a test build, and no label in a release build", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const { el } = await mount(new FakeTransport({ testBuild: true }));
+  const version = el.querySelector('[data-testid="settings-version"]');
+  expect(version?.querySelector('[data-testid="test-build"]')?.textContent).toBe("Test build");
+  expect(version?.textContent).toBe("Version 9.8.7Test build");
+  // a release build (the default) shows no label
+  await act(async () => root?.unmount());
+  host?.remove();
+  const plain = await mount(new FakeTransport());
+  expect(plain.el.querySelector('[data-testid="test-build"]')).toBeNull();
+  expect(plain.el.querySelector('[data-testid="settings-version"]')?.textContent).toBe(
+    "Version 9.8.7",
+  );
+});
+
+test("the Test build label reads in Hindi when the language is Hindi", async () => {
+  history.replaceState(null, "", "/settings.html#about");
+  const hi = { ...HOST, ui: { ...HOST.ui, language: "hi" as const } };
+  const { el } = await mount(withHost(hi, null, true));
+  expect(el.querySelector('[data-testid="test-build"]')?.textContent).toBe("टेस्ट बिल्ड");
 });
 
 test("off the Mac the title bar's caption buttons work the window; on the Mac there are none", async () => {
