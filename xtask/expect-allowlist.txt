@@ -249,6 +249,7 @@ crates/settings/src/policy/macos/tests.rs UserDomain::drop clippy::disallowed_me
 crates/settings/src/system/windows.rs - unsafe_code
 crates/settings/src/policy/macos.rs items unsafe_code
 crates/settings/src/policy/macos.rs entries unsafe_code
+crates/settings/src/system/tests.rs windows_without_documents clippy::disallowed_methods
 # Host's re-check of #450: reruns its own test binary with USER=nobody to show the managed file
 # follows the real user id.
 crates/settings/src/effective/policy_gaps_tests.rs the_login_user_comes_from_the_real_user_id_not_user clippy::disallowed_methods
