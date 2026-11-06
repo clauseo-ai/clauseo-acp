@@ -28,6 +28,7 @@ import { UTC } from "./registry-utc.tsx";
 import { WEB_SOURCES } from "./registry-web-sources.tsx";
 import { UET } from "./registry-uet.tsx";
 import { UD1 } from "./registry-ud1.tsx";
+import { UD2_PLANS } from "./registry-ud2-plans.tsx";
 import {
   MATTER,
   NEW_MATTER,
@@ -376,6 +377,7 @@ export const REGISTRY: readonly Entry[] = [
   ...UET,
   ...ME,
   ...UD1,
+  ...UD2_PLANS,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

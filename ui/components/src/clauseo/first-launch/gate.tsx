@@ -15,7 +15,7 @@ import { Say } from "../say.tsx";
 import { WRAP } from "./classes.ts";
 import { Failed } from "./gate-failed.tsx";
 import { Act, Note, PasteRow, Ways } from "./parts.tsx";
-import { NAME, other } from "./plan-names.ts";
+import { APP, FOUND, NAME, other } from "./plan-names.ts";
 
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
 export type Found =
@@ -73,22 +73,6 @@ export type GateTestIds = {
   loginFound?: string;
   loginUse?: string;
   loginOther?: string;
-};
-
-const APP: Record<Plan, string> = { claude: "Claude Code", chatgpt: "Codex" };
-
-/** The line for a login that can't be shared, or reuse that stopped. */
-const FOUND: Record<Found, FirstLaunchKey> = {
-  claude_settings:
-    "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.",
-  codex_keyring: "Codex on this computer keeps its sign-in where Clauseo can't share it.",
-  claude_windows_sandbox:
-    "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
-  reused_signed_out: "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
-  reused_changed:
-    "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",
-  codex_link_split: "Codex's sign-in on this computer changed, so Clauseo stopped using it.",
-  reused_failed: "{app}'s sign-in stopped working here, so Clauseo stopped using it.",
 };
 
 /** The gate, in the field's row, for every state before the field takes a question. */

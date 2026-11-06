@@ -25,3 +25,30 @@ export function PressWords({ words, children }: { words: string; children: React
   }, [words]);
   return <div ref={box}>{children}</div>;
 }
+
+/** Presses each control in order (CSS selectors, a dialog's included, in its portal), each once it is on the page
+ * (UD2's Plans: a confirm, then its act). */
+export function PressInOrder({
+  press,
+  children,
+}: {
+  press: readonly string[];
+  children: ReactNode;
+}) {
+  const done = useRef(0);
+  useEffect(() => {
+    const take = () => {
+      const selector = press[done.current];
+      if (selector === undefined) return;
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el === null) return;
+      done.current += 1;
+      el.click();
+    };
+    const watch = new MutationObserver(take);
+    watch.observe(document.body, { subtree: true, childList: true });
+    take();
+    return () => watch.disconnect();
+  }, [press]);
+  return children;
+}

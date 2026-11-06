@@ -6,7 +6,22 @@ import { nextHostOf } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type { ConnectorsState, LimitsView, ToolsSettingsView } from "../transport/protocol.ts";
+import type {
+  ConnectorsState,
+  LimitsView,
+  SettingsView,
+  SetupCommand,
+  SetupEvent,
+  ToolsSettingsView,
+} from "../transport/protocol.ts";
+
+/** The setup wire a cell's host carries (UD2's Plans): the events its feed starts with, after SetupInfo, and what
+ * each command plays back, as desktop would answer it. */
+export type CellSetup = {
+  first: SetupEvent[];
+  keys?: boolean;
+  answer?: (command: SetupCommand) => SetupEvent[];
+};
 
 /** The window over a host holding the default settings in `lang`, with `locked` locked, and with `limits` the plan's
  * limits its channel carries (U12); the display stays the frame's own (the review sets it per cell), so the store
@@ -19,6 +34,8 @@ export function SettingsOver({
   releaseDate = null,
   tools,
   connectors,
+  setup,
+  plans,
 }: {
   section: SectionId;
   lang: Lang;
@@ -29,6 +46,10 @@ export function SettingsOver({
   tools?: ToolsSettingsView;
   /** The connectors' state the app feed's catch-up carries (U15); none when left out. */
   connectors?: ConnectorsState;
+  /** The setup wire (UD2's Plans); none when left out, and Plans doesn't show. */
+  setup?: CellSetup;
+  /** Each agent's firm plan the host sends (SettingsView.plans). */
+  plans?: SettingsView["plans"];
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -41,12 +62,26 @@ export function SettingsOver({
                 ui: { ...DEFAULT_UI, language: lang },
                 locked,
                 ...(tools === undefined ? {} : { tools }),
+                ...(plans === undefined ? {} : { plans }),
               },
             };
           throw new Error("not scripted");
         },
         first: () => (connectors === undefined ? [] : [{ connectors_changed: connectors }]),
       },
+      ...(setup === undefined
+        ? {}
+        : {
+            setup: {
+              first: () => [{ setup_info: { keys_available: setup.keys ?? true } }, ...setup.first],
+              command: (command: SetupCommand) => {
+                const events = setup.answer?.(command) ?? [];
+                queueMicrotask(() => {
+                  for (const event of events) transport.setupEvent(event);
+                });
+              },
+            },
+          }),
     });
     if (limits !== undefined) transport.limitsChanged(limits);
     const store = createDisplayStore({

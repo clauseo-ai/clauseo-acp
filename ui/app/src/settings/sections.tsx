@@ -7,6 +7,7 @@ import type { IconProps } from "@clauseo/components/icons/icon.tsx";
 import {
   IconAbout,
   IconAppearance,
+  IconConversation,
   IconLanguage,
   IconPlanLimit,
   IconSearch,
@@ -33,6 +34,8 @@ import { Language } from "./sections/language.tsx";
 import { Privacy } from "./sections/privacy.tsx";
 import { Usage } from "./sections/usage.tsx";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
+import { PlansSection } from "./sections/plans-load.tsx";
+import { carriesSetup } from "./sections/plans-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
 import { usageNote } from "./sections/usage-note.ts";
 
@@ -94,6 +97,16 @@ export type SectionEntry = {
 
 /** The sections built so far, in SECTION_ORDER's order. */
 export const SECTIONS: readonly SectionEntry[] = [
+  {
+    // first, as the design has it, so the window opens on Plans; no side note, so the setup store stays out of the
+    // first load. Only where the transport carries the setup wire (UD2)
+    id: "plans",
+    name: "Plans",
+    icon: IconConversation,
+    lead: "The plans Clauseo works with. Each signs in through its own page in your browser.",
+    shown: (ctx) => carriesSetup(ctx.transport),
+    Body: PlansSection,
+  },
   {
     id: "usage",
     name: "Plan and usage",
