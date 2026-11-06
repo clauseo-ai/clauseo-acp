@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, TcpListener};
 use std::time::Duration;
 
 use clauseo_agents::testing::write_file;
-use clauseo_agents::{Agents, Method, SigninCode, SigninState, Source, is_sign_in_again};
+use clauseo_agents::{Agents, Found, Method, SigninCode, SigninState, Source, is_sign_in_again};
 
 use crate::support::{Events, Fixture, POLL, REMOTE_HINTS, Seen, codex, eventually, now};
 
@@ -335,7 +335,10 @@ fn codex_sign_out_runs_logout_then_status() {
     assert_eq!(logouts.len(), 1);
     assert_eq!(logouts[0].args[1..3], STORE);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none);
 }
 
 #[test]

@@ -1752,7 +1752,7 @@ export type FolderSupportKind =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
-/**  A login seen but not reusable, or why reuse stopped: [`SignIn::SignedOut`]'s `found`. */
+/**  What the search for a login saw, or why reuse stopped: [`SignIn::SignedOut`]'s `found`. */
 export type FoundLogin = 
 /**  A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one). */
 "claude_settings" | 
@@ -1767,7 +1767,14 @@ export type FoundLogin =
 /**  Reuse stopped: the agent's own CLI is signed in to another account. */
 "reused_changed" | 
 /**  Reuse stopped: Codex's shared login file was replaced, so it is no longer shared. */
-"codex_link_split";
+"codex_link_split" | 
+/**  The search for a login ran and found none of the lawyer's on this computer. */
+"none_found" | 
+/**
+ *  Reuse is off here ("Sign in with a different account", or "Stop using it here"), so
+ *  nothing was looked for; [`SetupCommand::FindLogin`] turns it back on.
+ */
+"reuse_off";
 
 /**  One piece of an event's JSON text. */
 export type Fragment = {
@@ -4319,7 +4326,12 @@ export type SetupCommand =
 	/**  The agent. */
 	agent: AgentId,
 } }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
-/**  Look again for a login the lawyer already has. */
+/**
+ *  Look again for a login the lawyer already has, turning reuse back on. Its end is one
+ *  `SignInChanged`, sent even when the state is unchanged: `LoginFound`, `SignedOut` with
+ *  `found` (`none_found` for nothing), `SignedIn`, or `Failed` (`signin.failed`) when
+ *  the search could not tell.
+ */
 ({ find_login: {
 	/**  The agent. */
 	agent: AgentId,
@@ -4384,7 +4396,11 @@ export type SetupMessage = {
 export type SignIn = 
 /**  Not signed in. */
 ({ signed_out: {
-	/**  A login seen but not reusable, or why reuse stopped; missing when neither. */
+	/**
+	 *  What the search for a login saw (a login not reusable, none, or reuse off), or why
+	 *  reuse stopped; missing when nothing was looked for (the agent not installed, a key
+	 *  or an endpoint that took over, a sign-out).
+	 */
 	found?: FoundLogin,
 } }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; switching?: never; waiting?: never } | 
 /**

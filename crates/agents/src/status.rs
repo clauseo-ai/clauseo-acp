@@ -73,10 +73,10 @@ pub(crate) fn parse_claude_status(stdout: &str) -> Option<ClaudeStatus> {
 pub(crate) fn claude_detection(exit: Option<i32>, status: Option<&ClaudeStatus>) -> SigninState {
     let signed_out = |found| SigninState::SignedOut { found };
     let Some(status) = status.filter(|status| exit == Some(0) && status.logged_in) else {
-        return signed_out(None);
+        return signed_out(Some(Found::NoLogin));
     };
     match status.auth_method.as_deref() {
-        None | Some(NONE) => signed_out(None),
+        None | Some(NONE) => signed_out(Some(Found::NoLogin)),
         Some(CLAUDE_AI) if first_party(status) => SigninState::LoginFound {
             from: LoginFrom::ClaudeCode,
             email: status.email.clone(),
@@ -143,7 +143,9 @@ impl CodexDetect {
     /// `account/read`), `SignedOut { found: CodexKeyring }` for a keyring one, else `SignedOut`.
     pub(crate) fn state(self, email: Option<String>) -> SigninState {
         match self {
-            CodexDetect::SignedOut => SigninState::SignedOut { found: None },
+            CodexDetect::SignedOut => SigninState::SignedOut {
+                found: Some(Found::NoLogin),
+            },
             CodexDetect::Reusable => SigninState::LoginFound {
                 from: LoginFrom::Codex,
                 email,

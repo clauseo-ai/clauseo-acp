@@ -361,6 +361,24 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SignInChanged {
                 agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::NoneFound),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"none_found"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::ReuseOff),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"reuse_off"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
                 state: SignIn::Failed {
                     code: ErrorCode::SigninLinkExpired,
                     at: at(9),

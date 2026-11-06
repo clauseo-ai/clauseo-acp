@@ -361,7 +361,7 @@ to the other.
 
 **The calls.** Four, each a job on the model above:
 - `find_login(agent)`: UD2's "Look for my … login". It deletes `no-reuse`, then runs the status
-  check.
+  check; a check that cannot tell ends it `signin.failed`, so the lawyer always gets an answer.
 - `use_found_login(agent)`: the lawyer's "Use it". It is refused with `NothingFound` unless the
   state is `LoginFound`.
 - `use_different_account(agent)`: "Sign in with a different account". It writes `no-reuse`,
@@ -397,7 +397,8 @@ at start and when a window shows Plans. It runs:
      `account/read` under the home. `Split` gives `CodexLinkSplit`, `Gone` gives
      `ReusedSignedOut`.
 2. Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
-3. With `no-reuse` there, `SignedOut`. Otherwise detection.
+3. With `no-reuse` there, `SignedOut { found: ReuseOff }`. Otherwise detection, whose
+   "nothing" is `SignedOut { found: NoLogin }` (UD2).
 
 A run that cannot tell leaves the state unchanged. The job creates the agent's home before
 any run. Without it, a status check before the first sign-in could not start, since every run
@@ -460,9 +461,11 @@ ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin
   starts the login, whose guard runs as for any login.
 
 **Reuse stops** (`found::stop`) with no logout:
-- no reason: `no-reuse` is written;
+- no reason (`NoLogin` and `ReuseOff` count as none, `Found::is_stop_reason`): `no-reuse` is
+  written;
 - for Codex, a reused home's login file name is removed (`unlink_reused_login`);
-- then `login-source` is deleted, and the state is `SignedOut { found: why }`.
+- then `login-source` is deleted, and the state is `SignedOut { found: why }`, or
+  `SignedOut { found: ReuseOff }` with no reason.
 
 A marker write that fails gives `signin.failed`, since the next start could otherwise reuse
 again without asking. The status check uses the same steps when it finds reuse has ended. So the
@@ -470,7 +473,7 @@ next start shows `LoginFound` again, and nothing re-links on its own.
 
 **The run-time fallback.** Claude's status can say signed out under the session's environment
 while detection says signed in. Then the `claude_reuse_fallback` note goes out, and reuse stops
-with no reason: `no-reuse`, `SignedOut`. This happens on "Use it" or at a later start. A Claude
+with no reason: `no-reuse`, `SignedOut { found: ReuseOff }`. This happens on "Use it" or at a later start. A Claude
 Code that ignores the variable would loop through "Use it" otherwise. "Look for my Claude Code
 login" offers it again.
 

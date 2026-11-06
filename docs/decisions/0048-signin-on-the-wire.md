@@ -45,7 +45,7 @@ form: external tagging, snake case, unknown fields and unknown commands refused.
 | `UseFoundLogin` | "Use it": reuses the login `LoginFound` showed; refused in any other state |
 | `UseDifferentAccount` | leaves the found or reused login and signs in |
 | `StopUsingLogin` | "Stop using it here": stops reuse, never a logout |
-| `FindLogin` | looks again for a login the lawyer already has |
+| `FindLogin` | looks again for a login the lawyer already has; ends in one `SignInChanged`, sent even when unchanged (`Failed { signin.failed }` when the search cannot tell) |
 | `SetAgentKey { key: Secret }` | stores the key in the OS keychain |
 | `ClearAgentKey` | removes it |
 | `SetFirmEndpoint { url }` | native confirm, then `plans.<id>.endpoint` set or cleared (`url` missing or `null`) |
@@ -90,7 +90,8 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
   is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
-  `reused_changed`, `codex_link_split`); `from` is a `LoginFrom` (`claude_code`, `codex`);
+  `reused_changed`, `codex_link_split`, then UD2's `none_found`: the search ran and found no
+  login, and `reuse_off`: S18's `no-reuse` is there, so nothing was looked for); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
   the lawyer's own CLI login, or `own`, Clauseo's). `plan` is a `PlanLabel` in words, from
   `limits`' plan words; desktop turns S18's raw plan string into it. Times are `Timestamp`s. A

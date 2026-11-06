@@ -408,6 +408,16 @@ const FOUND: [FoundLogin, string][] = [
   ["reused_failed", "Claude Code's sign-in stopped working here, so Clauseo stopped using it."],
 ];
 
+test.each<FoundLogin>(["none_found", "reuse_off"])(
+  "plan (%s): no login found and reuse off are the plain plan screen, with no found line",
+  async (found) => {
+    const t = await at({ signed_out: { found } });
+    for (const [, line] of FOUND) expect(text()).not.toContain(line);
+    await press("Sign in");
+    expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  },
+);
+
 test.each(FOUND)(
   "plan-found (%s): its line, Sign in sending StartSignIn, and the key or firm's account for Claude",
   async (found, line) => {
