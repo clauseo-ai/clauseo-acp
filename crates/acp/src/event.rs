@@ -55,6 +55,10 @@ pub enum AcpEvent {
         /// The agent's `elicitationId`, which URL elicitations carry and
         /// [`AcpEvent::ElicitationCompleted`] names again; `None` for a form.
         elicitation_id: Option<CompactString>,
+        /// The scope's `toolCallId`: the agent's tool call the elicitation belongs to, when it
+        /// names one. In-memory only: the host scopes the withheld values to that call
+        /// (0002, `elicitation_resolved`); it is not logged.
+        acp_tool_call_id: Option<CompactString>,
         /// The form or the URL.
         request: ElicitationRequest,
     },

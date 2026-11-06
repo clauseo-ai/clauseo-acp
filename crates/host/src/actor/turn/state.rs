@@ -83,6 +83,7 @@ impl Current {
             limit_read: None,
             started,
             first_words: None,
+            withheld: super::withheld::Withheld::default(),
         }
     }
 

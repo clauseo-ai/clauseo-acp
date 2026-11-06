@@ -165,7 +165,7 @@ pub(super) fn answer_elicitation(
             format!("elicitation {elicitation} is not pending"),
         )
     };
-    {
+    let form = {
         let request = actor
             .loaded(StreamId::Thread(thread))
             .and_then(|loaded| loaded.sent.elicitation(elicitation))
@@ -179,7 +179,8 @@ pub(super) fn answer_elicitation(
                 "the values do not match the form's schema",
             ));
         }
-    }
+        matches!(request, ElicitationRequest::Form { .. })
+    };
     let agent = state(actor, thread)
         .and_then(|state| state.agent.as_deref_mut())
         .ok_or_else(not_pending)?;
@@ -191,13 +192,26 @@ pub(super) fn answer_elicitation(
         // Only an accepted URL elicitation goes on in the browser.
         agent.url_elicitations.retain(|_, id| *id != elicitation);
     }
+    let agent = agent.id;
+    // An accepted form's strings are withheld from the tool output that follows (0002,
+    // `elicitation_resolved`), before the agent can echo them.
+    if let Some(current) = current(actor, thread) {
+        match &response {
+            ElicitationResponse::Accept { values } if form => {
+                current.withheld.accepted(elicitation, values);
+            }
+            ElicitationResponse::Accept { .. }
+            | ElicitationResponse::Decline
+            | ElicitationResponse::Cancel => current.withheld.forget(elicitation),
+        }
+    }
     let outcome = match &response {
         ElicitationResponse::Accept { .. } => ElicitationOutcome::Accepted,
         ElicitationResponse::Decline => ElicitationOutcome::Declined,
         ElicitationResponse::Cancel => ElicitationOutcome::Cancelled,
     };
     let then = Then::Elicitation {
-        agent: agent.id,
+        agent,
         key,
         response,
     };
