@@ -63,11 +63,15 @@ impl<V: Volume> Volume for Stopping<V> {
         self.inner.owner(path)
     }
 
-    fn own(&self, path: &Path) -> io::Result<()> {
+    fn pool(&self) -> io::Result<Vec<String>> {
+        self.inner.pool()
+    }
+
+    fn own(&self, path: &Path, pool: &[String]) -> io::Result<()> {
         if matches!(self.stop, Stop::CrashAtOwn) {
             panic!("the process dies during the hand-back");
         }
-        self.inner.own(path)
+        self.inner.own(path, pool)
     }
 
     fn move_into(

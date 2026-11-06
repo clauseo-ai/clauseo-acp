@@ -377,19 +377,21 @@ fn open_planned(path: &Path) -> Result<Option<Object>, ApplyFailure> {
 }
 
 /// `path`'s whole tree handed to this process's user, as forget hands back a pool user's
-/// items: the item itself when any other user owns it ([`AclWriter::hand_back`]), then every
-/// item below it any other user owns, whoever owns the top (the owner pass,
-/// [`AclWriter::hand_back_tree`] with no pool named: through each folder's handle, never
-/// following a link). Each one handed back is worked out again from its folder. For the
-/// set-aside's moves and `restore_set_aside`, so what the agent made is the lawyer's wherever it
-/// goes, even inside a lawyer's folder it renamed to `.git` (S15 `PR4a2`).
-pub(crate) fn own(path: &Path) -> io::Result<()> {
-    let owner = owner(path)?;
-    let mut acl = NtfsAcl::new()?;
-    if owner != current_user_sid()? {
-        acl.hand_back(path, &[owner]).map_err(io::Error::from)?;
+/// items: the item itself when one of `pool` owns it ([`AclWriter::hand_back`]), then every
+/// item below it one of `pool` owns, whoever owns the top (the owner pass,
+/// [`AclWriter::hand_back_tree`]: through each folder's handle, never following a link). Each
+/// one handed back is worked out again from its folder. For the set-aside's moves and
+/// `restore_set_aside`, so what the agent made is the lawyer's wherever it goes, even inside a
+/// lawyer's folder it renamed to `.git` (S15 `PR4a2`). `pool` is the machine record's
+/// (`sandbox_pool_sids`): what anyone else owns, a colleague's file the agent hard-linked in or
+/// one `Administrators` owns, keeps its owner and DACL. An empty `pool` hands nothing over.
+pub(crate) fn own(path: &Path, pool: &[Sid]) -> io::Result<()> {
+    if pool.is_empty() {
+        return Ok(());
     }
-    acl.hand_back_tree(path, &[])
+    let mut acl = NtfsAcl::new()?;
+    acl.hand_back(path, pool).map_err(io::Error::from)?;
+    acl.hand_back_tree(path, pool)
         .map(drop)
         .map_err(io::Error::from)
 }

@@ -241,7 +241,9 @@ pub(super) fn walks(
 ///   leaves it pending.
 /// - On a full walk (`own`), every protected tree.
 /// - On a targeted one, each touched folder (`extra`) inside a protected tree: a file the lawyer
-///   moved into `.claude\commands` or `.git\hooks` between sessions.
+///   moved into `.claude\commands` or `.git\hooks` between sessions; and each protected tree
+///   inside a touched tree, or directly in a touched folder: a folder moved in that holds a
+///   `.claude` already denied.
 ///
 /// A skipped launch has none: nothing in the trees changed since a clean close, and no pool user
 /// can add a child below a deny.
@@ -269,11 +271,26 @@ pub(super) fn owner_passes(
         .filter(|(i, g)| is_tree(g) && (own || unwalked(*i)))
         .map(|(_, g)| g.path().to_owned())
         .collect();
-    let touched = extra.iter().map(|walk| &walk.root);
     roots.extend(
-        touched
+        extra
+            .iter()
+            .map(|walk| &walk.root)
             .filter(|root| trees.iter().any(|tree| in_folder(root, tree)))
             .cloned(),
+    );
+    // A touched tree holds every protected tree inside it; a touched folder's children only
+    // those directly in it (the parent is the folder: each in the other).
+    let reaches = |tree: &Path, walk: &Walk| match walk.reach {
+        Reach::Tree => in_folder(tree, &walk.root),
+        Reach::Children | Reach::FilesOnly => tree
+            .parent()
+            .is_some_and(|p| in_folder(p, &walk.root) && in_folder(&walk.root, p)),
+    };
+    roots.extend(
+        trees
+            .iter()
+            .filter(|tree| extra.iter().any(|walk| reaches(tree, walk)))
+            .map(|tree| tree.to_path_buf()),
     );
     roots.sort();
     roots.dedup();

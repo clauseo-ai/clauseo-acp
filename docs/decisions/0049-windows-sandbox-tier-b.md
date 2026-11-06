@@ -217,8 +217,10 @@ build 26100):
     same way, by an owner pass (`AclWriter::hand_back_tree`: each owner read through its
     folder's handle, never following a link, only a pool user's item written): over each
     protected tree whose deny the launch writes or finds still pending (a crash between the deny
-    and its pass), over every protected tree on a full walk, and over each touched folder inside
-    one on a targeted walk (a file the lawyer moved into `.claude\commands` or `.git\hooks`).
+    and its pass), over every protected tree on a full walk, and on a targeted walk over each
+    touched folder inside one (a file the lawyer moved into `.claude\commands` or `.git\hooks`)
+    and each protected tree inside a touched tree or directly in a touched folder (a folder
+    moved in that holds a `.claude` already denied).
     A skipped launch needs none: nothing changed, and no pool user can add a child below a deny.
     Nothing is recorded for it: the lawyer owning it is where forget leaves it too.
     `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
@@ -367,11 +369,16 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   even where the lawyer protected it on purpose; the lawyer's own explicit entries are kept
   (accepted).
 - **An item set aside keeps its own permissions**, so an agent they grant could still open it by
-  its full path under the data folder. Since S15 PR4a2 an item another user owns (the agent's)
+  its full path under the data folder. Since S15 PR4a2 an item a pool user owns (the agent's)
   is handed to the desktop user once it is moved and listed, as forget hands back a pool user's
   items, and is worked out again from the set-aside folder, so the entries it inherited in the
-  matter go; its manifest entry keeps the owner it had. A lawyer's own item keeps its
-  permissions as they were. A hand-back that fails is logged and leaves the item set aside.
+  matter go; its manifest entry keeps the owner it had. Only owners in the machine record's
+  `PoolSids` count: an item anyone else owns (a colleague's file, or `Administrators'`, which
+  the agent can hard-link into an item to be set aside) keeps its owner and permissions, and a
+  file with another name is touched only when a pool user owns it. With the record unreadable
+  or empty nothing is handed over and that is logged; the item stays listed, and PR4c's reuse
+  hold keeps its owner from serving another matter. A lawyer's own item keeps its permissions
+  as they were. A hand-back that fails is logged and leaves the item set aside.
 
 ### Accepted risk: two hijacked agents at once
 

@@ -333,3 +333,34 @@ fn a_pool_owned_file_moved_into_a_denied_folder_is_handed_back_on_a_targeted_lau
     assert_eq!(l.acl.owners[&moved], super::fake::LAWYER);
     assert_eq!(l.acl.handed_trees, [commands]);
 }
+
+/// S15 `PR4a2` review: a folder the lawyer moved in between sessions that holds a `.claude`
+/// already denied: the targeted launch touches the folder, which lies in no protected tree, and
+/// the owner pass still goes over the protected tree inside it, handing the pool user's file in
+/// it to the lawyer.
+#[test]
+fn a_moved_in_folder_holding_a_denied_claude_gets_its_owner_pass_on_a_targeted_launch() {
+    let mut l = Launched::with("checked-owners-moved-in", &["a/.claude/settings.json"]);
+    assert_eq!(
+        nested_deny(&l, "a/.claude"),
+        (Some(EntryState::Applied), true)
+    );
+    let claude = l.roots[0].join("a/.claude");
+    let agent = l.w.dir.file("matter/a/.claude/agent.md", "the agent's\n");
+    let agent = dunce::canonicalize(agent).unwrap();
+    l.acl.owners.insert(agent.clone(), USER_SID.to_owned());
+    // Folder `a` (ID 101) arrives in the matter (ID 100).
+    l.journal.change(101, 100, CREATE, true);
+    l.acl.handed_trees.clear();
+    let check = l.check();
+    // The matter's children and folder `a`'s tree.
+    assert_eq!(check.path(), LaunchPath::Targeted(2));
+    l.apply(&check).unwrap();
+    assert_eq!(l.acl.owners[&agent], super::fake::LAWYER);
+    // The matter's own protected children get it too, as its children changed.
+    assert!(
+        l.acl.handed_trees.contains(&claude),
+        "{:?}",
+        l.acl.handed_trees
+    );
+}

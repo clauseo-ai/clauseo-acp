@@ -17,6 +17,8 @@ mod fast;
 mod links;
 mod nested;
 #[cfg(unix)]
+mod pool;
+#[cfg(unix)]
 mod posix;
 #[cfg(unix)]
 mod round4;

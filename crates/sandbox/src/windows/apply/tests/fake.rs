@@ -265,8 +265,7 @@ impl AclWriter for FakeAcl {
         );
         self.handed_trees.push(root.to_owned());
         for (path, owner) in &mut self.owners {
-            let handed =
-                pool.iter().any(|p| p.as_str() == owner) || (pool.is_empty() && owner != LAWYER);
+            let handed = pool.iter().any(|p| p.as_str() == owner);
             if path != root && path.starts_with(root) && handed {
                 LAWYER.clone_into(owner);
             }
