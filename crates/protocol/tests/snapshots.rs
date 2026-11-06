@@ -347,6 +347,20 @@ mod view_entry {
         insta::assert_json_snapshot!("header_with_agent_name", entry);
         round_trips(&entry);
     }
+
+    /// A header whose thread is resuming after an idle stop: the field set, as the reducer sets
+    /// it from the `UserMessage` that moved the status to `Starting`. Its own snapshot.
+    #[test]
+    fn header_resuming() {
+        let header = HeaderEntry {
+            status: ThreadStatus::Starting,
+            resuming_since: Some(Timestamp::new(1_760_000_000_000).unwrap()),
+            ..entries::header_entry()
+        };
+        let entry = ViewEntry::Header(Box::new(header));
+        insta::assert_json_snapshot!("header_resuming", entry);
+        round_trips(&entry);
+    }
 }
 
 mod host_event {

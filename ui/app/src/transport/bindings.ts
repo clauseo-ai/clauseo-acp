@@ -1846,6 +1846,14 @@ export type HeaderEntry = {
 	/**  Where it stands. */
 	status: ThreadStatus,
 	/**
+	 *  When the thread began a turn to resume after an idle stop: the `ts` of the `UserMessage`
+	 *  that set `Starting` from `IdleStopped`. Set by the reducer only, from the folded events,
+	 *  never from a clock. Cleared when the status leaves `Starting` (the turn started, ended,
+	 *  failed, or the thread was archived or detached) and by the next `AgentSessionAttached`.
+	 *  Missing reads as `None`, so a header written before the field still decodes.
+	 */
+	resuming_since?: Timestamp,
+	/**
 	 *  Whether the thread's queue is held: its queued turns wait for `ResumeQueue`. Filled by
 	 *  the host; also true after a restart, when every turn that never started comes back held.
 	 *  Missing reads as `false`, so a header written before the field still decodes.

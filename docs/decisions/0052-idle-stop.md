@@ -63,6 +63,11 @@ depends on `agents` (ruling 27), so the stop belongs in `host`.
   If a turn is running, it becomes the status after the turn (`after_turn`). The next
   `AgentSessionAttached` changes `IdleStopped` back to the settled status and drops a stop
   waiting for a turn's end. The rail and the triage sweep treat `IdleStopped` as idle.
+- **The resume cue.** The thread header's `resuming_since` is the timestamp of the
+  `UserMessage` that moved an `IdleStopped` thread to `Starting`. The reducer derives it from
+  logged events alone, so it survives a reload. The next `AgentSessionAttached` clears it, and
+  so does any status other than `Starting`. It is never set on a first start or after
+  `AgentExited`. The app decides when to show it (`docs/ui-states.md`).
   `DetachReason::Restarting` keeps its own not-yet-folded arm (R18).
 
 ## Consequences

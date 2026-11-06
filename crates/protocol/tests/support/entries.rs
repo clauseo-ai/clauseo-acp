@@ -46,6 +46,7 @@ pub fn header_entry() -> HeaderEntry {
         agent: agent("claude-acp"),
         agent_name: None,
         status: ThreadStatus::Idle,
+        resuming_since: None,
         queue_held: true,
         queue_held_reason: Some(QueueHoldReason::Paused),
         steer_joins_turn: true,

@@ -100,7 +100,7 @@ fn the_upsert_carries_the_kind_and_an_agent_notice_writes_no_kind_field() {
 /// dropped the kind) is refused, so the stream is refolded from its log and the kind is there.
 #[test]
 fn a_schema_9_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 10);
+    const { assert!(REDUCER_SCHEMA_VERSION > 9) };
     let log = host_then_agent();
     // What a schema 9 build folded from this log: the same notices, with no kind.
     let kindless: Vec<_> = log
@@ -130,7 +130,7 @@ fn a_schema_9_snapshot_is_refolded() {
             read,
             Err(Error::SchemaMismatch {
                 found: 9,
-                expected: 10
+                expected: REDUCER_SCHEMA_VERSION
             })
         ),
         "{read:?}"
