@@ -226,13 +226,17 @@ jobs:
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh
 
-      # fuzz/ has a lock file of its own, which a new dependency of a fuzzed crate leaves stale:
-      # on 2026-11-06 clauseo-settings' plist, nix and unicode-normalization failed the nightly
-      # fuzz run's `cargo fetch --locked`. The same fetch here fails the pull request instead.
-      - name: fuzz/Cargo.lock is up to date
+      # fuzz/ is a workspace of its own, which nothing else builds before the nightly fuzz run: a
+      # new dependency of a fuzzed crate leaves its lock file stale (2026-11-06: clauseo-settings'
+      # plist, nix and unicode-normalization failed the nightly's `cargo fetch --locked`), and a
+      # new field of a struct a target builds breaks the target (the same day: NewSession's and
+      # LoadSession's additional_directories, added on 11-05, failed acp_stdout's build). This
+      # checks every target with --locked, on this job's stable toolchain (run from the root, so
+      # fuzz/rust-toolchain.toml's nightly is not used; the targets need no nightly to check).
+      - name: The fuzz targets compile, against an up-to-date fuzz/Cargo.lock
         run: |
-          if ! cargo fetch --locked --manifest-path fuzz/Cargo.toml; then
-            echo "::error title=fuzz/Cargo.lock is stale::Run cargo fetch --manifest-path fuzz/Cargo.toml and commit fuzz/Cargo.lock."
+          if ! cargo check --locked --manifest-path fuzz/Cargo.toml --bins; then
+            echo "::error title=The fuzz targets do not compile::Run cargo check --manifest-path fuzz/Cargo.toml --bins from the repository root, fix the targets in fuzz/fuzz_targets/, and commit fuzz/Cargo.lock if it changed."
             exit 1
           fi
 
