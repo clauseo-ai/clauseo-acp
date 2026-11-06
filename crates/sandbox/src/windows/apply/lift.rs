@@ -113,7 +113,10 @@ fn replace(
     };
     let mut sub =
         AdmittedPlan::walk_down_denies(deny.matter, &deny.sid, &set.siblings, &set.levels);
-    match run_plan(ledger, &mut sub, acl, around, &OwnWalks::All) {
+    // The walk-down denies name only the group: the launch's plan names every pool user, so a
+    // folder one of them owns is refused here as at the launch (S15 `PR4h`).
+    let pool = super::strict_for(plan).pool;
+    match run_plan(ledger, &mut sub, acl, around, &OwnWalks::All, &pool) {
         Ok(_) => true,
         Err(error) => {
             tracing::warn!(%error, "the walk-down set wasn't applied; the deny stays");

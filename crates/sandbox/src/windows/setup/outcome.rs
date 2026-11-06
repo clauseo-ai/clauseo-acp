@@ -5,6 +5,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use clauseo_protocol::MatterId;
+
 use super::machine::MachineError;
 use crate::windows::apply::Applied;
 use crate::windows::pool::PoolUser;
@@ -151,6 +153,8 @@ pub enum Step {
     Marker,
     /// 1: reading the registered matters (`matters.json`, the ledger) after the lock.
     Matters,
+    /// 7: before the shared-write denies, no sandbox user may own a folder they protect.
+    Owners,
 }
 
 impl fmt::Display for Step {
@@ -176,6 +180,7 @@ impl fmt::Display for Step {
             Step::Secrets => "saving the sandbox users' passwords",
             Step::Marker => "writing setup.json",
             Step::Matters => "reading the registered matters",
+            Step::Owners => "making sure no sandbox user owns a protected folder",
         })
     }
 }
@@ -272,6 +277,9 @@ pub struct SetupReport {
     pub shared: SharedWrites,
     /// The fence of the registered matters, when this run made users and there are any.
     pub fenced: Option<Applied>,
+    /// The registered matters step 8 left unfenced, and why: a sandbox user owns the matter's
+    /// root and it couldn't be handed to the owner (S15 `PR4h`). The rest are fenced.
+    pub fence_skipped: Vec<(MatterId, String)>,
     /// Each volume's change journal; `Err` when the volumes couldn't be listed, and why.
     pub journals: Result<Vec<(PathBuf, JournalOutcome)>, String>,
 }

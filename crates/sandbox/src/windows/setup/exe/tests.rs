@@ -128,6 +128,22 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
     let profile = profile::profile_of(&sid).unwrap().unwrap();
     assert!(!profile.temporary);
     assert!(profile.path.join("AppData").join("LocalLow").is_dir());
+    // No pool user owns its `LocalLow` (item 11): it would keep an owner's `WRITE_DAC` there.
+    let local_low_owner =
+        crate::windows::acl::owner(&profile.path.join("AppData").join("LocalLow")).unwrap();
+    assert_ne!(
+        local_low_owner, sid,
+        "the pool user doesn't own its LocalLow"
+    );
+    // Nor DeviceSync, whose deny the group gets (the owner audit).
+    let device_sync = super::super::ffi::program_data()
+        .unwrap()
+        .join("Microsoft")
+        .join("DeviceSync");
+    if device_sync.is_dir() {
+        let owner = crate::windows::acl::owner(&device_sync).unwrap();
+        assert!(owner != sid && owner != record.group, "{owner}");
+    }
     // The owner's files, written as the owner: the marker, and the password's blob.
     let MarkerState::Current(written) = marker::read(&data, &me) else {
         panic!("setup.json isn't current");

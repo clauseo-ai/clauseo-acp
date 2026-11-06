@@ -17,6 +17,7 @@ fn step_of(call: &str) -> Step {
         "hide" => Step::Hide,
         "write_record" => Step::WriteRecord,
         "log_on_once" => Step::LogOn,
+        "exists" | "owner_of" | "give_to_admins" => Step::Owners,
         "program_data" => Step::SharedWrites,
         "protect_for_owner" => Step::Secrets,
         "write_marker" => Step::Marker,

@@ -27,14 +27,19 @@ use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
+use crate::windows::acl;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
+use crate::windows::record::current_user_sid;
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
+
+/// `BUILTIN\Administrators`, the owner a protected folder is handed to.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// The comment the pool group carries in Computer Management.
 const GROUP_COMMENT: &str = "Clauseo's protection runs each matter's agent as one of these users.";
@@ -101,6 +106,9 @@ pub struct WindowsMachine {
     data_dir: PathBuf,
     /// Whether this thread acts as the owner now (inside [`Machine::as_owner`]).
     acting: Rc<Cell<bool>>,
+    /// The account this process runs as, read when the machine is made (before any
+    /// impersonation): a profile folder it loaded may be its own.
+    own: Option<Sid>,
 }
 
 impl WindowsMachine {
@@ -119,6 +127,7 @@ impl WindowsMachine {
             owner: Rc::new(owner),
             data_dir,
             acting: Rc::new(Cell::new(false)),
+            own: current_user_sid().ok(),
         }
     }
 
@@ -275,6 +284,28 @@ impl Machine for WindowsMachine {
 
     fn delete_profile(&mut self, sid: &Sid) -> Result<(), MachineError> {
         profile::delete_profile(sid, self.owner.sid())
+    }
+
+    fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError> {
+        acl::owner(path).map_err(|error| MachineError::Other(format!("its owner: {error}")))
+    }
+
+    fn exists(&mut self, path: &Path) -> Result<bool, MachineError> {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(MachineError::Other(format!("whether it is there: {error}"))),
+        }
+    }
+
+    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError> {
+        let admins =
+            Sid::parse(ADMINISTRATORS).map_err(|error| MachineError::Other(error.to_string()))?;
+        acl::set_owner(path, &admins).map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn own_account(&self) -> Option<&Sid> {
+        self.own.as_ref()
     }
 
     fn program_data(&mut self) -> Result<PathBuf, MachineError> {

@@ -1,5 +1,6 @@
 //! The set-up's seams faked in memory: [`FakeMachine`] records every call as a line of text and
-//! fails the calls it is told to; [`FakeAcl`] (`fake_acl.rs`) keeps the entries written.
+//! fails the calls it is told to; [`FakeAcl`] (`fake_acl.rs`) keeps the entries written, and
+//! `fake_more.rs` holds the surroundings and the call lines' folder names.
 //! Profiles and `DeviceSync` are real folders in a temp folder, since the shared-write apply
 //! checks they exist, and the ledger is a real file there.
 
@@ -10,9 +11,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::test_support::TempDir;
-use crate::windows::FolderSupport;
 use crate::windows::acl_plan::Sid;
-use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
@@ -24,6 +23,8 @@ use crate::windows::setup::{
 use crate::windows::sids::Reserved;
 
 pub(super) use super::fake_acl::FakeAcl;
+use super::fake_more::Around;
+pub(super) use super::fake_more::folder_name;
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -32,6 +33,10 @@ pub(super) const OWNER_NAME: &str = "Rohan";
 pub(super) const OTHER_OWNER: &str = "S-1-5-21-7-8-9-1002";
 /// The volume the fake lists for the change journal.
 pub(super) const VOLUME: &str = "C:";
+
+/// `SYSTEM` and `BUILTIN\Administrators`.
+pub(super) const SYSTEM: &str = "S-1-5-18";
+pub(super) const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// The SID the fake gives the account or group with relative id `rid`.
 pub(super) fn sid(rid: u32) -> Sid {
@@ -68,30 +73,6 @@ pub(super) struct State {
     pub(super) secrets: BTreeMap<Sid, String>,
 }
 
-/// The surroundings: every folder `Ok`, the real listing, no set-aside, no credentials.
-#[derive(Debug, Default)]
-pub(super) struct Around;
-
-impl FolderList for Around {
-    fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
-        ReadDir.subfolders(parent)
-    }
-}
-
-impl Surroundings for Around {
-    fn check(&self, _folder: &Path) -> io::Result<FolderSupport> {
-        Ok(FolderSupport::Ok)
-    }
-
-    fn set_aside(&mut self, _matter: clauseo_protocol::MatterId, _path: &Path) -> io::Result<()> {
-        Err(io::Error::from(io::ErrorKind::Unsupported))
-    }
-
-    fn credentials(&self) -> Option<PathBuf> {
-        None
-    }
-}
-
 /// The machine, in memory.
 pub(super) struct FakeMachine {
     pub(super) dir: TempDir,
@@ -124,6 +105,15 @@ pub(super) struct FakeMachine {
     pub(super) refuse_owner: bool,
     /// The owner's registered matters, as `registered_matters` reads them.
     pub(super) matters: Vec<RegisteredMatter>,
+    /// Each folder's owner; one not listed is `SYSTEM`'s.
+    pub(super) owners: BTreeMap<PathBuf, Sid>,
+    /// Accounts whose first logon leaves their `LocalLow` owned by the account itself.
+    pub(super) self_owned_local_low: BTreeSet<String>,
+    /// The folders (by their call-line name) whose `give_to_admins` succeeds but leaves the
+    /// owner as it was.
+    pub(super) stuck_owners: BTreeSet<String>,
+    /// Accounts whose logon leaves their profile with no `LocalLow`.
+    pub(super) no_local_low: BTreeSet<String>,
     next_rid: u32,
     passwords: u32,
     around: Around,
@@ -168,6 +158,10 @@ impl FakeMachine {
             outside_owner: Vec::new(),
             refuse_owner: false,
             matters: Vec::new(),
+            owners: BTreeMap::new(),
+            self_owned_local_low: BTreeSet::new(),
+            stuck_owners: BTreeSet::new(),
+            no_local_low: BTreeSet::new(),
             next_rid: 1000,
             passwords: 0,
             around: Around,
@@ -411,7 +405,18 @@ impl Machine for FakeMachine {
             });
         }
         let path = self.profile_path(name);
-        self.dir.dir(&format!("Users/{name}/AppData/LocalLow"));
+        if self.no_local_low.contains(name) {
+            self.dir.dir(&format!("Users/{name}/AppData"));
+            self.state.profiles.insert(sid, path.clone());
+            return Ok(ProfileDir {
+                path,
+                temporary: false,
+            });
+        }
+        let local_low = self.dir.dir(&format!("Users/{name}/AppData/LocalLow"));
+        if self.self_owned_local_low.contains(name) {
+            self.owners.insert(local_low, sid.clone());
+        }
         self.state.profiles.insert(sid, path.clone());
         Ok(ProfileDir {
             path,
@@ -431,6 +436,33 @@ impl Machine for FakeMachine {
         self.call(format!("delete_profile {}", rid(sid)))?;
         self.state.profiles.remove(sid);
         Ok(())
+    }
+
+    fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError> {
+        self.call(format!("owner_of {}", folder_name(path)))?;
+        Ok(self
+            .owners
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| Sid::parse(SYSTEM).unwrap()))
+    }
+
+    fn exists(&mut self, path: &Path) -> Result<bool, MachineError> {
+        self.call(format!("exists {}", folder_name(path)))?;
+        Ok(std::fs::symlink_metadata(path).is_ok())
+    }
+
+    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError> {
+        self.call(format!("give_to_admins {}", folder_name(path)))?;
+        if !self.stuck_owners.contains(&folder_name(path)) {
+            self.owners
+                .insert(path.to_owned(), Sid::parse(ADMINISTRATORS).unwrap());
+        }
+        Ok(())
+    }
+
+    fn own_account(&self) -> Option<&Sid> {
+        None
     }
 
     fn program_data(&mut self) -> Result<PathBuf, MachineError> {

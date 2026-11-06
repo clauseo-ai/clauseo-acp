@@ -7,7 +7,7 @@ use super::*;
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Sid, plan};
 use crate::windows::admit::admit_with;
-use crate::windows::fence::{MatterFolders, Neighbours};
+use crate::windows::fence::{MatterFolders, Neighbours, RegisteredMatter};
 use crate::windows::ledger::{EntryState, ledger_path};
 use crate::windows::test_world::{
     FakeFolders, GROUP_SID, NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, matter_two,
@@ -20,6 +20,7 @@ mod fake;
 mod owners;
 mod protected_link;
 mod review;
+mod root_owners;
 mod round2;
 mod round3;
 mod round4;

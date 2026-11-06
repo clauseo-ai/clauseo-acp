@@ -223,6 +223,15 @@ build 26100):
     moved in that holds a `.claude` already denied).
     A skipped launch needs none: nothing changed, and no pool user can add a child below a deny.
     Nothing is recorded for it: the lawyer owning it is where forget leaves it too.
+  - The same holds for a root the plan denies on (S15 PR4h): the matter, state and notes
+    folders, a registered matter's, a sibling, the parent. Before anything is recorded, each one a
+    pool user owns (a folder an agent made, which the lawyer moved and registered) is handed to
+    the desktop user by the same `AclWriter::hand_back`; the state folder's read-only settings
+    get the protected items' hand-back too. Only a root whose hand-back fails (the lawyer's
+    handle got no `WRITE_OWNER` or `WRITE_DAC`) refuses the launch, as
+    `PoolOwned { owned: Root }`, naming it; set-up's fence of the registered matters skips such a
+    matter, reports it (`SetupReport::fence_skipped`) and fences the rest. **Tier B still needs
+    PR4i**: its elevated hand-back takes ownership of what the lawyer's own hand-back can't.
     `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
     as well, whoever owns its top (a lawyer's folder the agent filled and renamed to `.git`). An
     `OWNER RIGHTS` deny was ruled out: it binds the lawyer too when the lawyer owns the item.
@@ -436,17 +445,25 @@ Each target gets `ClauseoSandboxUsers`' `DenyWrite`, inherited to the tree. The 
 `icacls` `(W,DC)`; the code writes `0xd0156`, which adds `DELETE`, `WRITE_DAC` and `WRITE_OWNER`.
 Tools running with the full mask are not measured yet: PR4's VM test must confirm them.
 
-`LocalLow` is `SYSTEM`'s, but the files a pool user makes in it are the pool user's, and an owner
-always has `WRITE_DAC`. So each `LocalLow` also gets an inherit-only `OWNER RIGHTS` deny
-(`OI|CI|IO`, `0x0b`): what is below it loses the owner's implied `WRITE_DAC` and `WRITE_OWNER`, and
-`LocalLow` itself keeps `SYSTEM`'s rights. `DeviceSync` is `SYSTEM`'s too, and gets none. The grants
-are written, then walked down with the pool group and every pool user watched: a child a pool user
-owns is repaired (its explicit allows stripped), as the launch walk does. A child the lawyer owns,
-or one the walk can't repair, fails its target. A failed walk keeps the target's deny, which still
-blocks new files. Each target rolls back only its own grants, and only when an add fails.
+No pool user owns its `LocalLow`: set-up makes sure of it. A fresh profile's `LocalLow` can be
+owned by whichever account loaded the profile (PR4f's first elevated CI run found one that wasn't
+`SYSTEM`), and an owner keeps an implied `WRITE_DAC` on the folder itself, which would let a pool
+user that owned it drop the group's deny. So before any deny is written, set-up reads each
+`LocalLow`'s owner and hands one that isn't `SYSTEM`, `Administrators` or the set-up's own account
+to `Administrators` (owner only, the folder alone, never through a link), reads it again, and fails
+(`Step::Owners`) if it is still anyone else's. The files a pool user makes in `LocalLow` are the
+pool user's, so each `LocalLow` also gets an inherit-only `OWNER RIGHTS` deny (`OI|CI|IO`,
+`0x0b`): what is below it loses the owner's implied `WRITE_DAC` and `WRITE_OWNER`, and `LocalLow`
+itself keeps its non-pool owner's rights. `DeviceSync` is Windows' (`SYSTEM` or `TrustedInstaller`)
+and gets none; set-up only checks that no pool user or the group owns it, and fails if one does.
+The grants are written, then walked down with the pool group and every pool user watched: a child
+a pool user owns is repaired (its explicit allows stripped), as the launch walk does. A child the
+lawyer owns, or one the walk can't repair, fails its target. A failed walk keeps the target's
+deny, which still blocks new files. Each target rolls back only its own grants, and only when an
+add fails.
 
-A `LocalLow` exists only after its pool user's first logon, and Windows makes it `SYSTEM`'s, so PR4
-logs each pool user on once, with its profile loaded, before it applies these. A missing
+A `LocalLow` exists only after its pool user's first logon, so PR4 logs each pool user on once, with
+its profile loaded, and settles its owner as above, before it applies these. A missing
 `LocalLow` is a failure; a missing `DeviceSync` is skipped.
 
 PR4's elevated set-up applies these after it creates each pool user's profile and logs the user

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
-use super::late_steps::{fence, journals, registered};
+use super::late_steps::{fence, journals, own_protected, refuse_pool_owner, registered};
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
     LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, cause_of,
@@ -269,9 +269,18 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    let local_lows: Vec<PathBuf> = users
+        .profiles
+        .iter()
+        .map(|(_, profile)| profile.join("AppData").join("LocalLow"))
+        .collect();
+    own_protected(machine, &local_lows)?;
     let shared = shared_writes(machine, acl, &group, &users.profiles, run)?;
     let live: Vec<Sid> = users.profiles.iter().map(|(u, _)| u.sid.clone()).collect();
-    let fenced = fence(machine, acl, &plan.matters, run, &group, &live)?;
+    let (fenced, fence_skipped) = match fence(machine, acl, &plan.matters, run, &group, &live)? {
+        Some((applied, skipped)) => (Some(applied), skipped),
+        None => (None, Vec::new()),
+    };
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
@@ -297,6 +306,7 @@ fn change(
         skipped_names: users.skipped,
         shared,
         fenced,
+        fence_skipped,
         journals,
     })
 }
@@ -510,10 +520,20 @@ fn shared_writes(
         .program_data()
         .map_err(|error| failed(cause_of(&error)))?;
     let folders: Vec<PathBuf> = profiles.iter().map(|(_, path)| path.clone()).collect();
+    let live: Vec<Sid> = profiles.iter().map(|(user, _)| user.sid.clone()).collect();
+    let device_sync = program_data.join("Microsoft").join("DeviceSync");
+    let there = machine.exists(&device_sync).map_err(|error| {
+        let cause = cause_of(&error);
+        (Step::Owners, format!("{}: {cause}", device_sync.display()))
+    })?;
+    if there {
+        let mut pool = live.clone();
+        pool.push(group.clone());
+        refuse_pool_owner(machine, &device_sync, &pool)?;
+    }
     let targets = shared_write_targets(&program_data, &folders);
     let grants =
         plan_shared_write_denies(group, &targets).map_err(|error| failed(error.to_string()))?;
-    let live: Vec<Sid> = profiles.iter().map(|(user, _)| user.sid.clone()).collect();
     let done = apply_shared_write_denies(acl, &grants, &live);
     run.added.clone_from(&done.added);
     if done.failed.is_empty() {

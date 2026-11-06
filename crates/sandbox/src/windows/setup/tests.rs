@@ -12,6 +12,8 @@ mod create;
 mod extend;
 mod fake;
 mod fake_acl;
+mod fake_more;
+mod local_low;
 mod owner;
 mod registered;
 mod remains;
@@ -73,9 +75,17 @@ fn fresh_calls() -> Vec<String> {
             format!("log_on_once {name}"),
         ]);
     }
+    for n in 1..=4 {
+        calls.extend([
+            format!("exists ClauseoSb0{n}"),
+            format!("owner_of ClauseoSb0{n}"),
+        ]);
+    }
     calls.extend(
         [
             "program_data",
+            "exists DeviceSync",
+            "owner_of DeviceSync",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",

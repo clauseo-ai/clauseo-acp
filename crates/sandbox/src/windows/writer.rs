@@ -126,6 +126,26 @@ pub enum ApplyFailure {
     /// `apply` turns it into [`Error::ProtectedLink`](crate::Error::ProtectedLink), naming the
     /// item. A final path other than the planned one stays [`ApplyFailure::Changed`].
     Link,
+    /// A pool user owns something the plan protects, so it could take the entry off (an owner
+    /// may always change the permissions), and the hand-back to the desktop user
+    /// ([`AclWriter::hand_back`]) failed; what it owns, and the remedy, is `owned` (S15 `PR4h`).
+    PoolOwned {
+        /// What the pool user owns.
+        owned: Owned,
+    },
+}
+
+/// What a pool user owns when a launch or set-up refuses as [`ApplyFailure::PoolOwned`]: the
+/// host matches on it and the app words it for the lawyer. Each is first handed to the desktop
+/// user; only an item whose hand-back fails (the lawyer may not change its owner: no
+/// `WRITE_OWNER`) is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owned {
+    /// A root the plan denies on: a matter, state or notes folder, a registered matter's, a
+    /// sibling, the parent. Remedy: the lawyer takes ownership of the folder as an administrator
+    /// (its Properties, Security, Advanced, Owner), or runs set-up again once its elevated
+    /// hand-back lands (S15 `PR4i`); then launches again.
+    Root,
 }
 
 impl fmt::Display for ApplyFailure {
@@ -143,6 +163,9 @@ impl fmt::Display for ApplyFailure {
             ApplyFailure::Ledger(kind) => write!(f, "the permission ledger failed ({kind})"),
             ApplyFailure::ChildShut => f.write_str("a folder or file in it can't be opened"),
             ApplyFailure::Link => f.write_str("it is a junction or symbolic link"),
+            ApplyFailure::PoolOwned { owned: Owned::Root } => {
+                f.write_str("a sandbox user owns the folder and it couldn't be handed back")
+            }
         }
     }
 }
@@ -161,7 +184,8 @@ impl From<ApplyFailure> for io::Error {
             | ApplyFailure::VolumeRoot
             | ApplyFailure::NoDacl
             | ApplyFailure::ChildShut
-            | ApplyFailure::Link) => io::Error::other(other),
+            | ApplyFailure::Link
+            | ApplyFailure::PoolOwned { .. }) => io::Error::other(other),
         }
     }
 }
