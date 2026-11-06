@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::{API_KEY_METHOD, NO_ACCOUNT_METHOD, NO_EMAIL_METHOD, marker, say};
+use super::{API_KEY_METHOD, Marker, NO_ACCOUNT_METHOD, NO_EMAIL_METHOD, marker, say};
 use crate::EXIT_OK;
 
 /// [`super::Mode::CodexAdapter`]: each JSON-RPC request on stdin gets an error, -32602 for
@@ -86,7 +86,7 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
 /// still says signed in), the signed-out reply: `account` null and `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
     let marker = marker(folder);
-    let method = marker.as_ref().map(|(method, _)| method.as_str());
+    let method = marker.as_ref().map(|marker| marker.method.as_str());
     if method == Some(NO_ACCOUNT_METHOD) {
         json!({"account": null, "requiresOpenaiAuth": true})
     } else if method == Some(API_KEY_METHOD) {
@@ -96,7 +96,7 @@ fn account_read(folder: &Path) -> Value {
             "account": {"type": "chatgpt", "email": null, "planType": "plus"},
             "requiresOpenaiAuth": false,
         })
-    } else if let Some((_, email)) = &marker {
+    } else if let Some(Marker { email, .. }) = &marker {
         json!({
             "account": {"type": "chatgpt", "email": email, "planType": "plus"},
             "requiresOpenaiAuth": false,

@@ -3,10 +3,11 @@
 //! with no change to the sign-in state, and the account it names as an [`AccountHash`].
 //!
 //! - Claude: `auth status --json` with the session's environment ([`RunKind::Own`] for
-//!   Clauseo's own login, [`RunKind::Reused`] for the lawyer's), its `email`.
+//!   Clauseo's own login, [`RunKind::Reused`] for the lawyer's), its `email`, else its
+//!   `accountUuid` (an id is enough).
 //! - Codex: `login status` through the install's Codex CLI ([`crate::state::Installed::codex_cli`];
 //!   exit 0 with its signed-in line is signed in), then `account/read` through the app-server,
-//!   its `ChatGPT` `email`. Exit 0 with no signed-in line, no answer, a missing CLI, or a signed-in
+//!   its `ChatGPT` `email` (the pinned schema's account has no id). Exit 0 with no signed-in line, no answer, a missing CLI, or a signed-in
 //!   status whose `account/read` names no account or errs is [`AccountRead::Failed`].
 //!
 //! The identity comes only from that output: nothing here opens a credential. The email is
@@ -25,6 +26,7 @@ use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
 use crate::signin::codex::{StatusSaid, identity};
 use crate::signin::{claude, codex, found};
+use crate::status::Identity;
 
 /// The SHA-256, lowercase hex, of an account's normalised identity (its email or account id,
 /// trimmed and lower-cased). Clauseo records and compares this, never the email. Its `Debug`
@@ -93,7 +95,7 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
         Vendor::Claude => match claude::status_as(job, cancel, kind).await {
             None => AccountRead::Failed,
             Some(None) => AccountRead::NoAccount,
-            Some(Some(identity)) => named(identity.email.as_deref()),
+            Some(Some(identity)) => named(&identity),
         },
         // Codex's CLI missing from the install: nothing can be asked, so nothing is known.
         Vendor::Codex if job.script().is_none() => AccountRead::Failed,
@@ -103,7 +105,7 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
             // the account is not known either way.
             StatusSaid::NoMarker | StatusSaid::NoAnswer => AccountRead::Failed,
             StatusSaid::LoggedIn => match codex::identity::read_as(job, cancel, kind, &job.home).await {
-                identity::AccountRead::Chatgpt(identity) => named(identity.email.as_deref()),
+                identity::AccountRead::Chatgpt(identity) => named(&identity),
                 // An API-key, Bedrock or unknown kind of account names no email.
                 identity::AccountRead::NotChatgpt => AccountRead::NoAccount,
                 // `login status` said signed in, yet `account/read` named no account or answered
@@ -116,10 +118,12 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
     }
 }
 
-/// [`AccountRead::Account`] for an email the status gave, else [`AccountRead::NoAccount`].
-fn named(email: Option<&str>) -> AccountRead {
+/// [`AccountRead::Account`] for the email the status gave, else for its account id; else
+/// [`AccountRead::NoAccount`].
+fn named(identity: &Identity) -> AccountRead {
+    let email = identity.email.as_deref().and_then(AccountHash::of);
     email
-        .and_then(AccountHash::of)
+        .or_else(|| identity.account_id.as_deref().and_then(AccountHash::of))
         .map_or(AccountRead::NoAccount, AccountRead::Account)
 }
 

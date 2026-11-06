@@ -26,6 +26,10 @@
 //!   `signin.account_changed` once it named another account, the agents stopped, until a new
 //!   sign-in records again (`identity/check.rs`).
 //!
+//! - **No email:** the account id names the account, when the status gives one; neither is
+//!   unknown. **A key login** (a stored API key, or an endpoint or a provider, is what launches
+//!   use) is not checked: [`Verdict::KeyLogin`].
+//!
 //! Logs name the agent and a fixed kind, never an email, a hash or a path.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -77,6 +81,11 @@ pub(crate) enum Verdict {
     Unknown,
     /// The status named another account: the agents were stopped.
     Changed,
+    /// A stored API key (or an endpoint or a provider) is what the launches use, through the
+    /// launch hook's env, not the shared login file, so a swapped file cannot redirect them:
+    /// not checked, and no refusal while it holds (`setup/refusal.rs` filters this one's).
+    /// Once it ends the login is what launches use again, so this is due as [`Verdict::Due`].
+    KeyLogin,
 }
 
 impl Verdict {
@@ -84,7 +93,9 @@ impl Verdict {
     pub(crate) fn refusal(self) -> Option<ErrorCode> {
         match self {
             Verdict::Idle | Verdict::Same => None,
-            Verdict::Due | Verdict::Checking => Some(ErrorCode::AgentIdentityChecking),
+            Verdict::Due | Verdict::Checking | Verdict::KeyLogin => {
+                Some(ErrorCode::AgentIdentityChecking)
+            }
             Verdict::Unknown => Some(ErrorCode::AgentIdentityUnknown),
             Verdict::Changed => Some(ErrorCode::SigninAccountChanged),
         }
@@ -99,6 +110,7 @@ impl Verdict {
             Verdict::Same => "same",
             Verdict::Unknown => "unknown",
             Verdict::Changed => "changed",
+            Verdict::KeyLogin => "key_login",
         }
     }
 }
@@ -307,7 +319,7 @@ impl Identities {
         self.entry(agent, |entry| {
             let checkable = matches!(
                 entry.verdict,
-                Verdict::Due | Verdict::Same | Verdict::Unknown
+                Verdict::Due | Verdict::Same | Verdict::Unknown | Verdict::KeyLogin
             );
             if !checkable || entry.expect {
                 return None;
@@ -316,6 +328,41 @@ impl Identities {
             entry.stamps = Some(stamps);
             Some(Ticket(entry.generation))
         })
+    }
+
+    /// A stored key (or an endpoint) is what `agent` launches with: a verdict that would be
+    /// checked becomes [`Verdict::KeyLogin`]. Whether it changed now, for the log.
+    fn key_login(&self, agent: &AgentId) -> bool {
+        self.entry(agent, |entry| {
+            let checked = matches!(
+                entry.verdict,
+                Verdict::Due | Verdict::Same | Verdict::Unknown
+            );
+            if checked {
+                entry.verdict = Verdict::KeyLogin;
+            }
+            checked
+        })
+    }
+
+    /// A sign-in through Clauseo whose `SignedIn` names no email: the account it replaced is no
+    /// longer recorded, and `agent` is due a check, whose status may name it by its id; the
+    /// check's first account is then recorded, so the new login never reads as a swap.
+    fn forget(&self, agent: &AgentId, now: Duration) {
+        let mut inner = lock(&self.inner);
+        inner.unreadable.remove(agent);
+        inner.recorded.remove(agent);
+        let entry = inner.agents.entry(agent.clone()).or_default();
+        entry.verdict = Verdict::Due;
+        entry.expect = false;
+        entry.stamps = None;
+        entry.checked_at = Some(now);
+        entry.generation += 1;
+        let recorded = inner.recorded.clone();
+        drop(inner);
+        if let Err(error) = self.store.save(&recorded) {
+            tracing::warn!(%agent, kind = ?error.kind(), "the identity record was not written");
+        }
     }
 
     /// Whether an account is recorded for `agent` now.

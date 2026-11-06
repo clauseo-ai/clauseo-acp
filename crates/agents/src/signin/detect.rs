@@ -61,6 +61,7 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
         (SigninState::LoginFound { .. }, Some(parsed)) => Identity {
             email: parsed.email,
             plan: parsed.subscription_type,
+            account_id: parsed.account_uuid,
         },
         _ => Identity::default(),
     };
