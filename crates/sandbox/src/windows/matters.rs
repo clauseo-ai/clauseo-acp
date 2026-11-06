@@ -49,6 +49,8 @@ pub struct MatterSids {
     rows: Rows,
     /// How long a change waits for `matters.lock`; `None` is [`write::LOCK_WAIT`].
     lock_wait: Option<Duration>,
+    /// Reads an owner for the set-aside walk (`set_aside.rs`); a fake in the tests.
+    owner_of: set_aside::OwnerOf,
 }
 
 /// The SID of `matter` in `data_dir`'s `matters.json`, made and saved first if the matter has
@@ -83,6 +85,7 @@ impl MatterSids {
             reserved,
             rows,
             lock_wait: None,
+            owner_of: set_aside::owner_of,
         })
     }
 
@@ -153,6 +156,12 @@ impl MatterSids {
     /// matter holds none. A released matter asking again gets a fresh pick, and its old user goes
     /// to `held_before`. No free user is [`Assign::PoolFull`]. `open` is the caller's read;
     /// see [`OpenSessions`] for why a stale one is safe.
+    ///
+    /// The caller marks the launch's session open (`before_launch`) **before** calling this, so
+    /// no [`MatterSids::release`] can take the user between this and the session. A new pick
+    /// for a matter with no open session in its set-aside record (read under its set-aside lock)
+    /// is refused with [`Assign::Records`]; a matter that keeps its user needs none (set-up reads
+    /// registered matters' users with no session).
     pub fn assign(
         &mut self,
         matter: &MatterId,
@@ -161,13 +170,19 @@ impl MatterSids {
         open: &OpenSessions,
     ) -> Result<Sid, Assign> {
         let data_dir = self.data_dir.clone();
+        let owner_of = self.owner_of;
         self.change(|rows, _| {
             let ledger =
                 ledger().map_err(|error| SetupError::Failed(format!("the ACL ledger: {error}")))?;
-            let set_aside = set_aside::set_aside_owners(&data_dir);
+            let set_aside = set_aside::set_aside_owners(&data_dir, owner_of);
             match assign::decide(matter, rows, pool, &ledger, &set_aside, open)? {
                 Pick::Kept(user) => Ok((user, false)),
                 Pick::New(user) => {
+                    if !session_open(&data_dir, matter)? {
+                        return Err(Assign::Records(SetupError::Failed(format!(
+                            "{matter} has no open session: before_launch marks it before assign"
+                        ))));
+                    }
                     let row = rows.entry(*matter).or_default();
                     if let Some(old) = row.pool_user.take()
                         && !row.held_before.contains(&old)
@@ -187,9 +202,10 @@ impl MatterSids {
     /// for a time before it) as `released_at`. Inside [`MatterSids::change`]'s lock and fresh
     /// read. Refused while a session of the matter is open, read under the matter's set-aside
     /// lock (`set_aside::under_lock`, an unreadable record counting as open), so a user is
-    /// never released from under a live session. The lock order is `matters.lock`, then a
-    /// set-aside lock, never the reverse. Whether a user was released: a matter with none, or
-    /// released already, is left as it is.
+    /// never released from under a live session, nor between a launch's `assign` and its
+    /// session, as the launch marks the session first (see [`MatterSids::assign`]). The lock
+    /// order is `matters.lock`, then a set-aside lock, never the reverse. Whether a user was
+    /// released: a matter with none, or released already, is left as it is.
     pub fn release(&mut self, matter: &MatterId, now: SystemTime) -> Result<bool, SetupError> {
         let at = now
             .duration_since(UNIX_EPOCH)

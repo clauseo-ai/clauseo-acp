@@ -31,10 +31,13 @@ use crate::windows::sids::Sid;
 /// running or ended without one. That is the set-aside record's open-sessions set, which
 /// `clean_close` reads per matter through `set_aside::under_lock`; the caller gathers it.
 ///
-/// The caller's read can be stale, so it isn't the only guard: `MatterSids::release` refuses
-/// while the matter has an open session, read under its set-aside lock inside `matters.lock`.
-/// So a matter that holds a user keeps it (`Held`) for as long as any session of it is open,
-/// and a released matter launched again gets a fresh pick, never its old user by default.
+/// The caller's read can be stale, so it isn't the only guard. The rule for a launch: its
+/// session is marked open (`before_launch`) **before** `MatterSids::assign`. `assign` enforces
+/// it for a new pick, refusing a matter with no open session in its set-aside record, and
+/// `MatterSids::release` refuses while the matter has an open session; both read the record
+/// under the matter's set-aside lock inside `matters.lock`. So no release can fall between a
+/// launch's `assign` and its session, a matter that holds a user keeps it (`Held`) while any
+/// session of it is open, and a released matter launched again gets a fresh pick.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpenSessions {
     matters: BTreeSet<MatterId>,
@@ -114,6 +117,11 @@ impl SetAsideOwners {
             }
             Some(_) => false,
         }
+    }
+
+    /// Adds `owner`, read from an item or a child in an item's tree.
+    pub(crate) fn add_owner(&mut self, owner: &Sid) {
+        self.owners.insert(owner.as_str().to_ascii_uppercase());
     }
 
     /// Whether `user` is held: it owns an item, or every user is.
