@@ -24,7 +24,11 @@
 //!   the Dock, logout, shutdown), which reaches only `RunEvent::Exit`, synchronously there within
 //!   `EXIT_STOP_WAIT` (13 s). Windows needs none of this: the Job Object's kill-on-close ends
 //!   each agent's tree when the process dies, however it dies. SIGKILL or a crash leaves the
-//!   agents' groups running on Unix.
+//!   agents' groups running on Unix. Every quit hides the windows as it starts (after
+//!   `prevent_exit` and the stopper's start on `ExitRequested`); the window state never saves
+//!   the visibility. `RunEvent::Exit` with nothing running returns at once (a Windows logoff
+//!   reaches it through tao's `WM_ENDSESSION`), and a second start during a quit raises nothing
+//!   (`quit::on_second_start`).
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
 //!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
 //!   (`webview2.rs`).
@@ -191,6 +195,9 @@ pub fn run() -> tauri::Result<()> {
     e2e::mark_start();
     let context = context::<tauri::Wry>();
     let builder = tauri::Builder::default().manage(host_log);
+    // Where the quit stands (quit.rs), read by the run loop and the second start's callback.
+    let exit = Arc::new(Exit::default());
+    let launch_exit = Arc::clone(&exit);
     // The Mac's app menu, with "Settings…" (settings_window.rs). Windows and Linux get none: a
     // menu would be a bar on the undecorated window.
     #[cfg(target_os = "macos")]
@@ -200,8 +207,8 @@ pub fn run() -> tauri::Result<()> {
     let builder = builder
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
-            |app, _args, _cwd| {
-                raise_main_window(app);
+            move |app, _args, _cwd| {
+                let _raised = quit::on_second_start(app, &launch_exit);
             },
         ))
         // No URL scheme yet: the scheme is not decided.
@@ -290,7 +297,6 @@ pub fn run() -> tauri::Result<()> {
             Ok(())
         })
         .build(context)?;
-    let exit = Arc::new(Exit::default());
     app.run(move |app, event| match event {
         RunEvent::ExitRequested { api, code, .. } if !exit.stopped.load(Ordering::Acquire) => {
             api.prevent_exit();
@@ -302,9 +308,14 @@ pub fn run() -> tauri::Result<()> {
                 .is_ok();
             if first {
                 stop_host_then_exit(app, Arc::clone(&exit), code.unwrap_or(0));
+                // After the exit is held and the stopper started: the windows go now, and the
+                // stopper saves their state with no visibility in it (window_size.rs).
+                quit::hide_windows(app);
             }
         }
-        RunEvent::Exit => quit::stop_on_exit(app, &exit),
+        RunEvent::Exit => {
+            let _waited = quit::stop_on_exit(app, &exit);
+        }
         _ => {}
     });
     Ok(())
@@ -462,11 +473,19 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            // The window state, then the install (0037); returns when there is none.
+            // The window state, then the install (0037); returns when there is none. Neither
+            // runs once `RunEvent::Exit` holds the main thread (`quit::stop_on_exit`).
             quit::stop_steps(&app, |ended, agents_stopped| {
-                update::after_host(&app, ended, agents_stopped);
+                quit::after_host_unless_exiting(&exit, ended, agents_stopped, |ended, stopped| {
+                    update::after_host(&app, ended, stopped);
+                });
             });
-            exit.mark_stopped();
+            // The window state, saved here: a quit signal's exit saved none (the app thread's
+            // macOS rows). The e2e build keeps the real config folder untouched (below).
+            quit::save_then_mark_stopped(&exit, || {
+                #[cfg(not(feature = "e2e"))]
+                window_size::save_state(&app);
+            });
             // The e2e build ends the process itself once the host has joined. On a Windows
             // session with no visible window (session 0, as in CI) `app.exit` never yields
             // `RunEvent::Exit`: tao's loop ends only after a paint on a visible window (tao

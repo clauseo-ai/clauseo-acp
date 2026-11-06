@@ -1,7 +1,9 @@
 use super::{
     DAY_GROUND, NIGHT_GROUND, SETTINGS_SIZE, WINDOW_SIZE, fit, fitted, ground, state_denylist,
+    state_flags,
 };
 use std::path::Path;
+use tauri_plugin_window_state::StateFlags;
 
 /// `actual` and `expected` are equal to within a hundredth of a pixel.
 fn close(actual: (f64, f64), expected: (f64, f64)) -> bool {
@@ -77,4 +79,17 @@ fn the_ground_colours_are_the_tokens_hex_comments() {
     assert_eq!(rgb(&grounds[1]), NIGHT_GROUND);
     assert_eq!(ground(false), DAY_GROUND);
     assert_eq!(ground(true), NIGHT_GROUND);
+}
+
+/// The quit hides the windows before their state is saved (quit.rs), so the visibility is never
+/// saved or restored: a relaunch never opens hidden. The decorations stay the frame's.
+#[test]
+fn the_window_state_leaves_out_the_visibility_and_the_decorations() {
+    let flags = state_flags();
+    assert!(!flags.contains(StateFlags::VISIBLE));
+    assert!(!flags.contains(StateFlags::DECORATIONS));
+    assert_eq!(
+        flags.bits(),
+        (StateFlags::all() - StateFlags::VISIBLE - StateFlags::DECORATIONS).bits()
+    );
 }

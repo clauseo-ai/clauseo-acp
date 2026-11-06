@@ -5,6 +5,7 @@ use std::io;
 use std::pin::{Pin, pin};
 use std::process::ExitStatus;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_process::Child;
@@ -26,6 +27,17 @@ const STDIN_GRACE: Duration = Duration::from_secs(2);
 const TERM_GRACE: Duration = Duration::from_secs(3);
 /// How long shutdown waits for the exit after the kill, before it reports the agent unresponsive.
 const KILL_GRACE: Duration = Duration::from_secs(2);
+
+/// How many [`Handle`]s this process holds: one from each start until its handle is dropped.
+static LIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// How many started processes this process still holds a [`Handle`] for: each counts from
+/// [`crate::spawn_in_tree`] until its handle is dropped, whether or not it has exited. Zero means
+/// no tree started here can still be running. One atomic read, for desktop's exit (whether a
+/// stop has anything to wait for).
+pub fn live_handles() -> usize {
+    LIVE.load(Ordering::Acquire)
+}
 
 /// An agent's process and its tree. Dropping it kills the tree at once, without waiting.
 #[derive(Debug)]
@@ -54,6 +66,7 @@ impl Handle {
         ring: SharedRing,
         redactor: Arc<Redactor>,
     ) -> Handle {
+        LIVE.fetch_add(1, Ordering::AcqRel);
         Handle {
             child,
             tree,
@@ -172,6 +185,7 @@ impl Drop for Handle {
     /// a descendant outside the group outlives a handle dropped without a shutdown.
     fn drop(&mut self) {
         self.kill_tree();
+        LIVE.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
