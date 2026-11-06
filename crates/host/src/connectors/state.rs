@@ -2,17 +2,25 @@
 //! PR5). Plain data: the actor (`actor/connectors.rs`) changes it from the commands' work and
 //! the relays' events, and [`CaseLaw::view`] draws the app's view.
 //!
-//! - Money reaches the app in paise, as integers ([`paise`]): the price list and the account
-//!   write rupees as decimal text (`"23.60"`), and the app writes amounts by its own rule. A
-//!   figure that is not rupees and at most two paise digits is left out, never guessed.
+//! - Money reaches the app in paise, as integers, GST included (`money.rs`): what the lawyer
+//!   sees is what they pay, and the app writes amounts by its own rule. Packs carry their own
+//!   `gross_inr`; the account's spend and balance are credits, priced at the price list's
+//!   `credit_inr` plus `gst_rate`. A figure that does not read is left out, never guessed.
 //! - A pay link is held only as a [`PayUrl`], which only the connector's own `/pay/` links
 //!   parse to; the view carries its text.
 //! - No token, key or account id is held here: the credential is the connectors crate's.
 
-use clauseo_connectors::{Account, CredentialStatus, KnownConnector, Liveness, Pack, PayUrl};
+use clauseo_connectors::{
+    Account, CredentialStatus, KnownConnector, Liveness, Pack, PayUrl, Pricing,
+};
 use clauseo_protocol::{
     Balance, ConnectorStatus, ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend,
 };
+
+mod money;
+
+use money::GrossRate;
+pub(crate) use money::paise;
 
 /// The balance is low under this many search pages' worth of credits.
 const LOW_SEARCH_PAGES: i64 = 10;
@@ -109,31 +117,49 @@ impl CaseLaw {
 
     fn connector_view(&self, known: &KnownConnector) -> ConnectorView {
         let packs = self.packs();
+        let rate = self.gross_rate();
         ConnectorView {
             id: known.id.to_owned(),
             name: known.name.to_owned(),
             price_paise: packs.iter().map(|pack| pack.paise).min(),
             packs,
-            recent_spend: self.account.as_ref().map(recent_spend),
-            status: self.status(),
+            recent_spend: self
+                .account
+                .as_ref()
+                .map(|account| recent_spend(account, rate)),
+            status: self.status(rate),
             pay_url: self.pay_url.as_ref().map(|url| url.as_str().to_owned()),
         }
     }
 
-    /// The packs on sale, when live; a pack whose price or credits do not read is left out.
-    fn packs(&self) -> Vec<PackView> {
-        let Some(pricing) = self
-            .liveness
+    /// The price list, when live.
+    fn live_pricing(&self) -> Option<&Pricing> {
+        self.liveness
             .as_ref()
             .filter(|l| l.live)
             .and_then(|l| l.pricing.as_ref())
-        else {
-            return Vec::new();
-        };
-        pricing.packs.iter().filter_map(pack_view).collect()
     }
 
-    fn status(&self) -> ConnectorStatus {
+    /// The packs on sale, when live; a pack whose price or credits do not read is left out.
+    fn packs(&self) -> Vec<PackView> {
+        self.live_pricing()
+            .map(|pricing| pricing.packs.iter().filter_map(pack_view).collect())
+            .unwrap_or_default()
+    }
+
+    /// A credit's gross worth, from the live price list: what turns the account's credits into
+    /// the rupees the lawyer pays. `None`, with one warning that names no figure, when the
+    /// list's `credit_inr` or `gst_rate` does not read, so no amount is guessed.
+    fn gross_rate(&self) -> Option<GrossRate> {
+        let pricing = self.live_pricing()?;
+        let rate = GrossRate::from_pricing(pricing);
+        if rate.is_none() {
+            tracing::warn!("the price list's credit or GST rate does not read: no rupee amounts");
+        }
+        rate
+    }
+
+    fn status(&self, rate: Option<GrossRate>) -> ConnectorStatus {
         if self.signing_in {
             return ConnectorStatus::SigningIn;
         }
@@ -152,7 +178,7 @@ impl CaseLaw {
                 },
                 None => ConnectorStatus::SignedIn {
                     account_label: None,
-                    balance: self.account.as_ref().map(balance),
+                    balance: self.account.as_ref().map(|account| balance(account, rate)),
                     low: self.low(),
                 },
             },
@@ -188,22 +214,27 @@ fn pack_view(pack: &Pack) -> Option<PackView> {
     })
 }
 
-fn balance(account: &Account) -> Balance {
+/// The balance, priced from its credits at the gross rate; the account's own `balance_inr` is
+/// before GST, so it is not shown.
+fn balance(account: &Account, rate: Option<GrossRate>) -> Balance {
     Balance {
         credits: clamp(account.balance_credits),
-        paise: paise(&account.balance_inr),
+        paise: rate.and_then(|rate| rate.paise(account.balance_credits)),
     }
 }
 
-fn recent_spend(account: &Account) -> RecentSpend {
+fn recent_spend(account: &Account, rate: Option<GrossRate>) -> RecentSpend {
+    let priced = |credits: i64| rate.and_then(|rate| rate.paise(credits));
     RecentSpend {
         today_credits: clamp(account.spent_today_credits),
+        today_paise: priced(account.spent_today_credits),
         days: account
             .recent
             .iter()
             .map(|day| DaySpendView {
                 day: day.day.clone(),
                 credits: clamp(day.credits),
+                paise: priced(day.credits),
             })
             .collect(),
     }
@@ -212,33 +243,6 @@ fn recent_spend(account: &Account) -> RecentSpend {
 /// A count of credits in the wire's `i32`, held at its ends.
 fn clamp(credits: i64) -> i32 {
     i32::try_from(credits).unwrap_or(if credits < 0 { i32::MIN } else { i32::MAX })
-}
-
-/// Rupees written as decimal text (`"23.60"`, `"236"`, `"0.1"`) in paise; `None` for anything
-/// else: a sign, a grouping comma, a currency mark, more than two paise digits, or more than a
-/// `u32` holds.
-pub(crate) fn paise(text: &str) -> Option<u32> {
-    let (rupees, fraction) = match text.split_once('.') {
-        Some((rupees, fraction)) if !fraction.is_empty() => (rupees, fraction),
-        Some(_) => return None,
-        None => (text, ""),
-    };
-    let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
-    if rupees.is_empty()
-        || rupees.len() > 10
-        || !digits(rupees)
-        || fraction.len() > 2
-        || !digits(fraction)
-    {
-        return None;
-    }
-    let whole: u32 = rupees.parse().ok()?;
-    let part: u32 = match fraction.len() {
-        0 => 0,
-        1 => fraction.parse::<u32>().ok()? * 10,
-        _ => fraction.parse().ok()?,
-    };
-    whole.checked_mul(100)?.checked_add(part)
 }
 
 #[cfg(test)]

@@ -137,6 +137,11 @@ check (`MAX_REPLY_BYTES`) stands in front, since S28's limit is 8 MB.
 - **Money as integers.** Amounts reach the app in paise (`price_paise`, `PackView.paise`,
   `Balance.paise`), so the app formats them by its own money rule (`connectors/state.rs`). A
   figure that does not read as rupees with at most two paise digits is left out, never guessed.
+  Every amount the lawyer sees includes GST (what they see is what they pay); the GST
+  breakdown is on the connector's receipt, not in the app. The account's spend and balance are
+  credits, priced by the host at the price list's `credit_inr` plus `gst_rate` (integer
+  arithmetic, rounded half-up to the paise once per amount; none at all if either rate does not
+  read). `Balance.paise` was the account's net `balance_inr` before this; older logs hold net.
 - The pay link is held only as a `PayUrl`, which only the connector's own `/pay/` links parse
   to (D1: `ConnectorView.pay_url` in `ConnectorsChanged`, no new `CommandOutcome`).
 - **Proxy.** Desktop builds the connector's route as `ProxyChoice::Resolve`, asking

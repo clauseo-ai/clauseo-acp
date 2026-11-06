@@ -10,20 +10,22 @@ expression: "HostEvent::ConnectorsChanged(super::connectors::connectors_state(),
       {
         "id": "case-law",
         "name": "Indian case law",
-        "price_paise": 23600,
+        "price_paise": 2360,
         "packs": [
           {
             "pack": "pack_200",
             "credits": 200,
-            "paise": 23600
+            "paise": 2360
           }
         ],
         "recent_spend": {
           "today_credits": 40,
+          "today_paise": 472,
           "days": [
             {
               "day": "2026-11-04",
-              "credits": 120
+              "credits": 120,
+              "paise": 1416
             }
           ]
         },
@@ -31,7 +33,7 @@ expression: "HostEvent::ConnectorsChanged(super::connectors::connectors_state(),
           "signed_in": {
             "balance": {
               "credits": 1180,
-              "paise": 118000
+              "paise": 13924
             },
             "low": false
           }

@@ -58,8 +58,16 @@ fn the_commands_publish_the_state_and_no_token_reaches_the_app() {
         panic!("{state:?}");
     };
     assert_eq!((account_label, *credits, *low), (&None, 1_000, false));
-    // The fake answers `balance_inr` as a tenth of a rupee per credit: "100.00" for 1,000.
-    assert_eq!(*paise, Some(10_000), "{state:?}");
+    // At the fake's price list, ₹0.10 a credit plus 18% GST: 1,000 credits are ₹118.
+    assert_eq!(*paise, Some(11_800), "{state:?}");
+    // The spend, priced the same way: 46 credits are 542.8 paise, shown as 543.
+    let spend = case_law(&state).unwrap().recent_spend.clone().unwrap();
+    assert_eq!(
+        (spend.today_credits, spend.today_paise),
+        (46, Some(543)),
+        "{state:?}"
+    );
+    assert_eq!(spend.days[0].paise, Some(1_416), "{state:?}");
 
     // Add credits: the reply follows the pay link into the state; paying brings the balance.
     rig.ok(add_credits("200"));

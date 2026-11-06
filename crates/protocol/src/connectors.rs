@@ -48,7 +48,7 @@ pub struct ConnectorView {
     pub id: String,
     /// The connector's fallback name; the app shows its own words.
     pub name: String,
-    /// The cheapest pack's gross amount (GST included) in paise, such as `23_600` for ₹236:
+    /// The cheapest pack's amount in paise, GST included, such as `2_360` for ₹23.60:
     /// a number, so the app writes it by its own money rule. `None` when the connector is not
     /// live or the price list could not be read.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -75,17 +75,23 @@ pub struct PackView {
     pub pack: String,
     /// The credits it adds.
     pub credits: i32,
-    /// Its gross price (GST included) in paise, such as `23_600` for ₹236. A pack whose
-    /// price the host cannot read as rupees and paise is left out of the list.
+    /// Its price in paise, GST included, such as `2_360` for ₹23.60 (200 credits). A pack
+    /// whose price the host cannot read as rupees and paise is left out of the list.
     pub paise: u32,
 }
 
-/// What the account spent lately, from the last account read.
+/// What the account spent lately, from the last account read. The account gives credits; the
+/// host prices them in paise, GST included, at the live price list's rate (`credit_inr` plus
+/// `gst_rate`), each amount rounded half-up to the paise. Every `paise` is `None` when the
+/// connector is not live or the price list's rate does not read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct RecentSpend {
     /// Credits spent today, by the connector's day.
     pub today_credits: i32,
+    /// Today's spend in paise, GST included, such as `2_360` for 200 credits (₹23.60).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub today_paise: Option<u32>,
     /// Credits spent on each recent day, as the account lists them.
     pub days: Vec<DaySpendView>,
 }
@@ -98,6 +104,9 @@ pub struct DaySpendView {
     pub day: String,
     /// The credits spent that day.
     pub credits: i32,
+    /// That day's spend in paise, GST included; `None` as for [`RecentSpend::today_paise`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub paise: Option<u32>,
 }
 
 /// An account's balance, from the last account read.
@@ -106,8 +115,14 @@ pub struct DaySpendView {
 pub struct Balance {
     /// The credits left.
     pub credits: i32,
-    /// Their worth in paise, such as `118_000` for ₹1,180; `None` when the account's figure
-    /// is not rupees and paise the host can read. The app writes it by its own money rule.
+    /// Their worth in paise, GST included: the credits at the live price list's rate, rounded
+    /// half-up, such as `13_924` for 1,180 credits (₹139.24 at ₹0.10 a credit plus 18% GST).
+    /// `None` when the connector is not live or the price list's rate does not read. The app
+    /// writes it by its own money rule.
+    ///
+    /// GST-inclusive from R24's spend follow-up on. Before it this was the account's
+    /// `balance_inr`, which is net (before GST): a value in an older log or snapshot is net, not
+    /// gross. `ConnectorsChanged` is not folded, so no schema version changes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub paise: Option<u32>,
 }
