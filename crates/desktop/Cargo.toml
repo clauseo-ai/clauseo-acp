@@ -142,6 +142,13 @@ objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
 # updater's install kind (src/update/install_kind.rs): access(2) on the .app's folder.
 libc = { workspace = true }
 
+# The quit on a signal (src/quit_signals.rs): SIGTERM, SIGINT and SIGHUP caught by handlers on
+# Tauri's runtime, never blocked (a blocked signal stays blocked in every child the app starts).
+# Tauri's own tokio, at its locked version; `signal` adds only signal-hook-registry, already in
+# the tree. libc (below) names the signal numbers.
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1.53.3", default-features = false, features = ["signal"] }
+
 # The day cap's local day on Linux (src/connectors/local_day.rs): localtime_r; macOS takes libc
 # above.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
@@ -182,5 +189,13 @@ tauri-plugin-updater.workspace = true
 
 # The deletion's Windows tests (src/delete_app_data/tests/make.rs) set a reparse point that is no
 # link with DeviceIoControl (System_IO), to see it kept.
+# The quit-on-signal test (tests/quit_on_signal.rs) sends the signals, drives the ladder with
+# clauseo-process's ManualTimer, and keeps its scratch folder in a tempfile folder (already in the
+# tree, through tauri), removed when the test ends.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true }
+clauseo-process = { path = "../process", features = ["test-support"] }
+tempfile = "3"
+
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = ["Win32_System_IO"] }

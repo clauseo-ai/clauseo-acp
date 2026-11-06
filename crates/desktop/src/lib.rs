@@ -16,6 +16,15 @@
 //!   refused folders of `refused_folders`, and the launch profile (`profile.rs`, built on that
 //!   thread; with none when it cannot be built). Exit waits for the start, then for
 //!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
+//! - Every quit runs the agents' stop before the process ends (`quit.rs`): a closed window or
+//!   `AppHandle::exit` through `RunEvent::ExitRequested`; on Unix the first SIGTERM, SIGINT or
+//!   SIGHUP through `AppHandle::exit(0)` (`quit_signals.rs`: caught by handlers on Tauri's
+//!   runtime, never blocked, so the agents start with their default actions; a second one exits
+//!   at once with `128 + signo`); and macOS's own quit (the app menu's Quit,
+//!   the Dock, logout, shutdown), which reaches only `RunEvent::Exit`, synchronously there within
+//!   `EXIT_STOP_WAIT` (13 s). Windows needs none of this: the Job Object's kill-on-close ends
+//!   each agent's tree when the process dies, however it dies. SIGKILL or a crash leaves the
+//!   agents' groups running on Unix.
 //! - On Windows, `run` first checks the `WebView2` runtime; when it is missing or older than
 //!   `minimumWebview2Version`, a task dialog says so and `run` returns without building the app
 //!   (`webview2.rs`).
@@ -99,6 +108,8 @@ mod picked;
 mod pre_write_guard;
 mod profile;
 mod quit;
+#[cfg(unix)]
+mod quit_signals;
 mod rust_only;
 mod settings_window;
 mod setup;
@@ -115,7 +126,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bridge::Bridge;
-use clauseo_host::{HostConfig, HostExit};
+use clauseo_host::HostConfig;
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
@@ -126,7 +137,7 @@ pub use jailed::{
 };
 pub use pre_write_guard::guard_requested;
 use profile::{DesktopProfile, with_profile};
-use quit::{AGENTS_STOP_WAIT, Exit, SetupStop, stop_then_after_host};
+use quit::{Exit, SetupStop};
 use rust_only::PluginRustOnly;
 use tauri::{
     App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -140,6 +151,14 @@ pub const BUILDTIME_MARKER: u64 = 0;
 #[doc(hidden)]
 pub mod counts_for_tests {
     pub use crate::counts::{about, counts_on, open, open_with, tick_once};
+}
+
+/// What `tests/quit_on_signal.rs` drives: the signal thread the app starts (`quit_signals.rs`).
+/// Not an interface.
+#[cfg(unix)]
+#[doc(hidden)]
+pub mod quit_signals_for_tests {
+    pub use crate::quit_signals::{QuitSignals, exit_code};
 }
 
 /// The label of the main window. `capabilities/main.json` grants by this label
@@ -235,6 +254,9 @@ pub fn run() -> tauri::Result<()> {
             drop(on_window_event(window, event));
         })
         .setup(|app| {
+            // A quit signal from here on stops the agents as the normal quit does.
+            #[cfg(unix)]
+            quit_signals::quit_on_signals(app.handle().clone());
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
             e2e::grant_scoreboard(app)?;
@@ -268,10 +290,8 @@ pub fn run() -> tauri::Result<()> {
         })
         .build(context)?;
     let exit = Arc::new(Exit::default());
-    app.run(move |app, event| {
-        if let RunEvent::ExitRequested { api, code, .. } = event
-            && !exit.stopped.load(Ordering::Acquire)
-        {
+    app.run(move |app, event| match event {
+        RunEvent::ExitRequested { api, code, .. } if !exit.stopped.load(Ordering::Acquire) => {
             api.prevent_exit();
             // One stopper: a later request (another close, the stopper's own exit racing a
             // second one) only waits for it.
@@ -283,6 +303,8 @@ pub fn run() -> tauri::Result<()> {
                 stop_host_then_exit(app, Arc::clone(&exit), code.unwrap_or(0));
             }
         }
+        RunEvent::Exit => quit::stop_on_exit(app, &exit),
+        _ => {}
     });
     Ok(())
 }
@@ -436,31 +458,14 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let fallback = app.clone();
     let fallback_exit = Arc::clone(&exit);
     let app = app.clone();
-    let cell = app.try_state::<Bridge>().map(|bridge| bridge.cell());
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            // The agents' installs and sign-ins first, their children killed (#386), then the
-            // host; then the log, the counts and the install, in that order (quit.rs).
-            stop_then_after_host(
-                || {
-                    app.try_state::<SetupStop>().is_none_or(|setup| {
-                        setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT)
-                    })
-                },
-                || cell.as_deref().map_or(HostExit::Stopped, host_start::stop),
-                // The log's queued lines go to the file before either exit below skips the drops.
-                || host_log::flush_app(&app),
-                // After the host, whose last counts go in too.
-                || {
-                    if let Some(counts) = app.try_state::<counts::CountsState>() {
-                        counts.save();
-                    }
-                },
-                // The window state, then the install (0037); returns when there is none.
-                |ended, agents_stopped| update::after_host(&app, ended, agents_stopped),
-            );
-            exit.stopped.store(true, Ordering::Release);
+            // The window state, then the install (0037); returns when there is none.
+            quit::stop_steps(&app, |ended, agents_stopped| {
+                update::after_host(&app, ended, agents_stopped);
+            });
+            exit.mark_stopped();
             // The e2e build ends the process itself once the host has joined. On a Windows
             // session with no visible window (session 0, as in CI) `app.exit` never yields
             // `RunEvent::Exit`: tao's loop ends only after a paint on a visible window (tao
@@ -482,7 +487,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
         });
     if stopper.is_err() {
         // No thread for it: exit now; the host's next start repairs what it left open.
-        fallback_exit.stopped.store(true, Ordering::Release);
+        fallback_exit.mark_stopped();
         host_log::flush_app(&fallback);
         fallback.exit(code);
     }

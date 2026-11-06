@@ -91,6 +91,7 @@ bundled! {
         "permission-share-mode",
         "permission-word-open",
         "plan",
+        "prompt-child-in-group",
         "prompt-stream",
         "queue-two-prompts",
         "refresh-reused-then-load",
