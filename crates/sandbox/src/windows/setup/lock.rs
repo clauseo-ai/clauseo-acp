@@ -35,8 +35,9 @@ use std::marker::PhantomData;
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_DUP_NAME, ERROR_NOT_FOUND, HANDLE, HLOCAL, LocalFree,
-    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_DUP_NAME, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND,
+    ERROR_PATH_NOT_FOUND, HANDLE, HLOCAL, LocalFree, WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
 };
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -71,8 +72,10 @@ pub(super) const ADMINISTRATORS: &str = "S-1-5-32-544";
 pub(super) const OBJECT_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)";
 
 /// How many times opening the namespace is tried when it vanishes between a create that found
-/// it and the open (its last holder closed it in between).
-const NAMESPACE_TRIES: usize = 3;
+/// it and the open (its last holder, in another process, closed it in between). Windows says
+/// so with `ERROR_PATH_NOT_FOUND` (seen on the hosted runner, where nextest runs each test in
+/// its own process), and may with `ERROR_FILE_NOT_FOUND` or `ERROR_NOT_FOUND`.
+const NAMESPACE_TRIES: usize = 8;
 
 /// This process's one handle to [`NAMESPACE`] (module doc).
 static NAMESPACE_HANDLE: Shared<Namespace> = Shared::new();
@@ -228,7 +231,10 @@ impl Namespace {
                     "other code in this process holds the set-up lock's namespace open".to_owned(),
                 ));
             }
-            if error.code() != HRESULT::from_win32(ERROR_NOT_FOUND.0) {
+            let vanished = [ERROR_PATH_NOT_FOUND, ERROR_FILE_NOT_FOUND, ERROR_NOT_FOUND]
+                .iter()
+                .any(|gone| error.code() == HRESULT::from_win32(gone.0));
+            if !vanished {
                 return Err(os("OpenPrivateNamespaceW", &error));
             }
         }
