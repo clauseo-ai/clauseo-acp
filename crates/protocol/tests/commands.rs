@@ -55,6 +55,10 @@ mod folder_support;
 #[path = "commands/update.rs"]
 mod update;
 
+#[cfg(test)]
+#[path = "commands/protection.rs"]
+mod protection;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

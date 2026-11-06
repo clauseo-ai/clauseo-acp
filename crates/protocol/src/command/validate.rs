@@ -235,7 +235,9 @@ impl HostCommand {
             // Whether the updater's state takes them is the host's check.
             | Self::CheckForUpdate {}
             | Self::InstallUpdate { when: _ }
-            | Self::CancelScheduledUpdate {} => Ok(()),
+            | Self::CancelScheduledUpdate {}
+            // No fields; whether this computer has a set-up to retry or remove is state.
+            | Self::RetryProtection {} | Self::RemoveSandboxSetup {} => Ok(()),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),

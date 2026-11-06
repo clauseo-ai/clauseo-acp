@@ -14,8 +14,9 @@ use std::ops::RangeInclusive;
 
 use clauseo_protocol::{
     CheckpointKind, Deliverable, Delivery, ElicitationOutcome, ErrorCode, ExpiryReason,
-    LimitSource, MatterStatus, NoticeKind, NoticeLevel, PermissionAbout, PermissionKind,
-    SkippedFileReason, SteerOutcome, StopReason, ThreadStatus, ToolCallStatus, ToolKind,
+    LimitSource, MatterStatus, NotProtectedCause, NoticeKind, NoticeLevel, PermissionAbout,
+    PermissionKind, Protection, ProtectionTier, SkippedFileReason, SteerOutcome, StopReason,
+    ThreadStatus, ToolCallStatus, ToolKind,
 };
 
 /// The document, read at build time.
@@ -69,7 +70,8 @@ macro_rules! every_variant {
 #[test]
 fn every_listed_variant_is_in_ui_states() {
     let every = every_variant!(
-        data: ThreadStatus, LimitSource, SteerOutcome, MatterStatus, NoticeKind;
+        data: ThreadStatus, LimitSource, SteerOutcome, MatterStatus, NoticeKind, Protection,
+            NotProtectedCause, ProtectionTier;
         unit: StopReason, ToolKind, ToolCallStatus, PermissionKind, ExpiryReason,
             ElicitationOutcome, CheckpointKind, SkippedFileReason, Delivery, ErrorCode,
             Deliverable, NoticeLevel, PermissionAbout,

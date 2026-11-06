@@ -30,6 +30,7 @@ fn matter() -> MatterSummary {
         folder_display: "Documents/m".to_owned(),
         folder_state: FolderState::Found,
         folder_support: None,
+        protection: None,
     }
 }
 

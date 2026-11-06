@@ -48,11 +48,15 @@
 //!   policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and locks
 //!   each security key (`mcp.servers`, `tools.web_search`, `tools.browser`, `tools.connectors`,
 //!   `privacy.counts`, `privacy.crash_reports`, `update.mode`, `install.bundle`,
-//!   `install.registry`, every `plans.<id>`, `skills.extra`, `skills.allow_scripts` and
-//!   `skills.curated`) off: the list empty, each switch `false`, the update mode `none`, each
+//!   `install.registry`, every `plans.<id>`, `skills.extra`, `skills.allow_scripts`,
+//!   `skills.curated`, `sandbox.required`, `sandbox.allow_unprotected_auto` and the three
+//!   `network` keys) off: the list empty, each switch `false`, the update mode `none`, each
 //!   install key unset, no plan, so no endpoint the lawyer chose stands in for the firm's (decision
-//!   record 0048), no extra skill pack and none curated (decision record 0040).
-//! - Only a policy sets `skills.curated`: a `settings.json` value is ignored with a warning.
+//!   record 0048), no extra skill pack and none curated (decision record 0040), the sandbox not
+//!   required and no auto mode outside it, no proxy but the OS's, no CA file and no added domain
+//!   (decision record 0051).
+//! - Only a policy sets `skills.curated` and `network.allowed_domains`: a `settings.json`
+//!   value is ignored with a warning.
 //!   A `skills.enabled` entry whose id is no pack id or whose value is not
 //!   `sha256:<64 lowercase hex>` is left out with a warning that quotes the id only when it is
 //!   id-shaped, else gives its place; no message quotes a hash.
@@ -116,6 +120,7 @@ mod json;
 mod leaf;
 mod locations;
 mod lock_reason;
+mod network;
 mod plans;
 pub mod policy;
 mod privacy;
@@ -148,9 +153,9 @@ pub use policy::{
 pub use privacy::PrivacyPatch;
 pub use schema::{
     AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
-    McpServerLaunch, McpSettings, Motion, Plan, PlanProvider, PrivacySettings, Settings,
-    SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings, UpdateMode, UpdateSettings,
-    json_schema,
+    McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider, PrivacySettings,
+    SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings,
+    UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

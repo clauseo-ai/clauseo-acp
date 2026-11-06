@@ -695,5 +695,37 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-sandbox.setup_refused": {
+    "en": "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-sandbox.setup_failed": {
+    "en": "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-sandbox.setup_required": {
+    "en": "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-sandbox.required": {
+    "en": "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

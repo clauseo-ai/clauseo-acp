@@ -260,6 +260,10 @@ impl Bridge {
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.
             HostQuery::FolderSupport { source } => admit::picked_source(self, source)?,
+            // Decision record 0051: the host does not answer it yet; its next step rules here.
+            HostQuery::Protection => {
+                return Err(invalid("the protection query is not admitted yet"));
+            }
         }
         self.host().await?.query(PRINCIPAL, query).await
     }

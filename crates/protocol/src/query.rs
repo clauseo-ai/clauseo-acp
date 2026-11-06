@@ -10,9 +10,9 @@ use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
     FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource, MatterStatus,
-    PackList, PackStatus, QueueHoldReason, RestoreRequest, SearchAnswer, SearchRequest, Seq,
-    SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView,
-    ViewEntry,
+    PackList, PackStatus, Protection, ProtectionView, QueueHoldReason, RestoreRequest,
+    SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus,
+    Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -184,6 +184,10 @@ pub enum HostQuery {
     /// names, each with its state (decision record 0040), sorted by id; read off the host
     /// thread. Answered `QueryResult::SkillPacks`. JSON: `"list_skill_packs"`.
     ListSkillPacks,
+    /// This computer's sandbox and the firm's protection settings (decision record 0051).
+    /// Answered `QueryResult::Protection`; until the host builds it, `command.invalid`.
+    /// JSON: `"protection"`.
+    Protection,
 }
 
 /// A query's answer.
@@ -238,6 +242,8 @@ pub enum QueryResult {
     FolderSupport(PickedFolderSupport),
     /// For `ListSkillPacks`.
     SkillPacks(Vec<PackStatus>),
+    /// For `Protection`.
+    Protection(ProtectionView),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it
@@ -374,6 +380,11 @@ pub struct MatterSummary {
     /// folder is fine, before any check since the host started, and off Windows.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub folder_support: Option<FolderSupportKind>,
+    /// Whether its agents run in the sandbox, and why not (decision record 0051): an in-memory
+    /// reading, not state in the log. Missing when not known yet: before the host has decided,
+    /// and from a host that does not tell.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub protection: Option<Protection>,
 }
 
 open_unit_enum! {

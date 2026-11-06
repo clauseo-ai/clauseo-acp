@@ -60,6 +60,19 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterProtectedLink,
             "sub\\AGENTS.md is a shortcut, and Clauseo can't protect a shortcut",
         ),
+        failed(
+            ErrorCode::SandboxSetupRefused,
+            "the administrator prompt was declined",
+        ),
+        failed(ErrorCode::SandboxSetupFailed, "the sandbox check failed"),
+        failed(
+            ErrorCode::SandboxSetupRequired,
+            "the sandbox set-up is not done",
+        ),
+        failed(
+            ErrorCode::SandboxRequired,
+            "the firm requires the sandbox; this computer is at tier C",
+        ),
     ]
 }
 

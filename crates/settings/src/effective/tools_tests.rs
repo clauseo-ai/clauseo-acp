@@ -98,9 +98,14 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "install.bundle",
             "install.registry",
             "mcp.servers",
+            "network.allowed_domains",
+            "network.ca_certs",
+            "network.upstream_proxy",
             "plans.",
             "privacy.counts",
             "privacy.crash_reports",
+            "sandbox.allow_unprotected_auto",
+            "sandbox.required",
             "skills.allow_scripts",
             "skills.curated",
             "skills.extra",
@@ -144,7 +149,12 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "plans.",
             "skills.extra",
             "skills.allow_scripts",
-            "skills.curated"
+            "skills.curated",
+            "sandbox.required",
+            "sandbox.allow_unprotected_auto",
+            "network.upstream_proxy",
+            "network.ca_certs",
+            "network.allowed_domains"
         ]
     );
 }

@@ -4,14 +4,17 @@
 use super::{SECURITY_KEYS, agent_id};
 use crate::plans::plan_id;
 use crate::schema::{
-    Density, FontSize, Language, Lite, Motion, PrivacySettings, Settings, SkillsExtra, Theme,
-    ToolsSettings, UpdateMode,
+    Density, FontSize, Language, Lite, Motion, PrivacySettings, SandboxSettings, Settings,
+    SkillsExtra, Theme, ToolsSettings, UpdateMode,
 };
 
 /// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
 /// `tools` and `privacy` key `false`, `update.mode` `none`, each `install` key unset, no
-/// plan at all (`plans.`), `skills.extra` `off`, `skills.allow_scripts` `false` and
-/// `skills.curated` empty. Kept apart from [`reset`], which restores the default, since a
+/// plan at all (`plans.`), `skills.extra` `off`, `skills.allow_scripts` `false`,
+/// `skills.curated` empty, `sandbox.required` `false` (its default: `allow_unprotected_auto`
+/// `false` carries the fail-closed, decision record 0051), `sandbox.allow_unprotected_auto`
+/// `false`, `network.upstream_proxy` unset (the OS's proxy), and `network.ca_certs` and
+/// `network.allowed_domains` empty. Kept apart from [`reset`], which restores the default, since a
 /// security key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in
 /// `.` (`tools.`, `install.`) that names every security key under it. A single `plans.<id>`
 /// names none: [`reset`] drops that one plan.
@@ -38,6 +41,11 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "skills.extra" => settings.skills.extra = SkillsExtra::Off,
             "skills.allow_scripts" => settings.skills.allow_scripts = false,
             "skills.curated" => settings.skills.curated.clear(),
+            "sandbox.required" => settings.sandbox.required = false,
+            "sandbox.allow_unprotected_auto" => settings.sandbox.allow_unprotected_auto = false,
+            "network.upstream_proxy" => settings.network.upstream_proxy = None,
+            "network.ca_certs" => settings.network.ca_certs.clear(),
+            "network.allowed_domains" => settings.network.allowed_domains.clear(),
             other => unreachable!("security key {other} has no refused value"),
         }
     }
@@ -70,6 +78,14 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "skills.curated" => settings.skills.curated.clear(),
         "skills.allow_scripts" => settings.skills.allow_scripts = false,
         "skills.enabled" => settings.skills.enabled.clear(),
+        "sandbox.required" => settings.sandbox.required = SandboxSettings::default().required,
+        "sandbox.allow_unprotected_auto" => {
+            settings.sandbox.allow_unprotected_auto =
+                SandboxSettings::default().allow_unprotected_auto;
+        }
+        "network.upstream_proxy" => settings.network.upstream_proxy = None,
+        "network.ca_certs" => settings.network.ca_certs.clear(),
+        "network.allowed_domains" => settings.network.allowed_domains.clear(),
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);

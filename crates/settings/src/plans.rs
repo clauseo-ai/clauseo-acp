@@ -193,10 +193,16 @@ fn first_refused(
 /// then a host and a port of at most 65535 if any, with no user name or password (`@`), query
 /// (`?`), fragment (`#`), backslash, space or control character anywhere.
 pub fn web_address_ok(url: &str) -> bool {
+    address_ok(url, "https://")
+}
+
+/// [`web_address_ok`]'s rules after `scheme` (`https://`, or `http://` for a proxy), which
+/// matches in any case.
+pub(crate) fn address_ok(url: &str, scheme: &str) -> bool {
     let Some(rest) = url
-        .get(..8)
-        .filter(|scheme| url.is_ascii() && scheme.eq_ignore_ascii_case("https://"))
-        .and_then(|_| url.get(8..))
+        .get(..scheme.len())
+        .filter(|start| url.is_ascii() && start.eq_ignore_ascii_case(scheme))
+        .and_then(|_| url.get(scheme.len()..))
     else {
         return false;
     };

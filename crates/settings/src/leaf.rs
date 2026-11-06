@@ -48,8 +48,8 @@ use crate::schema::{
     AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, Plan, Settings,
     SkillsExtra, Theme, UpdateMode,
 };
-use crate::skills;
 use crate::warning::{Origin, Warning, WarningKind};
+use crate::{network, skills};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -61,7 +61,7 @@ use reset::reset;
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 20] = [
+pub(crate) const KEYS: [(&str, Kind); 25] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -82,6 +82,11 @@ pub(crate) const KEYS: [(&str, Kind); 20] = [
     ("skills.curated", Kind::StringArray),
     ("skills.allow_scripts", Kind::Boolean),
     ("skills.enabled", Kind::Object),
+    ("sandbox.required", Kind::Boolean),
+    ("sandbox.allow_unprotected_auto", Kind::Boolean),
+    ("network.upstream_proxy", Kind::String),
+    ("network.ca_certs", Kind::Object),
+    ("network.allowed_domains", Kind::StringArray),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -92,8 +97,10 @@ pub(crate) const KEYS: [(&str, Kind); 20] = [
 /// default would fail open (`tools.connectors` lets a connector spend the lawyer's credits,
 /// R24). `plans.` stands for every `plans.<id>` (decision record 0048):
 /// locked, no plan stands, so no endpoint the lawyer chose does. The three `skills` keys lock
-/// at no extra pack, none from a list, and no script (decision record 0040).
-pub(crate) const SECURITY_KEYS: [&str; 13] = [
+/// at no extra pack, none from a list, and no script (decision record 0040). The `sandbox` keys
+/// lock at not required and no auto mode outside the sandbox, and the `network` keys at no proxy
+/// (so the OS's), no CA file and no added domain (decision record 0051).
+pub(crate) const SECURITY_KEYS: [&str; 18] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
@@ -107,6 +114,11 @@ pub(crate) const SECURITY_KEYS: [&str; 13] = [
     "skills.extra",
     "skills.allow_scripts",
     "skills.curated",
+    "sandbox.required",
+    "sandbox.allow_unprotected_auto",
+    "network.upstream_proxy",
+    "network.ca_certs",
+    "network.allowed_domains",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -116,8 +128,9 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 
 /// The keys only a policy may set (decision record 0040): a `settings.json` value for one is
 /// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
-/// `skills.curated` is empty and admits nothing.
-pub(crate) const POLICY_ONLY_KEYS: [&str; 1] = ["skills.curated"];
+/// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
+/// firm's (decision record 0051), so without a policy it is empty and adds no domain.
+pub(crate) const POLICY_ONLY_KEYS: [&str; 2] = ["skills.curated", "network.allowed_domains"];
 
 /// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
 /// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of
@@ -182,6 +195,12 @@ pub(crate) enum Leaf {
     AllowScripts(bool),
     /// The whole `skills.enabled` map: a policy value replaces the user's map, never merges.
     SkillsEnabled(BTreeMap<String, String>),
+    SandboxRequired(bool),
+    AllowUnprotectedAuto(bool),
+    UpstreamProxy(Option<String>),
+    /// The whole `network.ca_certs` map: a policy value replaces the user's map, never merges.
+    CaCerts(BTreeMap<String, PathBuf>),
+    AllowedDomains(Vec<String>),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -303,6 +322,17 @@ impl Leaf {
             "skills.curated" => skills::curated(key, value).map(Leaf::Curated),
             "skills.allow_scripts" => typed_value(key, value).map(Leaf::AllowScripts),
             "skills.enabled" => skills::enabled(key, value, unknown).map(Leaf::SkillsEnabled),
+            "sandbox.required" => typed_value(key, value).map(Leaf::SandboxRequired),
+            "sandbox.allow_unprotected_auto" => {
+                typed_value(key, value).map(Leaf::AllowUnprotectedAuto)
+            }
+            "network.upstream_proxy" => {
+                network::upstream_proxy(key, value).map(Leaf::UpstreamProxy)
+            }
+            "network.ca_certs" => network::ca_certs(key, value, unknown).map(Leaf::CaCerts),
+            "network.allowed_domains" => {
+                network::allowed_domains(key, value, unknown).map(Leaf::AllowedDomains)
+            }
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -338,6 +368,11 @@ impl Leaf {
             Leaf::Curated(_) => "skills.curated".to_owned(),
             Leaf::AllowScripts(_) => "skills.allow_scripts".to_owned(),
             Leaf::SkillsEnabled(_) => "skills.enabled".to_owned(),
+            Leaf::SandboxRequired(_) => "sandbox.required".to_owned(),
+            Leaf::AllowUnprotectedAuto(_) => "sandbox.allow_unprotected_auto".to_owned(),
+            Leaf::UpstreamProxy(_) => "network.upstream_proxy".to_owned(),
+            Leaf::CaCerts(_) => "network.ca_certs".to_owned(),
+            Leaf::AllowedDomains(_) => "network.allowed_domains".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -385,6 +420,11 @@ impl Leaf {
             Leaf::Curated(ids) => settings.skills.curated = ids,
             Leaf::AllowScripts(on) => settings.skills.allow_scripts = on,
             Leaf::SkillsEnabled(packs) => settings.skills.enabled = packs,
+            Leaf::SandboxRequired(on) => settings.sandbox.required = on,
+            Leaf::AllowUnprotectedAuto(on) => settings.sandbox.allow_unprotected_auto = on,
+            Leaf::UpstreamProxy(url) => settings.network.upstream_proxy = url,
+            Leaf::CaCerts(certs) => settings.network.ca_certs = certs,
+            Leaf::AllowedDomains(hosts) => settings.network.allowed_domains = hosts,
             Leaf::Refused(key) => reset(&key, settings),
         }
     }

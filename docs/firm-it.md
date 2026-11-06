@@ -207,7 +207,9 @@ source that cannot be read at all (a `policy.json` that does not parse, a regist
 fails) is skipped and **locks each security key off**: `mcp.servers` empty, `tools.web_search`,
 `tools.browser`, `tools.connectors`, `privacy.counts` and `privacy.crash_reports` false, `install.bundle` and
 `install.registry` unset, `skills.extra` `off`, `skills.allow_scripts` false, `skills.curated`
-empty, `update.mode` `none`, and no `plans.<id>` at all. The two `privacy` keys can
+empty, `update.mode` `none`, no `plans.<id>` at all, and the "Coming" keys below at their
+safe values (`sandbox.required` and `sandbox.allow_unprotected_auto` false, each `network` key
+unset or empty). The two `privacy` keys can
 only be turned off by policy: a policy `true` for one is ignored with a warning, and the lawyer
 keeps their own switch. A key this version does not know is only a warning, so one profile can
 serve mixed versions, **unless its name looks like a security section's** (a section holding a
@@ -245,7 +247,7 @@ the registry or managed preferences) and the section, never a value or a path. (
   (`skills.curated`). Value names ignore case; an agent id keeps
   its case ([`crates/settings/src/policy/registry.rs`](../crates/settings/src/policy/registry.rs)).
 - **`policy.json`:** the shape of the user's `settings.json`: sections `matters`, `agents`, `mcp`,
-  `ui`, `tools`, `privacy`, `plans`, `install`, `skills` and `update`, each an object; comments and trailing commas are allowed. Sample:
+  `ui`, `tools`, `privacy`, `plans`, `install`, `skills`, `update`, `sandbox` and `network`, each an object; comments and trailing commas are allowed. Sample:
   [`docs/firm-it/policy.sample.json`](firm-it/policy.sample.json) (Windows paths).
 - **macOS profile:** a payload whose `PayloadType` is `ai.clauseo.desktop`, with the dotted keys as
   its keys, except agents and plans: one key `agents`, a dictionary from agent id to launch spec, and
@@ -298,12 +300,18 @@ later.
 
 ### Coming
 
-Planned keys, not in any build yet. Each moves into the table above in the pull request that adds
-it.
+Keys Clauseo already reads and locks, with the safe value an unreadable source locks each at,
+but that nothing acts on yet; the samples leave them out. Each moves into the table above in the
+pull request that makes Clauseo act on it. Same formats as above ([decision
+0051](decisions/0051-sandbox-in-host.md)).
 
 | Key | Task | Note |
 |---|---|---|
-| `sandbox.required`, `sandbox.allow_unprotected_auto`, `network.upstream_proxy`, `network.ca_certs`, `network.allowed_domains` | R17 | Security keys |
+| `sandbox.required` | R17 | Boolean, default false, `REG_DWORD` 0 or 1. 1: on a computer that can't give the sandbox, no agent starts (`sandbox.required`). **Security key**: false if a source is unreadable; `sandbox.allow_unprotected_auto` carries the fail-closed |
+| `sandbox.allow_unprotected_auto` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: an agent outside the sandbox runs only in the ask modes, never in auto. **Security key**: false if a source is unreadable or the value does not type |
+| `network.upstream_proxy` | R17 | `http` or `https` URL with a host; no user name, password, query or fragment (Clauseo stores no proxy password). Default none: the proxy the OS is set to. `REG_SZ`. **Security key**: unset if a source is unreadable |
+| `network.ca_certs` | R17 | Object: agent id to the absolute path of a CA file, trusted besides the system's. Default empty. `REG_SZ`, JSON: `{"claude-acp": "C:\\ProgramData\\Firm\\ca.pem"}`. Replaces the user's whole map; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
+| `network.allowed_domains` | R17 | List of host names (`*.firm.example` for every name under it), added to every matter's allowlist. Default empty. `REG_MULTI_SZ`. Policy only: a `settings.json` value is ignored with a warning; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
 
 ## 7. Hosts Clauseo reaches
 
