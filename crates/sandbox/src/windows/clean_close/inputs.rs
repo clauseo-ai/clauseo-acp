@@ -1,7 +1,9 @@
 //! What the own-tree walks depend on besides the trees: the own roots, the matter's grants on
 //! them, and the strict sets. The record keeps these as the session-end repair used them (from
 //! the ledger), and a launch compares them, exactly, with what its walk would use (from the
-//! plan). Kept whole rather than hashed: an exact comparison, a few hundred bytes.
+//! plan). Kept whole rather than hashed: an exact comparison, a few hundred bytes. The read-only
+//! denies aren't among them: each is checked at every launch, with its own walk when it is
+//! written (`apply_checked`'s docs).
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
