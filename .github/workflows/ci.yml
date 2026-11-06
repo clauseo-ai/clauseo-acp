@@ -464,7 +464,7 @@ jobs:
       # runners' tokens are elevated (probe #509). One at a time: they make and delete local
       # accounts, a group and an HKLM key.
       - name: Elevated tests, one at a time
-        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
+        if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
         env:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |

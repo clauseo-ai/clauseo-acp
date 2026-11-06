@@ -111,7 +111,6 @@ filter = 'package(clauseo-mcp) & binary(guard) & test(/^real_chrome::/)'
 slow-timeout = { period = "30s", terminate-after = 4 }
 test-group = 'real-chrome'
 
-
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
 # once under the runner's load does not eject a pull request from the merge queue. Flakes are still
