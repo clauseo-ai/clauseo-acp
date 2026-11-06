@@ -595,48 +595,107 @@ changes (`setup/identity.rs`).
   check records the id. **Neither an email nor an id is unknown** (refused, retryable).
 - *When it is recorded.* At a sign-in or reuse made through Clauseo (`StartSignIn`,
   `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
-  anything compares it, so a new account chosen in Clauseo never reads as a swap. And at the
-  first `SignedIn` when nothing is recorded (first run). **Any other `SignedIn` is compared:**
-  one from S18's status check (at start, or when a window shows Plans) naming another account is
-  a change. Before R17 the pump took such a state as a new sign-in and restarted the agents on
-  it.
-- *The cache.* The verdict holds while the login files' file id and last write are unchanged:
-  a stat every 2 s (metadata only), sessions running or not. Codex: `auth.json` in Clauseo's
-  agent home, and the lawyer's `~/.codex/auth.json` while reused. Claude: the store file
-  `CLAUDE_SECURESTORAGE_CONFIG_DIR` points a session at, `<home>/.credentials.json` for
-  Clauseo's own login and the lawyer's `~/.claude/.credentials.json` for a reused one (Linux and
-  Windows keep the login there). On macOS Claude keeps it in the Keychain: with no file, a
-  launch whose last check is 10 minutes old checks again first. **Open point:** a Keychain-only
-  Claude login fails inside the macOS sandbox, so the host will hand Claude its login through
-  `CLAUDE_CODE_OAUTH_TOKEN` or a Clauseo-owned file store, not yet decided. The check already
-  runs Claude's status with the store the launch entry names and watches whichever store file
-  exists there, so a file store makes macOS watchable too; until the host decides, macOS
-  Claude uses the 10-minute fallback, which stays for any login with no file (a token in the
-  environment only, say). A fresh, same verdict refuses
-  nothing, so a launch costs nothing.
-- *The flow, through the existing `set_launch_refused` and `stop_agents`.* A stamp changes:
-  `agent.identity_checking` at once (waited out like `agent.keys_loading`; a launch meeting it
-  asks desktop through the host's launch retry, `HostConfig::with_launch_retry`, which now
-  passes the code: `agent.key_unreadable` reads the key again, `agent.identity_checking` runs
-  the check), then the status, bounded by 20 s. The same account lifts the identity's refusal
-  and no other (a policy's or an unreadable key's stays in force over it); a status that failed,
-  timed out or named no account sets `agent.identity_unknown` (checked again every 30 s, or at
-  the next status); another account sets `signin.account_changed`, then calls `stop_agents`,
-  then shows `SignIn::Failed { code: signin.account_changed }`, until a sign-in through Clauseo
-  records an account again and `restart_agents` runs as for any new sign-in. A reused login
-  also gets S18's status check, which ends the reuse as `ReusedChanged`. The stop goes through
-  one desktop function, `stop_for_account_change`, which takes the host's
-  `stop_agents_for(agent, StopFor::SignInAgain)` once it lands.
-- *A key login is not checked* (the orchestrator's ruling, 2026-11-06). While Clauseo holds a
-  stored API key for the agent, the key is what its launches use, through the launch hook's env,
-  from Clauseo's own store, not from the shared login file, so a swapped file cannot redirect
-  it: no status runs, nothing is refused or stopped, and the verdict reads "key login, not
-  checked". An endpoint or a provider is treated alike. Once the key goes, the login is what
-  launches use again: `agent.identity_checking` at once, and the check runs.
-- *At start.* An agent with an account recorded waits (`agent.identity_checking`) until the
-  first status answers; a record that cannot be read counts as unknown for every agent with a
-  login (refused, retryable), never as the same, until a sign-in through Clauseo writes it
-  again. Logs name the agent and a fixed kind, never an email, a hash or a path.
+  anything compares it, so a new account chosen in Clauseo never reads as a swap. The sign-in
+  counts as under way for its run's own bound at most (`clauseo_agents::sign_in_limit`: 10
+  minutes for Claude, 20 for Codex's device code), moved on at each running state; past it the
+  agent is checked as any other. **Any other `SignedIn` is compared:** one from S18's status
+  check (at start, or when a window shows Plans) naming another account is a change. Before R17
+  the pump took such a state as a new sign-in and restarted the agents on it.
+- *First run: trusted on first use, only before any launch.* With no `identity.json` (every
+  upgrade to R17) every agent starts refused with `agent.identity_checking` until its startup
+  check, which the follower runs as soon as setup begins, records the account it names (or, with
+  none, leaves it idle). Once a launch of the agent has passed the launch gate, an account with
+  no record is never recorded: it is unknown, and refused. **Residual:** a swap made before
+  Clauseo first starts with R17 is trusted. That is outside the threat model, which covers an
+  agent running inside Clauseo.
+- *The cache.* The verdict holds while the login files' stamps are unchanged: the file id, the
+  last write, the last status change (ctime with nanoseconds on Unix; `ChangeTime` on Windows)
+  and the size, read from metadata only. Never a digest of the file's bytes, not even in memory
+  (ruling 4). The stamps are taken **before** the status read the verdict comes from, and a
+  record keeps them: a sign-in's from before its last step, a check's from as it began. With an
+  account recorded and no stamps held (at start), the next look checks; it never takes what is
+  there as the baseline. Codex: `auth.json` in Clauseo's agent home, and the lawyer's
+  `~/.codex/auth.json` while reused. Claude: the store file `CLAUDE_SECURESTORAGE_CONFIG_DIR`
+  points a session at, `<home>/.credentials.json` for Clauseo's own login and the lawyer's
+  `~/.claude/.credentials.json` for a reused one (Linux and Windows keep the login there). On
+  macOS Claude keeps it in the Keychain, which no stat sees, so with an account recorded a
+  macOS Claude login is due a check again every 10 minutes, files or not (a session may plant a
+  store file), before the next launch. **Open point:** a Keychain-only Claude login fails inside
+  the macOS sandbox, so the host will hand Claude its login through `CLAUDE_CODE_OAUTH_TOKEN` or a
+  Clauseo-owned file store, not yet decided; the check runs Claude's status with the store the
+  launch entry names and watches whichever store file exists there.
+- *When it looks.* At each launch, on the host's prepare thread, through a new Rust-only hook,
+  `HostConfig::with_launch_gate` (R17 review M3): desktop stats the agent's login files and
+  compares them with the stamps held. Fresh stamps answer `None` with no other work (a launch
+  costs one stat per login file). A difference makes the verdict due, asks for the check, and
+  sets `agent.identity_checking` through `set_launch_refused` (awaited) before the gate answers
+  it; the host then waits it out as below. Between launches, a stat every 2 s, sessions running
+  or not, signed in or not while an account is recorded. Each agent's check runs on its own, so
+  one status run that hangs to its bound holds up no other agent.
+- *The flow.* A stamp changes: `agent.identity_checking` at once (waited out like
+  `agent.keys_loading`, up to 2 s, woken when it lifts; a launch meeting it asks desktop through
+  the host's launch retry, `HostConfig::with_launch_retry`, which passes the code:
+  `agent.key_unreadable` reads the key again, `agent.identity_checking` runs the check; retries
+  queued together ask for one check), then the status, bounded by 20 s. The same account lifts
+  the identity's refusal and no other (a policy's or an unreadable key's stays in force over
+  it); a status that failed, timed out or named no account while one is recorded sets
+  `agent.identity_unknown` (checked again every 30 s); another account sets
+  `signin.account_changed`, then `stop_agents_for(agent, StopFor::SignInAgain)`, then shows
+  `SignIn::Failed { code: signin.account_changed }`. The host's hold stays until a sign-in
+  through Clauseo records an account again and `restart_agents` runs, so a prompt to the agent
+  meanwhile, in any thread, queues held as `sign_in` rather than failing, and runs then. A reused
+  login also gets S18's status check, which ends the reuse as `ReusedChanged`. A refusal the host
+  cannot be told (the call fails twice) is logged as an error and told again at each look until
+  it lands; the stop's hold covers a changed account meanwhile. A panic in the setup thread's
+  followers sets `agent.identity_unknown` on every watched agent and starts them again (three
+  times at most; past that the refusals stay until Clauseo restarts).
+- *A key login is not checked* (the orchestrator's ruling, 2026-11-06; narrowed by the security
+  review's H3). Only when the launch env the launch hook builds (`setup_vars`) carries a
+  credential that replaces the shared login: the API key variable the hook sets from Clauseo's
+  own key store, or a Claude provider switch (`CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY`),
+  which reads no OAuth file. A swapped file cannot redirect those launches: no status runs,
+  nothing is refused or stopped, and the verdict reads "key login, not checked". **An endpoint
+  alone is checked:** `ANTHROPIC_BASE_URL`, or a Codex endpoint, which adds no variable, still
+  launches on the shared login. Any change of a key, an endpoint or a provider works the
+  exemption out again from the launch env, drops a check in flight, and, when the exemption
+  ends, sets `agent.identity_checking` before `restart_for_login` relaunches.
+- *The state table.* Watched: a change of a login file's stamps checks it. Timer: checked
+  again by itself. A pending sign-in through Clauseo is the exception to every row below.
+
+  | State | Watched | Timer | Refuses |
+  |---|---|---|---|
+  | Idle, an account recorded (signed out) | yes | macOS Claude, 10 min | no |
+  | Idle, nothing recorded (not signed in) | yes | no | no |
+  | Same | yes | macOS Claude, 10 min | no |
+  | Unknown | yes | every 30 s | `agent.identity_unknown` |
+  | Due | yes | no (a launch or the startup asks) | `agent.identity_checking` |
+  | Checking | at the next look, against the stamps before its read | no | `agent.identity_checking` |
+  | Changed | no | no | `signin.account_changed`, until a sign-in records |
+  | KeyLogin | no | no | no |
+  | First run (start, nothing recorded) | as Due | no | `agent.identity_checking`, until its startup check |
+  | Pending sign-in through Clauseo | no, until it ends or its bound passes | no | as its state |
+
+- *At start.* Every agent waits (`agent.identity_checking`) until its startup check answers; a
+  record that cannot be read counts as unknown for every agent with a login (refused,
+  retryable), never as the same, until a sign-in through Clauseo writes it again. Logs name the
+  agent and a fixed kind, never an email, a hash or a path.
+- *The record's hash.* Plain SHA-256 of the email or id, no salt: a dictionary of emails would
+  reverse it, which is acceptable on a single-user machine, where Claude's own config already
+  holds the email in plain text. `identity.json` goes into no diagnostics bundle. A missing
+  `identity.json` reads as a first run, which is fail-open only in theory: sessions cannot
+  write the data folder.
+- **Known gap (R17).** The code is public, so assume an attacker knows the check.
+  - *Token-only swap.* Codex's `account/read` reads the email from the stored `id_token`
+    without contacting the server. Swapping the access and refresh tokens while keeping the
+    `id_token` passes the check until Codex's next refresh. Claude is unverified.
+  - *Windows `ChangeTime`.* It can be set through `SetFileInformationByHandle`, so a write
+    with all its times restored, and the same length, can go unseen on Windows.
+  - *The window of a sign-in.* Between the login tool writing the file and the sign-in's
+    confirming status run, a swap is recorded as the account signed in.
+  - *Closing them.* Both of the first two close with a forced refresh on the check
+    (`account/read` with `refreshToken: true`), once stage B's proof shows running sessions in
+    two matters survive it without `refresh_token_reused`: a row on the release checklist. For
+    Claude, PR-D's read-only `CLAUDE_CODE_OAUTH_TOKEN` closes it where it applies.
 
 ## Consequences
 
