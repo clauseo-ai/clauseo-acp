@@ -15,6 +15,8 @@ pub mod examples;
 #[path = "support/entries.rs"]
 pub mod entries;
 
+#[path = "view/sync_service.rs"]
+mod sync_service;
 use std::mem::size_of;
 
 use clauseo_protocol::{
@@ -23,9 +25,9 @@ use clauseo_protocol::{
     FolderScanned, HeaderEntry, HostEvent, INLINE_LIMIT_BYTES, LimitWindow, LimitWindowView,
     MAX_RAW_ENCODE_DEPTH, MarkerEntry, MarkerKind, MatterHeaderEntry, MatterKind, MeterTone,
     NoticeEntry, NoticeLevel, PatchBatch, RawFrom, RawPayload, StepEntry, StopReason, StreamHeader,
-    StreamId, TextOrBlob, ThreadSummary, Timestamp, ToolCallContent, ToolCallEntry, ToolCallStatus,
-    ToolKind, ToolLocation, ViewEntry, ViewEpoch, ViewPatch, ViewPatchBody, ViewWindow,
-    WindowFreshness, WindowKind,
+    StreamId, SyncService, TextOrBlob, ThreadSummary, Timestamp, ToolCallContent, ToolCallEntry,
+    ToolCallStatus, ToolKind, ToolLocation, ViewEntry, ViewEpoch, ViewPatch, ViewPatchBody,
+    ViewWindow, WindowFreshness, WindowKind,
 };
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
@@ -582,9 +584,9 @@ fn folder_scanned_names_each_place_and_leaves_out_no_file() {
         (FolderPlace::Network, serde_json::json!("network")),
         (
             FolderPlace::Synced {
-                service: "iCloud Drive".to_owned(),
+                service: SyncService::ICloud,
             },
-            serde_json::json!({"synced": {"service": "iCloud Drive"}}),
+            serde_json::json!({"synced": {"service": "icloud"}}),
         ),
     ] {
         let event = scanned(place);

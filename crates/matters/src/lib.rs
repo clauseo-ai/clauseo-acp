@@ -158,7 +158,7 @@ pub use locks::{
 };
 pub use matter::{Matter, remove_marker_of};
 pub use papers::{Paper, PaperList};
-pub use place::{Place, place};
+pub use place::{Place, SyncService, place};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::{WINDOWS_FOLDER_LIMIT, check_place, check_protected, is_too_deep, same_or_nested};
 pub use scan::scan;

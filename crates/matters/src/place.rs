@@ -9,6 +9,8 @@
 
 use std::path::Path;
 
+pub use clauseo_protocol::SyncService;
+
 #[cfg(any(test, windows, target_os = "macos"))]
 use crate::refuse;
 
@@ -19,7 +21,7 @@ mod windows;
 mod tests;
 
 /// Where a folder lives.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     /// On a disk of this computer, and no cloud service we know syncs it.
     Local,
@@ -27,15 +29,10 @@ pub enum Place {
     Network,
     /// In a folder a cloud service syncs.
     Synced {
-        /// The service, from the synced folder's name: `OneDrive`, `GoogleDrive`,
-        /// `iCloud Drive`.
-        service: String,
+        /// The service, from the synced folder's name.
+        service: SyncService,
     },
 }
-
-#[cfg(any(test, target_os = "macos"))]
-/// The service iCloud Drive's folder (`~/Library/Mobile Documents`) names.
-const ICLOUD_DRIVE: &str = "iCloud Drive";
 
 /// The Windows variables that hold a `OneDrive` folder, in the order they are tried.
 #[cfg(windows)]
@@ -93,12 +90,12 @@ pub(crate) fn mac_place(folder: &Path, home: Option<&Path>, local_mount: Option<
             && let Some(name) = rest.first()
         {
             return Place::Synced {
-                service: service_name(name),
+                service: SyncService::from_folder_name(name),
             };
         }
         if mac_rest(folder, home, &["library", "mobile documents"]).is_some() {
             return Place::Synced {
-                service: ICLOUD_DRIVE.to_owned(),
+                service: SyncService::ICloud,
             };
         }
     }
@@ -152,7 +149,7 @@ pub(crate) fn windows_place(folder: &str, onedrive_roots: &[String], remote: boo
             let trimmed = root.trim_end_matches(['\\', '/']);
             let name = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
             return Place::Synced {
-                service: service_name(name),
+                service: SyncService::from_folder_name(name),
             };
         }
     }
@@ -177,16 +174,4 @@ fn windows_key(path: &str) -> String {
         None => path,
     };
     plain.trim_end_matches('\\').to_lowercase()
-}
-
-#[cfg(any(test, target_os = "macos", windows))]
-/// The service a synced folder's `name` gives: what comes before its first `-`, trimmed
-/// (`OneDrive-Contoso` and `OneDrive - Contoso` are `OneDrive`), or the whole name.
-pub(crate) fn service_name(name: &str) -> String {
-    let service = name.split('-').next().unwrap_or(name).trim();
-    if service.is_empty() {
-        name.trim().to_owned()
-    } else {
-        service.to_owned()
-    }
 }

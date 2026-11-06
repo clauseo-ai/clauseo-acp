@@ -236,7 +236,7 @@ wire_types! {
     lists::{LastStop, MattersChanged, ThreadsChanged},
     matter::{
         CheckpointKind, FileChoice, FileDecision, FolderPlace, FolderScanned, ImportSummary,
-        MatterKind, RestoreScope,
+        MatterKind, RestoreScope, SyncService,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
     patch::{

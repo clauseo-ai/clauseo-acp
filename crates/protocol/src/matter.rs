@@ -124,7 +124,7 @@ pub struct FolderScanned {
     pub cancelled: bool,
 }
 
-/// Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": ".."}}`.
+/// Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": "one_drive"}}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -135,8 +135,61 @@ pub enum FolderPlace {
     Network,
     /// In a folder a cloud service syncs.
     Synced {
-        /// The service, from the synced folder's name: `OneDrive`, `GoogleDrive`,
-        /// `iCloud Drive`.
-        service: String,
+        /// The service, from the synced folder's name.
+        service: SyncService,
     },
+}
+
+/// The cloud service that syncs a folder: [`FolderPlace::Synced`]'s `service`. Closed, as
+/// `FolderPlace` is never logged (decision record 0002): a newer value fails to decode. JSON:
+/// `"one_drive"`, `"dropbox"`, `"google_drive"`, `"icloud"`, `"box"` or `"other"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum SyncService {
+    /// Microsoft `OneDrive`, personal or a work or school account.
+    OneDrive,
+    /// Dropbox.
+    Dropbox,
+    /// Google Drive.
+    GoogleDrive,
+    /// Apple's iCloud Drive.
+    #[serde(rename = "icloud")]
+    ICloud,
+    /// Box.
+    Box,
+    /// A service Clauseo does not name.
+    Other,
+}
+
+impl SyncService {
+    /// Every value, in declaration order.
+    pub const ALL: [Self; 6] = [
+        Self::OneDrive,
+        Self::Dropbox,
+        Self::GoogleDrive,
+        Self::ICloud,
+        Self::Box,
+        Self::Other,
+    ];
+
+    /// The service a synced folder's `name` gives: what comes before its first `-`, trimmed
+    /// (`OneDrive-Contoso` and `OneDrive - Contoso` are `OneDrive`), compared without case;
+    /// `Other` for a name it does not know. What follows the `-` (an account, an email) is
+    /// never kept.
+    pub fn from_folder_name(name: &str) -> Self {
+        let head = name.split('-').next().unwrap_or(name).trim();
+        let known = [
+            ("onedrive", Self::OneDrive),
+            ("dropbox", Self::Dropbox),
+            ("googledrive", Self::GoogleDrive),
+            ("icloud", Self::ICloud),
+            ("icloud drive", Self::ICloud),
+            ("box", Self::Box),
+        ];
+        known
+            .into_iter()
+            .find(|(spelling, _)| head.eq_ignore_ascii_case(spelling))
+            .map_or(Self::Other, |(_, service)| service)
+    }
 }
