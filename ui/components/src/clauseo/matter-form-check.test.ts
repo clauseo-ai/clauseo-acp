@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { HI } from "../lib/words-errors.hi.ts";
 import { createErrorLine, nextDateError, parseNextDate } from "./matter-form-check.ts";
 
 test("the next date reads as the lawyer writes it, or as ISO, into a calendar date", () => {
@@ -52,6 +53,23 @@ test("a refusal says why in the form's words, never the host's message", () => {
     "Clauseo can't read that folder. It may be locked, or on a drive that's no longer connected.",
   );
   expect(createErrorLine("en", "command.unknown_matter", "Acme")).toBe(
+    "Clauseo couldn't create the matter. Try again, or choose another folder.",
+  );
+});
+
+test("a folder refusal with its own line in words-errors gives that line, in the language", () => {
+  const TOO_DEEP =
+    "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.";
+  expect(createErrorLine("en", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(TOO_DEEP);
+  expect(createErrorLine("hi", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(HI[TOO_DEEP]);
+  expect(createErrorLine("en", "matter.folder_network")).toBe(
+    "Codex can't work on a network drive. Move the matter to this computer.",
+  );
+  expect(createErrorLine("en", "matter.something_new")).toBe(
+    "Clauseo couldn't create the matter. Try again, or choose another folder.",
+  );
+  // a code that isn't a folder refusal keeps the generic line, even where words-errors has one
+  expect(createErrorLine("en", "agent.auth_required")).toBe(
     "Clauseo couldn't create the matter. Try again, or choose another folder.",
   );
 });
