@@ -50,21 +50,36 @@ mod accounts;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
+pub mod answers;
 mod create;
+#[cfg(windows)]
+mod ffi;
+#[cfg(windows)]
+pub mod journal;
+pub mod journal_plan;
 #[cfg(windows)]
 mod lock;
 #[cfg(test)]
 #[cfg(windows)]
 mod lock_tests;
+#[cfg(windows)]
+pub mod logon;
 mod machine;
 mod outcome;
 pub mod password;
+#[cfg(windows)]
+pub mod preflight;
+#[cfg(windows)]
+pub mod processes;
+#[cfg(windows)]
+pub mod profile;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
+pub mod strays;
 #[cfg(windows)]
 mod windows_machine;
 

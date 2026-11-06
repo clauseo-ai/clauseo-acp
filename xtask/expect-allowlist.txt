@@ -408,3 +408,14 @@ crates/sandbox/src/windows/setup/account_list.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs - unsafe_code
 crates/sandbox/src/windows/setup/record_write.rs - unsafe_code
 crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::disallowed_methods
+# The set-up's logon, profile, preflight, process and journal calls (S15 PR4f); the profile
+# delete's bounded wait; the elevated tests' token read and their `net user` and PowerShell.
+crates/sandbox/src/windows/setup/ffi.rs - unsafe_code
+crates/sandbox/src/windows/setup/journal.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests.rs - unsafe_code
+crates/sandbox/src/windows/setup/logon/tests.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
+crates/sandbox/src/windows/setup/processes.rs - unsafe_code
+crates/sandbox/src/windows/setup/profile.rs - unsafe_code
+crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
