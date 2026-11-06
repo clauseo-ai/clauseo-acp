@@ -31,15 +31,16 @@ use crate::PROTECTED_NAMES;
 /// Also probed at the root: hooks in a `.git` the agent made would run in the lawyer's own git.
 const ALSO: [&str; 1] = [".git"];
 
-/// Probed in every folder below the root: git finds a `.git` at any depth, Claude loads
-/// `.claude`, `.mcp.json` and `CLAUDE.md` from the folder it works in, and Codex `AGENTS.md`.
-/// The one list below the root: the full scan and the fast pass's re-probe of each folder
-/// `clean_close` names ([`scan_part`]) both probe these. Each is one open per folder, matched as
-/// the volume matches names (on NTFS, case ignored). `CLAUDE.local.md` and `AGENTS.override.md`
-/// aren't probed below the root: the two opens cost 6.0% more on average (4.8% to 6.8%, three
-/// runs) on 50,000 files ten to a folder (`tests/timing.rs`), past the 5% D-B17 allows.
-pub(super) const NESTED_NAMES: [&str; 5] =
-    [".git", ".claude", ".mcp.json", "CLAUDE.md", "AGENTS.md"];
+/// Probed in every folder below the root: the policy's
+/// [`PROTECTED_AT_ANY_DEPTH`](crate::PROTECTED_AT_ANY_DEPTH), the names it write-denies at any
+/// depth where they exist at launch (S15 `PR4a2`), so the set-aside catches the ones made or
+/// replaced since. The one list below the root: the full scan and the fast pass's re-probe of
+/// each folder `clean_close` names ([`scan_part`]) both probe these. Each is one open per
+/// folder, matched as the volume matches names (on NTFS, case ignored). `CLAUDE.local.md` and
+/// `AGENTS.override.md` aren't probed below the root: the two opens cost 6.0% more on average
+/// (4.8% to 6.8%, three runs) on 50,000 files ten to a folder (`tests/timing.rs`), past the 5%
+/// D-B17 allows.
+pub(super) const NESTED_NAMES: [&str; 5] = crate::PROTECTED_AT_ANY_DEPTH;
 
 /// Each protected name probed at the matter's root.
 fn root_names() -> impl Iterator<Item = &'static str> {

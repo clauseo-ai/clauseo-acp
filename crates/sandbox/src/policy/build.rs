@@ -7,7 +7,10 @@ use std::path::{Component, Path, PathBuf};
 
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
-use super::{ClaudeStore, Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under};
+use super::{
+    ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
+    PolicyBuilder, same, under,
+};
 use crate::Error;
 use crate::links::{LinkFinding, scan_matter};
 
@@ -87,6 +90,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .map(|name| PathRule::Subpath(matter.join(name)))
         .chain(parts.git.into_iter().map(PathRule::Subpath))
         .chain(parts.git_dirs.into_iter().map(PathRule::Subpath))
+        .chain(outermost(parts.nested, &matter))
         .chain(over_cap.iter().cloned().map(PathRule::Literal))
         .collect();
     read_only_in_matter.sort();
@@ -146,6 +150,34 @@ fn add_new(links: &mut Vec<LinkFinding>, found: &HashSet<PathBuf>, extra: Vec<Li
             .into_iter()
             .filter(|finding| !found.contains(&keys.of(&finding.path))),
     );
+}
+
+/// A subpath rule for each of `nested`, the [`PROTECTED_AT_ANY_DEPTH`] names the walk found in
+/// `matter` besides `.git`, except one in a folder whose own rule covers it ([`in_denied_folder`]).
+fn outermost(nested: Vec<PathBuf>, matter: &Path) -> impl Iterator<Item = PathRule> {
+    nested
+        .into_iter()
+        .filter(move |p| !in_denied_folder(p, matter))
+        .map(PathRule::Subpath)
+}
+
+/// Whether `path`, a [`PROTECTED_AT_ANY_DEPTH`] name the walk found in `matter`, is inside a
+/// folder whose own rule covers it already: a folder of one of those names, or of one of
+/// [`PROTECTED_NAMES`] at the root (`a/.claude/CLAUDE.md`, `.codex/AGENTS.md`). Names only,
+/// in any letter case, as the walk matched them. A path not below `matter` as written (a scan
+/// the caller gave of another spelling) is kept: one rule too many costs nothing.
+fn in_denied_folder(path: &Path, matter: &Path) -> bool {
+    let Ok(rest) = path.strip_prefix(matter) else {
+        return false;
+    };
+    let mut folders: Vec<&std::ffi::OsStr> = rest.iter().collect();
+    folders.pop();
+    let is =
+        |names: &[&str], name: &std::ffi::OsStr| names.iter().any(|n| name.eq_ignore_ascii_case(n));
+    folders
+        .first()
+        .is_some_and(|first| is(&PROTECTED_NAMES, first))
+        || folders.iter().any(|name| is(&PROTECTED_AT_ANY_DEPTH, name))
 }
 
 /// The folders that hold a `.git`, repositories' working trees: neither they nor a folder above

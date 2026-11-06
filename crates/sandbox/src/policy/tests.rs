@@ -3,6 +3,7 @@ use crate::test_support::TempDir;
 
 mod allowed;
 mod links;
+mod nested;
 mod reallowed;
 mod unicode;
 
