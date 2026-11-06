@@ -80,6 +80,7 @@ export type ErrorCode =
   | "sandbox.setup_failed"
   | "sandbox.setup_required"
   | "sandbox.required"
+  | "signin.reuse_other_volume"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -179,6 +180,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.",
   "sandbox.required":
     "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+  "signin.reuse_other_volume":
+    "Clauseo can't reuse your Codex login because its data folder is on a different disk. Move Clauseo's data folder to the same disk, or sign in to Codex in Clauseo.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
