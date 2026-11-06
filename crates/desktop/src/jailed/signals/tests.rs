@@ -36,6 +36,8 @@ impl Answer {
 struct Fake {
     app_container: Answer,
     restricted: Answer,
+    /// `below_medium`'s answer.
+    low: Answer,
     /// `None`: `user_is` compares; else this answer.
     user: Option<Answer>,
 }
@@ -44,6 +46,7 @@ struct Fake {
 const PLAIN: Fake = Fake {
     app_container: Answer::No,
     restricted: Answer::No,
+    low: Answer::No,
     user: None,
 };
 
@@ -54,6 +57,10 @@ impl Token for Fake {
 
     fn restricted(&self) -> Result<bool, Failure> {
         self.restricted.read()
+    }
+
+    fn below_medium(&self) -> Result<bool, Failure> {
+        self.low.read()
     }
 
     fn user_is(&self, sid: &str) -> Result<bool, Failure> {
@@ -206,4 +213,27 @@ fn a_broken_read_fails_open_only_when_no_other_signal_answers() {
         ..PLAIN
     };
     assert_eq!(verdict(broken_user, record(USER)), "error: broken");
+}
+
+#[test]
+fn low_integrity_is_sandboxed_whatever_the_record_says() {
+    let low = Fake {
+        low: Answer::Yes,
+        ..PLAIN
+    };
+    assert_eq!(verdict(low, no_record()), "jailed");
+    assert_eq!(verdict(low, record(OTHER)), "jailed");
+    // Medium (or above) with no pool: not sandboxed.
+    assert_eq!(verdict(PLAIN, no_record()), "free");
+}
+
+#[test]
+fn an_integrity_level_that_cannot_be_read_is_sandboxed() {
+    for unreadable in [Answer::Denied, Answer::Broken] {
+        let token = Fake {
+            low: unreadable,
+            ..PLAIN
+        };
+        assert_eq!(verdict(token, no_record()), "jailed");
+    }
 }

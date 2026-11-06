@@ -15,8 +15,9 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows::Win32::Security::{
-    EqualSid, GetTokenInformation, PSID, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
-    TOKEN_USER, TokenIsAppContainer, TokenRestrictedSids, TokenUser,
+    EqualSid, GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsValidSid, PSID,
+    TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TOKEN_USER,
+    TokenIntegrityLevel, TokenIsAppContainer, TokenRestrictedSids, TokenUser,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::core::{HRESULT, HSTRING};
@@ -25,6 +26,10 @@ use super::signals::{self, Failure};
 
 // The restricting SIDs' count is read as the buffer's first u32.
 const _: () = assert!(std::mem::offset_of!(TOKEN_GROUPS, GroupCount) == 0);
+
+/// `SECURITY_MANDATORY_MEDIUM_RID`: the Medium integrity level's relative id. Pool users run at
+/// Low (0x1000).
+const MEDIUM_RID: u32 = 0x2000;
 
 /// Whether the process token is an `AppContainer`, has restricting SIDs or belongs to any pool
 /// user, or a read was refused (`signals::decide`).
@@ -127,6 +132,29 @@ impl signals::Token for Token {
         let first = buffer.first().copied().unwrap_or_default().to_ne_bytes();
         let count = u32::from_ne_bytes([first[0], first[1], first[2], first[3]]);
         Ok(count != 0)
+    }
+
+    /// `TokenIntegrityLevel`: a `TOKEN_MANDATORY_LABEL`, whose SID's last sub-authority is the
+    /// level. A label that is not a valid SID, or has no sub-authority, is [`Failure::Other`]
+    /// (which `signals::decide` counts as sandboxed for this signal).
+    fn below_medium(&self) -> Result<bool, Failure> {
+        let not_a_label = || Failure::Other(io::Error::other("the integrity label is not a SID"));
+        let buffer = self.variable::<TOKEN_MANDATORY_LABEL>(TokenIntegrityLevel)?;
+        // SAFETY: GetTokenInformation wrote a TOKEN_MANDATORY_LABEL at the start of `buffer`,
+        // which is at least that long and aligned for it (u64 words); its SID points into
+        // `buffer`, which lives to the end of this function.
+        let label = unsafe { &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
+        let sid = label.Label.Sid;
+        // SAFETY: `sid` points into `buffer`; IsValidSid only reads it.
+        if !unsafe { IsValidSid(sid) }.as_bool() {
+            return Err(not_a_label());
+        }
+        // SAFETY: `sid` is a valid SID (checked above), so its count byte is readable.
+        let count = unsafe { *GetSidSubAuthorityCount(sid) };
+        let last = count.checked_sub(1).ok_or_else(not_a_label)?;
+        // SAFETY: `last` is below the valid SID's sub-authority count.
+        let level = unsafe { *GetSidSubAuthority(sid, u32::from(last)) };
+        Ok(level < MEDIUM_RID)
     }
 
     /// `TokenUser`'s SID against the one `sid` spells, with `EqualSid`.

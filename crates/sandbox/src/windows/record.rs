@@ -46,12 +46,12 @@ pub enum RecordError {
     /// The value is not UTF-16.
     #[error("the sandbox record value is not text")]
     NotText,
-    /// `PoolSids` is not a list of SIDs (`pool_sids_from_multi_sz`).
-    #[error("the sandbox pool record is malformed: {0}")]
-    Malformed(MultiSzError),
     /// Anything else.
     #[error("the sandbox record can't be read: {0}")]
     Other(io::Error),
+    /// `PoolSids` is not a list of SIDs (`pool_sids_from_multi_sz`).
+    #[error("the sandbox pool record is malformed: {0}")]
+    Malformed(MultiSzError),
 }
 
 /// Every pool user's SID, as S15's set-up records it: value `PoolSids`, a `REG_MULTI_SZ`, in
