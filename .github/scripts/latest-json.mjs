@@ -1,7 +1,7 @@
 // The updater's manifest, latest.json, and the table of a release's assets. release.yml's
 // `assemble` job runs this file; latest-json.test.mjs tests it and lints release.yml.
 //
-//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date>
+//   node .github/scripts/latest-json.mjs [--no-macos] <dir> <version> <base-url> <pub-date>
 //
 // <dir> holds the release's assets with their final names (the Mac archives already renamed to
 // Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
@@ -10,6 +10,9 @@
 // each `.sig`'s trusted comment holds `version:<version>` (tauri-plugin-updater refuses a
 // signature without it when `requireSignedVersion` is on), then writes <dir>/latest.json and
 // prints one line per missing tier 2 asset, `missing <name>`, for the release notes.
+// --no-macos is a release without macOS (release.yml's MACOS_IN_RELEASE "false"): the macOS
+// assets are neither required nor named missing, latest.json has no darwin key, and a macOS
+// asset in <dir> is refused.
 // Exit status: 0 when latest.json is written, 1 when an asset or a signature is wrong, 2 on a
 // usage error. Plain Node: no package to install.
 //
@@ -32,15 +35,16 @@ const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})
 /**
  * Every asset of release <version>, by tier (1 must be there, 2 may be missing), with the
  * latest.json keys of the ones the updater installs. The one home of the asset names: release.yml
- * builds them under these names, and the test checks a release against this list.
+ * builds them under these names, and the test checks a release against this list. With
+ * `{ macos: false }`, a release without macOS: the macOS assets are left out.
  */
-export function assets(version) {
+export function assets(version, { macos = true } = {}) {
   const v = version;
-  return [
-    { name: `Clauseo_${v}_aarch64.dmg`, tier: 1 },
-    { name: `Clauseo_${v}_aarch64.app.tar.gz`, tier: 1, platforms: ["darwin-aarch64-app"] },
-    { name: `Clauseo_${v}_x64.dmg`, tier: 2 },
-    { name: `Clauseo_${v}_x64.app.tar.gz`, tier: 2, platforms: ["darwin-x86_64-app"] },
+  const all = [
+    { name: `Clauseo_${v}_aarch64.dmg`, tier: 1, macos: true },
+    { name: `Clauseo_${v}_aarch64.app.tar.gz`, tier: 1, macos: true, platforms: ["darwin-aarch64-app"] },
+    { name: `Clauseo_${v}_x64.dmg`, tier: 2, macos: true },
+    { name: `Clauseo_${v}_x64.app.tar.gz`, tier: 2, macos: true, platforms: ["darwin-x86_64-app"] },
     { name: `Clauseo_${v}_x64-setup.exe`, tier: 1, platforms: ["windows-x86_64-nsis", "windows-x86_64"] },
     { name: `Clauseo_${v}_x64-machine-setup.exe`, tier: 1 },
     { name: `Clauseo_${v}_arm64-setup.exe`, tier: 2, platforms: ["windows-aarch64-nsis", "windows-aarch64"] },
@@ -48,11 +52,12 @@ export function assets(version) {
     { name: `Clauseo_${v}_amd64.deb`, tier: 2 },
     { name: `Clauseo-${v}-1.x86_64.rpm`, tier: 2 },
   ];
+  return macos ? all : all.filter((asset) => !asset.macos);
 }
 
 /** The latest.json keys of tier 1 assets: a manifest without one of them is refused. */
-export function tier1Platforms(version) {
-  return assets(version)
+export function tier1Platforms(version, options) {
+  return assets(version, options)
     .filter((asset) => asset.tier === 1)
     .flatMap((asset) => asset.platforms ?? []);
 }
@@ -92,9 +97,10 @@ function signatureProblems(name, signature, version) {
 
 /**
  * Every way <manifest> (parsed latest.json) is not the plugin's static format for <version>, or
- * leaves out a tier 1 platform; empty when it is fine.
+ * leaves out a tier 1 platform; empty when it is fine. With `{ macos: false }` a darwin key is
+ * unknown.
  */
-export function manifestProblems(manifest, version) {
+export function manifestProblems(manifest, version, options) {
   const problems = [];
   if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) {
     return ["latest.json is not an object"];
@@ -116,7 +122,7 @@ export function manifestProblems(manifest, version) {
   if (platforms === null || typeof platforms !== "object" || Array.isArray(platforms)) {
     return [...problems, "platforms is not an object"];
   }
-  const known = new Set(assets(version).flatMap((asset) => asset.platforms ?? []));
+  const known = new Set(assets(version, options).flatMap((asset) => asset.platforms ?? []));
   for (const [key, entry] of Object.entries(platforms)) {
     if (!known.has(key)) {
       problems.push(`platforms has the unknown key ${key}`);
@@ -137,7 +143,7 @@ export function manifestProblems(manifest, version) {
     }
     problems.push(...signatureProblems(`platforms.${key}`, entry.signature, version));
   }
-  for (const key of tier1Platforms(version)) {
+  for (const key of tier1Platforms(version, options)) {
     if (!(key in platforms)) {
       problems.push(`platforms has no ${key} (tier 1)`);
     }
@@ -155,16 +161,26 @@ export function manifestProblems(manifest, version) {
 /**
  * Reads the assets in <dir> and builds latest.json for <version>. Returns { manifest, missing,
  * problems }: missing names the absent tier 2 assets; problems is empty when the manifest may be
- * written.
+ * written. With `{ macos: false }` (a release without macOS) the macOS assets are neither
+ * required nor missing, and one in <dir> is a problem.
  */
-export function buildManifest(dir, version, baseUrl, pubDate) {
+export function buildManifest(dir, version, baseUrl, pubDate, { macos = true } = {}) {
   const problems = [];
   const missing = [];
   const platforms = {};
   if (!PLAIN_VERSION.test(version)) {
     problems.push(`version ${version} is not plain X.Y.Z`);
   }
-  for (const asset of assets(version)) {
+  if (!macos) {
+    for (const asset of assets(version).filter((one) => one.macos)) {
+      for (const name of asset.platforms ? [asset.name, `${asset.name}.sig`] : [asset.name]) {
+        if (existsSync(join(dir, name))) {
+          problems.push(`${name} is a macOS asset, and this release has no macOS`);
+        }
+      }
+    }
+  }
+  for (const asset of assets(version, { macos })) {
     if (!existsSync(join(dir, asset.name))) {
       if (asset.tier === 1) {
         problems.push(`${asset.name} is missing (tier 1)`);
@@ -193,18 +209,20 @@ export function buildManifest(dir, version, baseUrl, pubDate) {
   }
   const manifest = { version, notes: "", pub_date: pubDate, platforms };
   if (problems.length === 0) {
-    problems.push(...manifestProblems(manifest, version));
+    problems.push(...manifestProblems(manifest, version, { macos }));
   }
   return { manifest, missing, problems };
 }
 
 function main(argv) {
-  if (argv.length !== 4) {
-    process.stderr.write("usage: node latest-json.mjs <dir> <version> <base-url> <pub-date>\n");
+  const macos = argv[0] !== "--no-macos";
+  const args = macos ? argv : argv.slice(1);
+  if (args.length !== 4 || args[0].startsWith("--")) {
+    process.stderr.write("usage: node latest-json.mjs [--no-macos] <dir> <version> <base-url> <pub-date>\n");
     return 2;
   }
-  const [dir, version, baseUrl, pubDate] = argv;
-  const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate);
+  const [dir, version, baseUrl, pubDate] = args;
+  const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate, { macos });
   if (problems.length > 0) {
     for (const problem of problems) {
       process.stderr.write(`latest.json: ${problem}\n`);
