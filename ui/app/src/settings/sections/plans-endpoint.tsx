@@ -1,7 +1,8 @@
 // Plans' firm address (UD2), Claude only, under "Other ways in": a URL field showing the address set
 // (SettingsView.plans["claude-acp"].endpoint), Connect, which sends `set_firm_endpoint { url }`, and once one is set
 // Remove address, which sends it with no url. Desktop shows its own confirm for both, so the app adds none; a
-// declined one, or a refused address, leaves the block's refusal line and keeps what was typed.
+// declined one, or a refused address, leaves the block's refusal line and keeps what was typed. A form, so Enter in the field
+// connects as Connect does.
 import { useState } from "react";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { st } from "@clauseo/components/lib/words-settings.ts";
@@ -21,7 +22,14 @@ export function PlansEndpoint({
   const [typed, setTyped] = useState(endpoint ?? "");
   const url = typed.trim();
   return (
-    <div className="set-plan-endpoint" data-testid="plans-endpoint">
+    <form
+      className="set-plan-endpoint"
+      data-testid="plans-endpoint"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (url !== "" && url !== endpoint) onConnect(url);
+      }}
+    >
       <TextField
         label={st(lang, "Your firm's address")}
         note={st(
@@ -34,12 +42,7 @@ export function PlansEndpoint({
         lang="en"
       />
       <div className="set-plan-acts">
-        <Button
-          kind="tone"
-          size="small"
-          disabled={url === "" || url === endpoint}
-          onClick={() => onConnect(url)}
-        >
+        <Button kind="tone" size="small" type="submit" disabled={url === "" || url === endpoint}>
           {say(st(lang, "Connect"))}
         </Button>
         {endpoint !== undefined && (
@@ -48,6 +51,6 @@ export function PlansEndpoint({
           </Button>
         )}
       </div>
-    </div>
+    </form>
   );
 }

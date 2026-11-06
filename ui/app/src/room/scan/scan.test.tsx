@@ -228,3 +228,25 @@ test("the services by their owners' names; other, and one this version doesn't k
   expect(of("a_service_from_later")).toBeNull();
   expect(serviceOf(scanned({ place: "local" }))).toBeNull();
 });
+
+test("keys and readers: the lines, the synced notice and cloud-only are statuses; Got it and Stop leave focus in New matter", async () => {
+  await pick(
+    await mount(
+      scanning([scanned({ place: { synced: { service: "one_drive" } }, cloud_only: 2 })]),
+    ),
+  );
+  expect(byId("scan")?.querySelector(".scan-line")?.getAttribute("role")).toBe("status");
+  expect(byId("place-notice")?.getAttribute("role")).toBe("status");
+  expect(byId("scan-cloud-only")?.getAttribute("role")).toBe("status");
+  const plane = byId("scan")?.closest("[data-dialog-plane]");
+  byId("synced-got-it")?.focus();
+  await press("synced-got-it");
+  expect(byId("place-notice")).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(plane?.contains(document.activeElement)).toBe(true);
+  byId("scan-stop")?.focus();
+  await press("scan-stop");
+  expect(byId("scan")).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(plane?.contains(document.activeElement)).toBe(true);
+});

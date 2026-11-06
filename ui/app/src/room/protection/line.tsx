@@ -44,6 +44,7 @@ export function protectionLine(
       data-testid="workspace-line"
       data-protection="not_protected"
       data-cause={cause.name}
+      aria-haspopup="dialog"
       onClick={onPress}
     >
       <NotProtectedMark {...(meaning === undefined ? {} : { meaning })} />

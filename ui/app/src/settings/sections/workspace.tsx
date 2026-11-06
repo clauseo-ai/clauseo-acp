@@ -13,7 +13,7 @@ import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { protectionStoreOf } from "../../store/protection.ts";
 import { useProtection } from "../../store/protection-run.ts";
 import type { ProtectionView } from "../../transport/protocol.ts";
@@ -72,11 +72,19 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
   const cause = computerCause(view);
   const managed = useId();
   const [removing, setRemoving] = useState(false);
-  const { press, confirm } = useSetUpPress(
-    state,
-    cause,
-    () => void setUpAgain(ctx.transport, store),
-  );
+  // a press whose command puts the waiting line in its button's place: focus goes to that line (the window's frame
+  // takes a focus lost any other way to the section's head)
+  const moving = useRef(false);
+  const waitLine = useRef<HTMLParagraphElement>(null);
+  const { press, confirm } = useSetUpPress(state, cause, () => {
+    moving.current = true;
+    void setUpAgain(ctx.transport, store);
+  });
+  const waiting = view == null ? null : waitingWords(lang, state, cause);
+  useEffect(() => {
+    if (moving.current) waitLine.current?.focus();
+    moving.current = false;
+  }, [waiting]);
   // not read yet: nothing, so the block never flashes a state it doesn't have
   if (view === undefined) return null;
   if (view === null)
@@ -115,7 +123,6 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
                     "Protection couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
                   )
                 : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
-  const waiting = waitingWords(lang, state, cause);
   const failed = failedWords(lang, state);
   const act =
     status === "b" ? (
@@ -158,7 +165,13 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
         </div>
         {act !== null &&
           (waiting !== null ? (
-            <p className="set-ws-wait" role="status" data-testid="protection-wait">
+            <p
+              className="set-ws-wait"
+              role="status"
+              tabIndex={-1}
+              ref={waitLine}
+              data-testid="protection-wait"
+            >
               {w.say(waiting)}
             </p>
           ) : (
@@ -191,6 +204,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
         onOpenChange={setRemoving}
         onConfirm={() => {
           setRemoving(false);
+          moving.current = true;
           void removeSetUp(ctx.transport, store);
         }}
       />

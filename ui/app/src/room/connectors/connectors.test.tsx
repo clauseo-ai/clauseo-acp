@@ -174,9 +174,12 @@ test("Don't show again sends the dismissal for its matter and the hint goes at o
   await mount();
   await play({ connectors_changed: stateOf("not_added") });
   await play(hint());
+  h!.one("case-law-dismiss")?.focus();
   await h!.click(h!.one("case-law-dismiss"));
   expect(h!.transport.connectorCommands()).toEqual([{ dismiss_case_law_hint: { matter: MATTER } }]);
   expect(h!.all("case-law-hint")).toHaveLength(0);
+  // the button went with the card: focus is in the composer, not on the page
+  expect(document.activeElement).toBe(h!.host.querySelector('[data-testid="composer"]'));
 });
 
 test("the hint goes when the connector is added or connectors are off, and never shows unlisted", async () => {
@@ -230,7 +233,10 @@ test("the note shows under the field while out of credit, never blocks typing or
 test("hidden in this conversation, the note stays hidden through more out-of-credit states, and comes back after credit returns and runs out again", async () => {
   await mount();
   await play({ connectors_changed: stateOf(OUT) });
+  h!.one("out-of-credit-hide")?.focus();
   await h!.click(h!.one("out-of-credit-hide"));
+  // Hide went with the note: focus is in the composer, not on the page
+  expect(document.activeElement).toBe(h!.host.querySelector('[data-testid="composer"]'));
   expect(h!.all("out-of-credit")).toHaveLength(0);
   await play({ connectors_changed: stateOf({ out_of_credit: {} }) });
   expect(h!.all("out-of-credit")).toHaveLength(0);
@@ -286,12 +292,12 @@ test("in every open conversation the note shows, and hiding it in one leaves the
         createElement(
           "div",
           { "data-c": "a" },
-          createElement(OutOfCredit, { transport, conversation: "a" }),
+          createElement(OutOfCredit, { transport, conversation: "a", onFocusField: () => {} }),
         ),
         createElement(
           "div",
           { "data-c": "b" },
-          createElement(OutOfCredit, { transport, conversation: "b" }),
+          createElement(OutOfCredit, { transport, conversation: "b", onFocusField: () => {} }),
         ),
       ),
     ),

@@ -118,6 +118,7 @@ test("the last recharge shows as a quiet line after the balance, for each outcom
     const el = r.el.querySelector('[data-testid="connectors-recharge"]');
     expect(el?.textContent).toBe(words);
     expect(el?.className).toContain("set-note");
+    expect(el?.getAttribute("role")).toBe("status");
     // after the balance tile in the block
     const tile = r.el.querySelector('[data-testid="connectors-balance"]');
     const after =

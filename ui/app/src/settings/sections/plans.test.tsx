@@ -4,6 +4,7 @@
 // nothing; no matter or thread command goes out from Plans. Add ChatGPT installs, then signs in once ready. A locked
 // plan shows Managed by firm and no control, and never env_names or provider. The key goes into one command and
 // nowhere else.
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { setupStoreOf, type SetupSource } from "../../store/setup.ts";
@@ -21,6 +22,7 @@ import {
   mountPlans,
   play,
   press,
+  settle,
   signIn,
   signed,
   typeInto,
@@ -388,4 +390,37 @@ test("agent.key_unreadable shows as failed, in words-errors' words, with Sign in
   expect(block("claude")!.querySelector('[data-testid="plans-key"]')).not.toBeNull();
   await press(button("Sign in again", block("claude")!));
   expect(t.setups()).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+});
+
+test("keys: Sign out's confirm starts on Cancel, and Escape sends nothing and gives focus back to Sign out", async () => {
+  const t = await at(signed());
+  const opener = document.querySelector<HTMLElement>('[data-testid="plans-sign-out"]');
+  opener?.focus();
+  await press(opener);
+  expect(document.activeElement).toBe(
+    document.querySelector('[data-testid="plans-sign-out-cancel"]'),
+  );
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  await settle();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+  expect(document.body.textContent).not.toContain("Sign out of Claude?");
+  expect(t.setups()).toEqual([]);
+  expect(document.activeElement).toBe(opener);
+});
+
+test("keys: Enter in the firm's address connects, once", async () => {
+  const t = await at({ signed_in: { method: "firm", source: "own", at: AT } });
+  const field = block("claude")!.querySelector<HTMLInputElement>(
+    '[data-testid="plans-endpoint"] input',
+  )!;
+  await typeInto(field, "https://ai.mehrachambers.in");
+  await act(async () => field.form?.requestSubmit());
+  await settle();
+  expect(t.setups()).toEqual([
+    { set_firm_endpoint: { agent: CLAUDE, url: "https://ai.mehrachambers.in" } },
+  ]);
 });

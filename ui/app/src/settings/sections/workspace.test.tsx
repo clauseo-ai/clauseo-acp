@@ -319,3 +319,45 @@ test("zero timers at rest in the section", async () => {
   expect(interval).not.toHaveBeenCalled();
   expect(frame).not.toHaveBeenCalled();
 });
+
+test("keys: Remove set-up's confirm starts on Cancel; Escape sends nothing and gives focus back to Remove set-up", async () => {
+  const s = held(PROT.b, { retry_asks_admin: false } as Partial<ProtectionView>);
+  const t = await mount(s.host);
+  one("protection-remove")?.focus();
+  await press(one("protection-remove"));
+  expect(document.activeElement).toBe(one("protection-confirm-cancel"));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  await settle();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+  expect(one("protection-confirm")).toBeNull();
+  expect(t.protectionCommands()).toEqual([]);
+  expect(document.activeElement).toBe(one("protection-remove"));
+});
+
+test("keys: confirming Remove set-up puts focus on the waiting line in its place, then on the section's head once it ends", async () => {
+  const s = held(PROT.b, { retry_asks_admin: false } as Partial<ProtectionView>);
+  await mount(s.host);
+  one("protection-remove")?.focus();
+  await press(one("protection-remove"));
+  await press(one("protection-confirm-ok"));
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+  expect(document.activeElement).toBe(one("protection-wait"));
+  s.state.computer = PROT.needs;
+  await act(async () => s.answers[0]!.resolve());
+  await settle();
+  expect(one("protection-wait")).toBeNull();
+  expect(document.activeElement).toBe(document.querySelector(".set-pane h2"));
+});
+
+test("keys: Set up protection without a confirm puts focus on the waiting line", async () => {
+  const s = held(PROT.needs, { retry_asks_admin: false } as Partial<ProtectionView>);
+  await mount(s.host);
+  one("protection-setup")?.focus();
+  await press(one("protection-setup"));
+  expect(one("protection-confirm")).toBeNull();
+  expect(document.activeElement).toBe(one("protection-wait"));
+});

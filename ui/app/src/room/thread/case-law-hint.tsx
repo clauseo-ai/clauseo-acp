@@ -65,7 +65,12 @@ function HintCard({
       onSetUp={
         open === undefined ? null : () => void open.call(transport, "connectors").catch(() => {})
       }
-      onDismiss={() => {
+      onDismiss={(from) => {
+        // the card goes with its button: focus goes to this room's composer
+        from
+          .closest(".room-centre")
+          ?.querySelector<HTMLElement>('[data-testid="composer"]')
+          ?.focus();
         void dismissHint(transport, hint.matter);
         store.dropHints(hint.matter);
       }}
@@ -82,7 +87,8 @@ export function CaseLawHint({
   /** `price_paise`, GST included; null when the host gave none. */
   price: number | null;
   onSetUp: (() => void) | null;
-  onDismiss: () => void;
+  /** The press's button, for where the focus goes. */
+  onDismiss: (from: HTMLElement) => void;
 }) {
   const { lang } = useDisplay();
   return (
@@ -103,7 +109,12 @@ export function CaseLawHint({
                 {cr(lang, "Set up in Settings")}
               </Button>
             )}
-            <Button kind="quiet" size="small" data-testid="case-law-dismiss" onClick={onDismiss}>
+            <Button
+              kind="quiet"
+              size="small"
+              data-testid="case-law-dismiss"
+              onClick={(e) => onDismiss(e.currentTarget)}
+            >
               {cr(lang, "Don't show again")}
             </Button>
           </>

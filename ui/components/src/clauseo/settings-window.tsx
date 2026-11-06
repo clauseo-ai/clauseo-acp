@@ -63,6 +63,28 @@ export function SettingsWindow({
   useEffect(() => {
     if (focusHead > 0) headEl.current?.focus({ preventScroll: true });
   }, [focusHead]);
+  // a control in the pane that takes itself away (a press whose answer redraws the block): focus that went with it
+  // goes to the section's head, never to the page, so the next Tab goes on in order
+  useEffect(() => {
+    const node = pane.current;
+    if (node === null || typeof MutationObserver === "undefined") return;
+    let last: Element | null = null;
+    const onFocus = (e: FocusEvent) => {
+      last = e.target instanceof Element ? e.target : null;
+    };
+    const watch = new MutationObserver(() => {
+      const at = document.activeElement;
+      if (last === null || last.isConnected || (at !== null && at !== document.body)) return;
+      last = null;
+      headEl.current?.focus({ preventScroll: true });
+    });
+    node.addEventListener("focusin", onFocus);
+    watch.observe(node, { childList: true, subtree: true });
+    return () => {
+      node.removeEventListener("focusin", onFocus);
+      watch.disconnect();
+    };
+  }, []);
   const open = sections.find((s) => s.id === current);
   return (
     <div className="set-win" data-platform={platform}>

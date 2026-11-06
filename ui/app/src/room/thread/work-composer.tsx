@@ -359,7 +359,11 @@ export function WorkComposer({
             : stopped);
   const credit =
     transport === null ? null : (
-      <OutOfCredit transport={transport} conversation={thread ?? draftKey} />
+      <OutOfCredit
+        transport={transport}
+        conversation={thread ?? draftKey}
+        onFocusField={focusField}
+      />
     );
   return (
     <Composer

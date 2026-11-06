@@ -206,7 +206,8 @@ export function NoticeCard({
 }) {
   const line =
     note != null && note !== "" ? (
-      <p className="lim-note-line">
+      // a status: the line often comes after a press, such as a refused one's words
+      <p className="lim-note-line" role="status">
         <Say>{note}</Say>
       </p>
     ) : null;
