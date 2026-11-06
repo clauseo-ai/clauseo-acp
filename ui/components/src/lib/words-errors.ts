@@ -86,6 +86,7 @@ export type ErrorCode =
   | "blocklist.notice_expired"
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
+  | "signin.reuse_other_volume"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -206,6 +207,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // Clauseo closes, because the host couldn't save that (decision record 0053)
   "blocklist.revoke_not_saved":
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
+  "signin.reuse_other_volume":
+    "Clauseo can't reuse your Codex login because its data folder is on a different disk. Move Clauseo's data folder to the same disk, or sign in to Codex in Clauseo.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

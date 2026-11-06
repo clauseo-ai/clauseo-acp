@@ -347,6 +347,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
 | Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
+| Codex login on another volume (R17) | `ErrorCode::SigninReuseOtherVolume` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

@@ -261,6 +261,11 @@ error_codes! {
     BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
         site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
         saved allows, so the site may be allowed again after a restart.";
+    SigninReuseOtherVolume = "signin.reuse_other_volume", retryable: false, meaning: "A reused \
+        Codex login could not be linked into a matter's state folder because Clauseo's data \
+        folder is on a different volume from the login file; a link across volumes is \
+        impossible and the login is never copied, so no agent was started. Trying again cannot \
+        succeed until the data folder moves or Codex is signed in to in Clauseo.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

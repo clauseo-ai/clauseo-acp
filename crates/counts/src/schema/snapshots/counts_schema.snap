@@ -1516,7 +1516,8 @@ expression: counts_schema()
         "blocklist.override_off",
         "blocklist.notice_expired",
         "blocklist.allow_not_saved",
-        "blocklist.revoke_not_saved"
+        "blocklist.revoke_not_saved",
+        "signin.reuse_other_volume"
       ],
       "type": "string"
     },
