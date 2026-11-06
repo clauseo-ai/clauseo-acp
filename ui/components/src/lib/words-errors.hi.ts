@@ -157,6 +157,13 @@ export const HI = {
     "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
   "The AI was downloaded, but setting it up didn't finish. Try again.":
     "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  // hi: later
+  "Clauseo is still checking which account your sign-in belongs to. Try again in a moment.": null,
+  // hi: later
+  "Clauseo couldn't confirm which account your sign-in belongs to. Try again.": null,
+  // hi: later
+  "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped answering so no matter's work goes to the wrong account. Sign in again. Your questions are kept and run once you do.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
