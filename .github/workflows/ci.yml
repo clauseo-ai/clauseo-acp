@@ -243,6 +243,21 @@ jobs:
       - name: cargo xtask check
         run: CI=1 cargo xtask check
 
+      # Every crate as it ships: its library and binaries, with no test target. xtask check's
+      # clippy has --all-targets, and the dev-dependencies turn on the `test-support` feature of
+      # eight crates (agents, connectors, host, matters, process, profile, sandbox, store), so code
+      # that only test-support uses never looks unused there. On 2026-11-06 two imports in
+      # host/src/config.rs that only test-support builders used failed
+      # `cargo clippy -p clauseo-host -- -D warnings` on main (#531). No crate turns on another's
+      # test-support outside dev-dependencies, so this one workspace run lints each crate on the
+      # features it ships with, as clippy -p on that crate alone would.
+      - name: clippy without test targets (no test-support)
+        run: |
+          if ! cargo clippy --workspace -- -D warnings; then
+            echo "::error title=clippy without test targets failed::Run cargo clippy --workspace -- -D warnings. Code that only tests or test-support use goes behind cfg(test) or cfg(feature = \"test-support\")."
+            exit 1
+          fi
+
   # vitest on the newest Node release that "engines.node" allows; see the note at the top.
   vitest-newest-node:
     name: vitest (newest Node)
