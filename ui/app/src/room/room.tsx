@@ -13,10 +13,9 @@
 // the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
-// change note naming one, open it in Word (word/open-in-word.ts). Versions opens and shows files through the
+// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). Versions opens and shows files through the
 // transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in its own
 // window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
-import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import {
   lazy,
   Suspense,
@@ -30,7 +29,6 @@ import {
 import { late } from "@clauseo/components/lib/late.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
-import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
@@ -41,7 +39,6 @@ import { th } from "@clauseo/components/lib/words-thread.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
-import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
 import { connectorsStoreOf } from "../store/connectors.ts";
@@ -69,6 +66,7 @@ import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
+import { PaperWall } from "./paper-wall.tsx";
 import { clockOf } from "./when.ts";
 import { useJumpFollows } from "./thread/jump-entry.ts";
 import type { Drafts } from "./thread/session.ts";
@@ -147,7 +145,6 @@ const railWaits = (view: MattersView, threads: AllThreads): boolean =>
   );
 
 /** A file's name, the last part of its path in the matter folder. */
-const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** The room: its own scope, and Base UI's CSP mode for everything inside it, so no part writes a style element. */
 export function Room({
@@ -532,31 +529,7 @@ function RoomFrame({
           (papers.papers.length === 0 ? (
             <EmptyPapers body={false} />
           ) : (
-            // a Word tile's tooltip mounts at the end of the wall, inside its landmark, not at the end of the body
-            <LayerProvider>
-              <ol className="facade facade-names facade-files">
-                {papers.papers.map((paper) => {
-                  const opener = word.openerFor(paper.path);
-                  return (
-                    <PaperTile
-                      key={paper.file}
-                      id={paper.file}
-                      state="uncited"
-                      title={fileName(paper.path)}
-                      fileIcon={fileTypeIcon(paper.path)}
-                      {...(opener === null
-                        ? {}
-                        : {
-                            onTurn: () => void opener.onOpen(),
-                            tip: opener.label,
-                            label: opener.label,
-                            testIds: { face: "open-in-word" },
-                          })}
-                    />
-                  );
-                })}
-              </ol>
-            </LayerProvider>
+            <PaperWall key={listed?.matter} papers={papers} word={word} />
           ))}
       </aside>
     </div>

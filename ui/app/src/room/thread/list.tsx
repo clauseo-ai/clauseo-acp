@@ -36,6 +36,8 @@ export { WarningNote } from "./limit-warning-note.tsx";
 export { OutOfCreditNote } from "./out-of-credit-note.tsx";
 /** UD2's notes in the composer's notice line: the expired sign-in card and the first read's line (work.tsx loads it). */
 export { AfterSignInNote } from "./after-signin-note.tsx";
+/** What a wall tile's open said, carried here with the change note's lines (paper-wall.tsx loads it). */
+export { WallSaid } from "../word/wall-said.tsx";
 
 const STEP = "step:";
 

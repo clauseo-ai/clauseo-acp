@@ -86,5 +86,29 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-12": {
+    "en": "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-13": {
+    "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U9-14": {
+    "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }
