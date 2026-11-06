@@ -31,6 +31,7 @@ use zeroize::Zeroizing;
 
 use self::env::Vendor;
 
+pub(crate) mod account;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod detect;

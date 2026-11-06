@@ -24,11 +24,13 @@ use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
+use futures::channel::oneshot;
 
 use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
+use crate::signin::account::{AccountFuture, AccountRead};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
@@ -54,6 +56,8 @@ enum Command {
     Retry(AgentId, bool),
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
+    /// Start an account read, answering on its sender.
+    Account(Box<SigninStart>, oneshot::Sender<AccountRead>),
 }
 
 /// What the handle, the worker and the jobs share.
@@ -340,6 +344,18 @@ impl Agents {
         self.shared.signin.going(agent)
     }
 
+    /// R17's identity check: the account `agent`'s login names now, from one status run under
+    /// the environment its sessions see (`signin/account.rs`), hashed. It runs beside any
+    /// sign-in job and changes no state. `Failed` when it could not tell, or could not start
+    /// (an unknown agent, no home, no install, the handle shut down).
+    pub fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        let (reply, answer) = oneshot::channel();
+        if let Ok(start) = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)) {
+            self.send(Command::Account(Box::new(start), reply));
+        }
+        Box::pin(async move { answer.await.unwrap_or(AccountRead::Failed) })
+    }
+
     /// `agent`'s last sign-in state, or `None` before any.
     pub fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.shared.signin.state(agent)
@@ -393,6 +409,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
                 Command::Signin(start) => signin::start_job(&self, *start),
+                Command::Account(start, reply) => signin::start_account(&self, *start, reply),
             }
         }
     }

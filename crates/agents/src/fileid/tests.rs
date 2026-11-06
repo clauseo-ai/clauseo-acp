@@ -1,7 +1,7 @@
 //! `same_file` on every OS: a hard link is the same file, another file is not, a link to the
 //! file is not, and a missing file is an error.
 
-use super::same_file;
+use super::{file_stamp, same_file};
 use crate::write::{self, TestDir};
 
 #[test]
@@ -30,6 +30,25 @@ fn a_missing_file_is_an_error() {
     let gone = dir.0.join("gone");
     assert!(same_file(&one, &gone).is_err());
     assert!(same_file(&gone, &one).is_err());
+}
+
+#[test]
+fn a_stamp_changes_with_another_file_under_the_name() {
+    let dir = TestDir::new("fileid-stamp");
+    let login = dir.file("login", b"one");
+    let first = file_stamp(&login).unwrap().unwrap();
+    assert_eq!(
+        file_stamp(&login).unwrap(),
+        Some(first),
+        "unchanged: the same stamp"
+    );
+    // Another file renamed over the name: another id.
+    let other = dir.file("other", b"two");
+    write::rename(&other, &login).unwrap();
+    let swapped = file_stamp(&login).unwrap().unwrap();
+    assert_ne!(swapped, first);
+    assert_ne!(swapped.id, first.id);
+    assert!(file_stamp(&dir.0.join("gone")).is_err());
 }
 
 #[cfg(unix)]

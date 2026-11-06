@@ -14,8 +14,9 @@
 //!
 //! - The marker is `fake-signin-marker` in the CLI's home folder. It holds
 //!   `{"authMethod": ..., "email": "test@example.com"}` and nothing else, never a credential.
-//!   Claude's status prints the marker's email. For Codex a test's dummy file with the name of
-//!   Codex's login file counts as the marker too (reuse's hard link, S18).
+//!   Claude's status and Codex's `account/read` print the marker's email. For Codex a test's
+//!   dummy file with the name of Codex's login file counts as the marker too (reuse's hard
+//!   link, S18).
 //! - The Claude home is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is `$HOME/.claude`), else
 //!   `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's home is `CODEX_HOME`
 //!   when set and not empty, else `$HOME/.codex`.
@@ -435,21 +436,20 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
     Some(reply.to_string())
 }
 
-/// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`, or, when the marker's `authMethod` is `apikey`, an API-key
-/// account, which names no email. Without it, the signed-out reply: `account` null and
-/// `requiresOpenaiAuth` true.
+/// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account named by the
+/// marker's email (`test@example.com` unless a test planted another, as R17's swap tests do) on
+/// `plus`, or, when the marker's `authMethod` is `apikey`, an API-key account, which names no
+/// email. Without it, the signed-out reply: `account` null and `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
-    let method = marker_method(folder);
-    if method.as_deref() == Some(API_KEY_METHOD) {
-        json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
-    } else if method.is_some() {
-        json!({
-            "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},
+    match marker(folder) {
+        Some((method, _)) if method == API_KEY_METHOD => {
+            json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
+        }
+        Some((_, email)) => json!({
+            "account": {"type": "chatgpt", "email": email, "planType": "plus"},
             "requiresOpenaiAuth": false,
-        })
-    } else {
-        json!({"account": null, "requiresOpenaiAuth": true})
+        }),
+        None => json!({"account": null, "requiresOpenaiAuth": true}),
     }
 }
 

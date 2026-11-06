@@ -8,6 +8,10 @@
 mod support;
 
 #[cfg(test)]
+#[path = "signin/account.rs"]
+mod account;
+
+#[cfg(test)]
 #[path = "signin/claude.rs"]
 mod claude;
 

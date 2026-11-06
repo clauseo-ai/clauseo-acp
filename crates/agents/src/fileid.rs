@@ -24,29 +24,51 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
     let (Some(a), Some(b)) = (file_id(a)?, file_id(b)?) else {
         return Ok(false);
     };
-    Ok(a == b)
+    Ok(a.id == b.id)
 }
 
-/// The file's id: (device, inode). `None` for a symbolic link.
+/// A file's id and last-write time, read as [`same_file`] reads ids, from metadata alone:
+/// R17's identity check caches its verdict on a login file by this, and checks again once it
+/// changes (another file under the name, or the same file written).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    /// (device, inode) on Unix; (volume serial number, file index) on Windows.
+    id: (u64, u64),
+    /// The last write: seconds and nanoseconds since the epoch on Unix; 100 ns ticks since
+    /// 1601 on Windows.
+    modified: (i64, i64),
+}
+
+/// `path`'s [`FileStamp`], never following a link; `None` for a symbolic link, a junction or
+/// any other reparse point. Err when it cannot be read (a missing file included). Opens
+/// nothing on Unix; on Windows the same access-0 handle as [`same_file`].
+pub fn file_stamp(path: &Path) -> io::Result<Option<FileStamp>> {
+    file_id(path)
+}
+
+/// The file's id, (device, inode), and its last write. `None` for a symbolic link.
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn file_id(path: &Path) -> io::Result<Option<FileStamp>> {
     use std::os::unix::fs::MetadataExt as _;
 
     let meta = std::fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         return Ok(None);
     }
-    Ok(Some((meta.dev(), meta.ino())))
+    Ok(Some(FileStamp {
+        id: (meta.dev(), meta.ino()),
+        modified: (meta.mtime(), meta.mtime_nsec()),
+    }))
 }
 
-/// The file's id: (volume serial number, file index). `None` for a reparse point (a symbolic
-/// link, a junction, or any other).
+/// The file's id, (volume serial number, file index), and its last write. `None` for a
+/// reparse point (a symbolic link, a junction, or any other).
 #[cfg(windows)]
 #[expect(
     unsafe_code,
     reason = "CreateFileW and GetFileInformationByHandle are the OS's file-id calls; std has no stable one"
 )]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn file_id(path: &Path) -> io::Result<Option<FileStamp>> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
@@ -91,7 +113,12 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
         return Ok(None);
     }
     let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
-    Ok(Some((u64::from(info.dwVolumeSerialNumber), index)))
+    let written = info.ftLastWriteTime;
+    let ticks = (u64::from(written.dwHighDateTime) << 32) | u64::from(written.dwLowDateTime);
+    Ok(Some(FileStamp {
+        id: (u64::from(info.dwVolumeSerialNumber), index),
+        modified: (i64::try_from(ticks).unwrap_or(i64::MAX), 0),
+    }))
 }
 
 #[cfg(test)]

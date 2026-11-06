@@ -50,7 +50,8 @@
 //!   Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
-//!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
+//!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`; R17's `read_account`, an
+//!   [`AccountFuture`] of [`AccountRead`] with the account as an [`AccountHash`].
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
@@ -138,11 +139,12 @@ mod write;
 pub mod testing;
 
 pub use config::{AgentsConfig, Clock, InstallConfig, NodeSearch, SigninConfig, SystemClock};
-pub use fileid::same_file;
+pub use fileid::{FileStamp, file_stamp, same_file};
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
 pub use receipt::{install_folder, install_root, script_path};
+pub use signin::account::{AccountFuture, AccountHash, AccountRead};
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
     Found, LoginFrom, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source,

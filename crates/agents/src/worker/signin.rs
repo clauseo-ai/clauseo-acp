@@ -19,6 +19,10 @@ use crate::signin::{
 };
 use crate::state::{AgentsEvent, Installed};
 
+mod account;
+
+pub(super) use self::account::{reserve_read, start_account};
+
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
 #[derive(Debug)]
 pub(crate) struct SigninHub {
@@ -49,6 +53,8 @@ struct Inner {
     /// Each agent's running job.
     jobs: BTreeMap<AgentId, Slot>,
     next_job: u64,
+    /// The cancels of the account reads that may still run (`account.rs`).
+    reads: Vec<std::sync::Weak<Cancel>>,
 }
 
 /// An agent's running job: its ticket, its task, where pasted codes go, and, for a task that
@@ -432,6 +438,7 @@ impl SigninHub {
         for slot in jobs.into_values() {
             slot.ticket.cancel.cancel();
         }
+        account::stop_reads(self);
     }
 }
 
