@@ -36,10 +36,10 @@ form: external tagging, snake case, unknown fields and unknown commands refused.
 |---|---|
 | `InstallAgent` | native confirm naming the agent and its size, then the install; another agent's download pauses |
 | `RetryAgentInstall { use_system_proxy }` | starts a failed or paused install again, through the OS proxy if asked |
-| `StartSignIn { console }` | the plan login (`console`: Claude's Console account); joins a sign-in already running |
+| `StartSignIn { console }` | the plan login (`console`: Claude's Console account); joins a sign-in already running; `command.invalid` for a reused login, which is left first |
 | `CancelSignIn` | stops the running sign-in |
 | `PasteSignInCode { code: Secret }` | gives the running Claude login the pasted code |
-| `UseDeviceCode` | switches Codex to its device code |
+| `UseDeviceCode` | switches Codex to its device code; `command.invalid` for a reused login |
 | `OpenSignInPage` | opens the current page again ("Didn't open?"); nothing in any other state |
 | `SignOut` | signs Clauseo's own login out; `command.invalid` for a reused login |
 | `UseFoundLogin` | "Use it": reuses the login `LoginFound` showed; refused in any other state |
@@ -425,6 +425,15 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     without it. Desktop cannot tell "no key stored" without a read that answers, so a read that
     does not answer counts as a stored key. The log line names the agent, "key unreadable" and
     the error's kind; never the key, the item's name or a path.
+  - *Nothing outside the keychain records whether an agent has a stored key.* Desktop keeps no
+    list, marker or setting of it, so only a keychain read that answers can say "no key". When
+    the keychain never answers, every agent is refused with `agent.key_unreadable` (fail
+    closed), agents that never stored a key included.
+  - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
+    agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
+    with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read
+    succeeds. The launches, the restart after a leave and a key's overwrite still count an
+    unreadable key as stored.
   - *The retry.* A read that had not answered goes on, and when it answers it is taken in: a key
     or no item lifts the refusal. A launch meeting `agent.key_unreadable` also asks desktop to
     read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
@@ -439,6 +448,12 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *Limits reads wait for the keys.* Before the keys load, a limits read waits (at most 12 s,
     then fails) and launches nothing, so it never reads another login's numbers for an agent
     whose key is stored. An agent whose key is unreadable fails its reads.
+    An agent an unreadable policy blocks (`signin.policy_unreadable`) fails its reads too, so
+    a stored key, perhaps a firm gateway's, never goes to the vendor's own host.
+  - *The refusal never lags the key.* Each `restart_agents` desktop makes sets the agent's
+    refusal first, so a key that just turned unreadable is refused before the restart's
+    launches. A `set_launch_refused` call that fails is tried once more, then logged by the
+    agent and the error's code.
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no
@@ -479,7 +494,10 @@ reads' hold dropped and `limits_login_changed`.
   rule below if the reuse stopped, and the reads' guard drops; meanwhile another leave of
   the agent answers `command.conflict`. Nothing changes under running agents. **A stop job
   that never reports keeps the agent held until the app restarts.** A `Failed` while the login
-  is reused never counts as the reuse's end. A leave dropped before it ends (a panic, or its command
+  is reused never counts as the reuse's end. Whether the login is reused is desktop's word,
+  as the host was told, never S18's last state, so a running state between hides nothing; a
+  `Failed` that follows a running state (a job that replaced the stop) leaves the reuse
+  unknown, and S18's status check decides, the holds waiting for its answer. A leave dropped before it ends (a panic, or its command
   dropped) lifts the hold from a drop guard. A failed `restart_agents` is tried once more, then
   logged as a warning. A leave that finishes follows the rule below; one that is the first
   step of `SetAgentKey` or `SetFirmEndpoint` leaves the restart to its command, which calls
