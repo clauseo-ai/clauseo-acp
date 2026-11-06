@@ -26,7 +26,7 @@ use windows::core::PCWSTR;
 
 use super::ffi::{code_of, os, token_user};
 use super::machine::MachineError;
-use super::preflight::machine_domain;
+use super::preflight::{account_name, machine_domain};
 use super::strays::{Seen, check_pool_sid, to_stop};
 use crate::windows::acl::object::Handle;
 use crate::windows::record::current_user_sid;
@@ -53,16 +53,16 @@ pub struct Stopped {
 
 /// Stops every process whose token user is one of `pool`, waiting up to five seconds for each
 /// to exit. Refuses the whole call, stopping nothing, when any SID of `pool` fails
-/// [`check_pool`]. Enables `SeDebugPrivilege` (where the token holds it, as an
-/// administrator's does) only around the list and the stops, since a pool user's process grants
-/// nothing to Administrators. A process that can't be opened at all is passed over: its user is
-/// unknown, so it is never stopped.
-pub fn stop_pool_processes(pool: &[Sid]) -> Result<Stopped, MachineError> {
+/// [`check_pool`] (`owner` is the user who asked for the set-up). Enables
+/// `SeDebugPrivilege` (where the token holds it, as an administrator's does) only around the
+/// list and the stops, since a pool user's process grants nothing to Administrators. A process
+/// that can't be opened at all is passed over: its user is unknown, so it is never stopped.
+pub fn stop_pool_processes(pool: &[Sid], owner: &Sid) -> Result<Stopped, MachineError> {
     let mut done = Stopped::default();
     if pool.is_empty() {
         return Ok(done);
     }
-    check_pool(pool)?;
+    check_pool(pool, owner)?;
     let debug = DebugPrivilege::enable();
     let listed = look()?;
     let seen: Vec<Seen> = listed.iter().map(|(seen, _)| seen.clone()).collect();
@@ -96,9 +96,10 @@ pub fn stop_pool_processes(pool: &[Sid]) -> Result<Stopped, MachineError> {
 }
 
 /// Refuses `pool` unless every SID passes [`check_pool_sid`] against this machine's account
-/// domain and this process's user: defence in depth, so no caller can stop another user's
-/// processes or delete another user's profile.
-pub(super) fn check_pool(pool: &[Sid]) -> Result<(), MachineError> {
+/// domain, this process's user, `owner` (the user who asked for the set-up) and the name the
+/// SID resolves to: defence in depth, so no caller can stop another user's processes or delete
+/// another user's profile.
+pub(super) fn check_pool(pool: &[Sid], owner: &Sid) -> Result<(), MachineError> {
     let machine = machine_domain()?;
     let own = current_user_sid().map_err(|error| MachineError::Os {
         call: "GetTokenInformation",
@@ -108,7 +109,8 @@ pub(super) fn check_pool(pool: &[Sid]) -> Result<(), MachineError> {
             .unwrap_or(u32::MAX),
     })?;
     for sid in pool {
-        check_pool_sid(sid, machine, &own).map_err(|why| {
+        let name = account_name(sid)?;
+        check_pool_sid(sid, machine, &own, owner, name.as_deref()).map_err(|why| {
             MachineError::Other(format!("{} isn't a pool user: {why}", sid.as_str()))
         })?;
     }

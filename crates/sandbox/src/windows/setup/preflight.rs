@@ -18,8 +18,10 @@ use windows::Win32::Security::Authentication::Identity::{
     LsaQueryInformationPolicy, POLICY_ACCOUNT_DOMAIN_INFO, POLICY_LOOKUP_NAMES,
     POLICY_VIEW_LOCAL_INFORMATION, PolicyAccountDomainInformation,
 };
-use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-use windows::Win32::Security::{LookupAccountNameW, PSID, SID_NAME_USE, SidTypeAlias};
+use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
+use windows::Win32::Security::{
+    LookupAccountNameW, LookupAccountSidW, PSID, SID_NAME_USE, SidTypeAlias,
+};
 use windows::Win32::System::Services::{
     CloseServiceHandle, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfigW,
     SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_QUERY_CONFIG,
@@ -205,6 +207,63 @@ fn group_sid() -> Result<Option<Sid>, MachineError> {
     unsafe { sid_text(PSID(sid.as_mut_ptr().cast())) }
 }
 
+/// The name of the account whose SID is `sid` (`LookupAccountSidW`); `None` when no account
+/// has it (a deleted one).
+pub(super) fn account_name(sid: &Sid) -> Result<Option<String>, MachineError> {
+    let text = wide(sid.as_str());
+    let mut parsed = PSID::default();
+    // SAFETY: `text` is NUL-terminated and outlives the call; `parsed` is a live out-pointer,
+    // freed by `LocalSid`.
+    unsafe { ConvertStringSidToSidW(PCWSTR(text.as_ptr()), &raw mut parsed) }
+        .map_err(|error| os("ConvertStringSidToSidW", &error))?;
+    let parsed = LocalSid(parsed);
+    let (mut name_size, mut domain_size) = (0u32, 0u32);
+    let mut kind = SID_NAME_USE::default();
+    // SAFETY: `parsed` is a valid SID; no buffers ask only for the sizes.
+    let sized = unsafe {
+        LookupAccountSidW(
+            PCWSTR::null(),
+            parsed.0,
+            None,
+            &raw mut name_size,
+            None,
+            &raw mut domain_size,
+            &raw mut kind,
+        )
+    };
+    match sized {
+        Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => {}
+        Err(error) if error.code() == ERROR_NONE_MAPPED.to_hresult() => return Ok(None),
+        Err(error) => return Err(os("LookupAccountSidW", &error)),
+        Ok(()) => return Ok(None),
+    }
+    let mut name = vec![0u16; usize::try_from(name_size).unwrap_or(0).max(1)];
+    let mut domain = vec![0u16; usize::try_from(domain_size).unwrap_or(0).max(1)];
+    // SAFETY: as above; `name` is writable for `name_size` characters and `domain` for
+    // `domain_size`.
+    unsafe {
+        LookupAccountSidW(
+            PCWSTR::null(),
+            parsed.0,
+            Some(PWSTR(name.as_mut_ptr())),
+            &raw mut name_size,
+            Some(PWSTR(domain.as_mut_ptr())),
+            &raw mut domain_size,
+            &raw mut kind,
+        )
+    }
+    .map_err(|error| os("LookupAccountSidW", &error))?;
+    drop(parsed);
+    let end = name
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(name.len());
+    name.truncate(end);
+    String::from_utf16(&name)
+        .map(Some)
+        .map_err(|_not_utf16| MachineError::Other("an account name is not text".to_owned()))
+}
+
 /// Opens the local LSA policy for `access`.
 fn open_policy(access: i32) -> Result<Policy, MachineError> {
     let attributes = LSA_OBJECT_ATTRIBUTES {
@@ -295,5 +354,15 @@ impl Drop for Local {
     fn drop(&mut self) {
         // SAFETY: the string came from ConvertSidToStringSidW (LocalAlloc) and is freed once.
         unsafe { LocalFree(Some(HLOCAL(self.0.0.cast()))) };
+    }
+}
+
+/// A SID `ConvertStringSidToSidW` allocated, freed on drop.
+struct LocalSid(PSID);
+
+impl Drop for LocalSid {
+    fn drop(&mut self) {
+        // SAFETY: the SID came from ConvertStringSidToSidW (LocalAlloc) and is freed once.
+        unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
     }
 }
