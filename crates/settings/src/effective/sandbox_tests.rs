@@ -237,7 +237,8 @@ fn the_registry_sets_each_key_by_its_type() {
 }
 
 /// A mistyped `allow_unprotected_auto` in the lawyer's own `settings.json` turns auto outside
-/// the sandbox off, its safe value, not back on at its default; with a warning, and no lock.
+/// the sandbox off, its safe value, not back on at its default; with a warning that names the key
+/// and the type it expects, never the value, and no lock.
 #[test]
 fn a_mistyped_allow_unprotected_auto_from_the_lawyer_falls_to_false() {
     let files = user(r#"{"sandbox": {"allow_unprotected_auto": "yes"}}"#);
@@ -247,7 +248,8 @@ fn a_mistyped_allow_unprotected_auto_from_the_lawyer_falls_to_false() {
     assert!(
         effective.warnings().iter().any(|warning| matches!(
             &warning.kind,
-            WarningKind::InvalidValue { key, .. } if key == "sandbox.allow_unprotected_auto"
+            WarningKind::InvalidValue { key, message }
+                if key == "sandbox.allow_unprotected_auto" && message == "invalid type: string, expected a boolean"
         )),
         "{:?}",
         effective.warnings()

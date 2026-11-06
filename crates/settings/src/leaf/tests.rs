@@ -75,7 +75,7 @@ fn a_value_of_the_wrong_type_is_left_out_with_its_key() {
         one("ui.theme", json!("purple")),
         Err(invalid(
             "ui.theme",
-            "unknown variant `purple`, expected one of `system`, `light`, `dark`"
+            "unknown variant, expected one of `system`, `light`, `dark`"
         ))
     );
     // 12 and 13 were sizes before the range moved to 14 to 20: a stored one now warns and the
@@ -92,21 +92,21 @@ fn a_value_of_the_wrong_type_is_left_out_with_its_key() {
         one("ui.language", json!("en-GB")),
         Err(invalid(
             "ui.language",
-            "unknown variant `en-GB`, expected `en` or `hi`"
+            "unknown variant, expected `en` or `hi`"
         ))
     );
     assert_eq!(
         one("ui.lite", json!("sometimes")),
         Err(invalid(
             "ui.lite",
-            "unknown variant `sometimes`, expected one of `automatic`, `on`, `off`"
+            "unknown variant, expected one of `automatic`, `on`, `off`"
         ))
     );
     assert_eq!(
         one("ui.motion", json!(true)),
         Err(invalid(
             "ui.motion",
-            "invalid type: boolean `true`, expected string or map"
+            "invalid type: boolean, expected string or map"
         ))
     );
     assert_eq!(
@@ -214,7 +214,7 @@ fn the_update_mode_is_auto_notify_or_none() {
         one("update.mode", json!("off")),
         Err(invalid(
             "update.mode",
-            "unknown variant `off`, expected one of `auto`, `notify`, `none`"
+            "unknown variant, expected one of `auto`, `notify`, `none`"
         ))
     );
 }
