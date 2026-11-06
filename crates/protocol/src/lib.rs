@@ -204,8 +204,8 @@ wire_types! {
         HostCommand, MatterSource, RefreshWhy, RestoreRequest,
     },
     connectors::{
-        Balance, ConnectorStatus, ConnectorView, ConnectorsState, DaySpendView, PackView,
-        RecentSpend, RedactedString,
+        Balance, ConnectorErrorKind, ConnectorStatus, ConnectorView, ConnectorsState,
+        DaySpendView, PackView, RechargeOutcome, RecentSpend, RedactedString, ConnectorSignInMethod,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     details::{ClientName, Date, MatterStatus, PackId, PackList},

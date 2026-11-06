@@ -33,12 +33,15 @@ expression: "HostEvent::ConnectorsChanged(super::connectors::connectors_state(),
           "signed_in": {
             "balance": {
               "credits": 1180,
-              "paise": 13924
+              "paise": 13924,
+              "as_of": 1762400000000
             },
-            "low": false
+            "low": false,
+            "method": "account"
           }
         },
-        "pay_url": "https://data.clauseo.chat/pay/rch_01"
+        "pay_url": "https://data.clauseo.chat/pay/rch_01",
+        "last_recharge": "paid"
       }
     ]
   }

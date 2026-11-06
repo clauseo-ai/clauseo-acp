@@ -38,6 +38,15 @@ struct FakeRecharge {
     credits: i64,
     amount: Value,
     paid: bool,
+    /// Ended unpaid, with this status (`expired`, `cancelled`).
+    ended: Option<&'static str>,
+}
+
+impl FakeRecharge {
+    /// Paid or ended: a `wait` poll answers at once.
+    fn settled(&self) -> bool {
+        self.paid || self.ended.is_some()
+    }
 }
 
 impl ApiState {
@@ -64,6 +73,17 @@ impl ApiState {
             self.balance = self.balance.saturating_add(recharge.credits);
         }
         true
+    }
+
+    /// Ends an unpaid recharge with `status`; false for an unknown or settled one.
+    pub(super) fn end_recharge(&mut self, id: &str, status: &'static str) -> bool {
+        match self.recharges.get_mut(id) {
+            Some(recharge) if !recharge.settled() => {
+                recharge.ended = Some(status);
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn recharge_ids(&self) -> Vec<String> {
@@ -113,6 +133,7 @@ impl ApiState {
                     "gross_inr": found.get("gross_inr").cloned().unwrap_or(Value::Null),
                 }),
                 paid: false,
+                ended: None,
             },
         );
         Some(id)
@@ -123,7 +144,7 @@ impl ApiState {
         self.recharge_ids().into_iter().rev().find(|id| {
             self.recharges
                 .get(id)
-                .is_some_and(|recharge| !recharge.paid)
+                .is_some_and(|recharge| !recharge.settled())
         })
     }
 
@@ -147,6 +168,9 @@ impl ApiState {
             "recharge-created.json"
         };
         let mut value = fixtures::value(file, base);
+        if let Some(status) = recharge.ended {
+            value["status"] = json!(status);
+        }
         value["recharge_id"] = json!(id);
         value["url"] = json!(
             self.pay_url
@@ -276,7 +300,7 @@ pub(super) fn create_recharge(shared: &Shared, request: &RecordedRequest) -> Res
 }
 
 /// `GET /v1/case-law/recharges/{id}?wait=N`: holds the answer up to `N` seconds (capped) while
-/// the recharge awaits payment.
+/// the recharge awaits payment (neither paid nor ended).
 pub(super) fn get_recharge(shared: &Shared, request: &RecordedRequest, id: &str) -> Response {
     if !authorized(shared, request) {
         return unauthorized(shared);
@@ -288,10 +312,10 @@ pub(super) fn get_recharge(shared: &Shared, request: &RecordedRequest, id: &str)
         .and_then(|(_, value)| value.parse::<u64>().ok())
         .unwrap_or(0);
     let mut state = shared.lock();
-    let Some(paid) = state.api.recharges.get(id).map(|recharge| recharge.paid) else {
+    let Some(settled) = state.api.recharges.get(id).map(FakeRecharge::settled) else {
         return Response::json(404, &json!({"error": {"code": "not_found"}}));
     };
-    if !paid && wait > 0 {
+    if !settled && wait > 0 {
         let hold = Duration::from_secs(wait).min(state.api.wait_cap);
         state = shared
             .paid
@@ -301,7 +325,7 @@ pub(super) fn get_recharge(shared: &Shared, request: &RecordedRequest, id: &str)
                         .api
                         .recharges
                         .get(id)
-                        .is_some_and(|recharge| recharge.paid)
+                        .is_some_and(FakeRecharge::settled)
             })
             .unwrap_or_else(PoisonError::into_inner)
             .0;

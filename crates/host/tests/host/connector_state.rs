@@ -6,9 +6,10 @@
 use std::time::Duration;
 
 use clauseo_connectors::fake::Fixture;
+use clauseo_host::Clock as _;
 use clauseo_protocol::{
-    Balance, CommandOutcome, ConnectorCommand, ConnectorStatus, ErrorCode, HostCommand, HostEvent,
-    MatterId, PackView, ToolsPatch,
+    Balance, CommandOutcome, ConnectorCommand, ConnectorSignInMethod, ConnectorStatus, ErrorCode,
+    HostCommand, HostEvent, MatterId, PackView, ToolsPatch,
 };
 
 use crate::connector_rig::{
@@ -51,13 +52,22 @@ fn the_commands_publish_the_state_and_no_token_reaches_the_app() {
     let state = rig.state_until("signed in", |state| signed_in(state).is_some());
     let ConnectorStatus::SignedIn {
         account_label,
-        balance: Some(Balance { credits, paise }),
+        balance:
+            Some(Balance {
+                credits,
+                paise,
+                as_of,
+            }),
         low,
+        method,
     } = status(&state).unwrap()
     else {
         panic!("{state:?}");
     };
     assert_eq!((account_label, *credits, *low), (&None, 1_000, false));
+    // Signed in through the browser, the balance read at the host's (manual) clock.
+    assert_eq!(*method, Some(ConnectorSignInMethod::Account), "{state:?}");
+    assert_eq!(*as_of, Some(rig.host.clock.now().wall), "{state:?}");
     // At the fake's price list, ₹0.10 a credit plus 18% GST: 1,000 credits are ₹118.
     assert_eq!(*paise, Some(11_800), "{state:?}");
     // The spend, priced the same way: 46 credits are 542.8 paise, shown as 543.
@@ -91,7 +101,17 @@ fn the_commands_publish_the_state_and_no_token_reaches_the_app() {
     let key = rig.fake.new_api_key();
     rig.keys.push(key.clone());
     rig.ok(add_key(&key));
-    rig.state_until("signed in with the key", |state| signed_in(state).is_some());
+    let state = rig.state_until("signed in with the key", |state| signed_in(state).is_some());
+    assert!(
+        matches!(
+            status(&state),
+            Some(ConnectorStatus::SignedIn {
+                method: Some(ConnectorSignInMethod::ApiKey),
+                ..
+            })
+        ),
+        "{state:?}"
+    );
     rig.ok(remove());
     let state = rig.state_until("removed", |state| {
         status(state) == Some(&ConnectorStatus::NotAdded)

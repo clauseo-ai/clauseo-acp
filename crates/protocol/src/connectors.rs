@@ -20,6 +20,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use zeroize::Zeroizing;
 
 use crate::MAX_SECRET_BYTES;
+use crate::number::Timestamp;
 
 /// The text a [`RedactedString`] encodes and prints as.
 pub const REDACTED_TEXT: &str = "[redacted]";
@@ -65,6 +66,28 @@ pub struct ConnectorView {
     /// native confirm. `None` until then, and again once the recharge is paid or expires.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pay_url: Option<String>,
+    /// How the last watched recharge ended, set when its pay link clears: the app says "Payment
+    /// received" or "That payment page expired". It lasts until the next recharge is watched
+    /// (an `AddCredits` whose pay link arrives, or an out-of-credit answer's new recharge),
+    /// and goes with a sign-out, a remove, the switch going off or a credential that ended.
+    /// `None` before any, and when the host cannot tell how the recharge ended (the watch
+    /// failed). Additive (R24's wire-gaps follow-up): an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_recharge: Option<RechargeOutcome>,
+}
+
+/// How a watched recharge ended. Closed: the host and the app are one version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum RechargeOutcome {
+    /// The connector says it was paid.
+    Paid,
+    /// The connector says the payment page expired, or the host's watch reached its deadline
+    /// first (the page is then past its use as far as the host is concerned).
+    Expired,
+    /// The connector says the recharge was cancelled.
+    Cancelled,
 }
 
 /// One pack of credits the lawyer can buy.
@@ -125,6 +148,36 @@ pub struct Balance {
     /// gross. `ConnectorsChanged` is not folded, so no schema version changes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub paise: Option<u32>,
+    /// When the account read this balance came from was applied, by the host's clock (wall
+    /// time, as every view timestamp): not the connector's time. Additive (R24's wire-gaps
+    /// follow-up): an older host leaves it out.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub as_of: Option<Timestamp>,
+}
+
+/// How a connector is signed in. Closed: the host and the app are one version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum ConnectorSignInMethod {
+    /// The browser sign-in to the lawyer's own account (OAuth).
+    Account,
+    /// A pasted API key: the firm's key, so the app says "Using your firm's key".
+    ApiKey,
+}
+
+/// Why a connector shows [`ConnectorStatus::Error`]. Closed: the host and the app are one
+/// version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum ConnectorErrorKind {
+    /// A sign-in or an API key check failed (not a cancelled one), or the keychain refused the
+    /// new credential: not signed in with it.
+    SignInFailed,
+    /// Signed in now, but the keychain refused the credential twice, so it is held in memory
+    /// only and the next start will need a new sign-in.
+    PersistFailed,
 }
 
 /// Where a connector stands. Closed: the host and the app are one version.
@@ -146,6 +199,10 @@ pub enum ConnectorStatus {
         balance: Option<Balance>,
         /// Whether the balance is under 10 search pages' worth of credits.
         low: bool,
+        /// How it is signed in. Additive (R24's wire-gaps follow-up): an older host leaves it
+        /// out; this one always sets it.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        method: Option<ConnectorSignInMethod>,
     },
     /// The account has no credits left: calls fail until it is topped up.
     OutOfCredit {
@@ -163,6 +220,10 @@ pub enum ConnectorStatus {
     Error {
         /// A short English line for the details view; the app writes its own words.
         message: String,
+        /// Which of the two it is. Additive (R24's wire-gaps follow-up): an older host leaves
+        /// it out; this one always sets it.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        kind: Option<ConnectorErrorKind>,
     },
 }
 

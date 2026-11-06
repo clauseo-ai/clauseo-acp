@@ -144,6 +144,16 @@ check (`MAX_REPLY_BYTES`) stands in front, since S28's limit is 8 MB.
   read). `Balance.paise` was the account's net `balance_inr` before this; older logs hold net.
 - The pay link is held only as a `PayUrl`, which only the connector's own `/pay/` links parse
   to (D1: `ConnectorView.pay_url` in `ConnectorsChanged`, no new `CommandOutcome`).
+- **The wire-gaps follow-up.** Four additive `Option` fields, left out when `None`, that this
+  host always fills where they apply (`ConnectorsChanged` is not folded, so no schema version
+  changes): `ConnectorStatus::Error.kind` (`sign_in_failed`, or `persist_failed` when the
+  connectors crate holds refreshed tokens in memory only, shown once when that turns true while
+  signed in); `SignedIn.method` (`account` for the browser sign-in, `api_key` for a pasted key);
+  `Balance.as_of` (the host clock's wall time when the account read was applied); and
+  `ConnectorView.last_recharge` (`paid`, `expired`, `cancelled`), set when the watched
+  recharge's pay link clears. A watch that reaches its deadline counts as `expired`; one that
+  fails otherwise sets nothing. The outcome lasts until the next recharge is watched, with no
+  timer, and goes with a sign-out, a remove, the switch going off or a credential that ended.
 - **Proxy.** Desktop builds the connector's route as `ProxyChoice::Resolve`, asking
   `clauseo_sandbox::upstream_for` before each request, so the connector goes the way the host's
   own HTTPS does (`desktop/src/connectors.rs`). A refused proxy setting fails each request; the

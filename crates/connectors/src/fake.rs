@@ -168,7 +168,7 @@ struct Shared {
     base_url: Url,
     clock: Arc<dyn Clock>,
     state: Mutex<FakeState>,
-    /// Woken when a recharge is paid, and on stop.
+    /// Woken when a recharge is paid or ended, and on stop.
     paid: Condvar,
     stop: CancelFlag,
 }
@@ -466,6 +466,23 @@ impl FakeHandle {
         let paid = self.lock().api.mark_paid(recharge_id);
         self.shared.paid.notify_all();
         paid
+    }
+
+    /// Ends an unpaid recharge as `expired` and wakes any `wait` poll on it. False for an
+    /// unknown, paid or already ended one.
+    pub fn expire_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "expired")
+    }
+
+    /// Ends an unpaid recharge as `cancelled`, as [`FakeHandle::expire_recharge`] does.
+    pub fn cancel_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "cancelled")
+    }
+
+    fn end_recharge(&self, recharge_id: &str, status: &'static str) -> bool {
+        let ended = self.lock().api.end_recharge(recharge_id, status);
+        self.shared.paid.notify_all();
+        ended
     }
 
     /// The ids of every recharge opened so far, oldest first.
