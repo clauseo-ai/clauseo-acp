@@ -10,7 +10,7 @@ use std::path::Path;
 use clauseo_protocol::{
     BlobRef, CommandOutcome, ContentBlock, Count, DomainEvent, ElicitationId, ElicitationResponse,
     HostCommand, HostQuery, QueryResult, RawPayload, ReadLen, StopReason, StreamId, TextOrBlob,
-    ThreadId, ToolCallContent, WITHHELD,
+    ThreadId, ToolCallContent, ToolLocation, WITHHELD,
 };
 use serde_json::{Value, json};
 
@@ -360,4 +360,54 @@ fn the_store_scan_finds_escaped_forms() {
     );
     assert!(!stored_bytes(dir.home(), SIGNER));
     assert!(stored(dir.home(), SIGNER));
+}
+
+/// The review's `rev_a_scrubbed_path_is_lost_to_the_turns_paths`: the turn's own list of the
+/// files it touched stays in memory, so it keeps the real name of a file named after a withheld
+/// value. The agent's edit to it is not flagged as maybe the lawyer's (Undo ticks it), while the
+/// logged call withholds the name.
+#[test]
+fn the_turns_paths_keep_a_file_named_after_a_withheld_value() {
+    let dir = Dir::new(
+        "elicitation_echo_path",
+        &[(FAKE, Scenario::Bundled("elicitation-echo-path"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Draft the engagement letter.");
+    let elicitation = requested(&mut events, 1);
+    answer(
+        &host,
+        thread,
+        elicitation,
+        accept(json!({ "client": "Acme" })),
+    );
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+    events.assert_no_mismatch();
+
+    let changed = events
+        .files_changed(turn)
+        .unwrap_or_else(|| panic!("no FilesChanged: {}", events.dump()));
+    let files: Vec<(&str, bool)> = changed
+        .files
+        .iter()
+        .map(|file| (file.path().as_str(), file.may_include_lawyer_edits()))
+        .collect();
+    assert_eq!(files, [("Acme engagement letter.docx", false)]);
+
+    let locations = events.events().find_map(|event| match event {
+        DomainEvent::ToolCallUpdated(updated) => updated.patch.locations.clone(),
+        _ => None,
+    });
+    let logged: Vec<String> = locations
+        .unwrap_or_default()
+        .iter()
+        .map(|location| match location {
+            ToolLocation::Inside { path, .. } => path.as_str().to_owned(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(logged, ["[withheld] engagement letter.docx"]);
+    host.shutdown();
 }

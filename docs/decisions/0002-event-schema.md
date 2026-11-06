@@ -191,6 +191,11 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
     an echo after the call or the turn ended; a value the agent transforms (encodes otherwise,
     splits, rewords). The scrub's cost grows with the output's size times the number of values
     on the host's actor; the values come from the lawyer, so an agent cannot raise their count.
+  - Only what is logged is scrubbed. The turn's own list of the paths its tool calls named
+    (memory only, for the after-turn checkpoint and Undo) takes the calls as the agent sent
+    them, so a file named after a value is still the agent's edit. Residual: restart recovery
+    rebuilds that list from the scrubbed log, so after a crash mid-turn such a file shows in
+    Undo as `[withheld] …` and unticked.
 - `DomainEvent` is what `store` accepts; `HostEvent` is what a subscriber receives and is never logged.
   Limit ticks stay out of the log; `store` keeps the last `AccountLimits` per account apart.
 
