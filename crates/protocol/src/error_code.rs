@@ -243,6 +243,14 @@ error_codes! {
         sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does \
         not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a \
         newer cause), so no agent was started.";
+    AgentIdentityChecking = "agent.identity_checking", retryable: true, meaning: "Clauseo is \
+        confirming which account this agent's login belongs to; no agent was started.";
+    AgentIdentityUnknown = "agent.identity_unknown", retryable: true, meaning: "Clauseo could \
+        not confirm which account this agent's login belongs to (its status check failed or \
+        gave no account); no agent was started. Trying again can succeed.";
+    SigninAccountChanged = "signin.account_changed", retryable: false, meaning: "The agent's \
+        login now belongs to a different account than the one signed in through Clauseo, so \
+        its agents were stopped. Sign in again.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
