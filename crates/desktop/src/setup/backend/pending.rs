@@ -93,10 +93,11 @@ pub(super) fn sign_out(backend: &AgentsBackend, agent: &AgentId) -> Result<(), H
         let _gate = lock(&backend.signin_gate);
         drop_press(backend, agent, "signed out");
     }
-    backend
-        .agents
-        .sign_out(agent)
-        .map_err(|error| signin_error(&error))?;
+    backend.wiring.identity.signing_out(agent, true);
+    backend.agents.sign_out(agent).map_err(|error| {
+        backend.wiring.identity.signing_out(agent, false);
+        signin_error(&error)
+    })?;
     backend.replaced(agent);
     Ok(())
 }
