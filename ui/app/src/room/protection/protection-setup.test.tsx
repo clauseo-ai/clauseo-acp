@@ -82,7 +82,7 @@ test.each([
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Windows will ask if you want to allow changes, and it may show the publisher as unknown. That's expected. Choose Yes to set up protection.",
+      "Windows will ask to let Clauseo set up its protection. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
     ),
   );
   expect(sentRetries()).toEqual([]);
