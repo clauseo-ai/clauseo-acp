@@ -10,7 +10,10 @@
 #
 # Per event:
 # - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted): the
-#   job `decide` picks one of six modes, and `build` acts on it:
+#   job `decide` picks one of seven modes, and `build` acts on it:
+#   - stale: the pull request's head is no longer the commit this run was started for (a push
+#     came while it waited in its group): the check passes in seconds on that old commit, which
+#     no required check reads, and the run cancels nothing.
 #   - covered: another run already passed `windows tests (PR)` for this head commit (the label
 #     `ready` added after a push, an approval after the label, any other label or review): the
 #     check passes in seconds on ubuntu and names that run. Nothing is tested twice.
@@ -45,6 +48,11 @@
 # its head commit, with cancel-in-progress off: a second run for the same commit waits for the
 # first, then finds its result and is `covered` (or `failed`). Runs for an older head of the same
 # pull request are cancelled by `decide` (actions: write), as cancel-in-progress did before.
+# "Older" is measured against the pull request's head as the API gives it when `decide` runs,
+# not the event's: on #536 (2026-11-06) a review run for the old head waited 40 minutes behind
+# that head's test run, and its `decide`, comparing against its own stale head, cancelled both
+# runs of the new head, whose check then stayed failed until they were re-run by hand. A run
+# whose own head is no longer the pull request's head is `stale` and cancels nothing.
 
 name: windows-pr-tests
 
@@ -108,9 +116,24 @@ jobs:
           mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
           if [ "$EVENT" = merge_group ]; then mode merge_group; fi
 
+          # The pull request's head now. A run started for an earlier head is stale: it tests
+          # nothing and cancels nothing (the note at the top). If the read fails, nothing is
+          # cancelled and the run goes on for its own head.
+          if current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) && [ -n "$current" ]; then
+            if [ "$current" != "$HEAD_SHA" ]; then
+              echo "This run is for $HEAD_SHA; the pull request's head is now $current."
+              mode stale
+            fi
+          else
+            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+            current=""
+          fi
+
           # This pull request's unfinished runs for an older head are obsolete (the note at the
           # top). A failure here only leaves them running.
-          if older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
+          if [ -z "$current" ]; then
+            :
+          elif older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
               -f branch="$HEAD_REF" -f per_page=50 \
               -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
             for id in $older; do
@@ -205,6 +228,10 @@ jobs:
       - name: Covered by the merge group's Windows x64 build
         if: env.MODE == 'merge_group'
         run: echo "covered by build (x86_64-pc-windows-msvc) in this merge group"
+
+      - name: A newer head replaced this run's commit
+        if: env.MODE == 'stale'
+        run: echo "the pull request's head moved on while this run waited; its own runs decide the check"
 
       - name: Covered by an earlier run of this commit
         if: env.MODE == 'covered'
