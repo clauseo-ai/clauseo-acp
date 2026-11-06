@@ -89,6 +89,20 @@ threads-required = "num-cpus"
 filter = 'package(xtask) & (test(/^buildtime::(worktree|profile)::tests::/) | test(/^checks::core_io::tests::clippy::/))'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
+# The guard's real-Chrome tests (crates/mcp/tests/guard/real_chrome.rs; they run where
+# CLAUSEO_TEST_AGENT_BROWSER is set, CI's Linux job) each start Chrome, 11 or 12 processes. Run side
+# by side on the loaded runner, Chrome took more than 10 s to listen once its start was logged, and
+# a_guard_killed_while_chrome_starts_leaves_no_chrome failed its first try in four merge groups
+# after #534 (first run 42223670975). They run one at a time; the test's wait for Chrome to listen
+# is 60 s, and 120 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-mcp) & binary(guard) & test(/^real_chrome::/)'
+slow-timeout = { period = "30s", terminate-after = 4 }
+test-group = 'real-chrome'
+
+[test-groups]
+real-chrome = { max-threads = 1 }
+
 [profile.ci]
 # One retry in CI only (local runs use the default profile and keep none), so a test that fails
 # once under the runner's load does not eject a pull request from the merge queue. Flakes are still
