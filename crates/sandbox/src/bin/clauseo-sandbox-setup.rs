@@ -12,6 +12,10 @@ use std::process::ExitCode;
 
 #[cfg(windows)]
 fn main() -> ExitCode {
+    // `exe::main` keeps the DLL search to System32 before anything else, so the delay-loaded
+    // `netapi32.dll` and `userenv.dll` (`build.rs`) load only after it. `args_os` reads the
+    // command line through kernel32 alone; nothing in this crate or its dependencies calls
+    // either DLL before `main` (no statics run code at start-up).
     let exit = clauseo_sandbox::windows::setup::exe::main(std::env::args_os().skip(1));
     ExitCode::from(exit.as_code())
 }
