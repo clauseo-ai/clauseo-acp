@@ -74,8 +74,8 @@ pub struct SetupRequest {
     pub matters: Vec<RegisteredMatter>,
 }
 
-/// Runs the set-up as the module says, under the machine-wide lock, which is given back
-/// whatever happens. A held lock is [`SetupExit::LockHeld`]; another owner
+/// Runs the set-up as the module says, under the machine-wide lock, which a guard gives back
+/// on every return. A held lock is [`SetupExit::LockHeld`]; another owner
 /// [`SetupExit::OtherOwner`]; any other failure [`SetupExit::Failed`], rolled back.
 pub fn set_up(
     machine: &mut impl Machine,
@@ -95,9 +95,18 @@ pub fn set_up(
             exit,
         });
     }
-    let result = create::run(machine, acl, req);
-    machine.unlock();
-    result
+    let locked = Locked(machine);
+    create::run(&mut *locked.0, acl, req)
+}
+
+/// The machine while set-up holds its lock: dropping it gives the lock back, so no return path
+/// leaves the lock held.
+struct Locked<'m, M: Machine>(&'m mut M);
+
+impl<M: Machine> Drop for Locked<'_, M> {
+    fn drop(&mut self) {
+        self.0.unlock();
+    }
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use crate::windows::fence::MatterFolders;
 mod create;
 mod extend;
 mod fake;
+mod remains;
 mod rollback;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};

@@ -1,18 +1,19 @@
 //! A failed set-up's rollback (D-B7). Users this run made come off in the uninstall order: their
-//! `LocalLow` deny, their profile, their account. The record is rewritten to the survivors, the
-//! group goes only if this run made it and it is empty, and every other deny stays (D12).
-//! Nothing that existed before the run is removed.
+//! `LocalLow` deny, their profile, their account. Then the group goes, only if this run made it
+//! and it is empty. Then the record is written to what really remains: every SID it held before,
+//! each made user still there (or gone but named by a ledger entry), and a group this run made
+//! that is still there, so no account or group is left that the record doesn't name. Every other
+//! deny stays (D12). Nothing that existed before the run is removed.
 //!
-//! Two things a rollback can't undo: a re-run's new passwords for the recorded users (they stay
-//! set, and `secrets.bin` holds them only if step 10 ran), and the denies, which stay on
-//! purpose: a deny naming a group or user that is gone does no harm. A `secrets.bin` step 10
-//! wrote stays too, with blobs for users now deleted, which nothing can use.
+//! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
+//! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
+//! denies stay on purpose: a deny naming a group or user that is gone does no harm.
 
 use std::path::{Path, PathBuf};
 
 use super::SetupRequest;
 use super::create::write_record;
-use super::machine::Machine;
+use super::machine::{Machine, Password};
 use super::outcome::cause_of;
 use crate::windows::acl_plan::Grant;
 use crate::windows::ledger::Ledger;
@@ -49,6 +50,10 @@ pub(super) struct Run {
     pub(super) added: Vec<Grant>,
     /// The owner's ledger, once step 8 fenced through it.
     pub(super) ledger: Option<Ledger>,
+    /// The recorded users whose accounts exist, kept by this run.
+    pub(super) kept: Vec<Sid>,
+    /// The new passwords this run gave kept users (a re-run), as each was set.
+    pub(super) reset: Vec<(Sid, Password)>,
 }
 
 impl Run {
@@ -62,6 +67,8 @@ impl Run {
             recorded: None,
             added: Vec::new(),
             ledger: None,
+            kept: Vec::new(),
+            reset: Vec::new(),
         }
     }
 
@@ -107,15 +114,13 @@ pub(super) fn roll_back(
         }
     }
     survivors.reverse();
-    let group_goes = run.group_made && alive == 0 && group_empty(machine, run, &mut left);
-    if run.recorded.is_some() {
-        rewrite_record(machine, req, run, &survivors, group_goes, &mut left);
-    }
-    if let (true, Some(group)) = (group_goes, &run.group)
-        && let Err(error) = machine.delete_group(group)
+    let group_gone = run.group_made && alive == 0 && delete_group(machine, run, &mut left);
+    rewrite_record(machine, req, run, &survivors, group_gone, &mut left);
+    if !run.reset.is_empty()
+        && let Err(error) = machine.protect_for_owner(&run.reset, &run.kept)
     {
         left.push(format!(
-            "the group ClauseoSandboxUsers: {}",
+            "secrets.bin, which lacks the sandbox users' new passwords ({}): run set-up again",
             cause_of(&error)
         ));
     }
@@ -165,14 +170,20 @@ fn local_low(profile: &Path) -> PathBuf {
     profile.join("AppData").join("LocalLow")
 }
 
-/// Whether the group this run made has no members left; a failed count keeps it.
-fn group_empty(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -> bool {
+/// Deletes the group this run made when it has no members left; whether it is gone. A group
+/// that still has members (kept users this run put in it) stays and is recorded, which is not a
+/// failure; a failed count or delete keeps it and is.
+fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -> bool {
     let Some(group) = &run.group else {
         return false;
     };
-    match machine.group_members(group) {
-        Ok(0) => true,
-        Ok(_) => false,
+    let result = match machine.group_members(group) {
+        Ok(0) => machine.delete_group(group),
+        Ok(_) => return false,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(()) => true,
         Err(error) => {
             left.push(format!(
                 "the group ClauseoSandboxUsers ({})",
@@ -183,50 +194,61 @@ fn group_empty(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) ->
     }
 }
 
-/// The record back to the survivors: the one before the run (every SID it listed, so nothing
-/// recorded before is dropped) plus `survivors`; or no record at all when there was none before
-/// and nothing survives. The group recorded is the one before when this run's group goes.
+/// The record written to what remains, after the users and the group: every SID the record
+/// held before the run (so nothing recorded before is dropped) plus `survivors`, with this run's
+/// group while it is still there, else the group before. No record at all when there was none
+/// before and nothing remains. Written only when it differs from what the machine holds.
 fn rewrite_record(
     machine: &mut impl Machine,
     req: &SetupRequest,
     run: &Run,
     survivors: &[Sid],
-    group_goes: bool,
+    group_gone: bool,
     left: &mut Vec<String>,
 ) {
-    let result = match (&run.before, &run.group) {
-        (None, _) if survivors.is_empty() => {
-            machine.delete_record().map_err(|error| cause_of(&error))
+    let made_group_left = run.group_made && !group_gone;
+    let before = run.before.as_ref();
+    let result = if before.is_none() && survivors.is_empty() && !made_group_left {
+        match run.recorded {
+            Some(_) => machine.delete_record().map_err(|error| cause_of(&error)),
+            None => Ok(()),
         }
-        (_, None) => Ok(()),
-        (before, Some(group)) => {
-            let mut pool = before.as_ref().map(|b| b.pool.clone()).unwrap_or_default();
-            let new: Vec<Sid> = survivors
-                .iter()
-                .filter(|sid| !pool.contains(sid))
-                .cloned()
-                .collect();
-            pool.extend(new);
-            let group = match before {
-                Some(before) if group_goes => before.group.clone(),
-                _ => group.clone(),
-            };
-            let record = MachineRecord {
-                owner: req.owner.clone(),
-                group,
-                pool,
-                data_dir: before
-                    .as_ref()
-                    .map_or_else(|| req.data_dir.clone(), |b| b.data_dir.clone()),
-                removing: before.as_ref().is_some_and(|b| b.removing),
-            };
+    } else {
+        let group = if made_group_left {
+            run.group.clone()
+        } else {
+            before
+                .map(|b| b.group.clone())
+                .or_else(|| run.group.clone())
+        };
+        let Some(group) = group else {
+            // No group means nothing was made: the record is as it was.
+            return;
+        };
+        let mut pool = before.map(|b| b.pool.clone()).unwrap_or_default();
+        let new: Vec<Sid> = survivors
+            .iter()
+            .filter(|sid| !pool.contains(sid))
+            .cloned()
+            .collect();
+        pool.extend(new);
+        let record = MachineRecord {
+            owner: req.owner.clone(),
+            group,
+            pool,
+            data_dir: before.map_or_else(|| req.data_dir.clone(), |b| b.data_dir.clone()),
+            removing: before.is_some_and(|b| b.removing),
+        };
+        if run.recorded() == Some(&record) {
+            Ok(())
+        } else {
             write_record(machine, &record)
         }
     };
     if let Err(cause) = result {
         let survivors: Vec<String> = survivors.iter().map(ToString::to_string).collect();
         left.push(format!(
-            "the machine's record, which may still list this run's users ({cause}; survivors: \
+            "the machine's record, which may not name what this run left ({cause}; survivors: \
              [{}])",
             survivors.join(", ")
         ));

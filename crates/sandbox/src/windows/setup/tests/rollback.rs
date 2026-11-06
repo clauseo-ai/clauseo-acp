@@ -145,8 +145,8 @@ fn a_record_write_failure_deletes_exactly_that_user() {
             "delete_profile 1001",
             "delete_user ClauseoSb01",
             "group_members 1000",
-            "delete_record",
             "delete_group 1000",
+            "delete_record",
             "unlock",
         ]
     );
@@ -170,8 +170,8 @@ fn a_failed_logon_takes_off_the_profiles_then_the_accounts() {
             "delete_profile 1001",
             "delete_user ClauseoSb01",
             "group_members 1000",
-            "delete_record",
             "delete_group 1000",
+            "delete_record",
             "unlock",
         ]
     );

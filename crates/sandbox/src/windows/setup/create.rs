@@ -104,10 +104,15 @@ fn check_owner(record: Option<&MachineRecord>, owner: &Sid) -> Result<(), SetupF
         ));
     }
     if record.pool.contains(owner) || record.group == *owner {
-        return Err(SetupFailure::early(
-            Step::Owner,
-            format!("the machine's record names the owner, {owner}, as a sandbox user or group"),
-        ));
+        // This user owns the set-up, so not `OtherOwner`: a failure with its cause.
+        return Err(SetupFailure {
+            step: Step::Owner,
+            cause: format!(
+                "the machine's record names the owner, {owner}, as a sandbox user or group"
+            ),
+            rolled_back: true,
+            exit: SetupExit::Failed,
+        });
     }
     Ok(())
 }
@@ -136,7 +141,8 @@ fn preflight(machine: &mut impl Machine) -> Result<(), SetupFailure> {
 /// ledger can't be read), else it goes. Each dead SID the marker lists was a live pool user at
 /// the last set-up and is made again under a new SID; with no current marker, every dead SID is.
 /// A set-up makes enough for [`POOL_START`] users at least; an extend makes `add` more; neither
-/// goes past [`POOL_CAP`]. A re-run with users to reset refuses while a session is open.
+/// goes past [`POOL_CAP`] SIDs in the record, dead ones kept for the ledger included. A re-run
+/// with users to reset refuses while a session is open.
 fn plan_pool(
     machine: &mut impl Machine,
     before: Option<&MachineRecord>,
@@ -206,10 +212,16 @@ fn plan_pool(
     } else {
         kept + missing + add
     };
-    plan.make = wanted.min(usize::from(POOL_CAP)).saturating_sub(kept);
+    // Dead SIDs kept in the record count too, so `PoolSids` never holds more than the cap.
+    let room = usize::from(POOL_CAP).saturating_sub(plan.base.len());
+    plan.make = wanted
+        .min(usize::from(POOL_CAP))
+        .saturating_sub(kept)
+        .min(room);
     if add > 0 && plan.make == 0 {
         return Err(pool_failure(format!(
-            "the pool already has {kept} sandbox users, the most there can be"
+            "the pool's record already holds {} sandbox users, the most there can be",
+            plan.base.len()
         )));
     }
     plan.reset = add == 0 && kept > 0;
@@ -240,6 +252,7 @@ fn change(
 ) -> Result<SetupReport, Failed> {
     let group = group(machine, run)?;
     let mut users = Users::default();
+    run.kept = plan.kept.iter().map(|user| user.sid.clone()).collect();
     for user in &plan.kept {
         keep_user(machine, plan, run, user, &group, &mut users)?;
     }
@@ -312,7 +325,7 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
 fn keep_user(
     machine: &mut impl Machine,
     plan: &Plan,
-    run: &Run,
+    run: &mut Run,
     user: &PoolUser,
     group: &Sid,
     users: &mut Users,
@@ -340,6 +353,7 @@ fn keep_user(
     machine
         .set_password(name, &password)
         .map_err(|error| (Step::ResetPassword, cause_of(&error)))?;
+    run.reset.push((user.sid.clone(), password.clone()));
     users.reset.push(user.clone());
     machine
         .add_to_group(name, group)
