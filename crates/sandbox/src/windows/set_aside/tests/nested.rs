@@ -156,8 +156,9 @@ fn a_nested_claude_md_made_during_a_session_is_set_aside() {
 /// `PR4a`: nested instruction files there at launch and only edited in place keep their file
 /// IDs, so they stay where they are. This pins ID-only detection: an in-place edit is not a
 /// change to the set-aside, even when the agent made it.
-// TODO(S15 PR4a2): an in-place edit of a nested protected item isn't caught; the follow-up's
-// deny-write at any depth closes it, and this test then shows the lawyer's own edit stays.
+// TODO(S15 PR4a2): a nested CLAUDE.md, AGENTS.md, .claude or .mcp.json there at launch can be
+// edited in place (no write-deny below the root on Windows); nested .git is write-denied at any
+// depth (read_only_in_matter). Once PR4a2 denies the rest, this shows the lawyer's edit stays.
 #[test]
 fn nested_instruction_files_there_at_launch_and_unchanged_stay() {
     let (w, root, data) = world("aside-nested-claude-kept");

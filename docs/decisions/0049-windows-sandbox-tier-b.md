@@ -307,12 +307,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   No agent runs in between, and the allow names only the matter's own pool user on its own matter
   (accepted; no launch marker).
 - **A nested protected item edited in place** is not set aside. The set-aside compares file IDs
-  only, so a nested `CLAUDE.md`, `AGENTS.md` or `.mcp.json`, a file in a nested `.claude`
-  folder or a nested `.git\config` is caught when it is created, replaced, renamed in or swapped
-  (a new file ID), not when one already there is edited in place. Windows denies writes to
-  protected names only at the matter's root (`policy.rs`), so the agent can edit a nested one and
-  the next launch loads or runs it. This gap is open until the deny-write at any depth follow-up
-  (S15 PR4a2); it is not accepted.
+  only, so a nested item is caught when it is created, replaced, renamed in or swapped (a new
+  file ID), not when it is edited in place. A nested `CLAUDE.md`, `AGENTS.md`, `.claude` or
+  `.mcp.json` that exists at launch can be edited in place, and the next launch loads it: Windows
+  has no write-deny for them below the root. This gap is open until S15 PR4a2; it is not accepted.
+  A nested `.git` is write-denied at any depth (`read_only_in_matter`, applied by `acl_plan`),
+  so its `config` and hooks can't be edited.
 - **A nested protected item one session's agent makes** is visible to a second session of the
   same matter running at the same time, until a set-aside pass runs (at that session's end or
   the next launch).
