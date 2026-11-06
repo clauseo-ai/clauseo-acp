@@ -1,7 +1,7 @@
 //! The permission writes faked in memory, for the set-up engine's tests: [`FakeAcl`].
 
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -28,6 +28,11 @@ pub(super) struct FakeAcl {
     pub(super) removed: Vec<Key>,
     pub(super) fail_add: Option<PathBuf>,
     pub(super) fail_walk: Option<PathBuf>,
+    /// Each path's owner, when not the lawyer: a hand-back of one a pool user owns takes it off
+    /// (the lawyer's again), unless it is in `keeps_owner`.
+    pub(super) owners: BTreeMap<PathBuf, Sid>,
+    /// Paths whose hand-back fails as `NtfsAcl`'s does on a handle with no `WRITE_OWNER`.
+    pub(super) keeps_owner: BTreeSet<PathBuf>,
 }
 
 pub(super) fn key(grant: &Grant) -> Key {
@@ -129,8 +134,15 @@ impl AclWriter for FakeAcl {
         Ok(Walked::default())
     }
 
-    fn hand_back(&mut self, _path: &Path, _pool: &[Sid]) -> Result<bool, ApplyFailure> {
-        Ok(false)
+    fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure> {
+        if !self.owners.get(path).is_some_and(|o| pool.contains(o)) {
+            return Ok(false);
+        }
+        if self.keeps_owner.contains(path) {
+            return Err(ApplyFailure::ChildShut);
+        }
+        self.owners.remove(path);
+        Ok(true)
     }
 
     fn label(&mut self, _path: &Path) -> io::Result<Option<Label>> {

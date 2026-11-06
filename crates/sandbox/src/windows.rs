@@ -101,11 +101,11 @@ pub use admit::admit;
 #[cfg(any(test, feature = "test-support"))]
 pub use admit::admit_with;
 pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
-#[cfg(any(windows, test, feature = "test-support"))]
-pub use apply::fence_registered;
 pub use apply::{
     Applied, Surroundings, apply, apply_checked, forget_matter, reconcile, repair_after_session,
 };
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use apply::{FencedEach, fence_each, fence_registered};
 #[cfg(windows)]
 pub use clean_close::NtfsJournal;
 #[cfg(windows)]
@@ -130,7 +130,7 @@ pub use set_aside::{
 };
 #[cfg(windows)]
 pub use user_setup::UserSetup;
-pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
+pub use writer::{AclWriter, Added, ApplyFailure, Label, Owned, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

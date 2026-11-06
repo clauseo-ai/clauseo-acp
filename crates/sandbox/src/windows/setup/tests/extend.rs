@@ -50,9 +50,17 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
             format!("log_on_once {name}"),
         ]);
     }
+    for n in 1..=8 {
+        expected.extend([
+            format!("exists ClauseoSb0{n}"),
+            format!("owner_of ClauseoSb0{n}"),
+        ]);
+    }
     expected.extend(
         [
             "program_data",
+            "exists DeviceSync",
+            "owner_of DeviceSync",
             "ledger",
             "journal_volumes",
             "journal_size C:",
@@ -136,9 +144,17 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
             ["set_password", "add_to_group", "hide", "log_on_once"].map(|c| format!("{c} {name}")),
         );
     }
+    for n in 1..=4 {
+        expected.extend([
+            format!("exists ClauseoSb0{n}"),
+            format!("owner_of ClauseoSb0{n}"),
+        ]);
+    }
     expected.extend(
         [
             "program_data",
+            "exists DeviceSync",
+            "owner_of DeviceSync",
             "journal_volumes",
             "journal_size C:",
             "protect_for_owner 1001,1002,1003,1004",
@@ -258,4 +274,80 @@ fn an_extend_at_the_cap_refuses_before_any_change() {
     assert_eq!((failure.step, failure.rolled_back), (Step::Pool, true));
     assert!(failure.cause.contains("32"), "{}", failure.cause);
     assert_eq!(machine.state, before);
+}
+
+/// The roots of `matter`, as the plan names them and canonical, owned by its own pool user.
+fn owned_by_its_pool_user(acl: &mut FakeAcl, matter: &RegisteredMatter) -> Vec<PathBuf> {
+    let roots = vec![matter.folders.root.clone(), canonical(&matter.folders.root)];
+    for root in &roots {
+        acl.owners.insert(root.clone(), matter.pool_user.clone());
+    }
+    roots
+}
+
+/// Whether every one of `made` is denied on each of `matter`'s folders.
+fn fenced_against(acl: &FakeAcl, matter: &RegisteredMatter, made: &[Sid]) -> bool {
+    [&matter.folders.root, &matter.folders.state]
+        .into_iter()
+        .map(|folder| canonical(folder))
+        .all(|folder| {
+            made.iter()
+                .all(|new| acl.has(&folder, new, Rights::DenyReadWrite))
+        })
+}
+
+/// S15 `PR4h`: a registered matter whose root its own pool user owns goes to the owner first
+/// (that user could take the denies off), and is fenced like the other.
+#[test]
+fn an_extend_hands_a_pool_owned_root_back_and_fences_it() {
+    let mut machine = FakeMachine::new("setup-extend-hand-back");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    owned_by_its_pool_user(&mut acl, &matters[0]);
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert!(
+        report.fence_skipped.is_empty(),
+        "{:?}",
+        report.fence_skipped
+    );
+    let root = canonical(&matters[0].folders.root);
+    assert!(
+        !acl.owners.contains_key(&root),
+        "the plan's root is the owner's now"
+    );
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(matters.iter().all(|m| fenced_against(&acl, m, &made)));
+}
+
+/// S15 `PR4h`: a pool-owned root whose hand-back fails can't be fenced, so the extend skips its
+/// matter and says so, and fences the other.
+#[test]
+fn an_extend_skips_a_matter_whose_root_cant_be_handed_back_and_fences_the_other() {
+    let mut machine = FakeMachine::new("setup-extend-skip");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let (owned, fenced) = (&matters[0], &matters[1]);
+    let roots = owned_by_its_pool_user(&mut acl, owned);
+    acl.keeps_owner.extend(roots);
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert_eq!(report.fence_skipped.len(), 1, "{:?}", report.fence_skipped);
+    let (skipped, why) = &report.fence_skipped[0];
+    assert_eq!(*skipped, owned.id);
+    assert!(why.contains("a sandbox user owns the folder"), "{why}");
+    assert!(report.fenced.unwrap().written > 0);
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(fenced_against(&acl, fenced, &made));
+    for folder in [&owned.folders.root, &owned.folders.state] {
+        let folder = canonical(folder);
+        assert!(
+            made.iter()
+                .all(|new| !acl.has(&folder, new, Rights::DenyReadWrite))
+        );
+    }
 }

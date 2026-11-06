@@ -11,11 +11,17 @@
 //!    [`AclWriter::add_expecting`], which compares the file ID on the handle it writes through.
 //!    Each new entry of the link's first records the credentials file, by its path and file ID,
 //!    and the way back removes the entry from that file, never through the link (round 4, L5).
-//! 3. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
+//! 3. No pool user may own a root the plan denies on (the matter, state and notes folders, a
+//!    registered matter's, a sibling, the parent): an owner may always change the permissions,
+//!    so it could take the deny off. Each one a pool user owns is handed to the desktop user
+//!    ([`AclWriter::hand_back`]) before anything is recorded; only one whose hand-back fails
+//!    refuses, as [`ApplyFailure::PoolOwned`] (`roots.rs`, S15 `PR4h`). A read-only target a
+//!    pool user owns is handed back just before its deny is written (step 4, S15 `PR4a2`).
+//! 4. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
 //!    first records the explicit label its path has now, so it can be put back, unless that
 //!    label is our own: the one this grant writes, or the one another entry for the same file
 //!    wrote (N7). Then the entries are written, path by path from the shallowest.
-//! 4. The walk ([`AclWriter::propagate`]) carries the inherited entries down: on every tree whose
+//! 5. The walk ([`AclWriter::propagate`]) carries the inherited entries down: on every tree whose
 //!    entry this launch wrote or whose entry was still `pending`, and on the matter, state and
 //!    notes folders at every launch, so a file moved in since the last launch picks them up
 //!    (unless the launch check found nothing changed in them since a clean close, or only a few
@@ -26,8 +32,8 @@
 //!    launch's own matter, state or notes tree, or a registered matter's whose fence this
 //!    launch applies (into that matter's set-aside, round 6), and refuses it anywhere else
 //!    (`walk.rs`).
-//! 5. Only then are the entries marked `applied`.
-//! 6. Only after all that succeeds does a folder that is now a registered matter lose the
+//! 6. Only then are the entries marked `applied`.
+//! 7. Only after all that succeeds does a folder that is now a registered matter lose the
 //!    sibling deny on it, for every matter whose entry names it; a deny on a folder holding it is
 //!    replaced by the walk-down set first (`lift.rs`). A refused launch leaves every deny.
 //!
@@ -50,17 +56,20 @@ use super::FolderSupport;
 use super::acl_plan::{AdmittedPlan, Grant, Rights, in_folder};
 use super::admit::{FolderList, PathKind};
 use super::clean_close::{FullReason, LaunchCheck, LaunchPath, WalkInputs};
-#[cfg(any(windows, test, feature = "test-support"))]
-use super::fence::RegisteredMatter;
 use super::ledger::{EntryId, EntryState, Ledger, RecordedFile, is_our_label};
 use super::writer::{AclWriter, Added, ApplyFailure, Label, Reach, Walked};
 use crate::Error;
 
 mod back;
+#[cfg(any(windows, test, feature = "test-support"))]
+mod fence;
 mod lift;
+mod roots;
 mod walk;
 
 pub use back::{forget_matter, reconcile};
+#[cfg(any(windows, test, feature = "test-support"))]
+pub use fence::{FencedEach, fence_each, fence_registered};
 pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
 use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, walks};
 
@@ -136,6 +145,20 @@ pub fn apply_checked(
     around: &mut dyn Surroundings,
     check: &LaunchCheck,
 ) -> Result<Applied, Error> {
+    apply_with_pool(ledger, plan, acl, around, check, &[])
+}
+
+/// [`apply_checked`], with `pool` counted as pool users for the roots' hand-back
+/// (`roots.rs`) besides the ones `plan` names: a fence-only plan leaves out each fenced
+/// matter's own pool user.
+fn apply_with_pool(
+    ledger: &mut Ledger,
+    plan: &mut AdmittedPlan,
+    acl: &mut dyn AclWriter,
+    around: &mut dyn Surroundings,
+    check: &LaunchCheck,
+    pool: &[super::acl_plan::Sid],
+) -> Result<Applied, Error> {
     let own = own_walks(plan, check);
     let roots: Vec<PathBuf> = plan
         .grants()
@@ -145,7 +168,7 @@ pub fn apply_checked(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let run = run_plan(ledger, plan, acl, around, &own)?;
+    let run = run_plan(ledger, plan, acl, around, &own, pool)?;
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),
@@ -192,16 +215,18 @@ struct Run {
     walked: Walked,
 }
 
-/// Steps 1 to 5 of [`apply`], rolled back on a failure.
+/// Steps 1 to 6 of [`apply`], rolled back on a failure.
 fn run_plan(
     ledger: &mut Ledger,
     plan: &mut AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
     own: &OwnWalks,
+    pool: &[super::acl_plan::Sid],
 ) -> Result<Run, Error> {
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
+    roots::hand_back_roots(plan, acl, pool)?;
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
@@ -381,10 +406,11 @@ fn write_all(
         .map_err(|e| ledger_failed(PathKind::Matter, e))
 }
 
-/// Whether `grant` is a read-only path's deny in the matter: a protected name, every `.git`,
-/// an over-cap file.
+/// Whether `grant` is a read-only path's deny in the matter (a protected name, every `.git`, an
+/// over-cap file) or in the state folder (its settings, S15 `PR4h`).
 fn protected(grant: &Grant) -> bool {
-    grant.kind() == PathKind::ReadOnlyInMatter && grant.rights() == Rights::DenyWrite
+    let kinds = [PathKind::ReadOnlyInMatter, PathKind::ReadOnlyInState];
+    kinds.contains(&grant.kind()) && grant.rights() == Rights::DenyWrite
 }
 
 /// The credentials file the credential link must be, by its path (its folder canonical, as the
@@ -461,25 +487,6 @@ pub fn repair_after_session(
         done.add(walked);
     }
     Ok(done)
-}
-
-/// Fences every registered matter against the whole `pool`, as when the pool grows: each
-/// matter's folders resolved and checked as the gate checks a neighbour's (`around`'s folder
-/// check), then the fence planned and applied. Entries listed already are kept, so only the new
-/// pool users' denies are written. PR4's set-up calls this after adding users.
-#[cfg(any(windows, test, feature = "test-support"))]
-pub fn fence_registered(
-    ledger: &mut Ledger,
-    registered: &[RegisteredMatter],
-    pool: &[super::acl_plan::Sid],
-    acl: &mut dyn AclWriter,
-    around: &mut dyn Surroundings,
-) -> Result<Applied, Error> {
-    let fences = super::admit::fences_for(registered, |p| around.check(p))?;
-    let Some(mut plan) = AdmittedPlan::from_fences(&fences, pool) else {
-        return Ok(Applied::default());
-    };
-    apply(ledger, &mut plan, acl, around)
 }
 
 /// Whether `path` is there (a link counts). A check that fails counts as there, so the write

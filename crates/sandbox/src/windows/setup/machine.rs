@@ -132,6 +132,18 @@ pub trait Machine {
     fn profile_of(&mut self, sid: &Sid) -> Result<Option<ProfileDir>, MachineError>;
     /// Deletes `sid`'s profile (`DeleteProfileW`).
     fn delete_profile(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// The owner of `path`, read without following a link (a pool user's `LocalLow`, `PR4h`).
+    fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError>;
+    /// Whether `path` is there, a junction or symbolic link counting as itself (never
+    /// followed): `DeviceSync` and each `LocalLow` are probed before their owners are read.
+    fn exists(&mut self, path: &Path) -> Result<bool, MachineError>;
+    /// Makes `BUILTIN\Administrators` the owner of `path` alone (its owner only, nothing below
+    /// it, never following a link), so no pool user keeps an owner's implied `WRITE_DAC` on a
+    /// folder whose denies protect what is below it.
+    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError>;
+    /// The account the set-up process itself runs as (the elevated token's user), which may own
+    /// a profile folder it loaded; `None` when it couldn't be read.
+    fn own_account(&self) -> Option<&Sid>;
     /// `%ProgramData%`, which holds `Microsoft\DeviceSync`.
     fn program_data(&mut self) -> Result<PathBuf, MachineError>;
     /// The owner's `setup.json`, read as `marker::read` reads it for the owner.

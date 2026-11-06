@@ -34,7 +34,8 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
     AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
-    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
+    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_descriptor,
+    owner_sid, sid_bytes,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
@@ -401,6 +402,34 @@ pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
     let object = Object::open(path)?;
     let bytes = object.security(OWNER_SECURITY_INFORMATION.0)?;
     owner_sid(&bytes).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no owner"))
+}
+
+/// Makes `owner` the owner of `path` alone (`OWNER_SECURITY_INFORMATION` only, through
+/// `SetKernelObjectSecurity` on its handle, so nothing below it changes): the set-up's hand-over
+/// of a pool user's `LocalLow` to `Administrators` (S15 `PR4h`). Opened without following a
+/// link, and refused, untouched, when `path` is a reparse point or the handle got no
+/// `WRITE_OWNER`.
+pub(crate) fn set_owner(path: &Path, owner: &Sid) -> io::Result<()> {
+    let object = Object::open(path)?;
+    if object.name_surrogate() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is a junction or a link", path.display()),
+        ));
+    }
+    if !object.write_owner {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "{}: its owner can't be changed by this process",
+                path.display()
+            ),
+        ));
+    }
+    object.set(
+        OWNER_SECURITY_INFORMATION,
+        &owner_descriptor(&sid_bytes(owner)),
+    )
 }
 
 /// Refuses a target that isn't what the gate checked: a junction or symbolic link now; a file

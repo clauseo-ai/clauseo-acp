@@ -80,6 +80,9 @@ pub(super) struct FakeAcl {
     pub(super) owners: BTreeMap<PathBuf, String>,
     /// The protected trees the owner pass went over, in order.
     pub(super) handed_trees: Vec<PathBuf>,
+    /// Paths a pool user owns whose hand-back fails, as `NtfsAcl`'s does on a handle with no
+    /// `WRITE_OWNER` ([`ApplyFailure::ChildShut`]); they keep their owner (S15 `PR4h`).
+    pub(super) keeps_owner: BTreeSet<PathBuf>,
 }
 
 /// The owner the fake's hand-back gives: the desktop user.
@@ -279,6 +282,9 @@ impl AclWriter for FakeAcl {
         };
         if !pool.iter().any(|p| p.as_str() == owner) {
             return Ok(false);
+        }
+        if self.keeps_owner.contains(path) {
+            return Err(ApplyFailure::ChildShut);
         }
         LAWYER.clone_into(owner);
         Ok(true)
