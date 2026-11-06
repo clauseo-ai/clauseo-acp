@@ -97,8 +97,10 @@ pub(crate) fn write_state_settings(state: &Path) -> std::io::Result<()> {
         .map(|(key, value)| ((*key).to_owned(), Value::Bool(*value)))
         .collect();
     let bytes = serde_json::to_vec_pretty(&Value::Object(settings))?;
-    let plain = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
-    if plain && std::fs::read(&path).is_ok_and(|held| held == bytes) {
+    // Read only as a plain file with one name (`state_folder::safe_read`): the agent can plant
+    // it as a link or a hard link to a credential.
+    let held = crate::agent::state_folder::safe_read::read_plain(&path)?;
+    if held == crate::agent::state_folder::safe_read::Found::Bytes(bytes.clone()) {
         return Ok(());
     }
     crate::write::replace_private_file(&path, &bytes)

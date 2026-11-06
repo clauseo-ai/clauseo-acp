@@ -54,7 +54,7 @@ fn an_own_folder_swapped_for_a_link_counts_for_nothing() {
     for (folder, up) in [
         ("agent-state/m1/notes", "../.."),
         ("run/s1", ".."),
-        ("agents/claude-acp/home/plans", "../../.."),
+        ("agent-state/m1/claude-acp/plans", "../../.."),
     ] {
         let folder = data.join(folder);
         write::remove_dir_all(&folder).unwrap();

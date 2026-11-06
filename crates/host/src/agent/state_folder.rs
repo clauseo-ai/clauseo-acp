@@ -9,13 +9,14 @@
 //!
 //! Made at a matter's first launch of the agent and kept, on the launch-prep thread
 //! ([`make`]: one folder at a time below `<data>`, a link anywhere below it refused and never
-//! followed). Before every launch the config surfaces the agent reads from its folder are
-//! taken back ([`clean`]): what the session may have planted there (a prompt-injected agent's
-//! hooks, instructions or skills) never reaches the matter's later sessions. The lists, with
-//! where each name was confirmed, are [`CLAUDE_REMOVED`] and [`CODEX_REMOVED`]; Clauseo's own
-//! files there (`settings.json`, `config.toml`) are written again after the clean. Transcripts
-//! (`projects/`, `sessions/`, `todos/` and the rest) are kept, so `session/load` finds them.
-//! The jail's write-deny of these names during a session is R17 PR-D's.
+//! followed). Before every launch everything in it that the agent does not keep across launches
+//! is removed ([`clean`]: an inverted list, [`CODEX_KEPT_FILES`] and [`CLAUDE_KEPT_FILES`]), so
+//! nothing a session planted there (instructions, hooks, skills, a `.env`, shell start-up
+//! files, auto-memory) reaches the matter's later sessions; Claude's `.claude.json` loses its
+//! MCP and tool keys ([`strip_claude_json`]). Clauseo's own files there (`settings.json`,
+//! `config.toml`) are written again after the clean. Transcripts are kept, so `session/load`
+//! finds them. Files the agent can plant are read only through [`safe_read`]: never through a
+//! link, never a file with a second name. The jail's write-deny is R17 PR-D's.
 //!
 //! Codex's link ([`link_own`], [`link_reused`]): `std::fs::hard_link`, never a symbolic link
 //! (Seatbelt checks a symbolic link at its target, decision record 0038), never a copy (a copy
@@ -31,6 +32,7 @@ use crate::error::Error;
 use crate::log_file::Cause;
 
 mod file_id;
+pub(crate) mod safe_read;
 
 pub(crate) use file_id::same_file;
 
@@ -44,71 +46,104 @@ pub(crate) const LOGIN_FILE: &str = "auth.json";
 /// Codex already running in the matter never finds the name missing.
 const RELINK_NAME: &str = "auth.json.clauseo-link";
 
-/// What of Claude Code's config folder is removed before every launch: each name read from
-/// `CLAUDE_CONFIG_DIR` that can change what a session loads or runs. `settings.json` is not
-/// here: it is written whole, Clauseo's keys only ([`super::home::write_state_settings`]).
-/// Sources (Claude Code 0.3.293 under claude-agent-acp, `research/42-reusing-the-claude-code-
-/// login.md` §2, bundle offsets): `settings.local.json` (Claude Code's local settings file,
-/// docs `code.claude.com/docs/en/settings`; not confirmed read from the config folder, removed
-/// as a settings file all the same); `CLAUDE.md` (`Ve(we(),…)` @186994727); `rules`
-/// (`MLe()` @186994752); `skills` (@192585549; claude.ai synced skills in `skills/synced`);
-/// `plugins` (@188170636, @188224681: installed plugins bring hooks, agents, commands, MCP);
-/// `agents` (docs `~/.claude/agents`; the exact path function not confirmed); `commands` and
-/// `output-styles` (docs `~/.claude/commands`, `~/.claude/output-styles`; not confirmed in the
-/// bundle); `hooks` (no loader reads it, hooks live in `settings.json`; removed since a hook
-/// command names scripts there by convention). Clauseo writes no file into any of them: its
-/// skills are its plugin under `<data>/profile/claude-plugin` (`clauseo_profile`), passed by
-/// path. `.claude.json` is kept (onboarding, trust list, the account's profile): its
-/// `mcpServers` are kept out by `strictMcpConfig` (`agent/loads.rs`).
-pub(crate) const CLAUDE_REMOVED: [&str; 9] = [
-    "settings.local.json",
-    "CLAUDE.md",
-    "rules",
-    "skills",
-    "plugins",
-    "agents",
-    "commands",
-    "output-styles",
-    "hooks",
+/// What Codex's state folder keeps across launches; every other entry is removed before each
+/// launch ([`clean`]), whatever its name, so nothing a session planted there (`.env`, which
+/// Codex loads at start and exports, `AGENTS.md`, `hooks.json`, `rules`, `skills`, `agents`
+/// role files, and with `HOME` the state folder, `.gitconfig`, `.config/git/config`, `.profile`
+/// and the rest) reaches the matter's later sessions. Each kept name is Codex's own, written by
+/// Codex's process (unsandboxed) or by Clauseo:
+/// - `auth.json`: the login link, checked or made again at each launch;
+/// - `config.toml`: Clauseo's, written whole after the clean;
+/// - `sessions`, `archived_sessions`: the rollouts `session/load` resumes;
+/// - `history.jsonl`: the prompt history;
+/// - `log`: Codex's own log folder;
+/// - `tmp`: the folder Codex's `arg0` links live in for its shell (`codex-rs/arg0`), the one
+///   folder of the state folder Codex's shell may write (`agent/codex_fence.rs`);
+///
+/// and Codex's databases, [`CODEX_DATABASES`] with [`SQLITE_SUFFIXES`].
+/// A kept name of the wrong kind (a link, or a folder where a file belongs) is removed too.
+pub(crate) const CODEX_KEPT_FILES: [&str; 3] = ["auth.json", "config.toml", "history.jsonl"];
+
+/// The folders of [`CODEX_KEPT_FILES`]' list.
+pub(crate) const CODEX_KEPT_FOLDERS: [&str; 4] = ["sessions", "archived_sessions", "log", "tmp"];
+
+/// A SQLite database's own file and its companions.
+pub(crate) const SQLITE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
+
+/// Codex's databases in its home (`codex-rs/state/src/sqlite.rs:34-39`): thread metadata with
+/// each thread's first message (`codex-rs/state/src/extract.rs:186`), logs, goals, memories, the
+/// queue and the thread history.
+pub(crate) const CODEX_DATABASES: [&str; 6] = [
+    "state_5.sqlite",
+    "logs_2.sqlite",
+    "goals_1.sqlite",
+    "memories_1.sqlite",
+    "queue_1.sqlite",
+    "thread_history_1.sqlite",
 ];
 
-/// What of Codex's home is removed before every launch. `config.toml` is not here: it is
-/// written whole ([`super::codex::write_home_config`]). Sources (`research/43-reusing-the-codex-
-/// login.md` §2 at `rust-v0.162.1`, and a local codex-rs checkout for `hooks.json`):
-/// `AGENTS.md` and `AGENTS.override.md` (`codex-home/src/instructions/mod.rs:12-13, 41-85`,
-/// `core/src/agents_md.rs:37-39`), `rules` (`core/src/exec_policy.rs:49, 662-682`), `skills`
-/// (`ext/skills/src/host_roots.rs:80-107`), `hooks.json` (`hooks/src/engine/discovery.rs:
-/// 129-150, 259`: Clauseo's guard turns hooks on), `plugins` (`core-plugins/src/manager.rs:
-/// 2814-2824`; off by `features.plugins=false`, removed all the same), `prompts` (custom
-/// prompts; not found in the checkout, removed as the brief names it). With `HOME` the state
-/// folder on macOS and Linux: `.agents` (Codex adds `~/.agents/skills`, research 43:61) and
-/// the shell and git start-up files a `bash -lc` or `git` run by Codex's shell reads from
-/// `HOME`. Clauseo writes no file into any of them: the profile's Codex skills are off
-/// (`clauseo_profile::CODEX_SKILLS`), and would go in the login home.
-pub(crate) const CODEX_REMOVED: [&str; 16] = [
-    "AGENTS.md",
-    "AGENTS.override.md",
-    "rules",
-    "skills",
-    "hooks.json",
-    "plugins",
-    "prompts",
-    ".agents",
-    ".profile",
-    ".bash_profile",
-    ".bash_login",
-    ".bashrc",
-    ".zshenv",
-    ".zprofile",
-    ".zshrc",
-    ".gitconfig",
+/// The folder Codex's shell may write in its state folder ([`CODEX_KEPT_FOLDERS`]).
+pub(crate) const CODEX_SHELL_FOLDER: &str = "tmp";
+
+/// What Claude Code's state folder keeps across launches; every other entry is removed before
+/// each launch ([`clean`]): `CLAUDE.md`, `rules`, `skills`, `plugins`, `agents`, `commands`,
+/// `output-styles`, `hooks`, `settings.local.json`, the auto-memory (`projects/*/memory`, an
+/// instruction surface: a matter's lasting notes are R22's `notes/` folder), `todos`,
+/// `statsig`, `shell-snapshots`, `plans`, `file-history`, `history.jsonl`, a session's
+/// `tool-results` and subagent transcripts. Kept:
+/// - `.claude.json`: onboarding, the trust list and the account's profile, which Claude Code
+///   refetches; its MCP and tool keys are taken out first ([`CLAUDE_JSON_STRIPPED`]), and one
+///   that is not JSON, is a link or has a second name is removed;
+/// - `settings.json`: Clauseo's, written whole after the clean;
+/// - `projects/<key>/<session>.jsonl`: the transcripts `session/load` resumes, nothing else in
+///   `projects`.
+pub(crate) const CLAUDE_KEPT_FILES: [&str; 2] = [CLAUDE_JSON, "settings.json"];
+
+/// Claude Code's own state file in its config folder.
+pub(crate) const CLAUDE_JSON: &str = ".claude.json";
+
+/// The keys of `.claude.json` taken out before each launch, at the top and in each
+/// `projects.<path>` entry: user and project MCP servers, the project `.mcp.json` approvals, and
+/// the tools allowed without asking. A session could plant any of them to run at every later
+/// launch in the matter.
+pub(crate) const CLAUDE_JSON_STRIPPED: [&str; 4] = [
+    "mcpServers",
+    "enabledMcpjsonServers",
+    "disabledMcpjsonServers",
+    "allowedTools",
 ];
 
-/// The names [`clean`] removes for an agent of `kind`.
-pub(crate) fn removed(kind: AgentKind) -> &'static [&'static str] {
+/// The folders of `state` (`kind`'s state folder for the matter) the host's auto-deny counts
+/// as the session's own (`data_fence::FenceCheck::allowed`): for Codex its `tmp`, the one
+/// folder its shell reaches; for Claude its `plans` (the plan note) and `projects` (its tool
+/// results, this matter's only).
+pub(crate) fn fence_own(state: &Path, kind: AgentKind) -> Vec<PathBuf> {
     match kind {
-        AgentKind::Claude => &CLAUDE_REMOVED,
-        AgentKind::Codex => &CODEX_REMOVED,
+        AgentKind::Codex => vec![state.join(CODEX_SHELL_FOLDER)],
+        AgentKind::Claude => vec![state.join("plans"), state.join("projects")],
+    }
+}
+
+/// What of `state` the auto-deny refuses even where an own folder holds it
+/// (`data_fence::FenceCheck::denied`), checked first: the login link and Clauseo's own files,
+/// Codex's databases and `.env`, Claude's login store and `.claude.json`.
+pub(crate) fn fence_denied(state: &Path, kind: AgentKind) -> Vec<PathBuf> {
+    match kind {
+        AgentKind::Codex => CODEX_KEPT_FILES
+            .iter()
+            .copied()
+            .chain([".env"])
+            .map(|name| state.join(name))
+            .chain(CODEX_DATABASES.iter().flat_map(|base| {
+                SQLITE_SUFFIXES
+                    .iter()
+                    .map(move |suffix| state.join(format!("{base}{suffix}")))
+            }))
+            .collect(),
+        AgentKind::Claude => [".credentials.json", CLAUDE_JSON, "settings.json"]
+            .iter()
+            .map(|name| state.join(name))
+            .collect(),
     }
 }
 
@@ -130,27 +165,139 @@ pub(crate) fn make(data: &Path, state: &Path, who: &str) -> Result<(), Error> {
     super::codex::make_agent_home(data, state, who)
 }
 
-/// Removes each of `names` from `state`, through no link: a real folder is removed with all it
-/// holds (`remove_dir_all`, which removes a link inside and never follows it), anything else
-/// (a file, a link, a junction) is removed as itself. A missing name is fine; the first other
+/// Removes `path`, of `kind` as `symlink_metadata` or `DirEntry::file_type` read it, through no
+/// link: a real folder with all it holds (`remove_dir_all`, which removes a link inside and never
+/// follows it), anything else (a file, a link, a junction) as itself. A missing name is fine.
+fn remove_entry(path: &Path, kind: std::fs::FileType) -> io::Result<()> {
+    let removed = if kind.is_dir() {
+        crate::write::remove_tree(path)
+    } else {
+        crate::write::remove_link(path)
+    };
+    match removed {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Whether Codex keeps the entry `name` of `kind` ([`CODEX_KEPT_FILES`]).
+fn codex_keeps(name: &str, kind: std::fs::FileType) -> bool {
+    let database = CODEX_DATABASES.iter().any(|base| {
+        SQLITE_SUFFIXES
+            .iter()
+            .any(|suffix| name.strip_prefix(base) == Some(suffix))
+    });
+    if kind.is_file() {
+        CODEX_KEPT_FILES.contains(&name) || database
+    } else {
+        kind.is_dir() && CODEX_KEPT_FOLDERS.contains(&name)
+    }
+}
+
+/// Removes every entry of `state` that `kind`'s agent does not keep ([`CODEX_KEPT_FILES`],
+/// [`CLAUDE_KEPT_FILES`]), through no link ([`remove_entry`]); for Claude, in `projects` only
+/// each project folder's `*.jsonl` files stay. A name that is not UTF-8 is removed. The first
 /// failure fails the clean, and so the launch. File system calls: off the actor.
-pub(crate) fn clean(state: &Path, names: &[&str]) -> io::Result<()> {
-    for name in names {
-        let path = state.join(name);
-        match std::fs::symlink_metadata(&path) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-            Ok(meta) if meta.is_dir() => crate::write::remove_tree(&path)?,
-            Ok(_) => match crate::write::remove_link(&path) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                other => other?,
-            },
+pub(crate) fn clean(state: &Path, kind: AgentKind) -> io::Result<()> {
+    for entry in std::fs::read_dir(state)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let name = entry.file_name();
+        let name = name.to_str().unwrap_or_default();
+        let kept = match kind {
+            AgentKind::Codex => codex_keeps(name, file_type),
+            AgentKind::Claude if name == "projects" && file_type.is_dir() => {
+                clean_claude_projects(&entry.path())?;
+                true
+            }
+            AgentKind::Claude => file_type.is_file() && CLAUDE_KEPT_FILES.contains(&name),
+        };
+        if !kept {
+            remove_entry(&entry.path(), file_type)?;
         }
     }
     Ok(())
 }
 
-/// Makes and cleans `kind`'s state folder `state` under `data`: [`make`], then [`clean`]. The
+/// In Claude's `projects`, keeps each real project folder's `*.jsonl` plain files and removes
+/// everything else, through no link.
+fn clean_claude_projects(projects: &Path) -> io::Result<()> {
+    for project in std::fs::read_dir(projects)? {
+        let project = project?;
+        let kind = project.file_type()?;
+        if !kind.is_dir() {
+            remove_entry(&project.path(), kind)?;
+            continue;
+        }
+        for item in std::fs::read_dir(project.path())? {
+            let item = item?;
+            let kind = item.file_type()?;
+            let name = item.file_name();
+            let transcript = kind.is_file()
+                && Path::new(&name)
+                    .extension()
+                    .is_some_and(|extension| extension == "jsonl");
+            if !transcript {
+                remove_entry(&item.path(), kind)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Takes [`CLAUDE_JSON_STRIPPED`] out of `<state>/.claude.json`, at the top and in each
+/// `projects.<path>` entry, writing it again atomically only when one was there. Read with
+/// `safe_read::read_plain`: a link, a file with a second name (a hard link to a credential
+/// would be one) or one too large is removed unread, and so is one that is not a JSON object;
+/// Claude Code makes a new one. File system calls: off the actor.
+pub(crate) fn strip_claude_json(state: &Path) -> io::Result<()> {
+    let path = state.join(CLAUDE_JSON);
+    let bytes = match safe_read::read_plain(&path)? {
+        safe_read::Found::Missing => return Ok(()),
+        safe_read::Found::Refused => {
+            tracing::warn!("a Claude state file was a link or had a second name; it is removed");
+            return remove_name(&path);
+        }
+        safe_read::Found::Bytes(bytes) => bytes,
+    };
+    let Ok(serde_json::Value::Object(mut state_json)) = serde_json::from_slice(&bytes) else {
+        tracing::warn!("a Claude state file was not a JSON object; it is removed");
+        return remove_name(&path);
+    };
+    let mut stripped = strip_keys(&mut state_json);
+    if let Some(serde_json::Value::Object(projects)) = state_json.get_mut("projects") {
+        for project in projects.values_mut() {
+            if let serde_json::Value::Object(project) = project {
+                stripped |= strip_keys(project);
+            }
+        }
+    }
+    if !stripped {
+        return Ok(());
+    }
+    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(state_json))?;
+    crate::write::replace_private_file(&path, &bytes)
+}
+
+/// Removes [`CLAUDE_JSON_STRIPPED`] from `object`; whether any was there.
+fn strip_keys(object: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut stripped = false;
+    for key in CLAUDE_JSON_STRIPPED {
+        stripped |= object.remove(key).is_some();
+    }
+    stripped
+}
+
+/// Removes the name `path` itself (never what it points to); a missing one is fine.
+fn remove_name(path: &Path) -> io::Result<()> {
+    match crate::write::remove_link(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Makes and cleans `kind`'s state folder `state` under `data`: [`make`], then [`clean`]; for
+/// Codex its `tmp` made, for Claude its `.claude.json` stripped ([`strip_claude_json`]). The
 /// caller writes Clauseo's own file there next.
 pub(crate) fn prepare(data: &Path, state: &Path, kind: AgentKind) -> Result<(), Error> {
     let who = match kind {
@@ -158,13 +305,25 @@ pub(crate) fn prepare(data: &Path, state: &Path, kind: AgentKind) -> Result<(), 
         AgentKind::Codex => "Codex",
     };
     make(data, state, who)?;
-    clean(state, removed(kind)).map_err(|error| {
+    let cleaned = clean(state, kind).and_then(|()| match kind {
+        AgentKind::Codex => {
+            crate::write::create_private_dirs_under(data, &state.join(CODEX_SHELL_FOLDER))
+        }
+        AgentKind::Claude => strip_claude_json(state),
+    });
+    cleaned.map_err(|error| {
         tracing::warn!(who, error = %Cause(&error), "an agent's state folder was not cleaned");
         Error::refused(
             ErrorCode::AgentLaunchFailed,
             format!("Clauseo couldn't prepare {who}'s folder."),
         )
     })
+}
+
+/// Removes the state folder's `auth.json` name, never what it is linked to: a link the old
+/// login left (`turn/sign_in.rs` marks it stale). A missing one is fine.
+pub(crate) fn remove_stale_link(state: &Path) -> io::Result<()> {
+    remove_name(&state.join(LOGIN_FILE))
 }
 
 /// What a Codex launch found of its state folder's `auth.json`.
@@ -318,28 +477,47 @@ pub(crate) fn link_reused(home: &Path, state: &Path) -> Result<StateLink, LinkEr
 }
 
 /// Every matter's state folder for `agent` under `data` that is a real folder: the folders
-/// whose `auth.json` `HostHandle::remove_login_links` removes. `agent-state` and each matter's
-/// folder must be real folders: a link is skipped, never followed. Only Codex links its login;
-/// any other agent has none. File system calls: off the actor.
-pub(crate) fn linked_folders(data: &Path, agent: &str) -> Vec<PathBuf> {
+/// whose `auth.json` `HostHandle::remove_login_links` removes, less the matters in `skip`
+/// (named by their folder, the matter id). `agent-state` and each matter's folder must be real
+/// folders: a link is skipped, never followed. Only Codex links its login; any other agent has
+/// none. A folder that cannot be listed (`agent-state` but a missing one, or an entry) is an
+/// error, so the caller never reports links removed that may remain. File system calls: off the
+/// actor.
+pub(crate) fn linked_folders(
+    data: &Path,
+    agent: &str,
+    skip: &[String],
+) -> io::Result<Vec<PathBuf>> {
     if agent != AgentKind::Codex.id() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let root = state_root(data);
-    if !crate::write::is_real_dir(&root) {
-        return Vec::new();
-    }
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return Vec::new();
+    let entries = match std::fs::read_dir(&root) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+        Ok(_) if !crate::write::is_real_dir(&root) => return Ok(Vec::new()),
+        Ok(entries) => entries,
     };
-    let mut folders: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .map(|entry| entry.path().join(agent))
-        .filter(|folder| crate::write::is_real_dir(folder))
-        .collect();
+    let mut folders = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| skip.iter().any(|m| m == name))
+        {
+            continue;
+        }
+        let folder = entry.path().join(agent);
+        if crate::write::is_real_dir(&folder) {
+            folders.push(folder);
+        }
+    }
     folders.sort();
-    folders
+    Ok(folders)
 }
 
 #[cfg(test)]

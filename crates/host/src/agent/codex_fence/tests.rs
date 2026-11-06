@@ -140,7 +140,9 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
         Turn::Profile => rules.extend(exact),
         Turn::Rebuilt => {
             rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
-            rules.extend([run_root(), notes(), state()].map(|root| (root, "write".to_owned())));
+            rules.extend(
+                [run_root(), notes(), state().join("tmp")].map(|root| (root, "write".to_owned())),
+            );
         }
     }
     rules
@@ -186,11 +188,6 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "skill-packs",
         "agents/claude-acp",
         "agents/codex-acp/home",
-        "agent-state/m1/codex-acp/auth.json",
-        "agent-state/m1/codex-acp/state_5.sqlite",
-        "agent-state/m1/codex-acp/history.jsonl",
-        "agent-state/m1/codex-acp/config.toml",
-        "agent-state/m1/codex-acp/hooks.json",
         "run",
         "agent-state",
         SET_ASIDE_GLOB,
@@ -198,8 +195,12 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
     for (subpath, value) in scoped {
-        let own = ["run/s1", "agent-state/m1/notes", "agent-state/m1/codex-acp"]
-            .contains(&subpath.as_str());
+        let own = [
+            "run/s1",
+            "agent-state/m1/notes",
+            "agent-state/m1/codex-acp/tmp",
+        ]
+        .contains(&subpath.as_str());
         assert_eq!(
             value,
             &json!(if own { "write" } else { "deny" }),
@@ -336,9 +337,29 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
         assert!(readable(&keys, &path), "{} is denied", path.display());
     }
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
-    // The own state folder is a writable root (a read-only carve-back under the deny of
-    // `agent-state` stays hidden on Linux), its config surfaces denied inside it.
+    // The own state folder's `tmp` is a writable root (a read-only carve-back under the deny
+    // of `agent-state` stays hidden on Linux); the rest of it stays under that deny.
     assert_eq!(access(&keys, &state().join("tmp")), "write");
+}
+
+/// The review's D1: nothing Codex or its shell loads at the next launch from the state folder
+/// (its `CODEX_HOME` and `HOME`) is writable by the shell: `.env`, which Codex exports at
+/// start, git's `.config/git/config`, `agents` role files, `AGENTS.md`, `config.toml`.
+#[test]
+fn review_codex_home_dotenv_and_git_xdg_config_are_not_writable() {
+    let keys = fence();
+    for name in [
+        ".env",
+        ".config/git/config",
+        "agents/role.toml",
+        "AGENTS.md",
+        "config.toml",
+        "hooks.json",
+        "auth.json",
+        ".gitconfig",
+    ] {
+        assert_eq!(access(&keys, &state().join(name)), "deny", "{name}");
+    }
 }
 
 /// Every path `Locations` defines under the data folder is denied, or allowed for a reason

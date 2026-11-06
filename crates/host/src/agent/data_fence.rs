@@ -53,7 +53,7 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// npm folders and the sign-in shim. Under `agent-state` (R17 PR-C), in every matter, the own
 /// one too, so a matter made after the launch is covered: Codex's state folders whole, and in
 /// Claude's its login store if one lands there, its `.claude.json`, its settings and the config
-/// surfaces the launch cleans (`state_folder::CLAUDE_REMOVED`), its transcripts (every
+/// surfaces the launch cleans (`state_folder::clean`), its transcripts (every
 /// project's, with its subagents' and its memory; not the whole of `projects`, which also holds
 /// the large tool results the model must Read back, `launch.rs`), and what it keeps across
 /// sessions: the prompt history, the edited files' copies, the to-do lists and the shell
@@ -225,6 +225,11 @@ pub(crate) struct FenceCheck {
     /// Each counts only while it resolves to exactly `<data>`'s canonical path joined with that
     /// place: one that is, or sits under, a link counts for nothing.
     pub(crate) allowed: Vec<PathBuf>,
+    /// Paths inside the own folders that still count as `<data>`, checked before the own
+    /// folders (R17 PR-C): the state folder's login link, Clauseo's own config files there,
+    /// Codex's databases and `.env`, Claude's login store and `.claude.json`. As `<data>` (as
+    /// configured) joined with their place, compared as [`Self::allowed`] is.
+    pub(crate) denied: Vec<PathBuf>,
     /// The agent's working folder (the matter folder): its own too, and the folder a relative
     /// path is taken from. It counts for nothing when it resolves to `<data>` or a folder above
     /// it, or when it is a link into `<data>`.
@@ -258,11 +263,19 @@ impl FenceCheck {
         };
         let data = key(&real_data, insensitive);
         let own = self.own(&real_data, insensitive);
+        let denied: Vec<Vec<OsString>> = self
+            .denied
+            .iter()
+            .filter_map(|path| path.strip_prefix(&self.data).ok())
+            .map(|place| key(&real_data.join(place), insensitive))
+            .collect();
         let inside = |found: &Option<PathBuf>| match found {
             None => true,
             Some(path) => {
                 let path = key(path, insensitive);
-                path.starts_with(&data) && !own.iter().any(|folder| path.starts_with(folder))
+                path.starts_with(&data)
+                    && (denied.iter().any(|name| path.starts_with(name))
+                        || !own.iter().any(|folder| path.starts_with(folder)))
             }
         };
         let embedded = self.embedded(&real_data, insensitive);

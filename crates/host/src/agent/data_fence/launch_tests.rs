@@ -41,8 +41,12 @@ fn launch(root: &std::path::Path) -> LaunchDeny {
     let own = [
         data.join("run").join("s1"),
         data.join("agent-state").join("m1").join("notes"),
-        // The matter's Claude state folder (R17 PR-C), its `CLAUDE_CONFIG_DIR`.
-        data.join("agent-state").join("m1").join("claude-acp"),
+        // The plans folder of the matter's Claude state folder (R17 PR-C), as
+        // `launch_checks/folders.rs` gives it.
+        data.join("agent-state")
+            .join("m1")
+            .join("claude-acp")
+            .join("plans"),
         root.join("matter"),
     ];
     let state = data.join("agent-state/m1/claude-acp");
@@ -112,7 +116,7 @@ fn the_auto_deny_agrees_with_the_launch_rules() {
     for own in [
         "run/s1/work/out.docx",
         "agent-state/m1/notes/n.md",
-        "agents/claude-acp/home/plans/plan.md",
+        "agent-state/m1/claude-acp/plans/plan.md",
     ] {
         let path = text(&data.join(own));
         assert!(!check(root, &[&path], None).touches_data(), "Read {path}");

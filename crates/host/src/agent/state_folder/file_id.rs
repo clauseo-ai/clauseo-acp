@@ -16,31 +16,39 @@ use std::path::Path;
 /// and delete so no other program is blocked, with `FILE_FLAG_OPEN_REPARSE_POINT` so a link is
 /// opened as itself; the handle is closed before this returns.
 pub(crate) fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
-    let (Some(a), Some(b)) = (file_id(a)?, file_id(b)?) else {
+    let (Some((a, _)), Some((b, _))) = (file_id(a)?, file_id(b)?) else {
         return Ok(false);
     };
     Ok(a == b)
 }
 
-/// The file's id: (device, inode). `None` for a symbolic link.
+/// How many names the file at `path` has (its hard links), read as [`same_file`] reads ids;
+/// `None` for a symbolic link or other reparse point. Err when it cannot be read.
+#[cfg(windows)]
+pub(crate) fn link_count(path: &Path) -> io::Result<Option<u64>> {
+    Ok(file_id(path)?.map(|(_, links)| links))
+}
+
+/// The file's id, (device, inode), and its link count. `None` for a symbolic link.
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
     use std::os::unix::fs::MetadataExt as _;
 
     let meta = std::fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         return Ok(None);
     }
-    Ok(Some((meta.dev(), meta.ino())))
+    Ok(Some(((meta.dev(), meta.ino()), meta.nlink())))
 }
 
-/// The file's id: (volume serial number, file index). `None` for a reparse point.
+/// The file's id, (volume serial number, file index), and its link count. `None` for a reparse
+/// point.
 #[cfg(windows)]
 #[expect(
     unsafe_code,
     reason = "CreateFileW and GetFileInformationByHandle are the OS's file-id calls; std has no stable one"
 )]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
@@ -85,5 +93,6 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
         return Ok(None);
     }
     let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
-    Ok(Some((u64::from(info.dwVolumeSerialNumber), index)))
+    let id = (u64::from(info.dwVolumeSerialNumber), index);
+    Ok(Some((id, u64::from(info.nNumberOfLinks))))
 }

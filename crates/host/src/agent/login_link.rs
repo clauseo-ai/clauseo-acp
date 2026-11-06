@@ -168,6 +168,10 @@ pub(crate) struct SignIn {
     /// of them launches, and their prompts queue held. The latest stop's reason wins. In memory
     /// only: a host restart clears it.
     pub(crate) held: BTreeMap<AgentId, StopFor>,
+    /// The matters whose Codex login link is the old login's, kept while a session ran there
+    /// when the login or its source changed (`turn/sign_in.rs`): the next launch there with no
+    /// other session running removes it first. In memory only.
+    pub(crate) stale_links: BTreeSet<MatterId>,
     /// The agents whose new launches desktop refuses, with the code their turns fail with
     /// (`HostHandle::set_launch_refused`, `HostConfig::with_launch_refused`). In memory only.
     pub(crate) refused: LaunchRefusals,
@@ -184,6 +188,7 @@ impl Default for SignIn {
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
             held: BTreeMap::new(),
+            stale_links: BTreeSet::new(),
             refused: LaunchRefusals::default(),
         }
     }
@@ -268,9 +273,20 @@ pub(crate) async fn check(
 /// Removes the `auth.json` link in each of `agent`'s state folders under `data`
 /// (`state_folder::linked_folders`: every matter's, listed through no link) on a
 /// `clauseo-codex-fs` thread, waiting at most [`REMOVE_WAIT`] on the system clock; a missing file
-/// is no error, and an agent with no links (Claude) removes nothing. The first failure fails the
-/// call with `agent.launch_failed`, its message naming no path.
+/// is no error, and an agent with no links (Claude) removes nothing. A folder that cannot be
+/// listed, or the first link that cannot be removed, fails the call with `agent.launch_failed`,
+/// its message naming no path: a link may remain.
 pub(crate) async fn remove_links(agent: AgentId, data: PathBuf) -> Result<(), Error> {
+    remove_links_but(agent, data, Vec::new()).await
+}
+
+/// [`remove_links`] but in the matters named in `skip` (their folder names, the matter ids):
+/// those where a session of the agent runs (`turn/sign_in.rs`).
+pub(crate) async fn remove_links_but(
+    agent: AgentId,
+    data: PathBuf,
+    skip: Vec<String>,
+) -> Result<(), Error> {
     let job = Job {
         what: "login link removal",
         matter: None,
@@ -279,7 +295,17 @@ pub(crate) async fn remove_links(agent: AgentId, data: PathBuf) -> Result<(), Er
     let clock: Arc<dyn Clock> = Arc::new(crate::clock::SystemClock);
     let listed = agent.clone();
     let removed = off_actor(clock, job, move || {
-        let folders = super::state_folder::linked_folders(&data, listed.as_str());
+        let folders = super::state_folder::linked_folders(&data, listed.as_str(), &skip).map_err(
+            |error| {
+                Error::refused(
+                    ErrorCode::AgentLaunchFailed,
+                    format!(
+                        "the matters' login links could not be listed: {}",
+                        error.kind()
+                    ),
+                )
+            },
+        )?;
         remove_in(&folders)
     })
     .await;

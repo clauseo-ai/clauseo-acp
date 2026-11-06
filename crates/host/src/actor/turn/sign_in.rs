@@ -20,16 +20,19 @@
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
-use clauseo_protocol::{AgentId, ErrorCode, StopReason, ThreadId, TurnId};
+use std::collections::BTreeSet;
+
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, MatterId, StopReason, ThreadId, TurnId};
+use futures::task::LocalSpawnExt as _;
 
 use super::super::Actor;
-use super::super::input::SignInRequest;
+use super::super::input::{Reply, SignInRequest};
 use super::close::TurnClose;
 use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
 use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
-use crate::agent::login_link::{LoginLink, LoginSplit, Seen, StopFor};
+use crate::agent::login_link::{self, LoginLink, LoginSplit, Seen, StopFor};
 use crate::agent::state_folder::StateLink;
 use crate::error::Error;
 
@@ -55,16 +58,21 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
         } => {
             tracing::info!(%agent, reused, "the login's source changed");
             let flags = &mut actor.wiring.sign_in.reused;
-            if reused {
-                flags.insert(agent);
+            let changed = if reused {
+                flags.insert(agent.clone())
             } else {
-                flags.remove(&agent);
+                flags.remove(&agent)
+            };
+            // Every matter's link is the old source's now (R17 PR-C).
+            if changed {
+                clear_links_then(actor, &agent, reply);
+            } else {
+                let _gone = reply.send(Ok(()));
             }
-            let _gone = reply.send(Ok(()));
         }
         SignInRequest::LinkHomes { agent, reply } => {
             // The state folders are listed off the actor, by `login_link::remove_links`.
-            tracing::info!(%agent, "the matters' login links are removed");
+            tracing::info!(%agent, "the matters' login links are being removed");
             let data = actor.effective.locations().data_dir().to_owned();
             let _gone = reply.send(Ok(data));
         }
@@ -73,8 +81,67 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
         }
         SignInRequest::LimitsLogin { agent, reply } => {
             super::super::limits::login_changed(actor, agent);
-            let _gone = reply.send(Ok(()));
+            // Desktop's word that the login changed: after Clauseo's own Codex login signed
+            // out or signed in (`restart_agents` and `limits_login_changed`), every matter's
+            // link is the old login's (R17 PR-C). A reused login's links are the leave
+            // order's (`remove_login_links`).
+            let id = AgentId::new(agent.id()).ok();
+            match id.filter(|id| !actor.wiring.sign_in.reused.contains(id)) {
+                Some(id) => clear_links_then(actor, &id, reply),
+                None => {
+                    let _gone = reply.send(Ok(()));
+                }
+            }
         }
+    }
+}
+
+/// The matters where a session of `agent` runs or is being launched, but `except`'s.
+pub(super) fn running_matters(
+    actor: &Actor,
+    agent: &AgentId,
+    except: Option<ThreadId>,
+) -> BTreeSet<MatterId> {
+    actor
+        .threads
+        .iter()
+        .filter(|(thread, entry)| {
+            Some(**thread) != except
+                && entry.row.agent == *agent
+                && (entry.turn.agent.is_some() || entry.turn.preparing.is_some())
+        })
+        .map(|(_, entry)| entry.row.matter)
+        .collect()
+}
+
+/// Removes every matter's Codex login link for `agent` off the actor when its source or login
+/// changed (R17 PR-C), then answers `reply`: no link of the old login stays to be taken for a
+/// split at the next reused launch, nor to keep a login the home dropped. A matter where a
+/// session of the agent runs keeps its link meanwhile (never removed under a running Codex),
+/// logged without a path; it is marked stale and removed by its next launch when no other
+/// session runs there (`launch_checks::prepare`). Any other agent links nothing: `reply` is
+/// answered at once.
+fn clear_links_then(actor: &mut Actor, agent: &AgentId, reply: Reply<()>) {
+    if agent.as_str() != AgentKind::Codex.id() {
+        let _gone = reply.send(Ok(()));
+        return;
+    }
+    let running = running_matters(actor, agent, None);
+    for matter in &running {
+        tracing::info!(%agent, %matter, "a matter's login link stays while its session runs");
+    }
+    let skip: Vec<String> = running.iter().map(ToString::to_string).collect();
+    actor.wiring.sign_in.stale_links.extend(running);
+    let data = actor.effective.locations().data_dir().to_owned();
+    let agent = agent.clone();
+    let spawned = actor.spawner.spawn_local(async move {
+        if let Err(error) = login_link::remove_links_but(agent, data, skip).await {
+            tracing::warn!(code = error.code().as_str(), "stale login links may remain");
+        }
+        let _gone = reply.send(Ok(()));
+    });
+    if let Err(error) = spawned {
+        tracing::error!(%error, "the host pool refused a task");
     }
 }
 

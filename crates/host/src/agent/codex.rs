@@ -309,10 +309,15 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
     };
     #[cfg(not(unix))]
     let private = true;
+    // Read only as a plain file with one name: in a state folder the agent can plant it, as a
+    // link or a hard link to a credential (`state_folder::safe_read`).
     meta.is_file()
         && private
         && usize::try_from(meta.len()).is_ok_and(|len| len == bytes.len())
-        && std::fs::read(path).is_ok_and(|held| held == bytes)
+        && matches!(
+            crate::agent::state_folder::safe_read::read_plain(path),
+            Ok(crate::agent::state_folder::safe_read::Found::Bytes(held)) if held == bytes
+        )
 }
 
 /// The failure of a Codex launch whose home or `config.toml` could not be made: the error's

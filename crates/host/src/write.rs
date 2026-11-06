@@ -118,6 +118,29 @@ pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     std::fs::hard_link(original, link)
 }
 
+/// Opens the file `path` for reading only, never through a link at `path` itself: `O_NOFOLLOW`
+/// on Unix (a symbolic link fails with `ELOOP`), `FILE_FLAG_OPEN_REPARSE_POINT` on Windows (a
+/// link is opened as itself, which the caller then refuses). Used for files in a matter's state
+/// folder, which an agent can plant (`agent/state_folder/safe_read.rs`). Opening for reading
+/// changes nothing; it lives here with the module's other `OpenOptions` call.
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        /// `FILE_FLAG_OPEN_REPARSE_POINT`.
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(OPEN_REPARSE_POINT);
+    }
+    options.open(path)
+}
+
 /// Sets the folder `path` to 0700 when it is not already (a link is left as it is).
 #[cfg(unix)]
 pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {

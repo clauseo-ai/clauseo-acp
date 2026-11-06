@@ -257,6 +257,7 @@ pub(super) fn prepare(
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
     let reused = reused_login(actor, thread);
+    let drop_stale = stale_link(actor, thread);
     let LaunchPaths {
         stored,
         data,
@@ -301,7 +302,7 @@ pub(super) fn prepare(
                 let codex = match (codex_home, run.state.clone()) {
                     (Some(home), Some(state)) => {
                         let (prepared, support) =
-                            prepare_codex(&check, &stored, &data, home, state, reused)?;
+                            prepare_codex(&check, &stored, &data, home, state, reused, drop_stale)?;
                         answer = Some(support);
                         Some(prepared)
                     }
@@ -556,7 +557,7 @@ use folders::{launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod state_prep;
-use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login};
+use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login, stale_link};
 
 #[cfg(test)]
 mod tests;

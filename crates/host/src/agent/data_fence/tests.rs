@@ -7,8 +7,10 @@ use super::{
     FenceCheck, LaunchDeny, candidates, candidates_roots, candidates_words, claude_deny_rules,
     rule_path,
 };
+use crate::agent::state_folder;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
+use clauseo_protocol::AgentKind;
 
 /// A temp folder for `test`: `data` with a pack source, two sessions' run folders and the
 /// matter's notes, the matter folder `matter` and an unrelated folder `outside`, beside it.
@@ -22,7 +24,7 @@ pub(super) fn layout(test: &str) -> TempDir {
         "data/run/s1/skill-packs",
         "data/run/s2/work",
         "data/agent-state/m1/notes",
-        "data/agents/claude-acp/home/plans",
+        "data/agent-state/m1/claude-acp/plans",
         "matter/sub",
         "outside",
     ] {
@@ -41,15 +43,16 @@ pub(super) fn check(
 ) -> FenceCheck {
     let data = root.join("data");
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let state = data.join("agent-state").join("m1").join("claude-acp");
+    let mut allowed = vec![
+        data.join("run").join("s1"),
+        data.join("agent-state").join("m1").join("notes"),
+    ];
+    // The matter's Claude state folder (R17 PR-C), as the host's `fence_check` gives it.
+    allowed.extend(state_folder::fence_own(&state, AgentKind::Claude));
     FenceCheck {
-        allowed: vec![
-            data.join("run").join("s1"),
-            data.join("agent-state").join("m1").join("notes"),
-            data.join("agents")
-                .join("claude-acp")
-                .join("home")
-                .join("plans"),
-        ],
+        allowed,
+        denied: state_folder::fence_denied(&state, AgentKind::Claude),
         data,
         cwd: root.join("matter"),
         home: Some(root.to_owned()),
@@ -226,6 +229,61 @@ fn a_junction_in_the_matter_folder_into_the_data_folder_is_denied() {
     assert!(check(root, &[], Some(&search)).touches_data());
 }
 
+/// The review's D2: the matter's own Codex state folder is the session's only in its `tmp`;
+/// its login link (hard-linked to the live login), `config.toml`, databases and `.env` are
+/// refused, by path, by `cat` and by `~/` (Codex's `HOME` is its state folder on macOS and
+/// Linux), and so is the login home's `auth.json`, as at the base.
+#[test]
+fn review_the_own_state_folders_login_link_is_auto_denied() {
+    let dir = layout("own_login");
+    let root = dir.path();
+    let data = root.join("data");
+    let state = data.join("agent-state/m1/codex-acp");
+    for name in ["tmp", "sessions"] {
+        write::create_dir_all(&state.join(name)).unwrap();
+    }
+    for name in ["auth.json", "config.toml", ".env", "state_5.sqlite"] {
+        write::write_file(&state.join(name), b"x").unwrap();
+    }
+    write::create_dir_all(&data.join("agents/codex-acp/home")).unwrap();
+    write::write_file(&data.join("agents/codex-acp/home/auth.json"), b"x").unwrap();
+    let codex = |paths: &[&str], raw: Option<&serde_json::Value>| {
+        let mut check = check(root, paths, raw);
+        check.allowed = vec![data.join("run/s1"), data.join("agent-state/m1/notes")];
+        check
+            .allowed
+            .extend(state_folder::fence_own(&state, AgentKind::Codex));
+        check.denied = state_folder::fence_denied(&state, AgentKind::Codex);
+        check.home = Some(state.clone());
+        check
+    };
+    let base = text(&data.join("agents/codex-acp/home/auth.json"));
+    let cat = json!({"command": format!("cat '{base}'")});
+    assert!(codex(&[], Some(&cat)).touches_data(), "base");
+    for name in [
+        "auth.json",
+        "config.toml",
+        ".env",
+        "state_5.sqlite",
+        "sessions/r.jsonl",
+    ] {
+        let path = text(&state.join(name));
+        assert!(codex(&[&path], None).touches_data(), "Read {name}");
+        let cat = json!({"command": format!("cat '{path}'")});
+        assert!(
+            codex(&[], Some(&cat)).touches_data(),
+            "head: the own matter's {name} is not auto-denied"
+        );
+    }
+    let home = json!({"command": "cat ~/auth.json"});
+    assert!(codex(&[], Some(&home)).touches_data(), "~/auth.json");
+    let own = text(&state.join("tmp/arg0/x"));
+    assert!(
+        !codex(&[&own], None).touches_data(),
+        "the shell's tmp is its own"
+    );
+}
+
 /// The session's own run folder, the notes, the matter and Claude's plans are its own; another
 /// session's run folder is not; a path elsewhere is not the data folder's.
 #[test]
@@ -236,7 +294,7 @@ fn the_sessions_own_folders_and_an_unrelated_path_are_not_denied() {
         root.join("data/run/s1/skill-packs/x/SKILL.md"),
         root.join("data/run/s1/work/out.docx"),
         root.join("data/agent-state/m1/notes/n.md"),
-        root.join("data/agents/claude-acp/home/plans/plan.md"),
+        root.join("data/agent-state/m1/claude-acp/plans/plan.md"),
         root.join("matter/sub/a.txt"),
         root.join("outside/x.txt"),
         PathBuf::from("sub/a.txt"),

@@ -259,16 +259,20 @@ fn recheck_managed(actor: &Actor, run: &mut RunFolders) {
 }
 
 /// Codex's ACP `additionalDirectories`: the session's run folder (its work folder and its pack
-/// plugin), the matter's notes and the matter's Codex state folder (its `CODEX_HOME`, R17 PR-C;
-/// `agent::codex_fence::Session::state`). codex-acp makes each turn's `workspaceWrite` roots from
-/// them, beside the matter folder and tmp (codex-acp 2.2.2 `dist/index.js:35598-35612,
+/// plugin), the matter's notes and the `tmp` of the matter's Codex state folder (its `CODEX_HOME`,
+/// R17 PR-C; `agent::codex_fence::Session::state`). codex-acp makes each turn's `workspaceWrite`
+/// roots from them, beside the matter folder and tmp (codex-acp 2.2.2 `dist/index.js:35598-35612,
 /// 35878-35885`). With the data-folder fence's profile selected, Codex reads no `writable_roots`
 /// from `CODEX_CONFIG`, so these and the profile's own `write` entries (`agent::codex_fence`) are
 /// what reopen these folders under its deny of `<data>/run` and `<data>/agent-state`.
 pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
     [run.root.clone(), run.notes.clone()]
         .into_iter()
-        .chain(run.state.clone())
+        .chain(
+            run.state
+                .as_deref()
+                .map(crate::agent::codex_fence::shell_folder),
+        )
         .collect()
 }
 
