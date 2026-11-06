@@ -364,6 +364,9 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::Gated { thread, id, code } => {
+            launch_checks::gate::on_gated(actor, thread, id, code);
+        }
         TurnInput::RunRemoved => launch_checks::on_run_removed(actor),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::Log {

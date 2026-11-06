@@ -6,7 +6,8 @@
 
 use clauseo_host::StopFor;
 use clauseo_protocol::{
-    AgentId, DomainEvent, MatterId, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId,
+    AgentId, DomainEvent, ErrorCode, MatterId, QueueHoldReason, StopReason, StreamId, ThreadId,
+    TurnId,
 };
 
 use crate::observe::Events;
@@ -114,6 +115,74 @@ fn a_sign_in_again_stop_shows_sign_in_and_restart_sends_the_turn_once() {
     assert_eq!(starts(&events, again), 1, "{}", events.dump());
     let started = events.count(|event| matches!(event, DomainEvent::TurnStarted(_)));
     assert_eq!(started, 2, "{}", events.dump());
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// R17: desktop's account change refuses the agent's launches with `signin.account_changed`,
+/// then stops its agents for a sign-in again. A prompt in another thread of the same agent,
+/// sent then, is held for the sign-in (the stop's hold comes before desktop's refusal), never
+/// failed; a new sign-in lifts the refusal and restarts the agents, and it runs.
+#[test]
+fn an_account_change_holds_a_second_threads_prompt_as_sign_in_until_restart() {
+    let dir = Dir::new(
+        "stop_for_account_change",
+        &[(FAKE, Scenario::Local("account-change-second-thread"))],
+    );
+    let host = dir.start(0);
+    let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, ASKED);
+    events.until("the turn starts", |events| starts(events, first) == 1);
+
+    // The account changed: desktop refuses new launches, then stops the agents.
+    wait(
+        "set_launch_refused",
+        host.handle
+            .set_launch_refused(fake(), Some(ErrorCode::SigninAccountChanged)),
+    )
+    .unwrap();
+    wait(
+        "stop_agents_for",
+        host.handle.stop_agents_for(fake(), StopFor::SignInAgain),
+    )
+    .unwrap();
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Cancelled);
+    let again = put_back(&mut events, first);
+
+    // A prompt in a second thread of the same matter and agent: held as sign_in, not failed.
+    let second = host.create_thread(matter, FAKE);
+    let mut second_events = host.events(StreamId::Thread(second));
+    let (held_turn, _) = host.prompt(second, "Sent while held.");
+    settle(&host, &mut second_events);
+    assert!(held(&host, matter, second), "{}", second_events.dump());
+    assert_eq!(
+        hold_reason(&host, matter, second),
+        Some(QueueHoldReason::SignIn),
+        "{}",
+        second_events.dump()
+    );
+    assert_eq!(starts(&second_events, held_turn), 0);
+    let failed = second_events.count(|event| matches!(event, DomainEvent::TurnFailed(_)));
+    assert_eq!(failed, 0, "{}", second_events.dump());
+
+    // A new sign-in: desktop lifts the refusal and restarts the agents; both turns run.
+    wait(
+        "set_launch_refused",
+        host.handle.set_launch_refused(fake(), None),
+    )
+    .unwrap();
+    wait("restart_agents", host.handle.restart_agents(fake())).unwrap();
+    assert_eq!(
+        second_events.until_turn_ended(held_turn).stop,
+        StopReason::EndTurn,
+        "{}",
+        second_events.dump()
+    );
+    assert_eq!(events.until_turn_ended(again).stop, StopReason::EndTurn);
+    settle(&host, &mut second_events);
+    assert_eq!(hold_reason(&host, matter, second), None);
+    second_events.assert_no_mismatch();
     events.assert_no_mismatch();
     host.shutdown();
 }

@@ -73,6 +73,18 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxRequired,
             "the firm requires the sandbox; this computer is at tier C",
         ),
+        failed(
+            ErrorCode::AgentIdentityChecking,
+            "the login's account is being confirmed",
+        ),
+        failed(
+            ErrorCode::AgentIdentityUnknown,
+            "the login's account could not be confirmed",
+        ),
+        failed(
+            ErrorCode::SigninAccountChanged,
+            "the login's account changed from the one signed in",
+        ),
     ]
 }
 

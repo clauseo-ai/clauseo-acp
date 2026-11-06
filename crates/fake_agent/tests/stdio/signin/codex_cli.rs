@@ -272,3 +272,30 @@ fn app_server_account_read_gives_an_api_key_account_for_an_apikey_marker() {
     );
     agent.expect_exit(EXIT_OK);
 }
+
+/// R17's swap tests: a marker that names another email makes `account/read` name that account,
+/// as Claude's status does.
+#[test]
+fn app_server_account_read_names_the_markers_email() {
+    let scratch = Scratch::new("codex_app_server_other");
+    let home = home(&scratch);
+    let codex_home = scratch.path().join("codex-home");
+    crate::write::create_dir_all(&codex_home).unwrap();
+    crate::write::write(
+        codex_home.join("fake-signin-marker"),
+        r#"{"authMethod": "chatgpt", "email": "other@example.com"}"#,
+    )
+    .unwrap();
+    let mut agent = codex(
+        &scratch,
+        &home,
+        &["app-server"],
+        &[("CODEX_HOME", text(&codex_home))],
+    );
+    agent.send(&json!({"jsonrpc": "2.0", "id": 1, "method": "account/read", "params": {}}));
+    assert_eq!(
+        agent.read_line()["result"]["account"]["email"],
+        "other@example.com"
+    );
+    agent.expect_exit(EXIT_OK);
+}

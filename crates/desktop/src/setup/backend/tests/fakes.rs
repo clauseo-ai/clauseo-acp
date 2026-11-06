@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    AccountFuture, AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError,
+    SigninState,
 };
-use clauseo_counts::schema::Event;
-use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_host::{AgentsStopped, LoginSplits, StopFor};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
@@ -25,8 +25,9 @@ use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
-use crate::setup::confirm::{Ask, SetupConfirm};
+use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
+use crate::setup::identity::Identities;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
@@ -35,6 +36,13 @@ use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
+
+mod calls;
+mod small;
+
+pub(super) use self::calls::HostCall;
+
+pub(super) use self::small::{FakeAccounts, FakeConfirm, FakeCounts, FakeOpener};
 
 /// What the fake `Agents` was asked, by name and agent.
 pub(super) type Calls = Arc<Mutex<Vec<(&'static str, AgentId)>>>;
@@ -63,6 +71,8 @@ pub(super) struct FakeAgents {
     pub(super) feed: Mutex<Option<UnboundedSender<AgentsEvent>>>,
     /// What `install_tries` answers, by agent.
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
+    /// What `read_account` answers (R17).
+    pub(super) accounts: FakeAccounts,
 }
 
 impl FakeAgents {
@@ -164,19 +174,13 @@ impl SetupAgents for FakeAgents {
     fn install_tries(&self, agent: &AgentId) -> Option<u32> {
         lock(&self.tries).get(agent).copied()
     }
+    fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        self.call("read_account", agent);
+        self.accounts.read(agent)
+    }
     fn shutdown(&self, _wait: Duration) -> bool {
         lock(&self.journal).push("agents.shutdown".to_owned());
         true
-    }
-}
-
-/// The usage counts, recording each event.
-#[derive(Default)]
-pub(super) struct FakeCounts(pub(super) Mutex<Vec<Event>>);
-
-impl SetupCounts for FakeCounts {
-    fn bump(&self, event: Event) {
-        lock(&self.0).push(event);
     }
 }
 
@@ -212,38 +216,6 @@ impl LeaveReaders for FakeReaders {
     }
 }
 
-/// One host call as `RecordingHost` saw it.
-#[derive(Clone, PartialEq, Eq)]
-pub(super) enum HostCall {
-    SetAgentLaunch(AgentId, AgentLaunch),
-    SetEndpoint(AgentId, Option<String>),
-    RestartAgents(AgentId),
-    StopAgents(AgentId),
-    SetReusedLogin(AgentId, bool),
-    RemoveLoginLinks(AgentId),
-    LoginChanged(AgentId),
-    SetLaunchRefused(AgentId, Option<ErrorCode>),
-}
-
-impl std::fmt::Debug for HostCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SetAgentLaunch(agent, launch) => {
-                write!(f, "set_agent_launch({agent}, {launch:?})")
-            }
-            Self::SetEndpoint(agent, url) => write!(f, "set_endpoint({agent}, {url:?})"),
-            Self::RestartAgents(agent) => write!(f, "restart_agents({agent})"),
-            Self::StopAgents(agent) => write!(f, "stop_agents({agent})"),
-            Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
-            Self::RemoveLoginLinks(agent) => write!(f, "remove_login_links({agent})"),
-            Self::LoginChanged(agent) => write!(f, "login_changed({agent})"),
-            Self::SetLaunchRefused(agent, code) => {
-                write!(f, "set_launch_refused({agent}, {code:?})")
-            }
-        }
-    }
-}
-
 /// The host's Rust-only calls, recorded in order, each answered `Ok`; `stop_agents` answers
 /// `stopped` (`Exited` unless a test sets `TimedOut`), and the next `restart_fails`
 /// `restart_agents` calls answer `internal`.
@@ -252,6 +224,8 @@ pub(super) struct RecordingHost {
     pub(super) journal: Journal,
     pub(super) stopped: Mutex<AgentsStopped>,
     pub(super) restart_fails: Mutex<usize>,
+    /// The next `set_launch_refused` calls that answer `internal` (recorded all the same).
+    pub(super) refused_fails: Mutex<usize>,
     /// The next `stop_agents` panics, once a test sets it.
     pub(super) stop_panics: Mutex<bool>,
     /// The next `stop_agents` answers once this opens, when a test sets it.
@@ -269,6 +243,7 @@ impl RecordingHost {
             journal,
             stopped: Mutex::new(AgentsStopped::Exited),
             restart_fails: Mutex::new(0),
+            refused_fails: Mutex::new(0),
             stop_panics: Mutex::new(false),
             stop_gate: Mutex::new(None),
             changes: Mutex::new(None),
@@ -336,6 +311,15 @@ impl SetupHost for RecordingHost {
             Ok(stopped)
         })
     }
+    fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        self.push(HostCall::StopAgentsFor(agent, why));
+        let stopped = *lock(&self.stopped);
+        Box::pin(std::future::ready(Ok(stopped)))
+    }
     fn set_reused_login(
         &self,
         agent: AgentId,
@@ -354,6 +338,17 @@ impl SetupHost for RecordingHost {
         agent: AgentId,
         code: Option<ErrorCode>,
     ) -> BoxFuture<'_, Result<(), HostError>> {
+        let failing = {
+            let mut fails = lock(&self.refused_fails);
+            let failing = *fails > 0;
+            *fails = fails.saturating_sub(1);
+            failing
+        };
+        if failing {
+            self.push(HostCall::SetLaunchRefused(agent, code));
+            let error = HostError::new(ErrorCode::Internal, "the refusal was not set");
+            return Box::pin(std::future::ready(Err(error)));
+        }
         self.record(HostCall::SetLaunchRefused(agent, code))
     }
     fn login_splits(&self) -> BoxFuture<'_, Result<LoginSplits, HostError>> {
@@ -368,36 +363,6 @@ impl SetupHost for RecordingHost {
             HostError::new(ErrorCode::Internal, "the tests apply settings directly")
         });
         Box::pin(std::future::ready(answer))
-    }
-}
-
-/// The confirms, answered `answer`, each ask recorded.
-pub(super) struct FakeConfirm {
-    pub(super) answer: bool,
-    pub(super) asked: Mutex<Vec<Ask>>,
-}
-
-impl SetupConfirm for FakeConfirm {
-    fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool> {
-        lock(&self.asked).push(ask);
-        Box::pin(std::future::ready(self.answer))
-    }
-}
-
-/// The opener, each URL recorded.
-#[derive(Default)]
-pub(super) struct FakeOpener(pub(super) Mutex<Vec<String>>);
-
-impl Opener for FakeOpener {
-    fn open_url(&self, url: &str) -> Result<(), HostError> {
-        lock(&self.0).push(url.to_owned());
-        Ok(())
-    }
-    fn open_path(&self, _path: &Path, _kind: &str) -> Result<(), HostError> {
-        Ok(())
-    }
-    fn reveal(&self, _path: &Path) -> Result<(), HostError> {
-        Ok(())
     }
 }
 
@@ -446,6 +411,31 @@ pub(super) fn rig_locked(plan_locked: bool) -> Rig {
 }
 
 fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool) -> Rig {
+    rig_full(
+        accept,
+        keychain,
+        keys,
+        plan_locked,
+        None,
+        Identities::in_memory(),
+    )
+}
+
+/// [`rig`] with each agent's home `<homes>/<id>`, `identity` as its identity check (R17), and
+/// its keys loaded from `keychain` (a memory one).
+pub(super) fn rig_identity(homes: &Path, identity: Identities, keychain: Keychain) -> Rig {
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    rig_full(true, keychain, keys, false, Some(homes), identity)
+}
+
+fn rig_full(
+    accept: bool,
+    keychain: Keychain,
+    keys: KeyCache,
+    plan_locked: bool,
+    homes: Option<&Path>,
+    identity: Identities,
+) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
         journal: Arc::clone(&journal),
@@ -472,7 +462,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             let info = AgentInfo {
                 name: name.to_owned(),
                 hosts: vec!["registry.npmjs.org".to_owned()],
-                home: home(&agent),
+                home: homes.map_or_else(|| home(&agent), |homes| homes.join(agent.as_str())),
                 plan_locked: plan_locked && agent == claude(),
                 provider: false,
             };
@@ -496,7 +486,8 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             SettingsRead::default(),
             Vec::new(),
         )
-        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
+        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
+        .with_identity(identity),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
     });
     Rig {
@@ -575,6 +566,13 @@ impl Rig {
     /// The journal so far, and cleared.
     pub(super) fn journal(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.journal))
+    }
+
+    /// Forgets every call made so far: the host's, the fake `Agents`', and the journal.
+    pub(super) fn forget_calls(&self) {
+        lock(&self.host.calls).clear();
+        lock(&self.agents.calls).clear();
+        lock(&self.journal).clear();
     }
 }
 

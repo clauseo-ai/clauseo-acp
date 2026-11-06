@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_agents::{
-    AgentsEvent, Clock, Found, InstallState, Installed, Method, PasteCode, SigninCode, SigninError,
-    SigninState, Source,
+    AccountFuture, AccountHash, AccountRead, AgentsEvent, Clock, Found, InstallState, Installed,
+    Method, PasteCode, SigninCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::AgentId;
 use futures::channel::mpsc;
@@ -374,6 +374,21 @@ impl SetupAgents for FakeSignin {
     }
     fn shutdown(&self, wait: Duration) -> bool {
         self.real.shutdown(wait)
+    }
+    /// A scripted agent's account is the one its `SignedIn` names, while it is signed in
+    /// (R17's identity check); none otherwise.
+    fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        if self.script(agent).is_none() {
+            return self.real.read_account(agent);
+        }
+        let read = match self.signin_state(agent) {
+            Some(SigninState::SignedIn { email, .. }) => email
+                .as_deref()
+                .and_then(AccountHash::of)
+                .map_or(AccountRead::NoAccount, AccountRead::Account),
+            _ => AccountRead::NoAccount,
+        };
+        Box::pin(ready(read))
     }
 }
 

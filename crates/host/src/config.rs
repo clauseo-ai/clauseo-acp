@@ -11,6 +11,8 @@ use clauseo_process::Launcher;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
+use crate::agent::launch_gate::LaunchGate;
+use crate::agent::launch_refusals::LaunchRetry;
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
@@ -491,7 +493,8 @@ impl HostConfig {
     /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
     /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
     /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys (and
-    /// counted as `agent.key_unreadable` past its bound). As
+    /// counted as `agent.key_unreadable` past its bound), and the identity codes
+    /// (`agent.identity_checking`, `agent.identity_unknown`, `signin.account_changed`). As
     /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
     /// is a bug: debug builds assert, and release builds log it and set nothing.
     #[must_use]
@@ -506,13 +509,33 @@ impl HostConfig {
         self
     }
 
-    /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
-    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
-    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
-    /// must not block.
+    /// Desktop's launch retry (decision record 0048; R17 made it generic): called, on the
+    /// host's actor, with the agent and the code of each launch that meets
+    /// `agent.key_unreadable` or `agent.identity_checking`, before the launch waits for the
+    /// refusal to lift. Desktop reads that key again, or runs the agent's identity check, and
+    /// lifts the refusal when that succeeds; it does nothing for another code. It must not
+    /// block.
     #[must_use]
-    pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
-        self.wiring.sign_in.refused.set_key_retry(retry);
+    pub fn with_launch_retry(mut self, retry: LaunchRetry) -> Self {
+        self.wiring.sign_in.refused.set_retry(retry);
+        self
+    }
+
+    /// Desktop's launch gate (R17 M3, [`LaunchGate`]): asked with the agent's id before each
+    /// launch, of every agent kind, on the launch-prep thread and never on the actor. It must
+    /// be cheap and non-blocking, a stat of the shared login file, never an open of its
+    /// contents, never a status run, no lock held across I/O; one that hangs is bounded by the
+    /// prepare job's wait, and the launch fails. `None` lets the launch go on. A refusal code
+    /// is one desktop has already set through `HostHandle::set_launch_refused`, and awaited,
+    /// before the gate returns (the host never writes it): a waited-out one
+    /// (`agent.identity_checking`) waits for the refusal to lift, once per launch, then
+    /// prepares again; another fails the launch with it. A code that is no launch refusal
+    /// fails the launch closed with `agent.launch_failed`. In release builds a panic aborts the
+    /// process; the gate must not panic (debug and test builds catch it as
+    /// `agent.launch_failed`). Unset: no gate.
+    #[must_use]
+    pub fn with_launch_gate(mut self, gate: LaunchGate) -> Self {
+        self.wiring.launch_gate = Some(gate);
         self
     }
 

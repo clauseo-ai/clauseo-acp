@@ -19,7 +19,9 @@
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored);
-//! 6. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
+//! 6. else, once the plan login's account changed (R17, `setup/identity.rs`), `Failed { code:
+//!    signin.account_changed }`, until a sign-in records an account again;
+//! 7. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
 //! Rule 1 is pending the orchestrator's confirmation (the plan's "Disagreements" 7); it is here
@@ -62,6 +64,8 @@ pub(crate) struct Facts {
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
     pub(crate) stuck: bool,
+    /// Since when the plan login's account is not the recorded one, if it is not (R17).
+    pub(crate) account_changed: Option<SystemTime>,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
@@ -100,6 +104,12 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     }
     if let Some(since) = facts.key {
         return Some(signed_in_by(SignInMethod::ApiKey, since));
+    }
+    if let Some(since) = facts.account_changed {
+        return Some(SignIn::Failed {
+            code: ErrorCode::SigninAccountChanged,
+            at: timestamp(since),
+        });
     }
     s18.and_then(|state| wire(agent, state))
 }
@@ -436,6 +446,14 @@ impl Compose {
     pub(crate) fn set_firm(&self, agent: &AgentId, firm: bool) {
         self.change(agent, |known, now| {
             known.facts.firm = firm.then(|| known.facts.firm.unwrap_or(now));
+        });
+    }
+
+    /// Whether `agent`'s plan login's account changed (R17): the card says sign in again.
+    pub(crate) fn set_account_changed(&self, agent: &AgentId, changed: bool) {
+        self.change(agent, |known, now| {
+            known.facts.account_changed =
+                changed.then(|| known.facts.account_changed.unwrap_or(now));
         });
     }
 

@@ -459,11 +459,12 @@ impl HostHandle {
     /// `None`, lets them start again. A turn that would launch the agent fails as any refused
     /// launch does: an ordinary `TurnFailed` with `code`. Running sessions go on until they
     /// exit; desktop calls [`Self::stop_agents`] to end them sooner. Only the codes desktop may
-    /// put there are taken, `signin.policy_unreadable`, `agent.keys_loading` and
-    /// `agent.key_unreadable`: another is a bug, which debug builds assert, and release builds
-    /// refuse with `command.invalid`, changing nothing. A launch meeting `agent.keys_loading`
-    /// or `agent.key_unreadable` waits up to 2 s on the host clock for it to be lifted before
-    /// it fails. In memory only. Rust only.
+    /// put there are taken, `signin.policy_unreadable`, `agent.keys_loading`,
+    /// `agent.key_unreadable`, `agent.identity_checking`, `agent.identity_unknown` and
+    /// `signin.account_changed`: another is a bug, which debug builds assert, and release builds
+    /// refuse with `command.invalid`, changing nothing. A launch meeting `agent.keys_loading`,
+    /// `agent.key_unreadable` or `agent.identity_checking` waits up to 2 s on the host clock for
+    /// it to be lifted before it fails. In memory only. Rust only.
     pub async fn set_launch_refused(
         &self,
         agent: AgentId,

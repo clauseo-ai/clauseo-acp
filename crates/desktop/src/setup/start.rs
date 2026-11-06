@@ -28,6 +28,10 @@
 //! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
 //! the thread that then follows the settings and the keys' notes, so they never cross; a
 //! policy refusal stays until the settings lift it.
+//!
+//! R17's identity check (`setup/identity.rs`) reads its record from the data folder before
+//! `Agents` start, and its follower (the login files' stats and the checks launches ask for)
+//! runs on the `clauseo-setup-host` thread with the others.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -37,7 +41,7 @@ use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use clauseo_settings::{Effective, Locations};
+use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::StreamExt as _;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
@@ -47,6 +51,7 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
+use super::identity::{GateSlot, Identities};
 use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot};
 use super::login_check::ReusedLogins;
 use super::readers::LeaveReaders;
@@ -281,6 +286,8 @@ pub(crate) struct HostSide {
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
     pub(crate) notes: Arc<KeyNotes>,
+    /// Where the backend goes once up, for the host's launch gate (R17, `identity/gate.rs`).
+    pub(crate) gate: GateSlot,
 }
 
 /// Starts the `clauseo-setup` thread: keys, `Agents`, the first states, the cell, the pump.
@@ -315,6 +322,12 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         return;
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let identity = Identities::load(
+        &read.data_dir,
+        Arc::new(SystemFiles),
+        parts.home.clone(),
+        read.known.keys(),
+    );
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
         .known
@@ -326,6 +339,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     config.install.bundle = read.bundle;
     config.install.proxy = env_proxy();
     config.clock = Arc::clone(&clock);
+    let gate = Arc::clone(&side.gate);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -353,7 +367,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             side.plans,
             read.settings,
             refused_at_start,
-        );
+        )
+        .with_identity(identity);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys,
@@ -376,22 +391,34 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         tracing::info!("the quit came first: no agents start");
         return;
     };
+    // Set once, here: the host's launch gate checks from now on.
+    let _set = gate.set(Arc::clone(&backend));
     let follower = Arc::clone(&backend);
     let reread = side.reread;
-    let notes = side.notes.take();
+    let mut notes = side.notes.take();
+    let mut asks = backend.wiring.identity.take_asks();
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
             futures::executor::block_on(sync_all(&follower));
-            let settings = follow_settings(&follower, &*reread);
-            let leaves = super::leave::follow_auto_leaves(&follower);
-            let keys = async {
-                if let Some(notes) = notes {
-                    follow_keys(&follower, notes).await;
-                }
-            };
-            let follows = join(join(settings, keys), join(follow_splits(&follower), leaves));
-            futures::executor::block_on(follows);
+            // Started again after a panic, the identity check failing closed first.
+            super::supervise::supervise(&follower, || {
+                let settings = follow_settings(&follower, &*reread);
+                let leaves = super::leave::follow_auto_leaves(&follower);
+                let keys = async {
+                    if let Some(notes) = notes.as_mut() {
+                        follow_keys(&follower, notes).await;
+                    }
+                };
+                let identity = async {
+                    if let Some(asks) = asks.as_mut() {
+                        super::identity::follow_identity(&follower, asks).await;
+                    }
+                };
+                let splits = join(follow_splits(&follower), leaves);
+                let follows = join(join(settings, keys), join(splits, identity));
+                futures::executor::block_on(follows);
+            });
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");

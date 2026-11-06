@@ -1510,7 +1510,10 @@ expression: counts_schema()
         "sandbox.setup_refused",
         "sandbox.setup_failed",
         "sandbox.setup_required",
-        "sandbox.required"
+        "sandbox.required",
+        "agent.identity_checking",
+        "agent.identity_unknown",
+        "signin.account_changed"
       ],
       "type": "string"
     },

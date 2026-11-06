@@ -10,7 +10,7 @@
 use std::future::ready;
 use std::sync::Arc;
 
-use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_host::{AgentsStopped, LoginSplits, StopFor};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, Principal};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::StreamExt as _;
@@ -44,6 +44,15 @@ pub(crate) trait SetupHost: Send + Sync {
     /// `stop_agents`), answering whether they exited or the bounded wait ran out (P4d).
     /// The leave order's first step.
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
+
+    /// [`Self::stop_agents`] with the reason the held queues show (`stop_agents_for`): R17's
+    /// account change stops with `StopFor::SignInAgain`, so its held turns show `sign_in` and
+    /// stay held until the new sign-in's `restart_agents`.
+    fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> BoxFuture<'_, Result<AgentsStopped, HostError>>;
 
     /// Tells the host whether `agent`'s login is the lawyer's own, reused (P4b's
     /// `set_reused_login`).
@@ -131,6 +140,14 @@ impl SetupHost for CellHost {
 
     fn stop_agents(&self, agent: AgentId) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
         Box::pin(async move { self.cell.host().await?.stop_agents(agent).await })
+    }
+
+    fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        Box::pin(async move { self.cell.host().await?.stop_agents_for(agent, why).await })
     }
 
     fn set_reused_login(

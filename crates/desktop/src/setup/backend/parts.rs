@@ -1,10 +1,14 @@
 //! Small parts of the backend: first run's decision, the plan login a `StartSignIn` asks for,
-//! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers.
+//! a sign-in call the identity check expects, the endpoint check before `SetFirmEndpoint`'s
+//! confirm, and its two error answers.
 
 use std::collections::BTreeSet;
 
 use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
+
+use crate::setup::backend::AgentsBackend;
+use crate::setup::identity;
 
 /// Which first install states have come in: first run is decided once every agent has one.
 pub(super) struct FirstRun {
@@ -47,6 +51,21 @@ pub(super) fn plan_method(agent: &AgentId, console: bool) -> Result<Method, Host
         (Some(AgentKind::Codex), false) => Ok(Method::Browser),
         _ => Err(invalid(format!("{agent} has no such sign-in"))),
     }
+}
+
+/// `call`, an S18 call that signs `agent` in through Clauseo (a sign-in, a reuse): the identity
+/// check expects it first, so its `SignedIn` records the account before anything compares it
+/// (R17), and stops expecting it when S18 refuses it.
+pub(super) fn signs_in(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    call: impl FnOnce() -> Result<(), SigninError>,
+) -> Result<(), HostError> {
+    identity::expect(backend, agent);
+    call().map_err(|error| {
+        backend.wiring.identity.expect_none(agent);
+        signin_error(&error)
+    })
 }
 
 /// The endpoint `url` as the confirm shows it and the plan stores it: an address the settings

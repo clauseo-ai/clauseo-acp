@@ -13,9 +13,11 @@
 //! # Invariants
 //!
 //! - The marker is `fake-signin-marker` in the CLI's home folder. It holds
-//!   `{"authMethod": ..., "email": "test@example.com"}` and nothing else, never a credential.
-//!   Claude's status prints the marker's email. For Codex a test's dummy file with the name of
-//!   Codex's login file counts as the marker too (reuse's hard link, S18).
+//!   `{"authMethod": ..., "email": "test@example.com"}` and nothing else, never a credential;
+//!   a test's marker may say `"email": null` (no email) or add `"accountUuid"` (R17).
+//!   Claude's status and Codex's `account/read` print the marker's email. For Codex a test's
+//!   dummy file with the name of Codex's login file counts as the marker too (reuse's hard
+//!   link, S18).
 //! - The Claude home is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is `$HOME/.claude`), else
 //!   `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's home is `CODEX_HOME`
 //!   when set and not empty, else `$HOME/.codex`.
@@ -328,13 +330,28 @@ fn open_browser(browser: &OsStr, url: &str) {
 
 /// `auth status --json`: the signed-in line when the marker is there, else the signed-out line.
 /// Both are printed exactly as the brief has them, with the keys in that order. The email is the
-/// marker's, `test@example.com` unless a test planted another.
+/// marker's, `test@example.com` unless a test planted another (or `null`, for none); a marker
+/// that names an `accountUuid` adds it last (R17's id-only status).
 fn claude_status(folder: &Path) -> io::Result<i32> {
     let line = match marker(folder) {
-        Some((method, email)) => format!(
+        Some(Marker {
+            method,
+            email,
+            account_uuid: None,
+        }) => format!(
             r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":{},"subscriptionType":"max"}}"#,
             json!(method),
             json!(email)
+        ),
+        Some(Marker {
+            method,
+            email,
+            account_uuid: Some(id),
+        }) => format!(
+            r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":{},"subscriptionType":"max","accountUuid":{}}}"#,
+            json!(method),
+            json!(email),
+            json!(id)
         ),
         None => r#"{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}"#.to_owned(),
     };
@@ -435,21 +452,20 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
     Some(reply.to_string())
 }
 
-/// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`, or, when the marker's `authMethod` is `apikey`, an API-key
-/// account, which names no email. Without it, the signed-out reply: `account` null and
-/// `requiresOpenaiAuth` true.
+/// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account named by the
+/// marker's email (`test@example.com` unless a test planted another, as R17's swap tests do) on
+/// `plus`, or, when the marker's `authMethod` is `apikey`, an API-key account, which names no
+/// email. Without it, the signed-out reply: `account` null and `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
-    let method = marker_method(folder);
-    if method.as_deref() == Some(API_KEY_METHOD) {
-        json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
-    } else if method.is_some() {
-        json!({
-            "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},
+    match marker(folder) {
+        Some(marker) if marker.method == API_KEY_METHOD => {
+            json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
+        }
+        Some(Marker { email, .. }) => json!({
+            "account": {"type": "chatgpt", "email": email, "planType": "plus"},
             "requiresOpenaiAuth": false,
-        })
-    } else {
-        json!({"account": null, "requiresOpenaiAuth": true})
+        }),
+        None => json!({"account": null, "requiresOpenaiAuth": true}),
     }
 }
 
@@ -511,7 +527,7 @@ fn read_line() -> io::Result<String> {
 
 /// The `authMethod` the marker in `folder` holds, or `None` when there is no marker.
 fn marker_method(folder: &Path) -> Option<String> {
-    marker(folder).map(|(method, _)| method)
+    marker(folder).map(|marker| marker.method)
 }
 
 /// The marker in `folder`: its `authMethod` and its `email` (`test@example.com` when it
@@ -519,7 +535,7 @@ fn marker_method(folder: &Path) -> Option<String> {
 /// counts as the marker too, so a test can stand an empty file of that name in `~/.codex` and
 /// the engine's hard link of it into `CODEX_HOME` signs the home in, as Codex's own file would.
 /// The file is the test's dummy, never a real credential.
-fn marker(folder: &Path) -> Option<(String, String)> {
+fn marker(folder: &Path) -> Option<Marker> {
     let path = [MARKER, CODEX_LOGIN_FILE]
         .into_iter()
         .map(|name| folder.join(name))
@@ -527,10 +543,23 @@ fn marker(folder: &Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let marker = serde_json::from_str::<Value>(&text).unwrap_or_default();
     let field = |name: &str| marker[name].as_str().map(str::to_owned);
-    Some((
-        field("authMethod").unwrap_or_default(),
-        field("email").unwrap_or_else(|| EMAIL.to_owned()),
-    ))
+    let email = match marker.get("email") {
+        Some(Value::Null) => None,
+        _ => Some(field("email").unwrap_or_else(|| EMAIL.to_owned())),
+    };
+    Some(Marker {
+        method: field("authMethod").unwrap_or_default(),
+        email,
+        account_uuid: field("accountUuid"),
+    })
+}
+
+/// What a marker says: its `authMethod`, its email (`test@example.com` when it names none; none
+/// when it says `null`, a login with no email) and its `accountUuid`, when it names one.
+struct Marker {
+    method: String,
+    email: Option<String>,
+    account_uuid: Option<String>,
 }
 
 /// Writes the marker in `folder` for `auth_method`, creating the folder first.

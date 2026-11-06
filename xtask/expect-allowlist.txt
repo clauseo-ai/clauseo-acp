@@ -37,6 +37,10 @@ crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/open/word_path.rs short_folder unsafe_code
 # R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
 crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
+crates/desktop/src/setup/backend/tests/identity.rs replace clippy::disallowed_methods
+# R17 review round: test set-up swapping and removing dummy login files, and timing the gate.
+crates/desktop/src/setup/backend/tests/identity_watch.rs files clippy::disallowed_methods
+crates/desktop/src/setup/backend/tests/identity_gate.rs gate_cost clippy::disallowed_methods
 crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
 crates/desktop/src/setup/readers/tests.rs fake_file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods
@@ -378,6 +382,7 @@ crates/matters/src/history/durable/windows_tests.rs hold clippy::disallowed_meth
 # the Windows proxy registry read.
 crates/agents/src/write.rs - clippy::disallowed_methods
 crates/agents/tests/install/write.rs - clippy::disallowed_methods
+crates/agents/tests/signin/account.rs a_read_costs_one_status_run_on_the_fakes clippy::disallowed_methods
 crates/agents/tests/install/quit.rs - clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::now clippy::disallowed_methods
 crates/agents/src/config.rs SystemClock::monotonic clippy::disallowed_methods
@@ -399,6 +404,9 @@ crates/agents/examples/install.rs mb clippy::cast_precision_loss
 crates/agents/src/keys.rs Keychain::clear clippy::unnecessary_wraps
 # S18: the Windows file id (CreateFileW with access 0, then GetFileInformationByHandle).
 crates/agents/src/fileid.rs file_id unsafe_code
+# R17 review H2: the test writes in place, puts the old mtime back, and lets coarse clocks tick.
+crates/agents/src/fileid/tests.rs put_back_last_write clippy::disallowed_methods
+crates/agents/src/fileid/tests.rs let_the_clock_tick clippy::disallowed_methods
 # S18: the Codex callback port is a test's own only under test-support; outside it self goes unused.
 crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.

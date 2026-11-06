@@ -15,8 +15,9 @@
 //!   launch of it starts ([`launch_refusal`]) and a prompt for it queues held (`queue/hold.rs`).
 //!   The hold's [`StopFor`] is the reason its queues show (`queue/held.rs`).
 //! - `set_launch_refused` refuses an id's new launches with desktop's code, running sessions
-//!   left alone ([`launch_refusal`]). A launch meeting `agent.keys_loading` waits for it to be
-//!   lifted first, at most `KEYS_WAIT` ([`keys_wait`]).
+//!   left alone ([`launch_refusal`]). A launch meeting `agent.keys_loading`,
+//!   `agent.key_unreadable` or `agent.identity_checking` waits for it to be lifted first, at
+//!   most `KEYS_WAIT` ([`keys_wait`]).
 //! - `set_reused_login` keeps desktop's word on the login's source, which turns on the split
 //!   check ([`check_launch`]).
 
@@ -170,12 +171,13 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     ))
 }
 
-/// Whether `thread`'s launch waits for its agent's `agent.keys_loading` or
-/// `agent.key_unreadable` refusal: when it is the refusal in force (no `stop_agents` hold), the
-/// wait, at most [`KEYS_WAIT`] on the host clock and woken when the refusal lifts or changes.
-/// For `agent.key_unreadable` desktop is first asked to read the key again, so a read that
-/// now succeeds lifts it. The launch checks the refusals again after it
-/// (`launch_checks::on_prepared`).
+/// Whether `thread`'s launch waits for its agent's `agent.keys_loading`,
+/// `agent.key_unreadable` or `agent.identity_checking` refusal: when it is the refusal in force
+/// (no `stop_agents` hold), the wait, at most [`KEYS_WAIT`] on the host clock and woken when the
+/// refusal lifts or changes. For `agent.key_unreadable` and `agent.identity_checking` desktop
+/// is first asked to act, with the code (`LaunchRefusals::retry`): it reads the key again, or
+/// runs the identity check, and lifts the refusal when that succeeds. The launch checks the
+/// refusals again after it (`launch_checks::on_prepared`).
 pub(super) fn keys_wait(
     actor: &mut Actor,
     thread: ThreadId,
@@ -191,17 +193,20 @@ pub(super) fn keys_wait(
     }
     if code == ErrorCode::AgentKeyUnreadable {
         tracing::info!(%agent, "a launch waits for its stored key to be read again");
-        refused.retry_key(&agent);
+    } else if code == ErrorCode::AgentIdentityChecking {
+        tracing::info!(%agent, "a launch waits for its login's account to be confirmed");
     } else {
         tracing::info!(%agent, "a launch waits for the stored keys to load");
     }
+    refused.retry(&agent, code);
     let timer = actor.clock.after(KEYS_WAIT);
     Some(actor.wiring.sign_in.refused.wait(&agent, timer))
 }
 
 /// `set_launch_refused`: keeps or clears the refusal of `agent`'s new launches; a code not on
 /// the list is refused with `command.invalid` and changes nothing. A launch waiting on an
-/// `agent.keys_loading` refusal is woken when it lifts or changes.
+/// `agent.keys_loading`, `agent.key_unreadable` or `agent.identity_checking` refusal is woken
+/// when it lifts or changes.
 fn set_refused(actor: &mut Actor, agent: AgentId, code: Option<ErrorCode>) -> Result<(), Error> {
     let shown = agent.clone();
     actor.wiring.sign_in.refused.set(agent, code)?;

@@ -160,6 +160,9 @@ mod key_unreadable;
 #[path = "host/keys_loading.rs"]
 mod keys_loading;
 #[cfg(test)]
+#[path = "host/launch_gate.rs"]
+mod launch_gate;
+#[cfg(test)]
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
 #[cfg(test)]

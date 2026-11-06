@@ -39,6 +39,10 @@ pub(crate) struct ClaudeStatus {
     /// `subscriptionType`: the raw plan string.
     #[serde(default)]
     pub(crate) subscription_type: Option<String>,
+    /// `accountUuid`: the account's id, when the status gives one (R17's identity check takes
+    /// it when there is no email). The name is the brief's default until G7 records the real one.
+    #[serde(default)]
+    pub(crate) account_uuid: Option<String>,
 }
 
 /// The account and plan a status reports.
@@ -48,6 +52,9 @@ pub(crate) struct Identity {
     pub(crate) email: Option<String>,
     /// The raw plan string, when reported.
     pub(crate) plan: Option<String>,
+    /// The account's id, when reported (Claude's `accountUuid`; Codex's `account/read` gives
+    /// none at the pinned schema).
+    pub(crate) account_id: Option<String>,
 }
 
 /// Claude's status JSON from its stdout: the whole text, or else its last line that parses
@@ -107,6 +114,7 @@ pub(crate) fn claude_signed_in(
     Some(Identity {
         email: status.email.clone(),
         plan: status.subscription_type.clone(),
+        account_id: status.account_uuid.clone(),
     })
 }
 
@@ -164,6 +172,7 @@ pub(crate) fn codex_identity(response: &GetAccountResponse) -> Option<Identity> 
         Account::Chatgpt(account) => Some(Identity {
             email: account.email.clone(),
             plan: Some(account.plan_type.as_str().to_owned()),
+            account_id: None,
         }),
         Account::ApiKey | Account::AmazonBedrock(_) | Account::Unknown(_) => None,
     }

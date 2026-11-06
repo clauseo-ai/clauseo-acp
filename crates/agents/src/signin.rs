@@ -31,6 +31,7 @@ use zeroize::Zeroizing;
 
 use self::env::Vendor;
 
+pub(crate) mod account;
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod detect;
@@ -309,6 +310,17 @@ impl From<String> for PasteCode {
 impl std::fmt::Debug for PasteCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<code>")
+    }
+}
+
+/// The longest one sign-in run of `kind`'s login may take before it is given up on: Claude's
+/// login run, and Codex's device-code run, the longer of its two (R17: desktop's identity check
+/// holds off for a sign-in through Clauseo that long at most).
+#[must_use]
+pub fn sign_in_limit(kind: clauseo_protocol::AgentKind) -> std::time::Duration {
+    match kind {
+        clauseo_protocol::AgentKind::Claude => claude::LOGIN_LIMIT,
+        clauseo_protocol::AgentKind::Codex => codex::DEVICE_LIMIT.max(claude::LOGIN_LIMIT),
     }
 }
 
