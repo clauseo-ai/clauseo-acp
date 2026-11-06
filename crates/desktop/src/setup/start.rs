@@ -3,7 +3,10 @@
 //! thread, and the keys, which load from the keychain: so the command's backend is a
 //! [`BackendCell`] that every command waits on (as the bridge waits on the host's cell), filled
 //! by a `clauseo-setup` thread of desktop's own. That thread loads the keys, starts `Agents`
-//! with its two launchers, publishes `setup_info` and each agent's composed sign-in, fills the
+//! with its two launchers and the network route of the settings and the environment
+//! (`network.rs`: `network.upstream_proxy`, else `HTTPS_PROXY`; the OS's proxy, which may
+//! wait on WPAD, comes from the `clauseo-setup-network` thread it starts, through
+//! `Agents::set_network`), publishes `setup_info` and each agent's composed sign-in, fills the
 //! cell, then runs the pump until `Agents` ends.
 //!
 //! The two launchers ([`launchers`]): the sign-in launcher is the host's
@@ -49,6 +52,9 @@ use super::hook::Plans;
 use super::host_calls::SetupHost;
 use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot};
 use super::login_check::ReusedLogins;
+use super::network::{
+    Follower, NetworkRoute, NetworkSlot, OS_FALLBACK, ProxyEnv, follow, os_lookup, resolve,
+};
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::refusal::{follow_keys, settle_after_load, sync_all};
@@ -196,6 +202,17 @@ impl SetupStart {
         self.settings.blocked.clone()
     }
 
+    /// The network route at start: the settings' and the environment's, with no OS lookup
+    /// (that may wait on WPAD; the setup's network thread makes it, `setup/network.rs`).
+    pub(crate) fn network_at_start(&self) -> NetworkRoute {
+        resolve(
+            &self.settings.network,
+            &ProxyEnv::from_process(),
+            false,
+            &|_| None,
+        )
+    }
+
     /// Reads `effective` for the setup thread, bringing the `firm-policy` markers up to date.
     pub(crate) fn read(effective: &Effective, locations: &Locations) -> Self {
         let snapshot = Snapshot::embedded();
@@ -277,6 +294,9 @@ pub(crate) struct HostSide {
     pub(crate) reused: ReusedLogins,
     /// The launch hook's plans snapshot.
     pub(crate) plans: Plans,
+    /// The launch hook's and the readers' network route, from [`SetupStart::network_at_start`]
+    /// until the setup's network thread replaces it.
+    pub(crate) network: NetworkSlot,
     /// Reads the effective settings again, on each `SettingsChanged`.
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
@@ -315,6 +335,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         return;
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    // The settings' and the environment's route; the OS's follows from the network thread.
+    let network = read.network_at_start().agents_network();
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
         .known
@@ -324,7 +346,10 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     config.managed = read.managed;
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;
-    config.install.proxy = env_proxy();
+    config.install.proxy = network.proxy;
+    config.install.signin_proxy = network.signin_proxy;
+    config.install.ca_certs = network.ca_certs;
+    let network_facts = read.settings.network.clone();
     config.clock = Arc::clone(&clock);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
@@ -347,13 +372,23 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             compose.show_key(agent, &keys);
         }
         let firm_policy = facts.firm_policy.clone();
+        let follower = Follower::new(
+            side.network,
+            Arc::clone(&agents),
+            ProxyEnv::from_process,
+            os_lookup,
+            OS_FALLBACK,
+        );
+        let network = follow(follower);
+        network.update(network_facts);
         let wiring = Wiring::new(
             side.readers,
             side.reused,
             side.plans,
             read.settings,
             refused_at_start,
-        );
+        )
+        .with_network(network);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys,
@@ -482,13 +517,4 @@ pub(crate) async fn follow_sign_in_holds(backend: &AgentsBackend) {
     while let Some(agent) = holds.next().await {
         backend.recheck_sign_in(&agent);
     }
-}
-
-/// The install's proxy from the environment: `HTTPS_PROXY`, else `https_proxy`, when set and
-/// not empty. (R17's `network.upstream_proxy` takes its place once it exists.)
-fn env_proxy() -> Option<String> {
-    ["HTTPS_PROXY", "https_proxy"]
-        .into_iter()
-        .filter_map(|name| std::env::var(name).ok())
-        .find(|value| !value.is_empty())
 }

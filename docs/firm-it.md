@@ -448,7 +448,10 @@ Coming:
   `HTTPS_PROXY`, then the OS's proxy settings, but not a PAC file yet, and never Clauseo's egress
   proxy ([decision 0036](decisions/0036-counts.md), "The desktop").
 - `nodejs.org` and `registry.npmjs.org`: Node and the agents' own downloads (task S17), unless
-  `install.bundle` or `install.registry` points at your copy.
+  `install.bundle` or `install.registry` points at your copy. They, the agents' sign-ins and the
+  agents themselves go through `network.upstream_proxy`, else `HTTPS_PROXY`, else the OS's
+  proxy settings, PAC included, and trust the agent's `network.ca_certs` file
+  ([decision 0033](decisions/0033-agents-installs.md), item 4).
 
 ## 8. Claude's personal skills
 

@@ -68,6 +68,7 @@ fn claude_s_read_has_the_home_and_the_key_and_a_hold_survives_an_entry_set() {
         Arc::clone(&launcher) as Arc<dyn Launcher>,
         slot,
         Arc::default(),
+        Arc::default(),
     );
     // No entry yet: no launch.
     assert!(matches!(
@@ -137,13 +138,14 @@ fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
     };
     let plans: crate::setup::hook::Plans =
         Arc::new(std::sync::RwLock::new([(claude.clone(), plan)].into()));
-    let hook = SetupHook::new(Arc::clone(&slot), Arc::clone(&plans));
+    let network: crate::setup::NetworkSlot = Arc::default();
+    let hook = SetupHook::new(Arc::clone(&slot), Arc::clone(&plans), Arc::clone(&network));
     let hooked: Vec<(String, String)> = hook
         .launch_env(&claude)
         .into_iter()
         .map(|(name, value)| (name.into_string().unwrap(), value.into_string().unwrap()))
         .collect();
-    let read: Vec<(String, String)> = read_vars(&slot, &plans, AgentKind::Claude)
+    let read: Vec<(String, String)> = read_vars(&slot, &plans, &network, AgentKind::Claude)
         .into_iter()
         .map(|(name, value)| (name, String::clone(&value)))
         .collect();
@@ -165,6 +167,7 @@ fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
         Arc::clone(&launcher) as Arc<dyn Launcher>,
         slot,
         plans,
+        Arc::default(),
     );
     let entry = AgentLaunch {
         command: if cfg!(windows) {
@@ -219,6 +222,7 @@ fn a_refused_entry_s_warning_names_no_path() {
         Arc::new(Recording::default()) as Arc<dyn Launcher>,
         Arc::new(OnceLock::new()),
         Arc::default(),
+        Arc::default(),
     );
     let entry = AgentLaunch {
         command: if cfg!(windows) {
@@ -272,6 +276,7 @@ fn before_the_keys_load_a_stored_key_agent_s_read_shows_no_account_s_numbers() {
         &effective,
         Arc::clone(&launcher) as Arc<dyn Launcher>,
         Arc::clone(&slot),
+        Arc::default(),
         Arc::default(),
     );
     let entry = AgentLaunch {
@@ -328,6 +333,7 @@ fn a_blocked_agent_with_a_stored_key_never_reads() {
         &effective,
         Arc::clone(&launcher) as Arc<dyn Launcher>,
         slot,
+        Arc::default(),
         Arc::default(),
     )
     .with_blocked(blocked.clone());

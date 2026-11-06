@@ -48,6 +48,7 @@ mod host_calls;
 mod keys;
 mod leave;
 mod login_check;
+mod network;
 mod readers;
 mod refresh;
 mod refusal;
@@ -72,6 +73,7 @@ pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
 pub(crate) use keys::{KeyNotes, KeySlot};
 pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};
+pub(crate) use network::NetworkSlot;
 pub(crate) use readers::{LeaveReaders, SwappableReaders};
 pub(crate) use start::{BackendCell, HostSide, SetupParts, SetupStart, spawn};
 #[cfg(test)]

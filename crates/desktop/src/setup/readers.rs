@@ -5,8 +5,9 @@
 //! - built over the host's launcher, with Clauseo's own homes forced (`CODEX_HOME` and, through
 //!   `ProcessReaders::with_claude_home`, `CLAUDE_CONFIG_DIR`, ruling 6), and at each read the
 //!   variables the launch hook adds (`with_launch_env` over `hook::setup_vars`): the stored key
-//!   from the [`KeySlot`] and the firm plan's routing from the [`Plans`] snapshot (the security
-//!   review's M4), so a read goes where the agent's launches go;
+//!   from the [`KeySlot`], the firm plan's routing from the [`Plans`] snapshot (the security
+//!   review's M4) and the proxy and CA variables from the [`NetworkSlot`], so a read goes where
+//!   the agent's launches go;
 //! - [`SwappableReaders::set_entry`] sets the entry with `ProcessReaders::set_entry` after each
 //!   `EntryWrite::Written`; a read takes its entry once past its gate, so a read queued behind
 //!   a hold reads the entry written before the hold drops (the review's L7);
@@ -36,6 +37,7 @@ use zeroize::Zeroizing;
 
 use super::hook::{Plans, setup_vars};
 use super::keys::KeySlot;
+use super::network::NetworkSlot;
 use crate::dialogs::BoxFuture;
 
 /// One hold on an agent's limits reads; dropping it ends the hold.
@@ -79,13 +81,14 @@ pub(crate) struct SwappableReaders {
 
 impl SwappableReaders {
     /// Readers for `effective`'s entries over `launcher`, with Clauseo's own homes forced and
-    /// each read's variables from `keys` (no key until the setup thread has loaded them) and
-    /// `plans`, as the launch hook makes them.
+    /// each read's variables from `keys` (no key until the setup thread has loaded them),
+    /// `plans` and `network`, as the launch hook makes them.
     pub(crate) fn new(
         effective: &Effective,
         launcher: Arc<dyn Launcher>,
         keys: KeySlot,
         plans: Plans,
+        network: NetworkSlot,
     ) -> Self {
         let locations = effective.locations();
         let readers = ProcessReaders::new(
@@ -96,7 +99,7 @@ impl SwappableReaders {
         )
         .with_claude_home(locations.agent_home(AgentKind::Claude.id()));
         let vars = Arc::clone(&keys);
-        let readers = readers.with_launch_env(move |kind| read_vars(&vars, &plans, kind));
+        let readers = readers.with_launch_env(move |kind| read_vars(&vars, &plans, &network, kind));
         Self {
             readers: Arc::new(readers),
             keys,
@@ -186,12 +189,15 @@ impl LeaveReaders for SwappableReaders {
 pub(crate) fn read_vars(
     keys: &KeySlot,
     plans: &Plans,
+    network: &NetworkSlot,
     kind: AgentKind,
 ) -> Vec<(String, Zeroizing<String>)> {
     let Ok(agent) = AgentId::new(kind.id()) else {
         return Vec::new();
     };
-    setup_vars(keys, plans, &agent, kind).into_iter().collect()
+    setup_vars(keys, plans, network, &agent, kind)
+        .into_iter()
+        .collect()
 }
 
 #[cfg(test)]

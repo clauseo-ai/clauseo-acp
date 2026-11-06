@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use clauseo_agents::{
-    Agents, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    Agents, Found, InstallState, Installed, Method, Network, PasteCode, SigninError, SigninState,
 };
 use clauseo_protocol::AgentId;
 
@@ -45,6 +45,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn install_tries(&self, agent: &AgentId) -> Option<u32>;
     /// `Agents::shutdown`.
     fn shutdown(&self, wait: Duration) -> bool;
+    /// `Agents::set_network`: the proxies and CA files the next install and sign-in take.
+    fn set_network(&self, network: Network);
 }
 
 impl SetupAgents for Agents {
@@ -98,5 +100,8 @@ impl SetupAgents for Agents {
     }
     fn shutdown(&self, wait: Duration) -> bool {
         Agents::shutdown(self, wait)
+    }
+    fn set_network(&self, network: Network) {
+        Agents::set_network(self, network);
     }
 }

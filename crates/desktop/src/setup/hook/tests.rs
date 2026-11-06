@@ -44,7 +44,7 @@ fn the_env_holds_only_the_key_variable_plus_the_plan_variables() {
     keychain.store(&codex, CODEX_KEY).unwrap();
     let slot = Arc::new(OnceLock::new());
     let plans = Arc::new(RwLock::new(BTreeMap::new()));
-    let hook = SetupHook::new(Arc::clone(&slot), Arc::clone(&plans));
+    let hook = SetupHook::new(Arc::clone(&slot), Arc::clone(&plans), Arc::default());
     // Keys not loaded yet, no plan: nothing at all.
     same(&hook.launch_env(&claude), &BTreeMap::new());
     let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude, &codex])));

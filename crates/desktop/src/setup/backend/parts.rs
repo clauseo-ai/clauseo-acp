@@ -1,10 +1,50 @@
 //! Small parts of the backend: first run's decision, the plan login a `StartSignIn` asks for,
-//! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers.
+//! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers; a retry's
+//! check, and the wait for the first network route before a command that reaches the network.
 
 use std::collections::BTreeSet;
 
 use clauseo_agents::{InstallState, Method, SigninError};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand};
+
+use super::AgentsBackend;
+
+/// `RetryAgentInstall`: `command.invalid` unless `agent`'s install is `Failed`, `Waiting` or
+/// `Paused`, since it asks nothing; a missing agent installs through `InstallAgent`'s confirm.
+pub(super) fn retry(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    use_system_proxy: bool,
+) -> Result<(), HostError> {
+    let restartable = matches!(
+        backend.agents.state(agent),
+        Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
+    );
+    if !restartable {
+        return Err(invalid(format!(
+            "{agent}'s install is not failed, waiting or paused; installing asks first"
+        )));
+    }
+    backend.agents.retry(agent, use_system_proxy);
+    Ok(())
+}
+
+/// Before an install, a retry or a sign-in: waits for the first network route to reach
+/// `Agents` (`network/follow.rs`), so the first try goes through the resolved proxy and
+/// never direct first.
+pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupCommand) {
+    let reaches = matches!(
+        command,
+        SetupCommand::InstallAgent { .. }
+            | SetupCommand::RetryAgentInstall { .. }
+            | SetupCommand::StartSignIn { .. }
+            | SetupCommand::UseDeviceCode { .. }
+            | SetupCommand::UseDifferentAccount { .. }
+    );
+    if reaches {
+        backend.wiring.network.ready().await;
+    }
+}
 
 /// Which first install states have come in: first run is decided once every agent has one.
 pub(super) struct FirstRun {
