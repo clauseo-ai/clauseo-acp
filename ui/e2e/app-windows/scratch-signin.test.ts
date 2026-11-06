@@ -4,7 +4,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { fakeSignInVar, makeScratch, removeScratch, scratchEnv } from "./scratch.ts";
+import {
+  FAKE_SIGNIN_HOLD_MS,
+  fakeSignInVar,
+  makeScratch,
+  removeScratch,
+  scratchEnv,
+} from "./scratch.ts";
 
 let base: string;
 
@@ -21,6 +27,9 @@ test("scripted sign-ins reach the app as E2E_FAKE_SIGNIN, and none sets no varia
   const opts = { scenario: null, matterFiles: {}, fakeSignIn: { "claude-acp": "ok" as const } };
   const scratch = makeScratch(opts, () => join(base, "fake_agent.exe"), base);
   expect(scratchEnv(scratch)["E2E_FAKE_SIGNIN"]).toBe("claude-acp=ok");
+  // Waiting lasts long enough for the spec to read it before the sign-in ends
+  expect(scratchEnv(scratch)["E2E_FAKE_SIGNIN_HOLD_MS"]).toBe(String(FAKE_SIGNIN_HOLD_MS));
+  expect(FAKE_SIGNIN_HOLD_MS).toBeGreaterThanOrEqual(5000);
   // installed by the seeding, but signed out: out of `plans`, so its sign-in card shows
   expect(scratchEnv(scratch)["E2E_AGENTS_MANAGED"]).toBe("claude-acp,codex-acp");
   const settings = JSON.parse(readFileSync(join(scratch.dataDir, "settings.json"), "utf8"));
@@ -34,5 +43,6 @@ test("scripted sign-ins reach the app as E2E_FAKE_SIGNIN, and none sets no varia
 test("no scripted sign-in sets no variable", async () => {
   const scratch = makeScratch({ scenario: null, matterFiles: {} }, () => "", base);
   expect(scratchEnv(scratch)).not.toHaveProperty("E2E_FAKE_SIGNIN");
+  expect(scratchEnv(scratch)).not.toHaveProperty("E2E_FAKE_SIGNIN_HOLD_MS");
   await removeScratch(scratch);
 });

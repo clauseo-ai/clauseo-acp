@@ -60,6 +60,12 @@ export interface ScratchOptions {
 /** How a scripted sign-in ends. */
 export type FakeSignIn = "ok" | "fail";
 
+/**
+ * `E2E_FAKE_SIGNIN_HOLD_MS` for a scripted sign-in: how long `Waiting` lasts. The app's default
+ * is 1.5 s, too short for a spec to read Waiting before the sign-in ends; 5 s cannot race.
+ */
+export const FAKE_SIGNIN_HOLD_MS = 5000;
+
 /** `E2E_FAKE_SIGNIN`'s value for `scripts`: `<agent>=<script>`, comma-separated. */
 export function fakeSignInVar(scripts: Readonly<Record<string, FakeSignIn>>): string {
   return Object.entries(scripts)
@@ -426,7 +432,12 @@ export function scratchEnv(scratch: Scratch): Record<string, string> {
     E2E_MATTER_DIR: scratch.matterDir,
     E2E_CONFIRM_ALWAYS: "accept",
     E2E_AGENTS_MANAGED: scratch.setUp.join(","),
-    ...(scratch.fakeSignIn ? { E2E_FAKE_SIGNIN: scratch.fakeSignIn } : {}),
+    ...(scratch.fakeSignIn
+      ? {
+          E2E_FAKE_SIGNIN: scratch.fakeSignIn,
+          E2E_FAKE_SIGNIN_HOLD_MS: String(FAKE_SIGNIN_HOLD_MS),
+        }
+      : {}),
   };
 }
 

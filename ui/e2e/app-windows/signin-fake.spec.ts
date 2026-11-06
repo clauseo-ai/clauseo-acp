@@ -22,7 +22,10 @@ test.describe("a scripted sign-in that succeeds", () => {
     const state = app.page.getByTestId("signin-state");
     await expect(gate).toHaveAttribute("data-agent", "claude");
     await expect(state).toHaveAttribute("data-state", "signed-out");
-    await gate.getByRole("button", { name: "Sign in", exact: true }).click();
+    const signIn = gate.getByRole("button", { name: "Sign in", exact: true });
+    await expect(signIn).toBeVisible();
+    await expect(signIn).toBeEnabled();
+    await signIn.click();
     await expect(state).toHaveAttribute("data-state", "waiting");
     await expect(app.page.getByTestId("signin-done")).toContainText("e2e@example.invalid");
     await expect(gate).toHaveCount(0);
@@ -37,7 +40,13 @@ test.describe("a scripted sign-in that fails", () => {
     await openMatter(w);
     const gate = app.page.getByTestId("signin");
     const state = app.page.getByTestId("signin-state");
-    await gate.getByRole("button", { name: "Sign in", exact: true }).click();
+    // the starting state: the sign-in card is up, signed out, before Sign in is pressed
+    await expect(gate).toHaveAttribute("data-agent", "claude");
+    await expect(state).toHaveAttribute("data-state", "signed-out");
+    const signIn = gate.getByRole("button", { name: "Sign in", exact: true });
+    await expect(signIn).toBeVisible();
+    await expect(signIn).toBeEnabled();
+    await signIn.click();
     await expect(state).toHaveAttribute("data-state", "waiting");
     await expect(state).toHaveAttribute("data-state", "signin.failed");
   });
