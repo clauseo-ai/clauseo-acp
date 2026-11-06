@@ -395,8 +395,8 @@ impl Ledger {
     }
 
     /// Whether any entry names `sid`, in any state, as last read: a trusted entry whose SID it
-    /// is, or a kept one holding it as any string value. The pool-user reuse check (S15 `PR4c`,
-    /// R14) refuses a pool user while this returns true.
+    /// is, or a kept entry or kept hand-back holding it as any string value. The pool-user reuse
+    /// check (S15 `PR4c`, R14) refuses a pool user while this returns true.
     pub fn names_sid(&self, sid: &Sid) -> bool {
         self.state.names_sid(sid)
     }

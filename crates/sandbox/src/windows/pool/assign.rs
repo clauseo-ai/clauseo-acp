@@ -4,15 +4,19 @@
 //! - no matter in `matters.json` holds it ([`MatterRow::holds`]);
 //! - no hand-back is owed for it ([`Ledger::handback_owed`], a kept owed entry included);
 //! - no ledger entry names it, in any state ([`Ledger::names_sid`], a kept entry included);
-//! - no matter that held it has an open session ([`OpenSessions`]).
+//! - it owns no item set aside and still on disk ([`SetAsideOwners`]): a moved item keeps its
+//!   owner, who has the implied `WRITE_DAC` on it;
+//! - no matter that held it, now or before ([`MatterRow::held_before`]), has an open session
+//!   ([`OpenSessions`]).
 //!
 //! So a pool user is never shared between live sessions of different matters (D-B5); two
 //! sessions of one matter share its user. Among the free users, one never used goes first, in
 //! pool order, then the one released longest ago. With none free, [`Assign::PoolFull`] names each
 //! user and why it is held back, which PR6 turns into tier C with its cause.
 //!
-//! Pure: the decision reads the rows, the ledger as last read and the open sessions given.
-//! `MatterSids::assign` makes it under `matters.lock` and saves the result.
+//! Pure: the decision reads the rows, the ledger, the set-aside owners and the open sessions
+//! given. `MatterSids::assign` reads the rows, the ledger and the set-aside owners inside
+//! `matters.lock`, makes the decision there and saves the result.
 
 use std::collections::BTreeSet;
 
@@ -26,6 +30,11 @@ use crate::windows::sids::Sid;
 /// The matters with an open session: a session launched whose after-session pass hasn't run,
 /// running or ended without one. That is the set-aside record's open-sessions set, which
 /// `clean_close` reads per matter through `set_aside::under_lock`; the caller gathers it.
+///
+/// The caller's read can be stale, so it isn't the only guard: `MatterSids::release` refuses
+/// while the matter has an open session, read under its set-aside lock inside `matters.lock`.
+/// So a matter that holds a user keeps it (`Held`) for as long as any session of it is open,
+/// and a released matter launched again gets a fresh pick, never its old user by default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpenSessions {
     matters: BTreeSet<MatterId>,
@@ -56,10 +65,65 @@ pub enum Why {
     Open,
     /// This matter holds it.
     Held(MatterId),
+    /// It owns an item set aside and still on disk, or a set-aside manifest that might name it
+    /// can't be read.
+    SetAside,
+}
+
+/// The owners of the items set aside and still on disk, from every matter's manifest; or all
+/// users, when a manifest or an owner can't be read (failing closed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SetAsideOwners {
+    /// Each owner's SID, upper-cased.
+    owners: BTreeSet<String>,
+    /// Every user is held: something that might name any of them can't be read.
+    all: bool,
+}
+
+impl SetAsideOwners {
+    /// Every user held.
+    pub fn all() -> SetAsideOwners {
+        SetAsideOwners {
+            owners: BTreeSet::new(),
+            all: true,
+        }
+    }
+
+    /// The owners `owners` (SID strings), and no others.
+    pub fn new<S: AsRef<str>>(owners: impl IntoIterator<Item = S>) -> SetAsideOwners {
+        SetAsideOwners {
+            owners: owners
+                .into_iter()
+                .map(|o| o.as_ref().to_ascii_uppercase())
+                .collect(),
+            all: false,
+        }
+    }
+
+    /// Adds a manifest entry's `owner` field: a string is that owner; missing or null (the
+    /// owner couldn't be read at the move) holds every user. False for any other value.
+    pub(crate) fn add(&mut self, owner: Option<&serde_json::Value>) -> bool {
+        match owner {
+            Some(serde_json::Value::String(sid)) => {
+                self.owners.insert(sid.to_ascii_uppercase());
+                true
+            }
+            None | Some(serde_json::Value::Null) => {
+                self.all = true;
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// Whether `user` is held: it owns an item, or every user is.
+    pub fn holds(&self, user: &Sid) -> bool {
+        self.all || self.owners.contains(&user.as_str().to_ascii_uppercase())
+    }
 }
 
 /// A pool user held back, and why: the first reason found, checked in the order `Held`, `Owed`,
-/// `Entries`, `Open`.
+/// `Entries`, `SetAside`, `Open`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldBack {
     /// The pool user's SID.
@@ -79,7 +143,8 @@ pub enum Assign {
         /// Each user and why it is held back.
         held_back: Vec<HeldBack>,
     },
-    /// `matters.json` couldn't be read, checked or saved, or names a user not in the pool.
+    /// `matters.json` or the ACL ledger couldn't be read, checked or saved, or the matter holds a
+    /// user not in the pool.
     #[error(transparent)]
     Records(#[from] SetupError),
 }
@@ -93,14 +158,15 @@ pub(crate) enum Pick {
     New(Sid),
 }
 
-/// The pool user `matter` gets from `pool`, given every matter's row, the ledger as last read and
-/// the matters with an open session, by the rules in this module's doc. A matter that holds a
-/// user not in `pool` is refused with [`Assign::Records`]: the machine record lost it.
+/// The pool user `matter` gets from `pool`, given every matter's row, the ledger, the set-aside
+/// owners and the matters with an open session, by the rules in this module's doc. A matter that
+/// holds a user not in `pool` is refused with [`Assign::Records`]: the machine record lost it.
 pub(crate) fn decide(
     matter: &MatterId,
     rows: &Rows,
     pool: &[Sid],
     ledger: &Ledger,
+    set_aside: &SetAsideOwners,
     open: &OpenSessions,
 ) -> Result<Pick, Assign> {
     if let Some(user) = rows.get(matter).and_then(MatterRow::holds) {
@@ -118,7 +184,7 @@ pub(crate) fn decide(
         if !seen.insert(user) {
             continue;
         }
-        match held_back_why(user, rows, ledger, open) {
+        match held_back_why(user, rows, ledger, set_aside, open) {
             Some(why) => held_back.push(HeldBack {
                 pool: user.clone(),
                 why,
@@ -140,7 +206,13 @@ pub(crate) fn decide(
 }
 
 /// Why `user` can't go to another matter, or `None` when it may.
-fn held_back_why(user: &Sid, rows: &Rows, ledger: &Ledger, open: &OpenSessions) -> Option<Why> {
+fn held_back_why(
+    user: &Sid,
+    rows: &Rows,
+    ledger: &Ledger,
+    set_aside: &SetAsideOwners,
+    open: &OpenSessions,
+) -> Option<Why> {
     if let Some((holder, _)) = rows.iter().find(|(_, row)| row.holds() == Some(user)) {
         return Some(Why::Held(*holder));
     }
@@ -150,17 +222,26 @@ fn held_back_why(user: &Sid, rows: &Rows, ledger: &Ledger, open: &OpenSessions) 
     if ledger.names_sid(user) {
         return Some(Why::Entries);
     }
+    if set_aside.holds(user) {
+        return Some(Why::SetAside);
+    }
     let held_by_open = rows
         .iter()
-        .any(|(matter, row)| row.pool_user.as_ref() == Some(user) && open.is_open(matter));
+        .any(|(matter, row)| row.named(user) && open.is_open(matter));
     held_by_open.then_some(Why::Open)
 }
 
-/// When `user` was last released, or `None` when no row names it: never used.
+/// When `user` was last released, or `None` when no row names it: never used. A user only in
+/// rows' `held_before` counts as released at 0, as its time isn't kept.
 fn last_released(user: &Sid, rows: &Rows) -> Option<u64> {
     rows.values()
-        .filter(|row| row.pool_user.as_ref() == Some(user))
-        .filter_map(|row| row.released_at)
+        .filter_map(|row| {
+            if row.pool_user.as_ref() == Some(user) {
+                row.released_at
+            } else {
+                row.held_before.contains(user).then_some(0)
+            }
+        })
         .max()
 }
 
@@ -186,6 +267,7 @@ mod tests {
             sid: None,
             pool_user: Some(user),
             released_at: Some(at),
+            held_before: Vec::new(),
         }
     }
 
@@ -205,15 +287,39 @@ mod tests {
         rows.insert(matter(3), released(sid(1003), 200));
         // 1004 is never used, so it goes first though it is last in the pool.
         let new = matter(9);
-        let pick = decide(&new, &rows, &pool, &ledger, &open).unwrap();
+        let pick = decide(
+            &new,
+            &rows,
+            &pool,
+            &ledger,
+            &SetAsideOwners::default(),
+            &open,
+        )
+        .unwrap();
         assert_eq!(pick, Pick::New(sid(1004)));
         rows.insert(matter(4), released(sid(1004), 400));
         // Then the one released longest ago, whatever its place in the pool.
-        let pick = decide(&new, &rows, &pool, &ledger, &open).unwrap();
+        let pick = decide(
+            &new,
+            &rows,
+            &pool,
+            &ledger,
+            &SetAsideOwners::default(),
+            &open,
+        )
+        .unwrap();
         assert_eq!(pick, Pick::New(sid(1002)));
         // A later row for 1002 counts: its last release is what matters.
         rows.insert(matter(5), released(sid(1002), 500));
-        let pick = decide(&new, &rows, &pool, &ledger, &open).unwrap();
+        let pick = decide(
+            &new,
+            &rows,
+            &pool,
+            &ledger,
+            &SetAsideOwners::default(),
+            &open,
+        )
+        .unwrap();
         assert_eq!(pick, Pick::New(sid(1003)));
     }
 
@@ -224,13 +330,29 @@ mod tests {
         let open = OpenSessions::default();
         let pool = [sid(1003), sid(1001), sid(1002)];
         let rows = Rows::new();
-        let pick = decide(&matter(9), &rows, &pool, &ledger, &open).unwrap();
+        let pick = decide(
+            &matter(9),
+            &rows,
+            &pool,
+            &ledger,
+            &SetAsideOwners::default(),
+            &open,
+        )
+        .unwrap();
         assert_eq!(pick, Pick::New(sid(1003)));
         let mut rows = Rows::new();
         rows.insert(matter(1), released(sid(1001), 50));
         rows.insert(matter(2), released(sid(1002), 50));
         rows.insert(matter(3), released(sid(1003), 60));
-        let pick = decide(&matter(9), &rows, &pool, &ledger, &open).unwrap();
+        let pick = decide(
+            &matter(9),
+            &rows,
+            &pool,
+            &ledger,
+            &SetAsideOwners::default(),
+            &open,
+        )
+        .unwrap();
         assert_eq!(pick, Pick::New(sid(1001)));
     }
 
@@ -245,6 +367,7 @@ mod tests {
                 sid: None,
                 pool_user: Some(sid(1009)),
                 released_at: None,
+                held_before: Vec::new(),
             },
         );
         let got = decide(
@@ -252,6 +375,7 @@ mod tests {
             &rows,
             &[sid(1001)],
             &ledger,
+            &SetAsideOwners::default(),
             &OpenSessions::default(),
         );
         assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
@@ -266,6 +390,7 @@ mod tests {
             &Rows::new(),
             &[],
             &ledger,
+            &SetAsideOwners::default(),
             &OpenSessions::default(),
         );
         let full = Assign::PoolFull {

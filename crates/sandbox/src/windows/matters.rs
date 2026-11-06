@@ -29,6 +29,7 @@ use super::write;
 use crate::SetupError;
 
 mod file;
+mod set_aside;
 
 pub use file::{MatterRow, Rows};
 
@@ -42,6 +43,7 @@ pub const MATTERS_LOCK: &str = "matters.lock";
 /// The matters of one data folder: their SIDs and pool users.
 #[derive(Debug)]
 pub struct MatterSids {
+    data_dir: PathBuf,
     folder: PathBuf,
     reserved: Reserved,
     rows: Rows,
@@ -76,6 +78,7 @@ impl MatterSids {
         let folder = data_dir.join(SANDBOX_DIR);
         let rows = file::read(&folder.join(MATTERS_FILE), &reserved)?;
         Ok(MatterSids {
+            data_dir: data_dir.to_owned(),
             folder,
             reserved,
             rows,
@@ -142,44 +145,65 @@ impl MatterSids {
     }
 
     /// The pool user of `matter`, from `pool` (the machine record's `PoolSids`). Inside
-    /// [`MatterSids::change`]'s lock and fresh read. A matter that holds one keeps it, and
-    /// nothing is written. Otherwise the user [`pool::assign`](super::pool::assign) picks, by
-    /// its reuse rule against `ledger` (as last read: open it fresh) and `open`, is saved in
-    /// the matter's row before it is returned; if the save fails, the matter holds none. A
-    /// released matter asking again gets a fresh pick. No free user is [`Assign::PoolFull`].
+    /// [`MatterSids::change`]'s lock and fresh read, where `ledger` is called to read the ACL
+    /// ledger and the set-aside manifests are read (`set_aside.rs`), so an entry, hand-back or
+    /// item recorded before the lock was taken is seen. A matter that holds one keeps it, and
+    /// nothing is written. Otherwise the user [`pool::assign`](super::pool::assign) picks, by its
+    /// reuse rule, is saved in the matter's row before it is returned; if the save fails, the
+    /// matter holds none. A released matter asking again gets a fresh pick, and its old user goes
+    /// to `held_before`. No free user is [`Assign::PoolFull`]. `open` is the caller's read;
+    /// see [`OpenSessions`] for why a stale one is safe.
     pub fn assign(
         &mut self,
         matter: &MatterId,
         pool: &[Sid],
-        ledger: &Ledger,
+        ledger: impl FnOnce() -> io::Result<Ledger>,
         open: &OpenSessions,
     ) -> Result<Sid, Assign> {
-        self.change(
-            |rows, _| match assign::decide(matter, rows, pool, ledger, open)? {
+        let data_dir = self.data_dir.clone();
+        self.change(|rows, _| {
+            let ledger =
+                ledger().map_err(|error| SetupError::Failed(format!("the ACL ledger: {error}")))?;
+            let set_aside = set_aside::set_aside_owners(&data_dir);
+            match assign::decide(matter, rows, pool, &ledger, &set_aside, open)? {
                 Pick::Kept(user) => Ok((user, false)),
                 Pick::New(user) => {
                     let row = rows.entry(*matter).or_default();
+                    if let Some(old) = row.pool_user.take()
+                        && !row.held_before.contains(&old)
+                    {
+                        row.held_before.push(old);
+                    }
                     row.pool_user = Some(user.clone());
                     row.released_at = None;
                     Ok((user, true))
                 }
-            },
-        )
+            }
+        })
     }
 
     /// Gives back `matter`'s pool user, after a full forget (`forget_matter` with no hand-back
     /// left owed): its row keeps the user, with `now` (whole seconds since the Unix epoch; 0
     /// for a time before it) as `released_at`. Inside [`MatterSids::change`]'s lock and fresh
-    /// read. Whether a user was released: a matter with none, or released already, is left as
-    /// it is.
+    /// read. Refused while a session of the matter is open, read under the matter's set-aside
+    /// lock (`set_aside::under_lock`, an unreadable record counting as open), so a user is
+    /// never released from under a live session. The lock order is `matters.lock`, then a
+    /// set-aside lock, never the reverse. Whether a user was released: a matter with none, or
+    /// released already, is left as it is.
     pub fn release(&mut self, matter: &MatterId, now: SystemTime) -> Result<bool, SetupError> {
         let at = now
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| since.as_secs());
+        let data_dir = self.data_dir.clone();
         self.change(|rows, _| {
             let Some(row) = rows.get_mut(matter).filter(|row| row.holds().is_some()) else {
                 return Ok((false, false));
             };
+            if session_open(&data_dir, matter)? {
+                return Err(SetupError::Failed(format!(
+                    "{matter} has an open session; its sandbox user is kept"
+                )));
+            }
             row.released_at = Some(at);
             Ok((true, true))
         })
@@ -222,6 +246,22 @@ impl MatterSids {
         }
         Ok(value)
     }
+}
+
+/// Whether a session of `matter` is open, read under its set-aside lock; an unreadable record
+/// counts as open.
+#[cfg(any(windows, test))]
+fn session_open(data_dir: &Path, matter: &MatterId) -> Result<bool, SetupError> {
+    super::set_aside::under_lock(data_dir, matter, |open| open)
+        .map_err(|error| SetupError::Failed(format!("{matter}'s set-aside lock: {error}")))
+}
+
+/// Off Windows, outside the tests, there are no set-aside records: refused, failing closed.
+#[cfg(not(any(windows, test)))]
+fn session_open(_data_dir: &Path, matter: &MatterId) -> Result<bool, SetupError> {
+    Err(SetupError::Failed(format!(
+        "{matter}: no set-aside record on this OS"
+    )))
 }
 
 #[cfg(test)]

@@ -101,14 +101,18 @@ impl State {
         })
     }
 
-    /// Whether an entry names `sid`: a trusted one whose SID it is, or a kept one holding it as
-    /// any string value at any depth, compared without ASCII case, since a kept entry's shape is
-    /// unknown.
+    /// Whether an entry names `sid`: a trusted one whose SID it is, or a kept entry or kept
+    /// hand-back holding it as any string value at any depth, compared without ASCII case,
+    /// since a kept item's shape is unknown.
     pub(super) fn names_sid(&self, sid: &Sid) -> bool {
-        self.slots.iter().any(|slot| match slot {
+        let in_entries = self.slots.iter().any(|slot| match slot {
             Slot::Known(known) => known.entry.sid == *sid,
             Slot::SetAside(value) => holds_text(value, sid.as_str()),
-        })
+        });
+        in_entries
+            || self.handbacks.iter().any(
+                |slot| matches!(slot, OwedSlot::SetAside(value) if holds_text(value, sid.as_str())),
+            )
     }
 
     /// The hand-backs owed this version reads and trusts.
