@@ -27,7 +27,7 @@ use clauseo_settings::{Effective, Plan, PlanProvider};
 use serde_json::{Map, Value};
 use zeroize::Zeroizing;
 
-use super::keys::KeySlot;
+use super::keys::{KeyCache, KeySlot};
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
@@ -83,6 +83,17 @@ pub(crate) fn setup_vars(
     agent: &AgentId,
     kind: AgentKind,
 ) -> BTreeMap<String, Zeroizing<String>> {
+    setup_vars_with(keys.get().map(Arc::as_ref), plans, agent, kind)
+}
+
+/// [`setup_vars`] over `keys` itself (none while they load): the identity check's
+/// exemption reads the launch env through this (`setup/identity/check.rs`).
+pub(crate) fn setup_vars_with(
+    keys: Option<&KeyCache>,
+    plans: &Plans,
+    agent: &AgentId,
+    kind: AgentKind,
+) -> BTreeMap<String, Zeroizing<String>> {
     let mut vars = BTreeMap::new();
     let plan = plans
         .read()
@@ -92,11 +103,30 @@ pub(crate) fn setup_vars(
     if let Some(plan) = plan {
         plan_env(kind, &plan, &mut vars);
     }
-    let key = keys.get().and_then(|keys| keys.get(agent));
+    let key = keys.and_then(|keys| keys.get(agent));
     if let Some(key) = key.filter(|key| !key.is_empty()) {
         vars.insert(key_var(kind).to_owned(), key);
     }
     vars
+}
+
+/// The provider switches that send Claude to a cloud provider's own credentials (AWS, Google
+/// Cloud, Azure), never to the OAuth login in Claude's store.
+const PROVIDER_VARS: [&str; 3] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+/// Whether the launch env `vars` ([`setup_vars`]) carries a credential that replaces the shared
+/// login for `kind` (R17, the security review's H3): the API key variable the hook sets, or,
+/// for Claude, a provider switch, which reads no OAuth file. An endpoint alone
+/// (`ANTHROPIC_BASE_URL`, or a Codex endpoint, which adds no variable) still launches on the
+/// shared login, so it is not one.
+pub(crate) fn replaces_login(kind: AgentKind, vars: &BTreeMap<String, Zeroizing<String>>) -> bool {
+    let set = |name: &str| vars.get(name).is_some_and(|value| !value.is_empty());
+    let provider = kind == AgentKind::Claude && PROVIDER_VARS.iter().any(|name| set(name));
+    set(key_var(kind)) || provider
 }
 
 /// The variable `kind`'s key goes in.

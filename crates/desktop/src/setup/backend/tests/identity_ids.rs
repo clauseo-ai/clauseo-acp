@@ -7,9 +7,9 @@ use clauseo_agents::{AccountHash, AccountRead, SigninState, Source};
 use clauseo_protocol::{AgentId, ErrorCode};
 
 use super::fakes::HostCall;
-use super::identity::{IdRig, signed_in};
+use super::identity::{IdRig, signed_in, stop};
 use super::{claude, codex};
-use crate::setup::identity::{Seen, Verdict, check, on_state};
+use crate::setup::identity::{self, Seen, Verdict, check, on_state};
 use crate::setup::refusal::wanted;
 use crate::test_support::block_on;
 
@@ -36,10 +36,7 @@ fn status(id: &IdRig, agent: &AgentId, state: SigninState) {
 }
 
 fn stopped(id: &IdRig, agent: &AgentId) -> bool {
-    id.rig
-        .host
-        .calls()
-        .contains(&HostCall::StopAgents(agent.clone()))
+    id.rig.host.calls().contains(&stop(agent))
 }
 
 #[test]
@@ -49,7 +46,7 @@ fn an_id_only_status_names_the_account_same_then_changed() {
     let mut asks = backend.wiring.identity.take_asks().unwrap();
     // A sign-in through Clauseo whose `SignedIn` names no email: nothing is recorded yet, and
     // a check is asked for, whose status names the account by its id.
-    backend.wiring.identity.expect(&agent);
+    identity::expect(backend, &agent);
     assert_eq!(
         block_on(on_state(backend, &agent, &no_email())),
         Seen::SignedIn
@@ -97,6 +94,8 @@ fn a_key_login_is_not_checked_and_is_checked_again_once_the_key_goes() {
     id.scratch.file("homes/codex-acp/auth.json", b"{}");
     // The key is what launches use: no refusal, no status run, whatever the login does.
     assert_eq!(wanted(backend, &agent), None);
+    // The startup looks (Claude's status names no account).
+    id.settle_start();
     id.look(0);
     assert_eq!(backend.wiring.identity.verdict(&agent), Verdict::KeyLogin);
     id.replace_codex_login("swapped");
@@ -144,7 +143,7 @@ fn no_email_and_no_id_without_a_key_is_unknown() {
     );
     assert!(!stopped(&id, &agent), "refused, retryable; nothing stopped");
     // A sign-in through Clauseo with neither is unknown too, never the old account's.
-    backend.wiring.identity.expect(&agent);
+    identity::expect(backend, &agent);
     block_on(on_state(backend, &agent, &no_email()));
     assert_eq!(backend.wiring.identity.recorded(&agent), None);
     assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);

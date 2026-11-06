@@ -11,7 +11,7 @@ use clauseo_agents::{
     AccountFuture, AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError,
     SigninState,
 };
-use clauseo_host::{AgentsStopped, LoginSplits};
+use clauseo_host::{AgentsStopped, LoginSplits, StopFor};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
@@ -37,7 +37,10 @@ use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod calls;
 mod small;
+
+pub(super) use self::calls::HostCall;
 
 pub(super) use self::small::{FakeAccounts, FakeConfirm, FakeCounts, FakeOpener};
 
@@ -213,38 +216,6 @@ impl LeaveReaders for FakeReaders {
     }
 }
 
-/// One host call as `RecordingHost` saw it.
-#[derive(Clone, PartialEq, Eq)]
-pub(super) enum HostCall {
-    SetAgentLaunch(AgentId, AgentLaunch),
-    SetEndpoint(AgentId, Option<String>),
-    RestartAgents(AgentId),
-    StopAgents(AgentId),
-    SetReusedLogin(AgentId, bool),
-    RemoveLoginLinks(AgentId),
-    LoginChanged(AgentId),
-    SetLaunchRefused(AgentId, Option<ErrorCode>),
-}
-
-impl std::fmt::Debug for HostCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SetAgentLaunch(agent, launch) => {
-                write!(f, "set_agent_launch({agent}, {launch:?})")
-            }
-            Self::SetEndpoint(agent, url) => write!(f, "set_endpoint({agent}, {url:?})"),
-            Self::RestartAgents(agent) => write!(f, "restart_agents({agent})"),
-            Self::StopAgents(agent) => write!(f, "stop_agents({agent})"),
-            Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
-            Self::RemoveLoginLinks(agent) => write!(f, "remove_login_links({agent})"),
-            Self::LoginChanged(agent) => write!(f, "login_changed({agent})"),
-            Self::SetLaunchRefused(agent, code) => {
-                write!(f, "set_launch_refused({agent}, {code:?})")
-            }
-        }
-    }
-}
-
 /// The host's Rust-only calls, recorded in order, each answered `Ok`; `stop_agents` answers
 /// `stopped` (`Exited` unless a test sets `TimedOut`), and the next `restart_fails`
 /// `restart_agents` calls answer `internal`.
@@ -253,6 +224,8 @@ pub(super) struct RecordingHost {
     pub(super) journal: Journal,
     pub(super) stopped: Mutex<AgentsStopped>,
     pub(super) restart_fails: Mutex<usize>,
+    /// The next `set_launch_refused` calls that answer `internal` (recorded all the same).
+    pub(super) refused_fails: Mutex<usize>,
     /// The next `stop_agents` panics, once a test sets it.
     pub(super) stop_panics: Mutex<bool>,
     /// The next `stop_agents` answers once this opens, when a test sets it.
@@ -270,6 +243,7 @@ impl RecordingHost {
             journal,
             stopped: Mutex::new(AgentsStopped::Exited),
             restart_fails: Mutex::new(0),
+            refused_fails: Mutex::new(0),
             stop_panics: Mutex::new(false),
             stop_gate: Mutex::new(None),
             changes: Mutex::new(None),
@@ -337,6 +311,15 @@ impl SetupHost for RecordingHost {
             Ok(stopped)
         })
     }
+    fn stop_agents_for(
+        &self,
+        agent: AgentId,
+        why: StopFor,
+    ) -> BoxFuture<'_, Result<AgentsStopped, HostError>> {
+        self.push(HostCall::StopAgentsFor(agent, why));
+        let stopped = *lock(&self.stopped);
+        Box::pin(std::future::ready(Ok(stopped)))
+    }
     fn set_reused_login(
         &self,
         agent: AgentId,
@@ -355,6 +338,17 @@ impl SetupHost for RecordingHost {
         agent: AgentId,
         code: Option<ErrorCode>,
     ) -> BoxFuture<'_, Result<(), HostError>> {
+        let failing = {
+            let mut fails = lock(&self.refused_fails);
+            let failing = *fails > 0;
+            *fails = fails.saturating_sub(1);
+            failing
+        };
+        if failing {
+            self.push(HostCall::SetLaunchRefused(agent, code));
+            let error = HostError::new(ErrorCode::Internal, "the refusal was not set");
+            return Box::pin(std::future::ready(Err(error)));
+        }
         self.record(HostCall::SetLaunchRefused(agent, code))
     }
     fn login_splits(&self) -> BoxFuture<'_, Result<LoginSplits, HostError>> {
@@ -572,6 +566,13 @@ impl Rig {
     /// The journal so far, and cleared.
     pub(super) fn journal(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.journal))
+    }
+
+    /// Forgets every call made so far: the host's, the fake `Agents`', and the journal.
+    pub(super) fn forget_calls(&self) {
+        lock(&self.host.calls).clear();
+        lock(&self.agents.calls).clear();
+        lock(&self.journal).clear();
     }
 }
 

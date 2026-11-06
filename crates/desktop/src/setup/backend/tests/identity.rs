@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{AccountHash, AccountRead, SigninState, Source};
+use clauseo_host::StopFor;
 use clauseo_protocol::{AgentId, ErrorCode, SignIn};
 use clauseo_settings::SystemFiles;
 
@@ -18,7 +19,7 @@ use super::switching::shown;
 use super::{claude, codex};
 use crate::bridge::lock;
 use crate::setup::identity::{
-    Identities, KEYCHAIN_STALE, Seen, Verdict, check, on_state, poll_once,
+    self, Identities, KEYCHAIN_STALE, Seen, Verdict, check, on_state, poll_once,
 };
 use crate::setup::keys::{KeyNote, KeyNotes};
 use crate::setup::login_check::LOGIN_FILE;
@@ -51,14 +52,33 @@ impl IdRig {
     /// [`IdRig::new`], its identity check changed by `with` (the Keychain fallback, say), the
     /// record as `scratch` holds it then.
     pub(super) fn with(test: &str, with: impl FnOnce(Identities) -> Identities) -> Self {
+        let id = Self::over(Self::scratch(test), with);
+        id.settle_start();
+        id
+    }
+
+    /// A scratch folder with the agents' homes, the data folder and the lawyer's home.
+    pub(super) fn scratch(test: &str) -> Scratch {
         let dirs = [
             "homes/claude-acp",
             "homes/codex-acp",
             "data/agents",
             "lawyer",
         ];
-        let scratch = Scratch::folder(test, &dirs);
-        Self::over(scratch, with)
+        Scratch::folder(test, &dirs)
+    }
+
+    /// Every agent's startup check, as a first run with nothing signed in answers it (no
+    /// account): both idle, nothing recorded. The calls they made are forgotten, and the
+    /// reads answer nothing set again.
+    pub(super) fn settle_start(&self) {
+        let rig = &self.rig;
+        for agent in [claude(), codex()] {
+            rig.agents.accounts.answers(&agent, AccountRead::NoAccount);
+        }
+        self.look(0);
+        rig.agents.accounts.clear();
+        rig.forget_calls();
     }
 
     /// The rig over `scratch` as it is: a start of the app after an earlier one.
@@ -97,7 +117,7 @@ impl IdRig {
     /// the identity first (it records), then the composer.
     pub(super) fn signs_in(&self, agent: &AgentId, email: &str) -> Seen {
         let backend = &self.rig.backend;
-        backend.wiring.identity.expect(agent);
+        identity::expect(backend, agent);
         let state = signed_in(email, Source::Own);
         let seen = block_on(on_state(backend, agent, &state));
         backend.compose.signin(agent, state);
@@ -131,11 +151,16 @@ fn replace(from: &Path, to: &Path) {
     std::fs::rename(from, to).unwrap();
 }
 
-fn refused(agent: &AgentId, code: Option<ErrorCode>) -> HostCall {
+pub(super) fn refused(agent: &AgentId, code: Option<ErrorCode>) -> HostCall {
     HostCall::SetLaunchRefused(agent.clone(), code)
 }
 
-fn account_changed(sign_in: Option<&SignIn>) -> bool {
+/// The host call an account change stops `agent`'s agents with.
+pub(super) fn stop(agent: &AgentId) -> HostCall {
+    HostCall::StopAgentsFor(agent.clone(), StopFor::SignInAgain)
+}
+
+pub(super) fn account_changed(sign_in: Option<&SignIn>) -> bool {
     matches!(
         sign_in,
         Some(SignIn::Failed {
@@ -169,7 +194,7 @@ fn a_swap_while_sessions_run_stops_the_agents_and_says_sign_in_again() {
             "host.set_launch_refused",
             "agents.read_account",
             "host.set_launch_refused",
-            "host.stop_agents",
+            "host.stop_agents_for",
         ],
         "checking first, then the read; the refusal before the stop, so nothing launches between"
     );
@@ -179,7 +204,7 @@ fn a_swap_while_sessions_run_stops_the_agents_and_says_sign_in_again() {
         [
             refused(&agent, Some(ErrorCode::AgentIdentityChecking)),
             refused(&agent, Some(ErrorCode::SigninAccountChanged)),
-            HostCall::StopAgents(agent.clone()),
+            stop(&agent),
         ]
     );
     assert!(account_changed(shown(rig, &agent).as_ref()));
@@ -210,10 +235,7 @@ fn a_status_check_naming_another_account_is_a_change_never_a_new_sign_in() {
         rig.s18_sends(&agent, signed_in(OTHER, Source::Own));
     });
     let calls = rig.host.calls();
-    assert!(
-        calls.contains(&HostCall::StopAgents(agent.clone())),
-        "{calls:?}"
-    );
+    assert!(calls.contains(&stop(&agent)), "{calls:?}");
     assert!(
         !calls.contains(&HostCall::RestartAgents(agent.clone())),
         "{calls:?}"
@@ -292,11 +314,7 @@ fn a_status_that_fails_or_names_no_account_is_unknown_and_checked_again_later() 
             .calls()
             .contains(&refused(&agent, Some(ErrorCode::AgentIdentityUnknown)))
     );
-    assert!(
-        !rig.host
-            .calls()
-            .contains(&HostCall::StopAgents(agent.clone()))
-    );
+    assert!(!rig.host.calls().contains(&stop(&agent)));
     // Checked again by itself once `UNKNOWN_AGAIN` has passed, and lifted when it answers.
     rig.agents.accounts.names(&agent, ONE);
     id.look(0);
@@ -387,12 +405,12 @@ fn the_launch_retry_reads_the_key_for_key_unreadable_and_asks_the_check_for_iden
             KeyNote::Retry(claude(), ErrorCode::SigninPolicyUnreadable),
         ]
     );
-    let (feed, notes_in) = futures::channel::mpsc::unbounded();
+    let (feed, mut notes_in) = futures::channel::mpsc::unbounded();
     for note in sent {
         feed.unbounded_send(note).unwrap();
     }
     drop(feed);
-    block_on(follow_keys(backend, notes_in));
+    block_on(follow_keys(backend, &mut notes_in));
     assert_eq!(
         asks.try_recv().ok(),
         Some(codex()),
@@ -421,9 +439,7 @@ fn signing_in_again_to_the_same_account_after_a_change_restarts_the_held_questio
     rig.pumped(async { rig.setup().run(super::MAIN, sent).await.unwrap() });
     assert_eq!(rig.backend.wiring.identity.verdict(&agent), Verdict::Same);
     let calls = rig.host.calls();
-    let stop = calls
-        .iter()
-        .position(|call| *call == HostCall::StopAgents(agent.clone()));
+    let stop = calls.iter().position(|call| *call == stop(&agent));
     let restart = calls
         .iter()
         .position(|call| *call == HostCall::RestartAgents(agent.clone()));

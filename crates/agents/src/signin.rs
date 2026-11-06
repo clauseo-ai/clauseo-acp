@@ -313,5 +313,16 @@ impl std::fmt::Debug for PasteCode {
     }
 }
 
+/// The longest one sign-in run of `kind`'s login may take before it is given up on: Claude's
+/// login run, and Codex's device-code run, the longer of its two (R17: desktop's identity check
+/// holds off for a sign-in through Clauseo that long at most).
+#[must_use]
+pub fn sign_in_limit(kind: clauseo_protocol::AgentKind) -> std::time::Duration {
+    match kind {
+        clauseo_protocol::AgentKind::Claude => claude::LOGIN_LIMIT,
+        clauseo_protocol::AgentKind::Codex => codex::DEVICE_LIMIT.max(claude::LOGIN_LIMIT),
+    }
+}
+
 #[cfg(test)]
 mod tests;

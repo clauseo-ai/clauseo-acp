@@ -9,7 +9,7 @@ use serde_json::json;
 
 use super::MAIN;
 use super::fakes::{HostCall, command};
-use super::identity::{IdRig, signed_in};
+use super::identity::{IdRig, signed_in, stop};
 use super::switching::shown;
 use super::{claude, codex};
 use crate::bridge::lock;
@@ -49,12 +49,12 @@ fn a_swap_while_clauseo_was_closed_is_caught_at_the_next_start() {
     );
     assert_eq!(
         wanted(&rig.backend, &claude()),
-        None,
-        "nothing recorded: nothing to wait for"
+        Some(ErrorCode::AgentIdentityChecking),
+        "nothing recorded: it waits for its startup check all the same (first run)"
     );
     first_status(&id, OTHER);
     let calls = rig.host.calls();
-    assert!(calls.contains(&HostCall::StopAgents(codex())), "{calls:?}");
+    assert!(calls.contains(&stop(&codex())), "{calls:?}");
     assert!(
         !calls.contains(&HostCall::RestartAgents(codex())),
         "{calls:?}"
@@ -91,7 +91,8 @@ fn the_same_account_at_the_next_start_lifts_the_wait() {
         .filter(|call| {
             matches!(
                 call,
-                HostCall::SetLaunchRefused(..) | HostCall::StopAgents(_)
+                HostCall::SetLaunchRefused(agent, _) | HostCall::StopAgentsFor(agent, _)
+                    if *agent == codex()
             )
         })
         .collect();
@@ -125,7 +126,7 @@ fn the_first_run_records_the_first_account_seen() {
     let identity = |call: &HostCall| {
         matches!(
             call,
-            HostCall::SetLaunchRefused(..) | HostCall::StopAgents(_)
+            HostCall::SetLaunchRefused(..) | HostCall::StopAgentsFor(..)
         )
     };
     assert!(
@@ -156,7 +157,7 @@ fn a_record_that_cannot_be_read_is_unknown_never_the_same() {
         Some(ErrorCode::AgentIdentityUnknown),
         "refused, retryable"
     );
-    assert!(!rig.host.calls().contains(&HostCall::StopAgents(codex())));
+    assert!(!rig.host.calls().contains(&stop(&codex())));
     // A sign-in through Clauseo writes the record again and lifts it.
     id.signs_in(&codex(), ONE);
     assert_eq!(wanted(&rig.backend, &codex()), None);
@@ -190,10 +191,7 @@ fn a_sign_in_through_clauseo_to_another_account_records_first_and_restarts() {
         assert_eq!(rig.backend.wiring.identity.verdict(&codex()), Verdict::Same);
     }
     let calls = rig.host.calls();
-    assert!(
-        !calls.contains(&HostCall::StopAgents(codex())),
-        "never a swap: {calls:?}"
-    );
+    assert!(!calls.contains(&stop(&codex())), "never a swap: {calls:?}");
     let restarts = calls
         .iter()
         .filter(|call| **call == HostCall::RestartAgents(codex()))

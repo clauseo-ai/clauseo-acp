@@ -38,6 +38,9 @@ crates/desktop/src/open/word_path.rs short_folder unsafe_code
 # R20 P5b piece B: test set-up writing fake installs and fake login files (mode 0000).
 crates/desktop/src/setup/backend/tests/leave.rs a_split_found_in_temp_homes_runs_the_leave_order_with_its_reason clippy::disallowed_methods
 crates/desktop/src/setup/backend/tests/identity.rs replace clippy::disallowed_methods
+# R17 review round: test set-up swapping and removing dummy login files, and timing the gate.
+crates/desktop/src/setup/backend/tests/identity_watch.rs files clippy::disallowed_methods
+crates/desktop/src/setup/backend/tests/identity_gate.rs gate_cost clippy::disallowed_methods
 crates/desktop/src/setup/login_check/tests.rs unix clippy::disallowed_methods
 crates/desktop/src/setup/readers/tests.rs fake_file clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::executable clippy::disallowed_methods

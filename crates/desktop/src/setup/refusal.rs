@@ -4,9 +4,9 @@
 //! - `signin.policy_unreadable` while an unreadable policy blocks it;
 //! - else `agent.key_unreadable` while its stored key is marked unreadable (the read failed,
 //!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
-//! - else, while it launches on its plan login (no key stored, no endpoint or provider), its
-//!   identity check's (R17, `setup/identity.rs`): `signin.account_changed`,
-//!   `agent.identity_checking` or `agent.identity_unknown`;
+//! - else, while it launches on the shared login (its launch env carries no key and no provider
+//!   switch: `identity::exempt`), its identity check's (R17, `setup/identity.rs`):
+//!   `signin.account_changed`, `agent.identity_checking` or `agent.identity_unknown`;
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over; [`sync`]
@@ -15,7 +15,12 @@
 //! again (a slow read that answered, a read again that succeeded, a key set or cleared), and
 //! each [`KeyNote::Retry`] dispatches by the code the launch met (the host's launch retry):
 //! `agent.key_unreadable` reads the key again, `agent.identity_checking` asks the identity
-//! follower for its check, and any other code does nothing.
+//! follower for its check, and any other code does nothing. Retries already queued together
+//! are taken as one: several launches waiting at once ask for one check.
+//!
+//! A refusal the host cannot be told (the call fails twice) fails closed: logged as an error,
+//! the agent is kept to be told again at each look of the identity follower (every 2 s) until
+//! the call succeeds, whatever it was told before.
 
 use std::collections::BTreeSet;
 
@@ -25,6 +30,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 
 use super::backend::AgentsBackend;
 use super::host_calls::SetupHost;
+use super::identity;
 use super::keys::{KeyCache, KeyNote};
 use crate::bridge::lock;
 
@@ -48,26 +54,27 @@ pub(crate) fn in_force(
 }
 
 /// The refusal in force for `agent` as `backend` holds the settings, the keys and the
-/// identity check; an endpoint or a provider (`firm`) takes the plan login out of it.
+/// identity check; a launch env that replaces the shared login (`identity::exempt`: a key or
+/// a provider, never an endpoint alone) takes the identity check's out of it.
 pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode> {
-    let (blocked, firm) = {
-        let applied = lock(&backend.wiring.applied);
-        (
-            applied.blocked.contains(agent),
-            applied.firm.contains(agent),
-        )
-    };
-    let identity = backend.wiring.identity.refusal(agent).filter(|_| !firm);
+    let blocked = lock(&backend.wiring.applied).blocked.contains(agent);
+    let identity = backend
+        .wiring
+        .identity
+        .refusal(agent)
+        .filter(|_| !identity::exempt(backend, agent));
     in_force(blocked, &backend.keys, identity, agent)
 }
 
-/// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
-/// call that fails is tried once more (review L4), then logged by the agent and the error's
-/// code; the host keeps what it had.
+/// Tells the host `agent`'s refusal in force when it is not what the host was last told, or
+/// the last telling failed. A call that fails is tried once more (review L4); failing again,
+/// it fails closed: an error log with the agent and the error's code, and the agent kept in
+/// `unsynced`, told again at the identity follower's next look.
 pub(crate) async fn sync(backend: &AgentsBackend, agent: &AgentId) {
     let _gate = backend.wiring.refusal_gate.lock().await;
     let code = wanted(backend, agent);
-    if lock(&backend.wiring.refused).get(agent).copied() == code {
+    let unsynced = lock(&backend.wiring.unsynced).contains(agent);
+    if !unsynced && lock(&backend.wiring.refused).get(agent).copied() == code {
         return;
     }
     for again in [false, true] {
@@ -78,6 +85,7 @@ pub(crate) async fn sync(backend: &AgentsBackend, agent: &AgentId) {
                     Some(code) => refused.insert(agent.clone(), code),
                     None => refused.remove(agent),
                 };
+                lock(&backend.wiring.unsynced).remove(agent);
                 return;
             }
             Err(error) if !again => {
@@ -85,7 +93,9 @@ pub(crate) async fn sync(backend: &AgentsBackend, agent: &AgentId) {
                 tracing::info!(%agent, code, "launch refusal not set; again");
             }
             Err(error) => {
-                tracing::warn!(%agent, code = error.code().as_str(), "launch refusal not set");
+                let code = error.code().as_str();
+                tracing::error!(%agent, code, "launch refusal not set; told again at the next look");
+                lock(&backend.wiring.unsynced).insert(agent.clone());
             }
         }
     }
@@ -119,25 +129,47 @@ pub(crate) async fn settle_after_load<'a>(
 /// Each note, until the channel closes: a [`KeyNote::Read`] sets that agent's refusal again
 /// (and what the windows show of its key); a [`KeyNote::Retry`] goes by the code the launch
 /// met, as the module docs say.
-pub(crate) async fn follow_keys(backend: &AgentsBackend, mut notes: UnboundedReceiver<KeyNote>) {
-    while let Some(note) = notes.next().await {
-        match note {
-            KeyNote::Retry(agent, ErrorCode::AgentKeyUnreadable) => {
-                // Its answer comes back as a `KeyNote::Read` when the mark changes.
-                drop(backend.keys.read_again(&agent));
+pub(crate) async fn follow_keys(backend: &AgentsBackend, notes: &mut UnboundedReceiver<KeyNote>) {
+    while let Some(first) = notes.next().await {
+        for note in coalesce(first, notes) {
+            follow_note(backend, note).await;
+        }
+    }
+}
+
+/// `first` and the notes queued behind it, each identity retry once per agent: several
+/// launches meeting `agent.identity_checking` together ask for one check.
+fn coalesce(first: KeyNote, notes: &mut UnboundedReceiver<KeyNote>) -> Vec<KeyNote> {
+    let mut batch = vec![first];
+    while let Ok(note) = notes.try_recv() {
+        let identity = matches!(note, KeyNote::Retry(_, ErrorCode::AgentIdentityChecking));
+        if !(identity && batch.contains(&note)) {
+            batch.push(note);
+        }
+    }
+    batch
+}
+
+/// One note, as [`follow_keys`] says.
+async fn follow_note(backend: &AgentsBackend, note: KeyNote) {
+    match note {
+        KeyNote::Retry(agent, ErrorCode::AgentKeyUnreadable) => {
+            // Its answer comes back as a `KeyNote::Read` when the mark changes.
+            drop(backend.keys.read_again(&agent));
+        }
+        // The follower runs it when it is due, and the refusal follows its verdict.
+        KeyNote::Retry(agent, ErrorCode::AgentIdentityChecking) => {
+            backend.wiring.identity.ask(&agent);
+        }
+        KeyNote::Retry(..) => {}
+        KeyNote::Read(agent) => {
+            if !backend.known.contains_key(&agent) {
+                return;
             }
-            // The follower runs it when it is due, and the refusal follows its verdict.
-            KeyNote::Retry(agent, ErrorCode::AgentIdentityChecking) => {
-                backend.wiring.identity.ask(&agent);
-            }
-            KeyNote::Retry(..) => {}
-            KeyNote::Read(agent) => {
-                if !backend.known.contains_key(&agent) {
-                    continue;
-                }
-                backend.compose.show_key(&agent, &backend.keys);
-                sync(backend, &agent).await;
-            }
+            backend.compose.show_key(&agent, &backend.keys);
+            // A key set, cleared or read changes the launch env's exemption (R17); the
+            // refusal follows.
+            identity::exemption_changed(backend, &agent).await;
         }
     }
 }

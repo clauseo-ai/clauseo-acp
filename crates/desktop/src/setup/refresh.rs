@@ -101,6 +101,10 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
             backend.set_firm_policy(agent, now(&read.firm_policy));
         }
     }
+    // A plan's provider in or out changes the launch env's exemption (R17), before any restart.
+    for agent in backend.known.keys() {
+        super::identity::exemption_changed(backend, agent).await;
+    }
     super::refusal::sync_all(backend).await;
     for agent in arrived {
         // Lifting the hold now would let agents launch mid-leave. The check and the record are
