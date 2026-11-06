@@ -546,10 +546,38 @@ fn mcp_name_ok(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// Reads a JSON value as `T`, naming the key when it cannot.
+/// Reads a JSON value as `T`, naming the key when it cannot. The warning names the value's
+/// type and what was expected, never the value: serde's `invalid type: string "yes", expected a
+/// boolean` becomes `invalid type: string, expected a boolean`, since a value can hold a path or
+/// an address (0047).
 fn typed_value<T: DeserializeOwned>(key: &str, value: Value) -> Result<T, WarningKind> {
     serde_json::from_value(value).map_err(|error| WarningKind::InvalidValue {
         key: key.to_owned(),
-        message: error.to_string(),
+        message: without_value(&error.to_string()),
     })
+}
+
+/// serde's message with each value it quotes before its last `, expected ` left out: a
+/// `` `...` `` or `"..."` and the space before it. The expected part names only types, variants
+/// and fields, so it stays; a message with no `, expected ` (`missing field ...`) stays whole.
+fn without_value(message: &str) -> String {
+    let Some((found, expected)) = message.rsplit_once(", expected ") else {
+        return message.to_owned();
+    };
+    let mut kept = String::with_capacity(found.len());
+    let mut quote = None;
+    for c in found.chars() {
+        match quote {
+            Some(open) if c == open => quote = None,
+            Some(_) => {}
+            None if c == '`' || c == '"' => {
+                quote = Some(c);
+                if kept.ends_with(' ') {
+                    kept.pop();
+                }
+            }
+            None => kept.push(c),
+        }
+    }
+    format!("{kept}, expected {expected}")
 }

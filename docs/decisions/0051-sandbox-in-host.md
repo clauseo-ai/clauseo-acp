@@ -37,24 +37,25 @@ settings, no change to any launch).
   `open`, `port_for`, `env`, `allow`, `revoke` and `close` per `SessionKey { matter, thread,
   launch }`. The desktop app implements both over `crates/sandbox`. The policy is built, and the
   launcher called, off the host thread. Without the seams everything runs as today.
-- **Launch.** Pick the tier; make the state folder, the links and the config; open the proxy
-  with the login's allowlist, `network.allowed_domains`, the matter's remembered sites and the
-  seed list; build the policy; launch. In tiers A and B the proxy and CA variables
-  (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`) join the launch environment, and the agent runs in an
-  auto mode; in tier C the proxy is opened but the agent's environment does not point at it, and
-  the agent runs in an ask mode. A state folder is readable by its own matter's sandbox and no
-  other.
+- **Launch.** Pick the tier; make the state folder, the links and the config; open the proxy with
+  the login's allowlist, `network.allowed_domains`, the matter's remembered sites and the seed list;
+  build the policy; launch. In tiers A and B the proxy and CA variables (`NODE_EXTRA_CA_CERTS`,
+  `SSL_CERT_FILE`) join the launch environment, and the agent runs in an auto mode; in tier C the
+  proxy is opened but the agent's environment does not point at it, and the agent runs in an ask
+  mode by default, in an auto mode only when the lawyer picks one and the firm allows it
+  (`sandbox.allow_unprotected_auto`, below). A state folder is readable by its own matter's sandbox
+  and no other.
 - **Settings.** Sections `sandbox` and `network`, every key a security key (below).
 - **Wire.** Below. The bridge admits `HostQuery::Protection` from the main window, and
   `RetryProtection` and `RemoveSandboxSetup` with the administrator prompt as the native
   confirm (`command.invalid` without a set-up seam). The sandbox crate's `NoSandbox` maps to a
   cause: `UnsupportedOs` and `NotBuilt` to `Unsupported`, `ProbeFailed` and `SetUpFailed` to
   `SetUpFailed`, the rest by name.
-- **Without the sandbox.** What a matter whose computer state is `NotProtected` gets depends
+- **Without the sandbox.** What a matter whose protection is `NotProtected` gets depends
   only on `sandbox.required`:
-  - **false:** for any cause, the agents run at tier C, in the ask modes; an auto mode only when
-    `sandbox.allow_unprotected_auto` is true. Nothing is refused, and the matter shows
-    `NotProtected { cause }`.
+  - **false:** for any cause, the agents run at tier C, in an ask mode by default; in an auto mode
+    only when the lawyer picks one and `sandbox.allow_unprotected_auto` is true. Nothing is refused,
+    and the matter shows `NotProtected { cause }`.
   - **true:** never a silent fallback. `NeedsSetUp` and `SetUpRefused`, which running the
     set-up fixes, refuse with `sandbox.setup_required`; every other cause (`Unsupported`,
     `SetUpFailed`, `PoolFull`, `SwitchedOff`, `Unknown`) with `sandbox.required`. Both at
