@@ -17,7 +17,10 @@
 //! Residuals: a descendant that calls `setsid` or `setpgid` leaves the agent's group, and (a)
 //! does not see it (Unix). Chrome is covered by (b); anything else is the jail's (R17 PR-D/E).
 //! Once the agent is reaped its group id can be reused by an unrelated group; then (a) never
-//! holds, and the wait runs into the cap and fails closed.
+//! holds, and the wait runs into the cap and fails closed. At stop, a wait ends within
+//! [`STOP_GRACE`] and the stop's release frees every held run, so a straggler still alive
+//! then outlives its proxy, relay and ports for the rest of the quit (agreed: the app is
+//! going away, and a stall at quit looks like a frozen app).
 
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,7 +29,6 @@ use std::time::Duration;
 
 use clauseo_process::TreeWatch;
 
-use super::RunFolders;
 use crate::browser::session::BrowserSession;
 
 /// How often the wait looks again.
@@ -170,20 +172,82 @@ fn chrome_alive(session: &BrowserSession) -> Option<Check> {
     }
 }
 
-/// The runs whose removal reached its cap: each keeps its proxy, relay and browser claims
-/// (they go when the run drops) until the host stops ([`HeldRuns::release_all`]). Their folders
-/// stay for the next start's sweep. It also carries the host's stop flag to the removals'
-/// threads ([`HeldRuns::begin_stop`]).
+/// What a session holds that must outlive its processes: its browser claims, its case-law
+/// relay and its egress proxy, dropped in that order. Freed only after a completed wait
+/// ([`Lease`]); otherwise held ([`HeldRuns`]).
+#[derive(Debug, Default)]
+pub(crate) struct Parts {
+    pub(super) browser: Option<Arc<BrowserSession>>,
+    pub(super) case_law: super::relay::CaseLaw,
+    pub(super) egress: Option<Arc<super::egress::EgressGuard>>,
+}
+
+impl Parts {
+    /// Whether it holds nothing to free.
+    fn is_empty(&self) -> bool {
+        self.browser.is_none()
+            && matches!(self.case_law, super::relay::CaseLaw::Absent)
+            && self.egress.is_none()
+    }
+}
+
+/// A run's lease on its [`Parts`], shared by every clone of its `RunFolders`: it keeps a
+/// clone of each, so they live until the lease drops. When the last clone of the run drops,
+/// the parts are freed only if [`Lease::wait_done`] was called (the removal's wait completed,
+/// or no agent was ever started); any other drop (a panic, a removal thread that did not start,
+/// a dropped task) holds them in [`HeldRuns`] until the host stops. That is a push under a
+/// lock, with no join, so it is cheap on any thread, the host's included.
+#[derive(Debug, Default)]
+pub(crate) struct Lease {
+    done: AtomicBool,
+    parts: Mutex<Option<(HeldRuns, Parts)>>,
+}
+
+impl Lease {
+    /// Takes `parts`, to hold in `held` unless the wait completes.
+    pub(super) fn keep(&self, held: HeldRuns, parts: Parts) {
+        *self.parts.lock().unwrap_or_else(PoisonError::into_inner) = Some((held, parts));
+    }
+
+    /// The session's processes are gone, or none was ever started: its parts are freed as the
+    /// run drops.
+    pub(super) fn wait_done(&self) {
+        self.done.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let taken = self
+            .parts
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let Some((held, parts)) = taken else {
+            return;
+        };
+        if parts.is_empty() || self.done.load(Ordering::Acquire) {
+            drop(parts);
+        } else {
+            held.hold(parts);
+        }
+    }
+}
+
+/// The parts of runs whose removal reached its cap, or that dropped without a completed wait:
+/// each keeps its proxy, relay and browser claims until the host stops
+/// ([`HeldRuns::release_all`]). Their folders stay for the next start's sweep. It also carries
+/// the host's stop flag to the removals' threads ([`HeldRuns::begin_stop`]).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HeldRuns {
     held: Arc<Mutex<Held>>,
     stopping: Arc<AtomicBool>,
 }
 
-/// The held runs, and whether the host has released them for good.
+/// The held parts, and whether the host has released them for good.
 #[derive(Debug, Default)]
 struct Held {
-    runs: Vec<RunFolders>,
+    parts: Vec<Parts>,
     closed: bool,
 }
 
@@ -198,30 +262,49 @@ impl HeldRuns {
         self.stopping.load(Ordering::Acquire)
     }
 
-    /// Holds `run` until the host stops, and answers true. After [`Self::release_all`] there is
-    /// nobody left to free it, so it drops at once, outside the lock, and this answers false.
-    pub(super) fn hold(&self, run: RunFolders) -> bool {
+    /// Whether the host's stop has released the held parts for good.
+    pub(super) fn closed(&self) -> bool {
+        self.held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed
+    }
+
+    /// Holds `parts` until the host stops, and answers true. After [`Self::release_all`] there
+    /// is nobody left to free them, so they drop at once, outside the lock, and this answers
+    /// false.
+    pub(super) fn hold(&self, parts: Parts) -> bool {
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
         if held.closed {
             drop(held);
-            drop(run);
+            drop(parts);
             return false;
         }
-        held.runs.push(run);
+        held.parts.push(parts);
         true
     }
 
-    /// Drops every held run, outside the lock: their proxies close and their relays stop. A
-    /// later [`Self::hold`] drops its run at once. Answers how many there were.
+    /// Drops every held part, outside the lock: their proxies close and their relays stop. A
+    /// later [`Self::hold`] drops its parts at once. Answers how many runs there were.
     pub(crate) fn release_all(&self) -> usize {
-        let runs = {
+        let parts = {
             let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
             held.closed = true;
-            std::mem::take(&mut held.runs)
+            std::mem::take(&mut held.parts)
         };
-        let count = runs.len();
-        drop(runs);
+        let count = parts.len();
+        drop(parts);
         count
+    }
+
+    /// How many runs' parts are held.
+    #[cfg(test)]
+    pub(crate) fn count(&self) -> usize {
+        self.held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .parts
+            .len()
     }
 }
 

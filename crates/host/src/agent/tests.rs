@@ -83,6 +83,7 @@ fn run_agent(
         &spec,
         Arc::new(clock.clone()),
         post,
+        &mut None,
     )
     .unwrap();
     (pool, link, clock, rx)

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use clauseo_protocol::{MatterId, ThreadId};
 
-use super::{Budget, CONNECT_WAIT, HeldRuns, POLL, STOP_GRACE, Straggler, wait_gone};
+use super::{Budget, CONNECT_WAIT, HeldRuns, POLL, Parts, STOP_GRACE, Straggler, wait_gone};
 use crate::actor::turn::launch_checks::RunFolders;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -116,23 +116,55 @@ fn a_stop_ends_the_wait_within_the_grace() {
     drop(listener);
 }
 
-/// After the host's stop released the held runs, a run that comes to be held drops at once.
+/// After the host's stop released the held runs, parts that come to be held drop at once.
 #[test]
-fn a_hold_after_the_release_drops_the_run_at_once() {
+fn a_hold_after_the_release_drops_the_parts_at_once() {
     let held = HeldRuns::default();
     let session = Arc::new(claims("after-stop"));
     let alive = Arc::downgrade(&session);
+    held.begin_stop();
+    assert!(held.stopping());
+    assert_eq!(held.release_all(), 0);
+    assert!(held.closed());
+    let parts = Parts {
+        browser: Some(session),
+        ..Parts::default()
+    };
+    assert!(!held.hold(parts), "nobody is left to free them");
+    assert!(alive.upgrade().is_none(), "the claims went at once");
+    assert_eq!(held.count(), 0);
+}
+
+/// A run's lease: dropped without a completed wait it holds the run's parts; after
+/// `wait_done` it frees them; and every clone of the run shares it.
+#[test]
+fn the_lease_frees_only_after_a_completed_wait() {
     let key = SessionKey {
         matter: id::<MatterId>(1),
         thread: id::<ThreadId>(2),
         launch: 3,
     };
-    let mut run = RunFolders::new(&std::env::temp_dir(), key);
-    run.browser_session = Some(session);
-    held.begin_stop();
-    assert!(held.stopping());
-    assert_eq!(held.release_all(), 0);
-    assert!(!held.hold(run), "nobody is left to free it");
-    assert!(alive.upgrade().is_none(), "its claims went at once");
-    assert_eq!(held.release_all(), 0);
+    let held = HeldRuns::default();
+    for done in [false, true] {
+        let session = Arc::new(claims(if done { "lease-done" } else { "lease-held" }));
+        let alive = Arc::downgrade(&session);
+        let run = RunFolders::new(&std::env::temp_dir(), key);
+        run.lease.keep(
+            held.clone(),
+            Parts {
+                browser: Some(session),
+                ..Parts::default()
+            },
+        );
+        let clone = run.clone();
+        drop(run);
+        assert!(alive.upgrade().is_some(), "a clone still holds the run");
+        if done {
+            clone.lease.wait_done();
+        }
+        drop(clone);
+        assert_eq!(alive.upgrade().is_some(), !done, "done: {done}");
+    }
+    assert_eq!(held.count(), 1, "the run without a completed wait is held");
+    assert_eq!(held.release_all(), 1);
 }

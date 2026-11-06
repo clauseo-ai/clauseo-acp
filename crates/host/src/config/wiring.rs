@@ -64,6 +64,9 @@ pub(crate) struct LaunchWiring {
     /// Run off the actor as a session's removal starts its wait, with the session's claimed
     /// Chrome debugging port, for tests (`HostConfig::with_tree_wait_hook`).
     pub(crate) tree_wait_hook: Option<TreeWaitHook>,
+    /// Whether a run folder removal's thread fails to start, for tests
+    /// (`HostConfig::with_removal_thread_failing`).
+    pub(crate) removal_thread_fails: bool,
     /// The sessions whose removal ran past [`Self::tree_wait`]: their proxy, relay and claims,
     /// held until the host stops (`launch_checks::straggler`).
     pub(crate) held: HeldRuns,
@@ -88,6 +91,7 @@ impl Default for LaunchWiring {
             run_removal_hook: None,
             tree_wait: super::DEFAULT_TREE_WAIT,
             tree_wait_hook: None,
+            removal_thread_fails: false,
             held: HeldRuns::default(),
         }
     }
