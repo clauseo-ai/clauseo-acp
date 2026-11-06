@@ -17,6 +17,18 @@ expression: statuses
   "key_revoked",
   {
     "error": {
+      "message": "the sign-in did not finish",
+      "kind": "sign_in_failed"
+    }
+  },
+  {
+    "error": {
+      "message": "the sign-in could not be saved",
+      "kind": "persist_failed"
+    }
+  },
+  {
+    "error": {
       "message": "the sign-in could not be saved"
     }
   }

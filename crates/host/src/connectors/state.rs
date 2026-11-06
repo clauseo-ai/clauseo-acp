@@ -11,10 +11,11 @@
 //! - No token, key or account id is held here: the credential is the connectors crate's.
 
 use clauseo_connectors::{
-    Account, CredentialStatus, KnownConnector, Liveness, Pack, PayUrl, Pricing,
+    Account, CredentialKind, CredentialStatus, KnownConnector, Liveness, Pack, PayUrl, Pricing,
 };
 use clauseo_protocol::{
-    Balance, ConnectorStatus, ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend,
+    Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, ConnectorView,
+    ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome, Timestamp,
 };
 
 mod money;
@@ -34,6 +35,30 @@ pub(crate) struct OutOfCredit {
     pub(crate) pay_url: Option<PayUrl>,
 }
 
+/// The error the state shows until the next connector command: its kind and a short English
+/// line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Failure {
+    pub(crate) kind: ConnectorErrorKind,
+    pub(crate) message: &'static str,
+}
+
+impl Failure {
+    /// A sign-in or a key check that failed, in `message`'s words.
+    pub(crate) const fn sign_in(message: &'static str) -> Self {
+        Self {
+            kind: ConnectorErrorKind::SignInFailed,
+            message,
+        }
+    }
+
+    /// Signed in, but the keychain refused the credential: memory only until the next start.
+    pub(crate) const PERSIST: Self = Self {
+        kind: ConnectorErrorKind::PersistFailed,
+        message: "signed in, but the sign-in could not be saved for the next start",
+    };
+}
+
 /// The case-law connector as the host knows it.
 #[derive(Debug, Default)]
 pub(crate) struct CaseLaw {
@@ -41,16 +66,24 @@ pub(crate) struct CaseLaw {
     pub(crate) credential: Option<CredentialStatus>,
     /// The system browser is open on the sign-in page.
     pub(crate) signing_in: bool,
-    /// A sign-in or API key failed, until the next connector command: a short English line.
-    pub(crate) error: Option<&'static str>,
+    /// A sign-in or API key failed, or the credential could not be saved, until the next
+    /// connector command.
+    pub(crate) error: Option<Failure>,
+    /// Whether the connectors crate held the credential in memory only when last asked: the
+    /// [`Failure::PERSIST`] error shows when this turns `true`, not on every look.
+    pub(crate) persist_failed: bool,
     /// A paid call came back out of credit.
     pub(crate) out_of_credit: Option<OutOfCredit>,
-    /// The last account read.
+    /// The last account read, and the host's wall time when it was applied.
     pub(crate) account: Option<Account>,
+    pub(crate) account_at: Option<Timestamp>,
     /// The pay link of the last `AddCredits`, until it is paid or settled otherwise.
     pub(crate) pay_url: Option<PayUrl>,
     /// The last liveness fetch.
     pub(crate) liveness: Option<Liveness>,
+    /// How the last watched recharge ended, until the next one is watched or the credential
+    /// ends (`ConnectorView::last_recharge`).
+    pub(crate) last_recharge: Option<RechargeOutcome>,
 }
 
 impl CaseLaw {
@@ -75,23 +108,41 @@ impl CaseLaw {
         self.liveness.as_ref().is_some_and(|liveness| liveness.live)
     }
 
-    /// A new credential: when it is no longer usable, the account, the out-of-credit state and
-    /// the pay link go with it.
+    /// A new credential: when it is no longer usable, the account, the out-of-credit state,
+    /// the pay link and the last recharge's outcome go with it.
     pub(crate) fn set_credential(&mut self, credential: CredentialStatus) {
         self.credential = Some(credential);
         if !self.signed_in() {
-            self.account = None;
-            self.out_of_credit = None;
-            self.pay_url = None;
+            self.reset();
         }
     }
 
-    /// A new account read: a balance above nothing ends the out-of-credit state.
-    pub(crate) fn set_account(&mut self, account: Account) {
+    /// Signed out, removed or switched off: what the account held goes.
+    pub(crate) fn reset(&mut self) {
+        self.account = None;
+        self.account_at = None;
+        self.out_of_credit = None;
+        self.pay_url = None;
+        self.last_recharge = None;
+    }
+
+    /// A new account read, applied at `at` by the host's clock: a balance above nothing ends
+    /// the out-of-credit state.
+    pub(crate) fn set_account(&mut self, account: Account, at: Timestamp) {
         if account.balance_credits > 0 {
             self.out_of_credit = None;
         }
         self.account = Some(account);
+        self.account_at = Some(at);
+    }
+
+    /// The connectors crate's `persist_failed` now: signed in, its turning `true` shows
+    /// [`Failure::PERSIST`] until the next command.
+    pub(crate) fn note_persist(&mut self, failed: bool) {
+        if failed && !self.persist_failed && self.signed_in() {
+            self.error = Some(Failure::PERSIST);
+        }
+        self.persist_failed = failed;
     }
 
     /// The app's view, under the switch as it took effect. The connector is listed when it is
@@ -129,6 +180,7 @@ impl CaseLaw {
                 .map(|account| recent_spend(account, rate)),
             status: self.status(rate),
             pay_url: self.pay_url.as_ref().map(|url| url.as_str().to_owned()),
+            last_recharge: self.last_recharge,
         }
     }
 
@@ -163,23 +215,31 @@ impl CaseLaw {
         if self.signing_in {
             return ConnectorStatus::SigningIn;
         }
-        if let Some(message) = self.error {
+        if let Some(Failure { kind, message }) = self.error {
             return ConnectorStatus::Error {
                 message: message.to_owned(),
+                kind: Some(kind),
             };
         }
         match self.credential {
             None | Some(CredentialStatus::NotAdded) => ConnectorStatus::NotAdded,
             Some(CredentialStatus::SignedOut) => ConnectorStatus::SignedOut,
             Some(CredentialStatus::KeyRevoked) => ConnectorStatus::KeyRevoked,
-            Some(CredentialStatus::SignedIn(_)) => match &self.out_of_credit {
+            Some(CredentialStatus::SignedIn(kind)) => match &self.out_of_credit {
                 Some(OutOfCredit { pay_url }) => ConnectorStatus::OutOfCredit {
                     pay_url: pay_url.as_ref().map(|url| url.as_str().to_owned()),
                 },
                 None => ConnectorStatus::SignedIn {
                     account_label: None,
-                    balance: self.account.as_ref().map(|account| balance(account, rate)),
+                    balance: self
+                        .account
+                        .as_ref()
+                        .map(|account| balance(account, rate, self.account_at)),
                     low: self.low(),
+                    method: Some(match kind {
+                        CredentialKind::OAuth => ConnectorSignInMethod::Account,
+                        CredentialKind::ApiKey => ConnectorSignInMethod::ApiKey,
+                    }),
                 },
             },
         }
@@ -216,10 +276,11 @@ fn pack_view(pack: &Pack) -> Option<PackView> {
 
 /// The balance, priced from its credits at the gross rate; the account's own `balance_inr` is
 /// before GST, so it is not shown.
-fn balance(account: &Account, rate: Option<GrossRate>) -> Balance {
+fn balance(account: &Account, rate: Option<GrossRate>, as_of: Option<Timestamp>) -> Balance {
     Balance {
         credits: clamp(account.balance_credits),
         paise: rate.and_then(|rate| rate.paise(account.balance_credits)),
+        as_of,
     }
 }
 

@@ -35,12 +35,14 @@ use std::time::Duration;
 
 use clauseo_connectors::{CASE_LAW, CancelFlag, ConnectorHandle, CredentialStatus, PayUrl};
 use clauseo_protocol::{
-    CommandId, CommandOutcome, ConnectorCommand, ConnectorsState, ErrorCode, HostCommand, HostEvent,
+    CommandId, CommandOutcome, ConnectorCommand, ConnectorsState, ErrorCode, HostCommand,
+    HostEvent, RechargeOutcome,
 };
 
 use super::Actor;
 use super::commands::CommandCtx;
 use super::input::Input;
+use crate::connectors::state::Failure;
 use crate::connectors::{ConnectorOpener, ConnectorsWiring, CredentialEnd, RelayEvent};
 use crate::error::Error;
 use jobs::{Change, Finished, Job, Post, Reach, Refusal};
@@ -393,7 +395,7 @@ fn answer(actor: &mut Actor, command: Option<CommandId>, reply: Result<(), Refus
 }
 
 fn on_finished(actor: &mut Actor, mut finished: Finished) {
-    let now = actor.now().mono;
+    let now = actor.now();
     if finished.generation != generation(actor) {
         // Started before a sign-out, a remove or the switch going off: what it read about the
         // credential and the account is older than that end, so the state is read again.
@@ -408,7 +410,7 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     if finished.slot {
         connectors.reads.in_flight = false;
     } else if finished.account.is_some() {
-        connectors.reads.last = Some(now);
+        connectors.reads.last = Some(now.mono);
     }
     let state = &mut connectors.state;
     let liveness = finished.liveness.is_some();
@@ -422,7 +424,7 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     if let Some(account) = finished.account
         && state.signed_in()
     {
-        state.set_account(account);
+        state.set_account(account, now.wall);
     }
     match finished.change {
         Change::Nothing => {}
@@ -431,16 +433,12 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
             if generation == connectors.sign_in.0 {
                 connectors.sign_in.1 = None;
                 state.signing_in = false;
-                state.error = error.or(state.error);
+                state.error = error.map(Failure::sign_in).or(state.error);
             }
         }
-        Change::Failed(message) => state.error = Some(message),
-        Change::Reset => {
-            state.account = None;
-            state.out_of_credit = None;
-            state.pay_url = None;
-        }
-        Change::Recharge { recharge, paid } => {
+        Change::Failed(message) => state.error = Some(Failure::sign_in(message)),
+        Change::Reset => state.reset(),
+        Change::Recharge { recharge, outcome } => {
             let current = connectors
                 .watch
                 .as_ref()
@@ -448,12 +446,14 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
             if current {
                 connectors.watch = None;
                 state.pay_url = None;
+                state.last_recharge = outcome;
             }
-            if paid {
+            if outcome == Some(RechargeOutcome::Paid) {
                 state.out_of_credit = None;
             }
         }
     }
+    note_persist(actor);
     if let Some(payment) = finished.out_of_credit {
         out_of_credit(actor, payment);
     }
@@ -493,7 +493,18 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             }
         }
     }
+    // A relay's call may have refreshed the tokens, and the keychain refused them.
+    note_persist(actor);
     publish(actor);
+}
+
+/// Asks the connectors crate whether the credential is held in memory only: once it turns so
+/// while signed in, the state shows `persist_failed` until the next command.
+fn note_persist(actor: &mut Actor) {
+    if let Some(wired) = &actor.connectors.wired {
+        let failed = wired.handle.persist_failed();
+        actor.connectors.state.note_persist(failed);
+    }
 }
 
 /// The state as the app sees it now, if connectors are wired.
@@ -518,13 +529,14 @@ fn publish(actor: &mut Actor) {
 
 /// `tools.connectors` changed: off ends the credential for the work in flight (a key being
 /// checked stores nothing), cancels a sign-in in flight and ends the recharge watch (no more
-/// polling) with its pay link; either way the state goes out.
+/// polling) with its pay link and the last recharge's outcome; either way the state goes out.
 pub(super) fn switch_changed(actor: &mut Actor) {
     if !actor.effective.settings().tools.connectors {
         end_credential(actor);
         cancel_sign_in(actor);
         end_recharges(actor);
         actor.connectors.state.pay_url = None;
+        actor.connectors.state.last_recharge = None;
     }
     publish(actor);
 }

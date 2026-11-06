@@ -68,6 +68,8 @@ pub(crate) struct Start {
 pub(crate) struct Rig {
     pub(crate) fake: FakeHandle,
     pub(crate) handle: ConnectorHandle,
+    /// The connectors' keychain, for its failures.
+    pub(crate) store: Arc<MemoryStore>,
     pub(crate) relays: Relays,
     pub(crate) events: Arc<ConnectorEvents>,
     pub(crate) pages: mpsc::Receiver<String>,
@@ -102,12 +104,13 @@ impl Rig {
         let events = ConnectorEvents::new();
         let mut made = None;
         let mut keys = Vec::new();
+        let store = Arc::new(MemoryStore::new());
+        let keychain: Arc<dyn SecretStore> = Arc::<MemoryStore>::clone(&store);
         let host =
             dir.start_clocked_launching(0, launcher, |config: HostConfig, clock: &ManualClock| {
                 let mut connector_config = fake.config(scratch.state_file());
                 connector_config.clock = Arc::new(HostTime(clock.clone()));
-                let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
-                let connectors = Arc::new(Connectors::new(connector_config, store).unwrap());
+                let connectors = Arc::new(Connectors::new(connector_config, keychain).unwrap());
                 let handle = connectors.get(CASE_LAW).unwrap();
                 let relays = Relays::new(RelayConfig {
                     connector: handle.clone(),
@@ -138,6 +141,7 @@ impl Rig {
         let mut rig = Self {
             fake,
             handle,
+            store,
             relays,
             events,
             pages,

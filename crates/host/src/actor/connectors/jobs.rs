@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use clauseo_connectors::{
     Account, CancelFlag, ConnectorHandle, Connectors, CredentialStatus, Error as Failed, Liveness,
-    PaymentRef, RechargeStatus, SignInError,
+    PaymentRef, SignInError,
 };
-use clauseo_protocol::{CommandId, ErrorCode, RedactedString};
+use clauseo_protocol::{CommandId, ErrorCode, RechargeOutcome, RedactedString};
 
 mod failures;
 
@@ -23,7 +23,7 @@ use crate::actor::input::Input;
 use crate::connectors::ConnectorOpener;
 use crate::error::Error;
 pub(super) use failures::kind;
-use failures::{refusal, sign_in_kind};
+use failures::{recharge_outcome, refusal, sign_in_kind};
 
 /// The job threads' name.
 const THREAD_NAME: &str = "clauseo-connector";
@@ -110,10 +110,10 @@ pub(crate) enum Change {
     Failed(&'static str),
     /// Signed out or removed: the account, out of credit and the pay link go.
     Reset,
-    /// A recharge settled: paid, or expired or failed.
+    /// A recharge settled: how, when the host can tell (`None` when the watch failed).
     Recharge {
         recharge: String,
-        paid: bool,
+        outcome: Option<RechargeOutcome>,
     },
     /// A liveness check ended without an answer (a panic): nothing waits on it any longer.
     NoLiveness,
@@ -495,11 +495,12 @@ fn credits(
 }
 
 /// Waits for `recharge` to settle, then reads the account if it was paid. `None` when
-/// cancelled: a newer recharge or a sign-out took its place.
+/// cancelled: a newer recharge or a sign-out took its place. A watch that reaches its deadline
+/// counts as expired; one that fails otherwise has no outcome.
 fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Option<Finished> {
     let mut finished = Finished::new(None);
-    let paid = match handle.wait_recharge(&recharge, cancel) {
-        Ok(settled) => settled.status == RechargeStatus::Paid,
+    let outcome = match handle.wait_recharge(&recharge, cancel) {
+        Ok(settled) => recharge_outcome(&settled.status),
         Err(Failed::Cancelled) => return None,
         Err(error) => {
             tracing::info!(
@@ -507,13 +508,14 @@ fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Opt
                 error = kind(&error),
                 "the recharge watch ended"
             );
-            false
+            // The watch's deadline: the page is past its use as far as the host can tell.
+            matches!(error, Failed::RechargeTimedOut).then_some(RechargeOutcome::Expired)
         }
     };
-    if paid {
+    if outcome == Some(RechargeOutcome::Paid) {
         read_into(handle, &mut finished);
     }
-    finished.change = Change::Recharge { recharge, paid };
+    finished.change = Change::Recharge { recharge, outcome };
     Some(finished)
 }
 

@@ -1,7 +1,8 @@
-//! A failed call's refusal, in fixed words, and its kind for the log.
+//! A failed call's refusal, in fixed words, and its kind for the log; and how a settled
+//! recharge ended, for the state.
 
-use clauseo_connectors::{AuthError, Error as Failed, SignInError};
-use clauseo_protocol::ErrorCode;
+use clauseo_connectors::{AuthError, Error as Failed, RechargeStatus, SignInError};
+use clauseo_protocol::{ErrorCode, RechargeOutcome};
 
 use super::Refusal;
 
@@ -57,5 +58,24 @@ pub(super) fn sign_in_kind(error: &SignInError) -> &'static str {
         SignInError::Exchange(_) => "exchange",
         SignInError::Store(_) => "store",
         SignInError::Busy => "busy",
+    }
+}
+
+/// How a settled recharge ended, by the connector's status: `None` for one the host cannot read
+/// (logged without its text).
+pub(super) fn recharge_outcome(status: &RechargeStatus) -> Option<RechargeOutcome> {
+    match status {
+        RechargeStatus::Paid => Some(RechargeOutcome::Paid),
+        RechargeStatus::Other(other) if other == "expired" => Some(RechargeOutcome::Expired),
+        RechargeStatus::Other(other) if other == "cancelled" || other == "canceled" => {
+            Some(RechargeOutcome::Cancelled)
+        }
+        RechargeStatus::AwaitingPayment | RechargeStatus::Other(_) => {
+            tracing::info!(
+                connector = "case-law",
+                "a recharge ended in a status the host does not know"
+            );
+            None
+        }
     }
 }

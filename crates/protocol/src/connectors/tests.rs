@@ -4,7 +4,8 @@
 use zeroize::Zeroizing;
 
 use super::{
-    Balance, ConnectorStatus, ConnectorView, ConnectorsState, REDACTED_TEXT, RedactedString,
+    Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, ConnectorView,
+    ConnectorsState, REDACTED_TEXT, RechargeOutcome, RedactedString,
 };
 use crate::{CommandEnvelope, CommandId, ConnectorCommand, HostCommand, HostEvent};
 
@@ -168,17 +169,86 @@ fn the_state_and_the_hint_read_back() {
                 balance: Some(Balance {
                     credits: 180,
                     paise: Some(2_124),
+                    as_of: None,
                 }),
                 low: true,
+                method: None,
             },
             pay_url: None,
+            last_recharge: None,
         }],
     };
     let event = HostEvent::ConnectorsChanged(state);
     let json = serde_json::to_string(&event).unwrap();
     assert_eq!(serde_json::from_str::<HostEvent>(&json).unwrap(), event);
     assert!(
-        !json.contains("pay_url") && !json.contains("account_label"),
+        !json.contains("pay_url")
+            && !json.contains("account_label")
+            && !json.contains("as_of")
+            && !json.contains("method")
+            && !json.contains("last_recharge"),
         "{json}"
     );
+}
+
+/// R24's wire-gaps fields are additive: an older host's state (none of them) still decodes,
+/// and each new enum is written in snake case.
+#[test]
+fn the_wire_gaps_fields_are_additive() {
+    let older: ConnectorStatus =
+        serde_json::from_str(r#"{"error":{"message":"the sign-in did not finish"}}"#).unwrap();
+    assert_eq!(
+        older,
+        ConnectorStatus::Error {
+            message: "the sign-in did not finish".to_owned(),
+            kind: None,
+        }
+    );
+    let older: ConnectorStatus =
+        serde_json::from_str(r#"{"signed_in":{"balance":{"credits":5},"low":true}}"#).unwrap();
+    assert_eq!(
+        older,
+        ConnectorStatus::SignedIn {
+            account_label: None,
+            balance: Some(Balance {
+                credits: 5,
+                paise: None,
+                as_of: None,
+            }),
+            low: true,
+            method: None,
+        }
+    );
+    let older: ConnectorView = serde_json::from_str(
+        r#"{"id":"case-law","name":"Indian case law","packs":[],"status":"not_added"}"#,
+    )
+    .unwrap();
+    assert_eq!(older.last_recharge, None);
+    let words = |value: serde_json::Value| value.as_str().unwrap().to_owned();
+    for (value, want) in [
+        (
+            serde_json::to_value(ConnectorErrorKind::SignInFailed),
+            "sign_in_failed",
+        ),
+        (
+            serde_json::to_value(ConnectorErrorKind::PersistFailed),
+            "persist_failed",
+        ),
+        (
+            serde_json::to_value(ConnectorSignInMethod::Account),
+            "account",
+        ),
+        (
+            serde_json::to_value(ConnectorSignInMethod::ApiKey),
+            "api_key",
+        ),
+        (serde_json::to_value(RechargeOutcome::Paid), "paid"),
+        (serde_json::to_value(RechargeOutcome::Expired), "expired"),
+        (
+            serde_json::to_value(RechargeOutcome::Cancelled),
+            "cancelled",
+        ),
+    ] {
+        assert_eq!(words(value.unwrap()), want);
+    }
 }

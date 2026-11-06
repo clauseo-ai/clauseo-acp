@@ -348,6 +348,12 @@ export type Balance = {
 	 *  gross. `ConnectorsChanged` is not folded, so no schema version changes.
 	 */
 	paise?: number,
+	/**
+	 *  When the account read this balance came from was applied, by the host's clock (wall
+	 *  time, as every view timestamp): not the connector's time. Additive (R24's wire-gaps
+	 *  follow-up): an older host leaves it out.
+	 */
+	as_of?: Timestamp,
 };
 
 /**  How an account pays. */
@@ -789,6 +795,29 @@ export type ConnectorCommand =
 	matter: MatterId,
 } }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never };
 
+/**
+ *  Why a connector shows [`ConnectorStatus::Error`]. Closed: the host and the app are one
+ *  version.
+ */
+export type ConnectorErrorKind = 
+/**
+ *  A sign-in or an API key check failed (not a cancelled one), or the keychain refused the
+ *  new credential: not signed in with it.
+ */
+"sign_in_failed" | 
+/**
+ *  Signed in now, but the keychain refused the credential twice, so it is held in memory
+ *  only and the next start will need a new sign-in.
+ */
+"persist_failed";
+
+/**  How a connector is signed in. Closed: the host and the app are one version. */
+export type ConnectorSignInMethod = 
+/**  The browser sign-in to the lawyer's own account (OAuth). */
+"account" | 
+/**  A pasted API key: the firm's key, so the app says "Using your firm's key". */
+"api_key";
+
 /**  Where a connector stands. Closed: the host and the app are one version. */
 export type ConnectorStatus = 
 /**  Not added: the app offers "Add". */
@@ -803,6 +832,11 @@ export type ConnectorStatus =
 	balance?: Balance,
 	/**  Whether the balance is under 10 search pages' worth of credits. */
 	low: boolean,
+	/**
+	 *  How it is signed in. Additive (R24's wire-gaps follow-up): an older host leaves it
+	 *  out; this one always sets it.
+	 */
+	method?: ConnectorSignInMethod,
 } }) & { error?: never; out_of_credit?: never } | 
 /**  The account has no credits left: calls fail until it is topped up. */
 ({ out_of_credit: {
@@ -823,6 +857,11 @@ export type ConnectorStatus =
 ({ error: {
 	/**  A short English line for the details view; the app writes its own words. */
 	message: string,
+	/**
+	 *  Which of the two it is. Additive (R24's wire-gaps follow-up): an older host leaves
+	 *  it out; this one always sets it.
+	 */
+	kind?: ConnectorErrorKind,
 } }) & { out_of_credit?: never; signed_in?: never };
 
 /**  One connector, as the Settings section, the setup card and the banner show it. */
@@ -849,6 +888,15 @@ export type ConnectorView = {
 	 *  native confirm. `None` until then, and again once the recharge is paid or expires.
 	 */
 	pay_url?: string,
+	/**
+	 *  How the last watched recharge ended, set when its pay link clears: the app says "Payment
+	 *  received" or "That payment page expired". It lasts until the next recharge is watched
+	 *  (an `AddCredits` whose pay link arrives, or an out-of-credit answer's new recharge),
+	 *  and goes with a sign-out, a remove, the switch going off or a credential that ended.
+	 *  `None` before any, and when the host cannot tell how the recharge ended (the watch
+	 *  failed). Additive (R24's wire-gaps follow-up): an older host leaves it out.
+	 */
+	last_recharge?: RechargeOutcome,
 };
 
 /**
@@ -3855,6 +3903,18 @@ export type RecentSpend = {
 	/**  Credits spent on each recent day, as the account lists them. */
 	days: DaySpendView[],
 };
+
+/**  How a watched recharge ended. Closed: the host and the app are one version. */
+export type RechargeOutcome = 
+/**  The connector says it was paid. */
+"paid" | 
+/**
+ *  The connector says the payment page expired, or the host's watch reached its deadline
+ *  first (the page is then past its use as far as the host is concerned).
+ */
+"expired" | 
+/**  The connector says the recharge was cancelled. */
+"cancelled";
 
 /**
  *  A secret a window sends once, such as a pasted API key. It decodes from a plain string of 1 to

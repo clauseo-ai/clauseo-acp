@@ -3,8 +3,9 @@
 
 use super::*;
 use clauseo_protocol::{
-    Balance, ConnectorCommand, ConnectorStatus, ConnectorView, ConnectorsState, DaySpendView,
-    PackView, RecentSpend, RedactedString,
+    Balance, ConnectorCommand, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus,
+    ConnectorView, ConnectorsState, DaySpendView, PackView, RecentSpend, RechargeOutcome,
+    RedactedString, Timestamp,
 };
 use zeroize::Zeroizing;
 
@@ -39,10 +40,13 @@ pub(super) fn connectors_state() -> ConnectorsState {
                 balance: Some(Balance {
                     credits: 1_180,
                     paise: Some(13_924),
+                    as_of: Some(Timestamp::new(1_762_400_000_000).unwrap()),
                 }),
                 low: false,
+                method: Some(ConnectorSignInMethod::Account),
             },
             pay_url: Some("https://data.clauseo.chat/pay/rch_01".to_owned()),
+            last_recharge: Some(RechargeOutcome::Paid),
         }],
     }
 }
@@ -111,7 +115,17 @@ fn connector_statuses() {
         ConnectorStatus::SignedOut,
         ConnectorStatus::KeyRevoked,
         ConnectorStatus::Error {
+            message: "the sign-in did not finish".to_owned(),
+            kind: Some(ConnectorErrorKind::SignInFailed),
+        },
+        ConnectorStatus::Error {
             message: "the sign-in could not be saved".to_owned(),
+            kind: Some(ConnectorErrorKind::PersistFailed),
+        },
+        // As an older host wrote it: no kind.
+        ConnectorStatus::Error {
+            message: "the sign-in could not be saved".to_owned(),
+            kind: None,
         },
     ];
     snapshot!("connector_statuses", statuses);

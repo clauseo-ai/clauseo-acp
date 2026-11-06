@@ -91,6 +91,9 @@ mod connector_money;
 #[path = "host/connector_no_key.rs"]
 mod connector_no_key;
 #[cfg(test)]
+#[path = "host/connector_outcomes.rs"]
+mod connector_outcomes;
+#[cfg(test)]
 #[path = "host/connector_pay_link.rs"]
 mod connector_pay_link;
 #[cfg(test)]

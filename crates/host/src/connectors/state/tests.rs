@@ -5,9 +5,17 @@ use clauseo_connectors::{
     Account, CASE_LAW, CredentialKind, CredentialStatus, DaySpend, Liveness, Pack, Pricing,
     PricingStatus,
 };
-use clauseo_protocol::{Balance, ConnectorStatus, PackView};
+use clauseo_protocol::{
+    Balance, ConnectorErrorKind, ConnectorSignInMethod, ConnectorStatus, PackView, RechargeOutcome,
+    Timestamp,
+};
 
-use super::{CaseLaw, GrossRate, paise};
+use super::{CaseLaw, Failure, GrossRate, paise};
+
+/// The host's wall time `millis`.
+fn at(millis: i64) -> Timestamp {
+    Timestamp::new(millis).unwrap()
+}
 
 #[test]
 fn paise_reads_rupees_and_at_most_two_paise_digits() {
@@ -122,7 +130,7 @@ fn the_view_shows_the_balance_low_and_out_of_credit() {
         ..CaseLaw::default()
     };
     state.set_credential(CredentialStatus::SignedIn(CredentialKind::ApiKey));
-    state.set_account(account(199, "19.90"));
+    state.set_account(account(199, "19.90"), at(1_000));
     let status = |state: &CaseLaw| {
         state.view(&CASE_LAW, true, false).connectors[0]
             .status
@@ -134,21 +142,25 @@ fn the_view_shows_the_balance_low_and_out_of_credit() {
             account_label: None,
             balance: Some(Balance {
                 credits: 199,
-                paise: Some(2_348)
+                paise: Some(2_348),
+                as_of: Some(at(1_000)),
             }),
             low: true,
+            method: Some(ConnectorSignInMethod::ApiKey),
         }
     );
-    state.set_account(account(200, "₹20"));
+    state.set_account(account(200, "₹20"), at(2_000));
     assert_eq!(
         status(&state),
         ConnectorStatus::SignedIn {
             account_label: None,
             balance: Some(Balance {
                 credits: 200,
-                paise: Some(2_360)
+                paise: Some(2_360),
+                as_of: Some(at(2_000)),
             }),
             low: false,
+            method: Some(ConnectorSignInMethod::ApiKey),
         }
     );
     state.out_of_credit = Some(super::OutOfCredit { pay_url: None });
@@ -156,16 +168,16 @@ fn the_view_shows_the_balance_low_and_out_of_credit() {
         status(&state),
         ConnectorStatus::OutOfCredit { pay_url: None }
     );
-    state.set_account(account(0, "0.00"));
+    state.set_account(account(0, "0.00"), at(3_000));
     assert_eq!(
         status(&state),
         ConnectorStatus::OutOfCredit { pay_url: None }
     );
-    state.set_account(account(10, "1.00"));
+    state.set_account(account(10, "1.00"), at(4_000));
     assert!(matches!(status(&state), ConnectorStatus::SignedIn { .. }));
     state.set_credential(CredentialStatus::KeyRevoked);
     assert_eq!(status(&state), ConnectorStatus::KeyRevoked);
-    assert!(state.account.is_none());
+    assert!(state.account.is_none() && state.account_at.is_none());
 }
 
 /// The fixture's price list: `credit_inr` "0.10", `gst_rate` "0.18", five packs.
@@ -283,14 +295,17 @@ fn the_view_prices_the_spend_and_balance_with_gst() {
         ..CaseLaw::default()
     };
     state.set_credential(CredentialStatus::SignedIn(CredentialKind::ApiKey));
-    state.set_account(Account {
-        spent_today_credits: 200,
-        recent: vec![DaySpend {
-            day: "2026-11-02".to_owned(),
-            credits: 1_000,
-        }],
-        ..account(1_180, "118.00")
-    });
+    state.set_account(
+        Account {
+            spent_today_credits: 200,
+            recent: vec![DaySpend {
+                day: "2026-11-02".to_owned(),
+                credits: 1_000,
+            }],
+            ..account(1_180, "118.00")
+        },
+        at(5_000),
+    );
     let view = |state: &CaseLaw| state.view(&CASE_LAW, true, false).connectors[0].clone();
     let connector = view(&state);
     let spend = connector.recent_spend.unwrap();
@@ -310,7 +325,8 @@ fn the_view_prices_the_spend_and_balance_with_gst() {
         balance,
         Balance {
             credits: 1_180,
-            paise: Some(13_924)
+            paise: Some(13_924),
+            as_of: Some(at(5_000)),
         }
     );
     let unpriced = |state: &CaseLaw| {
@@ -335,4 +351,71 @@ fn the_view_prices_the_spend_and_balance_with_gst() {
     state.liveness = Some(live());
     state.liveness.as_mut().unwrap().live = false;
     assert!(unpriced(&state));
+}
+
+/// `SignedIn` says how: the browser sign-in is `account`, a pasted key `api_key`.
+#[test]
+fn signed_in_says_how() {
+    let mut state = CaseLaw::default();
+    let method = |state: &CaseLaw| {
+        let view = state.view(&CASE_LAW, true, false);
+        let ConnectorStatus::SignedIn { method, .. } = view.connectors[0].status else {
+            panic!("{view:?}");
+        };
+        method
+    };
+    state.set_credential(CredentialStatus::SignedIn(CredentialKind::OAuth));
+    assert_eq!(method(&state), Some(ConnectorSignInMethod::Account));
+    state.set_credential(CredentialStatus::SignedIn(CredentialKind::ApiKey));
+    assert_eq!(method(&state), Some(ConnectorSignInMethod::ApiKey));
+}
+
+/// The error's kind: a sign-in failure, and `persist_failed` once the crate holds the
+/// credential in memory only while signed in (not again while it stays so, nor signed out).
+#[test]
+fn the_error_says_which_kind() {
+    let mut state = CaseLaw::default();
+    state.set_credential(CredentialStatus::SignedOut);
+    let status = |state: &CaseLaw| {
+        state.view(&CASE_LAW, true, false).connectors[0]
+            .status
+            .clone()
+    };
+    state.error = Some(Failure::sign_in("the sign-in did not finish"));
+    assert_eq!(
+        status(&state),
+        ConnectorStatus::Error {
+            message: "the sign-in did not finish".to_owned(),
+            kind: Some(ConnectorErrorKind::SignInFailed),
+        }
+    );
+    state.error = None;
+    state.note_persist(true);
+    assert_eq!(state.error, None, "signed out: nothing to save");
+    state.note_persist(false);
+    state.set_credential(CredentialStatus::SignedIn(CredentialKind::OAuth));
+    state.note_persist(true);
+    assert!(matches!(
+        status(&state),
+        ConnectorStatus::Error {
+            kind: Some(ConnectorErrorKind::PersistFailed),
+            ..
+        }
+    ));
+    // The next command clears it; it does not come back while the crate stays so.
+    state.error = None;
+    state.note_persist(true);
+    assert!(matches!(status(&state), ConnectorStatus::SignedIn { .. }));
+}
+
+/// The last recharge's outcome is in the view, and a credential that ends takes it.
+#[test]
+fn the_last_recharge_goes_with_the_credential() {
+    let mut state = CaseLaw::default();
+    state.set_credential(CredentialStatus::SignedIn(CredentialKind::ApiKey));
+    state.last_recharge = Some(RechargeOutcome::Expired);
+    let last = |state: &CaseLaw| state.view(&CASE_LAW, true, false).connectors[0].last_recharge;
+    assert_eq!(last(&state), Some(RechargeOutcome::Expired));
+    state.set_credential(CredentialStatus::SignedOut);
+    assert_eq!(last(&state), None);
 }
