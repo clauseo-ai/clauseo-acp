@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_agents::{AccountHash, AccountRead, FileStamp, SigninState};
+use clauseo_agents::{AccountHash, AccountRead, FileStamp};
 use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::Files;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -121,17 +121,53 @@ struct Entry {
     /// An unknown verdict is checked again every [`UNKNOWN_AGAIN`]: it came from a status that
     /// failed or timed out, or from a panic (`fail_closed`).
     again: bool,
-    /// A sign-in through Clauseo whose `SignedIn` named no email ([`Identities::forget`]) waits
-    /// for its record until this time: the next check records the first account it reads, by
-    /// email or id, even after a launch. Cleared when the record lands; past it, unknown and
-    /// checked. Trust on first use stays startup-only for every other path.
-    awaiting_record: Option<Duration>,
+    /// The window of a no-email sign-in through Clauseo ([`Identities::forget`]).
+    window: Window,
+}
+
+/// A no-email sign-in's window: while open, a check records the first account it reads (email or
+/// id), launched or not, while the login files are as the sign-in left them. The record shuts it;
+/// a stamp change or its bound breaks it. Trust on first use stays startup-only otherwise.
+#[derive(Debug, Clone, Default)]
+enum Window {
+    #[default]
+    Shut,
+    Open(Awaiting),
+    /// No account is recorded until a sign-in through Clauseo records again, launched or not.
+    Broken,
+}
+
+/// A no-email sign-in's window: until when, and the login files' stamps it left.
+#[derive(Debug, Clone)]
+struct Awaiting {
+    until: Duration,
+    stamps: Vec<Stamp>,
 }
 
 impl Entry {
     /// Whether a pending sign-in through Clauseo holds at `now`.
     fn expecting(&self, now: Duration) -> bool {
         self.expect.is_some_and(|until| now < until)
+    }
+
+    /// Whether a no-email sign-in's window lets a read at `now` record, the login files at
+    /// `stamps` (after the read) and at the entry's (before it) both as the sign-in left them.
+    fn awaiting(&self, now: Duration, stamps: &[Stamp]) -> bool {
+        let Window::Open(awaiting) = &self.window else {
+            return false;
+        };
+        now < awaiting.until && awaiting.stamps == stamps && self.stamps.as_deref() == Some(stamps)
+    }
+
+    /// Breaks a no-email sign-in's window when the login files at `stamps` are not as it left
+    /// them, or `now` is past its bound: nothing is recorded after. Whether it broke now.
+    fn break_window(&mut self, stamps: &[Stamp], now: Duration) -> bool {
+        let broke = matches!(&self.window, Window::Open(awaiting)
+            if awaiting.stamps != stamps || now >= awaiting.until);
+        if broke {
+            self.window = Window::Broken;
+        }
+        broke
     }
 
     /// A pending sign-in is no longer under way: whether its files had moved (`held`).
@@ -419,7 +455,7 @@ impl Identities {
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = verdict;
         entry.again = false;
-        entry.awaiting_record = None;
+        entry.window = Window::Shut;
         let _held = entry.expect_end();
         if stamps.is_some() {
             entry.stamps = stamps;
@@ -442,21 +478,28 @@ impl Identities {
             .and_then(|entry| entry.pending.clone())
     }
 
-    /// The verdict of `read` at `now` against `agent`'s record. With none recorded, an account
-    /// is trusted on first use only while no launch of the agent has passed the launch gate (after
-    /// one it is unknown), or while a sign-in through Clauseo with no email awaits its record;
-    /// and no account means nothing signed in: idle.
-    fn judge(&self, agent: &AgentId, read: &AccountRead, now: Duration) -> Judged {
+    /// The verdict of `read` at `now`, the login files at `stamps` after it, against `agent`'s
+    /// record. With none recorded, an account is trusted on first use only while no launch of
+    /// the agent has passed the launch gate and no sign-in's window broke (after either it is
+    /// unknown), or while a sign-in through Clauseo with no email awaits its record, the files
+    /// as it left them; and no account means nothing signed in: idle.
+    fn judge(
+        &self,
+        agent: &AgentId,
+        read: &AccountRead,
+        now: Duration,
+        stamps: &[Stamp],
+    ) -> Judged {
         let inner = lock(&self.inner);
         if inner.unreadable.contains(agent) {
             return Judged::Is(Verdict::Unknown);
         }
         let entry = inner.agents.get(agent);
-        let launched = entry.is_some_and(|entry| entry.launched);
-        // A sign-in through Clauseo with no email records its first account, launched or not.
-        let awaiting = entry
-            .and_then(|entry| entry.awaiting_record)
-            .is_some_and(|until| now < until);
+        let launched =
+            entry.is_some_and(|entry| entry.launched || matches!(entry.window, Window::Broken));
+        // A sign-in through Clauseo with no email records its first account, launched or not,
+        // while the login files are as it left them.
+        let awaiting = entry.is_some_and(|entry| entry.awaiting(now, stamps));
         match (read, inner.recorded.get(agent)) {
             (AccountRead::Account(hash), Some(recorded)) if hash == recorded => {
                 Judged::Is(Verdict::Same)
@@ -519,9 +562,10 @@ impl Identities {
 
     /// A sign-in through Clauseo whose `SignedIn` names no email, at `now`: the account it
     /// replaced is no longer recorded, and `agent` is due a check, whose status may name it by
-    /// its id; the check's first account is then recorded (`awaiting_record`, until `now +
-    /// bound`, the sign-in's), even after a launch, so the new login never reads as a swap.
-    fn forget(&self, agent: &AgentId, now: Duration, bound: Duration) {
+    /// its id; the check's first account is then recorded (its [`Window`], until `now +
+    /// bound`, the sign-in's), even after a launch, so the new login never reads as a swap, but
+    /// only while the login files are at `stamps`, as the sign-in left them.
+    fn forget(&self, agent: &AgentId, now: Duration, bound: Duration, stamps: Vec<Stamp>) {
         let mut inner = lock(&self.inner);
         inner.unreadable.remove(agent);
         inner.recorded.remove(agent);
@@ -530,7 +574,10 @@ impl Identities {
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = Verdict::Due;
         let _held = entry.expect_end();
-        entry.awaiting_record = Some(now + bound);
+        entry.window = Window::Open(Awaiting {
+            until: now + bound,
+            stamps,
+        });
         entry.checked_at = Some(now);
         entry.generation += 1;
         let recorded = inner.recorded.clone();
@@ -547,16 +594,6 @@ enum Judged {
     Is(Verdict),
     /// No account recorded (first run): record this one.
     Record(AccountHash),
-}
-
-/// What a `SignedIn` `state` says of the account: the account its email names, or none for
-/// one with no email; `None` for any other state.
-fn signed_in_account(state: &SigninState) -> Option<AccountRead> {
-    let SigninState::SignedIn { email, .. } = state else {
-        return None;
-    };
-    let hash = email.as_deref().and_then(AccountHash::of);
-    Some(hash.map_or(AccountRead::NoAccount, AccountRead::Account))
 }
 
 #[cfg(test)]

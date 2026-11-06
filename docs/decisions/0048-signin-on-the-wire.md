@@ -592,8 +592,11 @@ changes (`setup/identity.rs`).
   id to hash, written atomically, not at all when unchanged), so a swap while Clauseo is closed
   shows at the next start. A `SignedIn` with no email cannot tell, so it asks for a check, whose
   status may give the id; a sign-in through Clauseo with no email drops the old record and the
-  check records the first account it reads, by id or email, even after a launch (it awaits its
-  record for the sign-in's bound; past it, unknown and checked). **Neither an email nor an id is unknown** (refused, retryable).
+  check records the first account it reads, by id or email, even after a launch, but only while
+  the login files' stamps are those the sign-in left (taken when its `SignedIn` came) and
+  within the sign-in's bound. A check that fails or names no account with the files unchanged
+  keeps the window, so a retry can record; any stamp change, or the bound passing, ends it at
+  once: unknown and checked, and nothing is recorded until the lawyer signs in again. **Neither an email nor an id is unknown** (refused, retryable).
 - *When it is recorded.* At a sign-in or reuse made through Clauseo (`StartSignIn`,
   `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
   anything compares it, so a new account chosen in Clauseo never reads as a swap. The sign-in
@@ -698,7 +701,7 @@ changes (`setup/identity.rs`).
   | Changed | no | no | `signin.account_changed`, until a sign-in records |
   | KeyLogin | no | no | no |
   | First run (start, nothing recorded) | as Due | no | `agent.identity_checking`, until its startup check |
-  | Clauseo sign-in after a launch | as Due until its record | no (a no-email one past its bound: unknown, and a check) | `agent.identity_checking` until the record lands: its email, or the first account its check reads (by id), is recorded even after a launch; no other path records after one |
+  | Clauseo sign-in after a launch | as Due until its record; for a no-email one, any stamp change from what the sign-in left ends its window | no (a no-email one past its bound, or its files changed: unknown, a check, nothing recorded) | `agent.identity_checking` until the record lands: its email, or the first account its check reads (by id) while the files are as the sign-in left them, is recorded even after a launch; no other path records after one |
   | Pending sign-in through Clauseo | by stat: a change refuses until the record lands; no check | no (its bound passing: unknown, and a check) | as its state, or `agent.identity_checking` once its files moved |
   | Dead (followers panicked past three restarts; debug and test builds) | no | no | `agent.identity_unknown`, every agent on the shared login |
 

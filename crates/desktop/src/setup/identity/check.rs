@@ -4,14 +4,14 @@
 
 use std::time::Duration;
 
-use clauseo_agents::{AccountRead, SigninState, Source, sign_in_limit};
+use clauseo_agents::{AccountHash, AccountRead, SigninState, Source, sign_in_limit};
 use clauseo_host::StopFor;
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
 use super::watch::stamps;
-use super::{Judged, Ticket, Verdict, signed_in_account};
+use super::{Judged, Ticket, Verdict};
 use crate::setup::backend::AgentsBackend;
 use crate::setup::compose::is_running;
 use crate::setup::hook::{replaces_login, setup_vars_with};
@@ -113,7 +113,8 @@ pub(crate) async fn on_state(
             tracing::info!(%agent, kind = "recorded", "identity");
         } else {
             // No email: the status may name the account by its id; the check records it.
-            identity.forget(agent, now, pending_bound(agent));
+            let left = stamps(backend, agent);
+            identity.forget(agent, now, pending_bound(agent), left);
             identity.ask(agent);
             tracing::info!(%agent, kind = "no_email", "identity");
         }
@@ -230,7 +231,13 @@ fn settle(
     now: Duration,
 ) -> Verdict {
     let identity = &backend.wiring.identity;
-    let judged = identity.judge(agent, read, now);
+    // The login files after the read: a no-email sign-in's window records only while they are
+    // as it left them, and any change breaks it.
+    let after = stamps(backend, agent);
+    identity.entry(agent, |entry| {
+        let _broke = entry.break_window(&after, now);
+    });
+    let judged = identity.judge(agent, read, now, &after);
     let current = identity.entry(agent, |entry| {
         ticket.is_none_or(|Ticket(generation)| generation == entry.generation)
     });
@@ -294,4 +301,14 @@ pub(crate) async fn stop_for_account_change(backend: &AgentsBackend, agent: &Age
     if let Err(error) = stopped.await {
         tracing::warn!(%agent, code = error.code().as_str(), "identity: agents not stopped");
     }
+}
+
+/// What a `SignedIn` `state` says of the account: the account its email names, or none for
+/// one with no email; `None` for any other state.
+fn signed_in_account(state: &SigninState) -> Option<AccountRead> {
+    let SigninState::SignedIn { email, .. } = state else {
+        return None;
+    };
+    let hash = email.as_deref().and_then(AccountHash::of);
+    Some(hash.map_or(AccountRead::NoAccount, AccountRead::Account))
 }

@@ -56,6 +56,15 @@ pub(crate) fn gate(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode
     let recorded = identity.recorded_now(agent);
     let now = backend.compose.monotonic();
     let moved = identity.entry(agent, |entry| {
+        if entry.break_window(&stamps, now) {
+            // A no-email sign-in's files moved: unknown, nothing recorded, checked again.
+            if !matches!(entry.verdict, Verdict::Changed | Verdict::KeyLogin) {
+                entry.verdict = Verdict::Unknown;
+                entry.again = false;
+                entry.generation += 1;
+            }
+            return true;
+        }
         if entry.expecting(now) {
             // A pending sign-in's files moved: refused until its record lands (M1).
             return entry.hold_if_moved(&stamps);

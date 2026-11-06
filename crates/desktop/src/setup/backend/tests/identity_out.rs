@@ -250,3 +250,53 @@ fn a_sign_in_with_no_email_whose_record_never_lands_is_unknown_and_checked_at_it
     );
     assert_eq!(backend.wiring.identity.recorded(&agent), None);
 }
+
+#[test]
+fn a_write_in_a_no_email_sign_in_s_window_breaks_it_and_nothing_is_recorded() {
+    // The reviewer's trigger: garbage written, the first check fails, then another account.
+    let id = launched_claude("identity-nameless-broken");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    id.scratch.file(&claude_store(), b"garbage");
+    rig.agents.accounts.answers(&agent, AccountRead::Failed);
+    id.look(2);
+    assert_eq!(verdict(&id, &agent), Verdict::Unknown);
+    id.scratch
+        .file(&claude_store(), b"{ \"the attacker's\": \"login\" }");
+    rig.agents.accounts.names(&agent, OTHER);
+    id.look(4);
+    id.look(40);
+    assert_eq!(
+        backend.wiring.identity.recorded(&agent),
+        None,
+        "nothing recorded"
+    );
+    assert_eq!(verdict(&id, &agent), Verdict::Unknown);
+    assert_eq!(
+        gate(backend, &agent),
+        Some(ErrorCode::AgentIdentityUnknown),
+        "a launch is refused"
+    );
+}
+
+#[test]
+fn a_transient_failure_with_the_files_unchanged_keeps_the_window_and_a_retry_records() {
+    let id = launched_claude("identity-nameless-retry");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    rig.agents.accounts.answers(&agent, AccountRead::Failed);
+    assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);
+    let by_id = AccountHash::of(ACCOUNT_ID).unwrap();
+    rig.agents
+        .accounts
+        .answers(&agent, AccountRead::Account(by_id.clone()));
+    // The 30 s retry after a failed status.
+    id.look(31);
+    assert_eq!(verdict(&id, &agent), Verdict::Same);
+    assert_eq!(backend.wiring.identity.recorded(&agent), Some(by_id));
+    assert_eq!(wanted(backend, &agent), None);
+}
