@@ -59,6 +59,7 @@ mod start;
 mod status_timing;
 #[cfg(test)]
 mod stub;
+mod supervise;
 #[cfg(test)]
 mod tests;
 mod wiring;
@@ -75,6 +76,7 @@ pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
 pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
+pub(crate) use identity::{GateSlot, launch_gate};
 pub(crate) use keys::{KeyNotes, KeySlot};
 pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};
 pub(crate) use network::NetworkSlot;

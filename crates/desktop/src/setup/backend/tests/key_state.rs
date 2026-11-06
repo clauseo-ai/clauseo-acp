@@ -192,7 +192,7 @@ fn follow_keys_sets_the_refusal_from_each_note_and_a_retry_reads_the_key_again()
         KEYS_LOAD_BOUND,
     );
     let rig = rig_keys(keychain.clone(), keys);
-    let receiver = notes.take().unwrap();
+    let mut receiver = notes.take().unwrap();
     let retry = notes.retry_hook();
     let host = &rig.host;
     let told = |code| {
@@ -208,7 +208,7 @@ fn follow_keys_sets_the_refusal_from_each_note_and_a_retry_reads_the_key_again()
         retry(&claude(), ErrorCode::AgentKeyUnreadable);
         wait_for(told(None)).await;
     };
-    let follow = follow_keys(&rig.backend, receiver);
+    let follow = follow_keys(&rig.backend, &mut receiver);
     within("follow_keys lifts the refusal", async {
         match select(std::pin::pin!(follow), std::pin::pin!(drive)).await {
             Either::Left(((), _)) => panic!("the notes ended"),

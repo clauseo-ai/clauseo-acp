@@ -13,9 +13,18 @@
 //!   launch meets `agent.identity_checking` and asks for it through the host's launch retry).
 //!
 //! A change of any stamp (a file that appears, goes, is replaced or is written, a token refresh
-//! included) checks at once, whether or not sessions run. An unknown verdict is checked again
-//! every [`UNKNOWN_AGAIN`]. While a stored API key (or an endpoint) is what launches use, nothing
-//! is looked at: a key login, not checked; once it ends, the login is checked at once.
+//! included) checks at once, whether or not sessions run, signed in or not while an account is
+//! recorded. With an account recorded and no stamps the verdict holds for, the look checks; it
+//! never takes what is there as the baseline. An unknown verdict is checked again every
+//! [`UNKNOWN_AGAIN`]; a macOS Claude login with an account recorded (its Keychain may hold the
+//! login, which no stat sees) is due again every [`KEYCHAIN_STALE`], files or not. While the
+//! launch env carries a key or a provider, nothing is looked at: a key login, not checked; once
+//! it ends, the login is checked at once. A sign-in through Clauseo under way is not checked
+//! until it ends or its bound passes.
+//!
+//! The follower runs each agent's check on its own (a status run that hangs to its bound holds
+//! up no other agent), starts every agent's startup check at once, and fails closed when it
+//! panics ([`fail_closed`], `setup/start.rs`).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -23,11 +32,13 @@ use std::time::Duration;
 use clauseo_agents::file_stamp;
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
-use futures::StreamExt as _;
-use futures::future::{Either, select};
+use futures::channel::mpsc::UnboundedReceiver;
+use futures::future::{BoxFuture, FutureExt as _};
+use futures::stream::{FuturesUnordered, StreamExt as _};
 
 use super::check::exempt;
-use super::{KEYCHAIN_STALE, POLL, Stamp, UNKNOWN_AGAIN, Verdict, check};
+use super::{Entry, KEYCHAIN_STALE, POLL, Stamp, UNKNOWN_AGAIN, Verdict, check};
+use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::login_check::{LAWYER_CODEX, LOGIN_FILE};
 use crate::setup::refusal;
@@ -87,23 +98,100 @@ enum Look {
     Nothing,
     /// Check now.
     Check,
-    /// A Keychain-only login's last check is stale: due before the next launch.
+    /// A macOS Keychain login's last check is stale: due before the next launch.
     Stale,
-    /// A stored key (or an endpoint) is what launches use now: not checked.
+    /// The launch env carries a key or a provider now: not checked.
     KeyLogin,
 }
 
-/// One look at every agent's login files at `now` (the clock's monotonic time): a check for
-/// each whose stamps changed, or whose unknown verdict is due again; `agent.identity_checking`
-/// for a Keychain-only Claude login whose last check is stale. The first look after a record
-/// takes the stamps the verdict holds for.
-pub(crate) async fn poll_once(backend: &AgentsBackend, now: Duration) {
+/// What a look at `entry` decides, given the login files' `stamps` now, whether the launch
+/// env replaces the login (`exempt`), whether it is a macOS Claude login (`keychain`), whether
+/// an account is `recorded`, and the time `now`. The state table in decision record 0048.
+fn decide(
+    entry: &mut Entry,
+    stamps: Vec<Stamp>,
+    exempt: bool,
+    keychain: bool,
+    recorded: bool,
+    now: Duration,
+) -> Look {
+    if exempt {
+        if matches!(entry.verdict, Verdict::KeyLogin | Verdict::Changed) {
+            return Look::Nothing;
+        }
+        entry.verdict = Verdict::KeyLogin;
+        entry.generation += 1;
+        return Look::KeyLogin;
+    }
+    if entry.verdict == Verdict::KeyLogin {
+        // The key or the provider is gone: the login is what launches use again.
+        entry.verdict = Verdict::Due;
+        entry.generation += 1;
+        return Look::Check;
+    }
+    if entry.expecting(now) {
+        return Look::Nothing;
+    }
+    // A sign-in's bound passed: checked as any other from here.
+    entry.expect_end();
+    if matches!(entry.verdict, Verdict::Checking | Verdict::Changed) {
+        return Look::Nothing;
+    }
+    let Some(before) = &entry.stamps else {
+        if recorded || entry.verdict == Verdict::Due {
+            return Look::Check;
+        }
+        entry.stamps = Some(stamps);
+        return Look::Nothing;
+    };
+    if *before != stamps {
+        return Look::Check;
+    }
+    let age = entry.checked_at.map(|at| now.saturating_sub(at));
+    let older = |bound: Duration| age.is_none_or(|age| age >= bound);
+    if entry.verdict == Verdict::Unknown && older(UNKNOWN_AGAIN) {
+        return Look::Check;
+    }
+    let timed = matches!(entry.verdict, Verdict::Idle | Verdict::Same);
+    if keychain && recorded && timed && older(KEYCHAIN_STALE) {
+        entry.verdict = Verdict::Due;
+        return Look::Stale;
+    }
+    Look::Nothing
+}
+
+fn look(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Look {
+    let identity = &backend.wiring.identity;
+    let stamps = stamps(backend, agent);
+    let keychain = identity.keychain_fallback && AgentKind::of(agent) == Some(AgentKind::Claude);
+    let exempt = exempt(backend, agent);
+    let recorded = identity.recorded_now(agent);
+    let (seen, bound_passed) = identity.entry(agent, |entry| {
+        let pending = entry.expect.is_some();
+        let seen = decide(entry, stamps, exempt, keychain, recorded, now);
+        (seen, pending && entry.expect.is_none())
+    });
+    if bound_passed {
+        tracing::info!(%agent, kind = "sign_in_bound", "identity: checked again");
+    }
+    seen
+}
+
+/// One look at every agent at `now` (the clock's monotonic time): the refusals the host could
+/// not be told tried again (`setup/refusal.rs`), each look's refusal set, and the agents due a
+/// check, which the caller runs.
+async fn looks(backend: &AgentsBackend, now: Duration) -> Vec<AgentId> {
+    let unsynced: Vec<AgentId> = lock(&backend.wiring.unsynced).iter().cloned().collect();
+    for agent in &unsynced {
+        refusal::sync(backend, agent).await;
+    }
+    let mut checks = Vec::new();
     for agent in backend.known.keys() {
         match look(backend, agent, now) {
             Look::Nothing => {}
             Look::Check => {
                 tracing::info!(%agent, kind = "login_changed", "identity");
-                check(backend, agent).await;
+                checks.push(agent.clone());
             }
             Look::Stale => {
                 tracing::info!(%agent, kind = "keychain_stale", "identity");
@@ -115,73 +203,70 @@ pub(crate) async fn poll_once(backend: &AgentsBackend, now: Duration) {
             }
         }
     }
+    checks
 }
 
-fn look(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Look {
-    let identity = &backend.wiring.identity;
-    let stamps = stamps(backend, agent);
-    let keychain = identity.keychain_fallback
-        && AgentKind::of(agent) == Some(AgentKind::Claude)
-        && stamps.iter().all(|stamp| *stamp == Stamp::Missing);
-    let exempt = exempt(backend, agent);
-    identity.entry(agent, |entry| {
-        if exempt {
-            let checked = matches!(
-                entry.verdict,
-                Verdict::Due | Verdict::Same | Verdict::Unknown
-            );
-            if checked {
-                entry.verdict = Verdict::KeyLogin;
-                return Look::KeyLogin;
-            }
-            return Look::Nothing;
-        }
-        if entry.verdict == Verdict::KeyLogin && !entry.expect {
-            // The key or the endpoint is gone: the login is what launches use again.
-            return Look::Check;
-        }
-        if entry.expect || !matches!(entry.verdict, Verdict::Same | Verdict::Unknown) {
-            return Look::Nothing;
-        }
-        let Some(before) = &entry.stamps else {
-            entry.stamps = Some(stamps);
-            return Look::Nothing;
-        };
-        if *before != stamps {
-            return Look::Check;
-        }
-        let age = entry.checked_at.map(|at| now.saturating_sub(at));
-        let older = |bound: Duration| age.is_none_or(|age| age >= bound);
-        if entry.verdict == Verdict::Unknown && older(UNKNOWN_AGAIN) {
-            return Look::Check;
-        }
-        if keychain && entry.verdict == Verdict::Same && older(KEYCHAIN_STALE) {
-            entry.verdict = Verdict::Due;
-            return Look::Stale;
-        }
-        Look::Nothing
-    })
+/// One look at every agent's login files at `now`, the checks it finds due run side by side
+/// and waited for: what the follower does every [`POLL`], without its other work (the tests').
+#[cfg(test)]
+pub(crate) async fn poll_once(backend: &AgentsBackend, now: Duration) {
+    let checks = looks(backend, now).await;
+    futures::future::join_all(checks.iter().map(|agent| check(backend, agent))).await;
+}
+
+/// `agent`'s check, as one of the follower's running ones.
+fn checking(backend: &AgentsBackend, agent: AgentId) -> BoxFuture<'_, ()> {
+    async move {
+        check(backend, &agent).await;
+    }
+    .boxed()
 }
 
 /// The checks a launch asks for (`Identities::ask`) as they come, run when the agent's check
-/// is due; and a look every [`POLL`] between. Ends when the asks' channel closes; nothing
-/// when another follower took it.
-pub(crate) async fn follow_identity(backend: &AgentsBackend) {
-    let Some(mut asks) = backend.wiring.identity.take_asks() else {
-        return;
-    };
+/// is due; and a look every [`POLL`] between, the first at once (every agent's startup check).
+/// Each check runs on its own beside the others. Ends when the asks' channel closes.
+pub(crate) async fn follow_identity(
+    backend: &AgentsBackend,
+    asks: &mut UnboundedReceiver<AgentId>,
+) {
+    let mut running = FuturesUnordered::new();
+    for agent in looks(backend, backend.compose.monotonic()).await {
+        running.push(checking(backend, agent));
+    }
+    let mut tick = Box::pin(AsyncIoTimer.after(POLL)).fuse();
     loop {
-        let tick = std::pin::pin!(AsyncIoTimer.after(POLL));
-        match select(asks.next(), tick).await {
-            Either::Left((Some(agent), _)) => {
+        futures::select! {
+            ask = asks.next() => {
+                let Some(agent) = ask else { return };
                 let verdict = backend.wiring.identity.verdict(&agent);
                 if matches!(verdict, Verdict::Due | Verdict::KeyLogin) {
                     tracing::info!(%agent, kind = "launch_asked", "identity");
-                    check(backend, &agent).await;
+                    running.push(checking(backend, agent));
                 }
             }
-            Either::Left((None, _)) => return,
-            Either::Right(((), _)) => poll_once(backend, backend.compose.monotonic()).await,
+            () = tick => {
+                tick = Box::pin(AsyncIoTimer.after(POLL)).fuse();
+                for agent in looks(backend, backend.compose.monotonic()).await {
+                    running.push(checking(backend, agent));
+                }
+            }
+            () = running.select_next_some() => {}
         }
+    }
+}
+
+/// The follower panicked: every agent not a key login nor already refused for a changed account
+/// is made unknown, so `agent.identity_unknown` refuses its launches (fail closed) until a
+/// check answers again (at once, once a follower runs: the last check's time is dropped).
+pub(crate) async fn fail_closed(backend: &AgentsBackend) {
+    for agent in backend.known.keys() {
+        backend.wiring.identity.entry(agent, |entry| {
+            if !matches!(entry.verdict, Verdict::KeyLogin | Verdict::Changed) {
+                entry.verdict = Verdict::Unknown;
+                entry.checked_at = None;
+                entry.generation += 1;
+            }
+        });
+        refusal::sync(backend, agent).await;
     }
 }

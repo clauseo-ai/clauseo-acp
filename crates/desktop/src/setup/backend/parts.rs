@@ -45,7 +45,7 @@ pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupComman
     }
 }
 
-use crate::setup::identity::Identities;
+use crate::setup::identity;
 
 /// The plan login `StartSignIn` asks for: Claude's Claude.ai plan or, with `console`, its
 /// Console account; Codex's browser sign-in (`console` is Claude's alone).
@@ -62,13 +62,13 @@ pub(super) fn plan_method(agent: &AgentId, console: bool) -> Result<Method, Host
 /// check expects it first, so its `SignedIn` records the account before anything compares it
 /// (R17), and stops expecting it when S18 refuses it.
 pub(super) fn signs_in(
-    identity: &Identities,
+    backend: &AgentsBackend,
     agent: &AgentId,
     call: impl FnOnce() -> Result<(), SigninError>,
 ) -> Result<(), HostError> {
-    identity.expect(agent);
+    identity::expect(backend, agent);
     call().map_err(|error| {
-        identity.expect_none(agent);
+        backend.wiring.identity.expect_none(agent);
         signin_error(&error)
     })
 }

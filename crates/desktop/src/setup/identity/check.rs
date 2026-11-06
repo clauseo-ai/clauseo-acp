@@ -1,16 +1,20 @@
 //! The identity check's steps on the backend: S18's sign-in states as they come
-//! ([`on_state`]), one check of the login's account ([`check`]), and what a changed account
-//! does ([`account_changed`]).
+//! ([`on_state`]), one check of the login's account ([`check`]), the launch env's exemption
+//! ([`exempt`], [`exemption_changed`]), and what a changed account does ([`account_changed`]).
 
-use clauseo_agents::{AccountRead, SigninState, Source};
+use std::time::Duration;
+
+use clauseo_agents::{AccountRead, SigninState, Source, sign_in_limit};
+use clauseo_host::StopFor;
 use clauseo_process::{AsyncIoTimer, Timer as _};
-use clauseo_protocol::AgentId;
+use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
+use super::watch::stamps;
 use super::{Judged, Ticket, Verdict, signed_in_account};
-use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::compose::is_running;
+use crate::setup::hook::{replaces_login, setup_vars_with};
 use crate::setup::refusal;
 
 /// What [`on_state`] made of a state, for the pump.
@@ -31,13 +35,34 @@ pub(crate) enum Seen {
     Changed,
 }
 
-/// S18's new `state` for `agent`, before the pump handles it. A `SignedIn` of a sign-in or
-/// reuse through Clauseo records its account first, so nothing compares it with the account it
-/// replaced (with no email, the record goes and a check that may name an id records it);
-/// another `SignedIn` is compared with the record ([`Seen::Changed`] runs [`account_changed`]),
-/// unless a key login makes it moot, or it names no email, when a check is asked for. A resting
-/// state that is not `SignedIn` ends any sign-in under way and leaves nothing to check, but a
-/// changed account stays until a sign-in records again.
+/// How long a sign-in through Clauseo for `agent` holds off the check at most, from its start
+/// or its last running state: its run's own bound (`clauseo_agents::sign_in_limit`), else ten
+/// minutes.
+fn pending_bound(agent: &AgentId) -> Duration {
+    AgentKind::of(agent).map_or(Duration::from_mins(10), sign_in_limit)
+}
+
+/// A sign-in or reuse through Clauseo starts for `agent`: its `SignedIn` records, holding for
+/// the login files' stamps now (before its confirming status read), for its run's bound.
+pub(crate) fn expect(backend: &AgentsBackend, agent: &AgentId) {
+    let now = backend.compose.monotonic();
+    let stamps = stamps(backend, agent);
+    let identity = &backend.wiring.identity;
+    identity.expect(agent, now, pending_bound(agent), stamps);
+}
+
+/// S18's new `state` for `agent`, before the pump handles it.
+///
+/// - A running state moves a pending sign-in's bound on, with the stamps before its next step.
+/// - A `SignedIn` of a sign-in or reuse through Clauseo records its account first, holding for
+///   the stamps from before its status read, so nothing compares it with the account it
+///   replaced (with no email, the record goes and a check that may name an id records it).
+/// - Another `SignedIn` is compared with the record ([`Seen::Changed`] runs
+///   [`account_changed`]), unless a key login makes it moot, or it names no email, when a check
+///   is asked for.
+/// - A resting state that is not `SignedIn` ends any sign-in under way and makes the verdict
+///   idle (nothing refused), but the agent stays watched while an account is recorded, its
+///   stamps kept; a changed account stays until a sign-in records again, and a key login holds.
 pub(crate) async fn on_state(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -46,13 +71,21 @@ pub(crate) async fn on_state(
     let identity = &backend.wiring.identity;
     let now = backend.compose.monotonic();
     if is_running(state) {
+        if identity.entry(agent, |entry| entry.expect.is_some()) {
+            let stamps = stamps(backend, agent);
+            identity.expect_running(agent, now, pending_bound(agent), stamps);
+        }
         return Seen::Other;
     }
     let Some(read) = signed_in_account(state) else {
         let failed = matches!(state, SigninState::Failed { .. });
+        if !failed {
+            identity.nameless(agent, false);
+        }
         identity.entry(agent, |entry| {
-            entry.expect = false;
-            if !failed && entry.verdict != Verdict::Changed {
+            entry.expect_end();
+            let held = matches!(entry.verdict, Verdict::Changed | Verdict::KeyLogin);
+            if !failed && !held {
                 entry.verdict = Verdict::Idle;
                 entry.generation += 1;
             }
@@ -60,10 +93,11 @@ pub(crate) async fn on_state(
         refusal::sync(backend, agent).await;
         return Seen::Other;
     };
-    let expected = identity.entry(agent, |entry| entry.expect);
+    let expected = identity.entry(agent, |entry| entry.expecting(now));
     let seen = if expected {
         if let AccountRead::Account(hash) = read {
-            identity.record(agent, Some(hash), now);
+            let before = identity.pending_stamps(agent);
+            identity.record(agent, Some(hash), now, before);
             tracing::info!(%agent, kind = "recorded", "identity");
         } else {
             // No email: the status may name the account by its id; the check records it.
@@ -80,6 +114,7 @@ pub(crate) async fn on_state(
         Seen::Checked
     } else if read == AccountRead::NoAccount {
         // A state with no email cannot tell; the check's status may name an id.
+        identity.nameless(agent, true);
         identity.entry(agent, |entry| {
             if entry.verdict != Verdict::Changed {
                 entry.verdict = Verdict::Due;
@@ -92,7 +127,8 @@ pub(crate) async fn on_state(
         match settle(backend, agent, &read, None, now) {
             Verdict::Changed => Seen::Changed,
             _ if had => Seen::Checked,
-            _ => Seen::Recorded,
+            _ if identity.recorded_now(agent) => Seen::Recorded,
+            _ => Seen::Checked,
         }
     };
     if seen == Seen::Changed {
@@ -103,29 +139,54 @@ pub(crate) async fn on_state(
     seen
 }
 
-/// Whether `agent` launches with a stored API key, or an endpoint or a provider: the launch
-/// hook's env, not the shared login file, so the identity check does not apply.
-pub(super) fn exempt(backend: &AgentsBackend, agent: &AgentId) -> bool {
-    backend.keys.has(agent) || lock(&backend.wiring.applied).firm.contains(agent)
+/// Whether `agent`'s launch env, as the launch hook builds it (`setup/hook.rs`'s
+/// `setup_vars`), carries a credential that replaces the shared login: the API key variable
+/// the hook sets (a stored key), or a Claude provider switch (Bedrock, Vertex, Foundry). Then
+/// the identity check does not apply: a key login. An endpoint alone does not count.
+pub(crate) fn exempt(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    let Some(kind) = AgentKind::of(agent) else {
+        return false;
+    };
+    let vars = setup_vars_with(Some(&backend.keys), &backend.wiring.plans, agent, kind);
+    replaces_login(kind, &vars)
 }
 
-/// One check of `agent`'s account (none while it is [`exempt`]: a key login, not checked):
-/// `agent.identity_checking` while S18's read runs (bounded by [`super::CHECK_BOUND`]), then the
-/// verdict: the refusal lifted when it is the recorded
-/// account, `agent.identity_unknown` when the read failed, timed out or named none,
-/// [`account_changed`] when it named another. Nothing when the agent has nothing to check, a
-/// check runs, or a sign-in is under way; a check that a record or a sign-out overtook leaves
-/// their verdict.
-pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
+/// A key, an endpoint or a provider of `agent` changed: the exemption is worked out again
+/// from the launch env. One that ends makes the agent due a check (asked for at once) and puts
+/// `agent.identity_checking` on its launches before this returns, so a relaunch after it waits
+/// for the check; one that starts makes it a key login. Either drops a check in flight.
+pub(crate) async fn exemption_changed(backend: &AgentsBackend, agent: &AgentId) {
     let identity = &backend.wiring.identity;
     if exempt(backend, agent) {
         if identity.key_login(agent) {
             tracing::info!(%agent, kind = "key_login", "identity: not checked");
         }
+    } else if identity.key_login_ended(agent) {
+        tracing::info!(%agent, kind = "key_login_ended", "identity");
+        identity.ask(agent);
+    }
+    refusal::sync(backend, agent).await;
+}
+
+/// One check of `agent`'s account (none while it is [`exempt`]: a key login, not checked):
+/// `agent.identity_checking` while S18's read runs (bounded by [`super::CHECK_BOUND`]), then the
+/// verdict: the refusal lifted when it is the recorded account, `agent.identity_unknown` when
+/// the read failed, timed out or named none, [`account_changed`] when it named another. The
+/// login files' stamps are taken before the read, so a change during it shows at the next look.
+/// Nothing when a check runs, the account changed, or a sign-in is under way; a check that a
+/// record, a sign-out or a key login overtook leaves their verdict.
+pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
+    let identity = &backend.wiring.identity;
+    if exempt(backend, agent) {
+        if identity.key_login(agent) {
+            tracing::info!(%agent, kind = "key_login", "identity: not checked");
+            refusal::sync(backend, agent).await;
+        }
         return identity.verdict(agent);
     }
-    let stamps = super::watch::stamps(backend, agent);
-    let Some(ticket) = identity.begin(agent, stamps) else {
+    let stamps = stamps(backend, agent);
+    let begun = backend.compose.monotonic();
+    let Some(ticket) = identity.begin(agent, stamps, begun) else {
         return identity.verdict(agent);
     };
     refusal::sync(backend, agent).await;
@@ -147,13 +208,14 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
 }
 
 /// The verdict of `read` for `agent`, set unless `ticket`'s check was overtaken; the first
-/// account seen with none recorded is recorded.
+/// account seen with none recorded, before any launch, is recorded, holding for the stamps the
+/// entry has (a check's, taken as it began).
 fn settle(
     backend: &AgentsBackend,
     agent: &AgentId,
     read: &AccountRead,
     ticket: Option<Ticket>,
-    now: std::time::Duration,
+    now: Duration,
 ) -> Verdict {
     let identity = &backend.wiring.identity;
     let judged = identity.judge(agent, read);
@@ -166,7 +228,7 @@ fn settle(
     match judged {
         Judged::Record(hash) => {
             tracing::info!(%agent, kind = "first", "identity recorded");
-            identity.record(agent, Some(hash), now)
+            identity.record(agent, Some(hash), now, None)
         }
         Judged::Is(verdict) => identity.entry(agent, |entry| {
             // A changed account stays until a sign-in records again.
@@ -204,11 +266,15 @@ pub(crate) async fn account_changed(backend: &AgentsBackend, agent: &AgentId) {
     }
 }
 
-/// Stops `agent`'s agents because its login's account changed. The one place R17 stops them:
-/// the host's `stop_agents_for(agent, StopFor::SignInAgain)`, which keeps the stopped turns
-/// held for the new sign-in's `restart_agents`, replaces `stop_agents` here once it lands.
+/// Stops `agent`'s agents because its login's account changed, the one place R17 stops them:
+/// the host's `stop_agents_for(agent, StopFor::SignInAgain)`. The host's hold stays until the
+/// new sign-in's `restart_agents` (after it records the account again), so a prompt to the
+/// agent meanwhile, in any thread, queues held as `sign_in` rather than failing, and runs then.
 pub(crate) async fn stop_for_account_change(backend: &AgentsBackend, agent: &AgentId) {
-    if let Err(error) = backend.host.stop_agents(agent.clone()).await {
+    let stopped = backend
+        .host
+        .stop_agents_for(agent.clone(), StopFor::SignInAgain);
+    if let Err(error) = stopped.await {
         tracing::warn!(%agent, code = error.code().as_str(), "identity: agents not stopped");
     }
 }

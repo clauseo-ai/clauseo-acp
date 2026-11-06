@@ -58,7 +58,7 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::identity::Identities;
+use super::identity::{GateSlot, Identities};
 use super::keys::{FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot, KeysLoaded};
 use super::login_check::ReusedLogins;
 use super::network::FIRST_ROUTE_WAIT;
@@ -313,6 +313,8 @@ pub(crate) struct HostSide {
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
     pub(crate) notes: Arc<KeyNotes>,
+    /// Where the backend goes once up, for the host's launch gate (R17, `identity/gate.rs`).
+    pub(crate) gate: GateSlot,
 }
 
 /// Starts the `clauseo-setup` thread: keys, `Agents`, the first states, the cell, the pump.
@@ -378,6 +380,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
+    let gate = Arc::clone(&side.gate);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -441,24 +444,34 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         backend.compose.show_key(agent, &keys);
     }
     load_done.finish();
+    // Set once, here: the host's launch gate checks from now on.
+    let _set = gate.set(Arc::clone(&backend));
     let follower = Arc::clone(&backend);
     let reread = side.reread;
-    let notes = side.notes.take();
+    let mut notes = side.notes.take();
+    let mut asks = backend.wiring.identity.take_asks();
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
             futures::executor::block_on(lift_at_start(&follower, FIRST_ROUTE_WAIT));
-            let settings = follow_settings(&follower, &*reread);
-            let leaves = super::leave::follow_auto_leaves(&follower);
-            let keys = async {
-                if let Some(notes) = notes {
-                    follow_keys(&follower, notes).await;
-                }
-            };
-            let identity = super::identity::follow_identity(&follower);
-            let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
-            let follows = join(join(settings, keys), join(join(splits, leaves), identity));
-            futures::executor::block_on(follows);
+            // Started again after a panic, the identity check failing closed first.
+            super::supervise::supervise(&follower, || {
+                let settings = follow_settings(&follower, &*reread);
+                let leaves = super::leave::follow_auto_leaves(&follower);
+                let keys = async {
+                    if let Some(notes) = notes.as_mut() {
+                        follow_keys(&follower, notes).await;
+                    }
+                };
+                let identity = async {
+                    if let Some(asks) = asks.as_mut() {
+                        super::identity::follow_identity(&follower, asks).await;
+                    }
+                };
+                let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
+                let follows = join(join(settings, keys), join(join(splits, leaves), identity));
+                futures::executor::block_on(follows);
+            });
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
