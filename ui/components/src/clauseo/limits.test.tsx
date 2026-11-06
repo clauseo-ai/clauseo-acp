@@ -110,6 +110,11 @@ describe("the limit's note", () => {
       ),
     );
     expect(document.querySelector(".lim-field-note > .lim-field-end > button")).not.toBeNull();
+    // the action follows the last sentence, inside it
+    await act(async () =>
+      root?.render(<FieldNotice lead="Out." rest="Add more." action={<a href="#c">Add</a>} />),
+    );
+    expect(document.querySelector(".lim-field-rest > a")?.textContent).toBe("Add");
   });
 
   test("a day's line, a way on, and the band across the work say what they're given", async () => {
