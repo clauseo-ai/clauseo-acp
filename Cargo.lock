@@ -1294,6 +1294,7 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "thiserror 2.0.21",
+ "tracing",
  "unicode-normalization",
  "windows",
 ]
