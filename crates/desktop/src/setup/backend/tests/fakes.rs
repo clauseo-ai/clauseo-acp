@@ -228,6 +228,8 @@ pub(super) struct RecordingHost {
     pub(super) restart_fails: Mutex<usize>,
     /// The next `stop_agents` panics, once a test sets it.
     pub(super) stop_panics: Mutex<bool>,
+    /// The next `stop_agents` answers once this opens, when a test sets it.
+    pub(super) stop_gate: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
     /// What `settings_changes` answers, once a test sets it.
     pub(super) changes: Mutex<Option<BoxStream<'static, ()>>>,
     /// Told at each `restart_agents`, once a test sets it.
@@ -242,6 +244,7 @@ impl RecordingHost {
             stopped: Mutex::new(AgentsStopped::Exited),
             restart_fails: Mutex::new(0),
             stop_panics: Mutex::new(false),
+            stop_gate: Mutex::new(None),
             changes: Mutex::new(None),
             restarted: Mutex::new(None),
         }
@@ -298,7 +301,14 @@ impl SetupHost for RecordingHost {
         self.push(HostCall::StopAgents(agent));
         let panics = std::mem::take(&mut *lock(&self.stop_panics));
         assert!(!panics, "the test's stop_agents panics");
-        Box::pin(std::future::ready(Ok(*lock(&self.stopped))))
+        let gate = lock(&self.stop_gate).take();
+        let stopped = *lock(&self.stopped);
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                let _opened = gate.await;
+            }
+            Ok(stopped)
+        })
     }
     fn set_reused_login(
         &self,

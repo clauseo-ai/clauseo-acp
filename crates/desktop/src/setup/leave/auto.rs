@@ -18,12 +18,16 @@
 //! **A new sign-in** (review A1) ends the leave, never the other way round. Before the first try
 //! and each try again, and again right before S18's `stop_using_login` (under the sign-in gate),
 //! the leave checks whether a sign-in runs or Clauseo's own login is signed in
-//! ([`taken_over`](super::taken_over)); then it asks S18 nothing more and ends, `Switching` with
-//! it. A new `SignedIn` the pump handles (the host told, the entry rewritten, `restart_agents`)
+//! ([`taken_over`](super::taken_over)), and whether a new `SignedIn` came since the leave began,
+//! handled by the pump or still on its way (a "Use it" that finished as `SignedIn { Reused }`
+//! as a try started, review H1′). A new login ends the leave, `Switching` with it. A running
+//! sign-in only skips the try, never cancelled: the agent stays held, the sign-in shows over
+//! `Switching`, and should it fail, `Switching` shows again and the next try runs, so no hold
+//! is ever silent.
+//! A new `SignedIn` the pump handles (the host told, the entry rewritten, `restart_agents`)
 //! ends it too, whether it lands during the wait or during a try. The hold is then the new
-//! login's to lift: the pump's `restart_agents` on its `SignedIn`, or the leave's own when the
-//! pump had shown it before the leave's last `stop_agents`. A running sign-in that fails leaves
-//! the hold on until a login, a key or an endpoint is in place.
+//! login's to lift: the pump's `restart_agents` on its `SignedIn`, or the leave's own once more
+//! when the pump had handled it (it may have come before the leave's last `stop_agents`).
 //!
 //! **A panic** (review A3) in a leave lifts its hold ([`HostHold::on_panic`]) and ends
 //! `Switching`; [`follow`] catches it, so the thread's other followers (the settings, the
@@ -42,7 +46,7 @@ use futures::{FutureExt as _, StreamExt as _};
 
 use super::super::backend::AgentsBackend;
 use super::hold::HostHold;
-use super::{NotLeft, Wait, Whose, attempt, login_changed, retry_after, taken_over};
+use super::{NotLeft, Over, Wait, Whose, attempt, login_changed, retry_after, taken_over};
 
 /// Runs each automatic leave queued, each on its own, until the queue ends. A leave that panics
 /// is caught here: its hold lifted already, `Switching` ends, and the rest go on.
@@ -78,7 +82,7 @@ enum End {
     Again,
     /// The pump handled a new `SignedIn`, `restart_agents` included.
     NewSignIn,
-    /// A sign-in runs, or Clauseo's own login is signed in ([`taken_over`]).
+    /// A new login took the reused one's place ([`taken_over`]).
     TakenOver,
 }
 
@@ -99,7 +103,7 @@ pub(crate) async fn auto_leave(
             return Err(conflict);
         }
     };
-    if taken_over(backend, agent) {
+    if taken_over(backend, agent) == Some(Over::SignedIn) {
         tracing::info!(%agent, "a new sign-in took over: no automatic leave");
         slot.left();
         return Ok(());
@@ -111,7 +115,7 @@ pub(crate) async fn auto_leave(
     let end = match attempt(backend, agent, kind, why, Whose::Auto).await {
         Ok(_) => End::First,
         Err(NotLeft::NewSignIn) => End::NewSignIn,
-        Err(NotLeft::TakenOver) => End::TakenOver,
+        Err(NotLeft::TakenOver(Over::SignedIn)) => End::TakenOver,
         Err(not_left) => {
             log_try(agent, &not_left);
             backend.compose.start_switching(agent);
@@ -129,11 +133,12 @@ pub(crate) async fn auto_leave(
             end
         }
     };
+    let leaves = &backend.wiring.leaves;
     slot.left();
     drop(reads);
     match end {
         End::Again => hold.lift().await,
-        End::TakenOver if own_login_shown(backend, agent) => {
+        End::TakenOver if own_login_shown(backend, agent) || leaves.told_signed_in(agent) => {
             // The pump may have lifted it before this leave's last `stop_agents`.
             hold.lift().await;
         }
@@ -157,14 +162,16 @@ async fn try_again(
         if let Either::Right(_) = select(wait, &mut signed_in).await {
             break End::NewSignIn;
         }
-        if taken_over(backend, agent) {
-            break End::TakenOver;
-        }
-        match attempt(backend, agent, kind, why, Whose::Auto).await {
-            Ok(_) => return End::Again,
-            Err(NotLeft::NewSignIn) => break End::NewSignIn,
-            Err(NotLeft::TakenOver) => break End::TakenOver,
-            Err(not_left) => log_try(agent, &not_left),
+        match taken_over(backend, agent) {
+            Some(Over::SignedIn) => break End::TakenOver,
+            // Skipped, never cancelled: should the sign-in fail, the next try runs.
+            Some(Over::Running) => log_try(agent, &NotLeft::TakenOver(Over::Running)),
+            None => match attempt(backend, agent, kind, why, Whose::Auto).await {
+                Ok(_) => return End::Again,
+                Err(NotLeft::NewSignIn) => break End::NewSignIn,
+                Err(NotLeft::TakenOver(Over::SignedIn)) => break End::TakenOver,
+                Err(not_left) => log_try(agent, &not_left),
+            },
         }
         if !matches!(signed_in.try_recv(), Ok(None)) {
             break End::NewSignIn;

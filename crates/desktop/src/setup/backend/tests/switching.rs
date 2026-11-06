@@ -20,16 +20,16 @@ use crate::setup::backend::launch;
 use crate::setup::compose::timestamp;
 use crate::setup::leave::{Wait, auto_leave};
 
-const SPLIT: SigninState = SigninState::SignedOut {
+pub(super) const SPLIT: SigninState = SigninState::SignedOut {
     found: Some(Found::CodexLinkSplit),
 };
 
-fn retry(seconds: u64) -> Wait {
+pub(super) fn retry(seconds: u64) -> Wait {
     Wait::Retry(Duration::from_secs(seconds))
 }
 
 /// The latest `SignInChanged` for `agent`, as a new follower gets it.
-fn shown(rig: &Rig, agent: &AgentId) -> Option<SignIn> {
+pub(super) fn shown(rig: &Rig, agent: &AgentId) -> Option<SignIn> {
     let mut feed = rig.events.follow();
     sign_ins(&mut feed, agent).pop()
 }
@@ -48,14 +48,14 @@ fn sign_ins(
         .collect()
 }
 
-fn switching(stuck: bool) -> SignIn {
+pub(super) fn switching(stuck: bool) -> SignIn {
     SignIn::Switching {
         since: timestamp(start()),
         stuck,
     }
 }
 
-fn count(rig: &Rig, call: &HostCall) -> usize {
+pub(super) fn count(rig: &Rig, call: &HostCall) -> usize {
     rig.host.calls().iter().filter(|seen| *seen == call).count()
 }
 
@@ -320,7 +320,7 @@ fn a_new_sign_in_ends_the_tries_and_switching() {
 }
 
 /// Clauseo's own login, as a sign-in that lands during a leave reports it.
-fn own_login() -> SigninState {
+pub(super) fn own_login() -> SigninState {
     SigninState::SignedIn {
         email: Some("clauseo@firm.example".to_owned()),
         plan: None,
@@ -390,115 +390,31 @@ fn a_sign_in_landing_during_a_lawyer_s_leave_tells_the_host_the_new_source() {
 }
 
 #[test]
-fn a_try_again_never_cancels_or_replaces_a_running_sign_in() {
+fn a_found_login_used_as_a_try_starts_is_not_stopped() {
     let rig = reused_codex();
     *lock(&rig.host.stopped) = AgentsStopped::TimedOut;
     let mut script = rig.timer.script();
     let agent = codex();
     let leave = auto_leave(&rig.backend, &agent, Some(Found::CodexLinkSplit));
+    let found = SigninState::SignedIn {
+        email: Some("other@firm.example".to_owned()),
+        plan: None,
+        source: Source::Reused,
+        at: std::time::UNIX_EPOCH,
+    };
     let drive = async {
         script.asked(retry(5)).await;
-        // The lawyer started a sign-in meanwhile: S18 has reserved its job, with no state yet.
-        lock(&rig.agents.signing_in).insert(codex());
-        script.fire(retry(5)).await;
-    };
-    let (left, ()) = rig.pumped(join(leave, drive));
-    assert_eq!(left, Ok(()), "the running sign-in ends the tries");
-    let asked: Vec<_> = rig.calls().into_iter().map(|(name, _)| name).collect();
-    assert!(
-        !asked.contains(&"stop_using_login") && !asked.contains(&"cancel_sign_in"),
-        "S18 was asked nothing: {asked:?}"
-    );
-    assert_eq!(
-        count(&rig, &HostCall::StopAgents(codex())),
-        1,
-        "no try again"
-    );
-    assert_eq!(
-        count(&rig, &HostCall::RestartAgents(codex())),
-        0,
-        "held until the sign-in's SignedIn"
-    );
-    assert_ne!(
-        shown(&rig, &codex()),
-        Some(switching(false)),
-        "Switching ended"
-    );
-}
-
-#[test]
-fn a_sign_in_arriving_mid_try_ends_switching_lifts_the_hold_and_launches_on_it() {
-    let rig = reused_codex();
-    let mut script = rig.timer.script();
-    let agent = codex();
-    let leave = auto_leave(&rig.backend, &agent, Some(Found::CodexLinkSplit));
-    let drive = async {
-        script.fire(Wait::SignedOut).await;
-        script.asked(retry(5)).await;
-        let shows = shown(&rig, &codex());
-        assert!(matches!(shows, Some(SignIn::Switching { .. })), "{shows:?}");
-        script.fire(retry(5)).await;
-        script.asked(Wait::SignedOut).await;
-        rig.s18_sends(&codex(), own_login());
-    };
-    let (left, ()) = rig.pumped(join(leave, drive));
-    assert_eq!(left, Ok(()));
-    assert!(matches!(
-        shown(&rig, &codex()),
-        Some(SignIn::SignedIn {
-            source: SignInSource::Own,
-            ..
-        })
-    ));
-    let calls = rig.host.calls();
-    let own = calls
-        .iter()
-        .position(|call| *call == HostCall::SetReusedLogin(codex(), false));
-    let restart = calls
-        .iter()
-        .position(|call| *call == HostCall::RestartAgents(codex()));
-    assert!(
-        own.is_some() && own < restart,
-        "told Own, then launched: {calls:?}"
-    );
-    assert_eq!(count(&rig, &HostCall::RestartAgents(codex())), 1);
-    let asked = rig
-        .calls()
-        .into_iter()
-        .filter(|(name, _)| *name == "stop_using_login");
-    assert_eq!(asked.count(), 2, "no try after the sign-in");
-    assert!(!rig.backend.wiring.reused.get(&codex()));
-}
-
-#[test]
-fn a_panicking_automatic_leave_lifts_its_hold_and_the_next_leave_runs() {
-    let rig = reused_codex();
-    *lock(&rig.host.stop_panics) = true;
-    let (told, restarted) = std::sync::mpsc::channel();
-    *lock(&rig.host.restarted) = Some(told);
-    rig.pumped_with_leaves(async {
-        rig.backend
-            .wiring
-            .leaves
-            .submit(&codex(), Some(Found::CodexLinkSplit));
-        until("the leave ran", || {
-            count(&rig, &HostCall::StopAgents(codex())) == 1
-        })
-        .await;
-        restarted
-            .recv_timeout(crate::test_support::STEP_WAIT)
-            .expect("the hold lifted from its own thread");
+        *lock(&rig.host.stopped) = AgentsStopped::Exited;
         lock(&rig.agents.answers).insert("stop_using_login", SPLIT);
-        rig.backend
-            .wiring
-            .leaves
-            .submit(&codex(), Some(Found::CodexLinkSplit));
-        let done = || count(&rig, &HostCall::LoginChanged(codex())) == 1;
-        until("the next leave", done).await;
-    });
-    assert_eq!(count(&rig, &HostCall::StopAgents(codex())), 2);
+        rig.s18_sends(&codex(), found);
+        script.fire(retry(5)).await;
+    };
+    let (_left, ()) = rig.pumped(join(leave, drive));
     assert!(
-        !rig.backend.wiring.reused.get(&codex()),
-        "the next leave left"
+        !rig.calls()
+            .iter()
+            .any(|(name, _)| *name == "stop_using_login"),
+        "{:?}",
+        rig.calls()
     );
 }

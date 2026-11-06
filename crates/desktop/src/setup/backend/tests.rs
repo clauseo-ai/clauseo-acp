@@ -13,6 +13,7 @@ mod refusals;
 mod retry;
 mod signin;
 mod switching;
+mod takeover;
 mod timing;
 
 use std::collections::BTreeMap;
