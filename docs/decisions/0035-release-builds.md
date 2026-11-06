@@ -54,6 +54,14 @@ Developer ID.
   throwaway test key (`updater-test.pub`): its base64 text, its `RW…` key line and its key id, in ASCII or UTF-16 (NULs dropped first). A hit fails the
   leg with `::error::` naming the file. A `test` run builds `e2e`, which holds the key on
   purpose. The desktop tests' own checks (0037) cover only the source text and the test binary.
+  The same step fails on any e2e-only string, named in the `::error::`: the variables only the
+  `e2e` build reads (`E2E_AGENTS_MANAGED`, `E2E_UPDATE_ENDPOINT`, `E2E_FAKE_UPDATE`), the counts'
+  endpoint override only debug and `e2e` builds read (`CLAUSEO_COUNTS_URL`), and the `e2e`
+  build's marker, `CLAUSEO-E2E-BUILD-MARKER` (a `#[used]` static in `src/e2e.rs`, read at every
+  `e2e` start so the linker keeps it). The marker catches any `e2e` code that reached a release
+  binary, whatever its own strings. Checked locally (2026-11-06): the `e2e` app and unit-test
+  binaries hold the marker and the plain ones do not; the scan passes a clean binary and fails one
+  with each string, in ASCII or UTF-16LE.
 - **Artefacts by tier.** Tier 1, which must build: `Clauseo_<v>_aarch64.dmg` and
   `Clauseo_<v>_aarch64.app.tar.gz` (`macos-15`), `Clauseo_<v>_x64-setup.exe` and
   `Clauseo_<v>_x64-machine-setup.exe` (`windows-2025`). Tier 2, `continue-on-error`, named in the

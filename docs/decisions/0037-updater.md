@@ -290,7 +290,9 @@ install; what the brief left open was decided so:
   but the linker drops code only `run()` reaches, so that covers only what the tests reach. The
   real control is `release.yml`'s scan of each shipped app binary before it is signed or
   uploaded (0035, "No test key in a shipped binary"), which fails a release or dry run that
-  holds the key.
+  holds the key. The same scan fails on the `e2e` build's variable names (`E2E_UPDATE_ENDPOINT`,
+  `E2E_FAKE_UPDATE`) and on its marker, `CLAUSEO-E2E-BUILD-MARKER`, so neither the test release's
+  endpoint nor the fake can reach a shipped binary.
 - **The plugin** is reached through `UpdaterBuilder`, with a 30 s connect and a 60 s read
   timeout (the host sets no deadline on a check or a download), and HTTPS only
   (`configure_client` sets reqwest's `https_only`, in every build, `e2e` included, whose test

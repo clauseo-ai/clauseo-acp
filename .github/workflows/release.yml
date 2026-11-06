@@ -363,6 +363,10 @@ jobs:
       # is this file), holds none of it: not
       # the file's base64 text, its RW... key line or its key id (B142942ACEC5F521), in ASCII or
       # UTF-16 (the NULs are dropped first). This scan, not the desktop tests, is the control.
+      # Nor any e2e-only string: the variables only the e2e build reads (E2E_AGENTS_MANAGED,
+      # E2E_UPDATE_ENDPOINT, E2E_FAKE_UPDATE), the counts' endpoint override that only debug and
+      # e2e builds read (CLAUSEO_COUNTS_URL), and the e2e build's marker (CLAUSEO-E2E-BUILD-MARKER,
+      # src/e2e.rs), so any e2e code that reached this binary fails it, whatever its own strings.
       - name: The app binary holds no form of the test updater key
         if: env.MODE != 'test'
         run: |
@@ -382,6 +386,14 @@ jobs:
             fi
           done
           echo "$exe holds no form of the test updater key"
+          for form in E2E_AGENTS_MANAGED E2E_UPDATE_ENDPOINT E2E_FAKE_UPDATE CLAUSEO_COUNTS_URL CLAUSEO-E2E-BUILD-MARKER; do
+            found=$(LC_ALL=C tr -d '\000' < "$exe" | LC_ALL=C grep -c -a -F -e "$form") || [ $? -eq 1 ]
+            if [ "$found" != 0 ]; then
+              echo "::error::$exe holds the e2e-only string $form"
+              exit 1
+            fi
+          done
+          echo "$exe holds no e2e-only string"
 
       # A dry run's updater key: made here, with a random password, and gone with the runner.
       - name: Make a throwaway updater key (dry run)

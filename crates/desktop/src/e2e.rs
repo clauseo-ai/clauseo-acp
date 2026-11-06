@@ -143,11 +143,19 @@ if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === undefined) {{
     reason = "e2e/marks builds only; release ACL unchanged: grants the scoreboard's capability files"
 )]
 pub(crate) fn grant_scoreboard<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
+    // Read here, at every e2e start, so the linker keeps the marker in the binary.
+    std::hint::black_box(&E2E_BUILD_MARKER);
     manager.add_capability(include_str!("../capabilities/e2e.json"))?;
     #[cfg(feature = "marks")]
     manager.add_capability(include_str!("../capabilities/marks.json"))?;
     Ok(())
 }
+
+/// Bytes only an `e2e` build holds: release.yml's scan of every other run's app binary fails
+/// when it finds them, so any `e2e` code that reached a release binary is caught, whatever its
+/// own strings (0035, "No test key in a shipped binary"). Read by [`grant_scoreboard`].
+#[used]
+static E2E_BUILD_MARKER: [u8; 24] = *b"CLAUSEO-E2E-BUILD-MARKER";
 
 /// The bytes the bridge has sent down every window channel since the app started, as the
 /// release framing would have sent them: a `timed` message counts as its event's length.
