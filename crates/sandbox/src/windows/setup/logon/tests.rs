@@ -293,11 +293,13 @@ fn elevated_log_on_once_makes_a_profile_and_delete_profile_removes_it() {
     assert!(!profile.temporary, "{profile:?}");
     let local_low = profile.path.join("AppData").join("LocalLow");
     assert!(local_low.is_dir(), "{}", local_low.display());
-    // The profile service makes the folders; their owner is SYSTEM or the user.
+    // The profile service makes the folders. Their owner is SYSTEM, the user, or the account
+    // that loaded the profile (the elevated set-up's; on the hosted runner, which copies a
+    // Default profile its own account built, the built-in Administrator). Never another user.
     let owner = crate::windows::acl::owner(&local_low).unwrap();
     eprintln!("LocalLow's owner: {}", owner.as_str());
     assert!(
-        owner.as_str() == "S-1-5-18" || owner == user.sid,
+        owner.as_str() == "S-1-5-18" || owner == user.sid || owner == me(),
         "{}",
         owner.as_str()
     );
