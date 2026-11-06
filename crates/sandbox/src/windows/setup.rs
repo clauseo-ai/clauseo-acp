@@ -59,6 +59,9 @@ mod create;
 pub mod exe;
 #[cfg(windows)]
 mod ffi;
+#[cfg(test)]
+#[cfg(windows)]
+mod handback_tests;
 #[cfg(windows)]
 pub mod journal;
 pub mod journal_plan;

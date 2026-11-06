@@ -383,34 +383,3 @@ fn an_auto_inherited_child_keeps_an_explicit_entry_its_parent_also_passes_down()
     assert!(has(&ai, other, true), "ai.txt inherits the matter's");
     assert!(has(&plain, other, true) && !has(&plain, other, false));
 }
-
-/// S15 `PR4h`: in a matter's tree, a file or folder a pool user other than the matter's own
-/// owns goes to the desktop user, cleaned; the matter's own pool user's is left its own. The
-/// children's real owner (this process's user, or `Administrators` when elevated) stands in
-/// for the pool user who made them.
-#[test]
-fn a_child_another_pool_user_owns_is_handed_back_in_a_matters_walk() {
-    let place = Place::new("acl-foreign-owner");
-    let doc = place.dir.file("matter/moved/doc.txt", "x");
-    let maker = owner_sid(&descriptor(&doc).unwrap()).unwrap();
-    let me = current_user_sid().unwrap();
-    let other = Sid::parse(OTHER_POOL_SIDS[0]).unwrap();
-    let strict = |assigned: &Sid| Strict {
-        watched: vec![other.clone()],
-        pool: vec![maker.clone(), other.clone()],
-        assigned: vec![assigned.clone()],
-    };
-    let mut acl = NtfsAcl::new().unwrap();
-    let matter = place.at("matter");
-    acl.propagate(&matter, Reach::Tree, Some(&strict(&maker)))
-        .unwrap();
-    assert_eq!(owner_sid(&descriptor(&doc).unwrap()), Some(maker.clone()));
-
-    let walked = acl
-        .propagate(&matter, Reach::Tree, Some(&strict(&other)))
-        .unwrap();
-    assert!(walked.repaired >= 2, "{walked:?}");
-    for item in [place.at("matter/moved"), doc] {
-        assert_eq!(owner_sid(&descriptor(&item).unwrap()), Some(me.clone()));
-    }
-}

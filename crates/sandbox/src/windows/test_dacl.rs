@@ -180,3 +180,61 @@ pub(crate) fn elevated() -> bool {
     drop(unsafe { CloseHandle(token) });
     asked.is_ok() && elevation.TokenIsElevated != 0
 }
+
+/// Makes `sid` the owner of `path` (`SetNamedSecurityInfoW`, owner only), with
+/// `SeRestorePrivilege` enabled first, since the token doesn't hold `sid`: a test file made as
+/// another account would have made it (S15 `PR4h`). Elevated tests only.
+#[cfg(test)]
+pub(crate) fn give_owner(path: &Path, sid: &crate::windows::sids::Sid) -> io::Result<()> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW,
+        OWNER_SECURITY_INFORMATION, PSID, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES,
+        TOKEN_PRIVILEGES,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::w;
+
+    let mut token = HANDLE::default();
+    // SAFETY: a pseudo-handle and a live out-pointer; the handle is closed below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &raw mut token) }
+        .map_err(io::Error::other)?;
+    let mut luid = LUID::default();
+    // SAFETY: a NUL-terminated literal and a live out-pointer.
+    let looked = unsafe { LookupPrivilegeValueW(None, w!("SeRestorePrivilege"), &raw mut luid) };
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: SE_PRIVILEGE_ENABLED,
+        }],
+    };
+    // SAFETY: the token was opened to adjust; `privileges` lives for the call.
+    let enabled = looked.and_then(|()| unsafe {
+        AdjustTokenPrivileges(token, false, Some(&raw const privileges), 0, None, None)
+    });
+    // SAFETY: the token was opened above and is closed once, here.
+    drop(unsafe { CloseHandle(token) });
+    enabled.map_err(io::Error::other)?;
+    let target: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
+    let mut bytes = crate::windows::acl_bytes::sid_bytes(sid);
+    // SAFETY: `target` is NUL-terminated and `bytes` a valid SID; both outlive the call.
+    let status = unsafe {
+        SetNamedSecurityInfoW(
+            PCWSTR(target.as_ptr()),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(PSID(bytes.as_mut_ptr().cast())),
+            None,
+            None,
+            None,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::other(format!(
+            "SetNamedSecurityInfoW (owner) failed with {}",
+            status.0
+        )));
+    }
+    Ok(())
+}
