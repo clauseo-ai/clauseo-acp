@@ -188,7 +188,13 @@ pub(super) fn program_data() -> Result<PathBuf, MachineError> {
 
 /// Keeps every later DLL load of this process to System32 (`SetDefaultDllDirectories`), so a
 /// DLL planted beside the setup exe, in a folder a standard user may write, never loads into the
-/// elevated process. Static imports are kept there by the link flag `/DEPENDENTLOADFLAG:0x800`.
+/// elevated process. Direct static imports are kept there by the link flag
+/// `/DEPENDENTLOADFLAG:0x800`. `netapi32.dll` and `userenv.dll` are delay-loaded (`build.rs`)
+/// because their own imports (`netutils.dll`, `samcli.dll`, ...) aren't `KnownDLLs` and would
+/// otherwise be searched for beside the exe before `main`. Called first in `exe::main`: after
+/// it, the delay-load helper's `LoadLibraryExA(name, NULL, 0)` (or the loader's
+/// `ResolveDelayLoadedAPI`) searches only the default directories, System32, and so do the
+/// loads of those DLLs' own imports.
 pub(super) fn restrict_dll_search() -> Result<(), MachineError> {
     // SAFETY: a flags-only call with no pointers.
     unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) }

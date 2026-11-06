@@ -445,19 +445,31 @@ Malware running as that user can swap the exe, and when an administrator then ty
 password at the prompt (over-the-shoulder elevation) the malware runs as administrator. Its
 publisher shows as unknown either way, since Windows ships unsigned for now.
 
-A DLL planted beside the exe is mitigated (`DependentLoadFlags` plus `SetDefaultDllDirectories`),
-pending VM proof. The link flag `/DEPENDENTLOADFLAG:0x800` asks the loader to take the exe's
-static imports from System32 only, and the exe calls
-`SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first for every later load. A CI test
-shows the flag is in the PE's load configuration; nothing yet shows Windows honours it for the
-exe's own imports that aren't KnownDLLs (`netapi32.dll` and `userenv.dll` among them). The VM
-row plants a DLL named after each such import beside the exe, runs `--set-up`, and checks with
-Process Monitor that only the System32 copies load. If it fails, those calls move to
-`LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)` and `GetProcAddress`: the `windows` crate
-links its imports with `raw-dylib`, which can't be delay-loaded.
+A DLL planted beside the exe is mitigated, pending the VM re-run. Direct imports are covered by
+`DependentLoadFlags`: the link flag `/DEPENDENTLOADFLAG:0x800` makes the loader take the exe's
+static imports from System32 only, and the VM showed every direct import (`netapi32`, `userenv`,
+`crypt32`, `psapi`, `bcryptprimitives`, `ntdll`, `VCRUNTIME140`) loading from there. The flag
+doesn't reach those DLLs' own imports, which the loader resolves before `main` with the exe's
+folder searched first. `netapi32.dll` imports `netutils.dll` and `samcli.dll`, which aren't
+KnownDLLs, and on the VM a `netutils.dll` planted beside the exe was mapped executable. Transitive
+imports were not mitigated before this change: in a user-writable install folder, a planted DLL ran
+elevated.
 
-Swapping the exe itself stays open in a per-user install. The mitigation is the per-machine
-install, whose folder under Program Files only administrators can write (PR4j's
+Transitive imports are now covered by delay-load plus `SetDefaultDllDirectories`. `netapi32.dll`
+and `userenv.dll` are linked `/DELAYLOAD` (with `delayimp.lib`), so they load at their first call.
+That comes after the first statement of `main`,
+`SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so the delay-load helper's load and the
+loads of those DLLs' own imports search System32 only. No code runs before `main` that could call
+them. A CI test reads the exe's import and delay-import directories: both DLLs are delay-imports
+only, and every remaining normal import is a KnownDLL, an API set, or one of a vetted few whose own
+imports are all KnownDLLs; a new import fails the test by name. The VM re-run plants a DLL named
+after each import of `netapi32.dll` and `userenv.dll` beside the exe, runs `--set-up`, and checks
+with Process Monitor that nothing loads from the exe's folder. If the delay-load proves unworkable,
+those calls move to `LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)` and `GetProcAddress`.
+
+A planted DLL stays the same class of risk as swapping the exe: both need an install folder a
+standard user can write. Swapping the exe itself stays open in a per-user install. The per-machine
+install closes both, since only administrators can write its folder under Program Files (PR4j's
 `--per-machine`, with stage F).
 
 ### Shared writable places
