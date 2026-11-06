@@ -10,6 +10,14 @@
 //!   connect ([`chrome_alive`]). After #534 Chrome leads a process group of its own, so the
 //!   agent's tree kill can miss it, and it would go on using the proxy's port.
 //!
+//! On Windows a gone tree means a gone Chrome, and (b) is looked at only when there is no tree
+//! (the agent never started). The agent's Job Object forbids breakaway (`Tree::new` in
+//! clauseo-process, tested by `the_job_forbids_breakaway_and_an_empty_one_is_gone`), and
+//! Chrome is the browser guard's descendant, the guard the agent's, so Chrome counts in the
+//! job's `ActiveProcesses`, nested jobs included. That also spares a session whose agent
+//! started Windows' slow refusal ([`CONNECT_WAIT`]). On Unix Chrome leads a group of its own
+//! and (b) stays.
+//!
 //! It polls every [`POLL`] up to the cap (`HostConfig::with_tree_wait`, 20 s by default). Past
 //! the cap nothing is freed: the run goes to [`HeldRuns`], which keeps its proxy, relay and
 //! claims until the host stops, and the folder stays for the next start's sweep.
@@ -148,13 +156,18 @@ struct Check {
     slow: bool,
 }
 
-/// What is still there now, (a) first.
+/// What is still there now, (a) first. On Windows a gone tree is a gone Chrome (module doc).
 fn still_there(tree: Option<&TreeWatch>, browser: Option<&BrowserSession>) -> Option<Check> {
-    if tree.is_some_and(|tree| !tree.gone()) {
-        return Some(Check {
-            straggler: Straggler::AgentTree,
-            slow: false,
-        });
+    if let Some(tree) = tree {
+        if !tree.gone() {
+            return Some(Check {
+                straggler: Straggler::AgentTree,
+                slow: false,
+            });
+        }
+        if cfg!(windows) {
+            return None;
+        }
     }
     browser.and_then(chrome_alive)
 }

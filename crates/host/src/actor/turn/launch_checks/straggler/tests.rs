@@ -168,3 +168,36 @@ fn the_lease_frees_only_after_a_completed_wait() {
     assert_eq!(held.count(), 1, "the run without a completed wait is held");
     assert_eq!(held.release_all(), 1);
 }
+
+/// Windows: once the agent's job is empty, Chrome is gone too, since the job forbids breakaway
+/// and Chrome is the agent's descendant; a listener on the port does not hold the wait then.
+#[cfg(windows)]
+#[test]
+fn a_gone_tree_is_a_gone_chrome_on_windows() {
+    use clauseo_process::{LaunchSpec, Launched, SpawnOptions, spawn_in_tree};
+
+    let session = claims("tree-gone");
+    let listener = chrome(&session);
+    let cmd = std::env::var_os("ComSpec").unwrap();
+    let spec = LaunchSpec::new(
+        cmd.into(),
+        vec!["/c".into(), "exit 0".into()],
+        std::collections::BTreeMap::new(),
+        env!("CARGO_MANIFEST_DIR").into(),
+    )
+    .unwrap();
+    let Launched { mut handle, .. } = spawn_in_tree(&spec, &SpawnOptions::new()).unwrap();
+    let watch = handle.tree_watch();
+    futures::executor::block_on(handle.exited());
+    drop(handle);
+    assert_eq!(
+        wait_gone(
+            Some(&watch),
+            Some(&session),
+            Duration::from_secs(10),
+            || false
+        ),
+        Ok(())
+    );
+    drop(listener);
+}
