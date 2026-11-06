@@ -168,7 +168,17 @@ fn the_child_gets_the_spec_and_nothing_dropped() {
             assert_eq!(seen.child.get(name), None, "{name} reached {agent}");
         }
         assert_eq!(seen.child.get("PATH"), Some(&path), "{agent}");
-        assert_eq!(seen.child.get("HOME"), Some(&home), "{agent}");
+        if agent == "codex" && cfg!(unix) {
+            // Codex's `HOME` is its state folder on macOS and Linux (R17 PR-C), as `CODEX_HOME`.
+            assert_eq!(
+                seen.child.get("HOME"),
+                seen.child.get("CODEX_HOME"),
+                "{agent}"
+            );
+            assert_ne!(seen.child.get("HOME"), Some(&home), "{agent}");
+        } else {
+            assert_eq!(seen.child.get("HOME"), Some(&home), "{agent}");
+        }
         assert_eq!(
             seen.child.get("CLAUSEO_PROBE").map(String::as_str),
             Some("1"),
@@ -199,11 +209,14 @@ fn the_child_gets_the_spec_and_nothing_dropped() {
     for name in CODEX_DROPPED {
         assert_eq!(codex.child.get(name), None, "{name} reached Codex");
     }
+    // The matter's state folder (R17 PR-C), not the login home.
     let codex_home = dir.data().join("agents").join(CODEX).join("home");
-    assert_eq!(
-        codex.child.get("CODEX_HOME"),
-        Some(&codex_home.display().to_string())
+    let codex_state = &codex.child["CODEX_HOME"];
+    assert!(
+        codex_state.contains("agent-state") && codex_state.ends_with(CODEX),
+        "{codex_state}"
     );
+    assert_ne!(codex_state, &codex_home.display().to_string());
     // An agent of no kind is not Claude Code: the host forces no config folder on it.
     assert_eq!(
         fake.child.get("CLAUDE_CONFIG_DIR").map(String::as_str),

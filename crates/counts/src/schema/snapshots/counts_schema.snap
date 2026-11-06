@@ -1510,7 +1510,8 @@ expression: counts_schema()
         "sandbox.setup_refused",
         "sandbox.setup_failed",
         "sandbox.setup_required",
-        "sandbox.required"
+        "sandbox.required",
+        "signin.reuse_other_volume"
       ],
       "type": "string"
     },

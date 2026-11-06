@@ -1,9 +1,14 @@
 //! The data-folder fence for Codex: a read and write deny on what of `<data>` only Clauseo uses,
 //! and on `<data>/run`, `<data>/agent-state` and `<data>/run.old-*` whole ([`rules`]), as a
 //! Codex permission profile in each Codex session's `CODEX_CONFIG`. The session's own run folder
-//! and the matter's notes are reopened as `write` entries in the profile and as ACP
-//! `additionalDirectories` (`actor::turn::profile_loads::codex_directories`), so a session or a
-//! matter made after the launch is denied too.
+//! (with its `tmp`, the shell's `TMPDIR`) and the matter's notes are reopened as `write` entries
+//! in the profile and as ACP `additionalDirectories`
+//! (`actor::turn::profile_loads::codex_directories`), so a session or a matter made after the
+//! launch is denied too, and so is every matter's Codex state folder, the own one included (its
+//! `CODEX_HOME`, R17 PR-C): the shell never reads the login link, never writes what Codex loads
+//! at the next launch, and never writes the `arg0` folder Codex puts first on its `PATH`. The
+//! state folder is cleaned at each launch to what Codex keeps (`agent/state_folder.rs`); the
+//! jail's write-deny is R17 PR-D's.
 //!
 //! At codex tag `rust-v0.162.1`:
 //! - Per-path rules exist only in a named profile: `default_permissions = "<name>"` selects
@@ -54,34 +59,12 @@ use std::path::{Path, PathBuf};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value};
 
+use crate::agent::state_folder::SQLITE_SUFFIXES;
+
 /// The profile's name in `[permissions]`.
 pub(crate) const PROFILE: &str = "clauseo";
 /// The built-in profile it extends: Codex's workspace-write.
 pub(crate) const EXTENDS: &str = ":workspace";
-
-/// A SQLite database's own file and its companions.
-const SQLITE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
-
-/// Codex's databases in its home (`codex-rs/state/src/sqlite.rs:34-39`): thread metadata with
-/// each thread's first message (`codex-rs/state/src/extract.rs:186`), logs, goals, memories, the
-/// queue and the thread history, every matter's.
-const CODEX_DATABASES: [&str; 6] = [
-    "state_5.sqlite",
-    "logs_2.sqlite",
-    "goals_1.sqlite",
-    "memories_1.sqlite",
-    "queue_1.sqlite",
-    "thread_history_1.sqlite",
-];
-
-/// What of Codex's home is denied: its login, its transcripts and its prompt history
-/// (`codex-rs/message-history/src/lib.rs:52`), every matter's, with [`CODEX_DATABASES`].
-const CODEX_HOME_DENIED: [&str; 4] = [
-    "auth.json",
-    "sessions",
-    "archived_sessions",
-    "history.jsonl",
-];
 
 /// The folders under `<data>` no Codex shell needs that no `Locations` accessor names: the
 /// skill packs' sources, the matters' store, the counts, the Windows sandbox's ledger, the
@@ -119,16 +102,23 @@ pub(crate) struct Session<'a> {
     pub(crate) run_root: &'a Path,
     /// `<data>/agent-state/<matter>/notes`, a `write` entry.
     pub(crate) notes: &'a Path,
-    /// Codex's home, never denied whole.
-    pub(crate) codex_home: &'a Path,
+    /// The matter's state folder, `<data>/agent-state/<matter>/codex-acp`, Codex's
+    /// `CODEX_HOME` and `HOME` (R17 PR-C). It stays under the deny of `agent-state` whole, so the
+    /// shell neither reads its login link, transcripts and databases nor writes anything Codex
+    /// loads: above all not its `tmp`, whose `arg0/codex-arg0*` folder Codex puts first on
+    /// `PATH` (codex-rs `arg0/src/lib.rs:357`) and whose `git` Codex's own unsandboxed calls
+    /// would run (`git-utils/src/info.rs:375, 708`); that `tmp` is denied by name as well. The
+    /// shell's temp folder is the run folder's `tmp` (`TMPDIR`), under its `write` entry.
+    pub(crate) state: &'a Path,
 }
 
 /// The fence's denied paths: the `Locations` paths, the store's and the search index's database
-/// files, [`DATA_DENIED`], Claude's whole folder, [`AGENTS_DENIED`], Codex's sign-in markers and
-/// [`CODEX_HOME_DENIED`] and [`CODEX_DATABASES`] in its home, then [`SESSION_PARENTS`]. A path
-/// of the first group that is or holds the session's run folder, its notes or Codex's home is
-/// left out, with a warning; the session's two folders are reopened under [`SESSION_PARENTS`] by
-/// [`keys`]' `write` entries and the session's `additionalDirectories`.
+/// files, [`DATA_DENIED`], both agents' login homes whole and Claude's whole folder,
+/// [`AGENTS_DENIED`], Codex's sign-in markers, then [`SESSION_PARENTS`]. A path of the first
+/// group that is or holds the session's run folder, its notes or its state folder is left out,
+/// with a warning; then [`SESSION_PARENTS`] and the state folder's `tmp` by name. The session's
+/// run folder and notes are reopened under
+/// [`SESSION_PARENTS`] by [`keys`]' `write` entries and the session's `additionalDirectories`.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
     let agents = data.join("agents");
@@ -151,18 +141,15 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         denied.push(claude.to_path_buf());
     }
     denied.extend(AGENTS_DENIED.iter().map(|name| agents.join(name)));
+    // Codex's login home whole: its own login, and every matter's transcripts from before
+    // R17 PR-C. The session's `CODEX_HOME` is its state folder.
     let codex_home = locations.agent_home("codex-acp");
     if let Some(codex) = codex_home.parent() {
         denied.extend(["login-source", "no-reuse"].map(|name| codex.join(name)));
     }
-    denied.extend(CODEX_HOME_DENIED.iter().map(|name| codex_home.join(name)));
-    for database in CODEX_DATABASES {
-        for suffix in SQLITE_SUFFIXES {
-            denied.push(codex_home.join(format!("{database}{suffix}")));
-        }
-    }
+    denied.push(codex_home);
     denied.retain(|path| {
-        let own = [session.run_root, session.notes, session.codex_home];
+        let own = [session.run_root, session.notes, session.state];
         let keep = !own.iter().any(|folder| folder.starts_with(path));
         if !keep {
             tracing::warn!("a data-folder deny holds a session folder and is left out");
@@ -170,17 +157,22 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(SESSION_PARENTS.iter().map(|name| data.join(name)));
+    // Named too, so no `write` entry over the state folder could ever reopen it.
+    denied.push(
+        session
+            .state
+            .join(crate::agent::state_folder::CODEX_SHELL_FOLDER),
+    );
     denied
 }
 
 /// The `CODEX_CONFIG` keys of the fence: `default_permissions` naming [`PROFILE`], and
-/// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the
-/// session's run folder and notes as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
-/// when the data folder's path holds no glob character (a scoped glob reads its base as glob
-/// text; decision record 0030 names the gap). A rule outside
-/// `<data>` is keyed by its own path. Empty on Windows (`windows`). A path that is not UTF-8 is
-/// left out with a warning; the launch already fails on a run folder or notes that are not
-/// (`Folders::of`), and those sit in the data folder.
+/// `permissions.<PROFILE>` extending [`EXTENDS`] with each of [`rules`] as `deny` and the session's
+/// run folder, notes and state folder as `write`, scoped under `<data>`, plus [`SET_ASIDE_GLOB`]
+/// when the data folder's path holds no glob character (a scoped glob reads its base as glob text;
+/// decision record 0030 names the gap). A rule outside `<data>` is keyed by its own path. Empty on
+/// Windows (`windows`). A path that is not UTF-8 is left out with a warning; the launch already
+/// fails on a run folder or notes that are not (`Folders::of`), and those sit in the data folder.
 pub(crate) fn keys(
     locations: &Locations,
     session: Session<'_>,

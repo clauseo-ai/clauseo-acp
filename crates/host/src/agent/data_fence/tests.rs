@@ -7,8 +7,10 @@ use super::{
     FenceCheck, LaunchDeny, candidates, candidates_roots, candidates_words, claude_deny_rules,
     rule_path,
 };
+use crate::agent::state_folder;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
+use clauseo_protocol::AgentKind;
 
 /// A temp folder for `test`: `data` with a pack source, two sessions' run folders and the
 /// matter's notes, the matter folder `matter` and an unrelated folder `outside`, beside it.
@@ -22,7 +24,7 @@ pub(super) fn layout(test: &str) -> TempDir {
         "data/run/s1/skill-packs",
         "data/run/s2/work",
         "data/agent-state/m1/notes",
-        "data/agents/claude-acp/home/plans",
+        "data/agent-state/m1/claude-acp/plans",
         "matter/sub",
         "outside",
     ] {
@@ -41,15 +43,16 @@ pub(super) fn check(
 ) -> FenceCheck {
     let data = root.join("data");
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let state = data.join("agent-state").join("m1").join("claude-acp");
+    let mut allowed = vec![
+        data.join("run").join("s1"),
+        data.join("agent-state").join("m1").join("notes"),
+    ];
+    // The matter's Claude state folder (R17 PR-C), as the host's `fence_check` gives it.
+    allowed.extend(state_folder::fence_own(&state, AgentKind::Claude));
     FenceCheck {
-        allowed: vec![
-            data.join("run").join("s1"),
-            data.join("agent-state").join("m1").join("notes"),
-            data.join("agents")
-                .join("claude-acp")
-                .join("home")
-                .join("plans"),
-        ],
+        allowed,
+        denied: state_folder::fence_denied(&state, AgentKind::Claude),
         data,
         cwd: root.join("matter"),
         home: Some(root.to_owned()),
@@ -63,9 +66,11 @@ pub(super) fn text(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Claude's rules name each Clauseo-only subtree and file for Read and Edit, in the `//` form,
-/// the search index and the built-in plugin too, and never the run folders, the notes or the
-/// plans a session needs (those of other sessions are named per launch, `launch_tests.rs`).
+/// Claude's rules name each Clauseo-only subtree and file for Read and Edit, in the `//` form, the
+/// search index too, both login homes whole, every matter's Codex state folder and the config
+/// surfaces and transcripts in every matter's Claude state folder (R17 PR-C), and never the
+/// built-in plugin, the run folders, the notes, a Claude state folder whole or the plans a session
+/// needs (those of other sessions are named per launch, `launch_tests.rs`).
 #[test]
 fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
     let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]));
@@ -74,7 +79,11 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Edit(//d/ata/skill-packs/**)",
         "Read(//d/ata/matters/**)",
         "Read(//d/ata/agents/codex-acp/**)",
-        "Read(//d/ata/agents/claude-acp/home/.credentials.json)",
+        "Read(//d/ata/agents/claude-acp/**)",
+        "Read(//d/ata/agent-state/*/codex-acp/**)",
+        "Read(//d/ata/agent-state/*/claude-acp/projects/*/*.jsonl)",
+        "Edit(//d/ata/agent-state/*/claude-acp/settings.json)",
+        "Edit(//d/ata/agent-state/*/claude-acp/hooks/**)",
         "Read(//d/ata/settings.json)",
         "Edit(//d/ata/state.sqlite*)",
         "Read(//d/ata/search.sqlite*)",
@@ -84,12 +93,14 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
     }
     for kept in [
         "/run/",
-        "/agent-state",
+        "/agent-state/**",
+        "/agent-state/*/notes",
+        "/agent-state/*/claude-acp/**",
         "/plans",
+        "/projects/**",
         "/profile",
         "(//d/ata/**)",
         "(//d/ata/agents/**)",
-        "claude-acp/home/**",
     ] {
         // The relay token files are the one thing under `run` denied (R24); the run folders
         // themselves never are.
@@ -218,6 +229,60 @@ fn a_junction_in_the_matter_folder_into_the_data_folder_is_denied() {
     assert!(check(root, &[], Some(&search)).touches_data());
 }
 
+/// The review's D2: nothing of the matter's own Codex state folder is the session's;
+/// its login link (hard-linked to the live login), `config.toml`, databases and `.env` are
+/// refused, by path, by `cat` and by `~/` (Codex's `HOME` is its state folder on macOS and
+/// Linux), and so is the login home's `auth.json`, as at the base.
+#[test]
+fn review_the_own_state_folders_login_link_is_auto_denied() {
+    let dir = layout("own_login");
+    let root = dir.path();
+    let data = root.join("data");
+    let state = data.join("agent-state/m1/codex-acp");
+    for name in ["tmp/arg0/codex-arg0abc", "sessions"] {
+        write::create_dir_all(&state.join(name)).unwrap();
+    }
+    for name in ["auth.json", "config.toml", ".env", "state_5.sqlite"] {
+        write::write_file(&state.join(name), b"x").unwrap();
+    }
+    write::create_dir_all(&data.join("agents/codex-acp/home")).unwrap();
+    write::write_file(&data.join("agents/codex-acp/home/auth.json"), b"x").unwrap();
+    let codex = |paths: &[&str], raw: Option<&serde_json::Value>| {
+        let mut check = check(root, paths, raw);
+        check.allowed = vec![data.join("run/s1"), data.join("agent-state/m1/notes")];
+        check
+            .allowed
+            .extend(state_folder::fence_own(&state, AgentKind::Codex));
+        check.denied = state_folder::fence_denied(&state, AgentKind::Codex);
+        check.home = Some(state.clone());
+        check
+    };
+    let base = text(&data.join("agents/codex-acp/home/auth.json"));
+    let cat = json!({"command": format!("cat '{base}'")});
+    assert!(codex(&[], Some(&cat)).touches_data(), "base");
+    for name in [
+        "auth.json",
+        "config.toml",
+        ".env",
+        "state_5.sqlite",
+        "sessions/r.jsonl",
+    ] {
+        let path = text(&state.join(name));
+        assert!(codex(&[&path], None).touches_data(), "Read {name}");
+        let cat = json!({"command": format!("cat '{path}'")});
+        assert!(
+            codex(&[], Some(&cat)).touches_data(),
+            "head: the own matter's {name} is not auto-denied"
+        );
+    }
+    let home = json!({"command": "cat ~/auth.json"});
+    assert!(codex(&[], Some(&home)).touches_data(), "~/auth.json");
+    // Round 3's H1: the state folder's `tmp` (Codex's `arg0` links, first on its `PATH`) is
+    // no folder of the session's own.
+    let arg0 = text(&state.join("tmp/arg0/codex-arg0abc/git"));
+    assert!(codex(&[&arg0], None).touches_data(), "arg0 is not own");
+}
+
 /// The session's own run folder, the notes, the matter and Claude's plans are its own; another
 /// session's run folder is not; a path elsewhere is not the data folder's.
 #[test]
@@ -228,7 +293,7 @@ fn the_sessions_own_folders_and_an_unrelated_path_are_not_denied() {
         root.join("data/run/s1/skill-packs/x/SKILL.md"),
         root.join("data/run/s1/work/out.docx"),
         root.join("data/agent-state/m1/notes/n.md"),
-        root.join("data/agents/claude-acp/home/plans/plan.md"),
+        root.join("data/agent-state/m1/claude-acp/plans/plan.md"),
         root.join("matter/sub/a.txt"),
         root.join("outside/x.txt"),
         PathBuf::from("sub/a.txt"),

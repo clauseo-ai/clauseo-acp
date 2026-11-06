@@ -372,8 +372,13 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
         );
         assert!(
             !rules.iter().any(|rule| {
+                // No run folder (but the relay tokens), and in `agent-state` only every
+                // matter's Codex state folder and the named files of Claude's (R17 PR-C):
+                // never a matter's notes or a Claude state folder whole.
                 (rule.contains("/run/") && !rule.ends_with("/run/*/relay-token)"))
-                    || rule.contains("/agent-state")
+                    || rule.ends_with("/agent-state/**)")
+                    || rule.contains("/notes")
+                    || (rule.ends_with("/claude-acp/**)") && rule.contains("/agent-state/"))
             }),
             "{rules:?}"
         );

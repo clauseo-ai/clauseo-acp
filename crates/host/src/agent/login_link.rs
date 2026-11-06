@@ -19,8 +19,19 @@
 //! may be retried), and the guard refuses as for a shared file ([`treated_as_shared`]), as S18's
 //! checks do for a stat that fails. The logs name the agent and the outcome, never a path.
 //!
-//! `HostHandle::remove_login_links` removes each matter's `auth.json` link ([`remove_links`])
-//! on a thread of its own, never the actor's.
+//! `HostHandle::remove_login_links` removes each matter's `auth.json` link ([`remove_links`],
+//! every `<data>/agent-state/*/codex-acp/auth.json`, R17 PR-C) on a thread of its own, never
+//! the actor's. A matter's link itself is made at its launch (`agent/state_folder.rs`): on
+//! Clauseo's own login from the login home whenever the file ids differ; while reused only when
+//! this hook finds the home's link holding, and a matter's link that is not the home's file is
+//! a split, refused with no re-link.
+//!
+//! The shared login is writable from every matter's session (stage C's blocking point 2, C2):
+//! an in-place write to a matter's `auth.json` is a write to the login home's file, since they
+//! are one file, and changes its stamp (size, modified time; same file id). Stage D's identity
+//! check sees that before every launch: `HostConfig::with_launch_gate` (#554), a stat of the
+//! shared login on the prepare thread. PR-C refuses every launch with a state folder while no
+//! gate is wired (`launch_checks.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -161,6 +172,10 @@ pub(crate) struct SignIn {
     /// of them launches, and their prompts queue held. The latest stop's reason wins. In memory
     /// only: a host restart clears it.
     pub(crate) held: BTreeMap<AgentId, StopFor>,
+    /// The matters whose Codex login link is the old login's, kept while a session ran there
+    /// when the login or its source changed (`turn/sign_in.rs`): the next launch there with no
+    /// other session running removes it first. In memory only.
+    pub(crate) stale_links: BTreeSet<MatterId>,
     /// The agents whose new launches desktop refuses, with the code their turns fail with
     /// (`HostHandle::set_launch_refused`, `HostConfig::with_launch_refused`). In memory only.
     pub(crate) refused: LaunchRefusals,
@@ -177,6 +192,7 @@ impl Default for SignIn {
             reused: BTreeSet::new(),
             seen: BTreeMap::new(),
             held: BTreeMap::new(),
+            stale_links: BTreeSet::new(),
             refused: LaunchRefusals::default(),
         }
     }
@@ -258,37 +274,75 @@ pub(crate) async fn check(
     }
 }
 
-/// Removes the `auth.json` link in each of `homes` on a `clauseo-codex-fs` thread, waiting at
-/// most [`REMOVE_WAIT`] on the system clock; a missing file is no error. The first failure
-/// fails the call with `agent.launch_failed`, its message naming no path.
-pub(crate) async fn remove_links(agent: AgentId, homes: Vec<PathBuf>) -> Result<(), Error> {
-    if homes.is_empty() {
-        return Ok(());
-    }
+/// Removes the `auth.json` link in each of `agent`'s state folders under `data`
+/// (`state_folder::linked_folders`: every matter's, listed through no link) on a
+/// `clauseo-codex-fs` thread, waiting at most [`REMOVE_WAIT`] on the system clock; a missing file
+/// is no error, and an agent with no links (Claude) removes nothing. A folder that cannot be
+/// listed, or the first link that cannot be removed, fails the call with `agent.launch_failed`,
+/// its message naming no path: a link may remain.
+pub(crate) async fn remove_links(agent: AgentId, data: PathBuf) -> Result<(), Error> {
+    remove_links_but(agent, data, Vec::new(), None).await
+}
+
+/// [`remove_links`] but in the matters named in `skip` (their folder names, the matter ids):
+/// those where a session of the agent runs (`turn/sign_in.rs`). With `source` (the login home's
+/// `auth.json`), a link that is already that file is kept: a launch since the change made it,
+/// and it must never be removed under that session. The ids are compared right before each
+/// removal.
+pub(crate) async fn remove_links_but(
+    agent: AgentId,
+    data: PathBuf,
+    skip: Vec<String>,
+    source: Option<PathBuf>,
+) -> Result<(), Error> {
     let job = Job {
         what: "login link removal",
         matter: None,
         wait: REMOVE_WAIT,
     };
     let clock: Arc<dyn Clock> = Arc::new(crate::clock::SystemClock);
+    let listed = agent.clone();
     let removed = off_actor(clock, job, move || {
-        for home in &homes {
-            match crate::write::remove_link(&home.join("auth.json")) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(Error::refused(
-                        ErrorCode::AgentLaunchFailed,
-                        format!("a matter's login link was not removed: {}", error.kind()),
-                    ));
-                }
-            }
-        }
-        Ok(())
+        let folders = super::state_folder::linked_folders(&data, listed.as_str(), &skip).map_err(
+            |error| {
+                Error::refused(
+                    ErrorCode::AgentLaunchFailed,
+                    format!(
+                        "the matters' login links could not be listed: {}",
+                        error.kind()
+                    ),
+                )
+            },
+        )?;
+        remove_in(&folders, source.as_deref())
     })
     .await;
     if let Err(error) = &removed {
         tracing::warn!(%agent, code = error.code().as_str(), "the login links were not removed");
     }
     removed
+}
+
+/// Removes the `auth.json` link in each of `folders`, never what it points to; one that is
+/// already `source`'s file, stat'ed right before, is kept.
+fn remove_in(folders: &[PathBuf], source: Option<&Path>) -> Result<(), Error> {
+    for folder in folders {
+        let link = folder.join(super::state_folder::LOGIN_FILE);
+        if source
+            .is_some_and(|source| super::state_folder::same_file(source, &link).unwrap_or(false))
+        {
+            continue;
+        }
+        match crate::write::remove_link(&link) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Error::refused(
+                    ErrorCode::AgentLaunchFailed,
+                    format!("a matter's login link was not removed: {}", error.kind()),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

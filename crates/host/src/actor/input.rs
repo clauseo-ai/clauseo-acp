@@ -41,10 +41,11 @@ pub(crate) enum SignInRequest {
         reused: bool,
         reply: Reply<()>,
     },
-    /// The folders whose login links `HostHandle::remove_login_links` removes.
+    /// The data folder, under whose `agent-state` `HostHandle::remove_login_links` removes
+    /// each matter's login link.
     LinkHomes {
         agent: AgentId,
-        reply: Reply<Vec<PathBuf>>,
+        reply: Reply<PathBuf>,
     },
     /// `HostHandle::set_launch_refused`.
     LaunchRefused {

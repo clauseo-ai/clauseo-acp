@@ -54,7 +54,7 @@ fn an_own_folder_swapped_for_a_link_counts_for_nothing() {
     for (folder, up) in [
         ("agent-state/m1/notes", "../.."),
         ("run/s1", ".."),
-        ("agents/claude-acp/home/plans", "../../.."),
+        ("agent-state/m1/claude-acp/plans", "../../.."),
     ] {
         let folder = data.join(folder);
         write::remove_dir_all(&folder).unwrap();
@@ -155,10 +155,16 @@ fn a_glob_or_grep_pattern_into_the_data_folder_is_denied() {
     assert!(!check(root, &[], Some(&fine)).touches_data());
 }
 
-/// What Claude's home keeps across sessions, so across matters, is denied to its tools.
+/// What Claude keeps across sessions is denied to its tools: the login home whole (its login
+/// store, and every matter's records from before R17 PR-C), and in every matter's state folder
+/// the records it keeps across that matter's sessions.
 #[test]
 fn claudes_cross_matter_records_are_denied() {
     let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d")]));
+    for tool in ["Read", "Edit"] {
+        let rule = format!("{tool}(//d/agents/claude-acp/**)");
+        assert!(rules.contains(&rule), "{rule}");
+    }
     for target in [
         "history.jsonl",
         "file-history/**",
@@ -166,7 +172,7 @@ fn claudes_cross_matter_records_are_denied() {
         "shell-snapshots/**",
     ] {
         for tool in ["Read", "Edit"] {
-            let rule = format!("{tool}(//d/agents/claude-acp/home/{target})");
+            let rule = format!("{tool}(//d/agent-state/*/claude-acp/{target})");
             assert!(rules.contains(&rule), "{rule}");
         }
     }

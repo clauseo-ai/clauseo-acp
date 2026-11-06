@@ -224,8 +224,8 @@ impl Dir {
     ) -> HostConfig {
         let locations = Locations::under_home(&self.root);
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
-        let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
-        HostConfig::new(effective, launcher)
+        HostConfig::new(Effective::load(&locations, &SystemFiles, &[&policy]), launcher)
+            .with_launch_gate(Arc::new(|_| None)) // pass-through: no shared login to check
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))

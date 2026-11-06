@@ -50,8 +50,11 @@
 //!   mode) gets `session/set_mode default` before its first prompt; a failed switch fails the
 //!   launch.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
-//!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
-//!   `config.toml` of the same switches for app-server's start-up, a
+//!   (`INITIAL_AGENT_MODE=workspace-write`), the matter's state folder
+//!   (`<data>/agent-state/<matter>/codex-acp`, `agent/state_folder.rs`, R17 PR-C) as `CODEX_HOME`
+//!   (and `HOME` on macOS and Linux), cleaned of its config surfaces, with a hard link to the
+//!   login home's `auth.json` and a `config.toml` of the same switches for app-server's start-up,
+//!   a
 //!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` (and on Windows the unelevated
 //!   sandbox, record 0025) and the hooks seam's object, and no
 //!   MCP filtering, over any settings value; its refusal in a folder holding `.codex` (#184);
@@ -241,6 +244,7 @@ mod view;
 mod window;
 mod write;
 
+pub use agent::launch_gate::LaunchGate;
 pub use agent::loads::codex_hook_config;
 pub use agent::login_link::{
     AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,

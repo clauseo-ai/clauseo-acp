@@ -131,6 +131,7 @@ impl Rig {
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let config = HostConfig::new(effective, Arc::new(launcher))
+            .with_launch_gate(Arc::new(|_| None))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(root.join("managed-mcp.json"));

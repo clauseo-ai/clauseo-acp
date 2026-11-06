@@ -21,7 +21,7 @@ pub(super) struct LaunchPaths {
     pub(super) stored: PathBuf,
     /// The data folder.
     pub(super) data: PathBuf,
-    /// The agent's home, `Locations::agent_home` of its id, for an agent with a kind.
+    /// The agent's login home, `Locations::agent_home` of its id, for an agent with a kind.
     pub(super) home: Option<PathBuf>,
     /// Whether the agent is Claude.
     pub(super) claude: bool,
@@ -48,7 +48,11 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         thread,
         launch: id,
     };
-    let run = RunFolders::new(locations.data_dir(), key);
+    // The matter's state folder for an agent with a kind (`agent/state_folder.rs`).
+    let state = kind.map(|_| {
+        crate::agent::state_folder::state_dir(locations.data_dir(), row.matter, row.agent.as_str())
+    });
+    let run = RunFolders::new(locations.data_dir(), key).with_state(state);
     let skills = match kind {
         Some(_) => actor.profile.launch_writes(&row.agent),
         None => Vec::new(),

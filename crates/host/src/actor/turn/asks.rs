@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use clauseo_acp::{AcpEvent, LimitSignal, LimitStatus, Origin, PendingKey};
 use clauseo_matters::HeldOpen;
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionId, CompactString, Deliverable, ElicitationId, ElicitationRequest,
-    ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath, PermissionAbout,
-    PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId, PermissionRequested,
-    PermissionResolved, Principal, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionId, CompactString, Deliverable, ElicitationId,
+    ElicitationRequest, ElicitationRequested, ElicitationResponse, LimitStopReason, MatterPath,
+    PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, PermissionRequestId,
+    PermissionRequested, PermissionResolved, Principal, StreamId, ThreadId, TurnId,
 };
 
 use super::super::input::MatterTag;
@@ -22,6 +22,7 @@ use super::out::Out;
 use super::updates::{agent, commit, known_tool};
 use super::{JobKind, LimitMark, Then, TurnJob, current, matter_of, spawn};
 use crate::agent::data_fence::{self, FenceCheck, PathsChecked};
+use crate::agent::state_folder;
 use crate::error::Error;
 use crate::log_file::Cause;
 use crate::matter_worker::MatterJob;
@@ -123,9 +124,10 @@ pub(super) fn on_permission(actor: &mut Actor, thread: ThreadId, event: AcpEvent
 }
 
 /// The data-folder check of a request's paths and `rawInput` (`agent/data_fence.rs`), for
-/// the thread's agent: its own folders are its run folder, this matter's notes, a Claude agent's
-/// plans folder in Clauseo's Claude home, and its working folder. None when the request names no
-/// path and no command, or the thread has no agent.
+/// the thread's agent: its own folders are its run folder, this matter's notes, the parts of the
+/// agent's state folder for this matter that are its own (`state_folder::fence_own`, less
+/// `fence_denied`), a Claude agent's plans folder, and its working folder. None when the
+/// request names no path and no command, or the thread has no agent.
 fn fence_check(
     actor: &Actor,
     thread: ThreadId,
@@ -141,11 +143,20 @@ fn fence_check(
     let turn = &actor.threads.get(&thread)?.turn;
     let agent = turn.agent.as_deref()?;
     let data = actor.effective.locations().data_dir().to_owned();
+    let kind = AgentKind::of(&actor.threads.get(&thread)?.row.agent);
+    let state = turn.run.as_ref().and_then(|run| run.state.clone());
     let mut allowed: Vec<PathBuf> = turn
         .run
         .iter()
         .flat_map(|run| [run.root.clone(), run.notes.clone()])
         .collect();
+    let mut denied = Vec::new();
+    // The parts of the agent's state folder for this matter (R17 PR-C) that are its own, and
+    // what in them stays refused: the login link, Clauseo's files, the databases.
+    if let (Some(state), Some(kind)) = (&state, kind) {
+        allowed.extend(state_folder::fence_own(state, kind));
+        denied = state_folder::fence_denied(state, kind);
+    }
     // Claude Code writes its plan note there (`agent/plan_note.rs`); a plans folder elsewhere
     // in the data folder is not the session's.
     let plans = agent.plan_notes.iter();
@@ -154,11 +165,17 @@ fn fence_check(
             .filter(|plans| data_fence::is_agent_plans(&data, plans))
             .cloned(),
     );
+    // Codex's shell has `HOME` the state folder on macOS and Linux: `~` is that there.
+    let home = match (&state, kind) {
+        (Some(state), Some(AgentKind::Codex)) if cfg!(unix) => Some(state.clone()),
+        _ => std::env::home_dir(),
+    };
     Some(Box::new(FenceCheck {
         data,
         allowed,
+        denied,
         cwd: agent.folder.clone(),
-        home: std::env::home_dir(),
+        home,
         paths,
         roots,
         words,
@@ -239,7 +256,7 @@ pub(super) fn on_held_open(
 /// Whether any thread whose agent has kind `kind` has a permission request or an elicitation
 /// pending, for the limits model's `Asking` (no read while the agent asks). A URL elicitation
 /// the lawyer accepted counts until the agent says it is complete.
-pub(crate) fn asks_pending(actor: &Actor, kind: clauseo_protocol::AgentKind) -> bool {
+pub(crate) fn asks_pending(actor: &Actor, kind: AgentKind) -> bool {
     actor.threads.values().any(|entry| {
         entry.turn.agent.as_deref().is_some_and(|agent| {
             !(agent.permissions.is_empty()

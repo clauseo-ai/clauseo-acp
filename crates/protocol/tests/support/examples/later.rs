@@ -73,6 +73,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxRequired,
             "the firm requires the sandbox; this computer is at tier C",
         ),
+        failed(
+            ErrorCode::SigninReuseOtherVolume,
+            "the Codex login is on another volume",
+        ),
     ]
 }
 

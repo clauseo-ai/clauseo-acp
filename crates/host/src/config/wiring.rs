@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::launch_gate::LaunchGate;
 use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
@@ -43,6 +44,9 @@ pub(crate) struct LaunchWiring {
     pub(crate) install_tools: Option<Arc<dyn InstallTools>>,
     /// The sign-in hook, the sign-in-again test, and the host's sign-in state.
     pub(crate) sign_in: SignIn,
+    /// Desktop's launch gate (`HostConfig::with_launch_gate`); `None`: no identity check is
+    /// wired, and every launch of an agent with a kind is refused.
+    pub(crate) launch_gate: Option<LaunchGate>,
     /// Run between a skill pack's two reads, for tests (`actor/settings/packs.rs`).
     pub(crate) pack_read_hook: Option<PackReadHook>,
     /// The case-law connector's relays (R24); `None`: no session gets case law.
@@ -67,6 +71,7 @@ impl Default for LaunchWiring {
             inherited_env: None,
             install_tools: None,
             sign_in: SignIn::default(),
+            launch_gate: None,
             pack_read_hook: None,
             relays: None,
             connectors: None,
@@ -87,6 +92,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("inherited_env", &self.inherited_env.is_some())
             .field("install_tools", &self.install_tools.is_some())
             .field("sign_in", &self.sign_in)
+            .field("launch_gate", &self.launch_gate.is_some())
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .finish_non_exhaustive()

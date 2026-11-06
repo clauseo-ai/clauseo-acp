@@ -260,6 +260,14 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     (`clauseo_profile::paths::codex_skills`).
   - Claude's skills stay in Clauseo's plugin, passed by path. The forced-ask rules are
     flag-tier settings, not a file. Neither depends on the home.
+  - Since R17 PR-C the home is the login home only: a session's `CLAUDE_CONFIG_DIR` or
+    `CODEX_HOME` is the matter's state folder, `<data>/agent-state/<matter>/<agent>`
+    (`agent/state_folder.rs`), made at the matter's first launch, kept, and cleaned of the config
+    surfaces before every launch. Claude reads its login store through
+    `CLAUDE_SECURESTORAGE_CONFIG_DIR` (the login home, or `""` while reused); each Codex state
+    folder holds `auth.json` as a hard link to the login home's, made again when the file ids
+    differ on Clauseo's own login, and never re-linked while reused (a matter's file that is not
+    the home's is a split). A link across volumes refuses with `signin.reuse_other_volume`.
 - Codex's launch config takes both new overrides from the one `clauseo_limits::CODEX_OVERRIDES`.
 - The host drops codex-acp's `logout` from a Codex agent's `CommandsAvailable` and refuses a
   prompt whose text starts `/logout` with `command.invalid`. It does this whatever the login's
@@ -290,7 +298,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     `async_channel`'s do, and every clone takes from the same splits.
   - `remove_login_links(agent) -> Result<(), HostError>` asks the actor only for the folders.
     The removal of each `auth.json` runs on a `clauseo-codex-fs` thread with a 5 s wait, never
-    on the actor. Before stage C (R17) no matter has a link, so the list is empty.
+    on the actor. Since R17 PR-C the folders are every `<data>/agent-state/*/codex-acp`, listed
+    on that thread through no link (Claude links nothing, so none for it).
 - *The sign-in hold.* A turn is held for its agent's sign-in when it fails with
   `agent.auth_required`, or with an error the sign-in-again test accepts, which then ends as
   `agent.auth_required`. A turn `stop_agents` cancelled is held the same way, unless it ended

@@ -55,6 +55,31 @@ fn a_matter_folder_in_the_data_folders_agents_or_holding_it_is_refused() {
     write::remove_dir_all(&root).unwrap();
 }
 
+/// R17 PR-C: a matter folder that is `<data>/agent-state`, holds it, or sits anywhere in it (a
+/// matter's state folder or notes, which hold links to the lawyer's live Codex login) is
+/// refused; a name that only starts like it is not.
+#[test]
+fn a_matter_folder_in_agent_state_is_refused() {
+    let root = data("refuse_state");
+    let data = root.join("data");
+    let state = data.join("agent-state");
+    write::create_dir_all(&state.join("m1/codex-acp")).unwrap();
+    write::create_dir_all(&state.join("m1/notes")).unwrap();
+    for folder in [
+        state.clone(),
+        state.join("m1"),
+        state.join("m1/codex-acp"),
+        state.join("m1/notes"),
+        // Not made yet: still inside.
+        state.join("m2/claude-acp"),
+    ] {
+        assert!(refused(&folder, &data), "{}", folder.display());
+    }
+    assert!(!refused(&data.join("agent-state2"), &data));
+    assert!(!refused(&data.join("work/m"), &data));
+    write::remove_dir_all(&root).unwrap();
+}
+
 /// A spelling that differs only in case is the same folder on macOS and Windows.
 #[cfg(any(target_os = "macos", windows))]
 #[test]

@@ -192,7 +192,8 @@ fn codex_launch_variables_beat_the_settings_env() {
     let [codex, fake] = envs.as_slice() else {
         panic!("two launches, not {}", envs.len());
     };
-    let home = dir.data().join("agents").join(CODEX).join("home");
+    // The matter's state folder (R17 PR-C), not the login home.
+    let home = crate::profile_rig::state_folder(&dir, matter, CODEX);
     assert_eq!(
         var(codex, "INITIAL_AGENT_MODE").as_deref(),
         Some("workspace-write")
