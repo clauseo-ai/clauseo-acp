@@ -38,6 +38,7 @@ mod arm64;
 mod download_binding;
 mod file_binding;
 mod plugin;
+mod release_key;
 mod test_key;
 mod watchdog;
 
@@ -91,9 +92,10 @@ fn a_build_with_no_endpoint_gives_the_host_no_updater() {
     };
     assert_eq!(choice::choose(debug, none), Choice::None);
 
-    // The checked config names no endpoint until R23 PR 6, so every build is managed.
+    // Since R23 PR 6 the checked config names the release endpoint, so a release build takes the
+    // plugin over it, and a debug build still none.
     let context = crate::context::<MockRuntime>();
-    assert!(!choice::has_endpoints(context.config()));
+    assert!(choice::has_endpoints(context.config()));
 }
 
 #[test]

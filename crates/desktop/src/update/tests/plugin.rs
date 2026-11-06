@@ -277,12 +277,22 @@ fn the_install_refuses_a_validly_signed_file_of_another_name() {
     assert_eq!(refused, Err(UpdaterError::Signature(line.to_owned())));
 }
 
-/// The config's source takes its key from `plugins.updater.pubkey`, and has none while that is
-/// empty; a source set in code has its own.
+/// The config's source takes its key from `plugins.updater.pubkey` (since R23 PR 6 the checked
+/// config sets one), and has none while that is empty; a source set in code has its own.
 #[test]
 fn each_source_names_the_key_its_updater_trusts() {
     let app = app();
     let mut config = app.config().clone();
+    let conf: Value =
+        serde_json::from_slice(&std::fs::read(crate_dir().join("tauri.conf.json")).unwrap())
+            .unwrap();
+    let checked = conf["plugins"]["updater"]["pubkey"].as_str().unwrap();
+    assert!(!checked.is_empty());
+    assert_eq!(Source::Config.pubkey(&config).as_deref(), Some(checked));
+    config.plugins.0.insert(
+        "updater".to_owned(),
+        serde_json::json!({ "pubkey": " " }),
+    );
     assert_eq!(Source::Config.pubkey(&config), None);
     config.plugins.0.insert(
         "updater".to_owned(),
@@ -296,16 +306,23 @@ fn each_source_names_the_key_its_updater_trusts() {
     assert_eq!(endpoint.pubkey(&config), Some(fixture_key()));
 }
 
-/// The config's source names no endpoint until R23 PR 6, so its updater fails to build, which is
-/// why `choice.rs` never builds one then.
+/// The config's source (R23 PR 6) builds the plugin's updater over `tauri.conf.json`'s endpoint
+/// and key, and that endpoint is the release's `latest.json` on GitHub, over HTTPS.
 #[test]
-fn the_config_source_has_no_endpoint_yet() {
+fn the_config_source_builds_over_the_release_endpoint() {
     let app = app();
-    let error = Source::Config
+    assert!(Source::Config
         .updater(app.handle(), Target::Native)
-        .err()
-        .unwrap();
-    assert!(matches!(error, PluginError::EmptyEndpoints), "{error:?}");
+        .is_ok());
+    let conf: Value =
+        serde_json::from_slice(&std::fs::read(crate_dir().join("tauri.conf.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        conf["plugins"]["updater"]["endpoints"],
+        serde_json::json!([
+            "https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json"
+        ])
+    );
 }
 
 /// A check that cannot connect is a network failure whose line names no address.
