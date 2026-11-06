@@ -129,6 +129,36 @@ fn the_credential_link_takes_data_writes_but_not_metadata() {
     assert_eq!(text.matches(link).count(), 4, "{text}");
 }
 
+/// The session's temp folder, `data/run/s1/tmp`: read and write as a subpath, in the allows
+/// and again after the hidden data dir; the run folder above it gets only metadata (its path
+/// resolves), never a read or write rule.
+#[test]
+fn with_a_session_tmpdir() {
+    let w = World::new("profile-session-tmpdir");
+    w.dir.dir("data/run/s1");
+    let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
+    let text = w.render(&policy);
+    let rw = "(allow file-read* file-write*\n  (subpath (param \"TMPDIR\")))";
+    assert_eq!(text.matches(rw).count(), 2, "{text}");
+    let hidden_at = text.find("; Hidden paths").expect(&text);
+    assert!(text.rfind(rw).unwrap() > hidden_at, "{text}");
+    assert!(text.contains("TMPDIR = <root>/data/run/s1/tmp\n"), "{text}");
+    let run = dunce::canonicalize(w.at("data/run/s1")).unwrap();
+    let parent = run.parent().unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    for (name, path) in profile.params() {
+        assert!(
+            path != &run && path != parent,
+            "{name} names the run folder or its parent"
+        );
+        assert!(
+            name == "TMPDIR" || !path.starts_with(&run),
+            "{name} is in the run folder"
+        );
+    }
+    insta::assert_snapshot!(text);
+}
+
 #[test]
 fn with_a_browser_socket_folder() {
     let w = World::new("profile-browser-sockets");

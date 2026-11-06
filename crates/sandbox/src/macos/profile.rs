@@ -204,6 +204,7 @@ impl Writer {
             "file-read* file-write*",
             &[subpath(&matter), subpath(&state)],
         );
+        self.tmpdir(p);
 
         self.note("\n; Runtime: read, run and map as code.");
         let runtime = self.subpaths(&p.runtime);
@@ -242,6 +243,19 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &above);
     }
 
+    /// The session's temp folder (`TMPDIR`), read and write. Only this folder: the run folder
+    /// that holds it, and the token there, stay under the hidden data dir's deny.
+    fn tmpdir(&mut self, p: &Params) {
+        let Some(tmpdir) = &p.tmpdir else {
+            return;
+        };
+        self.note(
+            "; The session's temp folder (TMPDIR): read and write. Not the run folder above.",
+        );
+        let tmpdir = subpath(&self.param("TMPDIR", tmpdir));
+        self.rule("allow", "file-read* file-write*", &[tmpdir]);
+    }
+
     /// Notes and the Claude store's names, as filters.
     fn shared(&mut self, p: &Params) -> Vec<String> {
         let mut filters = Vec::new();
@@ -268,6 +282,9 @@ impl Writer {
     /// The ancestors of the paths allowed again after the hidden paths.
     fn reallowed_ancestors(&mut self, p: &Params) -> Vec<String> {
         let mut out = vec![ancestors("(param \"STATE\")")];
+        if let Some(tmpdir) = &p.tmpdir {
+            out.push(ancestors(&self.param("TMPDIR", tmpdir)));
+        }
         out.extend(self.ancestors_of(&p.runtime));
         out.extend(self.ancestors_of(&p.read));
         if let Some(notes) = &p.notes {
@@ -336,6 +353,7 @@ impl Writer {
         let mut shared = vec![state];
         shared.extend(self.shared(p));
         self.rule("allow", "file-read* file-write*", &shared);
+        self.tmpdir(p);
         self.credential_link(p);
         let runtime = self.subpaths(&p.runtime);
         self.rule(
@@ -349,7 +367,7 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &above);
     }
 
-    /// The matter, state and notes folders themselves cannot be removed or made again: a
+    /// The matter, state, notes and temp folders themselves cannot be removed or made again: a
     /// subpath rule matches the folder too, so without this an agent could put a symbolic link
     /// in its place for the next launch to follow.
     fn fixed_folders(&mut self, p: &Params) {
@@ -357,6 +375,10 @@ impl Writer {
         let mut filters = vec![literal("(param \"MATTER\")"), literal("(param \"STATE\")")];
         if p.notes.is_some() {
             filters.push(literal("(param \"NOTES\")"));
+        }
+        if p.tmpdir.is_some() {
+            self.note("; The session's temp folder too: the launcher makes it, outside the jail.");
+            filters.push(literal("(param \"TMPDIR\")"));
         }
         self.rule("deny", "file-write-unlink file-write-create", &filters);
     }

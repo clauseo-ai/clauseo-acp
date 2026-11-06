@@ -23,12 +23,10 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .as_deref()
         .map(|home| beneath_existing(home, "home folder"))
         .transpose()?;
-    let hidden = b
-        .hidden
-        .iter()
-        .map(|p| beneath_existing(p, "hidden path"))
-        .collect::<Result<Vec<_>, _>>()?;
-    check_matter(&matter, &state, home.as_deref(), &hidden)?;
+    let hidden = all_beneath(&b.hidden, "hidden path")?;
+    let home_ref = home.as_deref();
+    check_matter(&matter, &state, home_ref, &hidden)?;
+    let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
 
     let notes = b
         .notes
@@ -62,7 +60,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let read = all_existing(&b.read, "read path")?;
     for (paths, what) in [(&runtime, "a runtime path"), (&read, "a read path")] {
         for p in paths {
-            check_reallowed(p, what, &matter, home.as_deref(), &hidden)?;
+            check_reallowed(p, what, &matter, home_ref, &hidden)?;
         }
     }
     let read_only_in_state = all_inside(
@@ -74,7 +72,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let mut allowed_folders = Vec::new();
     for p in &b.allowed_folders {
         let folder = existing(p, "allowed folder")?;
-        check_allowed(&folder, &matter, home.as_deref(), &hidden)?;
+        check_allowed(&folder, &matter, home_ref, &hidden)?;
         allowed_folders.push(folder);
     }
 
@@ -103,6 +101,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
     add_new(&mut links, &found, linked);
     let mut allowed: Vec<&Path> = vec![state.as_path()];
+    allowed.extend(tmpdir.as_deref());
     allowed.extend(runtime.iter().map(PathBuf::as_path));
     allowed.extend(read.iter().map(PathBuf::as_path));
     allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
@@ -117,6 +116,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     Ok(Policy {
         matter,
         state,
+        tmpdir,
         home,
         runtime,
         read,
@@ -243,6 +243,59 @@ fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Er
         ));
     }
     Ok(())
+}
+
+/// The session's temp folder if set, by [`folder_and_name`] after refusing a `p` whose own name
+/// is a symbolic link (the launcher makes the folder if it is missing). It is allowed again
+/// after the hidden paths and holds the agent's writes, so it may not be `/`, equal or hold the
+/// home folder, the state folder or a hidden path, nor be inside the matter or hold it.
+fn tmp_folder(
+    p: Option<&Path>,
+    matter: &Path,
+    state: &Path,
+    home: Option<&Path>,
+    hidden: &[PathBuf],
+) -> Result<Option<PathBuf>, Error> {
+    let Some(p) = p else {
+        return Ok(None);
+    };
+    let what = "temp folder";
+    absolute(p, what)?;
+    if fs::symlink_metadata(p).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return refuse(format!(
+            "the {what} may not be a symbolic link: {}",
+            p.display()
+        ));
+    }
+    let tmpdir = folder_and_name(p, what)?;
+    let shown = tmpdir.display();
+    if is_root(&tmpdir) {
+        return refuse(format!("the {what} may not be the root folder: {shown}"));
+    }
+    if home.is_some_and(|home| under(home, &tmpdir)) {
+        return refuse(format!(
+            "the {what} may not equal or hold the home folder: {shown}"
+        ));
+    }
+    if under(state, &tmpdir) {
+        return refuse(format!(
+            "the {what} may not equal or hold the state folder: {shown} and {}",
+            state.display()
+        ));
+    }
+    if overlap(&tmpdir, matter) {
+        return refuse(format!(
+            "the {what} may not be inside the matter or hold it: {shown} and {}",
+            matter.display()
+        ));
+    }
+    if let Some(h) = hidden.iter().find(|h| under(h, &tmpdir)) {
+        return refuse(format!(
+            "the {what} may not equal or hold a hidden path: {shown} and {}",
+            h.display()
+        ));
+    }
+    Ok(Some(tmpdir))
 }
 
 /// The rules of a runtime or read path (`what`, with its article), on canonical paths. Both
@@ -378,6 +431,11 @@ pub(super) fn folder_and_name(p: &Path, what: &str) -> Result<PathBuf, Error> {
     };
     let folder = dunce::canonicalize(folder).map_err(|error| cannot_resolve(p, what, &error))?;
     Ok(folder.join(name))
+}
+
+/// Each of `paths`, by [`beneath_existing`].
+fn all_beneath(paths: &[PathBuf], what: &str) -> Result<Vec<PathBuf>, Error> {
+    paths.iter().map(|p| beneath_existing(p, what)).collect()
 }
 
 /// `p` canonical as far as it exists: the longest existing ancestor canonicalised, the rest

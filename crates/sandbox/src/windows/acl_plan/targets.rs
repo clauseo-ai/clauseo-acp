@@ -21,7 +21,8 @@ use crate::windows::matters::SANDBOX_DIR;
 ///   ([`FolderRefusal::OverlapsDataFolder`] for anything not listed here):
 ///   - writable: the state folder exactly one level below `<data_dir>\agent-state\<matter>`
 ///     (not `notes`), the notes folder exactly `<data_dir>\agent-state\<matter>\notes`, the
-///     credential link inside that state folder, and the Claude store exactly
+///     credential link inside that state folder, the session's temp folder exactly
+///     `<data_dir>\run\<session>\tmp` (never the run folder), and the Claude store exactly
 ///     `<data_dir>\agents\claude-acp\home` and its allowed names, `matter` being this
 ///     launch's matter id, never a string of the policy's;
 ///   - read and run: inside one agent's folder under `<data_dir>\agents`, never in its `home`
@@ -70,6 +71,7 @@ pub(super) fn check_target(
                     PathKind::CredentialLink => {
                         state_ok(policy.state()) && in_folder(path, policy.state())
                     }
+                    PathKind::TempFolder => temp_folder(path, data),
                     PathKind::ClaudeStore => same_path(path, &store),
                     PathKind::ClaudeStoreFile => {
                         path.parent().is_some_and(|p| same_path(p, &store))
@@ -90,6 +92,18 @@ pub(super) fn check_target(
         }
     };
     (!allowed).then_some(FolderRefusal::OverlapsDataFolder)
+}
+
+/// Whether `path` is a session's temp folder, `<data_dir>\run\<session>\tmp`: two levels
+/// below the run folder, named `tmp`. Never the run folder or the session's folder, which
+/// holds the session's token.
+fn temp_folder(path: &Path, data: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case(TEMP_DIR))
+        && path
+            .parent()
+            .and_then(Path::parent)
+            .is_some_and(|run| same_path(run, &data.join(RUN_DIR)))
 }
 
 /// Whether `path` is inside one agent's folder under `<data_dir>\agents` (not the folder
@@ -134,6 +148,12 @@ pub(crate) const AGENTS_DIR: &str = "agents";
 
 /// `<data_dir>\agent-state`: each matter's state and notes folders, by matter id.
 const AGENT_STATE_DIR: &str = "agent-state";
+
+/// `<data_dir>\run`: each session's folder, holding its token and its temp folder.
+const RUN_DIR: &str = "run";
+
+/// A session's temp folder in `<data_dir>\run\<session>`.
+const TEMP_DIR: &str = "tmp";
 
 /// A matter's notes folder in `<data_dir>\agent-state\<matter>`.
 const NOTES_DIR: &str = "notes";
