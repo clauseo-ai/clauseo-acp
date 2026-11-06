@@ -459,6 +459,18 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # The `elevated_` tests (D-B16), as windows-pr-tests.yml's step: ignored everywhere else,
+      # and each skips unless the token is elevated and CLAUSEO_ELEVATED_TESTS=1. Hosted Windows
+      # runners' tokens are elevated (probe #509). One at a time: they make and delete local
+      # accounts, a group and an HKLM key.
+      - name: Elevated tests, one at a time
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/^elevated_/)' --test-threads 1 --no-tests=fail
+
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
       # a fresh account name, on every native macOS and Windows entry, Windows ARM64 included.

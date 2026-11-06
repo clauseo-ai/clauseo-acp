@@ -65,3 +65,18 @@ pub(crate) fn protected(path: &Path) -> bool {
     let bytes = descriptor(path).unwrap();
     Descriptor::parse(&bytes).unwrap().dacl_protected()
 }
+
+/// Whether an `elevated_` test may run: the token is elevated **and**
+/// `CLAUSEO_ELEVATED_TESTS=1` (CI's elevated step sets it, split §8), so these tests never run
+/// on a developer's machine by accident. Says why when not.
+pub(crate) fn elevated_tests_enabled() -> bool {
+    if std::env::var_os("CLAUSEO_ELEVATED_TESTS").is_none_or(|value| value != "1") {
+        eprintln!("skipped: CLAUSEO_ELEVATED_TESTS=1 is not set");
+        return false;
+    }
+    if !super::test_dacl::elevated() {
+        eprintln!("skipped: the token is not elevated");
+        return false;
+    }
+    true
+}

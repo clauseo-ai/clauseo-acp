@@ -82,7 +82,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # set-aside's scan (src/windows/set_aside/ntfs/scan.rs): CompareStringOrdinal, to compare names as
 # NTFS does (Win32_Globalization). The change journal (src/windows/clean_close/ntfs.rs):
 # FSCTL_QUERY_USN_JOURNAL, FSCTL_READ_UNPRIVILEGED_USN_JOURNAL and its structs, and the storage
-# bus from IOCTL_STORAGE_QUERY_PROPERTY (Win32_System_Ioctl).
+# bus from IOCTL_STORAGE_QUERY_PROPERTY (Win32_System_Ioctl). The set-up's accounts and group
+# (src/windows/setup/accounts.rs): NetUserAdd and the other Net* calls (NetManagement).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -90,6 +91,7 @@ windows = { workspace = true, features = [
   "Wdk_Storage_FileSystem",
   "Win32_Foundation",
   "Win32_Globalization",
+  "Win32_NetworkManagement_NetManagement",
   "Win32_Networking_WinHttp",
   "Win32_Networking_WinSock",
   "Win32_Security",
