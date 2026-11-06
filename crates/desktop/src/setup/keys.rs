@@ -72,10 +72,14 @@ pub(crate) struct KeyCache {
 
 impl fmt::Debug for KeyCache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // One lock at a time, never the keys' while the marks' is taken: `Marks::finish` takes
+        // them the other way round (review L5).
+        let agents: Vec<AgentId> = lock(&self.keys).keys().cloned().collect();
+        let unreadable = self.marks.unreadable_agents();
         f.debug_struct("KeyCache")
             .field("available", &self.available)
-            .field("agents", &lock(&self.keys).keys().collect::<Vec<_>>())
-            .field("unreadable", &self.marks.unreadable_agents())
+            .field("agents", &agents)
+            .field("unreadable", &unreadable)
             .finish_non_exhaustive()
     }
 }

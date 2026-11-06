@@ -41,23 +41,31 @@ pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCo
 }
 
 /// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
-/// call that fails is logged by the agent and its code; the host keeps what it had.
+/// call that fails is tried once more (review L4), then logged by the agent and the error's
+/// code; the host keeps what it had.
 pub(crate) async fn sync(backend: &AgentsBackend, agent: &AgentId) {
     let _gate = backend.wiring.refusal_gate.lock().await;
     let code = wanted(backend, agent);
     if lock(&backend.wiring.refused).get(agent).copied() == code {
         return;
     }
-    match backend.host.set_launch_refused(agent.clone(), code).await {
-        Ok(()) => {
-            let mut refused = lock(&backend.wiring.refused);
-            match code {
-                Some(code) => refused.insert(agent.clone(), code),
-                None => refused.remove(agent),
-            };
-        }
-        Err(error) => {
-            tracing::warn!(%agent, code = error.code().as_str(), "launch refusal not set");
+    for again in [false, true] {
+        match backend.host.set_launch_refused(agent.clone(), code).await {
+            Ok(()) => {
+                let mut refused = lock(&backend.wiring.refused);
+                match code {
+                    Some(code) => refused.insert(agent.clone(), code),
+                    None => refused.remove(agent),
+                };
+                return;
+            }
+            Err(error) if !again => {
+                let code = error.code().as_str();
+                tracing::info!(%agent, code, "launch refusal not set; again");
+            }
+            Err(error) => {
+                tracing::warn!(%agent, code = error.code().as_str(), "launch refusal not set");
+            }
         }
     }
 }
@@ -101,7 +109,7 @@ pub(crate) async fn follow_keys(backend: &AgentsBackend, mut notes: UnboundedRec
                 if !backend.known.contains_key(&agent) {
                     continue;
                 }
-                backend.compose.set_key(&agent, backend.keys.has(&agent));
+                backend.compose.show_key(&agent, &backend.keys);
                 sync(backend, &agent).await;
             }
         }

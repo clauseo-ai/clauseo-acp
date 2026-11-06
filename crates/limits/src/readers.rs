@@ -14,6 +14,7 @@ mod tap;
 mod time;
 
 use std::future::Future;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, PoisonError, RwLock};
@@ -21,6 +22,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
+use zeroize::{Zeroize as _, Zeroizing};
 
 pub(crate) use claude::looks_like_email;
 pub use codex::CODEX_OVERRIDES;
@@ -87,8 +89,28 @@ pub enum ReadFailure {
 }
 
 /// The variables a read of an agent adds over its entry's, asked at each read: the stored API
-/// key and the firm plan's variables, as the caller's launch hook adds them.
-type LaunchEnv = Arc<dyn Fn(AgentKind) -> Vec<(String, String)> + Send + Sync>;
+/// key and the firm plan's variables, as the caller's launch hook adds them. Zeroed when dropped.
+type LaunchEnv = Arc<dyn Fn(AgentKind) -> Vec<(String, Zeroizing<String>)> + Send + Sync>;
+
+/// One read's entry, with the read's variables in: its variables, the stored API key among
+/// them, are zeroed when it drops, a read that is dropped mid-way included.
+struct ReadEntry(AgentLaunch);
+
+impl Drop for ReadEntry {
+    fn drop(&mut self) {
+        for value in self.0.env.values_mut() {
+            value.zeroize();
+        }
+    }
+}
+
+impl Deref for ReadEntry {
+    type Target = AgentLaunch;
+
+    fn deref(&self) -> &AgentLaunch {
+        &self.0
+    }
+}
 
 /// The settings entries, shared by every copy of the readers ([`ProcessReaders::with_entry`]).
 /// Never `Debug`-printed: an env may hold secrets.
@@ -105,15 +127,16 @@ fn entry_now(
     entries: &RwLock<Entries>,
     launch_env: Option<&LaunchEnv>,
     agent: AgentKind,
-) -> Option<AgentLaunch> {
+) -> Option<ReadEntry> {
     let entries = entries.read().unwrap_or_else(PoisonError::into_inner);
-    let mut launch = match agent {
+    let mut launch = ReadEntry(match agent {
         AgentKind::Claude => entries.claude.clone(),
         AgentKind::Codex => entries.codex.clone(),
-    }?;
+    }?);
     drop(entries);
     for (name, value) in launch_env.map(|vars| vars(agent)).unwrap_or_default() {
-        env::with_key(&mut launch.env, &name, value);
+        // The entry's copy is zeroed with it; `value` is zeroed here.
+        env::with_key(&mut launch.0.env, &name, String::clone(&value));
     }
     Some(launch)
 }
@@ -221,11 +244,12 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     /// the firm plan's routing (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, the plan's
     /// `env`). Each goes over any settings variable of that name in any case; a name not given
     /// leaves the settings variable as it is. No value is logged, and a tail that echoes a key
-    /// shows `[redacted]`.
+    /// shows `[redacted]`. The values, and the read's copy of its entry with them in, are zeroed
+    /// when dropped.
     #[must_use]
     pub fn with_launch_env(
         mut self,
-        vars: impl Fn(AgentKind) -> Vec<(String, String)> + Send + Sync + 'static,
+        vars: impl Fn(AgentKind) -> Vec<(String, Zeroizing<String>)> + Send + Sync + 'static,
     ) -> ProcessReaders<T> {
         self.launch_env = Some(Arc::new(vars));
         self

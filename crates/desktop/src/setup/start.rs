@@ -190,6 +190,11 @@ impl SetupStart {
         refusals_at_start(self.known.keys(), &self.settings.blocked)
     }
 
+    /// The agents an unreadable policy blocks, as read at start: the limits readers' first.
+    pub(crate) fn blocked(&self) -> BTreeSet<AgentId> {
+        self.settings.blocked.clone()
+    }
+
     /// Reads `effective` for the setup thread, bringing the `firm-policy` markers up to date.
     pub(crate) fn read(effective: &Effective, locations: &Locations) -> Self {
         let snapshot = Snapshot::embedded();
@@ -317,7 +322,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         for agent in read.known.keys() {
             compose.set_blocked(agent, facts.blocked.contains(agent));
             compose.set_firm(agent, facts.firm.contains(agent));
-            compose.set_key(agent, keys.has(agent));
+            compose.show_key(agent, &keys);
         }
         let firm_policy = facts.firm_policy.clone();
         let wiring = Wiring::new(

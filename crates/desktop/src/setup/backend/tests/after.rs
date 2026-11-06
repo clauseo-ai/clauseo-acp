@@ -2,7 +2,8 @@
 //! restart once when a stored key, an endpoint or Clauseo's own login remains, after an
 //! automatic leave's first try or a try again and after a lawyer's leave; with nothing usable
 //! they stay held and the agent shows signed out. A key set on a reused login restarts once,
-//! after the key is stored.
+//! after the key is stored. An endpoint that then arrives through the settings restarts a held
+//! agent once (the final security review's L3).
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Found, SigninState};
@@ -184,4 +185,26 @@ fn a_key_set_on_a_reused_login_with_a_key_stored_restarts_once_after_the_new_key
     assert!(restart > left, "after the leave ended: {calls:?}");
     let stored = rig.keychain.load(&claude()).unwrap();
     assert_eq!(stored.as_ref().map(|key| key.as_str()), Some(NEW_KEY));
+}
+
+#[test]
+fn an_endpoint_arriving_through_the_settings_restarts_a_held_agent_once() {
+    use crate::setup::refresh::{SettingsRead, apply_settings};
+    use crate::test_support::block_on;
+
+    let rig = reused_claude(false);
+    leave_at_first_try(&rig);
+    assert_eq!(restarts(&rig, &claude()), 0, "held for the next login");
+    let read = SettingsRead {
+        firm: std::collections::BTreeSet::from([claude()]),
+        ..SettingsRead::default()
+    };
+    block_on(apply_settings(&rig.backend, read.clone()));
+    assert_eq!(restarts(&rig, &claude()), 1, "the endpoint is usable");
+    assert_eq!(
+        method(shown(&rig, &claude()).as_ref()),
+        Some(SignInMethod::Firm)
+    );
+    block_on(apply_settings(&rig.backend, read));
+    assert_eq!(restarts(&rig, &claude()), 1, "no change, no restart");
 }
