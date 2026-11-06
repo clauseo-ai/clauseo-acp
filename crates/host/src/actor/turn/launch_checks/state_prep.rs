@@ -36,6 +36,13 @@ pub(super) fn prepare_codex(
     } else {
         state_folder::prepare(data, &state, AgentKind::Codex)?;
     }
+    codex::write_home_config(&state)?;
+    // The stale link's removal and the launch's own link run under the folder's lock, so a
+    // login change's removal (`login_link::remove_links_but`) never interleaves with them.
+    let lock = state_folder::folder_lock(&state);
+    let held = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if state_use.drop_stale {
         state_folder::remove_stale_link(&state).map_err(|error| {
             tracing::warn!(error_kind = ?error.kind(), "a stale login link was not removed");
@@ -45,7 +52,6 @@ pub(super) fn prepare_codex(
             )
         })?;
     }
-    codex::write_home_config(&state)?;
     // A key login gets no login file; Clauseo's own login is linked now; a reused one once the
     // hook has answered (`link_reused_after`).
     let link = if state_use.key_login {
@@ -53,6 +59,9 @@ pub(super) fn prepare_codex(
     } else {
         (!reused).then(|| state_folder::link_own(&home, &state).map_err(|error| error.refusal()))
     };
+    drop(held);
+    // The `agent-state` denies of the shell's fence, read here off the actor.
+    let state_denies = crate::agent::codex_fence::state_denies(data, &state);
     let prepared = CodexPrepared {
         folder,
         home,
@@ -60,6 +69,7 @@ pub(super) fn prepare_codex(
         keys: serde_json::Map::new(),
         login: None,
         link,
+        state_denies,
     };
     Ok((prepared, support))
 }
@@ -141,6 +151,10 @@ pub(super) async fn link_reused_after(
     let (home, state) = (codex.home.clone(), codex.state.clone());
     let job = codex::prepare::Job::short("login link", Some(matter));
     let linked = codex::prepare::off_actor(clock, job, move || {
+        let lock = state_folder::folder_lock(&state);
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state_folder::link_reused(&home, &state).map_err(|error| error.refusal())
     })
     .await;

@@ -1,14 +1,15 @@
 //! The data-folder fence for Codex: a read and write deny on what of `<data>` only Clauseo uses,
-//! and on `<data>/run`, `<data>/agent-state` and `<data>/run.old-*` whole ([`rules`]), as a
-//! Codex permission profile in each Codex session's `CODEX_CONFIG`. The session's own run folder
-//! (with its `tmp`, the shell's `TMPDIR`) and the matter's notes are reopened as `write` entries
-//! in the profile and as ACP `additionalDirectories`
-//! (`actor::turn::profile_loads::codex_directories`), so a session or a matter made after the
-//! launch is denied too, and so is every matter's Codex state folder, the own one included (its
-//! `CODEX_HOME`, R17 PR-C): the shell never reads the login link, never writes what Codex loads
-//! at the next launch, and never writes the `arg0` folder Codex puts first on its `PATH`. The
-//! state folder is cleaned at each launch to what Codex keeps (`agent/state_folder.rs`); the
-//! jail's write-deny is R17 PR-D's.
+//! on `<data>/run` and `<data>/run.old-*` whole, and on `<data>/agent-state` entry by entry
+//! ([`rules`], [`state_denies`]), as a Codex permission profile in each Codex session's
+//! `CODEX_CONFIG`. The session's own run folder (with its `tmp`, the shell's `TMPDIR`) and the
+//! matter's notes are reopened as `write` entries in the profile and as ACP
+//! `additionalDirectories` (`actor::turn::profile_loads::codex_directories`), so a session made
+//! after the launch is denied too. Every other matter's folder that exists at the launch is
+//! denied, and every entry of the own Codex state folder (its `CODEX_HOME`, R17 PR-C) but its
+//! `tmp`: the shell never reads the login link and never writes what Codex loads at the next
+//! launch, and reads but never writes the `arg0` folder Codex puts first on its `PATH`. A
+//! matter made after the launch is the named residual. The state folder is cleaned at each
+//! launch to what Codex keeps (`agent/state_folder.rs`); the jail's write-deny is R17 PR-D's.
 //!
 //! At codex tag `rust-v0.162.1`:
 //! - Per-path rules exist only in a named profile: `default_permissions = "<name>"` selects
@@ -92,8 +93,66 @@ const AGENTS_DENIED: [&str; 6] = [
 /// The run sweep's set-aside folders (`launch_checks/sweep.rs`), as a glob under `<data>`.
 pub(crate) const SET_ASIDE_GLOB: &str = "run.old-*";
 
-/// The folders holding every session's run folder and every matter's notes, denied whole.
-const SESSION_PARENTS: [&str; 2] = ["run", "agent-state"];
+/// The folder holding every session's run folder, denied whole. `agent-state` is denied entry
+/// by entry ([`state_denies`]), so the own state folder's `tmp` stays readable.
+const SESSION_PARENTS: [&str; 1] = ["run"];
+
+/// The names of the own state folder denied even when they do not exist at the launch: the
+/// login link, Codex's `.env` and Clauseo's `config.toml`.
+const STATE_ALWAYS_DENIED: [&str; 3] = ["auth.json", ".env", "config.toml"];
+
+/// The `agent-state` denies of a Codex launch whose state folder is `state` under `data`, read
+/// on the launch-prep thread (round 4's ruling, option B): every other matter's folder that
+/// exists, every entry of this matter's folder but its `notes` and `codex-acp`, and every entry
+/// of the state folder but `tmp`, plus [`STATE_ALWAYS_DENIED`] by name. So `tmp`, where Codex
+/// keeps the `arg0` links it puts first on `PATH` (`apply_patch`, `codex-execve-wrapper`, and the
+/// sandbox helper bubblewrap before 0.9 re-runs, codex-rs `linux_run_main.rs:404-435`), stays
+/// readable and runnable for the shell, and never writable (no `write` entry, no writable root:
+/// round 3's H1). A matter made after the launch, and a name Codex makes in its state folder
+/// during the session, are not denied (the residuals). Entries are listed through no link; a
+/// folder that cannot be listed is denied whole.
+pub(crate) fn state_denies(data: &Path, state: &Path) -> Vec<PathBuf> {
+    let root = data.join(crate::agent::state_folder::STATE_ROOT);
+    let (Some(matter), Some(agent)) = (state.parent(), state.file_name()) else {
+        return vec![root];
+    };
+    let mut denied = Vec::new();
+    let others = |folder: &Path, keep: &[&std::ffi::OsStr], denied: &mut Vec<PathBuf>| {
+        match std::fs::read_dir(folder) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    if !keep.contains(&entry.file_name().as_os_str()) {
+                        denied.push(entry.path());
+                    }
+                }
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        }
+    };
+    let matter_name = matter.file_name().unwrap_or_default();
+    let listed = others(&root, &[matter_name], &mut denied)
+        && others(matter, &[std::ffi::OsStr::new("notes"), agent], &mut denied)
+        && others(
+            state,
+            &[std::ffi::OsStr::new(
+                crate::agent::state_folder::CODEX_SHELL_FOLDER,
+            )],
+            &mut denied,
+        );
+    if !listed {
+        tracing::warn!("a state folder could not be listed: agent-state is denied whole");
+        return vec![root];
+    }
+    for name in STATE_ALWAYS_DENIED {
+        let path = state.join(name);
+        if !denied.contains(&path) {
+            denied.push(path);
+        }
+    }
+    denied
+}
 
 /// The session's folders the fence needs.
 #[derive(Debug, Clone, Copy)]
@@ -103,22 +162,25 @@ pub(crate) struct Session<'a> {
     /// `<data>/agent-state/<matter>/notes`, a `write` entry.
     pub(crate) notes: &'a Path,
     /// The matter's state folder, `<data>/agent-state/<matter>/codex-acp`, Codex's
-    /// `CODEX_HOME` and `HOME` (R17 PR-C). It stays under the deny of `agent-state` whole, so the
-    /// shell neither reads its login link, transcripts and databases nor writes anything Codex
-    /// loads: above all not its `tmp`, whose `arg0/codex-arg0*` folder Codex puts first on
+    /// `CODEX_HOME` and `HOME` (R17 PR-C). Every entry but `tmp` is denied ([`state_denies`]),
+    /// so the shell neither reads its login link, transcripts and databases nor writes anything
+    /// Codex loads; `tmp` is readable and never writable, since its `arg0/codex-arg0*` folder
+    /// Codex puts first on
     /// `PATH` (codex-rs `arg0/src/lib.rs:357`) and whose `git` Codex's own unsandboxed calls
-    /// would run (`git-utils/src/info.rs:375, 708`); that `tmp` is denied by name as well. The
-    /// shell's temp folder is the run folder's `tmp` (`TMPDIR`), under its `write` entry.
+    /// would run (`git-utils/src/info.rs:375, 708`). The shell's temp folder is the run
+    /// folder's `tmp` (`TMPDIR`), under its `write` entry.
     pub(crate) state: &'a Path,
+    /// The `agent-state` denies read at the launch ([`state_denies`]).
+    pub(crate) state_denies: &'a [PathBuf],
 }
 
 /// The fence's denied paths: the `Locations` paths, the store's and the search index's database
 /// files, [`DATA_DENIED`], both agents' login homes whole and Claude's whole folder,
 /// [`AGENTS_DENIED`], Codex's sign-in markers, then [`SESSION_PARENTS`]. A path of the first
 /// group that is or holds the session's run folder, its notes or its state folder is left out,
-/// with a warning; then [`SESSION_PARENTS`] and the state folder's `tmp` by name. The session's
-/// run folder and notes are reopened under
-/// [`SESSION_PARENTS`] by [`keys`]' `write` entries and the session's `additionalDirectories`.
+/// with a warning; then [`SESSION_PARENTS`] and the launch's `agent-state` denies
+/// ([`state_denies`]). The session's run folder is reopened under `run` by [`keys`]' `write`
+/// entries and the session's `additionalDirectories`, and so are this matter's notes.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
     let agents = data.join("agents");
@@ -157,12 +219,7 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(SESSION_PARENTS.iter().map(|name| data.join(name)));
-    // Named too, so no `write` entry over the state folder could ever reopen it.
-    denied.push(
-        session
-            .state
-            .join(crate::agent::state_folder::CODEX_SHELL_FOLDER),
-    );
+    denied.extend(session.state_denies.iter().cloned());
     denied
 }
 

@@ -246,6 +246,9 @@ pub(crate) struct CodexPrepared {
     /// hook found the reused login's link holding); `None` when it was not tried (reused, and
     /// the hook found no shared login: the split check refuses the launch then).
     pub(super) link: Option<Result<StateLink, Error>>,
+    /// The shell fence's `agent-state` denies, read at the launch
+    /// (`agent::codex_fence::state_denies`).
+    pub(super) state_denies: Vec<PathBuf>,
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With

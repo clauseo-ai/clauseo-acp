@@ -119,3 +119,70 @@ fn the_live_clean_removes_instructions_and_keeps_working_data() {
     }
     write::remove_dir_all(&data).unwrap();
 }
+
+/// Round 4's M2: a project folder swapped for a link to a folder elsewhere *between* the walk's
+/// open and its removals (a hook in the walk does the swap): the removal goes on through the
+/// folder's handle, in the folder that was opened, and nothing outside the state folder goes.
+#[cfg(unix)]
+#[test]
+fn a_project_folder_swapped_mid_walk_never_leads_the_removal_outside() {
+    let (data, _home) = data("project_swap");
+    let state = state_dir(&data, matter(16), "claude-acp");
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    plant(
+        &state,
+        &["projects/p/s-1/tool-results/r.txt", "projects/p/s-1.jsonl"],
+    );
+    let outside = data.join("outside");
+    plant(&outside, &["s-1/tool-results/r.txt", "s-1/keep.txt"]);
+    let moved = state.join("projects/p-moved");
+    let target = outside.clone();
+    super::handle::hook::set(move |project| {
+        write::rename(project, &moved).unwrap();
+        write::symlink(&target, project).unwrap();
+    });
+    let cleaned = prepare(&data, &state, AgentKind::Claude);
+    super::handle::hook::clear();
+    cleaned.unwrap();
+    assert!(
+        outside.join("s-1/keep.txt").exists(),
+        "the outside folder was touched"
+    );
+    assert!(outside.join("s-1/tool-results/r.txt").exists());
+    // The folder that was opened was cleaned through its handle.
+    assert!(!state.join("projects/p-moved/s-1").exists());
+    assert!(state.join("projects/p-moved/s-1.jsonl").exists());
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// Round 4's low: in Codex's kept folders (`sessions`, `log`, `archived_sessions`), every file
+/// with a second name and every link is removed at any depth; plain files stay.
+#[cfg(unix)]
+#[test]
+fn codex_kept_folders_lose_hard_and_symbolic_links() {
+    let (data, home) = data("kept_folder_links");
+    let state = state_dir(&data, matter(17), "codex-acp");
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    plant(&state, &["sessions/2026/r.jsonl", "log/codex.log"]);
+    let secret = home.join("auth.json");
+    write::hard_link(&secret, &state.join("sessions/2026/linked.jsonl")).unwrap();
+    write::symlink(&secret, &state.join("log/pointer")).unwrap();
+    write::create_dir_all(&state.join("archived_sessions")).unwrap();
+    write::hard_link(&secret, &state.join("archived_sessions/a.jsonl")).unwrap();
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    for gone in [
+        "sessions/2026/linked.jsonl",
+        "log/pointer",
+        "archived_sessions/a.jsonl",
+    ] {
+        assert!(
+            std::fs::symlink_metadata(state.join(gone)).is_err(),
+            "{gone}"
+        );
+    }
+    for kept in ["sessions/2026/r.jsonl", "log/codex.log"] {
+        assert!(state.join(kept).exists(), "{kept}");
+    }
+    assert_eq!(std::fs::read(&secret).unwrap(), b"{\"tokens\":1}");
+    write::remove_dir_all(&data).unwrap();
+}

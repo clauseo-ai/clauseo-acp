@@ -47,12 +47,39 @@ fn matter() -> PathBuf {
     PathBuf::from("/home/lawyer/Matters/Smith v Jones")
 }
 
+/// The `agent-state` denies `state_denies` reads at a launch after the clean: another matter,
+/// this matter's Claude folder, what Codex kept in its state folder, and the names denied even
+/// when absent. Not `tmp`, not `notes`.
+fn denies() -> Vec<PathBuf> {
+    let agent_state = data().join("agent-state");
+    let mut denies = vec![
+        agent_state.join("m2"),
+        agent_state.join("m1").join("claude-acp"),
+    ];
+    denies.extend(
+        [
+            "sessions",
+            "archived_sessions",
+            "history.jsonl",
+            "state_5.sqlite",
+            "state_5.sqlite-wal",
+            "log",
+            "auth.json",
+            ".env",
+            "config.toml",
+        ]
+        .map(|name| state().join(name)),
+    );
+    denies
+}
+
 fn fence() -> Map<String, Value> {
-    let (run_root, notes, state) = (run_root(), notes(), state());
+    let (run_root, notes, state, state_denies) = (run_root(), notes(), state(), denies());
     let session = Session {
         run_root: &run_root,
         notes: &notes,
         state: &state,
+        state_denies: &state_denies,
     };
     keys(&locations(), session, false)
 }
@@ -187,11 +214,15 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "agents/claude-acp",
         "agents/codex-acp/home",
         "run",
-        "agent-state",
+        "agent-state/m2",
+        "agent-state/m1/claude-acp",
+        "agent-state/m1/codex-acp/auth.json",
         SET_ASIDE_GLOB,
     ] {
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
+    // `agent-state` is denied entry by entry, so the own state folder's `tmp` stays readable.
+    assert_eq!(scoped.get("agent-state"), None);
     for (subpath, value) in scoped {
         let own = ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str());
         assert_eq!(
@@ -223,8 +254,9 @@ fn the_profile_names_the_own_run_folder_and_notes_write() {
     }
 }
 
-/// A session and a matter made after the launch are denied, in the profile and in every turn
-/// rebuilt from codex-acp's policy, while the own run folder and notes stay writable.
+/// A session made after the launch is denied, in the profile and in every turn rebuilt from
+/// codex-acp's policy, while the own run folder and notes stay writable. A matter made after the
+/// launch is readable, never writable, for the session (round 4's ruling, the named residual).
 #[test]
 fn sessions_and_matters_made_after_the_launch_are_denied() {
     let keys = fence();
@@ -232,14 +264,17 @@ fn sessions_and_matters_made_after_the_launch_are_denied() {
     for path in [
         data.join("run").join("s-later").join("work").join("a.txt"),
         data.join("run").join("s-later").join("skill-packs"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+    }
+    for path in [
         data.join("agent-state")
             .join("m-later")
             .join("notes")
             .join("brief.md"),
-        data.join("agent-state").join("m-later"),
         data.join("agent-state").join("m1").join("other"),
     ] {
-        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+        assert_eq!(access(&keys, &path), "read", "{}", path.display());
     }
     for path in [
         run_root().join("work").join("a.md"),
@@ -281,10 +316,7 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
         state().join("history.jsonl"),
         state().join("sessions").join("2026").join("t.jsonl"),
         state().join("config.toml"),
-        state().join("AGENTS.md"),
-        state().join("hooks.json"),
-        state().join("rules").join("default.rules"),
-        state().join(".profile"),
+        state().join(".env"),
         // The login home whole: its login and the transcripts from before R17 PR-C.
         locations().agent_home("codex-acp").join("auth.json"),
         locations()
@@ -331,12 +363,14 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
 }
 
-/// Round 3's H1: Codex puts `CODEX_HOME/tmp/arg0/codex-arg0*` first on `PATH` and its own
-/// unsandboxed `git` calls look `git` up by name, so the shell may never write there: the state
-/// folder's `tmp` is denied, by the `agent-state` deny and by name. The shell's temp folder is
-/// the run folder's `tmp` (its `TMPDIR`), writable.
+/// Round 3's H1 and round 4's ruling: Codex puts `CODEX_HOME/tmp/arg0/codex-arg0*` first on
+/// `PATH`, and its own unsandboxed `git` calls look `git` up by name, so the shell may never
+/// write there; it reads and runs them (`apply_patch`, `codex-execve-wrapper`, and the sandbox
+/// helper bubblewrap before 0.9 re-runs). The state folder's `tmp` is no `write` entry and no
+/// writable root, and no deny either. The shell's temp folder is the run folder's `tmp` (its
+/// `TMPDIR`), writable. Its login link and another matter's folder are denied.
 #[test]
-fn the_shell_never_writes_codex_homes_arg0_folder() {
+fn the_shell_reads_but_never_writes_codex_homes_arg0_folder() {
     let keys = fence();
     for path in [
         state().join("tmp"),
@@ -344,26 +378,41 @@ fn the_shell_never_writes_codex_homes_arg0_folder() {
             .join("tmp")
             .join("arg0")
             .join("codex-arg0abc")
-            .join("git"),
+            .join("apply_patch"),
     ] {
-        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+        assert_eq!(access(&keys, &path), "read", "{}", path.display());
     }
     let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
         .as_object()
         .unwrap();
-    assert_eq!(
-        scoped.get("agent-state/m1/codex-acp/tmp"),
-        Some(&json!("deny"))
+    assert_eq!(scoped.get("agent-state/m1/codex-acp/tmp"), None);
+    let writable: Vec<&String> = scoped
+        .iter()
+        .filter(|(_, mode)| *mode == &json!("write"))
+        .map(|(subpath, _)| subpath)
+        .collect();
+    assert!(
+        writable
+            .iter()
+            .all(|subpath| !subpath.contains("codex-acp")),
+        "{writable:?}"
     );
     assert_eq!(
         access(&keys, &run_root().join("tmp").join("t.txt")),
         "write"
     );
+    for path in [
+        state().join("auth.json"),
+        data().join("agent-state").join("m2").join("notes"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+    }
 }
 
 /// The review's D1: nothing Codex or its shell loads at the next launch from the state folder
 /// (its `CODEX_HOME` and `HOME`) is writable by the shell: `.env`, which Codex exports at
-/// start, git's `.config/git/config`, `agents` role files, `AGENTS.md`, `config.toml`.
+/// start, git's `.config/git/config`, `agents` role files, `AGENTS.md`, `config.toml`. The login
+/// link, `.env` and `config.toml` are denied outright, present or not.
 #[test]
 fn review_codex_home_dotenv_and_git_xdg_config_are_not_writable() {
     let keys = fence();
@@ -377,6 +426,9 @@ fn review_codex_home_dotenv_and_git_xdg_config_are_not_writable() {
         "auth.json",
         ".gitconfig",
     ] {
+        assert_ne!(access(&keys, &state().join(name)), "write", "{name}");
+    }
+    for name in ["auth.json", ".env", "config.toml"] {
         assert_eq!(access(&keys, &state().join(name)), "deny", "{name}");
     }
 }
@@ -423,6 +475,7 @@ fn windows_gets_no_fence() {
         run_root: &run_root,
         notes: &notes,
         state: &state,
+        state_denies: &[],
     };
     assert!(keys(&locations(), session, true).is_empty());
 }
@@ -440,6 +493,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
         run_root: &run_root,
         notes: &notes,
         state: &state,
+        state_denies: &[],
     };
     let keys = keys(&locations, session, false);
     let scoped = keys["permissions"][PROFILE]["filesystem"][data.to_str().unwrap()]
@@ -478,4 +532,48 @@ fn the_fence_reaches_codex_config_whole_and_the_hook_cannot_set_it() {
     assert_eq!(config["default_permissions"], fence["default_permissions"]);
     assert_eq!(config["permissions"], fence["permissions"]);
     assert_eq!(config.get("sandbox_mode"), None);
+}
+
+/// Round 4's ruling, option B: `state_denies` lists, through no link, every other matter's
+/// folder, every entry of this matter's folder but `notes` and `codex-acp`, and every entry of
+/// the state folder but `tmp`, plus the login link, `.env` and `config.toml` by name.
+#[test]
+fn state_denies_leave_out_tmp_and_notes_only() {
+    let dir = crate::pipeline::tests::support::TempDir::new("codex-state-denies");
+    let data = dir.path().join("data");
+    let state = data.join("agent-state/m1/codex-acp");
+    for folder in [
+        "agent-state/m1/notes",
+        "agent-state/m1/claude-acp",
+        "agent-state/m1/codex-acp/tmp/arg0",
+        "agent-state/m1/codex-acp/sessions",
+        "agent-state/m2/codex-acp",
+    ] {
+        crate::write::create_dir_all(&data.join(folder)).unwrap();
+    }
+    crate::write::write_file(&state.join("history.jsonl"), b"x").unwrap();
+    let denies = super::state_denies(&data, &state);
+    for denied in [
+        data.join("agent-state/m2"),
+        data.join("agent-state/m1/claude-acp"),
+        state.join("sessions"),
+        state.join("history.jsonl"),
+        state.join("auth.json"),
+        state.join(".env"),
+        state.join("config.toml"),
+    ] {
+        assert!(
+            denies.contains(&denied),
+            "{} in {denies:?}",
+            denied.display()
+        );
+    }
+    for kept in [
+        state.join("tmp"),
+        data.join("agent-state/m1/notes"),
+        state.clone(),
+        data.join("agent-state/m1"),
+    ] {
+        assert!(!denies.contains(&kept), "{}", kept.display());
+    }
 }
