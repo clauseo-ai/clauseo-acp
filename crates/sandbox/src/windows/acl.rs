@@ -209,6 +209,7 @@ impl AclWriter for NtfsAcl {
             Mode::Reclaim {
                 pool: &pool,
                 me: &me,
+                own: &[],
             },
         )
     }

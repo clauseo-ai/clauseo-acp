@@ -236,10 +236,23 @@ build 26100):
     in from another matter, say) keeps that user's `WRITE_DAC`, and that user reaches it by its
     path. It is handed to the desktop user and cleaned as forget's reclaim does; its owner comes
     from the descriptor the walk reads anyway. Only a child whose hand-back fails refuses the
-    launch, as `PoolOwned { owned: Child }`, naming it, and the launch's entries roll back. The
-    matter's own pool user owning its files is expected, and a child the lawyer can't open takes
-    the set-aside path below. **Tier B still needs PR4i**: its elevated hand-back takes ownership
-    of the roots and children the lawyer's own hand-back can't.
+    launch, as `PoolOwned { owned: Child }`, naming it, and the launch's entries roll back. That
+    is the fail-closed choice: such a child isn't set aside, since it opens fine and only its
+    owner can't be changed, and moving another matter's agent's item out of sight would hide
+    the problem. The matter's own pool user owning its files is expected, and a child the lawyer
+    can't open takes the set-aside path below. **Tier B still needs PR4i**: its elevated
+    hand-back takes ownership of the roots and children the lawyer's own hand-back can't.
+  - Every hand-back (these, the protected items', the owner pass, forget's) writes the owner
+    first, then the cleaned DACL, through the one no-follow handle, and reads the item again
+    through it: an owner other than the desktop user, or an explicit allow left for a pool SID
+    other than the matter's own, refuses (`PoolOwned`). Once the desktop user owns it, the pool
+    user has no owner's `WRITE_DAC` to put an allow back with. A file with more than one link is
+    never re-owned through one name (`LinkedFile`). A root handed back gets the entries the
+    ledger lists on it written again at once, the matter's own `Modify` included, which the
+    cleaning strips. Residual: a handle the pool user opened with `WRITE_DAC` before the owner
+    write keeps that right, and Windows can't revoke it, so it can still add an allow after.
+    The next strict walk refuses that child as `BroadAllowChild`; PR4i and the per-session
+    processes bound how long such a handle lives.
     `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
     as well, whoever owns its top (a lawyer's folder the agent filled and renamed to `.git`). An
     `OWNER RIGHTS` deny was ruled out: it binds the lawyer too when the lawyer owns the item.

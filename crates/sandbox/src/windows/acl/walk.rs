@@ -25,9 +25,9 @@ use std::path::PathBuf;
 
 use windows::Win32::Security::{
     CreatePrivateObjectSecurityEx, DestroyPrivateObjectSecurity, GENERIC_MAPPING,
-    GetSecurityDescriptorLength, LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, SEF_AVOID_OWNER_CHECK, SEF_AVOID_OWNER_RESTRICTION,
-    SEF_AVOID_PRIVILEGE_CHECK, SEF_DACL_AUTO_INHERIT, UNPROTECTED_DACL_SECURITY_INFORMATION,
+    GetSecurityDescriptorLength, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    SEF_AVOID_OWNER_CHECK, SEF_AVOID_OWNER_RESTRICTION, SEF_AVOID_PRIVILEGE_CHECK,
+    SEF_DACL_AUTO_INHERIT, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -37,10 +37,14 @@ use super::object::{Handle, Object, os_error, reparse_refused, words};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{
     Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED, SACL_PROTECTED,
-    Write, bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label,
-    lacking, owner_bytes, owner_descriptor, rebuild, without_broad, without_inherited, writes,
+    bare_child, broad_allow, build_descriptor, empty_acl, explicit_label, inherited_label, lacking,
+    owner_bytes, rebuild, without_broad, without_inherited, writes,
 };
 use crate::windows::writer::{ApplyFailure, Owned, Reach, Walked};
+
+mod handed;
+
+use handed::{Writes, make};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {
@@ -70,8 +74,13 @@ pub(super) enum Mode<'a> {
         pool: &'a [Vec<u8>],
         foreign: Option<Foreign<'a>>,
     },
-    /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned.
-    Reclaim { pool: &'a [Vec<u8>], me: &'a [u8] },
+    /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned. `own` (a strict
+    /// walk's matter subjects, else none) are the pool SIDs whose allows may stay after it.
+    Reclaim {
+        pool: &'a [Vec<u8>],
+        me: &'a [u8],
+        own: &'a [Vec<u8>],
+    },
     /// The owner pass over a protected tree (S15 `PR4a2`): what one of `pool` owns is settled
     /// as [`Mode::Reclaim`] settles it; every other child is only read, never written, so a
     /// colleague's or `Administrators`' file is never touched. With `pool` empty, nothing is.
@@ -237,7 +246,8 @@ fn settle_in(
 ) -> Result<Settled, ApplyFailure> {
     match mode {
         Mode::HandBack { pool, me } if mode.owned(current) => {
-            settle(token, child, parent, current, Mode::Reclaim { pool, me })
+            let reclaim = Mode::Reclaim { pool, me, own: &[] };
+            settle(token, child, parent, current, reclaim)
         }
         Mode::HandBack { .. } => Ok(Settled {
             written: None,
@@ -251,6 +261,7 @@ fn settle_in(
             let reclaim = Mode::Reclaim {
                 pool,
                 me: foreign.me,
+                own: foreign.assigned,
             };
             settle(token, child, parent, current, reclaim).map_err(|failure| {
                 if failure == ApplyFailure::ChildShut {
@@ -289,10 +300,15 @@ pub(super) fn hand_back(
     if object.name_surrogate() || !same_path(&object, path).map_err(io)? {
         return Ok(false);
     }
-    let mode = Mode::Reclaim { pool, me };
+    let mode = Mode::Reclaim { pool, me, own: &[] };
     let current = object.security(READ_ALL).map_err(io)?;
     if !mode.owned(&current) {
         return Ok(false);
+    }
+    // A file with another name elsewhere is never re-owned through this one, as no allow or
+    // label is written on one (`check_target`): refused.
+    if !object.folder && object.links > 1 {
+        return Err(ApplyFailure::LinkedFile);
     }
     let parent = Object::open_folder(folder)
         .and_then(|folder| folder.security(READ_ALL))
@@ -354,7 +370,7 @@ fn settle(
                 repaired = true;
             }
         }
-        Mode::Reclaim { pool, me } => {
+        Mode::Reclaim { pool, me, .. } => {
             if owned {
                 let cleaned = dacl.as_ref().map(|d| without_broad(d, pool));
                 base =
@@ -428,24 +444,12 @@ fn settle(
             ApplyFailure::Io(io::ErrorKind::PermissionDenied)
         });
     }
-    for write in &order {
-        match (write, &dacl_write, new_owner, &label_write) {
-            (Write::Dacl, Some((info, descriptor)), _, _) => child.set(*info, descriptor),
-            (Write::Owner, _, Some(me), _) => {
-                child.set(OWNER_SECURITY_INFORMATION, &owner_descriptor(me))
-            }
-            (Write::Label, _, _, Some(descriptor)) => {
-                child.set(LABEL_SECURITY_INFORMATION, descriptor)
-            }
-            _ => Ok(()),
-        }
-        .map_err(io)?;
-    }
-    let written = if !order.is_empty() || repaired {
-        Some(child.security(READ_ALL).map_err(io)?)
-    } else {
-        None
+    let writes = Writes {
+        dacl: dacl_write.as_ref().map(|(info, d)| (*info, d.as_slice())),
+        owner: new_owner,
+        label: label_write.as_deref(),
     };
+    let written = make(child, &order, &writes, repaired, mode)?;
     Ok(Settled { written, repaired })
 }
 
