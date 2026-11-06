@@ -15,19 +15,20 @@ pub mod examples;
 #[path = "support/entries.rs"]
 pub mod entries;
 
+#[path = "view/folder_scan.rs"]
+mod folder_scan;
 #[path = "view/sync_service.rs"]
 mod sync_service;
 use std::mem::size_of;
 
 use clauseo_protocol::{
-    AppendTarget, CompactionStatus, ContentBlock, Count, Cursor, DomainEvent, ElicitationEntry,
-    ElicitationRequest, ElicitationState, EntryId, ExpiryReason, Finite, FolderPlace, FolderRefId,
-    FolderScanned, HeaderEntry, HostEvent, INLINE_LIMIT_BYTES, LimitWindow, LimitWindowView,
-    MAX_RAW_ENCODE_DEPTH, MarkerEntry, MarkerKind, MatterHeaderEntry, MatterKind, MeterTone,
-    NoticeEntry, NoticeLevel, PatchBatch, RawFrom, RawPayload, StepEntry, StopReason, StreamHeader,
-    StreamId, SyncService, TextOrBlob, ThreadSummary, Timestamp, ToolCallContent, ToolCallEntry,
-    ToolCallStatus, ToolKind, ToolLocation, ViewEntry, ViewEpoch, ViewPatch, ViewPatchBody,
-    ViewWindow, WindowFreshness, WindowKind,
+    AppendTarget, CompactionStatus, ContentBlock, Cursor, DomainEvent, ElicitationEntry,
+    ElicitationRequest, ElicitationState, EntryId, ExpiryReason, Finite, HeaderEntry, HostEvent,
+    INLINE_LIMIT_BYTES, LimitWindow, LimitWindowView, MAX_RAW_ENCODE_DEPTH, MarkerEntry,
+    MarkerKind, MatterHeaderEntry, MatterKind, MeterTone, NoticeEntry, NoticeLevel, PatchBatch,
+    RawFrom, RawPayload, StepEntry, StopReason, StreamHeader, StreamId, TextOrBlob, ThreadSummary,
+    Timestamp, ToolCallContent, ToolCallEntry, ToolCallStatus, ToolKind, ToolLocation, ViewEntry,
+    ViewEpoch, ViewPatch, ViewPatchBody, ViewWindow, WindowFreshness, WindowKind,
 };
 use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
 
@@ -563,40 +564,4 @@ fn a_limit_window_and_its_row_leave_out_model_when_none() {
             .model,
         None
     );
-}
-
-#[test]
-fn folder_scanned_names_each_place_and_leaves_out_no_file() {
-    let scanned = |place: FolderPlace| {
-        HostEvent::FolderScanned(FolderScanned {
-            folder: FolderRefId::new(v7(5)).unwrap(),
-            files: 2,
-            bytes: Count::new(10).unwrap(),
-            now_reading: None,
-            place,
-            cloud_only: 0,
-            done: true,
-            cancelled: true,
-        })
-    };
-    for (place, json) in [
-        (FolderPlace::Local, serde_json::json!("local")),
-        (FolderPlace::Network, serde_json::json!("network")),
-        (
-            FolderPlace::Synced {
-                service: SyncService::ICloud,
-            },
-            serde_json::json!({"synced": {"service": "icloud"}}),
-        ),
-    ] {
-        let event = scanned(place);
-        let value = serde_json::to_value(&event).unwrap();
-        assert_eq!(value["folder_scanned"]["place"], json);
-        // The last event names no file.
-        assert!(
-            value["folder_scanned"].get("now_reading").is_none(),
-            "{value}"
-        );
-        round_trips(&event);
-    }
 }
