@@ -104,6 +104,31 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     s18.and_then(|state| wire(agent, state))
 }
 
+/// A fixed word for `state`'s kind, for the log: never an email, a plan, a code or an address.
+fn state_word(state: &SignIn) -> &'static str {
+    match state {
+        SignIn::SignedOut { .. } => "signed_out",
+        SignIn::Queued => "queued",
+        SignIn::Waiting { .. } => "waiting",
+        SignIn::DeviceCode { .. } => "device_code",
+        SignIn::LoginFound { .. } => "login_found",
+        SignIn::SignedIn {
+            method: SignInMethod::Plan,
+            ..
+        } => "signed_in",
+        SignIn::SignedIn {
+            method: SignInMethod::ApiKey,
+            ..
+        } => "signed_in_key",
+        SignIn::SignedIn {
+            method: SignInMethod::Firm,
+            ..
+        } => "signed_in_firm",
+        SignIn::Failed { .. } => "failed",
+        SignIn::Switching { .. } => "switching",
+    }
+}
+
 /// Whether S18's `state` is a running one: `Queued`, `Waiting` or `DeviceCode`.
 pub(crate) fn is_running(state: &SigninState) -> bool {
     matches!(
@@ -494,6 +519,7 @@ impl Compose {
         }
         known.sent.clone_from(&state);
         if let Some(state) = state {
+            tracing::info!(%agent, state = state_word(&state), "sign-in state changed");
             self.events.publish(SetupEvent::SignInChanged {
                 agent: agent.clone(),
                 state,

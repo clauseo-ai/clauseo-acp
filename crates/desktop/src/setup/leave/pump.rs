@@ -225,7 +225,7 @@ async fn signed_in(
         } else {
             SignInSource::Own
         };
-        backend.write_entry_as(agent, source).await;
+        crate::setup::backend::write_entry_as(backend, agent, source).await;
     } else if !reused
         && !reuse_ended
         && AgentKind::of(agent) == Some(AgentKind::Codex)

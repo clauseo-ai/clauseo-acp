@@ -12,11 +12,10 @@ use clauseo_agents::{
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
-use serde_json::json;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
 use super::timing::{FakeTimer, Stepping};
@@ -35,6 +34,8 @@ use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
+
+pub(super) use super::wire::{command, setup_events};
 
 /// What the fake `Agents` was asked, by name and agent.
 pub(super) type Calls = Arc<Mutex<Vec<(&'static str, AgentId)>>>;
@@ -260,6 +261,8 @@ pub(super) struct RecordingHost {
     pub(super) changes: Mutex<Option<BoxStream<'static, ()>>>,
     /// Told at each `restart_agents`, once a test sets it.
     pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    /// What `sign_in_holds` answers, once a test sets it.
+    pub(super) holds: Mutex<Option<BoxStream<'static, AgentId>>>,
 }
 
 impl RecordingHost {
@@ -273,6 +276,7 @@ impl RecordingHost {
             stop_gate: Mutex::new(None),
             changes: Mutex::new(None),
             restarted: Mutex::new(None),
+            holds: Mutex::new(None),
         }
     }
 
@@ -367,6 +371,12 @@ impl SetupHost for RecordingHost {
         let answer = lock(&self.changes).take().ok_or_else(|| {
             HostError::new(ErrorCode::Internal, "the tests apply settings directly")
         });
+        Box::pin(std::future::ready(answer))
+    }
+    fn sign_in_holds(&self) -> BoxFuture<'_, Result<BoxStream<'static, AgentId>, HostError>> {
+        let answer = lock(&self.holds)
+            .take()
+            .ok_or_else(|| HostError::new(ErrorCode::Internal, "the tests feed no holds"));
         Box::pin(std::future::ready(answer))
     }
 }
@@ -489,6 +499,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
         events: Arc::clone(&events),
         known,
         signin_gate: Mutex::default(),
+        rechecks: Mutex::default(),
         wiring: Wiring::new(
             Arc::clone(&readers) as Arc<dyn LeaveReaders>,
             ReusedLogins::default(),
@@ -576,24 +587,4 @@ impl Rig {
     pub(super) fn journal(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.journal))
     }
-}
-
-/// `command` as a window's JSON decodes, `fields` added to its agent.
-pub(super) fn command(name: &str, agent: &AgentId, fields: &serde_json::Value) -> SetupCommand {
-    let mut body = json!({ "agent": agent.as_str() });
-    body.as_object_mut()
-        .unwrap()
-        .extend(fields.as_object().unwrap().clone());
-    serde_json::from_value(json!({ name: body })).unwrap()
-}
-
-pub(super) fn setup_events(
-    feed: &mut futures::channel::mpsc::UnboundedReceiver<Arc<str>>,
-) -> Vec<SetupEvent> {
-    std::iter::from_fn(|| feed.try_recv().ok())
-        .map(|text| {
-            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-            serde_json::from_value(value["setup"].clone()).unwrap()
-        })
-        .collect()
 }
