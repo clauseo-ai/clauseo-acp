@@ -11,6 +11,7 @@ use clauseo_process::Launcher;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
+use crate::agent::launch_refusals::LaunchRetry;
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
@@ -507,13 +508,15 @@ impl HostConfig {
         self
     }
 
-    /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
-    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
-    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
-    /// must not block.
+    /// Desktop's launch retry (decision record 0048; R17 made it generic): called, on the
+    /// host's actor, with the agent and the code of each launch that meets
+    /// `agent.key_unreadable` or `agent.identity_checking`, before the launch waits for the
+    /// refusal to lift. Desktop reads that key again, or runs the agent's identity check, and
+    /// lifts the refusal when that succeeds; it does nothing for another code. It must not
+    /// block.
     #[must_use]
-    pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
-        self.wiring.sign_in.refused.set_key_retry(retry);
+    pub fn with_launch_retry(mut self, retry: LaunchRetry) -> Self {
+        self.wiring.sign_in.refused.set_retry(retry);
         self
     }
 
