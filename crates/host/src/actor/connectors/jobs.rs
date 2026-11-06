@@ -115,6 +115,8 @@ pub(crate) enum Change {
         recharge: String,
         paid: bool,
     },
+    /// A liveness check ended without an answer (a panic): nothing waits on it any longer.
+    NoLiveness,
 }
 
 /// One job.
@@ -157,8 +159,9 @@ impl Job {
                 generation: *generation,
                 error: Some(JOB_FAILED),
             },
+            // The case-law hint's matters waiting on liveness stop waiting (`hint.rs`).
+            Job::Check { .. } => Change::NoLiveness,
             Job::Status
-            | Job::Check { .. }
             | Job::ApiKey(_)
             | Job::Credits { .. }
             | Job::Watch { .. }

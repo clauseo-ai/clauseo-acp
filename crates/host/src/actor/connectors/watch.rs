@@ -28,12 +28,24 @@ impl Watch {
 }
 
 /// Cancels the recharge watch, if any, and starts following `recharge` with `cancel`; returns
-/// the new watch's number.
+/// the new watch's number. The pay link held goes unless the watch already follows
+/// `recharge`: it is an `AddCredits` link (`on_pay_link`), for the old watch's recharge, which
+/// `OpenPayLink` must not open once nothing watches it.
 pub(super) fn replace_watch(
     actor: &mut Actor,
     recharge: Option<String>,
     cancel: CancelFlag,
 ) -> u64 {
+    let same = recharge.as_deref().is_some_and(|recharge| {
+        actor
+            .connectors
+            .watch
+            .as_ref()
+            .is_some_and(|watch| watch.follows(recharge))
+    });
+    if !same {
+        actor.connectors.state.pay_url = None;
+    }
     end_watch(actor);
     actor.connectors.watches += 1;
     let number = actor.connectors.watches;

@@ -18,6 +18,7 @@
 //!
 //! [`MAX_REPLY_BYTES`]: super::super::limits::MAX_REPLY_BYTES
 
+mod found;
 mod reply;
 
 use clauseo_connectors::{AuthError, Error, McpReply, McpRequestHeaders};
@@ -38,6 +39,8 @@ struct Call {
     spend: Option<Spend>,
     /// For a `tools/call`, what was counted, for a refund.
     taken: Option<Taken>,
+    /// For a `search_law` or `read_document` call, what the sources join keys its result by.
+    join: Option<found::Join>,
 }
 
 impl Call {
@@ -140,6 +143,7 @@ fn vet(conn: &Conn, value: &mut Value) -> Result<Call, Option<Vec<u8>>> {
         method,
         spend: None,
         taken: None,
+        join: None,
     };
     match call.method.as_deref() {
         Some("initialize" | "server/discover") => blank_capabilities(map, &call)?,
@@ -217,6 +221,7 @@ fn vet_tools_call(
     };
     let spend = Spend::of(name);
     call.spend = Some(spend);
+    call.join = found::Join::of(name, map.get("params"));
     // Only a call that can go out is counted: a credential first, then an open session.
     if let Err(err) = session.hub.connector.bearer() {
         return Err(failed(session, call, &Error::Auth(err)));

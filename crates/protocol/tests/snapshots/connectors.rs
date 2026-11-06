@@ -76,6 +76,7 @@ mod connector_command {
     RefreshBalance => refresh_balance: ConnectorCommand::RefreshBalance {
         id: "case-law".to_owned(),
     };
+    OpenPayLink => open_pay_link: ConnectorCommand::OpenPayLink { id: "case-law".to_owned() };
     DismissCaseLawHint => dismiss_case_law_hint: ConnectorCommand::DismissCaseLawHint {
         matter: matter_id(1),
     };

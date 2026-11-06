@@ -1,6 +1,7 @@
 //! R24 PR5's recharge watch against S28's fake connector: a refused `AddCredits` leaves the
 //! out-of-credit recharge watched, a relay out-of-credit while `AddCredits` opens its recharge
-//! does not lose the command's pay link, and the switch going off ends the watch.
+//! does not lose the command's pay link, a relay out-of-credit's recharge taking over the watch
+//! drops the old pay link, and the switch going off ends the watch.
 
 use std::time::Duration;
 
@@ -99,6 +100,46 @@ fn an_out_of_credit_while_add_credits_opens_keeps_its_pay_link() {
         Some(pay_link(&recharge)),
         "{state:?}"
     );
+    rig.finish();
+}
+
+/// `AddCredits` (its recharge watched, its pay link held), then a relay's out of credit opens
+/// another recharge at the fake: the watch moves to that one, and the `AddCredits` pay link,
+/// no longer watched, goes, so `OpenPayLink` cannot open it.
+#[test]
+fn a_new_recharge_watched_drops_the_old_pay_link() {
+    let dir = Dir::new("connector_recharge_switched", &[]);
+    let mut rig = Rig::start(&dir, Start { signed_in: true });
+    rig.ok(add_credits("200"));
+    rig.state_until("the pay link", |state| {
+        case_law(state).is_some_and(|view| view.pay_url.is_some())
+    });
+    let added = rig.fake.recharges();
+    let (session, token) = rig.relay(1);
+    let mut reader = agent(session.addr(), &token);
+    rig.fake.set_balance(0);
+    rig.fake.open_new_recharge_on_out_of_credit(true);
+    search(&mut reader, 1);
+    // The out of credit and the watch's switch come in one state.
+    let state = rig.state_until("out of credit", |state| {
+        matches!(status(state), Some(ConnectorStatus::OutOfCredit { .. }))
+    });
+    let opened = rig.fake.recharges();
+    assert_eq!(opened.len(), added.len() + 1, "{opened:?}");
+    assert_eq!(case_law(&state).unwrap().pay_url, None, "{state:?}");
+    let refused = rig
+        .dispatch(clauseo_protocol::ConnectorCommand::OpenPayLink {
+            id: "case-law".to_owned(),
+        })
+        .unwrap_err();
+    assert_eq!(refused.code(), ErrorCode::CommandInvalid, "{refused}");
+    assert_eq!(
+        rig.confirmed.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    );
+    drop(reader);
+    session.end();
+    drop(session);
     rig.finish();
 }
 

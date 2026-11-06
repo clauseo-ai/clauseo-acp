@@ -72,6 +72,7 @@ impl Current {
             tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,
             prompt_call: None,
+            case_law_hint: crate::connectors::hint::TurnLooks::Nothing,
             cancel_timer: None,
             before_prompt: None,
             end: None,

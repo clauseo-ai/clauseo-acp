@@ -335,32 +335,55 @@ fn tool_call(
     if let Some(current) = current(actor, thread) {
         current.tool_paths.note(&call.locations, &call.content);
     }
-    let id = actor.ids.mint(actor.clock.now().wall)?;
-    let source = source_of(actor, thread, |sources, agent| {
-        sources.started(turn, id, agent, &call)
+    let now = actor.clock.now();
+    let id = actor.ids.mint(now.wall)?;
+    let case_law = source_of(actor, thread, |sources, agent| {
+        sources.case_law.started(now.mono, turn, id, agent, &call)
     });
+    let source = if case_law.is_some() {
+        None
+    } else {
+        source_of(actor, thread, |sources, agent| {
+            sources.started(turn, id, agent, &call)
+        })
+    };
     let (built, _fields) = build::tool_call_started(turn, id, call);
     commit(actor, thread, [built.value.into()], built.blobs)?;
-    sourced(actor, thread, source)
+    sourced(
+        actor,
+        thread,
+        source.into_iter().chain(case_law.into_iter().flatten()),
+    )
 }
 
 /// What a tool call adds to the thread's sources (`sources.rs`), asked of the thread's state
 /// with the thread's agent.
-fn source_of(
+fn source_of<T>(
     actor: &mut Actor,
     thread: ThreadId,
-    record: impl FnOnce(&mut Sources, &AgentId) -> Option<DomainEvent>,
-) -> Option<DomainEvent> {
+    record: impl FnOnce(&mut Sources, &AgentId) -> Option<T>,
+) -> Option<T> {
     let agent = actor.check_thread(thread).ok()?.row.agent.clone();
     record(&mut state(actor, thread)?.sources, &agent)
 }
 
 /// Logs what a tool call added to the thread's sources, after the call's own event.
-fn sourced(actor: &mut Actor, thread: ThreadId, source: Option<DomainEvent>) -> Result<(), Error> {
-    match source {
-        Some(event) => commit(actor, thread, [event], Vec::new()),
-        None => Ok(()),
+fn sourced(
+    actor: &mut Actor,
+    thread: ThreadId,
+    source: impl IntoIterator<Item = DomainEvent>,
+) -> Result<(), Error> {
+    let events: Vec<DomainEvent> = source.into_iter().collect();
+    if events.is_empty() {
+        return Ok(());
     }
+    let hint = events.iter().any(|event| {
+        matches!(event, DomainEvent::WebSearchRecorded(record) if crate::connectors::hint::fires(record))
+    });
+    if hint && let Some(current) = current(actor, thread) {
+        current.case_law_hint = crate::connectors::hint::TurnLooks::CaseLaw;
+    }
+    commit(actor, thread, events, Vec::new())
 }
 
 fn tool_update(
@@ -379,7 +402,7 @@ fn tool_update(
         tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
         return Ok(());
     };
-    let mut source = None;
+    let mut source = Vec::new();
     match context {
         Context::Outside { replay: true } => return Ok(()),
         Context::Live(turn) => {
@@ -388,9 +411,18 @@ fn tool_update(
                 let content = patch.content.as_deref().unwrap_or_default();
                 current.tool_paths.note(locations, content);
             }
-            source = source_of(actor, thread, |sources, agent| {
-                sources.updated(turn, acp_id, agent, &patch)
+            let now = actor.now().mono;
+            let case_law = source_of(actor, thread, |sources, agent| {
+                sources.case_law.updated(now, turn, acp_id, agent, &patch)
             });
+            source = match case_law {
+                Some(records) => records,
+                None => source_of(actor, thread, |sources, agent| {
+                    sources.updated(turn, acp_id, agent, &patch)
+                })
+                .into_iter()
+                .collect(),
+            };
         }
         Context::Outside { replay: false } => {}
     }
@@ -526,10 +558,10 @@ fn title_changed(actor: &mut Actor, thread: ThreadId, title: Option<String>) -> 
 
 /// Commits non-text events (after the held text); a chunk without an id after them starts a
 /// new message.
-pub(super) fn commit<const N: usize>(
+pub(super) fn commit(
     actor: &mut Actor,
     thread: ThreadId,
-    events: [DomainEvent; N],
+    events: impl IntoIterator<Item = DomainEvent>,
     blobs: Vec<BlobIn>,
 ) -> Result<(), Error> {
     let mut out = Out::new(actor, thread, None)?;

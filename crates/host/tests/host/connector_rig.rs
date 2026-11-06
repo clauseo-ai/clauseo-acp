@@ -38,12 +38,21 @@ impl clauseo_connectors::Clock for HostTime {
     }
 }
 
-/// The opener stand-in: hands each page to the test.
-struct Pages(Mutex<mpsc::Sender<String>>);
+/// The opener stand-in: each page the host opens with no confirm goes to `pages`, and each it
+/// opens behind the confirm (`open_confirmed`, the pay link) to `confirmed`.
+struct Pages {
+    pages: Mutex<mpsc::Sender<String>>,
+    confirmed: Mutex<mpsc::Sender<String>>,
+}
 
 impl ConnectorOpener for Pages {
     fn open(&self, url: &str) -> Result<(), String> {
-        self.0.lock().unwrap().send(url.to_owned()).unwrap();
+        self.pages.lock().unwrap().send(url.to_owned()).unwrap();
+        Ok(())
+    }
+
+    fn open_confirmed(&self, url: &str) -> Result<(), HostError> {
+        self.confirmed.lock().unwrap().send(url.to_owned()).unwrap();
         Ok(())
     }
 }
@@ -62,6 +71,8 @@ pub(crate) struct Rig {
     pub(crate) relays: Relays,
     pub(crate) events: Arc<ConnectorEvents>,
     pub(crate) pages: mpsc::Receiver<String>,
+    /// The links the host opened behind the confirm.
+    pub(crate) confirmed: mpsc::Receiver<String>,
     pub(crate) host: Running,
     pub(crate) sub: AppSubscription,
     /// Every app event and command reply so far, as JSON.
@@ -75,39 +86,53 @@ impl Rig {
     /// The fake, then the host started in `dir` with the connectors wired, then an app
     /// subscription past its first frames.
     pub(crate) fn start(dir: &Dir, start: Start) -> Self {
+        Self::start_launching(dir, start, Arc::new(dir.launcher()))
+    }
+
+    /// As [`Rig::start`], launching agents through `launcher`.
+    pub(crate) fn start_launching(
+        dir: &Dir,
+        start: Start,
+        launcher: Arc<dyn clauseo_process::Launcher>,
+    ) -> Self {
         let fake = FakeConnector::start(FakeOptions::default()).unwrap();
         let scratch = ScratchDir::new("host-connector-state").unwrap();
         let (send, pages) = mpsc::channel();
+        let (confirm, confirmed) = mpsc::channel();
         let events = ConnectorEvents::new();
         let mut made = None;
         let mut keys = Vec::new();
-        let host = dir.start_clocked(0, |config: HostConfig, clock: &ManualClock| {
-            let mut connector_config = fake.config(scratch.state_file());
-            connector_config.clock = Arc::new(HostTime(clock.clone()));
-            let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
-            let connectors = Arc::new(Connectors::new(connector_config, store).unwrap());
-            let handle = connectors.get(CASE_LAW).unwrap();
-            let relays = Relays::new(RelayConfig {
-                connector: handle.clone(),
-                origin: fake.config(scratch.state_file()).origin,
-                day_file: scratch.path().join("connectors").join("day.json"),
-                clock: Arc::new(clock.clone()),
-                local_day: Arc::new(FixedOffset(19_800)),
-                events: Arc::<ConnectorEvents>::clone(&events),
+        let host =
+            dir.start_clocked_launching(0, launcher, |config: HostConfig, clock: &ManualClock| {
+                let mut connector_config = fake.config(scratch.state_file());
+                connector_config.clock = Arc::new(HostTime(clock.clone()));
+                let store: Arc<dyn SecretStore> = Arc::new(MemoryStore::new());
+                let connectors = Arc::new(Connectors::new(connector_config, store).unwrap());
+                let handle = connectors.get(CASE_LAW).unwrap();
+                let relays = Relays::new(RelayConfig {
+                    connector: handle.clone(),
+                    origin: fake.config(scratch.state_file()).origin,
+                    day_file: scratch.path().join("connectors").join("day.json"),
+                    clock: Arc::new(clock.clone()),
+                    local_day: Arc::new(FixedOffset(19_800)),
+                    events: Arc::<ConnectorEvents>::clone(&events),
+                });
+                let wiring = ConnectorsWiring {
+                    connectors,
+                    events: Arc::clone(&events),
+                    opener: Arc::new(Pages {
+                        pages: Mutex::new(send),
+                        confirmed: Mutex::new(confirm),
+                    }),
+                };
+                if start.signed_in {
+                    let key = fake.new_api_key();
+                    handle.add_api_key(&key).unwrap();
+                    keys.push(key);
+                }
+                made = Some((handle, relays.clone()));
+                config.with_connectors(wiring).with_case_law_relays(relays)
             });
-            let wiring = ConnectorsWiring {
-                connectors,
-                events: Arc::clone(&events),
-                opener: Arc::new(Pages(Mutex::new(send))),
-            };
-            if start.signed_in {
-                let key = fake.new_api_key();
-                handle.add_api_key(&key).unwrap();
-                keys.push(key);
-            }
-            made = Some((handle, relays.clone()));
-            config.with_connectors(wiring).with_case_law_relays(relays)
-        });
         let (handle, relays) = made.unwrap();
         let sub = crate::browser_install::subscribe(&host);
         let mut rig = Self {
@@ -116,6 +141,7 @@ impl Rig {
             relays,
             events,
             pages,
+            confirmed,
             host,
             sub,
             seen: Vec::new(),
@@ -203,9 +229,21 @@ impl Rig {
 
     /// A session's relay on a loopback port, and its token (as the launch prep opens one).
     pub(crate) fn relay(&self, launch: u64) -> (RelaySession, String) {
+        let matter = MatterId::new(foreign_uuid(1)).unwrap();
+        let thread = ThreadId::new(foreign_uuid(2)).unwrap();
+        self.relay_for(matter, thread, launch)
+    }
+
+    /// A relay session for `thread` of `matter`, as a launch of it would open, and its token.
+    pub(crate) fn relay_for(
+        &self,
+        matter: MatterId,
+        thread: ThreadId,
+        launch: u64,
+    ) -> (RelaySession, String) {
         let key = SessionKey {
-            matter: MatterId::new(foreign_uuid(1)).unwrap(),
-            thread: ThreadId::new(foreign_uuid(2)).unwrap(),
+            matter,
+            thread,
             launch,
         };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

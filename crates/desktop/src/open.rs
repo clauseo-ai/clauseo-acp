@@ -6,7 +6,7 @@
 //! matter, never by a path. The host, the confirm and the OS sit behind traits, so tests run
 //! without a window and never open anything.
 
-mod gate;
+pub(crate) mod gate;
 mod link;
 #[cfg(target_os = "macos")]
 mod mac_app;

@@ -147,6 +147,9 @@ fn every_command() -> Vec<ConnectorCommand> {
         add_key("pasted-key-for-the-window-test"),
         add_credits("200"),
         refresh(),
+        ConnectorCommand::OpenPayLink {
+            id: "case-law".to_owned(),
+        },
         ConnectorCommand::DismissCaseLawHint {
             matter: MatterId::new(foreign_uuid(7)).unwrap(),
         },

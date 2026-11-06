@@ -104,7 +104,8 @@ pub(crate) struct DisplayInfo {
 /// `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
 /// commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
 /// `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
-/// connector command but `DismissCaseLawHint` and `RefreshBalance` (`src/bridge/admit.rs`).
+/// connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
+/// `src/bridge/admit.rs`).
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn dispatch<R: Runtime>(
@@ -297,12 +298,16 @@ pub(crate) async fn reveal<R: Runtime>(
     .await
 }
 
-/// Opens the settings window, or brings it forward when it is open (`settings_window.rs`).
-/// Granted to `main` only.
+/// Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
+/// `section` when one is named (`"connectors"`: the room's case-law hint and banner). An
+/// unknown section is refused as the arguments decode. Granted to `main` only.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
-pub(crate) async fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), HostError> {
-    crate::settings_window::open_or_focus(&app).map_err(|error| {
+pub(crate) async fn open_settings<R: Runtime>(
+    app: AppHandle<R>,
+    section: Option<crate::settings_window::SettingsSection>,
+) -> Result<(), HostError> {
+    crate::settings_window::open_or_focus(&app, section).map_err(|error| {
         HostError::new(
             clauseo_protocol::ErrorCode::Internal,
             format!("the settings window did not open: {error}"),

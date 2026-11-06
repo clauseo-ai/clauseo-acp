@@ -10,7 +10,8 @@
 //!   decides when the route is looked up again. A proxy setting the sandbox refuses fails each
 //!   request, rather than going around it.
 //! - The sign-in page opens with `open_url_unconfirmed` (https only, no confirm): the host's own
-//!   link, never a window's or an agent's.
+//!   link, never a window's or an agent's. The pay link (`OpenPayLink`) opens through
+//!   `open_external`'s native confirm and gate ([`open_pay_link`]).
 //! - The day cap's local day comes from the OS's time zone (`local_day.rs`).
 //!
 //! Anything that fails leaves the connectors out with one log line: every connector command is
@@ -34,7 +35,13 @@ use clauseo_host::connectors::{
 use clauseo_sandbox::{Route, Upstream, upstream_for};
 use tauri::{AppHandle, Runtime};
 
-use crate::open::{NativeOpener, Opener, open_url_unconfirmed};
+use clauseo_protocol::{ErrorCode, HostError, Language};
+use tauri::Manager as _;
+
+use crate::bridge::Bridge;
+use crate::open::{
+    LinkConfirm, NativeLinkConfirm, NativeOpener, OpenGates, Opener, open_url_unconfirmed,
+};
 
 pub(crate) use local_day::OsLocalDay;
 
@@ -48,7 +55,7 @@ pub(crate) fn with_connectors<R: Runtime>(
     app: AppHandle<R>,
     data_dir: &Path,
 ) -> HostConfig {
-    let opener = Arc::new(LinkOpener(NativeOpener::new(app)));
+    let opener = Arc::new(LinkOpener(app));
     let Ok(store) = KeyringStore::new() else {
         tracing::warn!("no data connectors: the keychain could not be opened");
         return config;
@@ -151,13 +158,59 @@ fn proxy_for(route: Route) -> Result<ProxyChoice, &'static str> {
     }
 }
 
-/// The host's opener for the sign-in page.
-struct LinkOpener<R: Runtime>(NativeOpener<R>);
+/// The host's opener: the sign-in page with no confirm, the pay link behind the confirm.
+struct LinkOpener<R: Runtime>(AppHandle<R>);
 
 impl<R: Runtime> ConnectorOpener for LinkOpener<R> {
     fn open(&self, url: &str) -> Result<(), String> {
-        open_link(&self.0, url)
+        open_link(&NativeOpener::new(self.0.clone()), url)
     }
+
+    fn open_confirmed(&self, url: &str) -> Result<(), HostError> {
+        let app = &self.0;
+        let (Some(gates), Some(bridge)) = (app.try_state::<OpenGates>(), app.try_state::<Bridge>())
+        else {
+            return Err(HostError::new(
+                ErrorCode::Internal,
+                "the app is not ready to open links",
+            ));
+        };
+        let confirm = NativeLinkConfirm::new(app.clone());
+        let opener = NativeOpener::new(app.clone());
+        tauri::async_runtime::block_on(async {
+            let language = bridge.language().await;
+            open_pay_link(
+                &confirm,
+                &opener,
+                &gates.links,
+                &crate::open::now,
+                language,
+                url,
+            )
+            .await
+        })
+    }
+}
+
+/// `OpenPayLink`'s open: the host's checked pay link, https only, through `open_external`'s
+/// native confirm and gate (one confirm at a time, a pause after a decline). Declined, nothing
+/// opens (`transport.unauthorized`).
+pub(crate) async fn open_pay_link(
+    confirm: &dyn LinkConfirm,
+    opener: &dyn Opener,
+    gate: &crate::open::gate::Gate,
+    now: crate::open::Now<'_>,
+    language: Language,
+    url: &str,
+) -> Result<(), HostError> {
+    let link = crate::open::check_link(url)?;
+    if !link.url.starts_with("https://") {
+        return Err(HostError::new(
+            ErrorCode::CommandInvalid,
+            "a pay link is https only",
+        ));
+    }
+    crate::open::open_external(confirm, opener, gate, now, language, &link).await
 }
 
 /// Opens `url` with no confirm, https only; the error names no URL.

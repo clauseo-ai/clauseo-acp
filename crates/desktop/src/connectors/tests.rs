@@ -79,6 +79,76 @@ impl clauseo_host::connectors::ConnectorOpener for NoOpener {
     fn open(&self, _url: &str) -> Result<(), String> {
         Err("not in this test".to_owned())
     }
+    fn open_confirmed(&self, _url: &str) -> Result<(), HostError> {
+        Err(HostError::new(
+            clauseo_protocol::ErrorCode::Internal,
+            "not in this test",
+        ))
+    }
+}
+
+/// Answers every confirm with `answer` and counts them.
+struct Confirm {
+    answer: bool,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::open::LinkConfirm for Confirm {
+    fn confirm_link(&self, _words: crate::open::LinkWords) -> futures::future::BoxFuture<'_, bool> {
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let answer = self.answer;
+        Box::pin(async move { answer })
+    }
+}
+
+fn pay(confirm: &Confirm, opener: &Recorder, url: &str) -> Result<(), HostError> {
+    let gate = crate::open::gate::Gate::default();
+    futures::executor::block_on(super::open_pay_link(
+        confirm,
+        opener,
+        &gate,
+        &crate::open::now,
+        clauseo_protocol::Language::En,
+        url,
+    ))
+}
+
+/// `OpenPayLink`'s open asks the native confirm first: accepted, the link opens; declined,
+/// nothing opens (`transport.unauthorized`); a link that is not https is refused before any
+/// confirm.
+#[test]
+fn the_pay_link_opens_only_through_the_confirm() {
+    use std::sync::atomic::Ordering;
+    let link = "https://data.clauseo.chat/pay/rch_123";
+    let yes = Confirm {
+        answer: true,
+        asked: 0.into(),
+    };
+    let opener = Recorder::default();
+    pay(&yes, &opener, link).unwrap();
+    assert_eq!(yes.asked.load(Ordering::SeqCst), 1);
+    assert_eq!(*opener.0.lock().unwrap(), [link]);
+
+    let no = Confirm {
+        answer: false,
+        asked: 0.into(),
+    };
+    let opener = Recorder::default();
+    let declined = pay(&no, &opener, link).unwrap_err();
+    assert_eq!(
+        declined.code(),
+        clauseo_protocol::ErrorCode::TransportUnauthorized
+    );
+    assert!(opener.0.lock().unwrap().is_empty());
+
+    let plain = pay(&yes, &opener, "http://data.clauseo.chat/pay/rch_123").unwrap_err();
+    assert_eq!(plain.code(), clauseo_protocol::ErrorCode::CommandInvalid);
+    assert_eq!(
+        yes.asked.load(Ordering::SeqCst),
+        1,
+        "no confirm for a refused link"
+    );
+    assert!(opener.0.lock().unwrap().is_empty());
 }
 
 /// The host's start builds the connectors without asking the route: the lookup (up to 10 s on

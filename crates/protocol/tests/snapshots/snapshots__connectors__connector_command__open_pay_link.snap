@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/connectors.rs
+expression: "ConnectorCommand::OpenPayLink { id: \"case-law\".to_owned() }"
+---
+{
+  "open_pay_link": {
+    "id": "case-law"
+  }
+}

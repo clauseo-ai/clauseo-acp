@@ -26,6 +26,7 @@ fn commands() -> Vec<(Value, bool)> {
         (json!({"sign_out": {"id": "case-law"}}), false),
         (json!({"remove": {"id": "case-law"}}), false),
         (json!({"refresh_balance": {"id": "case-law"}}), true),
+        (json!({"open_pay_link": {"id": "case-law"}}), false),
         (json!({"dismiss_case_law_hint": {"matter": matter}}), true),
     ]
 }

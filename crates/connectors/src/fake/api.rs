@@ -26,6 +26,8 @@ pub(super) struct ApiState {
     pub(super) wait_cap: Duration,
     /// A pay link to answer instead of the fake's own, for the client's refusals.
     pub(super) pay_url: Option<String>,
+    /// An out-of-credit answer opens a new recharge instead of naming the open one.
+    pub(super) fresh_recharge: bool,
     recharges: BTreeMap<String, FakeRecharge>,
     next_recharge: u64,
 }
@@ -47,6 +49,7 @@ impl ApiState {
             sse: false,
             wait_cap: Duration::from_secs(2),
             pay_url: None,
+            fresh_recharge: false,
             recharges: BTreeMap::new(),
             next_recharge: 1,
         }
@@ -124,9 +127,9 @@ impl ApiState {
         })
     }
 
-    /// The open recharge, or a new one for the smallest pack.
+    /// The open recharge (unless `fresh_recharge`), or a new one for the smallest pack.
     fn open_or_new(&mut self, base: &str) -> Option<String> {
-        if let Some(id) = self.open_recharge() {
+        if let Some(id) = self.open_recharge().filter(|_| !self.fresh_recharge) {
             return Some(id);
         }
         let smallest = self.packs(base).first().and_then(pack_name)?;
