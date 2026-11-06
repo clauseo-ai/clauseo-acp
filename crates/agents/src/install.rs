@@ -30,7 +30,7 @@ use crate::config::AgentsConfig;
 use crate::disk;
 use crate::download::{FetchError, FetchKind, write_kind};
 use crate::log::{InstallLog, redact};
-use crate::node::{self, FoundNode, NodeSource, NotUsed, UserSearch, node_line};
+use crate::node::{self, FoundNode, NotUsed, UserSearch};
 use crate::platform::Libc;
 use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
@@ -589,13 +589,7 @@ pub(crate) async fn ready_install<T: Timer>(
         // A receipt that will not be rewritten now is rewritten at the next start.
         drop(write_receipt(&folder, &receipt));
     }
-    let source = if receipt.node == runtime {
-        NodeSource::Pinned
-    } else {
-        NodeSource::User
-    };
-    let line = node_line(source, &receipt.node, &receipt.node_version);
-    tracing::info!(%agent, "agent start: {line}");
+    tracing::info!(%agent, "agent start: {}", receipt.node_line(&runtime));
     Some(Installed {
         node: receipt.node.clone(),
         script: script_path(&folder, entry),

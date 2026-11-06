@@ -13,8 +13,9 @@
 //!
 //! Every npm run starts through the launcher as `node --single-threaded <npm-cli.js> …` (no V8
 //! background tasks, so Node cannot deadlock as it exits: `NODE_SINGLE_THREADED`), with
-//! neither `NODE_OPTIONS` nor `NODE_PATH` (the spawn drops both), the private cache, and empty `agents/npmrc` and `agents/npmrc-global`
-//! files as its user and global config (npm refuses one file for both).
+//! neither `NODE_OPTIONS` nor `NODE_PATH` (the spawn drops both), the private cache, and empty
+//! `agents/npmrc` and `agents/npmrc-global` files as its user and global config (npm refuses
+//! one file for both).
 //! `npm ci` runs with `--offline --ignore-scripts --no-bin-links --no-audit --no-fund` and
 //! `--allow-file=all` (npm 11 reads `npm_config_allow_file` from the environment the launch
 //! inherits, and `none` there would refuse the `file:` tarballs; npm 10 accepts the flag).
