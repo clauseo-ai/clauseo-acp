@@ -20,7 +20,12 @@ export const HI = {
   "Open the sign-in page again": null, // hi: later
   // signed in: the balance in credits ({credits} is count()); its worth in rupees waits for stage E's gross rate
   "Ready to search.": null, // hi: later
+  // signed in with a pasted key: the firm's key, not the lawyer's account
+  "Using your firm's key.": null, // hi: later
   "{credits} credits left": null, // hi: later
+  // the balance's worth in rupees and when it was read (U15-15, U15-76); GST-inclusive, as every amount
+  "Worth {rupees}.": null, // hi: later
+  "As of {time}.": null, // hi: later
   "Balance not read yet.": null, // hi: later
   "Check balance": null, // hi: later
   "Running low. Add credits to keep searching.": null, // hi: later
@@ -43,6 +48,9 @@ export const HI = {
   "Add a new key": null, // hi: later
   "Sign-in failed": null, // hi: later
   "The sign-in didn't go through. Try again, or use an API key instead.": null, // hi: later
+  // signed in now, but the sign-in could not be saved for the next start
+  "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.":
+    null, // hi: later
   "Try again": null, // hi: later
   Details: null, // hi: later
   // a firm's policy turns connectors off: the side's note, then the block's line
@@ -58,6 +66,10 @@ export const HI = {
   "The payment page is open in your browser.": null, // hi: later
   "Your balance updates here once the payment goes through.": null, // hi: later
   "Open the payment page again": null, // hi: later
+  // how the last recharge ended, a quiet line in the section while it is set
+  "Payment received.": null, // hi: later
+  "That payment page expired. Add credits to try again.": null, // hi: later
+  "The payment was cancelled.": null, // hi: later
   // the API key
   "API key": null, // hi: later
   "Your firm's key for Clauseo's case-law service. Kept on this computer.": null, // hi: later

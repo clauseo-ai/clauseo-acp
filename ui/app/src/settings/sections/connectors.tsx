@@ -18,10 +18,12 @@ import { say } from "@clauseo/components/lib/words-ui.ts";
 import { settingLabel, settingNote } from "@clauseo/components/ui/recipes-controls.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { stamp } from "../../room/thread/clock.ts";
+import { useNow } from "../../store/limits.ts";
 import type { Balance, ConnectorView } from "../../transport/protocol.ts";
 import { sendConnector, type SettingsConnectorCommand } from "../connector-commands.ts";
 import type { SectionContext } from "../sections.tsx";
-import { kindOf, PAY_GUARD_MS } from "./connectors-model.ts";
+import { kindOf, PAY_GUARD_MS, RECHARGE_LINE } from "./connectors-model.ts";
 import { shownConnector } from "./connectors-note.ts";
 import { KeyField } from "./connectors-key.tsx";
 import { Packs } from "./connectors-packs.tsx";
@@ -40,10 +42,11 @@ function Actions({ children }: { children: ReactNode }) {
   return <div className="set-cn-actions">{children}</div>;
 }
 
-/** The balance as the Plan and usage tile's numeral: "10,000" then "credits left". Credits only: Balance.paise is the
- * account's figure before GST, and every amount on screen is GST-inclusive, so its worth waits for stage E's gross
- * per-credit rate ("Worth {rupees}.", U15-15, reserved). */
+/** The balance as the Plan and usage tile's numeral: "10,000" then "credits left", and under it what those credits are
+ * worth, GST-inclusive, when the host sends the rupees ("Worth {rupees}.", U15-15), and when the account was read
+ * ("As of {time}.", U15-76, the plan card's clock form). Each line is left out when its field is absent. */
 function BalanceTile({ lang, balance, low }: { lang: Lang; balance: Balance; low: boolean }) {
+  const now = useNow();
   const numeral = count(balance.credits);
   const left = cw(lang, "{credits} credits left", { credits: numeral });
   return (
@@ -56,6 +59,16 @@ function BalanceTile({ lang, balance, low }: { lang: Lang; balance: Balance; low
         <span className="set-numeral">{numeral}</span>
         <span className="set-window-word">{say(left.replace(numeral, "").trim())}</span>
       </p>
+      {balance.paise !== undefined && (
+        <p className="set-note" data-testid="connectors-worth">
+          {say(cw(lang, "Worth {rupees}.", { rupees: rupees(balance.paise) }))}
+        </p>
+      )}
+      {balance.as_of !== undefined && (
+        <p className="set-note" data-testid="connectors-as-of">
+          {say(cw(lang, "As of {time}.", { time: stamp(lang, balance.as_of, now) }))}
+        </p>
+      )}
     </div>
   );
 }
@@ -116,6 +129,11 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
     sendConnector(ctx.transport, command).catch(() => {});
   const w = (key: ConnectorsKey, slots?: Record<string, string>) => say(cw(lang, key, slots));
   const payUrl = c.pay_url;
+  // a signed-in status on the firm's pasted key says so; an account's, or none from an older host, says Ready to search
+  const signedInWords = (method: string | undefined) =>
+    method === "api_key" ? w("Using your firm's key.") : w("Ready to search.");
+  // the last watched recharge's outcome: a quiet line while the wire says it (an unknown word shows nothing)
+  const recharge = c.last_recharge === undefined ? undefined : RECHARGE_LINE[c.last_recharge];
 
   // a new pay link: open it once if this view's press asked for it under 30 s ago; else wait for a press
   useEffect(() => {
@@ -247,7 +265,7 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
           </p>
         ) : (
           <>
-            <p className="text-ui text-primary">{w("Ready to search.")}</p>
+            <p className="text-ui text-primary">{signedInWords(signed.method)}</p>
             {signed.balance === undefined ? (
               <div className="set-cn-unread">
                 <p className="set-note">{w("Balance not read yet.")}</p>
@@ -268,6 +286,11 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
               </p>
             )}
           </>
+        )}
+        {recharge !== undefined && (
+          <p className="set-note" data-testid="connectors-recharge">
+            {w(recharge)}
+          </p>
         )}
         {payUrl !== undefined &&
           (opened === payUrl ? (
@@ -366,12 +389,17 @@ function Block({ ctx, c, lang }: { ctx: SectionContext; c: ConnectorView; lang: 
       </>
     );
   } else {
-    const message =
-      typeof c.status === "object" && "error" in c.status ? (c.status.error?.message ?? "") : "";
+    const error = typeof c.status === "object" && "error" in c.status ? c.status.error : undefined;
+    const message = error?.message ?? "";
+    // a sign-in that worked but could not be saved: the block says so, and the next start needs a new sign-in
     body = (
       <>
         <p className="text-ui text-primary">
-          {w("The sign-in didn't go through. Try again, or use an API key instead.")}
+          {error?.kind === "persist_failed"
+            ? w(
+                "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
+              )
+            : w("The sign-in didn't go through. Try again, or use an API key instead.")}
         </p>
         {view === "key" ? (
           keyField

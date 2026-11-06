@@ -43,8 +43,9 @@ export const stateOf = (
   connectors: [{ ...CASE, ...over }],
 });
 
+/** 10,000 credits, worth ₹1,180 gross (11.8 paise a credit, the pack's rate). */
 export const SIGNED_IN: ConnectorView["status"] = {
-  signed_in: { balance: { credits: 10_000, paise: 1_00_000 }, low: false },
+  signed_in: { balance: { credits: 10_000, paise: 1_18_000 }, low: false },
 };
 
 const SETTINGS: Settings = {
