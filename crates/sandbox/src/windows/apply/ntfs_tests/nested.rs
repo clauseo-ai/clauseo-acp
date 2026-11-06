@@ -19,7 +19,7 @@ use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::private_dir::set_owner;
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{entries, has};
-use crate::windows::test_dacl::{drop_privileges, protect_with};
+use crate::windows::test_dacl::{auto_inherit_with, drop_privileges, protect_with};
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{
     FakeFolders, GROUP_SID, OTHER_POOL_SIDS, USER_SID, World, matter_one, reserved, sids, trusted,
@@ -142,14 +142,16 @@ fn the_pool_user_cant_edit_rename_or_delete_a_nested_claude_md_or_git_config() {
     // lawyer's files, so each is given to `Administrators` here, whatever the token's default
     // owner. A token that may not set that owner (Medium, no restore privilege) skips.
     let admins = Sid::parse("S-1-5-32-544").unwrap();
-    for rel in [
+    // Top-down: a folder before what is in it.
+    let items = [
         "sub",
         "sub/CLAUDE.md",
         "sub/brief.md",
         "repo",
         "repo/.git",
         "repo/.git/config",
-    ] {
+    ];
+    for rel in items {
         if let Err(error) = set_owner(&w.at(&format!("matter/{rel}")), &admins) {
             eprintln!("skipped: this token can't make Administrators an owner: {error}");
             return;
@@ -158,10 +160,25 @@ fn the_pool_user_cant_edit_rename_or_delete_a_nested_claude_md_or_git_config() {
     drop_privileges();
     let me = current_user_sid().unwrap();
     let matter = w.canonical("matter");
-    // The pool user's share of the matter: `Modify` and no `FILE_DELETE_CHILD`. `SYSTEM` keeps
-    // full control; this user, the owner, keeps `READ_CONTROL` and `WRITE_DAC`.
+    // The stand-in's rights must come from its own entries alone, as a real pool user's do:
+    // the product gives the pool SID `Modify` (`0x1301bf`, no `FILE_DELETE_CHILD`), and the
+    // protected item's deny takes `DELETE`. Here the stand-in is also in `Administrators`, and
+    // under a temp folder whose DACL isn't auto-inherited (CI's `D:\a\_temp`) NTFS gives each
+    // new item explicit copies of its parent's entries, `Administrators` full control among
+    // them. A protected DACL on `matter` alone keeps those copies on `sub`, whose
+    // `FILE_DELETE_CHILD` then lets the stand-in rename `CLAUDE.md` past its deny (CI run
+    // 42217823675). So `matter` gets the pool user's share alone (`Modify` for the stand-in,
+    // full control for `SYSTEM`; each owner keeps `READ_CONTROL` and `WRITE_DAC`), and each
+    // item below drops its explicit entries and takes only what `matter` passes down. The
+    // product's own grants and denies then sit on top, as in use.
     let dacl = format!("D:P(A;OICI;0x1301bf;;;{me})(A;OICI;FA;;;SY)");
     protect_with(&matter, &dacl).unwrap();
+    for rel in items {
+        let path = rel.split('/').fold(matter.clone(), |p, part| p.join(part));
+        auto_inherit_with(&path, "D:").unwrap();
+        assert!(!has(&path, "S-1-5-32-544", false), "{}", path.display());
+        assert!(!has(&path, "S-1-5-32-544", true), "{}", path.display());
+    }
     let claude = matter.join("sub").join("CLAUDE.md");
     let git = matter.join("repo").join(".git");
     let config = git.join("config");
