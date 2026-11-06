@@ -15,8 +15,9 @@ import type {
 } from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
+import { RoomDriven, type DrivenStep } from "./registry-ud1-switching.tsx";
 import { RoomClicking, RoomOver } from "./states.tsx";
-import type { WordsRef } from "./words.ts";
+import { errorWords, type WordsRef } from "./words.ts";
 
 const CLAUDE: AgentId = "claude-acp";
 const CODEX: AgentId = "codex-acp";
@@ -55,6 +56,9 @@ type Scene = {
   locked?: boolean;
   /** Controls to press, in order (CSS selectors). */
   clicks?: string[];
+  /** The code desktop refuses each setup command with, and the steps that send one (RoomDriven). */
+  refuse?: string;
+  steps?: DrivenStep[];
 };
 
 /** The room over a fake host with the setup wire, in the scene. */
@@ -82,14 +86,22 @@ function host(s: Scene): () => FakeTransport {
         if (typeof query === "object" && "list_threads" in query) return { threads: [] };
         throw new Error(`not scripted: ${JSON.stringify(query)}`);
       },
-      setup: { first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events] },
+      setup: {
+        first: () => [{ setup_info: { keys_available: s.keys ?? true } }, ...s.events],
+        command: () => {
+          if (s.refuse !== undefined)
+            throw { code: s.refuse, message: "refused", retryable: true } as const;
+        },
+      },
     });
 }
 
 const render = (s: Scene) =>
-  s.clicks === undefined
-    ? () => <RoomOver host={host(s)} />
-    : () => <RoomClicking host={host(s)} clicks={s.clicks ?? []} />;
+  s.steps !== undefined
+    ? () => <RoomDriven host={host(s)} steps={s.steps ?? []} />
+    : s.clicks === undefined
+      ? () => <RoomOver host={host(s)} />
+      : () => <RoomClicking host={host(s)} clicks={s.clicks ?? []} />;
 
 const WELCOME: Scene = { first: true, events: [DOWNLOADING, SIGNED_OUT] };
 const GATE: Scene = { events: [READY, SIGNED_OUT] };
@@ -119,6 +131,27 @@ const found = (
 ) => ({
   events: [READY, signIn(CLAUDE, { signed_out: f === undefined ? {} : { found: f } })],
 });
+const SWITCHING: Scene = {
+  events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: false } })],
+};
+const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
+/** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
+const SWITCH_CONFLICT: Scene = {
+  events: [READY, SIGNED_OUT],
+  refuse: "command.conflict",
+  steps: [
+    { press: ".fl-way-quiet" },
+    { play: signIn(CLAUDE, { switching: { since: AT, stuck: false } }) },
+    { type: "sk-ant-api03-example" },
+    { press: ".fl-gate .room-field-ask" },
+  ],
+};
+/** Sign in pressed while a key is in use: desktop refuses it with signin.key_in_use. */
+const KEY_IN_USE: Scene = {
+  events: [READY, SIGNED_OUT],
+  refuse: "signin.key_in_use",
+  steps: [{ press: ".fl-gate .room-field-ask" }],
+};
 const blocked = install(CLAUDE, {
   failed: { code: "agent.install_blocked", hosts: HOSTS, log: LOG },
 });
@@ -453,17 +486,46 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     "signin-policy",
   ],
   ["Ask your IT team.", { events: [READY, failed("signin.policy_unreadable")] }, "signin-policy"],
+  // switching accounts (0048, #493), and a refusal meanwhile
+  ["Switching accounts.", SWITCHING, "signin-switching"],
+  [
+    "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.",
+    SWITCHING,
+    "signin-switching",
+  ],
+  ["If this goes on, quit Clauseo and open it again.", STUCK, "signin-switching-stuck"],
+  [
+    "Clauseo is still switching accounts. Try again in a moment.",
+    SWITCH_CONFLICT,
+    "signin-switching-conflict",
+  ],
+  // UD1-84: the refusal line for any other code (REFUSAL, below), whose words are words-errors.ts's
+  null,
 ];
 
-export const UD1: readonly Entry[] = SCENES.flatMap((scene, i) =>
-  scene === null
-    ? []
-    : [
-        {
-          id: `UD1-${String(i + 1).padStart(2, "0")}`,
-          words: firstLaunchWords(scene[0]),
-          screen: `first-launch/${scene[2]}`,
-          render: render(scene[1]),
-        },
-      ],
-);
+/** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.
+ * Its id is the null SCENES keeps for it. */
+const REFUSAL: Entry = {
+  id: "UD1-84",
+  words: errorWords(
+    "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+  ),
+  screen: "first-launch/signin-refused",
+  render: render(KEY_IN_USE),
+};
+
+export const UD1: readonly Entry[] = [
+  ...SCENES.flatMap((scene, i) =>
+    scene === null
+      ? []
+      : [
+          {
+            id: `UD1-${String(i + 1).padStart(2, "0")}`,
+            words: firstLaunchWords(scene[0]),
+            screen: `first-launch/${scene[2]}`,
+            render: render(scene[1]),
+          },
+        ],
+  ),
+  REFUSAL,
+];

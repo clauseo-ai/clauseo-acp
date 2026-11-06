@@ -4,7 +4,7 @@
 // it is used), signing in in the browser with each way that can end, ChatGPT's device code (never the first offer:
 // only after the browser didn't work), and an API key. No model is named and no lab's logo shows.
 import { useEffect, useRef, type ReactNode } from "react";
-import { IconOpen, IconTick } from "../../icons/icons.tsx";
+import { IconTick } from "../../icons/icons.tsx";
 import { cn } from "../../lib/cn.ts";
 import { useDisplay } from "../../lib/display.ts";
 import { errorWords } from "../../lib/words-errors.ts";
@@ -13,7 +13,9 @@ import { ui } from "../../lib/words-ui.ts";
 import { Button } from "../../ui/button.tsx";
 import { Say } from "../say.tsx";
 import { WRAP } from "./classes.ts";
+import { Failed } from "./gate-failed.tsx";
 import { Act, Note, PasteRow, Ways } from "./parts.tsx";
+import { NAME, other } from "./plan-names.ts";
 
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
 export type Found =
@@ -37,7 +39,12 @@ export type GateView =
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
   | { kind: "failed"; code: string; at: string }
+  | { kind: "switching"; stuck: boolean }
   | { kind: "key" };
+
+/** A setup command desktop refused, for the line under the gate: its code, and whether the agent is switching
+ * accounts, when a `command.conflict` says only that the switch isn't done. */
+export type GateRefusal = { code: string; switching: boolean };
 
 /** What a press asks for; the app turns each into the host's command, or the gate's own state. */
 export type GateAct =
@@ -68,9 +75,7 @@ export type GateTestIds = {
   loginOther?: string;
 };
 
-const NAME: Record<Plan, string> = { claude: "Claude", chatgpt: "ChatGPT" };
 const APP: Record<Plan, string> = { claude: "Claude Code", chatgpt: "Codex" };
-const other = (p: Plan): Plan => (p === "claude" ? "chatgpt" : "claude");
 
 /** The line for a login that can't be shared, or reuse that stopped. */
 const FOUND: Record<Found, FirstLaunchKey> = {
@@ -92,20 +97,25 @@ export function Gate({
   view,
   keys,
   onAct,
+  refused,
   testIds = {},
 }: {
   plan: Plan;
   view: GateView;
+  /** The last setup command desktop refused for this plan, until its next sign-in change or press. */
+  refused?: GateRefusal | null | undefined;
   /** Whether this computer can keep an API key, and where (display_info's platform): `null` when it can't. */
   keys: "mac" | "windows" | "linux" | null;
-  onAct: (act: GateAct) => void;
+  /** A press. For a code or a key, the promise of whether desktop took it: its field keeps the words until then, and
+   * after a refusal. */
+  onAct: (act: GateAct) => void | Promise<boolean>;
   testIds?: GateTestIds;
 }) {
   const { lang } = useDisplay();
   const w = (key: FirstLaunchKey, slots?: Record<string, string | number>) => fl(lang, key, slots);
   const name = NAME[plan];
   const app = APP[plan];
-  const act = (a: GateAct) => () => onAct(a);
+  const act = (a: GateAct) => () => void onAct(a);
   // the key panel and the paste field take the focus as they open, and give it back to what opened them as they close
   // (Cancel goes with them); a change the host makes while the focus is elsewhere moves nothing
   const root = useRef<HTMLDivElement>(null);
@@ -246,6 +256,27 @@ export function Gate({
         </>
       );
       break;
+    case "switching":
+      // Clauseo is leaving a login it may no longer use and retries by itself: nothing to press, and no sign-in offered
+      body = (
+        <Act>
+          <Say>{w("Switching accounts.")}</Say>{" "}
+          <span className="fl-gate-why">
+            <Say>
+              {w(
+                "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.",
+              )}
+            </Say>
+            {view.stuck && (
+              <>
+                {" "}
+                <Say>{w("If this goes on, quit Clauseo and open it again.")}</Say>
+              </>
+            )}
+          </span>
+        </Act>
+      );
+      break;
     case "device":
       body = (
         <>
@@ -383,6 +414,17 @@ export function Gate({
     <div ref={root} className="fl-gate" data-testid={testIds.root} data-agent={plan}>
       <div className="fl-gate-body" data-testid={testIds.state} data-state={stateOf(view)}>
         {body}
+        {refused != null && (
+          <Ways>
+            <span className="fl-gate-note" role="status" data-testid="signin-refused">
+              <Say>
+                {refused.switching && refused.code === "command.conflict"
+                  ? w("Clauseo is still switching accounts. Try again in a moment.")
+                  : errorWords(lang, refused.code)}
+              </Say>
+            </span>
+          </Ways>
+        )}
       </div>
     </div>
   );
@@ -390,130 +432,6 @@ export function Gate({
 
 /** The state the gate is in, for its test id's data-state: the view's kind, a failure's code. */
 const stateOf = (view: GateView): string => (view.kind === "failed" ? view.code : view.kind);
-
-/** A sign-in that stopped, by its code. */
-function Failed({
-  plan,
-  view,
-  w,
-  way,
-  signIn,
-  instead,
-  onAct,
-}: {
-  plan: Plan;
-  view: { code: string; at: string };
-  w: (key: FirstLaunchKey, slots?: Record<string, string | number>) => string;
-  way: (label: string, a: GateAct) => ReactNode;
-  signIn: (label: string) => ReactNode;
-  instead: (key: boolean) => ReactNode;
-  onAct: (act: GateAct) => void;
-}) {
-  const { lang } = useDisplay();
-  const name = NAME[plan];
-  const plans = () => onAct({ act: "plans" });
-  switch (view.code) {
-    case "signin.cancelled":
-      return (
-        <>
-          <Act act={signIn(w("Sign in"))}>
-            <Say>{errorWords(lang, "signin.cancelled")}</Say>
-          </Act>
-          {instead(true)}
-        </>
-      );
-    case "signin.link_expired":
-      return (
-        <>
-          <Act act={signIn(w("Try again"))}>
-            <Say>{w("The sign-in link expired at {time}.", { time: view.at })}</Say>
-          </Act>
-          {instead(true)}
-        </>
-      );
-    case "signin.no_plan":
-      return (
-        <>
-          <Act
-            act={
-              <Button kind="tone" className="room-field-ask" onClick={plans}>
-                {w("See {name}'s plans", { name })}
-                <IconOpen size={14} />
-              </Button>
-            }
-          >
-            <Say>{errorWords(lang, "signin.no_plan")}</Say>{" "}
-            <span className="fl-gate-why">
-              <Say>
-                {plan === "claude"
-                  ? w("Clauseo works with a Claude Pro or Max plan.")
-                  : w("Clauseo works with a paid ChatGPT plan.")}
-              </Say>
-            </span>
-          </Act>
-          <Ways>
-            {way(w("Use another account"), { act: "sign-in" })}
-            {way(w("Use {name} instead", { name: NAME[other(plan)] }), { act: "instead" })}
-          </Ways>
-        </>
-      );
-    case "signin.device_code_off":
-      return (
-        <>
-          <Act
-            act={
-              <Button
-                kind="tone"
-                className="room-field-ask"
-                onClick={() => onAct({ act: "device" })}
-              >
-                {w("Try again")}
-              </Button>
-            }
-          >
-            <Say>{errorWords(lang, "signin.device_code_off")}</Say>{" "}
-            <span className="fl-gate-why">
-              <Say>
-                {w(
-                  "To turn it on, open ChatGPT, then Settings, then Security, and turn on Enable device code sign-in for Codex, Excel, PowerPoint, and Word. Then choose Try again.",
-                )}
-              </Say>
-            </span>
-          </Act>
-          <Ways>{way(w("Sign in in the browser instead"), { act: "sign-in" })}</Ways>
-        </>
-      );
-    case "signin.port_busy":
-      return (
-        <>
-          <Act act={signIn(w("Try again"))}>
-            <Say>{errorWords(lang, "signin.port_busy")}</Say>
-          </Act>
-          <Ways>{way(w("Use a code instead"), { act: "device" })}</Ways>
-        </>
-      );
-    case "signin.policy_unreadable":
-      return (
-        <Act>
-          <Say>
-            {w(
-              "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.",
-              { name },
-            )}
-          </Say>{" "}
-          <span className="fl-gate-why">
-            <Say>{w("Ask your IT team.")}</Say>
-          </span>
-        </Act>
-      );
-    default:
-      return (
-        <Act act={signIn(w("Try again"))}>
-          <Say>{w("Sign-in didn't finish.")}</Say>
-        </Act>
-      );
-  }
-}
 
 /** The signed-in line: the account and plan when the host has them, how when it is a key or the firm's, and through
  * which of the lawyer's own tools when Clauseo reuses that login. It stands inside the room's line. */

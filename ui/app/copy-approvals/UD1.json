@@ -614,5 +614,45 @@
     "at": "2026-11-05",
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "UD1-80": {
+    "en": "Switching accounts.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-81": {
+    "en": "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-82": {
+    "en": "If this goes on, quit Clauseo and open it again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-83": {
+    "en": "Clauseo is still switching accounts. Try again in a moment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-84": {
+    "en": "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

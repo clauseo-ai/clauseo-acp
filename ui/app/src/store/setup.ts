@@ -46,6 +46,8 @@ export type AgentSetup = {
   readyHere?: boolean;
   /** The sign-in finished while this window watched, or the first word was a reused login: the signed-in line shows. */
   signedHere?: boolean;
+  /** The code of the last setup command desktop refused for it, until its next sign-in change or a press. */
+  refused?: string | undefined;
 };
 
 export type CountsState = {
@@ -107,8 +109,11 @@ export type SetupStore = {
   state: () => SetupState;
   /** Subscribes to the setup stream and reads the privacy settings; returns the stop. */
   start: () => () => void;
-  /** One setup command; a refusal goes to the console, and the next event says what came of it. */
+  /** One setup command; a refusal goes to the console and to the agent's `refused`, and the next event says what came
+   * of it. */
   command: (command: SetupCommand) => void;
+  /** `command`, with the promise of whether desktop took it: a code's or a key's field keeps its words until then. */
+  send: (command: SetupCommand) => Promise<boolean>;
   /** Changes the gate's own state. */
   set: (
     patch: Partial<Pick<SetupState, "keyOpen" | "pasting" | "copied" | "chosen" | "pending">>,
@@ -169,7 +174,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
     } else if ("sign_in_changed" in event && event.sign_in_changed !== undefined) {
       const { agent: id, state: signIn } = event.sign_in_changed;
       const was = state.agents[id];
-      const patch: AgentSetup = { signIn };
+      // a new sign-in state answers whatever was refused before it
+      const patch: AgentSetup = { signIn, refused: undefined };
       if (isSignedIn(signIn) && !isSignedIn(was?.signIn)) {
         // the first word a reused login: no sign-in step, and the through line (UD1's brief)
         const reused = typeof signIn === "object" && signIn.signed_in?.source === "reused";
@@ -188,6 +194,22 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       });
       agent(id, patch);
     }
+  };
+  const send = (command: SetupCommand): Promise<boolean> => {
+    const id = Object.values(command)[0]?.agent;
+    // a press answers whatever was refused before it
+    if (id !== undefined && state.agents[id]?.refused !== undefined)
+      agent(id, { refused: undefined });
+    return transport.setup(command).then(
+      () => true,
+      (error: unknown) => {
+        // the command's kind only: it can hold a pasted code or an API key
+        warn(`setup ${Object.keys(command).join(",")}`)(error);
+        const code = (error as { code?: unknown } | null)?.code;
+        if (id !== undefined) agent(id, { refused: typeof code === "string" ? code : "internal" });
+        return false;
+      },
+    );
   };
   const readSettings = async () => {
     try {
@@ -223,10 +245,8 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       void readSettings();
       return stop;
     },
-    command: (command) => {
-      // the command's kind only: it can hold a pasted code or an API key
-      transport.setup(command).catch(warn(`setup ${Object.keys(command).join(",")}`));
-    },
+    command: (command) => void send(command),
+    send,
     set: (patch) => emit({ ...state, ...patch }),
     setCounts: (on) => {
       if (state.counts.locked) return;
