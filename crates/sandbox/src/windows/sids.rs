@@ -122,7 +122,7 @@ impl From<Sid> for String {
 }
 
 /// The SIDs a matter SID must never be: this machine's real accounts, each named and by its
-/// account domain. A matter SID in the domain of the lawyer's or `ClauseoSandbox`'s account
+/// account domain. A matter SID in the domain of the lawyer's or a pool user's account
 /// (`S-1-5-21-<machine>-…`) could equal a real account of the machine, so every such SID is
 /// refused too, as are the accounts themselves.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -148,14 +148,18 @@ impl Reserved {
                 .is_none_or(|domain| !self.domains.contains(&domain))
     }
 
-    /// This machine's reservations: this process's user, and `ClauseoSandbox` when the
-    /// machine's `UserSid` record names it. A read that fails, or a record that is not a SID,
-    /// is an error: matter SIDs are not checked against a guess.
+    /// This machine's reservations: this process's user, every pool user the machine's
+    /// `PoolSids` record names, and the `ClauseoSandboxUsers` group when `GroupSid` names it. A
+    /// read that fails, or a record that is not a SID or a list of SIDs, is an error: matter
+    /// SIDs are not checked against a guess.
     #[cfg(windows)]
     pub fn of_this_machine() -> Result<Reserved, SetupError> {
+        use super::record::{current_user_sid, sandbox_group_sid, sandbox_pool_sids};
+
         let failed = |why: String| SetupError::Failed(format!("this machine's accounts: {why}"));
-        let mut sids = vec![super::record::current_user_sid().map_err(|e| failed(e.to_string()))?];
-        if let Some(text) = super::record::sandbox_user_sid().map_err(|e| failed(e.to_string()))? {
+        let mut sids = vec![current_user_sid().map_err(|e| failed(e.to_string()))?];
+        sids.extend(sandbox_pool_sids().map_err(|e| failed(e.to_string()))?);
+        if let Some(text) = sandbox_group_sid().map_err(|e| failed(e.to_string()))? {
             sids.push(Sid::parse(&text).map_err(|e| failed(e.to_string()))?);
         }
         Ok(Reserved::new(sids))

@@ -2,13 +2,14 @@
 //! tests run it through the [`Token`] seam.
 //!
 //! Three signals, any one of which means the agent sandbox: the token is an `AppContainer`, the
-//! token has restricting SIDs, or the token's user is S15's sandbox user, whose SID S15's set-up
-//! records (`windows::sandbox_user_sid`). A read that is refused (`ERROR_ACCESS_DENIED`) counts
-//! as sandboxed too: an unjailed process can always read its own token and that record, which
-//! everyone may read, while a hostile agent can deny them (by changing its default DACL first).
-//! So does a record that is not a `REG_SZ` or not a valid SID: only S15's elevated set-up writes
-//! it. A missing record means no sandbox user on this machine. Any other failure is
-//! [`Failure::Other`]: it makes the check fail open (`jailed.rs`) unless another signal answers.
+//! token has restricting SIDs, or the token's user is any of S15's pool users, whose SIDs S15's
+//! set-up records (`windows::sandbox_pool_sids`). A read that is refused (`ERROR_ACCESS_DENIED`)
+//! counts as sandboxed too: an unjailed process can always read its own token and that record,
+//! which everyone may read, while a hostile agent can deny them (by changing its default DACL
+//! first). So does a record that is not a `REG_MULTI_SZ` or not a list of valid SIDs: only S15's
+//! elevated set-up writes it. A missing record means no pool on this machine. Any other failure
+//! is [`Failure::Other`]: it makes the check fail open (`jailed.rs`) unless another signal
+//! answers.
 
 #[cfg(test)]
 mod tests;
@@ -20,9 +21,9 @@ use std::io;
 pub(super) enum Failure {
     /// `ERROR_ACCESS_DENIED`: counts as sandboxed.
     Denied,
-    /// The sandbox user record is not a `REG_SZ`: counts as sandboxed.
+    /// The pool record is not a `REG_MULTI_SZ`: counts as sandboxed.
     WrongType,
-    /// The sandbox user record is not a valid SID string: counts as sandboxed.
+    /// The pool record is not a list of valid SID strings: counts as sandboxed.
     NotASid,
     /// Anything else: the check cannot tell.
     Other(io::Error),
@@ -39,12 +40,13 @@ pub(super) trait Token {
     fn user_is(&self, sid: &str) -> Result<bool, Failure>;
 }
 
-/// Whether the process is sandboxed, from its opened `token` and the sandbox user record that
-/// `sandbox_user` reads (`Ok(None)`: no record). `Err` only when no signal said sandboxed and a
-/// read failed with [`Failure::Other`]; the first such error comes back.
+/// Whether the process is sandboxed, from its opened `token` and the pool record that `pool`
+/// reads (empty: no record). The token's user is compared with every pool SID until one matches
+/// or counts as sandboxed. `Err` only when no signal said sandboxed and a read failed with
+/// [`Failure::Other`]; the first such error comes back.
 pub(super) fn decide<T: Token>(
     token: Result<T, Failure>,
-    sandbox_user: impl FnOnce() -> Result<Option<String>, Failure>,
+    pool: impl FnOnce() -> Result<Vec<String>, Failure>,
 ) -> io::Result<bool> {
     let mut failed = None;
     let mut signal = |answer: Result<bool, Failure>| match answer {
@@ -60,9 +62,8 @@ pub(super) fn decide<T: Token>(
         Ok(token) => {
             signal(token.app_container())
                 || signal(token.restricted())
-                || match sandbox_user() {
-                    Ok(None) => false,
-                    Ok(Some(sid)) => signal(token.user_is(&sid)),
+                || match pool() {
+                    Ok(sids) => sids.iter().any(|sid| signal(token.user_is(sid))),
                     Err(failure) => signal(Err(failure)),
                 }
         }

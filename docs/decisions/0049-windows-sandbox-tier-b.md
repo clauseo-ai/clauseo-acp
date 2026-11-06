@@ -196,19 +196,26 @@ build 26100):
     another volume than the data folder can't be moved there by a rename: the pass is refused naming
     the item (`OtherVolume`), the item stays, and no copy is made.
 - **Records.**
-  - `HKLM\SOFTWARE\Clauseo\Sandbox`, with an explicit DACL: every pool user's SID, which the
-    desktop's start-up check (#317) reads through `clauseo_sandbox::windows::sandbox_user_sid`,
-    and `OwnerSid`, the Windows user who owns the set-up (D5; `sandbox_owner_sid`). PR2 ships
-    the readers, of the values `UserSid` and `OwnerSid`; PR4's set-up writes the pool's SIDs.
+  - `HKLM\SOFTWARE\Clauseo\Sandbox`, with the protected DACL
+    `D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)(A;CI;KR;;;BU)`: `PoolSids` (`REG_MULTI_SZ`), every pool
+    user's SID, which the desktop's start-up check (#317) reads through
+    `clauseo_sandbox::windows::sandbox_pool_sids`; `GroupSid`, the group's SID; `OwnerSid`, the
+    Windows user who owns the set-up (D5; `sandbox_owner_sid`); `DataDir`, the owner's data
+    folder; and `Removing` (`REG_DWORD`), set while a removal is unfinished
+    (`clauseo_sandbox::windows::pool::MachineRecord`). PR4b ships the readers; PR4e's set-up
+    writes the key.
   - The local group `ClauseoSandboxUsers`, holding every pool user (PR4).
   - `<data_dir>\sandbox\matters.json`, replaced whole and atomically and refused, never
     rewritten, when it can't be read (`clauseo_sandbox::windows::matters`): today each matter's
     random `S-1-5-21-<a>-<b>-<c>-<rid>` SID, optional under D9 (`windows::sids`); PR4 adds
     each matter's assigned pool user.
-  - `<data_dir>\sandbox\setup.json`, the set-up marker: the set-up version, the Windows user
-    who ran it, the sandbox SID and the time (`clauseo_sandbox::windows::marker`).
+  - `<data_dir>\sandbox\setup.json`, the set-up marker (version 2): the set-up version, the
+    Windows user who ran it, the group's SID, the pool's SIDs and the time
+    (`clauseo_sandbox::windows::marker`). A version 1 marker reads as `Outdated`.
 - **Set-up state.** `SandboxSetup::state` gives `Ready` only for a current marker of this user
-  whose SID the record also names; otherwise `Needed`, `Outdated`, `SetUpByOtherUser` or
+  when `OwnerSid` is this user, `GroupSid` is the marker's group and `PoolSids` holds every pool
+  SID the marker names; a set `Removing` gives `Failed` ("removal unfinished: reinstall and
+  uninstall, or run set-up again"); otherwise `Needed`, `Outdated`, `SetUpByOtherUser` or
   `Failed`.
 - **Detection.** `detect(setup)` caches only the machine's architecture and build; ARM64 and
   builds before Windows 10 22H2 (19045) are tier C, `UnsupportedOs`. The set-up state is read on

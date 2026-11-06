@@ -32,11 +32,11 @@
 //!   take the agent's permission entries: network, no permissions, or no `WRITE_DAC`. Tier B's
 //!   records (S15), in `<data_dir>\sandbox\` under a protected DACL: matter SIDs in
 //!   `matters.json` (`windows::matters`), the set-up marker `setup.json` (`windows::marker`),
-//!   the machine's sandbox user and owner records (`windows::sandbox_user_sid`, which the
-//!   desktop's start-up check reads, and `windows::sandbox_owner_sid`), and the set-up state they
-//!   give (`windows::setup_state`). Tier B's folder gate (`windows::admit`), grant plan
-//!   (`windows::acl_plan`) and write-ahead ACL ledger (`windows::ledger`); nothing writes a
-//!   permission entry yet.
+//!   the machine's record of the pool (`windows::sandbox_pool_sids`, which the desktop's
+//!   start-up check reads, `windows::sandbox_owner_sid` and the rest; `windows::pool`), and the
+//!   set-up state they give (`windows::setup_state`). Tier B's folder gate (`windows::admit`),
+//!   grant plan (`windows::acl_plan`) and write-ahead ACL ledger (`windows::ledger`); nothing
+//!   writes a permission entry yet.
 
 //!
 //! # Interface

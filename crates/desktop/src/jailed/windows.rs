@@ -1,6 +1,6 @@
-//! Windows: reads this process's token and S15's sandbox user record (through `clauseo-sandbox`);
+//! Windows: reads this process's token and S15's pool record (through `clauseo-sandbox`);
 //! `signals.rs` decides. The agent sandbox runs the agent in an `AppContainer`, under a
-//! restricted token (restricting SIDs) or as its own local sandbox user (ADR 0038 and 0049,
+//! restricted token (restricting SIDs) or as one of its local pool users (ADR 0038 and 0049,
 //! tier B).
 #![expect(unsafe_code, reason = "FFI to the Win32 token and SID calls")]
 
@@ -26,23 +26,25 @@ use super::signals::{self, Failure};
 // The restricting SIDs' count is read as the buffer's first u32.
 const _: () = assert!(std::mem::offset_of!(TOKEN_GROUPS, GroupCount) == 0);
 
-/// Whether the process token is an `AppContainer`, has restricting SIDs or belongs to the
-/// sandbox user, or a read was refused (`signals::decide`).
+/// Whether the process token is an `AppContainer`, has restricting SIDs or belongs to any pool
+/// user, or a read was refused (`signals::decide`).
 pub(super) fn sandboxed() -> io::Result<bool> {
-    signals::decide(Token::open(), sandbox_user_sid)
+    signals::decide(Token::open(), sandbox_pool_sids)
 }
 
-/// The SID of S15's sandbox user on this machine, from the record S15's set-up writes, read by
-/// `clauseo_sandbox::windows::sandbox_user_sid` beside the code that writes it. `Ok(None)` when
-/// there is no record. A refused read is [`Failure::Denied`], a value that is not a `REG_SZ`
-/// [`Failure::WrongType`], one that is not UTF-16 [`Failure::NotASid`].
-pub(super) fn sandbox_user_sid() -> Result<Option<String>, Failure> {
-    clauseo_sandbox::windows::sandbox_user_sid().map_err(|error| match error {
-        RecordError::Denied => Failure::Denied,
-        RecordError::WrongType => Failure::WrongType,
-        RecordError::NotText => Failure::NotASid,
-        RecordError::Other(error) => Failure::Other(error),
-    })
+/// The SIDs of S15's pool users on this machine, from the record S15's set-up writes, read by
+/// `clauseo_sandbox::windows::sandbox_pool_sids` beside the code that writes it. Empty when there
+/// is no record. A refused read is [`Failure::Denied`], a value that is not a `REG_MULTI_SZ`
+/// [`Failure::WrongType`], one that is not UTF-16 or not a list of SIDs [`Failure::NotASid`]:
+/// all three count as sandboxed, as #317 counts an unreadable record.
+pub(super) fn sandbox_pool_sids() -> Result<Vec<String>, Failure> {
+    match clauseo_sandbox::windows::sandbox_pool_sids() {
+        Ok(sids) => Ok(sids.into_iter().map(String::from).collect()),
+        Err(RecordError::Denied) => Err(Failure::Denied),
+        Err(RecordError::WrongType) => Err(Failure::WrongType),
+        Err(RecordError::NotText | RecordError::Malformed(_)) => Err(Failure::NotASid),
+        Err(RecordError::Other(error)) => Err(Failure::Other(error)),
+    }
 }
 
 /// A Win32 error as a [`Failure`]: [`Failure::Denied`] for `ERROR_ACCESS_DENIED`.
