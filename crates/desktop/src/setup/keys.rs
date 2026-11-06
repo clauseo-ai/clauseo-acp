@@ -6,17 +6,28 @@
 //! The brief says "on the agents thread": that thread is internal to the `agents` crate, which
 //! runs no caller code on it, so the load runs on desktop's own setup thread instead.
 //!
+//! The first load is bounded (decision record 0048, R20 P5b A4; `keys/reads.rs`): each agent's
+//! key is read on a thread of its own, and the setup thread waits for them at most
+//! [`KEYS_LOAD_BOUND`]. A read that fails (the keychain's error) or has not answered by then
+//! marks the agent's key **unreadable**: a key is stored, or may be, and it never reads as "no
+//! key" ([`KeyCache::unreadable`]; [`KeyCache::has`] counts it). Desktop then refuses that
+//! agent's launches with `agent.key_unreadable` (`setup/refusal.rs`) until a later read
+//! succeeds: the slow read answering, or a read again ([`KeyCache::read_again`]) when a
+//! launch meets the refusal. Each change of the mark goes out as a [`KeyNote::Read`].
+//!
 //! A write goes to the keychain first, on a thread of its own (a keychain call may block on a
 //! prompt), and to memory only once it is stored, under one write order (see [`KeyCache`]). A
-//! read that failed at start leaves the key out; a `main` key refused because one is stored
-//! takes the stored one into memory then. `main`'s first key ([`KeyWrite::OnlyIfAbsent`])
-//! goes through `Keychain::store_if_absent`, whose check and store are one step in this process,
-//! and is refused with `settings.key_stored` when a key is there. No key reaches a log, an error
+//! write that lands ends the unreadable mark; a `main` key refused because one is stored
+//! takes the stored one into memory then, or marks it unreadable when that read fails.
+//! `main`'s first key ([`KeyWrite::OnlyIfAbsent`]) goes through `Keychain::store_if_absent`,
+//! whose check and store are one step in this process, and is refused with
+//! `settings.key_stored` when a key is there. No key reaches a log, an error
 //! or a `Debug`: [`KeyCache`]'s `Debug` names the agents that have one.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clauseo_agents::keys::{KeyError, Keychain};
 use clauseo_protocol::{AgentId, ErrorCode, HostError, Secret};
@@ -26,6 +37,16 @@ use zeroize::Zeroizing;
 use super::KeyWrite;
 use super::admit::key_stored;
 use crate::bridge::lock;
+
+mod notes;
+mod reads;
+
+pub(crate) use notes::{KeyNote, KeyNotes, NoteSender};
+use reads::Marks;
+
+/// How long the setup thread waits for the first load before an agent whose read has not
+/// answered counts as unreadable (an unanswered keychain prompt, say).
+pub(crate) const KEYS_LOAD_BOUND: Duration = Duration::from_secs(10);
 
 /// Where the [`KeyCache`] lands once the setup thread has loaded it: the launch hook and the
 /// limits readers are built before, on the host's start thread, and find no key until then.
@@ -45,6 +66,8 @@ pub(crate) struct KeyCache {
     available: bool,
     keys: Keys,
     order: Arc<Mutex<()>>,
+    /// The agents whose stored key is unreadable or being read, and the notes of each change.
+    marks: Marks,
 }
 
 impl fmt::Debug for KeyCache {
@@ -52,39 +75,49 @@ impl fmt::Debug for KeyCache {
         f.debug_struct("KeyCache")
             .field("available", &self.available)
             .field("agents", &lock(&self.keys).keys().collect::<Vec<_>>())
+            .field("unreadable", &self.marks.unreadable_agents())
             .finish_non_exhaustive()
     }
 }
 
 impl KeyCache {
-    /// Reads each of `agents`' keys from `keychain`, blocking: once, at start. A key that does
-    /// not load (no access, an item that is not a key) is left out and logged by its agent and
-    /// the error's kind; the lawyer enters it again.
+    /// No key in memory and none marked yet, over `keychain`; each change of a mark goes to
+    /// `notes`.
+    fn empty(keychain: Keychain, notes: Option<NoteSender>) -> Self {
+        Self {
+            available: keychain.available(),
+            keychain,
+            keys: Arc::default(),
+            order: Arc::default(),
+            marks: Marks::new(notes),
+        }
+    }
+
+    /// Reads each of `agents`' keys from `keychain` and waits for all: the tests' load.
+    #[cfg(test)]
     pub(crate) fn load_all<'a>(
         keychain: Keychain,
         agents: impl IntoIterator<Item = &'a AgentId>,
     ) -> Self {
-        let available = keychain.available();
-        let mut keys = BTreeMap::new();
-        if available {
-            for agent in agents {
-                match keychain.load(agent) {
-                    Ok(Some(key)) => {
-                        keys.insert(agent.clone(), key);
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        tracing::warn!(%agent, kind = error_kind(&error), "an API key did not load");
-                    }
-                }
-            }
-        }
-        Self {
-            keychain,
-            available,
-            keys: Arc::new(Mutex::new(keys)),
-            order: Arc::default(),
-        }
+        reads::load_all(keychain, agents)
+    }
+
+    /// The first load, on the setup thread, waited for at most `bound` on `timer`
+    /// (`keys/reads.rs`); each change of a mark, then and later, goes to `notes`.
+    pub(crate) fn load_bounded<'a>(
+        keychain: Keychain,
+        agents: impl IntoIterator<Item = &'a AgentId>,
+        notes: NoteSender,
+        timer: &impl clauseo_process::Timer,
+        bound: Duration,
+    ) -> Self {
+        reads::load_bounded(keychain, agents, notes, timer, bound)
+    }
+
+    /// Reads `agent`'s key again when it is marked unreadable and no read of it runs
+    /// (`keys/reads.rs`); the receiver resolves once the answer is in.
+    pub(crate) fn read_again(&self, agent: &AgentId) -> oneshot::Receiver<()> {
+        reads::read_again(self, agent)
     }
 
     /// Whether this computer's keychain can hold a key: `SetupInfo`'s `keys_available`.
@@ -103,9 +136,20 @@ impl KeyCache {
         }))
     }
 
-    /// Whether `agent` has a key.
+    /// Whether `agent` has a key: in memory, or stored and unreadable (never "no key").
     pub(crate) fn has(&self, agent: &AgentId) -> bool {
+        let in_memory = lock(&self.keys).contains_key(agent);
+        in_memory || self.marks.is_unreadable(agent)
+    }
+
+    /// Whether memory holds `agent`'s key.
+    pub(crate) fn in_memory(&self, agent: &AgentId) -> bool {
         lock(&self.keys).contains_key(agent)
+    }
+
+    /// Whether `agent`'s stored key could not be read: the read failed, or has not answered.
+    pub(crate) fn unreadable(&self, agent: &AgentId) -> bool {
+        self.marks.is_unreadable(agent)
     }
 
     /// Whether the keychain would take `key` as `agent`'s: `command.invalid` (naming the agent
@@ -124,13 +168,16 @@ impl KeyCache {
         then: impl FnOnce(bool) + Send + 'static,
     ) -> Result<bool, HostError> {
         let (keychain, keys, order) = self.parts();
+        let marks = self.marks.clone();
         let agent = agent.clone();
         off_thread(move || -> Result<bool, KeyError> {
             let _order = lock(&order);
             let Some(key) = keychain.load(&agent)? else {
+                marks.known(&agent);
                 return Ok(false);
             };
-            lock(&keys).insert(agent, key);
+            lock(&keys).insert(agent.clone(), key);
+            marks.known(&agent);
             then(true);
             Ok(true)
         })
@@ -161,6 +208,7 @@ impl KeyCache {
     ) -> Result<(), HostError> {
         let key = key.into_zeroizing();
         let (keychain, keys, order) = self.parts();
+        let marks = self.marks.clone();
         let for_thread = agent.clone();
         let stored = off_thread(move || -> Result<bool, KeyError> {
             let agent = for_thread;
@@ -170,10 +218,11 @@ impl KeyCache {
                 KeyWrite::OnlyIfAbsent => keychain.store_if_absent(&agent, &key),
             }?;
             if stored {
-                lock(&keys).insert(agent, key);
+                lock(&keys).insert(agent.clone(), key);
+                marks.known(&agent);
                 then(true);
             } else {
-                then(reload(&keychain, &keys, &agent));
+                then(reload(&keychain, &keys, &marks, &agent));
             }
             Ok(stored)
         })
@@ -194,11 +243,13 @@ impl KeyCache {
         then: impl FnOnce(bool) + Send + 'static,
     ) -> Result<(), HostError> {
         let (keychain, keys, order) = self.parts();
+        let marks = self.marks.clone();
         let agent = agent.clone();
         off_thread(move || -> Result<(), KeyError> {
             let _order = lock(&order);
             keychain.clear(&agent)?;
             lock(&keys).remove(&agent);
+            marks.known(&agent);
             then(false);
             Ok(())
         })
@@ -217,20 +268,23 @@ impl KeyCache {
 }
 
 /// Takes `agent`'s entry from `keychain` into `keys` again, under the write order, and answers
-/// whether memory holds a key after: a read that fails leaves memory as it was, logged.
-fn reload(keychain: &Keychain, keys: &Keys, agent: &AgentId) -> bool {
+/// whether a key is stored: a read that fails marks it unreadable (a key is there, the store
+/// said so) and answers `true`, never "no key".
+fn reload(keychain: &Keychain, keys: &Keys, marks: &Marks, agent: &AgentId) -> bool {
     match keychain.load(agent) {
         Ok(Some(key)) => {
             lock(keys).insert(agent.clone(), key);
+            marks.known(agent);
             true
         }
         Ok(None) => {
             lock(keys).remove(agent);
+            marks.known(agent);
             false
         }
         Err(error) => {
-            tracing::warn!(%agent, kind = error_kind(&error), "an API key did not load");
-            lock(keys).contains_key(agent)
+            marks.unreadable(agent, error_kind(&error));
+            true
         }
     }
 }

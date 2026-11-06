@@ -3,8 +3,8 @@
 //! leaves and the leave's timer, the plans
 //! snapshot the launch hook reads, and what it last took from the settings.
 
-use clauseo_protocol::AgentId;
-use std::collections::BTreeSet;
+use clauseo_protocol::{AgentId, ErrorCode};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use super::hook::Plans;
@@ -27,19 +27,23 @@ pub(crate) struct Wiring {
     pub(crate) plans: Plans,
     /// The settings as last taken in (`refresh::apply_settings`).
     pub(crate) applied: Mutex<SettingsRead>,
-    /// The agents whose new launches the host was told to refuse.
-    pub(crate) refused: Mutex<BTreeSet<AgentId>>,
+    /// The code the host was last told to refuse each agent's new launches with; an agent not
+    /// here may launch (`setup/refusal.rs`).
+    pub(crate) refused: Mutex<BTreeMap<AgentId, ErrorCode>>,
+    /// Held across each change of a refusal, so the host's and [`Self::refused`] keep step.
+    pub(crate) refusal_gate: futures::lock::Mutex<()>,
 }
 
 impl Wiring {
     /// Over `readers`, `reused` and `plans`, with `start` the settings the backend's facts were
-    /// set from; the host started refusing `start`'s blocked agents
+    /// set from and `refused` the refusals the host started with
     /// (`SetupStart::launch_refusals`).
     pub(crate) fn new(
         readers: Arc<dyn LeaveReaders>,
         reused: ReusedLogins,
         plans: Plans,
         start: SettingsRead,
+        refused: impl IntoIterator<Item = (AgentId, ErrorCode)>,
     ) -> Self {
         Self {
             readers,
@@ -48,7 +52,8 @@ impl Wiring {
             leaves: Leaves::default(),
             timer: Arc::new(AsyncIoTimer),
             plans,
-            refused: Mutex::new(start.blocked.clone()),
+            refused: Mutex::new(refused.into_iter().collect()),
+            refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
         }
     }

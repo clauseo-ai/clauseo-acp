@@ -6,6 +6,7 @@
 mod counts;
 mod endpoint;
 mod fakes;
+mod key_reads;
 mod keys;
 mod leave;
 mod once;

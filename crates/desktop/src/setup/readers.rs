@@ -12,12 +12,18 @@
 //!   a hold reads the entry written before the hold drops (the review's L7);
 //! - [`ReadHold`] is the hold the backend keeps across the leave order, as [`LeaveReaders`]
 //!   names it, so the backend's tests play it with a fake.
+//! - No read goes out before the keys have loaded (R20 P5b A4, c1): a read with no key could
+//!   read another login's numbers (a stale own login in the home, or the reused one) for an
+//!   agent whose key is stored. A read waits for the key slot, at most [`KEYS_HOLD`], checked
+//!   every [`KEYS_POLL`] on the readers' timer, and fails if it stays empty; an agent whose
+//!   stored key is unreadable fails its read too. A failed read shows no account's numbers.
 
 use std::any::Any;
 use std::sync::Arc;
+use std::time::Duration;
 
-use clauseo_limits::{ProcessReaders, ReadLimits, ReadOutcome};
-use clauseo_process::{AsyncIoTimer, Launcher};
+use clauseo_limits::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};
+use clauseo_process::{AsyncIoTimer, Launcher, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{AgentLaunch, Effective};
 
@@ -47,8 +53,19 @@ pub(crate) trait LeaveReaders: Send + Sync {
     fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>);
 }
 
-/// The host's limits reader: one `ProcessReaders`, whose entry is set on each entry written.
-pub(crate) struct SwappableReaders(ProcessReaders<AsyncIoTimer>);
+/// How long a limits read waits for the keys to load before it fails: the host's own bound on
+/// `agent.keys_loading`.
+pub(crate) const KEYS_HOLD: Duration = Duration::from_secs(12);
+
+/// How often a waiting limits read looks at the key slot.
+pub(crate) const KEYS_POLL: Duration = Duration::from_millis(100);
+
+/// The host's limits reader: one `ProcessReaders`, whose entry is set on each entry written,
+/// and the key slot its reads wait for.
+pub(crate) struct SwappableReaders {
+    readers: Arc<ProcessReaders<AsyncIoTimer>>,
+    keys: KeySlot,
+}
 
 impl SwappableReaders {
     /// Readers for `effective`'s entries over `launcher`, with Clauseo's own homes forced and
@@ -67,14 +84,37 @@ impl SwappableReaders {
             launcher,
             AsyncIoTimer,
         )
-        .with_claude_home(locations.agent_home(AgentKind::Claude.id()))
-        .with_launch_env(move |kind| read_vars(&keys, &plans, kind));
-        Self::from_readers(readers)
+        .with_claude_home(locations.agent_home(AgentKind::Claude.id()));
+        let vars = Arc::clone(&keys);
+        let readers = readers.with_launch_env(move |kind| read_vars(&vars, &plans, kind));
+        Self {
+            readers: Arc::new(readers),
+            keys,
+        }
     }
+}
 
-    /// Over `readers`.
-    pub(crate) fn from_readers(readers: ProcessReaders<AsyncIoTimer>) -> Self {
-        Self(readers)
+/// Waits until `keys` has loaded, at most [`KEYS_HOLD`]: the failure a read of `kind` ends
+/// with when they have not, or when its stored key is unreadable.
+async fn keys_ready(keys: &KeySlot, kind: AgentKind) -> Result<(), ReadFailure> {
+    let mut waited = Duration::ZERO;
+    loop {
+        if let Some(cache) = keys.get() {
+            let unreadable = AgentId::new(kind.id()).is_ok_and(|agent| cache.unreadable(&agent));
+            if unreadable {
+                return Err(ReadFailure::LaunchFailed(
+                    "the stored API key could not be read".to_owned(),
+                ));
+            }
+            return Ok(());
+        }
+        if waited >= KEYS_HOLD {
+            return Err(ReadFailure::LaunchFailed(
+                "the stored API keys did not load".to_owned(),
+            ));
+        }
+        AsyncIoTimer.after(KEYS_POLL).await;
+        waited = waited.saturating_add(KEYS_POLL);
     }
 }
 
@@ -83,18 +123,25 @@ impl ReadLimits for SwappableReaders {
         &self,
         agent: AgentKind,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ReadOutcome> + Send>> {
-        self.0.read(agent)
+        let readers = Arc::clone(&self.readers);
+        let keys = Arc::clone(&self.keys);
+        Box::pin(async move {
+            if let Err(failure) = keys_ready(&keys, agent).await {
+                return ReadOutcome::Failed(failure);
+            }
+            readers.read(agent).await
+        })
     }
 }
 
 impl LeaveReaders for SwappableReaders {
     fn hold(&self, agent: AgentKind) -> BoxFuture<'static, ReadHold> {
-        let held = self.0.hold(agent);
+        let held = self.readers.hold(agent);
         Box::pin(async move { ReadHold::new(held.await) })
     }
 
     fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
-        self.0.set_entry(agent, launch);
+        self.readers.set_entry(agent, launch);
     }
 }
 

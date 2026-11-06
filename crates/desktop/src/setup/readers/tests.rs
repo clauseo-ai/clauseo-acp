@@ -243,3 +243,57 @@ fn a_refused_entry_s_warning_names_no_path() {
         "a path reached the log: {text}"
     );
 }
+
+/// R20 P5b A4, c1: before the keys load, a read of an agent whose key is stored waits and
+/// launches nothing, so it can show no other login's numbers; once they load with that key
+/// unreadable, it fails without a launch.
+#[test]
+fn before_the_keys_load_a_stored_key_agent_s_read_shows_no_account_s_numbers() {
+    let scratch = Scratch::folder("setup-readers-before-keys", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.store(&claude, KEY).unwrap();
+    let slot: crate::setup::KeySlot = Arc::new(OnceLock::new());
+    let launcher = Arc::new(Recording::default());
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        Arc::clone(&slot),
+        Arc::default(),
+    );
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    let mut read = readers.read(AgentKind::Claude);
+    assert!(
+        (&mut read).now_or_never().is_none(),
+        "the read waits for the keys"
+    );
+    assert!(
+        lock(&launcher.0).is_empty(),
+        "nothing read before the keys load"
+    );
+    // The keys load with Claude's stored key unreadable: the read fails, launching nothing.
+    keychain.fail_reads(true);
+    let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
+    assert!(matches!(
+        block_on(read),
+        ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
+    ));
+    assert!(lock(&launcher.0).is_empty(), "no read with another login");
+}

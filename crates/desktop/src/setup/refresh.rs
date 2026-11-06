@@ -7,14 +7,14 @@
 //! [`apply_settings`] tells [`Compose`](super::compose::Compose) what changed. A
 //! firm policy's endpoint or provider that arrives ends a running sign-in quietly, the same
 //! superseding cancel a stored key or endpoint makes (no `signin.cancelled` reaches a window).
-//! The host is told each change of the launch refusal (`set_launch_refused` with
-//! `signin.policy_unreadable`, or `None`); it started with the blocked agents refused
+//! The host is told each change of the launch refusal (`setup/refusal.rs`: the policy's, else
+//! an unreadable key's, else none); it started with the blocked agents refused
 //! (`SetupStart::launch_refusals`), so a follow that never runs leaves no launch open.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::PoisonError;
 
-use clauseo_protocol::{AgentId, ErrorCode};
+use clauseo_protocol::AgentId;
 use clauseo_settings::{Effective, Plan, SystemFiles};
 
 use super::backend::AgentsBackend;
@@ -87,24 +87,5 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
             backend.set_firm_policy(agent, now(&read.firm_policy));
         }
     }
-    for agent in backend.known.keys() {
-        let blocked = read.blocked.contains(agent);
-        if lock(&backend.wiring.refused).contains(agent) == blocked {
-            continue;
-        }
-        let code = blocked.then_some(ErrorCode::SigninPolicyUnreadable);
-        match backend.host.set_launch_refused(agent.clone(), code).await {
-            Ok(()) => {
-                let mut refused = lock(&backend.wiring.refused);
-                if blocked {
-                    refused.insert(agent.clone());
-                } else {
-                    refused.remove(agent);
-                }
-            }
-            Err(error) => {
-                tracing::warn!(%agent, code = error.code().as_str(), "launch refusal not set");
-            }
-        }
-    }
+    super::refusal::sync_all(backend).await;
 }

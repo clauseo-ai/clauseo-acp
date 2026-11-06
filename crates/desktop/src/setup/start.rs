@@ -22,9 +22,11 @@
 //! The launch refusals (decision record 0048, ruling 4 and the security review's M3): the host
 //! starts with them ([`SetupStart::launch_refusals`], `HostConfig::with_launch_refused`), so no
 //! launch comes before them: `signin.policy_unreadable` for each agent an unreadable policy
-//! blocks, `agent.keys_loading` for every other known agent. Once the keys have loaded, the
-//! keys' refusal is lifted ([`lift_keys_loading`]) on the thread that then follows the
-//! settings, so the two never cross; a policy refusal stays until the settings lift it.
+//! blocks, `agent.keys_loading` for every other known agent. The first load is bounded
+//! ([`KEYS_LOAD_BOUND`], on the setup thread's timer); once it is over, each agent gets its
+//! refusal in force (`setup/refusal.rs`: none, or `agent.key_unreadable` for a stored key
+//! that did not read) on the thread that then follows the settings and the keys' notes, so
+//! they never cross; a policy refusal stays until the settings lift it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -44,10 +46,11 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::keys::{KeyCache, KeySlot};
+use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyNotes, KeySlot};
 use super::login_check::ReusedLogins;
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
+use super::refusal::{follow_keys, settle_after_load, sync_all};
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents};
 use crate::bridge::lock;
@@ -255,6 +258,8 @@ pub(crate) struct HostSide {
     pub(crate) plans: Plans,
     /// Reads the effective settings again, on each `SettingsChanged`.
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
+    /// The keys' notes; the host was given its retry hook.
+    pub(crate) notes: Arc<KeyNotes>,
 }
 
 /// Starts the `clauseo-setup` thread: keys, `Agents`, the first states, the cell, the pump.
@@ -269,13 +274,21 @@ pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std:
 
 /// The setup thread's work.
 fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
-    let keys = Arc::new(KeyCache::load_all(Keychain::os(), read.known.keys()));
+    let keys = Arc::new(KeyCache::load_bounded(
+        Keychain::os(),
+        read.known.keys(),
+        side.notes.sender(),
+        &AsyncIoTimer,
+        KEYS_LOAD_BOUND,
+    ));
     // Set once, here: nothing else fills the slot.
     let _set = side.keys.set(Arc::clone(&keys));
+    let refused_at_start = read.launch_refusals();
     let Some(platform) = Platform::current() else {
         tracing::warn!("no agent installs on this platform: setup answers internal");
-        let lift = lift_keys_loading(&*parts.host, read.known.keys(), &read.settings.blocked);
-        futures::executor::block_on(lift);
+        let blocked = &read.settings.blocked;
+        let settle = settle_after_load(&*parts.host, &keys, read.known.keys(), blocked);
+        futures::executor::block_on(settle);
         return;
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -307,7 +320,13 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             compose.set_key(agent, keys.has(agent));
         }
         let firm_policy = facts.firm_policy.clone();
-        let wiring = Wiring::new(side.readers, side.reused, side.plans, read.settings);
+        let wiring = Wiring::new(
+            side.readers,
+            side.reused,
+            side.plans,
+            read.settings,
+            refused_at_start,
+        );
         let backend = Arc::new(AgentsBackend {
             agents: Arc::new(agents),
             keys,
@@ -332,17 +351,24 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     };
     let follower = Arc::clone(&backend);
     let reread = side.reread;
+    let notes = side.notes.take();
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
-            lift_on(&follower);
+            futures::executor::block_on(sync_all(&follower));
             let settings = follow_settings(&follower, &*reread);
             let leaves = super::leave::follow_auto_leaves(&follower);
-            futures::executor::block_on(join(settings, join(follow_splits(&follower), leaves)));
+            let keys = async {
+                if let Some(notes) = notes {
+                    follow_keys(&follower, notes).await;
+                }
+            };
+            let follows = join(join(settings, keys), join(follow_splits(&follower), leaves));
+            futures::executor::block_on(follows);
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
-        lift_on(&backend);
+        futures::executor::block_on(sync_all(&backend));
     }
     futures::executor::block_on(backend.pump(source));
 }
@@ -364,29 +390,6 @@ pub(crate) fn refusals_at_start<'a>(
             (agent.clone(), code)
         })
         .collect()
-}
-
-/// [`lift_keys_loading`] for `backend`'s agents, keeping each policy refusal it holds.
-fn lift_on(backend: &AgentsBackend) {
-    let blocked = crate::bridge::lock(&backend.wiring.refused).clone();
-    let lift = lift_keys_loading(&*backend.host, backend.known.keys(), &blocked);
-    futures::executor::block_on(lift);
-}
-
-/// The keys have loaded: each of `known` but those in `blocked` (whose refusal is the
-/// policy's) may launch again. A call that fails is logged by the agent and its code; that
-/// agent's launches stay refused.
-pub(crate) async fn lift_keys_loading<'a>(
-    host: &dyn SetupHost,
-    known: impl IntoIterator<Item = &'a AgentId>,
-    blocked: &BTreeSet<AgentId>,
-) {
-    for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
-        if let Err(error) = host.set_launch_refused(agent.clone(), None).await {
-            let code = error.code().as_str();
-            tracing::warn!(%agent, code, "the keys' launch refusal was not lifted");
-        }
-    }
 }
 
 /// Each `SettingsChanged`: the settings read again and taken in, until the host stops. Once

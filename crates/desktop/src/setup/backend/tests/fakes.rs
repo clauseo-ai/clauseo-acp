@@ -480,6 +480,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
             ReusedLogins::default(),
             Arc::default(),
             SettingsRead::default(),
+            Vec::new(),
         )
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
