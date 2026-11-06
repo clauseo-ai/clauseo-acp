@@ -306,6 +306,16 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   the next launch walks those deny trees strictly and still refuses what it would have refused.
   No agent runs in between, and the allow names only the matter's own pool user on its own matter
   (accepted; no launch marker).
+- **A nested protected item edited in place** is not set aside. The set-aside compares file IDs
+  only, so a nested `CLAUDE.md`, `AGENTS.md` or `.mcp.json`, a file in a nested `.claude`
+  folder or a nested `.git\config` is caught when it is created, replaced, renamed in or swapped
+  (a new file ID), not when one already there is edited in place. Windows denies writes to
+  protected names only at the matter's root (`policy.rs`), so the agent can edit a nested one and
+  the next launch loads or runs it. This gap is open until the deny-write at any depth follow-up
+  (S15 PR4a2); it is not accepted.
+- **A nested protected item one session's agent makes** is visible to a second session of the
+  same matter running at the same time, until a set-aside pass runs (at that session's end or
+  the next launch).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
