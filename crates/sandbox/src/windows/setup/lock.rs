@@ -77,6 +77,17 @@ pub(super) const OBJECT_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)";
 /// its own process), and may with `ERROR_FILE_NOT_FOUND` or `ERROR_NOT_FOUND`.
 const NAMESPACE_TRIES: usize = 8;
 
+/// Waits a little before the next try, growing from 1 ms (1, 2, 4 … 64 ms; 127 ms at most in
+/// all), so a busy machine doesn't spin while the other process lets go.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a bounded wait between tries in the elevated one-shot set-up, with no clock to inject"
+)]
+fn back_off(attempt: usize) {
+    let millis = 1u64 << attempt.saturating_sub(1).min(6);
+    std::thread::sleep(std::time::Duration::from_millis(millis));
+}
+
 /// This process's one handle to [`NAMESPACE`] (module doc).
 static NAMESPACE_HANDLE: Shared<Namespace> = Shared::new();
 
@@ -206,7 +217,10 @@ impl Namespace {
         let descriptor = Descriptor::from_sddl(OBJECT_SDDL)?;
         let attributes = attributes(&descriptor);
         let alias = HSTRING::from(NAMESPACE);
-        for _try in 0..NAMESPACE_TRIES {
+        for attempt in 0..NAMESPACE_TRIES {
+            if attempt > 0 {
+                back_off(attempt);
+            }
             // SAFETY: `attributes`, its descriptor and the boundary live for the call; the alias
             // is NUL-terminated. A handle returned is closed by `Namespace`'s drop.
             let made = unsafe {
