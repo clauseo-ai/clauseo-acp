@@ -113,7 +113,7 @@ pub(crate) async fn on_state(
             tracing::info!(%agent, kind = "recorded", "identity");
         } else {
             // No email: the status may name the account by its id; the check records it.
-            identity.forget(agent, now);
+            identity.forget(agent, now, pending_bound(agent));
             identity.ask(agent);
             tracing::info!(%agent, kind = "no_email", "identity");
         }
@@ -230,7 +230,7 @@ fn settle(
     now: Duration,
 ) -> Verdict {
     let identity = &backend.wiring.identity;
-    let judged = identity.judge(agent, read);
+    let judged = identity.judge(agent, read, now);
     let current = identity.entry(agent, |entry| {
         ticket.is_none_or(|Ticket(generation)| generation == entry.generation)
     });

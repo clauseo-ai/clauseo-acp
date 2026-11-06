@@ -121,6 +121,11 @@ struct Entry {
     /// An unknown verdict is checked again every [`UNKNOWN_AGAIN`]: it came from a status that
     /// failed or timed out, or from a panic (`fail_closed`).
     again: bool,
+    /// A sign-in through Clauseo whose `SignedIn` named no email ([`Identities::forget`]) waits
+    /// for its record until this time: the next check records the first account it reads, by
+    /// email or id, even after a launch. Cleared when the record lands; past it, unknown and
+    /// checked. Trust on first use stays startup-only for every other path.
+    awaiting_record: Option<Duration>,
 }
 
 impl Entry {
@@ -414,6 +419,7 @@ impl Identities {
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = verdict;
         entry.again = false;
+        entry.awaiting_record = None;
         let _held = entry.expect_end();
         if stamps.is_some() {
             entry.stamps = stamps;
@@ -436,21 +442,29 @@ impl Identities {
             .and_then(|entry| entry.pending.clone())
     }
 
-    /// The verdict of `read` against `agent`'s record. With none recorded, an account is
-    /// trusted on first use only while no launch of the agent has passed the launch gate (after
-    /// one it is unknown), and no account means nothing signed in: idle.
-    fn judge(&self, agent: &AgentId, read: &AccountRead) -> Judged {
+    /// The verdict of `read` at `now` against `agent`'s record. With none recorded, an account
+    /// is trusted on first use only while no launch of the agent has passed the launch gate (after
+    /// one it is unknown), or while a sign-in through Clauseo with no email awaits its record;
+    /// and no account means nothing signed in: idle.
+    fn judge(&self, agent: &AgentId, read: &AccountRead, now: Duration) -> Judged {
         let inner = lock(&self.inner);
         if inner.unreadable.contains(agent) {
             return Judged::Is(Verdict::Unknown);
         }
-        let launched = inner.agents.get(agent).is_some_and(|entry| entry.launched);
+        let entry = inner.agents.get(agent);
+        let launched = entry.is_some_and(|entry| entry.launched);
+        // A sign-in through Clauseo with no email records its first account, launched or not.
+        let awaiting = entry
+            .and_then(|entry| entry.awaiting_record)
+            .is_some_and(|until| now < until);
         match (read, inner.recorded.get(agent)) {
             (AccountRead::Account(hash), Some(recorded)) if hash == recorded => {
                 Judged::Is(Verdict::Same)
             }
             (AccountRead::Account(_), Some(_)) => Judged::Is(Verdict::Changed),
-            (AccountRead::Account(_), None) if launched => Judged::Is(Verdict::Unknown),
+            (AccountRead::Account(_), None) if launched && !awaiting => {
+                Judged::Is(Verdict::Unknown)
+            }
             (AccountRead::Account(hash), None) => Judged::Record(hash.clone()),
             (AccountRead::NoAccount, None) if !inner.nameless.contains(agent) => {
                 Judged::Is(Verdict::Idle)
@@ -503,10 +517,11 @@ impl Identities {
         })
     }
 
-    /// A sign-in through Clauseo whose `SignedIn` names no email: the account it replaced is no
-    /// longer recorded, and `agent` is due a check, whose status may name it by its id; the
-    /// check's first account is then recorded, so the new login never reads as a swap.
-    fn forget(&self, agent: &AgentId, now: Duration) {
+    /// A sign-in through Clauseo whose `SignedIn` names no email, at `now`: the account it
+    /// replaced is no longer recorded, and `agent` is due a check, whose status may name it by
+    /// its id; the check's first account is then recorded (`awaiting_record`, until `now +
+    /// bound`, the sign-in's), even after a launch, so the new login never reads as a swap.
+    fn forget(&self, agent: &AgentId, now: Duration, bound: Duration) {
         let mut inner = lock(&self.inner);
         inner.unreadable.remove(agent);
         inner.recorded.remove(agent);
@@ -515,6 +530,7 @@ impl Identities {
         let entry = inner.agents.entry(agent.clone()).or_default();
         entry.verdict = Verdict::Due;
         let _held = entry.expect_end();
+        entry.awaiting_record = Some(now + bound);
         entry.checked_at = Some(now);
         entry.generation += 1;
         let recorded = inner.recorded.clone();
