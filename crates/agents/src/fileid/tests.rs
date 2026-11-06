@@ -66,6 +66,72 @@ fn a_symlink_is_never_the_same_file() {
     );
 }
 
+/// Puts `path`'s last write back to `when`, as `touch -r` does. `set_modified` is banned outside
+/// the write module, and this test is the one place that needs it.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test puts a file's old last write back, the attack the stamp must catch"
+)]
+fn put_back_last_write(path: &std::path::Path, when: std::time::SystemTime) {
+    std::fs::File::open(path)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+}
+
+/// Waits for the file system's clock to tick, so a write after this has a later change time
+/// than the link made before it, even where timestamps are coarse.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test waits for the file system's clock to tick, not for an injected time"
+)]
+fn let_the_clock_tick() {
+    std::thread::sleep(std::time::Duration::from_millis(20));
+}
+
+/// An in-place write through a hard link, with the old last write put back, changes the stamp:
+/// the change time moves whatever the last write says. Checked with a same-length write (the
+/// harder case, where only the change time can tell) and with a longer one (the size tells too).
+#[cfg(unix)]
+#[test]
+fn an_in_place_write_with_the_old_mtime_put_back_changes_the_stamp() {
+    use std::io::Write as _;
+
+    for (tag, new_bytes) in [("same", &b"MARKER"[..]), ("longer", &b"a longer login"[..])] {
+        let dir = TestDir::new(&format!("fileid-inplace-{tag}"));
+        let original = dir.file("login", b"marker");
+        let link = dir.0.join("link");
+        write::hard_link(&original, &link).unwrap();
+        let before = file_stamp(&original).unwrap().unwrap();
+        let old_mtime = std::fs::metadata(&original).unwrap().modified().unwrap();
+        let_the_clock_tick();
+        let mut file = write::open_truncate(&link).unwrap();
+        file.write_all(new_bytes).unwrap();
+        drop(file);
+        put_back_last_write(&original, old_mtime);
+
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().modified().unwrap(),
+            old_mtime,
+            "{tag}: the last write is back where it was"
+        );
+        let after = file_stamp(&original).unwrap().unwrap();
+        assert_eq!(after.id, before.id, "{tag}: still the same file");
+        assert_ne!(
+            after.changed, before.changed,
+            "{tag}: the change time moved"
+        );
+        assert_eq!(
+            after.size,
+            u64::try_from(new_bytes.len()).unwrap(),
+            "{tag}: the size"
+        );
+        assert_ne!(after, before, "{tag}: the stamp changed");
+    }
+}
+
 /// Whether a test that needs a privilege it lacks may skip: only off CI. `ci` is the `CI`
 /// variable, which GitHub's runners set to `true`; set and not empty, `false` or `0`, it is CI,
 /// where Windows runners can make symbolic links, so the test must run there.
