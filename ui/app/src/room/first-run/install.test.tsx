@@ -61,19 +61,38 @@ test("install: installing is a calm wait with no bar and no time, the pen writin
   expect(document.querySelector('.working [data-lead="pen"]')).not.toBeNull();
 });
 
+const OFFLINE = install(CLAUDE, {
+  waiting: { code: "agent.install_offline", hosts: HOSTS, log: LOG },
+});
+
 test("install: dl-offline waits for the connection and resumes by itself", async () => {
-  const t = await mountFirstRun({
-    matters: [],
-    first: [
-      install(CLAUDE, { waiting: { code: "agent.install_offline", hosts: HOSTS, log: LOG } }),
-    ],
-  });
+  const t = await mountFirstRun({ matters: [], first: [OFFLINE] });
   expect(foot()?.dataset["state"]).toBe("offline");
   expect(text()).toContain("You're offline. Setting up waits for the connection.");
-  expect(foot()?.querySelector("button")).toBeNull();
   await play(t, install(CLAUDE, { downloading: { received: 1, total: 200_000_000 } }));
   expect(foot()?.dataset["state"]).toBe("downloading");
   expect(setups(t)).toEqual([]);
+});
+
+test("install: dl-offline offers Try again and Use the system proxy, Try again first", async () => {
+  await mountFirstRun({ matters: [], first: [OFFLINE] });
+  expect(foot()?.dataset["state"]).toBe("offline");
+  expect(byId("install-retry")?.textContent).toBe("Try again");
+  expect(byId("install-proxy")?.textContent).toBe("Use the system proxy");
+  const names = [...(foot()?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
+  expect(names).toEqual(["Try again", "Use the system proxy"]);
+});
+
+test("install: dl-offline's Try again sends RetryAgentInstall with no proxy (missing means false)", async () => {
+  const t = await mountFirstRun({ matters: [], first: [OFFLINE] });
+  await press(byId("install-retry"));
+  expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE } }]);
+});
+
+test("install: dl-offline's Use the system proxy sends RetryAgentInstall with use_system_proxy true", async () => {
+  const t = await mountFirstRun({ matters: [], first: [OFFLINE] });
+  await press(byId("install-proxy"));
+  expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
 });
 
 test("install: dl-blocked offers the system proxy (RetryAgentInstall with use_system_proxy) and copies the IT message", async () => {
@@ -123,6 +142,7 @@ test("install: dl-error offers Try again and Details, which copies the event's l
   });
   expect(foot()?.dataset["state"]).toBe("failed");
   expect(text()).toContain("Claude couldn't be downloaded.");
+  expect(byId("install-proxy")?.textContent).toBe("Use the system proxy");
   await press("Details");
   expect(writeText).toHaveBeenCalledWith(LOG.join("\n"));
   expect(text()).toContain(
@@ -137,6 +157,15 @@ test("install: dl-error offers Try again and Details, which copies the event's l
     install(CLAUDE, { failed: { code: "agent.install_failed", hosts: HOSTS, log: LOG } }),
   );
   expect(text()).not.toContain("The log is copied");
+});
+
+test("install: dl-error's Use the system proxy sends RetryAgentInstall with use_system_proxy true", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, { failed: { code: "agent.install_failed", hosts: HOSTS, log: LOG } })],
+  });
+  await press(byId("install-proxy"));
+  expect(setups(t)).toEqual([{ retry_agent_install: { agent: CLAUDE, use_system_proxy: true } }]);
 });
 
 test("install: ready says Claude is ready on the first screen, and counts agent_ready once", async () => {

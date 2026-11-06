@@ -64,6 +64,18 @@ export function installLine(
       {w("Try again")}
     </Button>
   );
+  /** Goes through the OS's proxy this time: the words and the handler the Blocked view has. */
+  const proxyButton = (kind: "tone" | "quiet") => (
+    <Button
+      kind={kind}
+      size="small"
+      className="working-act"
+      onClick={acts.proxy}
+      data-testid={ids.proxy}
+    >
+      {w("Use the system proxy")}
+    </Button>
+  );
   switch (view.kind) {
     case "missing": {
       const words = w("Getting {name} ready. About {mb} MB.", { name, mb: view.mb });
@@ -92,7 +104,12 @@ export function installLine(
         words: errorWords(lang, "agent.install_offline"),
         pill: null,
         code: "agent.install_offline",
-        actions: wrap(null),
+        actions: wrap(
+          <>
+            {retry}
+            {proxyButton("quiet")}
+          </>,
+        ),
       };
     case "blocked": {
       const message = w(
@@ -106,15 +123,7 @@ export function installLine(
         code: "agent.install_blocked",
         actions: wrap(
           <>
-            <Button
-              kind="tone"
-              size="small"
-              className="working-act"
-              onClick={acts.proxy}
-              data-testid={ids.proxy}
-            >
-              {w("Use the system proxy")}
-            </Button>
+            {proxyButton("tone")}
             <Button
               kind="quiet"
               size="small"
@@ -158,6 +167,7 @@ export function installLine(
         actions: wrap(
           <>
             {retry}
+            {proxyButton("quiet")}
             <Button
               kind="quiet"
               size="small"

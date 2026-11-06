@@ -734,5 +734,26 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-85": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-86": {
+    "en": "Use the system proxy",
+    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-87": {
+    "en": "Use the system proxy",
+    "hi": "सिस्टम की proxy इस्तेमाल करें",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }
