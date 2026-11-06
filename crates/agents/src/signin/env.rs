@@ -30,7 +30,8 @@ use crate::platform::Os;
 pub(crate) enum Vendor {
     /// Claude Code, through the adapter's `--cli`.
     Claude,
-    /// Codex, through `@openai/codex/bin/codex.js`.
+    /// Codex, through `@openai/codex/bin/codex.js` found in the install (`Installed::codex_cli`),
+    /// never the install's `script`, codex-acp's ACP adapter.
     Codex,
 }
 

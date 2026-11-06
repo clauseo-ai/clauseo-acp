@@ -8,12 +8,20 @@
 mod support;
 
 #[cfg(test)]
+#[path = "signin/events.rs"]
+mod events;
+
+#[cfg(test)]
 #[path = "signin/claude.rs"]
 mod claude;
 
 #[cfg(test)]
 #[path = "signin/codex.rs"]
 mod codex;
+
+#[cfg(test)]
+#[path = "signin/codex_cli.rs"]
+mod codex_cli;
 
 #[cfg(test)]
 #[path = "signin/queued.rs"]

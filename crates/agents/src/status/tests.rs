@@ -5,7 +5,7 @@ use clauseo_codex_appserver::GetAccountResponse;
 
 use super::{
     ClaudeStatus, CodexDetect, Identity, claude_detection, claude_signed_in, codex_identity,
-    codex_logged_in, is_sign_in_again, parse_claude_status,
+    codex_logged_in, codex_says_logged_in, is_sign_in_again, parse_claude_status,
 };
 use crate::signin::{Found, LoginFrom, SigninState};
 
@@ -160,20 +160,39 @@ fn claude_signed_in_reads_the_account_and_plan() {
 }
 
 #[test]
-fn codex_detection_reads_the_exit_code_and_the_stat() {
-    assert!(codex_logged_in(Some(0)));
-    for exit in [Some(1), Some(2), None] {
-        assert!(!codex_logged_in(exit));
+fn codex_status_lines_are_read_by_their_signed_in_start_only() {
+    assert!(codex_says_logged_in("Logged in using ChatGPT"));
+    assert!(codex_says_logged_in(
+        "Logged in using an API key - sk-proj-***ABCDE\r"
+    ));
+    for line in [
+        "Not logged in",
+        "",
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602}}",
+        "Error: not logged in using ChatGPT",
+    ] {
+        assert!(!codex_says_logged_in(line), "{line}");
     }
+}
+
+#[test]
+fn codex_detection_reads_the_exit_code_the_line_and_the_stat() {
+    assert!(codex_logged_in(Some(0), true));
+    for exit in [Some(1), Some(2), None] {
+        assert!(!codex_logged_in(exit, true));
+        assert!(!codex_logged_in(exit, false));
+    }
+    // Exit 0 with no signed-in line (codex-acp's adapter run by mistake) is not signed in.
+    assert!(!codex_logged_in(Some(0), false));
     let email = || Some("test@example.com".to_owned());
     let table = [
-        (Some(0), true, CodexDetect::Reusable),
-        (Some(0), false, CodexDetect::Keyring),
-        (Some(1), true, CodexDetect::SignedOut),
-        (None, false, CodexDetect::SignedOut),
+        (true, true, CodexDetect::Reusable),
+        (true, false, CodexDetect::Keyring),
+        (false, true, CodexDetect::SignedOut),
+        (false, false, CodexDetect::SignedOut),
     ];
-    for (exit, present, want) in table {
-        assert_eq!(CodexDetect::classify(exit, present), want);
+    for (logged_in, present, want) in table {
+        assert_eq!(CodexDetect::classify(logged_in, present), want);
     }
     assert_eq!(
         CodexDetect::Reusable.state(email()),

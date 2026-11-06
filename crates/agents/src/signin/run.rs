@@ -38,7 +38,8 @@ const LINE_MAX: usize = 16 * 1024;
 pub(crate) struct RunSpec {
     /// Node: `Installed::node`.
     pub(crate) node: PathBuf,
-    /// The script Node runs: the adapter's (`--cli`, Claude) or `codex.js` (Codex).
+    /// The script Node runs, `SigninJob::script`: the adapter's (`--cli`, Claude) or the Codex
+    /// CLI's `codex.js` in the install (Codex), never codex-acp's adapter.
     pub(crate) script: PathBuf,
     /// The arguments after the script.
     pub(crate) args: Vec<OsString>,

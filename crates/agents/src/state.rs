@@ -2,8 +2,9 @@
 //! [`AgentsEvent`]s, and the [`Installed`] adapter R20 turns into the `agents.<id>` settings
 //! entry.
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
+use clauseo_codex_appserver::codex_js_candidates;
 use clauseo_protocol::AgentId;
 
 use crate::log::InstallLog;
@@ -152,4 +153,46 @@ pub struct Installed {
     pub folder: PathBuf,
     /// The adapter's version.
     pub version: String,
+}
+
+impl Installed {
+    /// The Codex CLI's `codex.js` in this install, which every Codex sign-in, status, logout and
+    /// `app-server` run uses: `script` is codex-acp's ACP adapter, which ignores those commands
+    /// and exits 0. The candidates are `codex_appserver`'s [`codex_js_candidates`], the layout
+    /// `limits`' reader follows too (the adapter package's own `node_modules`, then the install
+    /// folder's), always inside `folder`, never beside Node, which may be the user's own. The
+    /// first that is a regular file reached through no link below `folder` is it. `None` when
+    /// none is: the job then fails rather than run the adapter.
+    pub(crate) fn codex_cli(&self) -> Option<PathBuf> {
+        codex_js_candidates(&self.folder, &self.script)
+            .into_iter()
+            .find(|candidate| regular_file_below(&self.folder, candidate))
+    }
+}
+
+/// Whether `file` is a regular file inside `folder` with no link from `folder` down to it.
+fn regular_file_below(folder: &Path, file: &Path) -> bool {
+    let Ok(rest) = file.strip_prefix(folder) else {
+        return false;
+    };
+    let mut path = folder.to_path_buf();
+    let mut parts = rest.components().peekable();
+    while let Some(part) = parts.next() {
+        let Component::Normal(part) = part else {
+            return false;
+        };
+        path.push(part);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            return false;
+        };
+        let fits = if parts.peek().is_some() {
+            meta.is_dir()
+        } else {
+            meta.is_file()
+        };
+        if !fits {
+            return false;
+        }
+    }
+    true
 }

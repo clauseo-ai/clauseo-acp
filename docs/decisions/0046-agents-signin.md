@@ -113,7 +113,10 @@ its own stderr ring for `ExitReport::stderr_tail`, and S18 never reads it.
   `firstParty` gives `LoginFound { from: ClaudeCode, email }`. Any other signed-in
   `authMethod`, or `claude.ai` with another provider, gives `SignedOut { found: ClaudeSettings }`.
 - In Clauseo's own folder, `loggedIn: true` is signed in, whatever the `authMethod`.
-- Codex: `login status` exit 0 is signed in. Then the stat of the lawyer's login file decides
+- Codex: `login status` exit 0 with its `Logged in using …` line is signed in; a sign-in or a
+  status check is `SignedIn` only once `account/read` then names an account (a JSON-RPC error,
+  `account: null` or no answer confirms nothing; only a sign-in the lawyer started then fails,
+  and a status check never sends `Failed`). Then the stat of the lawyer's login file decides
   between reusable and `CodexKeyring`.
 - `account/read`: only a `chatgpt` account gives an email and plan.
 - `is_sign_in_again(error_text)` is true when the text names `refresh_token_reused`,
@@ -289,7 +292,10 @@ nudge, expiry, Cancel, paste, sign-out) is the same.
 
 ### Codex's sign-in
 
-**The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` with the Own environment
+**The runs.** `node <install>/node_modules/@openai/codex/bin/codex.js` (the adapter package's own
+`node_modules` first, then the install's; `Installed::codex_cli`, never the install's `script`,
+which is codex-acp's ACP adapter and exits 0 for any arguments; missing, a sign-in fails and runs
+nothing) with the Own environment
 (`CODEX_HOME` and, on macOS and Linux, `HOME` set to the agent's home; `CODEX_API_KEY=""`;
 `SSL_CERT_FILE` for the agent's CA; `HTTPS_PROXY`), in the home, and
 `-c cli_auth_credentials_store="file"` before the subcommand, where Codex takes its `-c`
@@ -297,7 +303,8 @@ overrides:
 - `login` (`Method::Browser`), 10 minute limit;
 - `login --device-auth` (`Method::DeviceCode`), 20 minute limit, so the code's own 15 minutes
   end it first;
-- `login status`, 5 s limit, exit code only (its output is never read);
+- `login status`, 5 s limit: signed in only on exit 0 with its `Logged in using …` line on
+  stderr (the line is checked, never kept); `Not logged in` exits 1;
 - `logout`, 30 s limit;
 - `app-server`, 10 s limit, with `limits`' six `-c` overrides as well (plugins off stops its
   start-up git sync, #203). It is asked `initialize` and `account/read` through
@@ -419,7 +426,7 @@ is set to 0700 as well, as `make_home` does. `agents` itself does not depend on 
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` or `CODEX_HOME`, the lawyer's `HOME`, no
 `cli_auth_credentials_store`. Its working folder is the empty `<data_dir>/agents/signin/detect`.
 - Claude: `--cli auth status --json`, read by `status::claude_detection`.
-- Codex: `login status`, exit code only. Exit 0 is followed by a `symlink_metadata` of the
+- Codex: `login status`, exit 0 with its signed-in line. That is followed by a `symlink_metadata` of the
   lawyer's `~/.codex` login file: present is `LoginFound` (with `account/read`, same
   environment, same folder), absent is `CodexKeyring`. An `account/read` that gets no answer
   (cut short by Cancel or its 10 s limit, or an error reply) is "could not tell", never "no

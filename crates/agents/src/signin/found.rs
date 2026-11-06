@@ -9,7 +9,10 @@
 //!   email (else `ReusedChanged`, or `ReusedSignedOut` when it is signed out) and the status
 //!   under the session's environment is signed in (else the run-time fallback). Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
-//!   `ReusedSignedOut` when the lawyer's file is gone).
+//!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
+//!   confirms the account (`codex::confirm`; signed out is `ReusedSignedOut` too).
+//! - Codex's status confirming nothing either way leaves the state as it is, never `Failed`;
+//!   a `SignedIn` it no longer confirms becomes `SignedOut` ([`unconfirmed`]).
 //! - otherwise Clauseo's own login: "A Clauseo-owned login, once made, wins over reuse."
 //! - otherwise, unless `no-reuse` is there, detection (`super::detect`): `LoginFound`, or
 //!   `SignedOut` with what was seen.
@@ -21,6 +24,7 @@
 
 use clauseo_process::Timer;
 
+use crate::signin::codex::Confirmation;
 use crate::signin::detect::{self, Detected};
 use crate::signin::env::{RunKind, Vendor};
 use crate::signin::job::SigninJob;
@@ -171,23 +175,29 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
         if let Some(why) = reuse::codex_link_holds(&job.home, &lawyer).found() {
             return Some(stop(job, Some(why)).await);
         }
+        // The marker and the link say only that the login was chosen; Codex's own status
+        // through its CLI must still confirm it.
         let reused = RunKind::Reused { home: &job.home };
-        let identity = codex::identity::read_as(job, cancel, reused, &job.home)
-            .await
-            .unwrap_or_default();
-        let accepted = match source {
-            Some(LoginSource::Reused { email }) => email,
-            _ => None,
+        return match codex::confirm(job, cancel, reused, &job.home).await {
+            Confirmation::Confirmed(identity) => {
+                let accepted = match source {
+                    Some(LoginSource::Reused { email }) => email,
+                    _ => None,
+                };
+                Some(reused_signed_in(
+                    job,
+                    identity.email.or(accepted),
+                    identity.plan,
+                ))
+            }
+            Confirmation::SignedOut => Some(stop(job, Some(Found::ReusedSignedOut)).await),
+            Confirmation::Unknown => unconfirmed(job),
         };
-        return Some(reused_signed_in(
-            job,
-            identity.email.or(accepted),
-            identity.plan,
-        ));
     }
-    if codex::status(job, cancel).await? {
-        let identity = codex::identity::read(job, cancel).await;
-        return Some(codex::signed_in(job, identity));
+    match codex::confirm(job, cancel, RunKind::Own { home: &job.home }, &job.home).await {
+        Confirmation::Confirmed(identity) => return Some(codex::signed_in(job, identity)),
+        Confirmation::SignedOut => {}
+        Confirmation::Unknown => return unconfirmed(job),
     }
     if marker::no_reuse(&job.config.data_dir, &job.ticket.agent) {
         return Some(SigninState::SignedOut {
@@ -195,6 +205,16 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
         });
     }
     Some(detect::codex(job, cancel).await?.state)
+}
+
+/// The status check's answer when Codex's status confirmed nothing either way (no answer, no
+/// signed-in line, no account): the state is left as it is (`None`), never `Failed`, since
+/// no lawyer started this; but a `SignedIn` nothing confirms any more becomes `SignedOut`.
+pub(crate) fn unconfirmed<T>(job: &SigninJob<T>) -> Option<SigninState> {
+    job.shared
+        .signin
+        .source(&job.ticket.agent)
+        .map(|_| SigninState::SignedOut { found: None })
 }
 
 /// `find_login` (UD2's "Look for my … login"): "deletes `no-reuse` and detects again", through
