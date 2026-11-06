@@ -597,8 +597,12 @@ changes (`setup/identity.rs`).
   `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
   anything compares it, so a new account chosen in Clauseo never reads as a swap. The sign-in
   counts as under way for its run's own bound at most (`clauseo_agents::sign_in_limit`: 10
-  minutes for Claude, 20 for Codex's device code), moved on at each running state; past it the
-  agent is checked as any other. **Any other `SignedIn` is compared:** one from S18's status
+  minutes for Claude, 20 for Codex's device code), moved on at each running state, each time
+  with the login files' stamps then. No check runs while it is under way, but the gate and the
+  watcher keep their stat: a change of those stamps sets `agent.identity_checking` (on a verdict
+  that refused nothing) and holds it until the sign-in's record lands, which holds for the
+  stamps from before its confirming status read, so the next look checks the write. A record
+  that never lands, because the bound passes first, gives `agent.identity_unknown` and a check. **Any other `SignedIn` is compared:** one from S18's status
   check (at start, or when a window shows Plans) naming another account is a change. Before R17
   the pump took such a state as a new sign-in and restarted the agents on it.
 - *First run: trusted on first use, only before any launch.* With no `identity.json` (every
@@ -639,16 +643,33 @@ changes (`setup/identity.rs`).
   queued together ask for one check), then the status, bounded by 20 s. The same account lifts
   the identity's refusal and no other (a policy's or an unreadable key's stays in force over
   it); a status that failed, timed out or named no account while one is recorded sets
-  `agent.identity_unknown` (checked again every 30 s); another account sets
+  `agent.identity_unknown` (checked again every 30 s only after a status that failed or timed
+  out; otherwise when a login file changes); after a sign-out through Clauseo, no account is
+  the signed-out state instead (below); another account sets
   `signin.account_changed`, then `stop_agents_for(agent, StopFor::SignInAgain)`, then shows
   `SignIn::Failed { code: signin.account_changed }`. The host's hold stays until a sign-in
   through Clauseo records an account again and `restart_agents` runs, so a prompt to the agent
   meanwhile, in any thread, queues held as `sign_in` rather than failing, and runs then. A reused
   login also gets S18's status check, which ends the reuse as `ReusedChanged`. A refusal the host
   cannot be told (the call fails twice) is logged as an error and told again at each look until
-  it lands; the stop's hold covers a changed account meanwhile. A panic in the setup thread's
-  followers sets `agent.identity_unknown` on every watched agent and starts them again (three
-  times at most; past that the refusals stay until Clauseo restarts).
+  it lands; the stop's hold covers a changed account meanwhile.
+- *A sign-out through Clauseo* (`SignOut`) keeps the record, so a different account coming
+  back reads as changed. Its verdict is signed out: nothing refused by the identity check (a
+  launch meets the agent's own sign-in refusal, `agent.auth_required`, never
+  `agent.identity_unknown`), no 30 s timer, and the stat watches for a login file coming back,
+  which checks. One status run confirms the file's going.
+- *A panic in the setup thread's followers* (debug and test builds only: the workspace's
+  `[profile.release]` sets `panic = "abort"`, so in a release build a panic there, or in the
+  launch gate, aborts the app, and none of what follows runs; the gate is written not to panic).
+  Each panic sets `agent.identity_unknown` on every watched agent and starts the followers again,
+  three times at most. After the third restart's panic the identity check is dead: a flag pins
+  every agent on the shared login at `agent.identity_unknown` (a changed one keeps
+  `signin.account_changed`), so neither the pump nor a record can lift it, the gate refuses
+  them all, and one error line says so, until Clauseo restarts. Agents with a key login are not
+  refused.
+- *If the setup host thread fails to start* (`setup/start.rs`), nothing runs the checks a
+  start, a stamp change or a launch asks for, so every login whose check is due stays waiting
+  at `agent.identity_checking`: it fails closed.
 - *A key login is not checked* (the orchestrator's ruling, 2026-11-06; narrowed by the security
   review's H3). Only when the launch env the launch hook builds (`setup_vars`) carries a
   credential that replaces the shared login: the API key variable the hook sets from Clauseo's
@@ -664,16 +685,18 @@ changes (`setup/identity.rs`).
 
   | State | Watched | Timer | Refuses |
   |---|---|---|---|
-  | Idle, an account recorded (signed out) | yes | macOS Claude, 10 min | no |
+  | Idle, an account recorded (signed out outside Clauseo) | yes | macOS Claude, 10 min | no |
   | Idle, nothing recorded (not signed in) | yes | no | no |
+  | Signed out through Clauseo (account still recorded) | yes | macOS Claude, 10 min | no (the agent's own `agent.auth_required`) |
   | Same | yes | macOS Claude, 10 min | no |
-  | Unknown | yes | every 30 s | `agent.identity_unknown` |
+  | Unknown | yes | every 30 s after a failed or timed-out status, else no | `agent.identity_unknown` |
   | Due | yes | no (a launch or the startup asks) | `agent.identity_checking` |
   | Checking | at the next look, against the stamps before its read | no | `agent.identity_checking` |
   | Changed | no | no | `signin.account_changed`, until a sign-in records |
   | KeyLogin | no | no | no |
   | First run (start, nothing recorded) | as Due | no | `agent.identity_checking`, until its startup check |
-  | Pending sign-in through Clauseo | no, until it ends or its bound passes | no | as its state |
+  | Pending sign-in through Clauseo | by stat: a change refuses until the record lands; no check | no (its bound passing: unknown, and a check) | as its state, or `agent.identity_checking` once its files moved |
+  | Dead (followers panicked past three restarts; debug and test builds) | no | no | `agent.identity_unknown`, every agent on the shared login |
 
 - *At start.* Every agent waits (`agent.identity_checking`) until its startup check answers; a
   record that cannot be read counts as unknown for every agent with a login (refused,
@@ -682,16 +705,28 @@ changes (`setup/identity.rs`).
 - *The record's hash.* Plain SHA-256 of the email or id, no salt: a dictionary of emails would
   reverse it, which is acceptable on a single-user machine, where Claude's own config already
   holds the email in plain text. `identity.json` goes into no diagnostics bundle. A missing
-  `identity.json` reads as a first run, which is fail-open only in theory: sessions cannot
-  write the data folder.
+  `identity.json` reads as a first run. Sessions will be denied writes to `<data_dir>/agents/`
+  once the sandbox's enforcement lands (S14/S15, 0051 PR-D/E); today it is not enforced at
+  launch (`clauseo_sandbox`'s `detect.rs` reports `NotBuilt`), so see the known gap below.
 - **Known gap (R17).** The code is public, so assume an attacker knows the check.
   - *Token-only swap.* Codex's `account/read` reads the email from the stored `id_token`
     without contacting the server. Swapping the access and refresh tokens while keeping the
-    `id_token` passes the check until Codex's next refresh. Claude is unverified.
+    `id_token` passes the check until Codex's next refresh, and the attacker controls when that
+    is: the file's `last_refresh` decides it, so it can be put off by days. Claude is presumed
+    open: its status email likely comes from `.claude.json`, which a swap doesn't touch.
+  - *The data folder, until the sandbox is enforced.* Until S14/S15's enforcement lands (0051
+    PR-D/E), a session could delete or rewrite `identity.json`. During a run the in-memory
+    record still catches a swap. Across a restart, the startup check would trust a swapped
+    account: a missing record reads as a first run, and a rewritten one as the record. No cheap
+    marker shows an agent was signed in on the shared login before (`key-stored.json` marks
+    stored keys, which are not checked), so nothing tells a deleted record from a first run.
   - *Windows `ChangeTime`.* It can be set through `SetFileInformationByHandle`, so a write
     with all its times restored, and the same length, can go unseen on Windows.
-  - *The window of a sign-in.* Between the login tool writing the file and the sign-in's
-    confirming status run, a swap is recorded as the account signed in.
+  - *The window of a sign-in.* The record trusts the account the sign-in's confirming status
+    read names. Launches are refused once the login files move during the sign-in, so no new
+    session starts on a written login; what remains is a write by a session already running (or
+    anything else) between the stamps taken at the sign-in's last running state and that read:
+    it is recorded as the account signed in.
   - *Closing them.* Both of the first two close with a forced refresh on the check
     (`account/read` with `refreshToken: true`), once stage B's proof shows running sessions in
     two matters survive it without `refresh_token_reused`: a row on the release checklist. For
