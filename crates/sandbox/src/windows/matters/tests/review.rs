@@ -1,6 +1,6 @@
 //! The S15 `PR4c` review's defects, each as a test that failed before its fix.
 
-use super::pool::{full, ledger_in, ledger_naming, ledger_of, pool, reread, sids_in, user};
+use super::pool::{Launch, full, ledger_in, ledger_naming, ledger_of, pool, reread, sids_in, user};
 use super::*;
 use crate::windows::pool::assign::Why;
 use crate::windows::set_aside::{SET_ASIDE_DIR, open_session};
@@ -36,17 +36,17 @@ fn a_user_owning_a_set_aside_item_is_held_back() {
     manifest(&temp, gone, &one_entry(gone, &item, &owner));
     let none = OpenSessions::default();
     let mut sids = sids_in(&temp);
-    let got = sids.assign(&new, &pool(1), reread(&ledger), &none);
+    let got = sids.launch(&new, &pool(1), reread(&ledger), &none);
     assert_eq!(got, Err(full(1, vec![(user(1), Why::SetAside)])));
     // Another user is free.
     assert_eq!(
-        sids.assign(&new, &pool(2), reread(&ledger), &none),
+        sids.launch(&new, &pool(2), reread(&ledger), &none),
         Ok(user(2))
     );
     let other = matter();
     write::remove_owned_file(&item).unwrap();
     assert_eq!(
-        sids.assign(&other, &pool(2), reread(&ledger), &none),
+        sids.launch(&other, &pool(2), reread(&ledger), &none),
         Ok(user(1))
     );
 
@@ -61,7 +61,7 @@ fn a_user_owning_a_set_aside_item_is_held_back() {
         one_entry(gone, &item, "7"),
     ] {
         manifest(&temp, gone, &bad);
-        let got = sids_in(&temp).assign(&new, &pool(2), reread(&ledger), &none);
+        let got = sids_in(&temp).launch(&new, &pool(2), reread(&ledger), &none);
         assert_eq!(got, Err(full(2, both.clone())), "{bad}");
     }
 
@@ -71,7 +71,7 @@ fn a_user_owning_a_set_aside_item_is_held_back() {
         user(1)
     );
     manifest(&temp, gone, &begun);
-    let got = sids_in(&temp).assign(&new, &pool(1), reread(&ledger), &none);
+    let got = sids_in(&temp).launch(&new, &pool(1), reread(&ledger), &none);
     assert_eq!(got, Err(full(1, vec![(user(1), Why::SetAside)])));
 }
 
@@ -86,11 +86,11 @@ fn assign_reads_the_ledger_inside_the_lock_and_release_waits_for_sessions() {
     // Recorded after `stale` was read.
     ledger_naming(&records, one, &user(1));
     assert!(!stale.names_sid(&user(1)), "the caller's read is stale");
-    let got = sids_in(&temp).assign(&new, &pool(1), reread(&stale), &OpenSessions::default());
+    let got = sids_in(&temp).launch(&new, &pool(1), reread(&stale), &OpenSessions::default());
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Entries)])));
     // A loader that fails refuses the assignment.
     let failing = || Err(io::Error::other("no ledger"));
-    let got = sids_in(&temp).assign(&new, &pool(1), failing, &OpenSessions::default());
+    let got = sids_in(&temp).launch(&new, &pool(1), failing, &OpenSessions::default());
     assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
 
     let empty = TempDir::new("review-lock-empty");
@@ -98,7 +98,7 @@ fn assign_reads_the_ledger_inside_the_lock_and_release_waits_for_sessions() {
     let mut sids = sids_in(&temp);
     let none = OpenSessions::default();
     assert_eq!(
-        sids.assign(&one, &pool(1), reread(&empty), &none),
+        sids.launch(&one, &pool(1), reread(&empty), &none),
         Ok(user(1))
     );
     open_session(temp.path(), &one, "s1");
@@ -117,12 +117,12 @@ fn a_matters_earlier_users_stay_held_by_its_open_session() {
     let none = OpenSessions::default();
     let mut sids = sids_in(&temp);
     assert_eq!(
-        sids.assign(&one, &pool(2), reread(&ledger), &none),
+        sids.launch(&one, &pool(2), reread(&ledger), &none),
         Ok(user(1))
     );
     sids.release(&one, UNIX_EPOCH).unwrap();
     assert_eq!(
-        sids.assign(&one, &pool(2), reread(&ledger), &none),
+        sids.launch(&one, &pool(2), reread(&ledger), &none),
         Ok(user(2))
     );
     let row = &sids.rows()[&one];
@@ -137,7 +137,7 @@ fn a_matters_earlier_users_stay_held_by_its_open_session() {
         user(1).as_str()
     );
     let open = OpenSessions::new([one]);
-    let got = sids.assign(&new, &pool(2), reread(&ledger), &open);
+    let got = sids.launch(&new, &pool(2), reread(&ledger), &open);
     let want = full(2, vec![(user(1), Why::Open), (user(2), Why::Held(one))]);
     assert_eq!(got, Err(want));
 }
@@ -155,7 +155,7 @@ fn a_kept_handback_naming_a_user_under_another_key_holds_it_back() {
     let ledger = ledger_of(&records, &json);
     assert!(!ledger.handback_owed(&user(1)));
     assert!(ledger.names_sid(&user(1)));
-    let got = sids_in(&temp).assign(
+    let got = sids_in(&temp).launch(
         &matter(),
         &pool(1),
         reread(&ledger),

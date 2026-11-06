@@ -5,6 +5,7 @@ use crate::test_support::TempDir;
 
 mod pool;
 mod review;
+mod review2;
 
 /// A fresh matter id: a v7 UUID from random bytes, enough for distinct test matters.
 fn matter() -> MatterId {

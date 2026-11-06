@@ -7,6 +7,7 @@ use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::ledger_path;
 use crate::windows::pool::assign::{HeldBack, Why};
+use crate::windows::set_aside::{SET_ASIDE_DIR, open_session};
 
 /// Pool user `n`'s SID in these tests.
 pub(super) fn user(n: u32) -> Sid {
@@ -61,7 +62,66 @@ pub(super) fn reread(ledger: &Ledger) -> impl FnOnce() -> io::Result<Ledger> + '
 }
 
 pub(super) fn sids_in(temp: &TempDir) -> MatterSids {
-    MatterSids::load_with(temp.path(), Reserved::default()).unwrap()
+    let mut sids = MatterSids::load_with(temp.path(), Reserved::default()).unwrap();
+    sids.owner_of = fake_owner;
+    sids
+}
+
+/// The lawyer's SID, owner of every test file not named for a pool user.
+pub(super) const LAWYER: &str = "S-1-5-21-7-8-9-1001";
+
+/// The tests' owners, by name: `pool-<n>` is owned by pool user `n`, `unreadable` has an owner
+/// that can't be read, and anything else is the lawyer's.
+pub(super) fn fake_owner(path: &Path) -> io::Result<Sid> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if name == "unreadable" {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
+    match name.strip_prefix("pool-").and_then(|n| n.parse().ok()) {
+        Some(n) => Ok(user(n)),
+        None => Ok(Sid::parse(LAWYER).unwrap()),
+    }
+}
+
+/// Removes every open session of `matter`: its set-aside record.
+pub(super) fn close_sessions(data_dir: &Path, matter: &MatterId) {
+    let record = data_dir
+        .join(SANDBOX_DIR)
+        .join(SET_ASIDE_DIR)
+        .join(matter.to_string())
+        .join("record.json");
+    write::remove_owned_file(&record).unwrap();
+}
+
+/// A launch as the rule wants it: its session marked open, then `assign`; the session is
+/// closed again after, so a later `release` isn't refused.
+pub(super) trait Launch {
+    fn launch(
+        &mut self,
+        matter: &MatterId,
+        pool: &[Sid],
+        ledger: impl FnOnce() -> io::Result<Ledger>,
+        open: &OpenSessions,
+    ) -> Result<Sid, Assign>;
+}
+
+impl Launch for MatterSids {
+    fn launch(
+        &mut self,
+        matter: &MatterId,
+        pool: &[Sid],
+        ledger: impl FnOnce() -> io::Result<Ledger>,
+        open: &OpenSessions,
+    ) -> Result<Sid, Assign> {
+        let data_dir = self.data_dir.clone();
+        open_session(&data_dir, matter, "launch");
+        let got = self.assign(matter, pool, ledger, open);
+        close_sessions(&data_dir, matter);
+        got
+    }
 }
 
 /// `secs` seconds after the Unix epoch.
@@ -91,20 +151,20 @@ fn each_reason_holds_a_user_back() {
     // Held: another matter holds it.
     let temp = TempDir::new("pool-reasons-held");
     let mut sids = sids_in(&temp);
-    sids.assign(&one, &pool, reread(&empty), &none_open())
+    sids.launch(&one, &pool, reread(&empty), &none_open())
         .unwrap();
-    let got = sids.assign(&new, &pool, reread(&empty), &none_open());
+    let got = sids.launch(&new, &pool, reread(&empty), &none_open());
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Held(one))])));
 
     // Open: released, but the matter that held it has an open session.
     sids.release(&one, at(10)).unwrap();
     let open = OpenSessions::new([one]);
-    let got = sids.assign(&new, &pool, reread(&empty), &open);
+    let got = sids.launch(&new, &pool, reread(&empty), &open);
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Open)])));
     // Another matter's open session doesn't hold it.
     let other_open = OpenSessions::new([two]);
     assert_eq!(
-        sids.assign(&new, &pool, reread(&empty), &other_open),
+        sids.launch(&new, &pool, reread(&empty), &other_open),
         Ok(user(1))
     );
 
@@ -112,14 +172,14 @@ fn each_reason_holds_a_user_back() {
     let temp = TempDir::new("pool-reasons-owed");
     let owed = TempDir::new("pool-reasons-owed-ledger");
     let ledger = ledger_owing(&owed, &one.to_string(), &user(1));
-    let got = sids_in(&temp).assign(&new, &pool, reread(&ledger), &none_open());
+    let got = sids_in(&temp).launch(&new, &pool, reread(&ledger), &none_open());
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Owed)])));
 
     // Entries: a ledger entry names it, in any state.
     let temp = TempDir::new("pool-reasons-entries");
     let named = TempDir::new("pool-reasons-entries-ledger");
     let ledger = ledger_naming(&named, two, &user(1));
-    let got = sids_in(&temp).assign(&new, &pool, reread(&ledger), &none_open());
+    let got = sids_in(&temp).launch(&new, &pool, reread(&ledger), &none_open());
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Entries)])));
 
     // Entries: a kept entry this version can't read names it too.
@@ -132,7 +192,7 @@ fn each_reason_holds_a_user_back() {
         ),
     );
     assert_eq!(ledger.set_aside_entries(), 1);
-    let got = sids_in(&temp).assign(&new, &pool, reread(&ledger), &none_open());
+    let got = sids_in(&temp).launch(&new, &pool, reread(&ledger), &none_open());
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Entries)])));
     assert!(
         sids_in(&temp).is_empty(),
@@ -150,9 +210,9 @@ fn a_kept_owed_entry_holds_a_user_back() {
         "the hand-back is kept, not trusted"
     );
     let mut sids = sids_in(&temp);
-    let first = sids.assign(&matter(), &pool(2), reread(&ledger), &none_open());
+    let first = sids.launch(&matter(), &pool(2), reread(&ledger), &none_open());
     assert_eq!(first, Ok(user(1)));
-    let got = sids.assign(&matter(), &pool(2), reread(&ledger), &none_open());
+    let got = sids.launch(&matter(), &pool(2), reread(&ledger), &none_open());
     let held = sids.rows().keys().next().copied().unwrap();
     let want = full(2, vec![(user(1), Why::Held(held)), (user(2), Why::Owed)]);
     assert_eq!(got, Err(want));
@@ -166,11 +226,11 @@ fn a_released_user_goes_to_another_matter() {
     let (one, two) = (matter(), matter());
     let mut sids = sids_in(&temp);
     assert_eq!(
-        sids.assign(&one, &pool(1), reread(&ledger), &none_open()),
+        sids.launch(&one, &pool(1), reread(&ledger), &none_open()),
         Ok(user(1))
     );
     assert!(
-        sids.assign(&two, &pool(1), reread(&ledger), &none_open())
+        sids.launch(&two, &pool(1), reread(&ledger), &none_open())
             .is_err()
     );
     assert_eq!(sids.release(&one, at(1)), Ok(true));
@@ -186,7 +246,7 @@ fn a_released_user_goes_to_another_matter() {
     );
     assert_eq!(row.released_at, Some(1));
     assert_eq!(
-        sids.assign(&two, &pool(1), reread(&ledger), &none_open()),
+        sids.launch(&two, &pool(1), reread(&ledger), &none_open()),
         Ok(user(1))
     );
     let again = sids_in(&temp);
@@ -206,7 +266,7 @@ fn never_used_users_go_first_then_the_longest_free() {
     let (fourth, fifth) = (matter(), matter());
     for (m, want) in [(first, 1), (second, 2)] {
         assert_eq!(
-            sids.assign(&m, &pool(3), reread(&ledger), &none_open()),
+            sids.launch(&m, &pool(3), reread(&ledger), &none_open()),
             Ok(user(want))
         );
     }
@@ -214,16 +274,16 @@ fn never_used_users_go_first_then_the_longest_free() {
     sids.release(&first, at(200)).unwrap();
     // User 3 was never used, so it goes before both released ones.
     assert_eq!(
-        sids.assign(&third, &pool(3), reread(&ledger), &none_open()),
+        sids.launch(&third, &pool(3), reread(&ledger), &none_open()),
         Ok(user(3))
     );
     // Then user 2, free since 100, before user 1, free since 200.
     assert_eq!(
-        sids.assign(&fourth, &pool(3), reread(&ledger), &none_open()),
+        sids.launch(&fourth, &pool(3), reread(&ledger), &none_open()),
         Ok(user(2))
     );
     assert_eq!(
-        sids.assign(&fifth, &pool(3), reread(&ledger), &none_open()),
+        sids.launch(&fifth, &pool(3), reread(&ledger), &none_open()),
         Ok(user(1))
     );
 }
@@ -247,16 +307,16 @@ fn a_full_pool_names_every_user_held_back_and_why() {
     let mut sids = sids_in(&temp);
     // User 1 held; user 4 held, then released by a matter with an open session.
     assert_eq!(
-        sids.assign(&holder, &pool(1), reread(&empty), &none_open()),
+        sids.launch(&holder, &pool(1), reread(&empty), &none_open()),
         Ok(user(1))
     );
     let pool4 = [user(4)];
     assert_eq!(
-        sids.assign(&gone, &pool4, reread(&empty), &none_open()),
+        sids.launch(&gone, &pool4, reread(&empty), &none_open()),
         Ok(user(4))
     );
     sids.release(&gone, at(5)).unwrap();
-    let got = sids.assign(&new, &pool(4), reread(&ledger), &OpenSessions::new([gone]));
+    let got = sids.launch(&new, &pool(4), reread(&ledger), &OpenSessions::new([gone]));
     let want = full(
         4,
         vec![
@@ -286,7 +346,7 @@ fn a_version_1_file_is_upgraded_on_the_next_write() {
     let empty = TempDir::new("pool-v1-ledger");
     let ledger = ledger_in(empty.path(), &pool(1));
     assert_eq!(
-        sids.assign(&a, &pool(1), reread(&ledger), &none_open()),
+        sids.launch(&a, &pool(1), reread(&ledger), &none_open()),
         Ok(user(1))
     );
     let text = std::fs::read_to_string(&path).unwrap();
@@ -332,8 +392,9 @@ fn an_unreadable_file_is_refused_and_left_as_it_is() {
             reserved: Reserved::default(),
             rows: Rows::new(),
             lock_wait: None,
+            owner_of: fake_owner,
         };
-        let got = sids.assign(&matter(), &pool(2), reread(&ledger), &none_open());
+        let got = sids.launch(&matter(), &pool(2), reread(&ledger), &none_open());
         assert!(matches!(got, Err(Assign::Records(_))), "{bad}: {got:?}");
         assert!(sids.release(&a, at(1)).is_err(), "{bad}");
         assert!(sids.sid_for(&a).is_err(), "{bad}");
@@ -349,7 +410,7 @@ fn a_matter_keeps_its_user_across_calls() {
     let empty = ledger_in(records.path(), &pool(3));
     let mut sids = sids_in(&temp);
     assert_eq!(
-        sids.assign(&a, &pool(3), reread(&empty), &none_open()),
+        sids.launch(&a, &pool(3), reread(&empty), &none_open()),
         Ok(user(1))
     );
     let path = temp.path().join(SANDBOX_DIR).join(MATTERS_FILE);
@@ -358,13 +419,13 @@ fn a_matter_keeps_its_user_across_calls() {
     let ledger = ledger_naming(&records, a, &user(1));
     let open = OpenSessions::new([a]);
     assert_eq!(
-        sids.assign(&a, &pool(3), reread(&ledger), &open),
+        sids.launch(&a, &pool(3), reread(&ledger), &open),
         Ok(user(1))
     );
     let mut again = sids_in(&temp);
     assert_eq!(again.pool_user(&a), Some(&user(1)));
     assert_eq!(
-        again.assign(&a, &pool(3), reread(&ledger), &open),
+        again.launch(&a, &pool(3), reread(&ledger), &open),
         Ok(user(1))
     );
     assert_eq!(
@@ -381,6 +442,6 @@ fn a_matter_keeps_its_user_across_calls() {
         (Some(&sid), Some(&user(1)))
     );
     // A user the machine's pool no longer lists is refused, not swapped.
-    let got = again.assign(&a, &pool(3)[1..], reread(&ledger), &open);
+    let got = again.launch(&a, &pool(3)[1..], reread(&ledger), &open);
     assert!(matches!(got, Err(Assign::Records(_))), "{got:?}");
 }
