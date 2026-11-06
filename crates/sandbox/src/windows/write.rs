@@ -18,8 +18,10 @@ use std::time::Duration;
 /// already in place (`private_dir::create`: the desktop user, `SYSTEM` and `Administrators`
 /// with full access, nothing inherited); a folder already there is opened without following a
 /// link and secured through that handle (`private_dir::protect`: refused if a link,
-/// owner taken back or refused, the DACL set again). Files inside are checked one by one by the
-/// code that uses them ([`check_owned_file`]); nothing walks the folder.
+/// owner taken back or refused, the DACL set again). Elsewhere, where only tests use it, a link
+/// or anything but a folder at `path` is refused, as on Windows. Files inside are checked one by
+/// one by the code that uses them ([`check_owned_file`]); only `secrets.bin`'s store lists the
+/// folder, for its temp names, after this.
 pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -31,6 +33,12 @@ pub(crate) fn make_sandbox_dir(path: &Path) -> io::Result<()> {
     #[cfg(not(windows))]
     match std::fs::create_dir(path) {
         Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
+        Err(_) if !std::fs::symlink_metadata(path)?.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is a link or not a folder", path.display()),
+            ));
+        }
         _ => {}
     }
     Ok(())

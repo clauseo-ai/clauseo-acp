@@ -294,11 +294,12 @@ fn store_with(
     write_bytes: impl FnOnce(&mut File, &[u8]) -> io::Result<()>,
 ) -> Result<(), SecretError> {
     let file = path(data_dir);
-    remove_stale_temps(&file)?;
-    let new = merge(|| read(data_dir), secrets, pool, protect)?;
+    // The folder first: a link or junction there is refused before anything lists it.
     if let Some(folder) = file.parent() {
         write::make_sandbox_dir(folder).map_err(|error| io_error(&error))?;
     }
+    remove_stale_temps(&file)?;
+    let new = merge(|| read(data_dir), secrets, pool, protect)?;
     write::check_owned_file(&file).map_err(|error| io_error(&error))?;
     write::write_atomic_with(&file, &new.to_bytes()?, write_bytes)
         .map_err(|error| SecretError::Io(format!("{}: {error}", file.display())))?;
@@ -311,7 +312,9 @@ fn store_with(
 /// `write::write_atomic`'s temp name for `file` (`write::is_atomic_temp`). Each goes through
 /// `write::remove_owned_file`, so a link or a file with a second hard link is never followed
 /// or removed: it stays, and does no harm, since every write makes a new name. Nothing else in
-/// the folder is touched. A missing folder has nothing to remove.
+/// the folder is touched. A missing folder has nothing to remove. Called after
+/// `write::make_sandbox_dir`, which refuses a folder that is a link or a junction, so the
+/// listing never reads through one.
 #[cfg(any(windows, test))]
 fn remove_stale_temps(file: &Path) -> Result<(), SecretError> {
     let (Some(folder), Some(name)) = (file.parent(), file.file_name()) else {
