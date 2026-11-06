@@ -155,23 +155,42 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
   and since a tool call can echo what the agent was told, the host also withholds them from tool
   output. When the lawyer accepts a form, the host keeps the submitted strings in memory
   (zeroized when dropped) and writes `[withheld]` (`clauseo_protocol::WITHHELD`) in place of
-  each occurrence in later `tool_call_started` and `tool_call_updated` events: in `raw_input`,
-  `raw_output` (in the parsed JSON's string values and object keys, so escaping cannot hide a
-  value and the JSON stays valid), the title, and content text (text blocks, a resource's text,
-  a diff's old and new text). It does this before the inline or blob decision, so a blob is
-  scrubbed too. Matching is exact and case-sensitive, earliest match first, longest value at a
-  position.
-  - A form scoped to a tool call (the scope's `toolCallId`): every non-empty string, a string in
-    a list included, is withheld from that call until the call is `completed` or `failed` or the
-    turn ends.
-  - A form with no tool call scope: every string of 8 characters or more is withheld from every
-    tool call for the rest of the turn. Shorter strings ("Yes", "Fees") would blank ordinary
-    words in unrelated output. A turn can hold both kinds; a scoped call gets both.
-  - Numbers and booleans are not withheld: they cannot be told apart from other output. A
-    declined or cancelled form, and a URL elicitation, keep nothing.
-  - Not covered (residuals): another tool call that repeats a value from a scoped form, a short
-    value of an unscoped form, the agent's own message or thought text, an echo after the call
-    or the turn ended, and a value the agent transforms (encodes, splits, rewords).
+  each occurrence in later `tool_call_started` and `tool_call_updated` events, before the
+  inline or blob decision, so a blob is scrubbed too.
+  - Fields: every string field of the call and its content. That is the title, `tool_name`,
+    `locations` (an inside path that no longer makes a valid matter path becomes an outside
+    place: it loses its link), `raw_input` and `raw_output`, and in content a text block, a
+    diff's path and its old and new text, a resource link's `uri`, `name`, `mime_type`,
+    `title` and `description`, a resource's `uri`, `mime_type` and text, an image's
+    `uri` and `mime_type`, an audio block's `mime_type`, and an unsupported block's `kind`
+    and raw JSON. Not scrubbed: the agent's `toolCallId` (the host's key for the call) and
+    base64 data (an image's or audio's `data`, a resource's `blob`).
+  - JSON (`raw_input`, `raw_output`, an unsupported block's raw) is parsed and scrubbed in
+    its string values, its numbers and its object keys, then written back, so it stays valid.
+    Two keys that both become `[withheld]` stay apart: `[withheld]`, `[withheld] 2`, and so
+    on. A value whose trimmed text is a JSON number (`12345678`, `1.50`) also replaces an equal
+    JSON number with the string `"[withheld]"`.
+  - Forms matched, in every string field and JSON string or key: the value as typed; trimmed,
+    when that differs and is not empty; and of each, the JSON-escaped text (what `serde_json`
+    writes between the quotes, as found in JSON text nested in a string) and that text with
+    every non-ASCII char as `\uXXXX` (lower or upper hex, a char outside the BMP as its
+    surrogate pair, as Python's `ensure_ascii` writes it). Other escapings (mixed hex case, an
+    escaped `/`, `\u` for an ASCII char, HTML or URL encoding) are not matched. Matching is
+    exact and case-sensitive, earliest match first, longest form at a position.
+  - A form scoped to a tool call (the scope's `toolCallId`): every string of 3 characters or
+    more after trimming, a string in a list included, is withheld from that call until the call
+    is `completed` or `failed` or the turn ends.
+  - A form with no tool call scope: every string of 8 characters or more after trimming is
+    withheld from every tool call for the rest of the turn. Shorter strings ("Yes", "Fees")
+    would blank ordinary words in unrelated output. A turn can hold both kinds; a scoped call
+    gets both.
+  - Booleans and numbers the lawyer submits as numbers are not withheld: they cannot be told
+    apart from other output. A declined or cancelled form, and a URL elicitation, keep nothing.
+  - Not covered (residuals): another tool call that repeats a value from a scoped form; a value
+    under the minimum length (3 scoped, 8 unscoped); the agent's own message or thought text;
+    an echo after the call or the turn ended; a value the agent transforms (encodes otherwise,
+    splits, rewords). The scrub's cost grows with the output's size times the number of values
+    on the host's actor; the values come from the lawyer, so an agent cannot raise their count.
 - `DomainEvent` is what `store` accepts; `HostEvent` is what a subscriber receives and is never logged.
   Limit ticks stay out of the log; `store` keeps the last `AccountLimits` per account apart.
 
