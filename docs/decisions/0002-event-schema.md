@@ -195,7 +195,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
     (memory only, for the after-turn checkpoint and Undo) takes the calls as the agent sent
     them, so a file named after a value is still the agent's edit. Residual: restart recovery
     rebuilds that list from the scrubbed log, so after a crash mid-turn such a file shows in
-    Undo as `[withheld] …` and unticked.
+    Undo under its real name (it is on disk), unticked, as a possible lawyer's edit.
 - `DomainEvent` is what `store` accepts; `HostEvent` is what a subscriber receives and is never logged.
   Limit ticks stay out of the log; `store` keeps the last `AccountLimits` per account apart.
 
