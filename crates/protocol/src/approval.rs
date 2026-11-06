@@ -171,9 +171,14 @@ pub enum ElicitationResponse {
     Cancel,
 }
 
+/// What the host writes in a tool call's logged output in place of an elicitation value the
+/// call echoes (0002, `elicitation_resolved`), so the app can tell the gap from the agent's text.
+pub const WITHHELD: &str = "[withheld]";
+
 open_unit_enum! {
     /// How an elicitation ended. The values are never logged: they can hold secrets, and the
-    /// agent already has them.
+    /// agent already has them. A tool call that echoes them has them withheld from its logged
+    /// output too (`WITHHELD`; 0002, `elicitation_resolved`).
     pub enum ElicitationOutcome {
         /// The lawyer accepted and sent values.
         Accepted,

@@ -410,6 +410,7 @@ pub(super) fn on_elicitation(
     _session: &AgentSessionId,
     key: PendingKey,
     elicitation_id: Option<CompactString>,
+    acp_tool_call_id: Option<CompactString>,
     request: ElicitationRequest,
 ) {
     let live = current(actor, thread).is_some_and(|current| current.live());
@@ -434,6 +435,9 @@ pub(super) fn on_elicitation(
             if let Some(acp) = elicitation_id {
                 agent.url_elicitations.insert(acp, elicitation);
             }
+        }
+        if let Some(current) = current(actor, thread) {
+            current.withheld.requested(elicitation, acp_tool_call_id);
         }
         let event = ElicitationRequested {
             elicitation,

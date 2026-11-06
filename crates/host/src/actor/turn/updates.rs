@@ -119,8 +119,17 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             session,
             key,
             elicitation_id,
+            acp_tool_call_id,
             request,
-        } => asks::on_elicitation(actor, thread, &session, key, elicitation_id, request),
+        } => asks::on_elicitation(
+            actor,
+            thread,
+            &session,
+            key,
+            elicitation_id,
+            acp_tool_call_id,
+            request,
+        ),
         AcpEvent::ElicitationCompleted { elicitation_id } => {
             // The lawyer's answer already logged `ElicitationResolved`; nothing to log.
             if let Some(agent) = agent(actor, thread) {
@@ -319,7 +328,7 @@ fn tool_call(
     thread: ThreadId,
     context: Context,
     session: &AgentSessionId,
-    call: clauseo_acp::ToolCall,
+    mut call: clauseo_acp::ToolCall,
 ) -> Result<(), Error> {
     let known = known_tool(actor, thread, session, &call.acp_id);
     let Context::Live(turn) = context else {
@@ -333,6 +342,8 @@ fn tool_call(
         return Ok(());
     }
     if let Some(current) = current(actor, thread) {
+        // Before anything reads it: the sources, the paths and the build.
+        current.withheld.scrub_call(&mut call);
         current.tool_paths.note(&call.locations, &call.content);
     }
     let now = actor.clock.now();
@@ -392,7 +403,7 @@ fn tool_update(
     context: Context,
     session: &AgentSessionId,
     acp_id: &str,
-    patch: ToolCallPatch,
+    mut patch: ToolCallPatch,
 ) -> Result<(), Error> {
     let found = actor
         .loaded(StreamId::Thread(thread))
@@ -402,6 +413,14 @@ fn tool_update(
         tracing::debug!(%thread, %acp_id, "an update for an unknown tool call was dropped");
         return Ok(());
     };
+    if matches!(context, Context::Outside { replay: true }) {
+        return Ok(());
+    }
+    // The elicitation values withheld from this call (`withheld.rs`) go before anything reads
+    // the patch: the sources, the paths, and `build.rs`'s inline or blob decision.
+    if let Some(current) = current(actor, thread) {
+        current.withheld.scrub_patch(acp_id, &mut patch);
+    }
     let mut source = Vec::new();
     match context {
         Context::Outside { replay: true } => return Ok(()),

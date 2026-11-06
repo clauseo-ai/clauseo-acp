@@ -214,6 +214,7 @@ impl Inbound {
                         session: request.session,
                         key,
                         elicitation_id: request.elicitation_id,
+                        acp_tool_call_id: request.acp_tool_call_id,
                         request: request.request,
                     }
                 }
@@ -317,6 +318,8 @@ fn permission_paths(params: &Value) -> Vec<PathBuf> {
 struct CheckedElicitation {
     session: AgentSessionId,
     elicitation_id: Option<CompactString>,
+    /// The scope's `toolCallId`, when it names one.
+    acp_tool_call_id: Option<CompactString>,
     request: ElicitationRequest,
 }
 
@@ -358,9 +361,11 @@ fn elicitation(params: Value) -> Result<CheckedElicitation, agent_client_protoco
     };
     let session = AgentSessionId::new(&scope.session_id.0)
         .map_err(|error| invalid_params(&format!("sessionId: {error}")))?;
+    let acp_tool_call_id = scope.tool_call_id.map(|id| CompactString::from(&*id.0));
     Ok(CheckedElicitation {
         session,
         elicitation_id,
+        acp_tool_call_id,
         request,
     })
 }

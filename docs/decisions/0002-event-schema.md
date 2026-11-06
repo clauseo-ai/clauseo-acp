@@ -114,7 +114,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `permission_resolved` | request, choice, by, held_open? (0021) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
-| `elicitation_resolved` | elicitation, outcome, by (never the values) | host | yes | T |
+| `elicitation_resolved` | elicitation, outcome, by (never the values; see the paragraph after the table) | host | yes | T |
 | `elicitation_expired` | elicitation, reason | host | yes | T |
 | `plan_replaced` | entries | acp | yes | T |
 | `mode_changed` | mode_id | acp | yes | T |
@@ -151,6 +151,27 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
   field back to absent: a call that has a `tool_name`, `raw_input` or `raw_output` keeps one. A
   new tool-call field touches `ToolCallStarted`, `ToolCallPatch` and the view's `ToolCallEntry`,
   plus the reducer's merge.
+- Elicitation values stay out of Clauseo's record: `elicitation_resolved` never carries them,
+  and since a tool call can echo what the agent was told, the host also withholds them from tool
+  output. When the lawyer accepts a form, the host keeps the submitted strings in memory
+  (zeroized when dropped) and writes `[withheld]` (`clauseo_protocol::WITHHELD`) in place of
+  each occurrence in later `tool_call_started` and `tool_call_updated` events: in `raw_input`,
+  `raw_output` (in the parsed JSON's string values and object keys, so escaping cannot hide a
+  value and the JSON stays valid), the title, and content text (text blocks, a resource's text,
+  a diff's old and new text). It does this before the inline or blob decision, so a blob is
+  scrubbed too. Matching is exact and case-sensitive, earliest match first, longest value at a
+  position.
+  - A form scoped to a tool call (the scope's `toolCallId`): every non-empty string, a string in
+    a list included, is withheld from that call until the call is `completed` or `failed` or the
+    turn ends.
+  - A form with no tool call scope: every string of 8 characters or more is withheld from every
+    tool call for the rest of the turn. Shorter strings ("Yes", "Fees") would blank ordinary
+    words in unrelated output. A turn can hold both kinds; a scoped call gets both.
+  - Numbers and booleans are not withheld: they cannot be told apart from other output. A
+    declined or cancelled form, and a URL elicitation, keep nothing.
+  - Not covered (residuals): another tool call that repeats a value from a scoped form, a short
+    value of an unscoped form, the agent's own message or thought text, an echo after the call
+    or the turn ended, and a value the agent transforms (encodes, splits, rewords).
 - `DomainEvent` is what `store` accepts; `HostEvent` is what a subscriber receives and is never logged.
   Limit ticks stay out of the log; `store` keeps the last `AccountLimits` per account apart.
 

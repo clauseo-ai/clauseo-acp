@@ -40,6 +40,7 @@ mod undo;
 pub(crate) mod undo_preview;
 mod updates;
 pub(crate) mod wide;
+mod withheld;
 mod writer;
 
 use std::collections::VecDeque;
@@ -209,6 +210,9 @@ struct Current {
     started: std::time::Duration,
     /// When its first answer text came, on the same clock: `answer_ended.first_words`.
     first_words: Option<std::time::Duration>,
+    /// Elicitation values withheld from the turn's tool output (`withheld.rs`), zeroized when
+    /// the turn ends.
+    withheld: withheld::Withheld,
 }
 
 /// Where the prompt's task leaves the listing of the agent's descendants; `None` until it is

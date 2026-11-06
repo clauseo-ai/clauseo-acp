@@ -292,6 +292,8 @@ wire_types! {
 
 // Re-exports that are not wire types: constants, functions, and types that never cross the
 // boundary.
+// What stands in a tool call's logged output for an elicitation value it echoed.
+pub use approval::WITHHELD;
 pub use command::{
     MAX_CONNECTOR_ID_BYTES,
     MAX_DAY_START_SKEW_MS,
