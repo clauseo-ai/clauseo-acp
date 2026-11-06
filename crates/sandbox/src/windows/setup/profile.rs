@@ -38,16 +38,16 @@ pub fn profile_of(sid: &Sid) -> Result<Option<ProfileDir>, MachineError> {
 }
 
 /// Deletes `sid`'s profile: its folder and its `ProfileList` entry. Refuses, deleting nothing,
-/// unless `sid` passes [`check_pool`]: a local account of this machine, not built in, and not
-/// this process's user. Then stops every process whose token user is exactly `sid`; then
-/// `DeleteProfileW`, tried again for up to about three seconds while the profile service still
-/// holds the hive. No profile is `Ok`, so a re-run
-/// skips what is gone.
-pub fn delete_profile(sid: &Sid) -> Result<(), MachineError> {
+/// unless `sid` passes [`check_pool`]: a local account of this machine, not built in, not this
+/// process's user nor `owner` (the user who asked), and named as a pool user if it resolves.
+/// Then stops every process whose token user is exactly `sid`; then `DeleteProfileW`, tried
+/// again for up to about three seconds while the profile service still holds the hive. No
+/// profile is `Ok`, so a re-run skips what is gone.
+pub fn delete_profile(sid: &Sid, owner: &Sid) -> Result<(), MachineError> {
     let one = std::slice::from_ref(sid);
-    check_pool(one)?;
+    check_pool(one, owner)?;
     // A stop that fails still leaves the delete to try: it fails, named, if the hive is held.
-    match stop_pool_processes(one) {
+    match stop_pool_processes(one, owner) {
         Ok(stopped) if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() => {
             tracing::warn!(
                 failed = stopped.failed.len(),

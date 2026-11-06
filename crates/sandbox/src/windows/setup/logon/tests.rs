@@ -61,9 +61,9 @@ fn elevated() -> bool {
 
 /// Whether an elevated test may run here: an elevated token and `CLAUSEO_ELEVATED_TESTS=1`.
 ///
-/// The elevated tests assume CI's elevated step, which runs them one at a time
-/// (`--test-threads 1`): [`clear_leftovers`] deletes this family's accounts, so two of its
-/// tests running at once would delete each other's.
+/// The elevated tests assume they run one at a time, serial via `PR4e`'s nextest test group for
+/// `elevated_` tests: [`clear_leftovers`] deletes this family's accounts, so two of its tests
+/// running at once would delete each other's.
 fn gate(test: &str) -> bool {
     let asked = std::env::var("CLAUSEO_ELEVATED_TESTS").is_ok_and(|value| value == "1");
     if asked && elevated() {
@@ -121,6 +121,12 @@ fn delete_account(name: &str) {
     }
 }
 
+/// The owner the stop and the delete are given: this process's user, as in a set-up that
+/// isn't over the shoulder.
+fn me() -> Sid {
+    current_user_sid().unwrap()
+}
+
 /// Clears what a killed earlier try of this family left: every `ClauseoSbTL*` account with
 /// its profile, then any profile whose folder has that prefix and whose account is gone.
 fn clear_leftovers() {
@@ -132,7 +138,7 @@ fn clear_leftovers() {
             continue;
         };
         if let Ok(sid) = Sid::parse(sid) {
-            drop(delete_profile(&sid));
+            drop(delete_profile(&sid, &me()));
         }
         delete_account(name);
     }
@@ -143,7 +149,7 @@ fn clear_leftovers() {
     ));
     for line in profiles.lines() {
         if let Ok(sid) = Sid::parse(line.trim()) {
-            drop(delete_profile(&sid));
+            drop(delete_profile(&sid, &me()));
         }
     }
 }
@@ -158,12 +164,17 @@ struct TestUser {
 impl TestUser {
     /// Makes `ClauseoSbTL<6 hex>` in `Users`, with a random password meeting the complexity
     /// policy. The password reaches PowerShell on its standard input, never a command line.
+    fn new() -> TestUser {
+        TestUser::named(&random_hex(3))
+    }
+
+    /// Makes `ClauseoSbTL<suffix>` as [`TestUser::new`] does.
     #[expect(
         clippy::disallowed_methods,
         reason = "the tests make accounts with PowerShell"
     )]
-    fn new() -> TestUser {
-        let name = format!("{PREFIX}{}", random_hex(3));
+    fn named(suffix: &str) -> TestUser {
+        let name = format!("{PREFIX}{suffix}");
         assert!(name.len() <= 20, "{name}");
         let password = Password::new(format!("Aa1!{}", random_hex(12)));
         let script = format!(
@@ -199,7 +210,7 @@ impl TestUser {
 
 impl Drop for TestUser {
     fn drop(&mut self) {
-        if let Err(error) = delete_profile(&self.sid) {
+        if let Err(error) = delete_profile(&self.sid, &me()) {
             eprintln!("{}'s profile wasn't deleted: {error}", self.name);
         }
         delete_account(&self.name);
@@ -225,22 +236,49 @@ fn the_process_list_reads_this_process_and_its_user() {
 #[test]
 fn stopping_refuses_sids_that_cant_be_pool_users_and_stops_nothing_for_an_unused_one() {
     // Another domain's SID, a well-known SID, and this process's user are refused outright.
-    let me = current_user_sid().unwrap();
+    let own = current_user_sid().unwrap();
     for refused in [
         Sid::parse("S-1-5-21-1-2-3-4242").unwrap(),
         Sid::parse("S-1-5-18").unwrap(),
-        me,
+        own,
     ] {
-        let error = stop_pool_processes(std::slice::from_ref(&refused)).unwrap_err();
+        let error = stop_pool_processes(std::slice::from_ref(&refused), &me()).unwrap_err();
         assert!(error.to_string().contains(refused.as_str()), "{error}");
-        assert!(delete_profile(&refused).is_err());
+        assert!(delete_profile(&refused, &me()).is_err());
     }
-    // An unused account SID of this machine: nothing runs as it, so nothing is stopped.
+    // An unused account SID of this machine resolves to no account, so it passes: nothing runs
+    // as it, so nothing is stopped.
     let [a, b, c] = machine_domain().unwrap();
     let unused = Sid::parse(&format!("S-1-5-21-{a}-{b}-{c}-4000000000")).unwrap();
-    let stopped = stop_pool_processes(&[unused]).unwrap();
+    let stopped = stop_pool_processes(std::slice::from_ref(&unused), &me()).unwrap();
     assert_eq!(stopped, Stopped::default());
-    assert_eq!(stop_pool_processes(&[]).unwrap(), Stopped::default());
+    assert_eq!(stop_pool_processes(&[], &me()).unwrap(), Stopped::default());
+    // The same SID as the owner (an over-the-shoulder run, where the owner isn't this
+    // process's user) is refused.
+    let error = stop_pool_processes(std::slice::from_ref(&unused), &unused).unwrap_err();
+    assert!(error.to_string().contains("owner"), "{error}");
+    assert!(delete_profile(&unused, &unused).is_err());
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_an_account_not_named_as_a_pool_user_is_refused() {
+    if !gate("elevated_an_account_not_named_as_a_pool_user_is_refused") {
+        return;
+    }
+    clear_leftovers();
+    // `ClauseoSbTL`, five hex digits and a `g`: this family's prefix, so a leftover is
+    // cleared, but not a name the check takes as a pool user's.
+    let mut suffix = random_hex(3);
+    suffix.replace_range(5.., "g");
+    let other = TestUser::named(&suffix);
+    let error = stop_pool_processes(std::slice::from_ref(&other.sid), &me()).unwrap_err();
+    assert!(error.to_string().contains("isn't a pool user"), "{error}");
+    assert!(delete_profile(&other.sid, &me()).is_err());
+    // A name of the family's form passes.
+    let user = TestUser::new();
+    let stopped = stop_pool_processes(std::slice::from_ref(&user.sid), &me()).unwrap();
+    assert_eq!(stopped, Stopped::default());
 }
 
 #[test]
@@ -269,7 +307,7 @@ fn elevated_log_on_once_makes_a_profile_and_delete_profile_removes_it() {
     // A second logon finds the same profile.
     assert_eq!(log_on_once(&user.name, &user.password).unwrap(), profile);
 
-    delete_profile(&user.sid).unwrap();
+    delete_profile(&user.sid, &me()).unwrap();
     assert!(
         !Path::new(&profile.path).exists(),
         "{}",
@@ -277,7 +315,7 @@ fn elevated_log_on_once_makes_a_profile_and_delete_profile_removes_it() {
     );
     assert_eq!(profile_of(&user.sid).unwrap(), None);
     // Deleting what is gone is `Ok`, as a re-run needs.
-    delete_profile(&user.sid).unwrap();
+    delete_profile(&user.sid, &me()).unwrap();
 }
 
 #[test]
