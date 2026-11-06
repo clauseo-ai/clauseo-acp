@@ -285,6 +285,23 @@ impl Dir {
         self.start_launching(run, Arc::new(self.launcher()), adjust)
     }
 
+    /// As [`Dir::start_with`], `adjust` also given the run's clock, for a seam that shares it.
+    pub(crate) fn start_clocked(
+        &self,
+        run: u16,
+        adjust: impl FnOnce(HostConfig, &ManualClock) -> HostConfig,
+    ) -> Running {
+        let clock = Self::clock(run);
+        let (handle, join) = Host::start(adjust(self.config(run, &clock), &clock))
+            .unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
+        let join = Some(join);
+        Running {
+            handle,
+            join,
+            clock,
+        }
+    }
+
     /// As [`Dir::start_with`], launching agents through `launcher`.
     pub(crate) fn start_launching(
         &self,

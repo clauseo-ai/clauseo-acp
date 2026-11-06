@@ -476,5 +476,6 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
 
 mod admit;
 mod app;
+mod connectors;
 mod limits;
 mod permission;

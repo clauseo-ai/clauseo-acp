@@ -108,6 +108,13 @@ pub(super) fn dispatch(actor: &mut Actor, envelope: CommandEnvelope, reply: Repl
         }
     };
     let id = command.command_id();
+    // Connector commands store no receipt and their keys all hash alike, so an id one of them
+    // used is a conflict, never a join or a second run (`connectors.rs`, `UsedIds`).
+    if super::connectors::reused(actor, id, command.command()) {
+        let _gone = reply.send(Err(conflict(id)));
+        return;
+    }
+    super::connectors::record(actor, id, command.command());
     let hash = command_hash(command.command());
     if let Some(pending) = actor.commands.get_mut(&id) {
         if pending.hash == hash {
@@ -275,9 +282,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             actor.finish_command(ctx.id, Ok(CommandOutcome::Done));
         }
         // R24's connector commands: no receipt, ever (decision D2), since nothing here commits,
-        // so the API key never reaches the receipts table, not even as a hash. The connector
-        // state lands in a later PR; until then each is refused.
-        HostCommand::RestartAgent { .. } | HostCommand::Connector(_) => not_built(actor, ctx),
+        // so the API key never reaches the receipts table, not even as a hash.
+        HostCommand::Connector(command) => super::connectors::run(actor, ctx, command),
+        HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
         HostCommand::CheckForUpdate {} => super::update::command(actor, ctx, Asked::Check),
@@ -291,7 +298,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
     }
 }
 
-/// A command the host does not run yet (`RestartAgent`, the connector commands):
+/// A command the host does not run yet (`RestartAgent`):
 /// `command.invalid`, with no receipt.
 fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
     let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");

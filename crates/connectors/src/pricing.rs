@@ -176,6 +176,9 @@ pub(crate) fn liveness_from(status: u16, body: &[u8], mcp_url: &str, at: SystemT
 /// [`Connectors::liveness`](crate::Connectors::liveness): the cached answer while it is young
 /// enough, else one fetch of `pricing.json`.
 pub(crate) fn cached_liveness(shared: &Shared) -> Liveness {
+    // Asked before the cache's lock (wasted when the cache answers): a slow proxy lookup never
+    // holds every other liveness caller.
+    let route = shared.agent.route();
     let mut cache = lock(&shared.liveness);
     let now = shared.config.clock.now();
     if let Some(cached) = cache.as_ref()
@@ -192,8 +195,8 @@ pub(crate) fn cached_liveness(shared: &Shared) -> Liveness {
         }
     }
     let headers = [("Accept", "application/json")];
-    let fetched = http::send(
-        &shared.agent,
+    let fetched = http::send_on(
+        &route,
         "GET",
         &shared.pricing_url,
         &headers,

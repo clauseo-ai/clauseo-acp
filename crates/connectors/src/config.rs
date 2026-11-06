@@ -181,7 +181,7 @@ pub(crate) struct ConnectorUrls {
 }
 
 /// The proxy every request goes through.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum ProxyChoice {
     /// `HTTPS_PROXY` from the environment, until stage C's upstream lookup exists.
     Env,
@@ -189,7 +189,54 @@ pub enum ProxyChoice {
     Fixed(url::Url),
     /// No proxy.
     Direct,
+    /// Asked before every request, never by [`Connectors::new`](crate::Connectors::new), so
+    /// a slow lookup (a WPAD script, say) delays no app start and the route follows the
+    /// lookup's own cache. It answers `Direct` or `Fixed`; anything else, or
+    /// [`ProxyRefused`], fails that request without going around the proxy. A request whose
+    /// answer differs from the last one gets a new HTTP agent.
+    Resolve(ProxyResolver),
 }
+
+impl PartialEq for ProxyChoice {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ProxyChoice::Env, ProxyChoice::Env) | (ProxyChoice::Direct, ProxyChoice::Direct) => {
+                true
+            }
+            (ProxyChoice::Fixed(a), ProxyChoice::Fixed(b)) => a == b,
+            (ProxyChoice::Resolve(a), ProxyChoice::Resolve(b)) => Arc::ptr_eq(&a.0, &b.0),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ProxyChoice {}
+
+/// The lookup behind [`ProxyChoice::Resolve`]. Blocking is fine: it runs on the caller of the
+/// request, never on [`Connectors::new`](crate::Connectors::new).
+#[derive(Clone)]
+pub struct ProxyResolver(Arc<dyn Fn() -> Result<ProxyChoice, ProxyRefused> + Send + Sync>);
+
+impl ProxyResolver {
+    /// A resolver that asks `lookup`.
+    pub fn new(
+        lookup: impl Fn() -> Result<ProxyChoice, ProxyRefused> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(lookup))
+    }
+
+    /// The route now: `Direct` or `Fixed`, or refused.
+    pub(crate) fn resolve(&self) -> Result<ProxyChoice, ProxyRefused> {
+        match (self.0)() {
+            Ok(choice @ (ProxyChoice::Direct | ProxyChoice::Fixed(_))) => Ok(choice),
+            Ok(ProxyChoice::Env | ProxyChoice::Resolve(_)) | Err(ProxyRefused) => Err(ProxyRefused),
+        }
+    }
+}
+
+/// A proxy setting the caller refuses: the request fails rather than go around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProxyRefused;
 
 /// `Fixed(<scheme>://<host>:<port>)`: never the user info (a proxy password), path or query.
 impl fmt::Debug for ProxyChoice {
@@ -197,6 +244,7 @@ impl fmt::Debug for ProxyChoice {
         match self {
             ProxyChoice::Env => f.write_str("Env"),
             ProxyChoice::Direct => f.write_str("Direct"),
+            ProxyChoice::Resolve(_) => f.write_str("Resolve"),
             ProxyChoice::Fixed(url) => {
                 let host = url.host_str().unwrap_or("?");
                 match url.port_or_known_default() {

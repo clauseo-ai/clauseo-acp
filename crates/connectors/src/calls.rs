@@ -9,12 +9,14 @@ use std::time::{Duration, SystemTime};
 use crate::account::{Account, parse_account};
 use crate::cancel::CancelFlag;
 use crate::connectors::{ConnectorHandle, lock};
+use crate::credential::{Credential, CredentialKind};
 use crate::error::{AuthError, Error, parse_error};
-use crate::http::{self, POLL_TIMEOUT, Reply, SendBody};
+use crate::http::{self, POLL_TIMEOUT, Reply, Route, SendBody};
 use crate::mcp::{McpBody, McpReply, McpRequestHeaders, parse_event_stream};
 use crate::recharge::{Recharge, RechargeStatus, insufficient_credits_402, parse_recharge};
 use crate::secret::Secret;
 use serde_json::value::RawValue;
+use zeroize::Zeroizing;
 
 /// The account is read at most once a minute; a copy younger than this is served from memory.
 pub const ACCOUNT_MIN_INTERVAL: Duration = Duration::from_mins(1);
@@ -119,7 +121,8 @@ pub(crate) fn create_recharge(handle: &ConnectorHandle, pack: &str) -> Result<Re
 
 /// Polls `GET /v1/case-law/recharges/{id}?wait=40` until the recharge is no longer awaiting
 /// payment, the recharge deadline passes (`RechargeTimedOut`) or `cancel` is set
-/// (`Cancelled`, within about 20 ms, even mid-poll). Polls start at least 2 s apart. A network
+/// (`Cancelled`, within about 20 ms, even mid-poll). A paid one drops the account's copy, so the
+/// next `account` reads the new balance. Polls start at least 2 s apart. A network
 /// error or a 5xx waits 5 s and polls again. An answer for another recharge is `Parse`.
 pub(crate) fn wait_recharge(
     handle: &ConnectorHandle,
@@ -157,6 +160,10 @@ pub(crate) fn wait_recharge(
                     ));
                 }
                 if recharge.status != RechargeStatus::AwaitingPayment {
+                    if recharge.status == RechargeStatus::Paid {
+                        // The balance changed: the next account read asks the connector.
+                        *lock(&handle.inner.account) = None;
+                    }
                     return Ok(recharge);
                 }
                 let took = config
@@ -268,9 +275,11 @@ pub(crate) fn authed(
     timeout: Duration,
     anonymous_ok: bool,
 ) -> Result<Reply, Error> {
+    // Asked before the credential's lock, and used for every request below.
+    let route = handle.inner.shared.agent.route();
     let token = {
         let mut slot = lock(&handle.inner.slot);
-        match crate::refresh::fresh_token(handle, &mut slot) {
+        match crate::refresh::fresh_token(handle, &mut slot, &route) {
             Ok(token) => Some(token),
             Err(AuthError::NotAdded | AuthError::SignedOut | AuthError::KeyRevoked)
                 if anonymous_ok =>
@@ -280,34 +289,52 @@ pub(crate) fn authed(
             Err(err) => return Err(Error::Auth(err)),
         }
     };
-    let reply = send_with(handle, method, url, headers, body, timeout, token.as_ref())?;
+    let request = Request {
+        route: &route,
+        method,
+        url,
+        headers,
+        body,
+        timeout,
+    };
+    let reply = send_with(&request, token.as_ref())?;
     let Some(used) = token.filter(|_| reply.status == 401) else {
         return Ok(reply);
     };
-    let next = crate::refresh::after_401(handle, &used)?;
-    let reply = send_with(handle, method, url, headers, body, timeout, Some(&next))?;
+    let next = crate::refresh::after_401(handle, &used, &route)?;
+    let reply = send_with(&request, Some(&next))?;
     if reply.status == 401 {
         return Err(Error::Auth(crate::refresh::after_second_401(handle, &next)));
     }
     Ok(reply)
 }
 
-fn send_with(
-    handle: &ConnectorHandle,
-    method: &str,
-    url: &str,
-    headers: &[(&str, &str)],
-    body: SendBody<'_>,
+/// One request of [`authed`], before its `Authorization`.
+struct Request<'a> {
+    route: &'a Route,
+    method: &'a str,
+    url: &'a str,
+    headers: &'a [(&'a str, &'a str)],
+    body: SendBody<'a>,
     timeout: Duration,
-    token: Option<&Secret>,
-) -> Result<Reply, Error> {
+}
+
+fn send_with(request: &Request<'_>, token: Option<&Secret>) -> Result<Reply, Error> {
+    let Request {
+        route,
+        method,
+        url,
+        headers,
+        body,
+        timeout,
+    } = *request;
     let auth = token.map(ConnectorHandle::bearer_header);
     let mut all: Vec<(&str, &str)> = Vec::with_capacity(headers.len().saturating_add(1));
     if let Some(auth) = &auth {
         all.push(("Authorization", auth.as_str()));
     }
     all.extend_from_slice(headers);
-    http::send(&handle.inner.shared.agent, method, url, &all, body, timeout).map_err(Error::Network)
+    http::send_on(route, method, url, &all, body, timeout).map_err(Error::Network)
 }
 
 /// An MCP answer as [`McpReply`], its JSON kept raw: validated, never built as a tree (a dense
@@ -358,4 +385,57 @@ pub(crate) fn raw_json(mut text: String) -> Result<Box<RawValue>, serde_json::Er
     let start = text.len() - text.trim_start_matches(json_space).len();
     text.drain(..start);
     RawValue::from_string(text)
+}
+
+/// `ConnectorHandle::add_api_key_while`: the key's shape, one account read with it, then the
+/// store if `still` agrees under the credential's lock.
+pub(crate) fn add_api_key(
+    handle: &ConnectorHandle,
+    key: &str,
+    still: &dyn Fn() -> bool,
+) -> Result<(), Error> {
+    if !crate::credential::is_api_key(key) {
+        return Err(Error::BadKeyFormat);
+    }
+    let key = Secret::from(key);
+    let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
+    let url = handle.account_url();
+    let headers = [
+        ("Authorization", auth.as_str()),
+        ("Accept", "application/json"),
+    ];
+    let shared = &handle.inner.shared;
+    let reply = http::send_via(
+        &shared.agent,
+        "GET",
+        &url,
+        &headers,
+        SendBody::None,
+        shared.timeout(),
+    )
+    .map_err(Error::Network)?;
+    match reply.status {
+        // A 402 is a valid key on an empty account.
+        200 | 402 => {}
+        401 => return Err(Error::Auth(AuthError::KeyRevoked)),
+        status => return Err(Error::Http { status }),
+    }
+    let credential = Credential::ApiKey(key);
+    if !handle.store_new(credential, CredentialKind::ApiKey, still)? {
+        return Err(Error::Cancelled);
+    }
+    if reply.status == 200 {
+        let now = shared.config.clock.now();
+        let parsed = crate::account::parse_account(
+            &reply.body,
+            handle.inner.known,
+            &shared.config.origin,
+            now,
+        );
+        if let Ok(account) = parsed {
+            let generation = handle.inner.generation.load(Ordering::SeqCst);
+            *lock(&handle.inner.account) = Some((generation, account));
+        }
+    }
+    Ok(())
 }

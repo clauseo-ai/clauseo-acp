@@ -285,7 +285,8 @@ fn both_windows_get_the_settings_change_and_the_limits_and_only_main_the_lists()
 }
 
 /// What each label's channel carries (`AppEvents`, 0028, U12): `main` every app and limits
-/// event, the settings window `settings_changed` and the limits, and any other label neither.
+/// event, the settings window `settings_changed`, `connectors_changed` and the limits, and any
+/// other label neither.
 /// So a window of another label that follows the app feed gets nothing of it, while the
 /// settings window gets each settings change.
 #[test]
@@ -295,17 +296,24 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     // The folder scan's progress (R20a): the room in `main` is its only reader.
     let folder_scanned = r#"{"folder_scanned":{}}"#;
     let limits = r#"{"limits_view_changed":{}}"#;
+    // R24: Settings' Connectors section reads the connector state; the hint is the room's.
+    let connectors_changed = r#"{"connectors_changed":{}}"#;
+    let case_law_hint = r#"{"case_law_hint":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
         (Feed::App, threads_changed),
         (Feed::App, folder_scanned),
+        (Feed::App, connectors_changed),
+        (Feed::App, case_law_hint),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
         assert!(!carries("other", feed, json), "other: {json}");
     }
     assert!(carries(SETTINGS, Feed::App, settings_changed));
+    assert!(carries(SETTINGS, Feed::App, connectors_changed));
+    assert!(!carries(SETTINGS, Feed::App, case_law_hint));
     assert!(!carries(SETTINGS, Feed::App, threads_changed));
     assert!(!carries(SETTINGS, Feed::App, folder_scanned));
     assert!(carries(SETTINGS, Feed::Limits, limits));

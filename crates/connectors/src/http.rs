@@ -4,14 +4,14 @@
 //! its own request. Redirects are not followed, a status is not an error (the
 //! caller reads it), and production and staging allow `https` only.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::{Agent, Proxy, RequestExt as _};
 use zeroize::Zeroizing;
 
-use crate::config::{Config, Origin, ProxyChoice};
+use crate::config::{Config, Origin, ProxyChoice, ProxyRefused, ProxyResolver};
 use crate::error::Error;
 
 /// How long a connection may take.
@@ -21,21 +21,88 @@ pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 /// How long a `wait=40` recharge poll may take.
 pub(crate) const POLL_TIMEOUT: Duration = Duration::from_secs(50);
 
-/// The agent for `config`. Fails only on a `ProxyChoice::Fixed` that ureq cannot use; the error
-/// does not repeat the proxy URL, which may hold credentials.
+/// The agent for one request, or why there is none (a refused proxy setting).
+pub(crate) type Route = Result<Agent, String>;
+
+/// A route the resolver gave, and its agent.
+type Routed = (ProxyChoice, Agent);
+
+/// The HTTP agents of one [`Config`]: the one agent, or (with `ProxyChoice::Resolve`) the
+/// agent of the route the resolver gave last, made again when the route changes.
+pub(crate) struct Agents {
+    config: Config,
+    resolved: Option<(ProxyResolver, Mutex<Option<Routed>>)>,
+    fixed: Option<Agent>,
+}
+
+impl Agents {
+    /// The agents for `config`; asks no resolver. Fails as [`agent`] does.
+    pub(crate) fn new(config: &Config) -> Result<Agents, Error> {
+        Ok(match &config.proxy {
+            ProxyChoice::Resolve(resolver) => Agents {
+                config: config.clone(),
+                resolved: Some((resolver.clone(), Mutex::new(None))),
+                fixed: None,
+            },
+            _ => Agents {
+                config: config.clone(),
+                resolved: None,
+                fixed: Some(agent(config)?),
+            },
+        })
+    }
+
+    /// The agent for a request now: the route asked of the resolver, if any (outside the lock,
+    /// since it can block). A refused route is an error, never a direct request. A caller that
+    /// takes a lock around a request (the credential's, the price list's, discovery's) asks
+    /// this first and passes the [`Route`] in, so no lookup ever runs under one of those locks.
+    pub(crate) fn route(&self) -> Route {
+        let Some((resolver, last)) = &self.resolved else {
+            return self.fixed.clone().ok_or_else(|| "no HTTP agent".to_owned());
+        };
+        let choice = resolver
+            .resolve()
+            .map_err(|ProxyRefused| "the proxy setting is refused".to_owned())?;
+        let mut last = crate::connectors::lock(last);
+        if let Some((held, agent)) = &*last
+            && *held == choice
+        {
+            return Ok(agent.clone());
+        }
+        let made = agent_via(&self.config, &choice).map_err(|error| error.to_string())?;
+        // `ProxyChoice`'s `Debug` prints no user info.
+        tracing::info!(proxy = ?choice, "the connectors' route");
+        *last = Some((choice, made.clone()));
+        Ok(made)
+    }
+}
+
+/// The agent for `config`. Fails only on a `ProxyChoice::Fixed` that ureq cannot use (or a
+/// `Resolve`, which takes [`Agents`]); the error does not repeat the proxy URL, which may hold
+/// credentials.
 pub(crate) fn agent(config: &Config) -> Result<Agent, Error> {
+    agent_via(config, &config.proxy)
+}
+
+/// The agent for `config` through `proxy`.
+fn agent_via(config: &Config, proxy: &ProxyChoice) -> Result<Agent, Error> {
     let tls = TlsConfig::builder()
         .provider(TlsProvider::Rustls)
         .root_certs(RootCerts::PlatformVerifier)
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .build();
-    let proxy = match &config.proxy {
+    let proxy = match proxy {
         ProxyChoice::Env => Proxy::try_from_env(),
         ProxyChoice::Fixed(url) => match Proxy::new(url.as_str()) {
             Ok(proxy) => Some(proxy),
             Err(_) => return Err(Error::Network("the proxy URL is not usable".to_owned())),
         },
         ProxyChoice::Direct => None,
+        ProxyChoice::Resolve(_) => {
+            return Err(Error::Network(
+                "the proxy is resolved per request".to_owned(),
+            ));
+        }
     };
     let https_only = match config.origin {
         Origin::Production | Origin::Staging => true,
@@ -79,6 +146,31 @@ pub(crate) struct Reply {
     pub(crate) session_id: Option<String>,
     /// The body.
     pub(crate) body: Zeroizing<Vec<u8>>,
+}
+
+/// [`send`] with the agent [`Agents`] gives for this request (no lock may be held).
+pub(crate) fn send_via(
+    agents: &Agents,
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: SendBody<'_>,
+    timeout: Duration,
+) -> Result<Reply, String> {
+    send_on(&agents.route(), method, url, headers, body, timeout)
+}
+
+/// [`send`] on a route asked for before (see [`Agents::route`]).
+pub(crate) fn send_on(
+    route: &Route,
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: SendBody<'_>,
+    timeout: Duration,
+) -> Result<Reply, String> {
+    let agent = route.as_ref().map_err(Clone::clone)?;
+    send(agent, method, url, headers, body, timeout)
 }
 
 /// Sends one request and reads the whole answer. `headers` may hold an `Authorization` value;

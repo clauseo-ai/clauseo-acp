@@ -463,9 +463,18 @@ impl HostConfig {
     /// The case-law connector's relays (R24): each agent launch whose profile offers a
     /// `case-law` entry, with `tools.connectors` on, no firm `managed-mcp.json` and the
     /// connector signed in, gets a relay of its own and the entry. Unset (the default), no session
-    /// gets case law. Desktop wiring (PR5) builds the relays from its `Connectors`.
+    /// gets case law. Desktop builds the relays from the `Connectors` it passes to
+    /// [`Self::with_connectors`], with that wiring's `ConnectorEvents` as their events.
     pub fn with_case_law_relays(mut self, relays: crate::connectors::Relays) -> Self {
         self.wiring.relays = Some(relays);
+        self
+    }
+
+    /// The connector commands' wiring (R24): the app's `Connectors`, the events sink its relays
+    /// were built with, and the opener for the sign-in page. Unset (the default), every connector
+    /// command is refused and no app subscriber hears `ConnectorsChanged`.
+    pub fn with_connectors(mut self, wiring: crate::connectors::ConnectorsWiring) -> Self {
+        self.wiring.connectors = Some(wiring);
         self
     }
 

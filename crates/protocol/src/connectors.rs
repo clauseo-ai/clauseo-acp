@@ -48,10 +48,11 @@ pub struct ConnectorView {
     pub id: String,
     /// The connector's fallback name; the app shows its own words.
     pub name: String,
-    /// The cheapest pack's gross amount, such as `₹236` (Indian digit grouping); `None` when
-    /// the connector is not live or the price list could not be read.
+    /// The cheapest pack's gross amount (GST included) in paise, such as `23_600` for ₹236:
+    /// a number, so the app writes it by its own money rule. `None` when the connector is not
+    /// live or the price list could not be read.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub price_text: Option<String>,
+    pub price_paise: Option<u32>,
     /// The packs for the "Add credits" choice, from the price list; empty when not live.
     pub packs: Vec<PackView>,
     /// The spend view, from the last account read; `None` before one.
@@ -74,8 +75,9 @@ pub struct PackView {
     pub pack: String,
     /// The credits it adds.
     pub credits: i32,
-    /// Its gross price as the price list writes it, such as `₹236`.
-    pub rupees: String,
+    /// Its gross price (GST included) in paise, such as `23_600` for ₹236. A pack whose
+    /// price the host cannot read as rupees and paise is left out of the list.
+    pub paise: u32,
 }
 
 /// What the account spent lately, from the last account read.
@@ -104,8 +106,10 @@ pub struct DaySpendView {
 pub struct Balance {
     /// The credits left.
     pub credits: i32,
-    /// Their worth in rupees, as the account writes it.
-    pub rupees: String,
+    /// Their worth in paise, such as `118_000` for ₹1,180; `None` when the account's figure
+    /// is not rupees and paise the host can read. The app writes it by its own money rule.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub paise: Option<u32>,
 }
 
 /// Where a connector stands. Closed: the host and the app are one version.

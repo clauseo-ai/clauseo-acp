@@ -52,6 +52,9 @@ clauseo-profile = { path = "../profile" }
 clauseo-agents = { path = "../agents" }
 zeroize = { workspace = true }
 clauseo-limits = { path = "../limits" }
+# The paid data connectors (src/connectors.rs, R24): the keychain store, the connector's config
+# and the account, handed to the host with the case-law relays.
+clauseo-connectors = { path = "../connectors" }
 # The sandbox: on Windows, the sandbox user record (src/jailed/windows.rs); on every OS, its
 # folder's name, which the uninstaller's deletion keeps (src/delete_app_data/walk.rs). The host
 # already builds it everywhere.
@@ -85,7 +88,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # capture and leave tracking, the window's DPI, and this module's handle. Gdi for WNDCLASSEXW.
 # The WebView2 dialog (src/webview2/windows.rs): Controls for TaskDialogIndirect, HiDpi for its
 # DPI awareness, Com and Shell for ShellExecuteW. SystemInformation for GlobalMemoryStatusEx, the
-# machine's total memory (src/machine_memory.rs).
+# machine's total memory (src/machine_memory.rs). Time for the day cap's local day
+# (src/connectors/local_day.rs): FileTimeToSystemTime and SystemTimeToTzSpecificLocalTime.
 # The agent sandbox check (src/jailed/windows.rs): Foundation for HANDLE, CloseHandle and LocalFree,
 # Security for GetTokenInformation and EqualSid, Security_Authorization for ConvertStringSidToSidW,
 # Threading for OpenProcessToken; clauseo-sandbox (above) reads the sandbox user record. Its
@@ -105,6 +109,7 @@ windows = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
+  "Win32_System_Time",
   "Win32_UI_Controls",
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
@@ -116,6 +121,11 @@ windows = { workspace = true, features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
 # The machine's total memory on macOS (src/machine_memory.rs): sysctlbyname("hw.memsize").
+libc = { workspace = true }
+
+# The day cap's local day on Linux (src/connectors/local_day.rs): localtime_r; macOS takes libc
+# above.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 libc = { workspace = true }
 
 # The updater is left out of Linux: Linux always updates through its package manager (R23), so the

@@ -22,6 +22,7 @@ fn search_off_browser_on() -> ToolsPatch {
     ToolsPatch {
         web_search: Some(false),
         browser: Some(true),
+        connectors: None,
     }
 }
 
@@ -121,6 +122,14 @@ fn each_locked_tool_key_is_reported_by_its_own_name() {
             },
             "tools.browser",
         ),
+        (
+            r#"{"tools": {"connectors": false}}"#,
+            ToolsPatch {
+                connectors: Some(true),
+                ..ToolsPatch::default()
+            },
+            "tools.connectors",
+        ),
         // A policy value that does not type still locks its key (fail closed).
         (
             r#"{"tools": {"browser": "yes"}}"#,
@@ -150,6 +159,25 @@ fn each_locked_tool_key_is_reported_by_its_own_name() {
         );
         assert_eq!(file_text(&files), None, "{firm_text}");
     }
+}
+
+/// The lawyer's own off for data connectors (R24): written to `settings.json` and in memory.
+#[test]
+fn the_connectors_switch_is_the_lawyers_to_turn_off() {
+    let files = MemFiles::default();
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    let off = ToolsPatch {
+        connectors: Some(false),
+        ..ToolsPatch::default()
+    };
+    effective.apply_tools_patch(&files, &off).unwrap();
+    assert!(!effective.settings().tools.connectors);
+    assert_eq!(
+        file_text(&files).unwrap(),
+        "{\n  \"tools\": {\n    \"connectors\": false\n  }\n}\n"
+    );
+    let again = Effective::load(&locations(), &files, &[]);
+    assert!(!again.settings().tools.connectors);
 }
 
 #[test]
@@ -250,6 +278,7 @@ fn a_patch_refuses_unknown_fields() {
         ToolsPatch {
             web_search: None,
             browser: Some(false),
+            connectors: None,
         }
     );
 }

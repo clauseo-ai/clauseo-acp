@@ -50,6 +50,9 @@ crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
 # on Windows. Each module's FFI call, under its own #![expect].
 crates/desktop/src/machine_memory.rs mac unsafe_code
 crates/desktop/src/machine_memory.rs win unsafe_code
+# R24 PR5: the day cap's local day from the OS (localtime_r; the Win32 time conversions).
+crates/desktop/src/connectors/local_day.rs offset unsafe_code
+crates/desktop/src/connectors/local_day.rs offset unsafe_code
 # The usage counts' clock (src/counts.rs, 0036, S21): SystemTime::now, read there alone, since
 # clauseo-counts takes time as an input.
 crates/desktop/src/counts.rs now clippy::disallowed_methods

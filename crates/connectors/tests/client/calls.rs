@@ -379,3 +379,76 @@ fn a_recharge_deadline_that_overflows_the_clock_is_a_parse_error() {
         Err(Error::Parse(_))
     ));
 }
+
+/// `ProxyChoice::Resolve`: `Connectors::new` never asks the resolver; every request does, so
+/// the route follows it (a dead proxy, then direct); a refused route fails the request without
+/// going around it.
+#[test]
+fn a_resolved_proxy_is_asked_per_request_and_never_at_start() {
+    use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+
+    use clauseo_connectors::{ProxyChoice, ProxyRefused, ProxyResolver};
+
+    let rig = rig();
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let asked = Arc::new(AtomicUsize::new(0));
+    let mode = Arc::new(AtomicU8::new(0));
+    let resolver = {
+        let (asked, mode) = (Arc::clone(&asked), Arc::clone(&mode));
+        ProxyResolver::new(move || {
+            asked.fetch_add(1, Ordering::SeqCst);
+            match mode.load(Ordering::SeqCst) {
+                0 => Ok(ProxyChoice::Fixed(
+                    url::Url::parse(&format!("http://127.0.0.1:{closed}")).unwrap(),
+                )),
+                1 => Ok(ProxyChoice::Direct),
+                _ => Err(ProxyRefused),
+            }
+        })
+    };
+    let scratch = ScratchDir::new("resolved-proxy").unwrap();
+    let mut config = rig.fake.config(scratch.state_file());
+    config.proxy = ProxyChoice::Resolve(resolver);
+    let connectors = Connectors::new(config, Arc::new(MemoryStore::new())).unwrap();
+    let handle = connectors.get("case-law").unwrap();
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "asked at start");
+    let key = rig.fake.new_api_key();
+    let reads = || rig.fake.requests_to("/v1/case-law/account").len();
+    let before = reads();
+    assert!(matches!(handle.add_api_key(&key), Err(Error::Network(_))));
+    assert_eq!(reads(), before, "went around the dead proxy");
+    mode.store(1, Ordering::SeqCst);
+    handle.add_api_key(&key).unwrap();
+    assert_eq!(reads(), before + 1);
+    mode.store(2, Ordering::SeqCst);
+    assert!(matches!(handle.add_api_key(&key), Err(Error::Network(_))));
+    assert_eq!(reads(), before + 1, "a refused route went direct");
+    assert_eq!(asked.load(Ordering::SeqCst), 3);
+}
+
+/// The price list's route lookup runs before its cache's lock: while one caller's lookup is
+/// held, another caller's liveness check goes through.
+#[test]
+fn a_slow_route_lookup_does_not_hold_the_price_list() {
+    let slow = SlowRoute::default();
+    let resolver = slow.resolver();
+    let rig = rig_with(FakeOptions::default(), false, move |config| {
+        config.proxy = clauseo_connectors::ProxyChoice::Resolve(resolver);
+    });
+    let connectors = Arc::new(rig.connectors);
+    let (entered, release) = slow.arm();
+    let first = {
+        let connectors = Arc::clone(&connectors);
+        thread::spawn(move || connectors.liveness())
+    };
+    entered.recv().unwrap();
+    let other = Arc::clone(&connectors);
+    let liveness = ends_while_held("a liveness check", move || other.liveness());
+    assert!(liveness.live);
+    release.send(()).unwrap();
+    assert!(first.join().unwrap().live);
+}

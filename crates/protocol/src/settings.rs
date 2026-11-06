@@ -219,6 +219,11 @@ pub struct ToolsPatch {
     /// The new browser setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<bool>,
+    /// The new data connectors setting (`tools.connectors`, R24): the lawyer's own off, which
+    /// `ConnectorsState` shows with `locked: false`. Off, the host refuses every connector
+    /// command but sign-out and remove, and no session started after gets case law.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connectors: Option<bool>,
 }
 
 /// A change to the display settings: each field set is changed, the rest stay. A patch that

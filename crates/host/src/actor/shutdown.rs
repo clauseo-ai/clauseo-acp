@@ -19,6 +19,7 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
     super::matters::cancel_imports(actor);
     super::scan::cancel_all(actor);
     super::browser_install::shutdown(actor);
+    super::connectors::shutdown(actor);
     turn::shutdown(actor);
 }
 

@@ -9,8 +9,11 @@ export const commands = {
 	/**
 	 *  Runs a command. Refuses `AnswerPermission` (that goes through `answer_permission`) and a
 	 *  `CreateMatter` whose folder ref this run's `pick_folder` did not issue; from the settings
-	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings` and
-	 *  `RefreshLimits`; from `main`, `SetToolSettings` and `SetPrivacySettings`.
+	 *  window, everything but `SetUiSettings`, `SetToolSettings`, `SetPrivacySettings`,
+	 *  `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
+	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
+	 *  `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
+	 *  connector command but `DismissCaseLawHint` and `RefreshBalance` (`src/bridge/admit.rs`).
 	 */
 	dispatch: (command: CommandEnvelope) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("dispatch", { command })),
 	/**  Answers a query; from the settings window, `GetSettings` only. */
@@ -330,8 +333,11 @@ export type BackgroundMark = {
 export type Balance = {
 	/**  The credits left. */
 	credits: number,
-	/**  Their worth in rupees, as the account writes it. */
-	rupees: string,
+	/**
+	 *  Their worth in paise, such as `118_000` for ₹1,180; `None` when the account's figure
+	 *  is not rupees and paise the host can read. The app writes it by its own money rule.
+	 */
+	paise?: number,
 };
 
 /**  How an account pays. */
@@ -806,10 +812,11 @@ export type ConnectorView = {
 	/**  The connector's fallback name; the app shows its own words. */
 	name: string,
 	/**
-	 *  The cheapest pack's gross amount, such as `₹236` (Indian digit grouping); `None` when
-	 *  the connector is not live or the price list could not be read.
+	 *  The cheapest pack's gross amount (GST included) in paise, such as `23_600` for ₹236:
+	 *  a number, so the app writes it by its own money rule. `None` when the connector is not
+	 *  live or the price list could not be read.
 	 */
-	price_text?: string,
+	price_paise?: number,
 	/**  The packs for the "Add credits" choice, from the price list; empty when not live. */
 	packs: PackView[],
 	/**  The spend view, from the last account read; `None` before one. */
@@ -3306,8 +3313,11 @@ export type PackView = {
 	pack: string,
 	/**  The credits it adds. */
 	credits: number,
-	/**  Its gross price as the price list writes it, such as `₹236`. */
-	rupees: string,
+	/**
+	 *  Its gross price (GST included) in paise, such as `23_600` for ₹236. A pack whose
+	 *  price the host cannot read as rupees and paise is left out of the list.
+	 */
+	paise: number,
 };
 
 /**  How many entries one `PageEntries` asks for: 1 to [`MAX_PAGE_ENTRIES`]. */
@@ -5040,6 +5050,12 @@ export type ToolsPatch = {
 	web_search?: boolean,
 	/**  The new browser setting. */
 	browser?: boolean,
+	/**
+	 *  The new data connectors setting (`tools.connectors`, R24): the lawyer's own off, which
+	 *  `ConnectorsState` shows with `locked: false`. Off, the host refuses every connector
+	 *  command but sign-out and remove, and no session started after gets case law.
+	 */
+	connectors?: boolean,
 };
 
 /**  The tool switches in force: the lawyer's, with policy's values over them. */

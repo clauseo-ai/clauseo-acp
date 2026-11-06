@@ -13,7 +13,10 @@
 //! - [`TurnHandle`] is written by the host thread when a turn starts and ends; a relay thread
 //!   reads it when it counts a call.
 //! - [`RelayEvents`] hears what the host shows: a credential that ended, out of credit, and a
-//!   paid result (a balance read is due).
+//!   paid result (a balance read is due). [`ConnectorEvents`] is the host's own, bound to its
+//!   actor at start (`wiring.rs`).
+//! - `state.rs` holds what the app sees of the connector (PR5): the credential, the balance, out
+//!   of credit and the pay link; `actor/connectors.rs` runs the commands that change it.
 //!
 //! Logs name the session, the method and the reason, never a line's content, an argument, a
 //! URL query or a token; the hello line is never logged or echoed.
@@ -22,7 +25,9 @@
 
 mod limits;
 mod relay;
+pub(crate) mod state;
 mod texts;
+mod wiring;
 
 use std::time::Duration;
 
@@ -36,6 +41,7 @@ pub use limits::{
     MAX_PAID_CALLS_PER_TURN, MAX_PENDING_HANDSHAKES, MAX_RECHARGE_CALLS_PER_TURN, MAX_REPLY_BYTES,
 };
 pub use relay::{RelayConfig, RelaySession, Relays, TurnHandle};
+pub use wiring::{ConnectorEvents, ConnectorOpener, ConnectorsWiring};
 
 /// What the relay tells the host, from the relay's own threads.
 #[derive(Debug, Clone, PartialEq, Eq)]

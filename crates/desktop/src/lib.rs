@@ -79,6 +79,7 @@
 mod agent_browser_pin;
 mod bridge;
 mod commands;
+mod connectors;
 mod counts;
 mod csp;
 mod delete_app_data;
@@ -293,7 +294,8 @@ pub fn run() -> tauri::Result<()> {
 /// host's browser limit takes (`machine_memory`), before the host starts. So are the usage
 /// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here. So
 /// does the agents' setup, from the same effective settings, on a `clauseo-setup` thread of its
-/// own (`setup/start.rs`).
+/// own (`setup/start.rs`), and the data connectors with their case-law relays
+/// (`connectors.rs`, R24).
 fn start_host<R: Runtime>(
     app: AppHandle<R>,
     start: HostStart,
@@ -332,6 +334,7 @@ fn start_host<R: Runtime>(
         }
         let exe = std::env::current_exe().ok();
         let counts = counts::open(&locations, &effective, exe.as_deref());
+        let data_dir = effective.data_dir().to_path_buf();
         let config = host_config(effective)
             .with_login_check(Arc::new(setup::DesktopLoginCheck::new(
                 SystemDirs.home(),
@@ -342,6 +345,7 @@ fn start_host<R: Runtime>(
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
             config.with_launch_refused(agent, code)
         });
+        let config = connectors::with_connectors(config, app.clone(), &data_dir);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());
