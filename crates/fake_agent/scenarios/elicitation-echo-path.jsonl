@@ -1,0 +1,9 @@
+{"scenario":"elicitation-echo-path","description":"A tool call, then a form elicitation scoped to it that the client accepts with a client name; the agent writes a file whose name holds that name and completes the call with a location and a diff on it; end_turn. The logged call withholds the name; the turn's own list of changed files keeps the real file","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-edit","title":"Draft the engagement letter","name":"Write","kind":"edit","status":"in_progress"}}}
+{"request":{"id":"elicit-1","method":"elicitation/create","params":{"mode":"form","sessionId":"sess-1","toolCallId":"tc-edit","message":"Which client is this for?","requestedSchema":{"type":"object","properties":{"client":{"type":"string","title":"Client"}},"required":["client"]}}}}
+{"expect_response":{"id":"elicit-1","result":{"action":"accept","content":{"client":"Acme"}}}}
+{"write_file":{"path":"Acme engagement letter.docx","content":"Letter\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-edit","status":"completed","locations":[{"path":"{{cwd}}/Acme engagement letter.docx"}],"content":[{"type":"diff","path":"{{cwd}}/Acme engagement letter.docx","newText":"Letter\n"}]}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

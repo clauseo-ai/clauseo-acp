@@ -342,9 +342,10 @@ fn tool_call(
         return Ok(());
     }
     if let Some(current) = current(actor, thread) {
-        // Before anything reads it: the sources, the paths and the build.
-        current.withheld.scrub_call(&mut call);
+        // The turn's paths stay in memory, so they take the call as the agent sent it; what is
+        // logged (the sources and the build) takes it with the withheld values scrubbed.
         current.tool_paths.note(&call.locations, &call.content);
+        current.withheld.scrub_call(&mut call);
     }
     let now = actor.clock.now();
     let id = actor.ids.mint(now.wall)?;
@@ -416,20 +417,21 @@ fn tool_update(
     if matches!(context, Context::Outside { replay: true }) {
         return Ok(());
     }
-    // The elicitation values withheld from this call (`withheld.rs`) go before anything reads
-    // the patch: the sources, the paths, and `build.rs`'s inline or blob decision.
+    // The turn's paths stay in memory, so they take the patch as the agent sent it. The
+    // elicitation values withheld from this call (`withheld.rs`) then go before anything
+    // logged reads it: the sources, and `build.rs`'s inline or blob decision.
     if let Some(current) = current(actor, thread) {
+        if matches!(context, Context::Live(_)) {
+            let locations = patch.locations.as_deref().unwrap_or_default();
+            let content = patch.content.as_deref().unwrap_or_default();
+            current.tool_paths.note(locations, content);
+        }
         current.withheld.scrub_patch(acp_id, &mut patch);
     }
     let mut source = Vec::new();
     match context {
         Context::Outside { replay: true } => return Ok(()),
         Context::Live(turn) => {
-            if let Some(current) = current(actor, thread) {
-                let locations = patch.locations.as_deref().unwrap_or_default();
-                let content = patch.content.as_deref().unwrap_or_default();
-                current.tool_paths.note(locations, content);
-            }
             let now = actor.now().mono;
             let case_law = source_of(actor, thread, |sources, agent| {
                 sources.case_law.updated(now, turn, acp_id, agent, &patch)

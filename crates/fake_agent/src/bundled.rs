@@ -67,6 +67,7 @@ bundled! {
         "codex-permission",
         "codex-plan",
         "codex-resume",
+        "elicitation-echo-path",
         "elicitation-echo-residuals",
         "elicitation-echo-unscoped",
         "elicitation-echo-withheld",
