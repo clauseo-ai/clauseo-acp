@@ -12,14 +12,17 @@
 //! next run's, which an MCP reconnect starts at once under the same `--cwd`.
 //!
 //! The reaper first takes its share of the run's lock, so no sweep deletes the run while it may
-//! still clean up, then writes `ready`, which the guard waits for before it starts Chrome. The
-//! guard writes `chrome <pid>` as soon as Chrome is started (before it waits for Chrome to
-//! listen), `agent <pid>` as soon as agent-browser is, `reaped chrome` or `reaped agent`
-//! once it has killed or reaped that one itself (the reaper then never signals that pid or
-//! group, which could have been reused), and `done` once it has cleaned up. If the pipe ends
+//! still clean up, then writes `ready`, which the guard waits for before it relays (so before
+//! any Chrome). The guard writes `chrome <pid>` as soon as Chrome is started (before it waits for
+//! Chrome to listen), `agent <pid>` as soon as agent-browser is (the session's or a one-shot's),
+//! `reaped chrome` or `reaped agent` once it has killed or reaped that one itself (the reaper
+//! then never signals that pid or group, which could have been reused), again at each lazy start
+//! and stop, and `done` once it has cleaned up. If the pipe ends
 //! without `done`, the guard is gone: the reaper kills agent-browser's process group (so no CLI
 //! call of it can start a daemon later), the daemon ([`kill_daemon`]) and Chrome's process
-//! group, moves Chrome's finished downloads, deletes the profile and the run's lock file. In both
+//! group; deletes the run's Chrome record (only if it names no Chrome that may live; one that
+//! says `starting` first ends every process with the run's profile, `record.rs`); moves
+//! Chrome's finished downloads, and deletes the profile and the run's lock file. In both
 //! cases it ends the run's daemon once more [`DAEMON_AGAIN`] later, which catches a daemon that
 //! bound its socket only after the first kill, and exits.
 //!
@@ -38,7 +41,7 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
 use super::chrome::{self, STAGING};
-use super::{downloads, pause, runs};
+use super::{downloads, pause, record, runs};
 use crate::Failure;
 
 /// The mode's command line.
@@ -73,6 +76,12 @@ impl Teller {
         if !sent {
             super::note("the reaper is gone; a killed guard would leave Chrome behind");
         }
+    }
+
+    /// A teller with no reaper behind it, for the unit tests that drive the pumps.
+    #[cfg(test)]
+    pub(crate) fn none() -> Teller {
+        Teller(Arc::new(Mutex::new(None)))
     }
 
     fn close(&self) {
@@ -122,22 +131,9 @@ impl Reaper {
         Ok(Reaper { child, teller })
     }
 
-    /// Tells the reaper Chrome's pid.
-    pub(crate) fn chrome(&self, pid: u32) {
-        self.teller.say(&format!("chrome {pid}"));
-    }
-
-    /// Tells the reaper agent-browser's pid, which also names its process group.
-    pub(crate) fn agent(&self, pid: u32) {
-        self.teller.say(&format!("agent {pid}"));
-    }
-
-    /// Tells the reaper the guard has killed agent-browser's group and reaps agent-browser.
-    pub(crate) fn reaped_agent(&self) {
-        self.teller.say("reaped agent");
-    }
-
-    /// A handle for the threads that tell the reaper something (Chrome's reap hook).
+    /// A handle for the threads that tell the reaper something: `chrome <pid>`, `agent <pid>`,
+    /// `reaped chrome` and `reaped agent`, from each start and stop of the browser
+    /// (`session.rs`) and each one-shot agent-browser (`relay/oneshot.rs`).
     pub(crate) fn teller(&self) -> Teller {
         self.teller.clone()
     }
@@ -257,6 +253,10 @@ fn clean_up(
             pause(Duration::from_millis(100));
         }
     }
+    // Before the profile and the lock go: a record left saying `starting` (the guard died
+    // around Chrome's spawn, and no pid was told) ends what runs with the profile first, and
+    // goes only if it names no Chrome that may live (`record.rs`).
+    record::forget(cwd, run);
     let profile = runs::profile_of(cwd, run);
     downloads::sweep(&profile.join(STAGING), &cwd.join("downloads"));
     chrome::remove_profile(&profile);

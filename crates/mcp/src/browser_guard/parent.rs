@@ -99,7 +99,7 @@ pub(crate) fn gone_unix(first: u32, now: u32) -> bool {
 }
 
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 #[cfg(all(test, unix))]
 mod tests {

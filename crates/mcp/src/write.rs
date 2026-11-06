@@ -62,6 +62,12 @@ pub(crate) fn open_or_create(path: &Path) -> io::Result<std::fs::File> {
         .open(path)
 }
 
+/// `fs::rename`, replacing `to`: a guard run's Chrome record (`browser_guard/record.rs`), written
+/// to a temporary name first, so a reader sees the old record or the new one, never half.
+pub(crate) fn replace(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// `fs::remove_file`: a guard run's lock file, once its profile is gone.
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)

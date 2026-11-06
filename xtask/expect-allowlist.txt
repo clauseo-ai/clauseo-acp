@@ -331,7 +331,7 @@ crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
 # write module and guard starts.
 crates/mcp/src/main.rs main clippy::print_stderr
 crates/mcp/src/write.rs - clippy::disallowed_methods
-crates/mcp/src/browser_guard/relay.rs spawn_child clippy::disallowed_methods
+crates/mcp/src/browser_guard/relay/pumps.rs spawn_child clippy::disallowed_methods
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
 crates/mcp/src/browser_guard/job.rs - unsafe_code
@@ -342,6 +342,11 @@ crates/mcp/tests/connector/support.rs write clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs run clippy::disallowed_methods
 crates/mcp/tests/connector/support.rs start clippy::disallowed_methods
 crates/mcp/src/browser_guard.rs pause clippy::disallowed_methods
+crates/mcp/src/browser_guard.rs now clippy::disallowed_methods
+crates/mcp/src/browser_guard/session.rs end_agent unused_variables
+crates/mcp/src/browser_guard/record/windows.rs - unsafe_code
+crates/mcp/src/browser_guard/record/scan/macos.rs - unsafe_code
+crates/mcp/src/browser_guard/record/tests.rs group clippy::disallowed_methods
 crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code

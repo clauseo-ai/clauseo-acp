@@ -91,8 +91,9 @@ pub(super) fn parent() -> Lookup {
     }
 }
 
-/// The creation time of process `handle`, in 100 ns units.
-fn started(handle: HANDLE) -> Option<u64> {
+/// The creation time of process `handle`, in 100 ns units; also read for the Chrome record
+/// (`record/windows.rs`).
+pub(crate) fn started(handle: HANDLE) -> Option<u64> {
     let (mut created, mut exited, mut kernel, mut user) = (
         FILETIME::default(),
         FILETIME::default(),

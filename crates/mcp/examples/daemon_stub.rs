@@ -1,18 +1,20 @@
 //! A stand-in for agent-browser in the guard's lifecycle tests (`tests/guard/lifecycle.rs`). On
-//! Unix it first starts itself again as `daemon_stub --daemon` in a process group of its own, the
-//! way agent-browser's daemon leaves the guard's group (`setsid`); that daemon listens on
+//! Unix, at its first `tools/call` (where agent-browser's CLI starts its daemon), it starts itself
+//! again as `daemon_stub --daemon` in a process group of its own, the way agent-browser's daemon
+//! leaves the guard's group (`setsid`); that daemon listens on
 //! `<AGENT_BROWSER_SOCKET_DIR>/<AGENT_BROWSER_SESSION>.sock` (removing a stale socket file there
 //! first, as agent-browser does), writes its pid to `<session>.pid` beside it, as agent-browser's
 //! does, and waits to be killed; once it runs, this process also writes the daemon's pid to
 //! `daemon-of-<parent pid>.pid` there (the guard that started it). Then, on every OS, it answers
 //! each line that has an `id` with an empty result, and exits 0 at the end of its stdin. With the
-//! argument `linger` it first also starts itself as `daemon_stub --linger` in its own process
+//! argument `linger` it also starts itself as `daemon_stub --linger` in its own process
 //! group, standing in for a CLI call of agent-browser's that outlives it: that process writes its
 //! pid to `linger.pid` in the socket folder and waits to be killed. With the argument `late` it
 //! starts no daemon at once but `daemon_stub --late` in a process group of its own: a daemon that
 //! has left agent-browser's group but not yet bound its socket. That process writes its pid to
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
-//! the daemon does. Cargo builds it for the tests; it is never shipped.
+//! the daemon does. A tool call named `stub_hold` is never answered (a call in flight). Cargo
+//! builds it for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -103,6 +105,9 @@ mod daemon {
     /// Starts the daemon in a group of its own and waits until its pid file exists.
     pub(crate) fn start() -> std::io::Result<()> {
         let (dir, session) = files();
+        let pid_file = dir.join(format!("{session}.pid"));
+        // A restarted session's previous daemon left its pid file: wait for this daemon's own.
+        drop(std::fs::remove_file(&pid_file));
         let mut daemon = Command::new(std::env::current_exe()?)
             .arg("--daemon")
             .stdin(Stdio::null())
@@ -110,7 +115,6 @@ mod daemon {
             .stderr(Stdio::null())
             .process_group(0)
             .spawn()?;
-        let pid_file = dir.join(format!("{session}.pid"));
         while !pid_file.exists() {
             if daemon.try_wait()?.is_some() {
                 return Err(std::io::Error::other("the daemon stub exited"));
@@ -128,27 +132,43 @@ mod daemon {
     }
 }
 
+/// What agent-browser's first tool call starts on Unix: the daemon, and with `linger` or
+/// `late` the process the test asked for.
+#[cfg(unix)]
+fn first_call() -> std::io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("linger") {
+        daemon::start_linger()?;
+    }
+    if std::env::args().nth(1).as_deref() == Some("late") {
+        daemon::start_alone("--late")
+    } else {
+        daemon::start()
+    }
+}
+
 fn main() -> std::io::Result<()> {
     #[cfg(unix)]
-    {
-        match std::env::args().nth(1).as_deref() {
-            Some("--daemon") => return daemon::serve(),
-            Some("--linger") => return daemon::linger(),
-            Some("--late") => return daemon::late(),
-            Some("linger") => daemon::start_linger()?,
-            _ => {}
-        }
-        if std::env::args().nth(1).as_deref() == Some("late") {
-            daemon::start_alone("--late")?;
-        } else {
-            daemon::start()?;
-        }
+    match std::env::args().nth(1).as_deref() {
+        Some("--daemon") => return daemon::serve(),
+        Some("--linger") => return daemon::linger(),
+        Some("--late") => return daemon::late(),
+        _ => {}
     }
     let mut out = std::io::stdout().lock();
+    let mut called = false;
     for line in std::io::stdin().lock().lines() {
         let Ok(message) = serde_json::from_str::<Value>(&line?) else {
             continue;
         };
+        if !called && message.get("method").and_then(Value::as_str) == Some("tools/call") {
+            called = true;
+            #[cfg(unix)]
+            first_call()?;
+        }
+        // A call held unanswered, for the tests of a call in flight when Chrome dies.
+        if message.pointer("/params/name").and_then(Value::as_str) == Some("stub_hold") {
+            continue;
+        }
         if let Some(id) = message.get("id") {
             writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "result": {}}))?;
             out.flush()?;

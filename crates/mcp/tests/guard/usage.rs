@@ -7,7 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::support::{CDP_PORT, GUARD, Scratch, example, guard_command, port_args, run};
+use crate::support::{CDP_PORT, GUARD, Guard, Scratch, example, guard_command, port_args, run};
 use crate::write;
 
 const MODE_USAGE: &str = if cfg!(unix) {
@@ -240,9 +240,11 @@ fn an_unstartable_child_exits_1() {
     let not_a_program = scratch.path().join("not-a-program");
     write::write(&not_a_program, "plain text").unwrap();
     let args: [&OsStr; 0] = [];
-    let output = run(guard_command(&scratch, &not_a_program, &args));
-    assert_eq!(output.status.code(), Some(1));
-    let text = stderr(&output);
+    // The first call starts Chrome, then fails to start agent-browser: the call gets an error.
+    let mut guard = Guard::start(guard_command(&scratch, &not_a_program, &args));
+    assert_eq!(guard.call("open")["error"]["code"], -32603);
+    let (status, (_, text)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1));
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(
         lines.get(..2),
