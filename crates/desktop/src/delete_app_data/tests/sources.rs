@@ -139,13 +139,13 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
     let failed = line_with(body, &["$(deleteAppDataFailed)"]);
     let kept = line_with(body, &["$(deleteAppDataKept)\""]);
     let both = line_with(body, &["$(deleteAppDataKeptFailed)"]);
-    assert_eq!(body[failed - 1], "${If} $R8 == \"\"");
+    assert_eq!(body[failed - 1], "${ElseIf} $R8 == \"\"");
     assert_eq!(body[kept - 2], "${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}");
     assert_eq!(body[kept - 1], "${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}");
     assert_eq!(body[both - 1], "${Else}");
     assert_eq!(body[both + 1], "${EndIf}");
     let boxes = body.iter().filter(|line| line.starts_with("MessageBox"));
-    assert_eq!(boxes.count(), 3, "{body:?}");
+    assert_eq!(boxes.count(), 4, "{body:?}");
 }
 
 #[test]
@@ -211,6 +211,62 @@ fn the_hook_names_a_kept_folder_only_when_it_is_a_real_folder() {
             .any(|line| line.contains("FileExists") && line.contains("$R9")),
         "{code:?}"
     );
+}
+
+#[test]
+fn the_hook_shows_no_box_when_the_data_folder_is_gone_and_no_path_through_a_link() {
+    let code = hook_code();
+    let body = preuninstall(&code);
+    // The data folder's own attributes, with GetLastError: gone only for 2 or 3.
+    let attributes = line_with(
+        body,
+        &["System::Call 'kernel32::GetFileAttributesW(w \"$R9\") i .R3 ?e'"],
+    );
+    let expected = [
+        "Pop $R1",
+        "StrCpy $R6 1",
+        "${If} $R3 = -1",
+        "StrCpy $R6 2",
+        "${If} $R1 = 2",
+        "${OrIf} $R1 = 3",
+        "StrCpy $R6 0",
+        "${EndIf}",
+        "${Else}",
+        "IntOp $R3 $R3 & 1024",
+        "${If} $R3 <> 0",
+        "StrCpy $R6 2",
+    ];
+    assert_eq!(
+        body[attributes + 1..=attributes + expected.len()],
+        expected,
+        "{body:?}"
+    );
+    // Every box sits under `$R6 <> 0` (no box when gone); a present folder gets a box, the
+    // unnamed one first for a link or an unreadable one.
+    let silent = line_with(body, &["${IfNot} ${Silent}"]);
+    assert!(attributes < silent, "{body:?}");
+    assert_eq!(body[silent + 1], "${AndIf} $R7 <> ${CLAUSEO_DELETED}");
+    assert_eq!(body[silent + 2], "${AndIf} $R6 <> 0");
+    assert_eq!(body[silent + 3], "${If} $R6 = 2");
+    assert_eq!(
+        body[silent + 4],
+        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(deleteAppDataFailedUnnamed)\""
+    );
+    assert_eq!(body[silent + 5], "${ElseIf} $R8 == \"\"");
+    let boxes = (0..body.len()).filter(|&at| body[at].starts_with("MessageBox"));
+    for at in boxes {
+        assert!(silent + 3 < at, "{body:?}");
+    }
+    // The unnamed line names no path, only the folder's name.
+    let english = read("windows/nsis/English.nsh");
+    let unnamed = english
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} ")
+        })
+        .unwrap();
+    assert!(!unnamed.contains('$'), "{unnamed}");
+    assert!(unnamed.contains(clauseo_settings::IDENTIFIER), "{unnamed}");
 }
 
 #[test]

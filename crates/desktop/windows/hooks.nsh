@@ -143,11 +143,37 @@
       ${ElseIf} $R4 = 1
         StrCpy $R8 "$R9\sandbox"
       ${EndIf}
+      ; The data folder itself, by its own attributes (never through a link): $R6 0 when it is
+      ; gone (INVALID_FILE_ATTRIBUTES with ERROR_FILE_NOT_FOUND 2 or ERROR_PATH_NOT_FOUND 3, ?e
+      ; pushing GetLastError), 1 a folder that is no reparse point, 2 a reparse point or anything
+      ; unreadable. The app's refusal of a data folder that is a link (#473) keeps that link and
+      ; exits 1, so $R9 can be a surviving link here: that box names no path (a path, or a kept
+      ; folder found through it, would lead through the link). Gone: no box, since nothing is left
+      ; to look at (an unlink-only run, say: exit 1 with the whole folder deleted).
+      System::Call 'kernel32::GetFileAttributesW(w "$R9") i .R3 ?e'
+      Pop $R1
+      StrCpy $R6 1
+      ${If} $R3 = -1
+        StrCpy $R6 2
+        ${If} $R1 = 2
+        ${OrIf} $R1 = 3
+          StrCpy $R6 0
+        ${EndIf}
+      ${Else}
+        IntOp $R3 $R3 & 1024
+        ${If} $R3 <> 0
+          StrCpy $R6 2
+        ${EndIf}
+      ${EndIf}
       ; One message: nothing kept, the whole folder (Failed); a folder kept and all else gone
-      ; (Kept); a folder kept and something else left, both folders in one box (KeptFailed).
+      ; (Kept); a folder kept and something else left, both folders in one box (KeptFailed); the
+      ; data folder a link or unreadable, no path (FailedUnnamed).
       ${IfNot} ${Silent}
       ${AndIf} $R7 <> ${CLAUSEO_DELETED}
-        ${If} $R8 == ""
+      ${AndIf} $R6 <> 0
+        ${If} $R6 = 2
+          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailedUnnamed)"
+        ${ElseIf} $R8 == ""
           MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
         ${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}
         ${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}

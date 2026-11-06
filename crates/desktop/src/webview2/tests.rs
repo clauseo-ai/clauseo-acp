@@ -198,15 +198,16 @@ fn english_file() -> String {
 }
 
 #[test]
-fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_3_once_each() {
-    // Tauri's 27, and the three lines windows/hooks.nsh shows (deleteAppDataFailed,
-    // deleteAppDataKept and deleteAppDataKeptFailed), which a test there holds to the hook.
+fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_4_once_each() {
+    // Tauri's 27, and the four lines windows/hooks.nsh shows (deleteAppDataFailed,
+    // deleteAppDataKept, deleteAppDataKeptFailed and deleteAppDataFailedUnnamed), which a test
+    // there holds to the hook.
     let strings = lang_strings(&english_file());
-    assert_eq!(strings.len(), 30);
+    assert_eq!(strings.len(), 31);
     let mut keys: Vec<&str> = strings.iter().map(|(key, _)| key.as_str()).collect();
     keys.sort_unstable();
     keys.dedup();
-    assert_eq!(keys.len(), 30);
+    assert_eq!(keys.len(), 31);
     assert!(
         strings
             .iter()

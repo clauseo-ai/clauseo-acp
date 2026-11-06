@@ -4,7 +4,8 @@
 ; No byte order mark: the bundler adds one when it copies the file.
 
 ; Clauseo's wording: the one line whose words differ from Tauri's (approved by Rohan, 2026-11-03),
-; then the three lines windows/hooks.nsh shows after the app deletes its data (S20, 2026-11-05).
+; then the four lines windows/hooks.nsh shows after the app deletes its data (S20, 2026-11-05;
+; deleteAppDataFailedUnnamed 2026-11-06).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -19,6 +20,10 @@ LangString deleteAppDataKept ${LANG_ENGLISH} "Clauseo kept this folder because i
 ; deleteAppDataKeptFailed: a folder stays ($R8, as deleteAppDataKept) and something else in the
 ; data folder ($R9) could not be deleted: one box for both. Provisional (app thread, 2026-11-05).
 LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It kept one folder because it may hold files you still need. Look through that folder before you delete anything.$\n$\nThe folder it kept:$\n$R8$\n$\nThe rest of its data:$\n$R9"
+; deleteAppDataFailedUnnamed: as deleteAppDataFailed, but the data folder is itself a link (or
+; could not be read), so no path is shown: one would lead through the link. The folder is named
+; by its name instead. Provisional (S20 follow-up, 2026-11-06; for the app thread's copy page).
+LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. Its data is in the ai.clauseo.desktop folder in your local AppData folder."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
