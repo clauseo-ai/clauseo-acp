@@ -33,6 +33,11 @@ serde_json = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["socket"] }
 
+# macOS only: `getxattr` and `setxattr` for a download's `com.apple.quarantine` mark
+# (src/browser_guard/downloads/marks.rs, src/write/mac.rs). libc is already nix's dependency.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
 # Windows only: Chrome and agent-browser run in a Job Object the guard owns, so a refused port,
 # and the guard's own exit, end Chrome and agent-browser's detached daemon
 # (src/browser_guard/job.rs); a Toolhelp snapshot and a process handle wait for the guard's

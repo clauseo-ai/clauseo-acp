@@ -1,8 +1,10 @@
-//! The download mover: names, the no-replace move and Chrome's in-progress names.
+//! The download mover: names, the no-replace move, Chrome's in-progress names and the OS marks.
 
 use std::path::{Path, PathBuf};
 
-use super::{in_progress, is_protected, place, safe_name, sweep};
+use super::{
+    BLOCKED_NOTE, Mover, Sweeper, in_progress, is_protected, marks, place, safe_name, sweep,
+};
 use crate::write;
 
 /// A fresh `<temp>/clauseo-mcp-downloads-<test>-<pid>` with empty `staging` and `downloads`.
@@ -33,6 +35,9 @@ fn names(dir: &Path) -> Vec<String> {
 
 /// No names, for an empty folder.
 const NONE: [&str; 0] = [];
+
+/// Whether this OS has a download mark the mover waits for.
+const MARKS: bool = cfg!(any(windows, target_os = "macos"));
 
 /// A file that appears under the chosen name between the mover's look and its move is kept,
 /// and the download takes the next free name; so does one that appears there too.
@@ -160,6 +165,152 @@ fn a_tmp_that_is_no_guid_moves() {
     write::remove_dir_all(&dir).unwrap();
 }
 
+/// A finished file without its OS mark waits up to the given number of sweeps for Chrome's
+/// (Windows and macOS), then is marked in staging and moves; on Linux, which has no mark, it moves
+/// at once and nothing else changes.
+#[test]
+fn an_unmarked_file_waits_for_chromes_mark_then_moves_marked() {
+    let (dir, staging, downloads) = scratch("unmarked");
+    write::write(&staging.join("report.pdf"), "download").unwrap();
+    let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), 2);
+    let waits = if MARKS { 2 } else { 0 };
+    for _ in 0..waits {
+        sweeper.sweep();
+        assert_eq!(names(&staging), ["report.pdf"]);
+        assert_eq!(names(&downloads), NONE);
+    }
+    sweeper.sweep();
+    assert_eq!(names(&staging), NONE);
+    assert_eq!(names(&downloads), ["report.pdf"]);
+    assert_eq!(sweeper.waited.len(), 0);
+    let moved = downloads.join("report.pdf");
+    assert_eq!(std::fs::read_to_string(&moved).unwrap(), "download");
+    assert!(marks::marked(&moved));
+    assert_eq!(marks::read(&moved).is_some(), MARKS);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// A file Chrome has marked moves on the next sweep, however long the wait: the wait is only for
+/// files without a mark, and a slow one holds back no other.
+#[test]
+fn a_marked_file_moves_while_an_unmarked_one_waits() {
+    let (dir, staging, downloads) = scratch("one-waits");
+    write::write(&staging.join("slow.pdf"), "a").unwrap();
+    write::write(&staging.join("done.pdf"), "b").unwrap();
+    marks::ensure(&staging.join("done.pdf")).unwrap();
+    let mut sweeper = Sweeper::new(staging.clone(), downloads.clone(), 150);
+    sweeper.sweep();
+    if MARKS {
+        assert_eq!(names(&staging), ["slow.pdf"]);
+        assert_eq!(names(&downloads), ["done.pdf"]);
+    } else {
+        assert_eq!(names(&downloads), ["done.pdf", "slow.pdf"]);
+    }
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Fail closed: where the probe cannot write a mark, no download reaches the downloads folder;
+/// files stay in staging, and the folder gets one note, written once and never replaced.
+#[test]
+fn downloads_are_held_back_where_no_mark_can_be_written() {
+    let (dir, staging, downloads) = scratch("blocked");
+    write::write(&staging.join("report.pdf"), "download").unwrap();
+    let probe = |_: &Path| -> std::io::Result<()> {
+        Err(std::io::Error::other("no streams on this drive"))
+    };
+    let mut sweeper = Sweeper::with_probe(staging.clone(), downloads.clone(), 0, probe);
+    sweeper.sweep();
+    write::write(&staging.join("second.pdf"), "download").unwrap();
+    sweeper.sweep();
+    assert_eq!(names(&staging), ["report.pdf", "second.pdf"]);
+    assert_eq!(names(&downloads), [BLOCKED_NOTE]);
+    let note = std::fs::read_to_string(downloads.join(BLOCKED_NOTE)).unwrap();
+    assert!(
+        note.contains("\"downloaded from the internet\" mark"),
+        "{note}"
+    );
+    assert_eq!(sweeper.marks_work, Some(false));
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The real probe on this OS's temp folder (NTFS, APFS or a Linux file system): it passes and
+/// leaves nothing behind.
+#[test]
+fn the_probe_passes_here_and_leaves_nothing() {
+    let (dir, staging, _) = scratch("probe");
+    marks::probe(&staging).unwrap();
+    assert_eq!(names(&staging), NONE);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The `ZoneId` rules: 1 to 4 kept, 0 or a value that does not read raised to 3.
+#[test]
+fn zone_ids_below_the_internet_are_kept_only_for_the_firms_own_zones() {
+    for (text, zone) in [
+        (
+            "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://a.test/\r\n",
+            Some(3),
+        ),
+        ("[ZoneTransfer]\nZoneId= 2 \n", Some(2)),
+        ("[ZoneTransfer]\r\nZoneId=0\r\n", Some(0)),
+        ("[ZoneTransfer]\r\nZoneId=x\r\n", None),
+        ("[ZoneTransfer]\r\n", None),
+        ("", None),
+    ] {
+        assert_eq!(marks::zone_of(text), zone, "{text:?}");
+    }
+    for (zone, kept) in [
+        (Some(0), false),
+        (Some(1), true),
+        (Some(2), true),
+        (Some(3), true),
+        (Some(4), true),
+        (Some(5), false),
+        (None, false),
+    ] {
+        assert_eq!(marks::zone_kept(zone), kept, "{zone:?}");
+    }
+}
+
+#[test]
+fn the_quarantine_value_has_the_attributes_format() {
+    assert_eq!(
+        marks::quarantine_value(0x6543_2100),
+        "0081;65432100;Clauseo;"
+    );
+}
+
+/// Windows: a moved file has a `Zone.Identifier`: Chrome's own untouched when it names zone 1
+/// to 4, and `ZoneId=3` when the file had none, zone 0, or one that does not read.
+#[cfg(windows)]
+#[test]
+fn a_moved_file_has_its_zone_with_or_without_a_mark_before() {
+    let (dir, staging, downloads) = scratch("zone");
+    let chromes = "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.com/a.pdf\r\n";
+    let trusted = "[ZoneTransfer]\r\nZoneId=2\r\n";
+    for (name, stream) in [
+        ("marked.pdf", Some(chromes)),
+        ("trusted.pdf", Some(trusted)),
+        ("local.pdf", Some("[ZoneTransfer]\r\nZoneId=0\r\n")),
+        ("garbled.pdf", Some("ZoneId=three")),
+        ("bare.pdf", None),
+    ] {
+        write::write(&staging.join(name), name).unwrap();
+        if let Some(stream) = stream {
+            write::write(&marks::stream_of(&staging.join(name)), stream).unwrap();
+        }
+    }
+    sweep(&staging, &downloads);
+    let read = |name: &str| marks::read(&downloads.join(name));
+    assert_eq!(read("marked.pdf").as_deref(), Some(chromes));
+    assert_eq!(read("trusted.pdf").as_deref(), Some(trusted));
+    for raised in ["local.pdf", "garbled.pdf", "bare.pdf"] {
+        assert_eq!(read(raised).as_deref(), Some(marks::ZONE_MARK), "{raised}");
+    }
+    assert!(marks::ZONE_MARK.contains("ZoneId=3"));
+    write::remove_dir_all(&dir).unwrap();
+}
+
 /// Windows: a file held open without delete sharing (Chrome, or a scanner) cannot be moved; it
 /// stays in the staging folder, and the next sweep after it is closed moves it.
 #[cfg(windows)]
@@ -176,5 +327,54 @@ fn a_file_held_open_is_moved_by_a_later_sweep() {
     sweep(&staging, &downloads);
     assert_eq!(names(&staging), NONE);
     assert_eq!(names(&downloads), ["report.pdf"]);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// macOS: a moved file has a `com.apple.quarantine` attribute: the one it had, untouched, or the
+/// guard's when it had none.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_moved_file_is_quarantined_with_or_without_a_mark_before() {
+    let (dir, staging, downloads) = scratch("quarantine");
+    let chromes = "0083;6543210f;Google Chrome;";
+    write::write(&staging.join("marked.pdf"), "a").unwrap();
+    write::set_xattr(
+        &staging.join("marked.pdf"),
+        c"com.apple.quarantine",
+        chromes.as_bytes(),
+    )
+    .unwrap();
+    write::write(&staging.join("bare.pdf"), "b").unwrap();
+    sweep(&staging, &downloads);
+    assert_eq!(names(&downloads), ["bare.pdf", "marked.pdf"]);
+    assert_eq!(
+        marks::read(&downloads.join("marked.pdf")).as_deref(),
+        Some(chromes)
+    );
+    let ours = marks::read(&downloads.join("bare.pdf")).unwrap();
+    assert!(
+        ours.starts_with("0081;") && ours.ends_with(";Clauseo;"),
+        "{ours}"
+    );
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Lazy start's idle stop drops Chrome, whose mover then sweeps once without waiting for a mark:
+/// what finished is delivered, marked, and staging keeps only the unfinished file. The next
+/// start's mover, on the same kept staging folder, delivers again.
+#[test]
+fn an_idle_stop_delivers_what_finished_and_the_next_start_delivers_again() {
+    let (dir, staging, downloads) = scratch("idle-stop");
+    let mover = Mover::start(staging.clone(), downloads.clone());
+    write::write(&staging.join("report.pdf"), "first").unwrap();
+    write::write(&staging.join("big.zip.crdownload"), "half").unwrap();
+    mover.finish();
+    assert_eq!(names(&downloads), ["report.pdf"]);
+    assert_eq!(names(&staging), ["big.zip.crdownload"]);
+    assert!(marks::marked(&downloads.join("report.pdf")));
+    let mover = Mover::start(staging.clone(), downloads.clone());
+    write::write(&staging.join("second.pdf"), "second").unwrap();
+    mover.finish();
+    assert_eq!(names(&downloads), ["report.pdf", "second.pdf"]);
     write::remove_dir_all(&dir).unwrap();
 }

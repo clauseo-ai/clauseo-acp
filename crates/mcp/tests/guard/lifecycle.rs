@@ -263,7 +263,8 @@ fn chrome_that_exits_at_its_start_is_refused() {
 }
 
 /// The mover at the guard's level: files Chrome finished in the staging folder reach the
-/// downloads folder, a protected name renamed in any case; an unfinished one stays.
+/// downloads folder, a protected name renamed in any case; an unfinished one stays (and goes
+/// with the profile).
 #[test]
 fn downloads_with_protected_names_are_renamed() {
     let scratch = Scratch::new("life_downloads");
@@ -298,21 +299,27 @@ fn downloads_with_protected_names_are_renamed() {
     ]
     .map(str::to_owned)
     .into();
-    assert!(
-        within(|| listed(&downloads) == expected),
-        "{:?}",
-        listed(&downloads)
-    );
+    // On Windows and macOS the mover waits up to 30 s for Chrome's download mark, which these
+    // files never get; the sweep at the guard's exit, which waits for no mark, moves them.
+    let marks_wait = cfg!(any(windows, target_os = "macos"));
+    if !marks_wait {
+        assert!(
+            within(|| listed(&downloads) == expected),
+            "{:?}",
+            listed(&downloads)
+        );
+        assert_eq!(
+            listed(&staging),
+            BTreeSet::from(["big.zip.crdownload".to_owned()])
+        );
+    }
+    let (status, _) = guard.finish();
+    assert_eq!(status.code(), Some(0));
+    assert_eq!(listed(&downloads), expected);
     assert_eq!(
         std::fs::read_to_string(downloads.join("CLAUDE (download).md")).unwrap(),
         "CLAUDE.md"
     );
-    assert_eq!(
-        listed(&staging),
-        BTreeSet::from(["big.zip.crdownload".to_owned()])
-    );
-    let (status, _) = guard.finish();
-    assert_eq!(status.code(), Some(0));
 }
 
 /// The guard's list is the sandbox's `PROTECTED_NAMES`, read from both sources.
