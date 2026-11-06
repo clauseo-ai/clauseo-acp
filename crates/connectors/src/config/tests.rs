@@ -21,6 +21,7 @@ fn production_keeps_every_compiled_in_url() {
     );
 }
 
+#[cfg(feature = "staging")]
 #[test]
 fn staging_maps_every_url_onto_its_host() {
     let urls = Origin::Staging.urls(&CASE_LAW);
@@ -47,6 +48,41 @@ fn staging_maps_every_url_onto_its_host() {
     assert_eq!(urls.pay_prefix, "https://data-staging.clauseo.chat/pay/");
 }
 
+/// The local test server: every path of production on `http://127.0.0.1:8793`, the paths the
+/// connector's owner listed.
+#[cfg(feature = "local")]
+#[test]
+fn local_maps_every_url_onto_the_local_server() {
+    let base = "http://127.0.0.1:8793";
+    assert!(Origin::Local.allowed());
+    let urls = Origin::Local.urls(&CASE_LAW);
+    assert_eq!(urls.issuer, base);
+    assert_eq!(urls.mcp_url, format!("{base}/mcp/case-law"));
+    assert_eq!(urls.api_base, format!("{base}/v1/case-law"));
+    assert_eq!(
+        urls.resources,
+        [
+            format!("{base}/mcp/case-law"),
+            format!("{base}/v1/case-law")
+        ]
+    );
+    assert_eq!(
+        urls.client_id,
+        format!("{base}/oauth/clients/clauseo-desktop.json")
+    );
+    assert_eq!(urls.pricing_url, format!("{base}/pricing.json"));
+    assert_eq!(urls.pay_prefix, format!("{base}/pay/"));
+    assert_eq!(
+        urls.protected_resource_metadata,
+        format!("{base}/.well-known/oauth-protected-resource/mcp/case-law")
+    );
+    assert_eq!(
+        urls.authorization_server_metadata,
+        format!("{base}/.well-known/oauth-authorization-server")
+    );
+}
+
+#[cfg(feature = "staging")]
 #[test]
 fn map_url_leaves_a_lookalike_host_alone() {
     let origin = Origin::Staging;

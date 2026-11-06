@@ -14,7 +14,7 @@ use zeroize::Zeroizing;
 
 use crate::account::Account;
 use crate::cancel::CancelFlag;
-use crate::config::{Config, ConnectorUrls};
+use crate::config::{Config, ConnectorUrls, Origin};
 use crate::credential::{Credential, CredentialKind, CredentialStatus, SignOutReport};
 use crate::error::{AuthError, Error, SignInError, StoreError};
 use crate::http;
@@ -114,6 +114,13 @@ impl Connectors {
     /// nothing is fetched in the background.
     pub fn liveness(&self) -> Liveness {
         crate::pricing::cached_liveness(&self.shared)
+    }
+
+    /// The origin the config named: where every request goes and whose pay links are taken.
+    /// Fixed for the life of the value; the host reads it to recheck a pay link before it opens
+    /// one (`PayUrl::is_for`).
+    pub fn origin(&self) -> &Origin {
+        &self.shared.config.origin
     }
 
     /// The handle of a known connector (`case-law`); `None` for any other id. Every call for

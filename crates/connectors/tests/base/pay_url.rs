@@ -102,6 +102,7 @@ fn every_refusal_in_the_brief_gives_none() {
     }
 }
 
+#[cfg(feature = "staging")]
 #[test]
 fn staging_keeps_its_own_link_and_refuses_production() {
     let staged = PayUrl::parse_for(
@@ -145,5 +146,86 @@ fn the_fake_s_link_comes_back_in_the_production_form() {
         "https://data.clauseo.chat/pay/rch_1",
     ] {
         assert_eq!(PayUrl::parse_for(&CASE_LAW, &origin, text), None, "{text}");
+    }
+}
+
+#[cfg(feature = "staging")]
+#[test]
+fn is_for_takes_only_the_configured_origin_s_https_link() {
+    let production = PayUrl::parse(&CASE_LAW, "https://data.clauseo.chat/pay/rch_1").unwrap();
+    let staging = PayUrl::parse_for(
+        &CASE_LAW,
+        &Origin::Staging,
+        "https://data-staging.clauseo.chat/pay/rch_1",
+    )
+    .unwrap();
+    assert!(production.is_for(&CASE_LAW, &Origin::Production));
+    assert!(!production.is_for(&CASE_LAW, &Origin::Staging));
+    assert!(staging.is_for(&CASE_LAW, &Origin::Staging));
+    assert!(!staging.is_for(&CASE_LAW, &Origin::Production));
+    // The fake's links come back in the production form and are checked as production.
+    let fake = Origin::Fake(url::Url::parse("http://127.0.0.1:4321").unwrap());
+    let from_fake = PayUrl::parse_for(&CASE_LAW, &fake, "http://127.0.0.1:4321/pay/rch_1").unwrap();
+    assert!(from_fake.is_for(&CASE_LAW, &fake));
+    assert!(!staging.is_for(&CASE_LAW, &fake));
+}
+
+#[test]
+fn http_and_other_hosts_are_refused_under_both_origins() {
+    let origins = [
+        Origin::Production,
+        #[cfg(feature = "staging")]
+        Origin::Staging,
+    ];
+    for origin in origins {
+        for text in [
+            "http://data.clauseo.chat/pay/rch_1",
+            "http://data-staging.clauseo.chat/pay/rch_1",
+            "https://evil.example/pay/rch_1",
+            "https://data-staging.clauseo.chat.evil.example/pay/rch_1",
+            "https://staging.clauseo.chat/pay/rch_1",
+            "https://data-staging.clauseo.chat:8443/pay/rch_1",
+        ] {
+            assert_eq!(
+                PayUrl::parse_for(&CASE_LAW, &origin, text),
+                None,
+                "{origin:?}: {text}"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "local")]
+#[test]
+fn local_takes_only_its_own_http_link() {
+    let text = "http://127.0.0.1:8793/pay/rch_AB12cd34";
+    let local = PayUrl::parse_for(&CASE_LAW, &Origin::Local, text).unwrap();
+    assert_eq!(local.as_str(), text);
+    assert!(local.is_for(&CASE_LAW, &Origin::Local));
+    assert!(!local.is_for(&CASE_LAW, &Origin::Production));
+    let production = PayUrl::parse(&CASE_LAW, "https://data.clauseo.chat/pay/rch_1").unwrap();
+    assert!(!production.is_for(&CASE_LAW, &Origin::Local));
+    for refused in [
+        "https://127.0.0.1:8793/pay/rch_AB12cd34",
+        "http://127.0.0.1:8794/pay/rch_AB12cd34",
+        "http://127.0.0.1/pay/rch_AB12cd34",
+        "http://127.0.0.1:08793/pay/rch_AB12cd34",
+        "http://localhost:8793/pay/rch_AB12cd34",
+        "http://127.0.0.2:8793/pay/rch_AB12cd34",
+        "http://[::1]:8793/pay/rch_AB12cd34",
+        "http://user@127.0.0.1:8793/pay/rch_AB12cd34",
+        "http://127.0.0.1:8793/pay/rch_AB12cd34?x=1",
+        "http://127.0.0.1:8793/pay/rch_AB12cd34#top",
+        "http://127.0.0.1:8793/pay/",
+        "http://127.0.0.1:8793/pay/../account",
+        "http://127.0.0.1:8793/payment/rch_AB12cd34",
+        "https://data.clauseo.chat/pay/rch_AB12cd34",
+        "http://data.clauseo.chat/pay/rch_AB12cd34",
+    ] {
+        assert_eq!(
+            PayUrl::parse_for(&CASE_LAW, &Origin::Local, refused),
+            None,
+            "{refused}"
+        );
     }
 }

@@ -5,7 +5,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::known::{KnownConnector, PRODUCTION_ORIGIN, STAGING_ORIGIN};
+#[cfg(feature = "local")]
+use crate::known::LOCAL_ORIGIN;
+#[cfg(feature = "staging")]
+use crate::known::STAGING_ORIGIN;
+use crate::known::{KnownConnector, PRODUCTION_ORIGIN};
 
 #[cfg(feature = "test-support")]
 mod manual;
@@ -66,13 +70,20 @@ impl fmt::Debug for Config {
 }
 
 /// The connector's host. Every compiled-in URL starts with `https://data.clauseo.chat`; under
-/// `Staging` and `Fake` that prefix is replaced by the origin's, keeping the path.
+/// `Staging`, `Local` and `Fake` that prefix is replaced by the origin's, keeping the path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
     /// `https://data.clauseo.chat`.
     Production,
-    /// `https://data-staging.clauseo.chat`, the same paths as production.
+    /// `https://data-staging.clauseo.chat`, the same paths as production (feature `staging`,
+    /// which desktop's `staging-connector` build turns on; never in a release).
+    #[cfg(feature = "staging")]
     Staging,
+    /// `http://127.0.0.1:8793`, the connector's local test server (feature `local`, which
+    /// desktop's `local-connector` build turns on; never in a release). Plain http, exactly
+    /// this host and port.
+    #[cfg(feature = "local")]
+    Local,
     /// The fake connector at `http://127.0.0.1:<port>` (feature `test-support`); any other URL
     /// is refused before any request (`crate::Error::BadOrigin`).
     #[cfg(feature = "test-support")]
@@ -86,7 +97,11 @@ impl Origin {
     /// that is always `Ok` (`unnecessary_wraps`).
     pub(crate) fn allowed(&self) -> bool {
         match self {
-            Origin::Production | Origin::Staging => true,
+            Origin::Production => true,
+            #[cfg(feature = "staging")]
+            Origin::Staging => true,
+            #[cfg(feature = "local")]
+            Origin::Local => true,
             #[cfg(feature = "test-support")]
             Origin::Fake(url) => {
                 url.scheme() == "http"
@@ -106,7 +121,10 @@ impl Origin {
     pub(crate) fn prefix(&self) -> String {
         match self {
             Origin::Production => PRODUCTION_ORIGIN.to_owned(),
+            #[cfg(feature = "staging")]
             Origin::Staging => STAGING_ORIGIN.to_owned(),
+            #[cfg(feature = "local")]
+            Origin::Local => LOCAL_ORIGIN.to_owned(),
             #[cfg(feature = "test-support")]
             Origin::Fake(url) => url.origin().ascii_serialization(),
         }

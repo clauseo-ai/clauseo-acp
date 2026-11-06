@@ -13,6 +13,12 @@
 //!   link, never a window's or an agent's. The pay link (`OpenPayLink`) opens through
 //!   `open_external`'s native confirm and gate ([`open_pay_link`]).
 //! - The day cap's local day comes from the OS's time zone (`local_day.rs`).
+//! - The connector's origin is fixed when the app is compiled ([`ORIGIN`]): production, the
+//!   staging host with the `staging-connector` feature, or the connector's local test server
+//!   (`http://127.0.0.1:8793`) with `local-connector` (`docs/connector-staging.md`); the two
+//!   features exclude each other. No setting, policy, variable or argument picks it; the pay link
+//!   `OpenPayLink` opens follows it. A local build opens that server's own http links
+//!   ([`local_link`]) and goes to it with no proxy.
 //!
 //! Anything that fails leaves the connectors out with one log line: every connector command is
 //! then refused and no session gets case law.
@@ -47,6 +53,47 @@ pub(crate) use local_day::OsLocalDay;
 
 /// The connectors' folder in the data folder.
 const FOLDER: &str = "connectors";
+
+// The two builds exclude each other: every real build (cargo build or test, tauri build) with
+// both fails here. Not under clippy: xtask's clippy step lints each changed package with
+// `--all-features` (xtask/src/steps/plan.rs, CLIPPY_FLAGS), which turns both on; clippy makes no
+// binary, and `ORIGIN` is then `Local` so the code still lints.
+#[cfg(all(
+    feature = "staging-connector",
+    feature = "local-connector",
+    not(clippy)
+))]
+compile_error!("staging-connector and local-connector exclude each other: build with one");
+
+/// The connector's origin, chosen only by the `staging-connector` and `local-connector`
+/// features at compile time.
+#[cfg(not(any(feature = "staging-connector", feature = "local-connector")))]
+const ORIGIN: Origin = Origin::Production;
+/// The connector's origin, chosen only by the `staging-connector` feature at compile time.
+#[cfg(all(feature = "staging-connector", not(feature = "local-connector")))]
+const ORIGIN: Origin = Origin::Staging;
+/// The connector's origin, chosen only by the `local-connector` feature at compile time.
+#[cfg(feature = "local-connector")]
+const ORIGIN: Origin = Origin::Local;
+
+// The origin is the features' and nothing else's: the build fails if they disagree. Without its
+// feature `Origin::Staging` or `Origin::Local` does not exist (clauseo-connectors' `staging`
+// and `local` are off), so a production build cannot name either.
+#[cfg(all(feature = "staging-connector", not(feature = "local-connector")))]
+const _: () = assert!(matches!(ORIGIN, Origin::Staging));
+#[cfg(feature = "local-connector")]
+const _: () = assert!(matches!(ORIGIN, Origin::Local));
+#[cfg(not(any(feature = "staging-connector", feature = "local-connector")))]
+const _: () = assert!(matches!(ORIGIN, Origin::Production));
+
+/// The user agent's mark for a staging or local build, so the connector's logs tell it apart.
+const UA_MARK: &str = if cfg!(feature = "local-connector") {
+    " (local)"
+} else if cfg!(feature = "staging-connector") {
+    " (staging)"
+} else {
+    ""
+};
 
 /// `config` with the connectors and the case-law relays, or unchanged (logged) when they cannot
 /// be built.
@@ -83,7 +130,8 @@ fn build(
 ) -> Result<(ConnectorsWiring, Relays), &'static str> {
     let folder = data_dir.join(FOLDER);
     let mut config = Config::production(user_agent(), folder.join("state.json"));
-    config.proxy = ProxyChoice::Resolve(route);
+    config.origin = ORIGIN;
+    config.proxy = proxy_setting(route);
     let connectors = Connectors::new(config, store)
         .map_err(|_unsaid| "the connectors' state could not be read")?;
     let connector = connectors
@@ -92,7 +140,7 @@ fn build(
     let events = ConnectorEvents::new();
     let relays = Relays::new(RelayConfig {
         connector,
-        origin: Origin::Production,
+        origin: ORIGIN,
         day_file: folder.join("day.json"),
         clock: Arc::new(SystemClock),
         local_day: Arc::new(OsLocalDay),
@@ -106,9 +154,23 @@ fn build(
     Ok((wiring, relays))
 }
 
-/// `Clauseo/<version>`, sent on every connector request.
+/// The connector's proxy setting: the route as the host's own HTTPS takes it, asked per request.
+#[cfg(not(feature = "local-connector"))]
+fn proxy_setting(route: ProxyResolver) -> ProxyChoice {
+    ProxyChoice::Resolve(route)
+}
+
+/// The connector's proxy setting in a local build: none, as the local test server is this
+/// computer (on Windows, a port forward on it), which a firm's proxy cannot reach.
+#[cfg(feature = "local-connector")]
+fn proxy_setting(_route: ProxyResolver) -> ProxyChoice {
+    ProxyChoice::Direct
+}
+
+/// `Clauseo/<version>`, sent on every connector request; `Clauseo/<version> (staging)` in a
+/// staging build, `Clauseo/<version> (local)` in a local one.
 fn user_agent() -> String {
-    format!("Clauseo/{}", env!("CARGO_PKG_VERSION"))
+    format!("Clauseo/{}{UA_MARK}", env!("CARGO_PKG_VERSION"))
 }
 
 /// Whether the last route asked for was refused, so a run of refusals logs once.
@@ -203,6 +265,12 @@ pub(crate) async fn open_pay_link(
     language: Language,
     url: &str,
 ) -> Result<(), HostError> {
+    let link = local_link(url).map_or_else(|| https_link(url), Ok)?;
+    crate::open::open_external(confirm, opener, gate, now, language, &link).await
+}
+
+/// `url` as a link `open_external` takes, https only.
+fn https_link(url: &str) -> Result<crate::open::Link, HostError> {
     let link = crate::open::check_link(url)?;
     if !link.url.starts_with("https://") {
         return Err(HostError::new(
@@ -210,15 +278,49 @@ pub(crate) async fn open_pay_link(
             "a pay link is https only",
         ));
     }
-    crate::open::open_external(confirm, opener, gate, now, language, &link).await
+    Ok(link)
 }
 
-/// Opens `url` with no confirm, https only; the error names no URL.
+/// Opens `url` with no confirm, https only (or the local server's own link in a local build);
+/// the error names no URL.
 fn open_link(opener: &dyn Opener, url: &str) -> Result<(), String> {
-    open_url_unconfirmed(opener, url).map_err(|error| {
+    let opened = match local_link(url) {
+        Some(link) => opener.open_url(&link.url),
+        None => open_url_unconfirmed(opener, url),
+    };
+    opened.map_err(|error| {
         tracing::warn!(code = ?error.code(), "the sign-in page did not open");
         "the browser did not open the sign-in page".to_owned()
     })
+}
+
+/// In a local build, a link on exactly the local test server's origin (`http://127.0.0.1:8793`,
+/// as written, no user info): `check_link` refuses loopback and `open_url_unconfirmed` plain
+/// http, so the connector's own sign-in page and pay link are let through here, and nothing else.
+#[cfg(feature = "local-connector")]
+fn local_link(url: &str) -> Option<crate::open::Link> {
+    use clauseo_connectors::LOCAL_ORIGIN;
+
+    let rest = url.strip_prefix(LOCAL_ORIGIN)?;
+    if !rest.starts_with('/') {
+        return None;
+    }
+    let parsed = url::Url::parse(url).ok()?;
+    let ours = parsed.origin().ascii_serialization() == LOCAL_ORIGIN
+        && parsed.username().is_empty()
+        && parsed.password().is_none();
+    ours.then(|| crate::open::Link {
+        url: parsed.as_str().to_owned(),
+        destination: crate::open::Destination::Web(
+            LOCAL_ORIGIN.trim_start_matches("http://").to_owned(),
+        ),
+    })
+}
+
+/// Outside a local build no link is the local server's.
+#[cfg(not(feature = "local-connector"))]
+fn local_link(_url: &str) -> Option<crate::open::Link> {
+    None
 }
 
 #[cfg(test)]

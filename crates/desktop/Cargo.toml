@@ -24,6 +24,19 @@ e2e = []
 # writes the run to MARKS_OUT and quits. e2e alone also stamps channel events with their receive
 # time, sets the page's perf globals and adds `perf_channel_bytes` (src/e2e.rs).
 marks = ["e2e"]
+# The staging build (docs/connector-staging.md), never on by default: the case-law connector talks
+# to https://data-staging.clauseo.chat instead of production, OpenPayLink opens only that host's
+# /pay/ links, and the user agent reads "Clauseo/<version> (staging)". The origin is chosen here
+# alone, at compile time (src/connectors.rs, ORIGIN); no setting, variable or argument picks it.
+# It turns on clauseo-connectors' staging, so a build without it holds no staging host at all.
+staging-connector = ["clauseo-connectors/staging"]
+# The local test build (docs/connector-staging.md), never on by default and never with
+# staging-connector (a compile_error!): the case-law connector talks to its local test server at
+# exactly http://127.0.0.1:8793 (the Mac mini's; a port forward on Windows) with no proxy,
+# OpenPayLink opens only that origin's /pay/ links, and the user agent reads
+# "Clauseo/<version> (local)". Chosen here alone, at compile time; a fixed address, so a build
+# can be scanned for it.
+local-connector = ["clauseo-connectors/local"]
 
 [build-dependencies]
 tauri-build.workspace = true

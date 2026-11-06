@@ -140,7 +140,13 @@ pub struct FakeConnector;
 impl FakeConnector {
     /// Binds `127.0.0.1:0` and serves until the handle drops.
     pub fn start(options: FakeOptions) -> io::Result<FakeHandle> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        FakeConnector::start_on(0, options)
+    }
+
+    /// Binds `127.0.0.1:<port>` (0 for any) and serves until the handle drops: the local test
+    /// server's own port, for `Origin::Local`'s tests.
+    pub fn start_on(port: u16, options: FakeOptions) -> io::Result<FakeHandle> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let port = listener.local_addr()?.port();
         let base = format!("http://127.0.0.1:{port}");
         let base_url = Url::parse(&base).map_err(io::Error::other)?;

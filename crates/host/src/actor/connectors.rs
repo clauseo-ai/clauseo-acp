@@ -255,10 +255,12 @@ fn begin(actor: &mut Actor, id: CommandId, command: ConnectorCommand) -> Result<
         ConnectorCommand::Remove { id: connector } => tidy_up(actor, &connector, Job::Remove)?,
         ConnectorCommand::OpenPayLink { id: connector } => {
             known(&connector)?;
+            // The wired connectors' own origin: desktop fixes it at compile time.
             let url = actor
                 .connectors
-                .state
-                .pay_link()
+                .wired
+                .as_ref()
+                .and_then(|wired| actor.connectors.state.pay_link(wired.connectors.origin()))
                 .ok_or_else(|| refused("there is no checked pay link to open"))?
                 .clone();
             let opener = Arc::clone(&wired(actor)?.opener);

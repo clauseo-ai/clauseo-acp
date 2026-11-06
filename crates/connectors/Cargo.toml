@@ -11,6 +11,14 @@ publish.workspace = true
 # The fake connector (`fake`), `MemoryStore`, `ManualClock` and `Origin::Fake`, for this crate's
 # tests and R24's. Never on in the app.
 test-support = []
+# `Origin::Staging` and the staging host (https://data-staging.clauseo.chat), for desktop's
+# `staging-connector` build (docs/connector-staging.md) and the tests. Off, a build holds no
+# staging host at all, which release.yml's binary scan relies on.
+staging = []
+# `Origin::Local` and the connector's local test server (http://127.0.0.1:8793, the Mac mini's),
+# for desktop's `local-connector` build and the tests. The one origin plain http may reach. Off,
+# a build holds no such address.
+local = []
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -47,7 +55,10 @@ windows = { workspace = true, features = ["Win32_Networking_WinSock"] }
 
 [dev-dependencies]
 # Itself with test-support, so `cargo nextest run -p clauseo-connectors` and the workspace run
-# build the fake connector and `MemoryStore` with no flag.
+# build the fake connector and `MemoryStore` with no flag. Not staging: the workspace's test build
+# unifies features, so it would put the staging host in the app binary that
+# crates/desktop/tests/staging_host.rs scans. `Origin::Staging`'s tests run with
+# `--features staging` (ci.yml).
 clauseo-connectors = { path = ".", features = ["test-support"] }
 tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 tracing-log = { workspace = true, features = ["std", "log-tracer"] }

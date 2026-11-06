@@ -85,7 +85,9 @@ clauseo-matters = { path = "../matters", features = ["test-support"] }
 # `running` and `kill`: the cancel tests watch the processes the agent started.
 clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-profile = { path = "../profile", features = ["test-support"] }
-# The fake connector, its memory store and manual clock for the relay's tests and bench.
+# The fake connector, its memory store and manual clock for the relay's tests and bench. Not
+# staging: the workspace's test build would put the staging host in the app binary
+# (crates/desktop/tests/staging_host.rs).
 clauseo-connectors = { path = "../connectors", features = ["test-support"] }
 # The relay tests' gated upstream as an `Origin::Fake`.
 url = { workspace = true }

@@ -105,7 +105,12 @@ fn agent_via(config: &Config, proxy: &ProxyChoice) -> Result<Agent, Error> {
         }
     };
     let https_only = match config.origin {
-        Origin::Production | Origin::Staging => true,
+        Origin::Production => true,
+        #[cfg(feature = "staging")]
+        Origin::Staging => true,
+        // The local test server is plain http, and its origin is exactly that one.
+        #[cfg(feature = "local")]
+        Origin::Local => false,
         #[cfg(feature = "test-support")]
         Origin::Fake(_) => false,
     };

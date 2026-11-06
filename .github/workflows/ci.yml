@@ -471,6 +471,9 @@ jobs:
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-desktop --features staging-connector --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-desktop --features local-connector --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-connectors --features staging,local --profile ci --no-tests=pass --no-run
 
       # The guard's real-Chrome regression test (crates/mcp/tests/guard/real_chrome.rs) opens a page
       # through `clauseo-mcp browser-guard`, the pinned agent-browser and the runner's Google Chrome.
@@ -499,7 +502,12 @@ jobs:
 
       # The desktop crate's tests run a second time with the marks feature (the speed scoreboard's
       # build): its portable cases on every Linux run, so the merge queue tests them; the macOS job
-      # runs the macOS ones on main.
+      # runs the macOS ones on main. And once more with staging-connector (docs/connector-staging.md):
+      # the staging build's origin and pay-link tests, and tests/staging_host.rs's scan for the
+      # staging host, which every other run makes sure is absent; the same with local-connector
+      # (the local test server, 127.0.0.1:8793). clauseo-connectors' Origin::Staging and
+      # Origin::Local tests run with its staging and local features, which no dev-dependency
+      # turns on (they would unify into the app binary that scan reads).
       # A new network namespace with only loopback, entered as root and then dropped back to the
       # runner user, without its supplementary groups (docker's socket would reach the network) and
       # with no_new_privs (sudo could otherwise nsenter back out). sudo may replace PATH, HOME and
@@ -521,6 +529,9 @@ jobs:
               echo "uid inside the namespace: $(as_runner id -u)"
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
               as_runner cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-desktop --features staging-connector --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-desktop --features local-connector --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-connectors --features staging,local --profile ci --no-tests=pass
             '
 
       # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist (a plain
