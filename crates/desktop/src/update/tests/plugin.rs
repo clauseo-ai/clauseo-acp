@@ -235,13 +235,21 @@ fn the_install_verifies_the_saved_file_again() {
     );
 }
 
-/// The config's source names no endpoint until R23 PR 6, so its updater fails to build, which is
-/// why `choice.rs` never builds one then.
+/// The config's source (R23 PR 6) builds the plugin's updater over `tauri.conf.json`'s endpoint
+/// and key, and that endpoint is the release's `latest.json` on GitHub, over HTTPS.
 #[test]
-fn the_config_source_has_no_endpoint_yet() {
+fn the_config_source_builds_over_the_release_endpoint() {
     let app = app();
-    let error = Source::Config.updater(app.handle()).err().unwrap();
-    assert!(matches!(error, PluginError::EmptyEndpoints), "{error:?}");
+    assert!(Source::Config.updater(app.handle()).is_ok());
+    let conf: Value =
+        serde_json::from_slice(&std::fs::read(crate_dir().join("tauri.conf.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        conf["plugins"]["updater"]["endpoints"],
+        serde_json::json!([
+            "https://github.com/clauseo-ai/clauseo-acp/releases/latest/download/latest.json"
+        ])
+    );
 }
 
 /// A check that cannot connect is a network failure whose line names no address.

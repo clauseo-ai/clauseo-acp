@@ -35,12 +35,28 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   `requireSignedVersion: true`, `allowDowngrades: false`, `windows: { installMode: "passive" }`.
   Full installers, no deltas. `releases/latest` sees only published, non-prerelease releases, so
   neither a draft nor a test pre-release is ever offered. The flags landed with PR 5; the
-  pubkey and the endpoint land with PR 6.
+  pubkey and the endpoint landed with PR 6.
 - **Empty endpoints until the real key.** PRs 1 to 5 land with `endpoints` empty (the
   `tauri-config` check refuses endpoints without a pubkey, and the plugin's `build` fails with
   `EmptyEndpoints`). A build with no endpoint uses `NoUpdater`, shown as `managed` by `package`, so
   it never touches the network. The `e2e` build alone sets an endpoint in code
   (`E2E_UPDATE_ENDPOINT`) and trusts the test key (landed with PR 5).
+- **PR 6: the endpoint, built against a placeholder key.** PR 6 sets `endpoints` to the URL above
+  and `pubkey` to a placeholder: a throwaway minisign key made for PR 6 alone, whose private
+  half and password were deleted at once, so nothing can sign for it. Its public half is
+  committed as `crates/desktop/release/updater-placeholder.pub`. While it is the release key,
+  the desktop test `the_release_pubkey_is_not_the_placeholder` fails ("PR 6 can't merge until
+  Rohan's public key replaces the placeholder"), so PR 6 cannot merge by accident; a release
+  run would fail too, since the bundler checks the signing key against that pubkey. A release
+  build now gives the host `PluginUpdater` over the config; a debug build without `e2e`
+  still gives none.
+- **The swap, when Rohan's key arrives** (R23-key-steps.md): paste his `.pub` text as
+  `plugins.updater.pubkey` in `tauri.conf.json`; delete `updater-placeholder.pub` and the
+  test that reads it (`the_committed_placeholder_has_the_key_id_the_guard_refuses`). The guard
+  stays and keeps the placeholder's key id in the test (`PLACEHOLDER_KEY_ID`), so the placeholder
+  can never come back; it also refuses the test key, and a pubkey that is not a minisign public
+  key. Keeping it costs nothing, and deleting it would leave only "not empty" to catch a wrong
+  key.
 
 ### The `Updater` trait
 
@@ -260,8 +276,9 @@ call before `install` stays a no-op seam until S22 merges.
 install; what the brief left open was decided so:
 
 - **Which updater.** Linux and debug builds give the host none (`NoUpdater`, `managed` by
-  `package`), and so does a release build while `tauri.conf.json` names no endpoint, so the
-  plugin's `build` (which fails with `EmptyEndpoints`) is never called. The `e2e` build takes
+  `package`), and so would a release build whose `tauri.conf.json` named no endpoint (as before
+  PR 6), so the plugin's `build` (which fails with `EmptyEndpoints`) is never called. Since PR 6
+  a release build takes the plugin over the config's endpoint and key. The `e2e` build takes
   an updater only from its variables, never from the config, so a test run never reaches the
   real endpoint: `E2E_FAKE_UPDATE=<version>` (a fake, installed per user, that offers that
   version at once, finishes its download at once with no file, and is never installed: the app
@@ -375,7 +392,8 @@ install; what the brief left open was decided so:
   requests with such matches must add them before they merge.
 - The host never depends on the plugin, Tauri or tokio; a test drives the whole state machine
   with a fake `Updater` and `ManualClock`.
-- Until PR 6, no build updates itself: every build reads `managed`.
+- Until PR 6, no build updated itself: every build read `managed`. Since PR 6, per-user release
+  builds on Windows and macOS check the release endpoint.
 - A later move of the endpoint (a Worker, staged rollout) changes only the config and the
   adapter; the wire and the state machine stay.
 

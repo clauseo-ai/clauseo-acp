@@ -97,7 +97,7 @@ pub(super) fn choose(build: Build, env: E2eEnv) -> Choice {
             }
         }
         Flavour::Release if build.endpoints => Choice::Config,
-        // A debug build, or a release build with no endpoint (until R23 PR 6).
+        // A debug build, or a release build whose config names no endpoint.
         Flavour::Debug | Flavour::Release => Choice::None,
     }
 }
