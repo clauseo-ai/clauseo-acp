@@ -4,13 +4,14 @@
 //! Each process is opened once, by pid, and its token user read through that same handle; the
 //! termination goes through that handle too, so a pid reused between the list and the
 //! termination can't redirect it. Which processes to stop is [`to_stop`] (pure, tested on every
-//! OS): a token user equal to a pool SID, nothing else.
+//! OS): a token user equal to a pool SID, nothing else. Before anything, every SID asked for
+//! must be a local account of this machine, not built in, and not this process's user.
 #![expect(
     unsafe_code,
     reason = "FFI to the process list, process tokens and TerminateProcess"
 )]
 
-use windows::Win32::Foundation::{HANDLE, LUID};
+use windows::Win32::Foundation::{HANDLE, LUID, WAIT_OBJECT_0};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_DEBUG_NAME,
     SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
@@ -25,8 +26,10 @@ use windows::core::PCWSTR;
 
 use super::ffi::{code_of, os, token_user};
 use super::machine::MachineError;
-use super::strays::{Seen, to_stop};
+use super::preflight::machine_domain;
+use super::strays::{Seen, check_pool_sid, to_stop};
 use crate::windows::acl::object::Handle;
+use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
 /// The exit code a stopped process gets.
@@ -40,22 +43,27 @@ const ACCESS_DENIED: u32 = 5;
 /// What [`stop_pool_processes`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Stopped {
-    /// The pids stopped.
-    pub stopped: Vec<u32>,
+    /// The pids stopped and seen to exit.
+    pub ended: Vec<u32>,
     /// The pids that run as a pool user but couldn't be stopped, each with its error code.
     pub failed: Vec<(u32, u32)>,
+    /// The pids told to stop that hadn't exited when the wait ran out.
+    pub timed_out: Vec<u32>,
 }
 
 /// Stops every process whose token user is one of `pool`, waiting up to five seconds for each
-/// to exit. Enables `SeDebugPrivilege` first where the token holds it (an administrator's
-/// does), since a pool user's process grants nothing to Administrators. A process that can't
-/// be opened at all is passed over: its user is unknown, so it is never stopped.
+/// to exit. Refuses the whole call, stopping nothing, when any SID of `pool` fails
+/// [`check_pool`]. Enables `SeDebugPrivilege` (where the token holds it, as an
+/// administrator's does) only around the list and the stops, since a pool user's process grants
+/// nothing to Administrators. A process that can't be opened at all is passed over: its user is
+/// unknown, so it is never stopped.
 pub fn stop_pool_processes(pool: &[Sid]) -> Result<Stopped, MachineError> {
     let mut done = Stopped::default();
     if pool.is_empty() {
         return Ok(done);
     }
-    enable_debug();
+    check_pool(pool)?;
+    let debug = DebugPrivilege::enable();
     let listed = look()?;
     let seen: Vec<Seen> = listed.iter().map(|(seen, _)| seen.clone()).collect();
     // SAFETY: GetCurrentProcessId only reads this process's id.
@@ -73,13 +81,38 @@ pub fn stop_pool_processes(pool: &[Sid]) -> Result<Stopped, MachineError> {
         match unsafe { TerminateProcess(handle.0, STOPPED_EXIT) } {
             Ok(()) => {
                 // SAFETY: the handle is open with PROCESS_SYNCHRONIZE; the wait is bounded.
-                unsafe { WaitForSingleObject(handle.0, EXIT_WAIT_MS) };
-                done.stopped.push(pid);
+                if unsafe { WaitForSingleObject(handle.0, EXIT_WAIT_MS) } == WAIT_OBJECT_0 {
+                    done.ended.push(pid);
+                } else {
+                    done.timed_out.push(pid);
+                }
             }
             Err(error) => done.failed.push((pid, code_of(&error))),
         }
     }
+    drop(listed);
+    drop(debug);
     Ok(done)
+}
+
+/// Refuses `pool` unless every SID passes [`check_pool_sid`] against this machine's account
+/// domain and this process's user: defence in depth, so no caller can stop another user's
+/// processes or delete another user's profile.
+pub(super) fn check_pool(pool: &[Sid]) -> Result<(), MachineError> {
+    let machine = machine_domain()?;
+    let own = current_user_sid().map_err(|error| MachineError::Os {
+        call: "GetTokenInformation",
+        code: error
+            .raw_os_error()
+            .and_then(|code| u32::try_from(code).ok())
+            .unwrap_or(u32::MAX),
+    })?;
+    for sid in pool {
+        check_pool_sid(sid, machine, &own).map_err(|why| {
+            MachineError::Other(format!("{} isn't a pool user: {why}", sid.as_str()))
+        })?;
+    }
+    Ok(())
 }
 
 /// Every running process with its token user, for the tests.
@@ -140,44 +173,83 @@ fn pids() -> Result<Vec<u32>, MachineError> {
     }
 }
 
-/// Enables `SeDebugPrivilege` in this process's token, where it holds the privilege. Without
-/// it, the stop still reaches the processes whose DACL lets this token in.
-fn enable_debug() {
-    let mut token = HANDLE::default();
-    let access = TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY;
-    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a live
-    // out-pointer, owned by `Handle` once written.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut token) }.is_err() {
-        return;
+/// `SeDebugPrivilege` enabled in this process's token for as long as this guard lives; on drop
+/// the token gets back the state it had before (`PreviousState`), on every return path.
+struct DebugPrivilege {
+    /// The token, open for `TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY`.
+    token: Handle,
+    /// The privilege's state before the change; restored on drop.
+    previous: TOKEN_PRIVILEGES,
+}
+
+impl DebugPrivilege {
+    /// Enables the privilege where the token holds it; `None` when it couldn't (the stop then
+    /// still reaches the processes whose DACL lets this token in).
+    fn enable() -> Option<DebugPrivilege> {
+        let mut token = HANDLE::default();
+        let access = TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY;
+        // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a
+        // live out-pointer, owned by `Handle` once written.
+        unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut token) }.ok()?;
+        let token = Handle(token);
+        let mut luid = LUID::default();
+        // SAFETY: no system name (this one); the privilege name is a NUL-terminated constant;
+        // `luid` is a live out-pointer.
+        unsafe { LookupPrivilegeValueW(PCWSTR::null(), SE_DEBUG_NAME, &raw mut luid) }.ok()?;
+        let wanted = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES {
+                Luid: luid,
+                Attributes: SE_PRIVILEGE_ENABLED,
+            }],
+        };
+        let mut previous = TOKEN_PRIVILEGES::default();
+        let size = u32::try_from(size_of::<TOKEN_PRIVILEGES>()).unwrap_or(0);
+        let mut returned = 0u32;
+        // SAFETY: the token is open with TOKEN_ADJUST_PRIVILEGES; `wanted` and `previous` are
+        // live and `size` bytes long (one privilege each); `returned` is a live out-pointer.
+        let adjusted = unsafe {
+            AdjustTokenPrivileges(
+                token.0,
+                false,
+                Some(&raw const wanted),
+                size,
+                Some(&raw mut previous),
+                Some(&raw mut returned),
+            )
+        };
+        if let Err(error) = adjusted {
+            tracing::debug!(code = error.code().0, "SeDebugPrivilege wasn't enabled");
+            return None;
+        }
+        Some(DebugPrivilege { token, previous })
     }
-    let token = Handle(token);
-    let mut luid = LUID::default();
-    // SAFETY: no system name (this one); the privilege name is a NUL-terminated constant;
-    // `luid` is a live out-pointer.
-    if unsafe { LookupPrivilegeValueW(PCWSTR::null(), SE_DEBUG_NAME, &raw mut luid) }.is_err() {
-        return;
-    }
-    let privileges = TOKEN_PRIVILEGES {
-        PrivilegeCount: 1,
-        Privileges: [LUID_AND_ATTRIBUTES {
-            Luid: luid,
-            Attributes: SE_PRIVILEGE_ENABLED,
-        }],
-    };
-    let size = u32::try_from(size_of::<TOKEN_PRIVILEGES>()).unwrap_or(0);
-    // SAFETY: the token is open with TOKEN_ADJUST_PRIVILEGES; `privileges` is live and `size`
-    // bytes long; no previous state is asked for.
-    let adjusted = unsafe {
-        AdjustTokenPrivileges(
-            token.0,
-            false,
-            Some(&raw const privileges),
-            size,
-            None,
-            None,
-        )
-    };
-    if let Err(error) = adjusted {
-        tracing::debug!(code = error.code().0, "SeDebugPrivilege wasn't enabled");
+}
+
+impl Drop for DebugPrivilege {
+    fn drop(&mut self) {
+        // A privilege the token lacked changed nothing: `previous` then lists none.
+        if self.previous.PrivilegeCount == 0 {
+            return;
+        }
+        let size = u32::try_from(size_of::<TOKEN_PRIVILEGES>()).unwrap_or(0);
+        // SAFETY: the token is still open with TOKEN_ADJUST_PRIVILEGES (it drops after this);
+        // `previous` is live and `size` bytes long; no previous state is asked for.
+        let restored = unsafe {
+            AdjustTokenPrivileges(
+                self.token.0,
+                false,
+                Some(&raw const self.previous),
+                size,
+                None,
+                None,
+            )
+        };
+        if let Err(error) = restored {
+            tracing::warn!(
+                code = error.code().0,
+                "SeDebugPrivilege's state wasn't restored"
+            );
+        }
     }
 }

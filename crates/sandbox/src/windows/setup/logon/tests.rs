@@ -4,17 +4,14 @@
 //! The unelevated tests run on every Windows CI run. The `elevated_` tests are `#[ignore]` and
 //! run only from CI's elevated step: each skips unless this process's token is elevated and
 //! `CLAUSEO_ELEVATED_TESTS=1`, so they never touch a dev box. Each makes its account under a
-//! name unique to the run (`ClauseoSbTest` and six hex digits), and first clears whatever a
-//! killed earlier try left (accounts named `ClauseoSbTest*`, and profiles of such names).
-#![expect(unsafe_code, reason = "FFI to read this process's token elevation")]
-#![expect(
-    clippy::disallowed_methods,
-    reason = "the tests make and delete their accounts with `net user` and PowerShell"
-)]
+//! name unique to the run ([`PREFIX`] and six hex digits), and first clears whatever a killed
+//! earlier try of this family left (accounts named `ClauseoSbTL*`, and profiles of such names).
+//! Other test families use other prefixes, so this one never clears their accounts.
 
 use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
@@ -22,7 +19,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::super::journal::{journal_size, journal_volumes};
 use super::super::machine::Password;
-use super::super::preflight::{logon_right, seclogon};
+use super::super::preflight::{logon_right, machine_domain, seclogon};
 use super::super::processes::{Stopped, running, stop_pool_processes};
 use super::super::profile::{delete_profile, profile_of};
 use super::log_on_once;
@@ -30,10 +27,13 @@ use crate::windows::acl::object::Handle;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
-/// The test accounts' name prefix, shared with the other set-up tests.
-const PREFIX: &str = "ClauseoSbTest";
+/// This family's account name prefix (`PR4f`'s logon tests): `ClauseoSbTL`, then six hex
+/// digits, 17 characters in all, under the 20 that local account names allow.
+const PREFIX: &str = "ClauseoSbTL";
 
 /// Whether this process's token is elevated. A token that cannot be asked counts as not.
+// TODO(S15 PR4e): use the shared helper PR4e moves into `test_acl.rs` once it merges.
+#[expect(unsafe_code, reason = "FFI to read this process's token elevation")]
 fn elevated() -> bool {
     let mut token = HANDLE::default();
     // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a live
@@ -60,6 +60,10 @@ fn elevated() -> bool {
 }
 
 /// Whether an elevated test may run here: an elevated token and `CLAUSEO_ELEVATED_TESTS=1`.
+///
+/// The elevated tests assume CI's elevated step, which runs them one at a time
+/// (`--test-threads 1`): [`clear_leftovers`] deletes this family's accounts, so two of its
+/// tests running at once would delete each other's.
 fn gate(test: &str) -> bool {
     let asked = std::env::var("CLAUSEO_ELEVATED_TESTS").is_ok_and(|value| value == "1");
     if asked && elevated() {
@@ -79,8 +83,12 @@ fn random_hex(bytes: usize) -> String {
     })
 }
 
-/// Runs PowerShell's `script`; its standard output, trimmed. Panics, without the script, when
-/// it fails (scripts here carry no password).
+/// Runs PowerShell's `script`; its standard output, trimmed. Panics when it fails (scripts
+/// here carry no password).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the tests read accounts with PowerShell"
+)]
 fn powershell(script: &str) -> String {
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
@@ -99,6 +107,10 @@ fn sid_of(name: &str) -> Sid {
 }
 
 /// Deletes the account `name` (`net user /delete`); a failure is printed, not raised.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the tests delete accounts with `net user`"
+)]
 fn delete_account(name: &str) {
     let output = Command::new("net")
         .args(["user", name, "/delete"])
@@ -109,8 +121,8 @@ fn delete_account(name: &str) {
     }
 }
 
-/// Clears what a killed earlier try left: every `ClauseoSbTest*` account with its profile,
-/// then any profile whose folder has that prefix and whose account is gone.
+/// Clears what a killed earlier try of this family left: every `ClauseoSbTL*` account with
+/// its profile, then any profile whose folder has that prefix and whose account is gone.
 fn clear_leftovers() {
     let accounts = powershell(&format!(
         "Get-LocalUser -Name '{PREFIX}*' | ForEach-Object {{ $_.Name + ' ' + $_.SID.Value }}"
@@ -144,20 +156,37 @@ struct TestUser {
 }
 
 impl TestUser {
-    /// Makes `ClauseoSbTest<6 hex>` with a random password meeting the complexity policy.
+    /// Makes `ClauseoSbTL<6 hex>` in `Users`, with a random password meeting the complexity
+    /// policy. The password reaches PowerShell on its standard input, never a command line.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the tests make accounts with PowerShell"
+    )]
     fn new() -> TestUser {
         let name = format!("{PREFIX}{}", random_hex(3));
         assert!(name.len() <= 20, "{name}");
         let password = Password::new(format!("Aa1!{}", random_hex(12)));
-        // The password goes on the command line of this one test child, never into output.
-        let output = Command::new("net")
-            .args(["user", &name, password.as_str(), "/add"])
-            .output()
+        let script = format!(
+            "$p = [Console]::In.ReadLine() | ConvertTo-SecureString -AsPlainText -Force; \
+             New-LocalUser -Name '{name}' -Password $p -AccountNeverExpires | Out-Null; \
+             Add-LocalGroupMember -SID 'S-1-5-32-545' -Member '{name}'"
+        );
+        let mut child = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(password.as_bytes()).unwrap();
+        stdin.write_all(b"\n").unwrap();
+        drop(stdin);
+        let output = child.wait_with_output().unwrap();
         assert!(
             output.status.success(),
-            "net user {name} /add failed: {}",
-            output.status
+            "New-LocalUser {name} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
         let sid = sid_of(&name);
         TestUser {
@@ -194,14 +223,23 @@ fn the_process_list_reads_this_process_and_its_user() {
 }
 
 #[test]
-fn stopping_a_pool_nobody_runs_as_stops_nothing() {
-    // A SID in a domain no machine has: nothing runs as it, so nothing may be stopped.
-    let unused = Sid::parse("S-1-5-21-1-2-3-4242").unwrap();
+fn stopping_refuses_sids_that_cant_be_pool_users_and_stops_nothing_for_an_unused_one() {
+    // Another domain's SID, a well-known SID, and this process's user are refused outright.
+    let me = current_user_sid().unwrap();
+    for refused in [
+        Sid::parse("S-1-5-21-1-2-3-4242").unwrap(),
+        Sid::parse("S-1-5-18").unwrap(),
+        me,
+    ] {
+        let error = stop_pool_processes(std::slice::from_ref(&refused)).unwrap_err();
+        assert!(error.to_string().contains(refused.as_str()), "{error}");
+        assert!(delete_profile(&refused).is_err());
+    }
+    // An unused account SID of this machine: nothing runs as it, so nothing is stopped.
+    let [a, b, c] = machine_domain().unwrap();
+    let unused = Sid::parse(&format!("S-1-5-21-{a}-{b}-{c}-4000000000")).unwrap();
     let stopped = stop_pool_processes(&[unused]).unwrap();
-    assert!(
-        stopped.stopped.is_empty() && stopped.failed.is_empty(),
-        "{stopped:?}"
-    );
+    assert_eq!(stopped, Stopped::default());
     assert_eq!(stop_pool_processes(&[]).unwrap(), Stopped::default());
 }
 

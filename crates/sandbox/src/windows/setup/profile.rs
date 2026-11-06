@@ -16,7 +16,7 @@ use windows::core::PCWSTR;
 use super::answers::is_temporary;
 use super::ffi::{PROFILE_LIST, os, reg_dword, reg_string, wide};
 use super::machine::{MachineError, ProfileDir};
-use super::processes::stop_pool_processes;
+use super::processes::{check_pool, stop_pool_processes};
 use crate::windows::sids::Sid;
 
 /// How many times a delete is tried while the profile service still holds the hive.
@@ -37,17 +37,24 @@ pub fn profile_of(sid: &Sid) -> Result<Option<ProfileDir>, MachineError> {
     Ok(Some(ProfileDir { path, temporary }))
 }
 
-/// Deletes `sid`'s profile: its folder and its `ProfileList` entry. First stops every process
-/// whose token user is exactly `sid`; then `DeleteProfileW`, tried again for up to about three
-/// seconds while the profile service still holds the hive. No profile is `Ok`, so a re-run
+/// Deletes `sid`'s profile: its folder and its `ProfileList` entry. Refuses, deleting nothing,
+/// unless `sid` passes [`check_pool`]: a local account of this machine, not built in, and not
+/// this process's user. Then stops every process whose token user is exactly `sid`; then
+/// `DeleteProfileW`, tried again for up to about three seconds while the profile service still
+/// holds the hive. No profile is `Ok`, so a re-run
 /// skips what is gone.
 pub fn delete_profile(sid: &Sid) -> Result<(), MachineError> {
+    let one = std::slice::from_ref(sid);
+    check_pool(one)?;
     // A stop that fails still leaves the delete to try: it fails, named, if the hive is held.
-    match stop_pool_processes(std::slice::from_ref(sid)) {
-        Ok(stopped) if !stopped.failed.is_empty() => tracing::warn!(
-            failed = stopped.failed.len(),
-            "processes of a pool user couldn't be stopped before its profile delete"
-        ),
+    match stop_pool_processes(one) {
+        Ok(stopped) if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() => {
+            tracing::warn!(
+                failed = stopped.failed.len(),
+                timed_out = stopped.timed_out.len(),
+                "processes of a pool user couldn't be stopped before its profile delete"
+            );
+        }
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "the processes of a pool user couldn't be listed"),
     }

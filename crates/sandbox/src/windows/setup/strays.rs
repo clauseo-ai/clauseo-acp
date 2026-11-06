@@ -14,6 +14,46 @@ const IDLE_PID: u32 = 0;
 /// The System process's pid.
 const SYSTEM_PID: u32 = 4;
 
+/// The lowest relative id a pool account can have: Windows gives local accounts 1000 and up,
+/// and keeps the ones below for built-in accounts and groups (500 is Administrator).
+pub const POOL_RID_MIN: u32 = 1000;
+
+/// Why a SID is refused as a pool user's, before any process is stopped or profile deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum NotPool {
+    /// Not an account of this machine: a well-known SID, another machine's, or a domain's.
+    #[error("it isn't an account of this computer")]
+    NotThisMachine,
+    /// An account of this machine with a relative id under [`POOL_RID_MIN`]: a built-in one.
+    #[error("it is a built-in account of this computer")]
+    BuiltIn,
+    /// The user this process runs as.
+    #[error("it is the user running set-up")]
+    ThisUser,
+}
+
+/// Checks that `sid` can be a pool user's, as defence in depth before a stop or a delete: a
+/// local account (`S-1-5-21-<machine>-<rid>`) in `machine`, this machine's account domain,
+/// with a relative id of at least [`POOL_RID_MIN`], and not `own`, this process's user.
+pub fn check_pool_sid(sid: &Sid, machine: [u32; 3], own: &Sid) -> Result<(), NotPool> {
+    let parts: Vec<&str> = sid.as_str().split('-').collect();
+    // S, 1, 5, 21, the domain's three parts, the relative id.
+    if parts.len() != 8 || sid.domain() != Some(machine) {
+        return Err(NotPool::NotThisMachine);
+    }
+    let rid = parts
+        .last()
+        .and_then(|rid| rid.parse::<u32>().ok())
+        .ok_or(NotPool::NotThisMachine)?;
+    if rid < POOL_RID_MIN {
+        return Err(NotPool::BuiltIn);
+    }
+    if sid == own {
+        return Err(NotPool::ThisUser);
+    }
+    Ok(())
+}
+
 /// One running process as the list saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seen {
@@ -63,6 +103,36 @@ mod tests {
 
     fn pool() -> Vec<Sid> {
         vec![sid(POOL_1), sid(POOL_2)]
+    }
+
+    const MACHINE: [u32; 3] = [111, 222, 333];
+
+    #[test]
+    fn only_this_machines_non_built_in_accounts_other_than_this_user_pass() {
+        let own = sid(OWNER);
+        let check = |text: &str| check_pool_sid(&sid(text), MACHINE, &own);
+        assert_eq!(check(POOL_1), Ok(()));
+        assert_eq!(check("S-1-5-21-111-222-333-1000"), Err(NotPool::ThisUser));
+        // Well-known SIDs: SYSTEM, Administrators, Users, Everyone.
+        for text in ["S-1-5-18", "S-1-5-32-544", "S-1-5-32-545", "S-1-1-0"] {
+            assert_eq!(check(text), Err(NotPool::NotThisMachine), "{text}");
+        }
+        // A domain's account, another machine's, and the machine's domain SID itself.
+        assert_eq!(check("S-1-5-21-7-8-9-1105"), Err(NotPool::NotThisMachine));
+        assert_eq!(
+            check("S-1-5-21-111-222-334-1001"),
+            Err(NotPool::NotThisMachine)
+        );
+        assert_eq!(check("S-1-5-21-111-222-333"), Err(NotPool::NotThisMachine));
+        assert_eq!(
+            check("S-1-5-21-111-222-333-5-1001"),
+            Err(NotPool::NotThisMachine)
+        );
+        // Built-in accounts: Administrator (500), Guest (501), DefaultAccount (503), and 999.
+        for rid in [500, 501, 503, 999] {
+            let text = format!("S-1-5-21-111-222-333-{rid}");
+            assert_eq!(check(&text), Err(NotPool::BuiltIn), "{text}");
+        }
     }
 
     #[test]
