@@ -269,10 +269,19 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
+    let prepared_run_tmp = prepared.run.tmp.clone();
     let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.state, &settings.env, prepared.keys, hooks);
+        let mut forced =
+            agent::codex::launch_env(&prepared.state, &settings.env, prepared.keys, hooks);
+        // The shell's temp folder is the session's run folder's (`RunFolders::tmp`), never the
+        // state folder's `tmp`, whose `arg0` links Codex puts first on `PATH` and runs
+        // unsandboxed.
+        forced.insert(
+            std::ffi::OsString::from(agent::codex::TMPDIR_VAR),
+            prepared_run_tmp.as_os_str().to_owned(),
+        );
         let codex = CodexAgent {
             folder: prepared.folder,
             guard,
@@ -283,6 +292,10 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         // A Claude agent's state folder goes in before `plans_folder` reads the merged map
         // below; its login store is the login home, or the lawyer's default store while
         // desktop says the login is reused.
+        // The reused store `""` is the lawyer's default store (on macOS their Keychain). Right
+        // at tier C, all PR-C has: no jail stands between the agent and that store. The tier A
+        // and B rule (`SignedOut { found: ClaudeSandbox }`, S18) lands with the jail in R17
+        // PR-D.
         let reused = actor.wiring.sign_in.reused.contains(&row.agent);
         let store = prepared.claude_home.as_deref().filter(|_| !reused);
         let forced = prepared

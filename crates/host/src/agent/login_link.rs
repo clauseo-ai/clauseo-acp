@@ -26,8 +26,12 @@
 //! this hook finds the home's link holding, and a matter's link that is not the home's file is
 //! a split, refused with no re-link.
 //!
-//! TODO(R17-C2): stage C's blocking point 2, the shared-login swap check (the shared login is
-//! writable from every matter's session), waits on the orchestrator's ruling.
+//! The shared login is writable from every matter's session (stage C's blocking point 2, C2):
+//! an in-place write to a matter's `auth.json` is a write to the login home's file, since they
+//! are one file, and changes its stamp (size, modified time; same file id). Stage D's identity
+//! check sees that before every launch: `HostConfig::with_launch_gate` (#554), a stat of the
+//! shared login on the prepare thread. PR-C refuses every launch with a state folder while no
+//! gate is wired (`launch_checks.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -277,15 +281,19 @@ pub(crate) async fn check(
 /// listed, or the first link that cannot be removed, fails the call with `agent.launch_failed`,
 /// its message naming no path: a link may remain.
 pub(crate) async fn remove_links(agent: AgentId, data: PathBuf) -> Result<(), Error> {
-    remove_links_but(agent, data, Vec::new()).await
+    remove_links_but(agent, data, Vec::new(), None).await
 }
 
 /// [`remove_links`] but in the matters named in `skip` (their folder names, the matter ids):
-/// those where a session of the agent runs (`turn/sign_in.rs`).
+/// those where a session of the agent runs (`turn/sign_in.rs`). With `source` (the login home's
+/// `auth.json`), a link that is already that file is kept: a launch since the change made it,
+/// and it must never be removed under that session. The ids are compared right before each
+/// removal.
 pub(crate) async fn remove_links_but(
     agent: AgentId,
     data: PathBuf,
     skip: Vec<String>,
+    source: Option<PathBuf>,
 ) -> Result<(), Error> {
     let job = Job {
         what: "login link removal",
@@ -306,7 +314,7 @@ pub(crate) async fn remove_links_but(
                 )
             },
         )?;
-        remove_in(&folders)
+        remove_in(&folders, source.as_deref())
     })
     .await;
     if let Err(error) = &removed {
@@ -315,10 +323,17 @@ pub(crate) async fn remove_links_but(
     removed
 }
 
-/// Removes the `auth.json` link in each of `folders`, never what it points to.
-fn remove_in(folders: &[PathBuf]) -> Result<(), Error> {
+/// Removes the `auth.json` link in each of `folders`, never what it points to; one that is
+/// already `source`'s file, stat'ed right before, is kept.
+fn remove_in(folders: &[PathBuf], source: Option<&Path>) -> Result<(), Error> {
     for folder in folders {
-        match crate::write::remove_link(&folder.join(super::state_folder::LOGIN_FILE)) {
+        let link = folder.join(super::state_folder::LOGIN_FILE);
+        if source
+            .is_some_and(|source| super::state_folder::same_file(source, &link).unwrap_or(false))
+        {
+            continue;
+        }
+        match crate::write::remove_link(&link) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {

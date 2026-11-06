@@ -229,7 +229,7 @@ fn a_junction_in_the_matter_folder_into_the_data_folder_is_denied() {
     assert!(check(root, &[], Some(&search)).touches_data());
 }
 
-/// The review's D2: the matter's own Codex state folder is the session's only in its `tmp`;
+/// The review's D2: nothing of the matter's own Codex state folder is the session's;
 /// its login link (hard-linked to the live login), `config.toml`, databases and `.env` are
 /// refused, by path, by `cat` and by `~/` (Codex's `HOME` is its state folder on macOS and
 /// Linux), and so is the login home's `auth.json`, as at the base.
@@ -239,7 +239,7 @@ fn review_the_own_state_folders_login_link_is_auto_denied() {
     let root = dir.path();
     let data = root.join("data");
     let state = data.join("agent-state/m1/codex-acp");
-    for name in ["tmp", "sessions"] {
+    for name in ["tmp/arg0/codex-arg0abc", "sessions"] {
         write::create_dir_all(&state.join(name)).unwrap();
     }
     for name in ["auth.json", "config.toml", ".env", "state_5.sqlite"] {
@@ -277,11 +277,10 @@ fn review_the_own_state_folders_login_link_is_auto_denied() {
     }
     let home = json!({"command": "cat ~/auth.json"});
     assert!(codex(&[], Some(&home)).touches_data(), "~/auth.json");
-    let own = text(&state.join("tmp/arg0/x"));
-    assert!(
-        !codex(&[&own], None).touches_data(),
-        "the shell's tmp is its own"
-    );
+    // Round 3's H1: the state folder's `tmp` (Codex's `arg0` links, first on its `PATH`) is
+    // no folder of the session's own.
+    let arg0 = text(&state.join("tmp/arg0/codex-arg0abc/git"));
+    assert!(codex(&[&arg0], None).touches_data(), "arg0 is not own");
 }
 
 /// The session's own run folder, the notes, the matter and Claude's plans are its own; another

@@ -137,6 +137,7 @@ impl Running {
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.path().join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let mut config = HostConfig::new(effective, Arc::new(launcher))
+            .with_launch_gate(Arc::new(|_| None))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(crate::SequentialIds::with_run(1)));
         if let Some(walk) = walk {

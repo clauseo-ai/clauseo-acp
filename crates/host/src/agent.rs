@@ -24,6 +24,7 @@ pub(crate) mod data_folder;
 pub(crate) mod folder_support;
 pub(crate) mod forced_ask;
 pub(crate) mod home;
+pub(crate) mod launch_gate;
 pub(crate) mod launch_refusals;
 pub(crate) mod leftovers;
 pub(crate) mod loads;

@@ -295,6 +295,9 @@ mod skill_packs_cap;
 #[path = "host/state_folders.rs"]
 mod state_folders;
 #[cfg(test)]
+#[path = "host/state_folders_live.rs"]
+mod state_folders_live;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]

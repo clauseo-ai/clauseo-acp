@@ -19,12 +19,12 @@ use crate::codex::{CODEX, run_turn};
 use crate::profile_rig::{CLAUDE, Seen, Wired, state_folder};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 
-fn claude() -> AgentId {
+pub(crate) fn claude() -> AgentId {
     AgentId::new(CLAUDE).unwrap()
 }
 
 /// A Claude and a Codex agent, each answering one prompt per launch.
-fn two_agents(test: &str) -> Dir {
+pub(crate) fn two_agents(test: &str) -> Dir {
     Dir::new(
         test,
         &[
@@ -35,19 +35,19 @@ fn two_agents(test: &str) -> Dir {
 }
 
 /// The login home the tests' `Locations` gives `agent`.
-fn login_home(dir: &Dir, agent: &str) -> PathBuf {
+pub(crate) fn login_home(dir: &Dir, agent: &str) -> PathBuf {
     Locations::under_home(dir.home()).agent_home(agent)
 }
 
 /// `name` in `seen`'s environment, as text.
-fn var(seen: &Seen, name: &str) -> Option<String> {
+pub(crate) fn var(seen: &Seen, name: &str) -> Option<String> {
     seen.env
         .get(&OsString::from(name))
         .map(|value| value.to_str().unwrap().to_owned())
 }
 
 /// One turn on a new `agent` thread in `matter`: a new launch.
-fn turn_on(host: &Running, matter: MatterId, agent: &str) {
+pub(crate) fn turn_on(host: &Running, matter: MatterId, agent: &str) {
     let thread = host.create_thread(matter, agent);
     let mut events = host.events(StreamId::Thread(thread));
     let turn = run_turn(host, &mut events, thread);
@@ -57,7 +57,7 @@ fn turn_on(host: &Running, matter: MatterId, agent: &str) {
 
 /// Whether `a` and `b` are one file (Unix: device and inode, never through a link).
 #[cfg(unix)]
-fn one_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+pub(crate) fn one_file(a: &std::path::Path, b: &std::path::Path) -> bool {
     use std::os::unix::fs::MetadataExt as _;
     let (Ok(a), Ok(b)) = (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) else {
         return false;
@@ -114,6 +114,15 @@ fn each_matter_gets_its_own_state_folder_and_claude_one_login_store() {
         var(claude_reused, "CLAUDE_SECURESTORAGE_CONFIG_DIR").as_deref(),
         Some("")
     );
+    // Round 3's H1: Codex's `TMPDIR` is its session's run folder's `tmp`, never the state
+    // folder's (Codex's `arg0` links, first on its `PATH`).
+    let tmp = PathBuf::from(var(codex_b, "TMPDIR").unwrap());
+    assert_eq!(tmp.file_name().unwrap(), "tmp");
+    assert_eq!(
+        tmp.parent().and_then(std::path::Path::parent),
+        Some(dir.data().join("run").as_path())
+    );
+    assert_eq!(var(claude_b, "TMPDIR"), var(claude_a, "TMPDIR"));
     // Codex's `HOME` is its state folder on macOS and Linux; Claude's is never changed.
     if cfg!(unix) {
         assert_eq!(var(codex_b, "HOME"), var(codex_b, "CODEX_HOME"));
@@ -387,86 +396,5 @@ fn a_running_matter_keeps_its_link_until_its_next_launch() {
     turn_on(&host, busy, CODEX);
     assert!(splits.try_recv().is_err(), "no split");
     assert!(one_file(&home.join("auth.json"), &busy_link));
-    host.shutdown();
-}
-
-/// Round 2, defect 1: a second launch in a matter while another session of the agent still runs
-/// there does not clean the shared state folder: the live session's tool results and plan note
-/// stay. The config files are written all the same.
-#[test]
-fn review_a_second_launch_keeps_a_live_sessions_tool_results_and_plan() {
-    let dir = two_agents("state_folders_live");
-    let host = dir.start(0);
-    let matter = host.create_matter("a", &dir.folder("a", &[("brief.txt", "x\n")]));
-    // The first thread's agent stays alive after its turn.
-    turn_on(&host, matter, CLAUDE);
-    let state = state_folder(&dir, matter, CLAUDE);
-    let live = [
-        state.join("projects/p/s-1/tool-results/r.txt"),
-        state.join("plans/p.md"),
-    ];
-    for file in &live {
-        crate::write::create_dir_all(file.parent().unwrap());
-        crate::write::write(file, b"live");
-    }
-    crate::write::write(&state.join("settings.json"), br#"{"hooks":{}}"#);
-    turn_on(&host, matter, CLAUDE);
-    let removed: Vec<&PathBuf> = live.iter().filter(|file| !file.exists()).collect();
-    assert!(
-        removed.is_empty(),
-        "a live session's files were removed: {removed:?}"
-    );
-    let settings = std::fs::read(state.join("settings.json")).unwrap();
-    let settings: serde_json::Value = serde_json::from_slice(&settings).unwrap();
-    assert_eq!(settings, serde_json::json!({"syncClaudeAiSkills": false}));
-    host.shutdown();
-}
-
-/// Round 2, defect 2: a matter busy at the switch to reuse keeps its old link, and a second
-/// thread's launch there is refused with `agent.launch_failed` (retryable), not as a split:
-/// reuse goes on and no split is sent. Once the busy session has ended, the next launch removes
-/// the stale link and links the reused file.
-#[cfg(unix)]
-#[test]
-fn review_a_busy_matter_at_the_switch_splits_a_second_threads_reuse() {
-    use clauseo_host::LoginLink;
-    use clauseo_protocol::{DomainEvent, ErrorCode};
-
-    use crate::codex::codex_dir;
-    use crate::login_check::{Fake, codex};
-
-    let dir = codex_dir("state_folders_busy_switch", "codex-handshake");
-    let home = login_home(&dir, CODEX);
-    crate::write::create_dir_all(&home);
-    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"own\"}");
-    let hook = Fake::new(LoginLink::Shared);
-    let host = dir.start_with(0, |config| config.with_login_check(hook));
-    let splits = host.handle.login_splits();
-    let matter = host.create_matter("a", &dir.folder("a", &[("brief.txt", "x\n")]));
-    // The busy session: its agent stays alive after the turn.
-    turn_on(&host, matter, CODEX);
-    let link = state_folder(&dir, matter, CODEX).join("auth.json");
-    crate::write::remove_file(&home.join("auth.json"));
-    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"lawyer\"}");
-    wait("reused", host.handle.set_reused_login(codex(), true)).unwrap();
-    assert!(link.exists(), "the busy matter keeps its link");
-
-    let second = host.create_thread(matter, CODEX);
-    let mut events = host.events(StreamId::Thread(second));
-    let (turn, _) = host.prompt(second, "Look at the matter.");
-    assert_eq!(events.until_turn_ended(turn).stop, StopReason::Failed);
-    let code = events.events().find_map(|event| match event {
-        DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.code),
-        _ => None,
-    });
-    assert_eq!(code, Some(ErrorCode::AgentLaunchFailed));
-    assert!(splits.try_recv().is_err(), "no split");
-    assert_eq!(std::fs::read(&link).unwrap(), b"{\"tokens\":\"own\"}");
-
-    wait("stop", host.handle.stop_agents(codex())).unwrap();
-    wait("restart", host.handle.restart_agents(codex())).unwrap();
-    turn_on(&host, matter, CODEX);
-    assert!(splits.try_recv().is_err(), "no split");
-    assert!(one_file(&home.join("auth.json"), &link));
     host.shutdown();
 }

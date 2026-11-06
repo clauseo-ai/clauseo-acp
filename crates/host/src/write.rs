@@ -54,9 +54,10 @@ pub(crate) fn create_private_dirs_under(base: &Path, target: &Path) -> io::Resul
             Ok(_) => {}
         }
         if !is_real_dir(&at) {
+            // No path in the error: it reaches the log, which names none (decision record 0047).
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("{} is a link or not a folder", at.display()),
+                "a part of the path is a link or not a folder",
             ));
         }
     }
@@ -136,7 +137,9 @@ pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<std::fs::File> {
         use std::os::windows::fs::OpenOptionsExt;
         /// `FILE_FLAG_OPEN_REPARSE_POINT`.
         const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(OPEN_REPARSE_POINT);
+        /// `FILE_FLAG_BACKUP_SEMANTICS`, so a folder opens too.
+        const BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        options.custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS);
     }
     options.open(path)
 }

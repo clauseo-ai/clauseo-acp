@@ -1,11 +1,12 @@
 //! The data-folder fence for Codex: a read and write deny on what of `<data>` only Clauseo uses,
 //! and on `<data>/run`, `<data>/agent-state` and `<data>/run.old-*` whole ([`rules`]), as a
-//! Codex permission profile in each Codex session's `CODEX_CONFIG`. The session's own run folder,
-//! the matter's notes and the `tmp` of the matter's Codex state folder (its `CODEX_HOME`, R17
-//! PR-C) are reopened as `write` entries in the profile and as ACP `additionalDirectories`
+//! Codex permission profile in each Codex session's `CODEX_CONFIG`. The session's own run folder
+//! (with its `tmp`, the shell's `TMPDIR`) and the matter's notes are reopened as `write` entries
+//! in the profile and as ACP `additionalDirectories`
 //! (`actor::turn::profile_loads::codex_directories`), so a session or a matter made after the
-//! launch is denied too, and so is every other matter's state folder and the rest of its own:
-//! the shell never reads the login link or writes what Codex loads at the next launch. The
+//! launch is denied too, and so is every matter's Codex state folder, the own one included (its
+//! `CODEX_HOME`, R17 PR-C): the shell never reads the login link, never writes what Codex loads
+//! at the next launch, and never writes the `arg0` folder Codex puts first on its `PATH`. The
 //! state folder is cleaned at each launch to what Codex keeps (`agent/state_folder.rs`); the
 //! jail's write-deny is R17 PR-D's.
 //!
@@ -102,26 +103,21 @@ pub(crate) struct Session<'a> {
     /// `<data>/agent-state/<matter>/notes`, a `write` entry.
     pub(crate) notes: &'a Path,
     /// The matter's state folder, `<data>/agent-state/<matter>/codex-acp`, Codex's
-    /// `CODEX_HOME` and `HOME` (R17 PR-C). It stays under the deny of `agent-state`, so the
+    /// `CODEX_HOME` and `HOME` (R17 PR-C). It stays under the deny of `agent-state` whole, so the
     /// shell neither reads its login link, transcripts and databases nor writes anything Codex
-    /// loads at the next launch; only its `tmp` ([`shell_folder`]), where Codex keeps the
-    /// `arg0` links its shell runs, is a `write` entry. Every other matter's state folder stays
-    /// under the deny too.
+    /// loads: above all not its `tmp`, whose `arg0/codex-arg0*` folder Codex puts first on
+    /// `PATH` (codex-rs `arg0/src/lib.rs:357`) and whose `git` Codex's own unsandboxed calls
+    /// would run (`git-utils/src/info.rs:375, 708`); that `tmp` is denied by name as well. The
+    /// shell's temp folder is the run folder's `tmp` (`TMPDIR`), under its `write` entry.
     pub(crate) state: &'a Path,
-}
-
-/// The one folder of the session's state folder Codex's shell reaches: its `tmp`
-/// (`state_folder::CODEX_SHELL_FOLDER`), writable, since a read-only carve-back under a deny
-/// stays hidden under bubblewrap.
-pub(crate) fn shell_folder(state: &Path) -> PathBuf {
-    state.join(crate::agent::state_folder::CODEX_SHELL_FOLDER)
 }
 
 /// The fence's denied paths: the `Locations` paths, the store's and the search index's database
 /// files, [`DATA_DENIED`], both agents' login homes whole and Claude's whole folder,
 /// [`AGENTS_DENIED`], Codex's sign-in markers, then [`SESSION_PARENTS`]. A path of the first
 /// group that is or holds the session's run folder, its notes or its state folder is left out,
-/// with a warning; the session's run folder, notes and state folder's `tmp` are reopened under
+/// with a warning; then [`SESSION_PARENTS`] and the state folder's `tmp` by name. The session's
+/// run folder and notes are reopened under
 /// [`SESSION_PARENTS`] by [`keys`]' `write` entries and the session's `additionalDirectories`.
 pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf> {
     let data = locations.data_dir();
@@ -161,6 +157,12 @@ pub(crate) fn rules(locations: &Locations, session: Session<'_>) -> Vec<PathBuf>
         keep
     });
     denied.extend(SESSION_PARENTS.iter().map(|name| data.join(name)));
+    // Named too, so no `write` entry over the state folder could ever reopen it.
+    denied.push(
+        session
+            .state
+            .join(crate::agent::state_folder::CODEX_SHELL_FOLDER),
+    );
     denied
 }
 
@@ -190,12 +192,7 @@ pub(crate) fn keys(
     let denies = rules(locations, session)
         .into_iter()
         .map(|path| (path, "deny"));
-    let own = [
-        session.run_root.to_path_buf(),
-        session.notes.to_path_buf(),
-        shell_folder(session.state),
-    ]
-    .map(|path| (path, "write"));
+    let own = [session.run_root, session.notes].map(|path| (path.to_path_buf(), "write"));
     for (path, mode) in denies.chain(own) {
         match path.strip_prefix(data).ok().and_then(Path::to_str) {
             Some(relative) if !relative.is_empty() => {

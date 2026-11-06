@@ -140,9 +140,7 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
         Turn::Profile => rules.extend(exact),
         Turn::Rebuilt => {
             rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
-            rules.extend(
-                [run_root(), notes(), state().join("tmp")].map(|root| (root, "write".to_owned())),
-            );
+            rules.extend([run_root(), notes()].map(|root| (root, "write".to_owned())));
         }
     }
     rules
@@ -195,12 +193,7 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
     for (subpath, value) in scoped {
-        let own = [
-            "run/s1",
-            "agent-state/m1/notes",
-            "agent-state/m1/codex-acp/tmp",
-        ]
-        .contains(&subpath.as_str());
+        let own = ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str());
         assert_eq!(
             value,
             &json!(if own { "write" } else { "deny" }),
@@ -320,7 +313,6 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
         run_root().join("work").join("notes.md"),
         run_root().join("skill-packs").join("x").join("SKILL.md"),
         notes().join("matter-brief.md"),
-        state().join("tmp").join("arg0").join("codex-linux-sandbox"),
         data()
             .join("agents")
             .join("codex-acp")
@@ -337,9 +329,36 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
         assert!(readable(&keys, &path), "{} is denied", path.display());
     }
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
-    // The own state folder's `tmp` is a writable root (a read-only carve-back under the deny
-    // of `agent-state` stays hidden on Linux); the rest of it stays under that deny.
-    assert_eq!(access(&keys, &state().join("tmp")), "write");
+}
+
+/// Round 3's H1: Codex puts `CODEX_HOME/tmp/arg0/codex-arg0*` first on `PATH` and its own
+/// unsandboxed `git` calls look `git` up by name, so the shell may never write there: the state
+/// folder's `tmp` is denied, by the `agent-state` deny and by name. The shell's temp folder is
+/// the run folder's `tmp` (its `TMPDIR`), writable.
+#[test]
+fn the_shell_never_writes_codex_homes_arg0_folder() {
+    let keys = fence();
+    for path in [
+        state().join("tmp"),
+        state()
+            .join("tmp")
+            .join("arg0")
+            .join("codex-arg0abc")
+            .join("git"),
+    ] {
+        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
+    }
+    let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
+        .as_object()
+        .unwrap();
+    assert_eq!(
+        scoped.get("agent-state/m1/codex-acp/tmp"),
+        Some(&json!("deny"))
+    );
+    assert_eq!(
+        access(&keys, &run_root().join("tmp").join("t.txt")),
+        "write"
+    );
 }
 
 /// The review's D1: nothing Codex or its shell loads at the next launch from the state folder

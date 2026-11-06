@@ -60,8 +60,9 @@ unicode-normalization = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs"] }
 # The data folder fence's `~user` paths (agent/data_fence/resolve.rs): the user's home from the
-# user database.
-nix = { workspace = true, features = ["user"] }
+# user database. `dir` and `fs`: the state folder's clean walks Claude's projects by handle
+# (`openat` with `O_NOFOLLOW`, `unlinkat`; agent/state_folder/projects.rs).
+nix = { workspace = true, features = ["user", "dir", "fs"] }
 
 # The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe

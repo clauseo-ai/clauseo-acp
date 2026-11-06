@@ -462,6 +462,28 @@ impl HostConfig {
         self
     }
 
+    /// Desktop's launch gate (R17, stage D's #554; [`LaunchGate`]): an identity check of the
+    /// shared login before each launch. Unset, every launch of an agent with a kind (which
+    /// uses the matter's state folder and the one shared login, R17 PR-C) is refused with
+    /// `agent.launch_failed`, failing closed; tests set a pass-through gate. PR-C only requires
+    /// one; #554 asks it.
+    ///
+    /// [`LaunchGate`]: crate::LaunchGate
+    #[must_use]
+    pub fn with_launch_gate(mut self, gate: crate::LaunchGate) -> Self {
+        self.wiring.launch_gate = Some(gate);
+        self
+    }
+
+    /// No launch gate, as a host that was given none (tests that check the fail-closed refusal;
+    /// the test hosts set a pass-through one).
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn without_launch_gate(mut self) -> Self {
+        self.wiring.launch_gate = None;
+        self
+    }
+
     /// The case-law connector's relays (R24): each agent launch whose profile offers a
     /// `case-law` entry, with `tools.connectors` on, no firm `managed-mcp.json` and the
     /// connector signed in, gets a relay of its own and the entry. Unset (the default), no session
