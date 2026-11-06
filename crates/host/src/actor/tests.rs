@@ -40,6 +40,7 @@ fn start(dir: &Path, run: u16) -> (HostHandle, HostJoin) {
     let effective = Effective::load(&Locations::under_home(dir), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.join("home")));
     let config = HostConfig::new(effective, Arc::new(launcher))
+        .with_launch_gate(Arc::new(|_| None))
         .with_clock(Arc::new(ManualClock::new(
             Timestamp::new(1_790_000_000_000).unwrap(),
         )))

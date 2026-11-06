@@ -133,9 +133,15 @@ fn clear_links_then(actor: &mut Actor, agent: &AgentId, reply: Reply<()>) {
     let skip: Vec<String> = running.iter().map(ToString::to_string).collect();
     actor.wiring.sign_in.stale_links.extend(running);
     let data = actor.effective.locations().data_dir().to_owned();
+    // A link that is already the login home's file was made since the change: it stays.
+    let source = actor
+        .effective
+        .locations()
+        .agent_home(agent.as_str())
+        .join(crate::agent::state_folder::LOGIN_FILE);
     let agent = agent.clone();
     let spawned = actor.spawner.spawn_local(async move {
-        if let Err(error) = login_link::remove_links_but(agent, data, skip).await {
+        if let Err(error) = login_link::remove_links_but(agent, data, skip, Some(source)).await {
             tracing::warn!(code = error.code().as_str(), "stale login links may remain");
         }
         let _gone = reply.send(Ok(()));

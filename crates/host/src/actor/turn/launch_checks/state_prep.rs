@@ -46,10 +46,13 @@ pub(super) fn prepare_codex(
         })?;
     }
     codex::write_home_config(&state)?;
-    // Clauseo's own login is linked now; a reused one once the hook has answered
-    // (`link_reused_after`).
-    let link =
-        (!reused).then(|| state_folder::link_own(&home, &state).map_err(|error| error.refusal()));
+    // A key login gets no login file; Clauseo's own login is linked now; a reused one once the
+    // hook has answered (`link_reused_after`).
+    let link = if state_use.key_login {
+        Some(unlink_for_key(&state, state_use.in_use))
+    } else {
+        (!reused).then(|| state_folder::link_own(&home, &state).map_err(|error| error.refusal()))
+    };
     let prepared = CodexPrepared {
         folder,
         home,
@@ -59,6 +62,27 @@ pub(super) fn prepare_codex(
         link,
     };
     Ok((prepared, support))
+}
+
+/// A Codex key login's state folder: no `auth.json`, so Codex can use only the key. One left by
+/// an earlier account login is removed, but not while another session of the agent runs in the
+/// matter (`in_use`): that session holds it, so it stays and is logged, and the next launch
+/// with no other session running removes it.
+fn unlink_for_key(state: &Path, in_use: bool) -> Result<state_folder::StateLink, Error> {
+    if in_use {
+        if state.join(state_folder::LOGIN_FILE).exists() {
+            tracing::info!("a key login's matter keeps a login link a running session holds");
+        }
+        return Ok(state_folder::StateLink::NoLogin);
+    }
+    state_folder::remove_stale_link(state).map_err(|error| {
+        tracing::warn!(error_kind = ?error.kind(), "a key login's matter link was not removed");
+        Error::refused(
+            clauseo_protocol::ErrorCode::AgentLaunchFailed,
+            "Clauseo couldn't prepare Codex's folder.",
+        )
+    })?;
+    Ok(state_folder::StateLink::NoLogin)
 }
 
 /// A Claude launch's folders on the launch-prep thread: its login home `home` made, with
@@ -104,6 +128,10 @@ pub(super) async fn link_reused_after(
     matter: clauseo_protocol::MatterId,
     codex: &mut CodexPrepared,
 ) {
+    // Linked or left out already (a key login).
+    if codex.link.is_some() {
+        return;
+    }
     let holds = codex
         .login
         .is_none_or(|checked| checked.link == Seen::Answered(LoginLink::Shared));
@@ -129,6 +157,40 @@ pub(super) struct StateUse {
     /// session ran there, `turn/sign_in.rs`) and no other session runs there now: the launch
     /// removes it before it links. The mark is taken.
     pub(super) drop_stale: bool,
+    /// The launch's environment will carry `CODEX_API_KEY` (desktop's key login, through the
+    /// hook's env; or the settings' or inherited value): no `auth.json` is linked, and one
+    /// there is removed, so Codex can use only the key and no shared login file is in reach.
+    pub(super) key_login: bool,
+}
+
+/// The variable a Codex key login reaches the agent in.
+const KEY_VAR: &str = "CODEX_API_KEY";
+
+/// Whether `thread`'s Codex launch environment will carry a non-empty [`KEY_VAR`], read in the
+/// launch spec's order (the hook's env over the settings' agent variables over the inherited
+/// environment, `agent::launch_spec`).
+fn key_login(actor: &Actor, agent: &clauseo_protocol::AgentId) -> bool {
+    if agent.as_str() != AgentKind::Codex.id() {
+        return false;
+    }
+    let hook = actor.profile.launch_env(agent);
+    if let Some((_, value)) = hook.iter().find(|(name, _)| name.as_os_str() == KEY_VAR) {
+        return !value.is_empty();
+    }
+    let settings = actor.effective.agent(agent.as_str());
+    if let Some((_, value)) = settings
+        .iter()
+        .flat_map(|launch| launch.env.iter())
+        .find(|(name, _)| name.as_str() == KEY_VAR)
+    {
+        return !value.is_empty();
+    }
+    match &actor.wiring.inherited_env {
+        Some(env) => env
+            .iter()
+            .any(|(name, value)| name.as_os_str() == KEY_VAR && !value.is_empty()),
+        None => std::env::var_os(KEY_VAR).is_some_and(|value| !value.is_empty()),
+    }
 }
 
 /// [`StateUse`] for `thread`'s launch. A matter whose link is stale while a session from before
@@ -145,6 +207,7 @@ pub(super) fn state_use(actor: &mut Actor, thread: ThreadId) -> Result<StateUse,
         return Ok(StateUse {
             in_use: false,
             drop_stale: false,
+            key_login: false,
         });
     };
     let in_use =
@@ -165,7 +228,12 @@ pub(super) fn state_use(actor: &mut Actor, thread: ThreadId) -> Result<StateUse,
         ));
     }
     let drop_stale = stale && actor.wiring.sign_in.stale_links.remove(&matter);
-    Ok(StateUse { in_use, drop_stale })
+    let key_login = key_login(actor, &agent);
+    Ok(StateUse {
+        in_use,
+        drop_stale,
+        key_login,
+    })
 }
 
 /// Whether desktop has said `thread`'s agent's login is reused (`HostHandle::set_reused_login`).

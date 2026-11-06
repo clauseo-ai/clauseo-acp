@@ -264,6 +264,7 @@ mod view;
 mod window;
 mod write;
 
+pub use agent::launch_gate::LaunchGate;
 pub use agent::loads::codex_hook_config;
 pub use agent::login_link::{
     AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,

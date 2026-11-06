@@ -31,9 +31,12 @@ use clauseo_protocol::{AgentKind, ErrorCode, MatterId};
 use crate::error::Error;
 use crate::log_file::Cause;
 
+mod claude_json;
 mod file_id;
+mod projects;
 pub(crate) mod safe_read;
 
+pub(crate) use claude_json::strip_claude_json;
 pub(crate) use file_id::same_file;
 
 /// The folder under `<data>` that holds every matter's state folders and notes.
@@ -60,8 +63,8 @@ const RELINK_NAME: &str = "auth.json.clauseo-link";
 ///   (`codex-rs/windows-sandbox-rs/src/cap.rs`); a new one at each launch could add new
 ///   permission entries to the matter folder every time. Codex's own state, no instruction;
 /// - `log`: Codex's own log folder;
-/// - `tmp`: the folder Codex's `arg0` links live in for its shell (`codex-rs/arg0`), the one
-///   folder of the state folder Codex's shell may write (`agent/codex_fence.rs`);
+/// - `tmp`: Codex's own temp folder, where it makes the `arg0` links (`codex-rs/arg0`); denied
+///   to Codex's shell (`agent/codex_fence.rs`), whose `TMPDIR` is the run folder's `tmp`;
 ///
 /// and Codex's databases, [`CODEX_DATABASES`] with [`SQLITE_SUFFIXES`].
 /// A kept name of the wrong kind (a link, or a folder where a file belongs) is removed too.
@@ -86,7 +89,8 @@ pub(crate) const CODEX_DATABASES: [&str; 6] = [
     "thread_history_1.sqlite",
 ];
 
-/// The folder Codex's shell may write in its state folder ([`CODEX_KEPT_FOLDERS`]).
+/// Codex's own temp folder in its state folder, where it makes the `arg0` links it puts first
+/// on `PATH` ([`CODEX_KEPT_FOLDERS`]): written by Codex's process only, never by its shell.
 pub(crate) const CODEX_SHELL_FOLDER: &str = "tmp";
 
 /// What Claude Code's state folder keeps across launches; every other entry is removed before
@@ -96,7 +100,7 @@ pub(crate) const CODEX_SHELL_FOLDER: &str = "tmp";
 /// `statsig`, `shell-snapshots`, `plans`, `file-history`, `history.jsonl`, a session's
 /// `tool-results` and subagent transcripts. Kept:
 /// - `.claude.json`: onboarding, the trust list and the account's profile, which Claude Code
-///   refetches; its MCP and tool keys are taken out first ([`CLAUDE_JSON_STRIPPED`]), and one
+///   refetches; cut to an allow-list of keys first (`claude_json::CLAUDE_JSON_KEPT`), and one
 ///   that is not JSON, is a link or has a second name is removed;
 /// - `settings.json`: Clauseo's, written whole after the clean;
 /// - `projects/<key>/<session>.jsonl`: the transcripts `session/load` resumes, nothing else in
@@ -106,24 +110,14 @@ pub(crate) const CLAUDE_KEPT_FILES: [&str; 2] = [CLAUDE_JSON, "settings.json"];
 /// Claude Code's own state file in its config folder.
 pub(crate) const CLAUDE_JSON: &str = ".claude.json";
 
-/// The keys of `.claude.json` taken out before each launch, at the top and in each
-/// `projects.<path>` entry: user and project MCP servers, the project `.mcp.json` approvals, and
-/// the tools allowed without asking. A session could plant any of them to run at every later
-/// launch in the matter.
-pub(crate) const CLAUDE_JSON_STRIPPED: [&str; 4] = [
-    "mcpServers",
-    "enabledMcpjsonServers",
-    "disabledMcpjsonServers",
-    "allowedTools",
-];
-
 /// The folders of `state` (`kind`'s state folder for the matter) the host's auto-deny counts
-/// as the session's own (`data_fence::FenceCheck::allowed`): for Codex its `tmp`, the one
-/// folder its shell reaches; for Claude its `plans` (the plan note) and `projects` (its tool
-/// results, this matter's only).
+/// as the session's own (`data_fence::FenceCheck::allowed`): for Codex none (its shell's temp
+/// folder is the run folder's; the state folder's `tmp` holds the `arg0` links Codex puts first
+/// on `PATH`); for Claude its `plans` (the plan note) and `projects` (its tool results, this
+/// matter's only).
 pub(crate) fn fence_own(state: &Path, kind: AgentKind) -> Vec<PathBuf> {
     match kind {
-        AgentKind::Codex => vec![state.join(CODEX_SHELL_FOLDER)],
+        AgentKind::Codex => Vec::new(),
         AgentKind::Claude => vec![state.join("plans"), state.join("projects")],
     }
 }
@@ -136,7 +130,7 @@ pub(crate) fn fence_denied(state: &Path, kind: AgentKind) -> Vec<PathBuf> {
         AgentKind::Codex => CODEX_KEPT_FILES
             .iter()
             .copied()
-            .chain([".env"])
+            .chain([".env", CODEX_SHELL_FOLDER])
             .map(|name| state.join(name))
             .chain(CODEX_DATABASES.iter().flat_map(|base| {
                 SQLITE_SUFFIXES
@@ -198,11 +192,40 @@ fn codex_keeps(name: &str, kind: std::fs::FileType) -> bool {
     }
 }
 
+/// The folders of Claude's state folder a live session reads back or writes while it runs, kept
+/// beside a live session ([`clean`] with `live`): its plan note, its edited files' copies, its
+/// to-do lists and its shell snapshots. In `projects` the session folders (tool results,
+/// subagents) are kept too, never `memory`.
+pub(crate) const CLAUDE_LIVE_FOLDERS: [&str; 4] =
+    ["plans", "file-history", "todos", "shell-snapshots"];
+
+/// Whether the file `path` has another name: a hard link (to a credential, say) is never kept.
+pub(crate) fn has_second_name(path: &Path) -> io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        Ok(std::fs::symlink_metadata(path)?.nlink() > 1)
+    }
+    #[cfg(windows)]
+    {
+        Ok(file_id::link_count(path)?.is_some_and(|links| links > 1))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(true)
+    }
+}
+
 /// Removes every entry of `state` that `kind`'s agent does not keep ([`CODEX_KEPT_FILES`],
-/// [`CLAUDE_KEPT_FILES`]), through no link ([`remove_entry`]); for Claude, in `projects` only
-/// each project folder's `*.jsonl` files stay. A name that is not UTF-8 is removed. The first
-/// failure fails the clean, and so the launch. File system calls: off the actor.
-pub(crate) fn clean(state: &Path, kind: AgentKind) -> io::Result<()> {
+/// [`CLAUDE_KEPT_FILES`]), through no link ([`remove_entry`]); a kept file with a second name is
+/// removed too, but Codex's `auth.json` (the login link, checked by its own rules). For Claude,
+/// in `projects` only each project folder's `*.jsonl` files stay (`projects.rs`, by handle).
+/// With `live` (another session of the agent runs in the matter) Claude keeps the working data
+/// a live session reads back as well ([`CLAUDE_LIVE_FOLDERS`], session folders in `projects`);
+/// every instruction surface is removed either way. A name that is not UTF-8 is removed. The
+/// first failure fails the clean, and so the launch. File system calls: off the actor.
+pub(crate) fn clean(state: &Path, kind: AgentKind, live: bool) -> io::Result<()> {
     for entry in std::fs::read_dir(state)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
@@ -211,85 +234,22 @@ pub(crate) fn clean(state: &Path, kind: AgentKind) -> io::Result<()> {
         let kept = match kind {
             AgentKind::Codex => codex_keeps(name, file_type),
             AgentKind::Claude if name == "projects" && file_type.is_dir() => {
-                clean_claude_projects(&entry.path())?;
+                projects::clean(&entry.path(), live)?;
                 true
             }
+            AgentKind::Claude if file_type.is_dir() => live && CLAUDE_LIVE_FOLDERS.contains(&name),
             AgentKind::Claude => file_type.is_file() && CLAUDE_KEPT_FILES.contains(&name),
         };
-        if !kept {
+        let second =
+            kept && file_type.is_file() && name != LOGIN_FILE && has_second_name(&entry.path())?;
+        if second {
+            tracing::warn!("a kept state file had a second name; it is removed");
+        }
+        if !kept || second {
             remove_entry(&entry.path(), file_type)?;
         }
     }
     Ok(())
-}
-
-/// In Claude's `projects`, keeps each real project folder's `*.jsonl` plain files and removes
-/// everything else, through no link.
-fn clean_claude_projects(projects: &Path) -> io::Result<()> {
-    for project in std::fs::read_dir(projects)? {
-        let project = project?;
-        let kind = project.file_type()?;
-        if !kind.is_dir() {
-            remove_entry(&project.path(), kind)?;
-            continue;
-        }
-        for item in std::fs::read_dir(project.path())? {
-            let item = item?;
-            let kind = item.file_type()?;
-            let name = item.file_name();
-            let transcript = kind.is_file()
-                && Path::new(&name)
-                    .extension()
-                    .is_some_and(|extension| extension == "jsonl");
-            if !transcript {
-                remove_entry(&item.path(), kind)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Takes [`CLAUDE_JSON_STRIPPED`] out of `<state>/.claude.json`, at the top and in each
-/// `projects.<path>` entry, writing it again atomically only when one was there. Read with
-/// `safe_read::read_plain`: a link, a file with a second name (a hard link to a credential
-/// would be one) or one too large is removed unread, and so is one that is not a JSON object;
-/// Claude Code makes a new one. File system calls: off the actor.
-pub(crate) fn strip_claude_json(state: &Path) -> io::Result<()> {
-    let path = state.join(CLAUDE_JSON);
-    let bytes = match safe_read::read_plain(&path)? {
-        safe_read::Found::Missing => return Ok(()),
-        safe_read::Found::Refused => {
-            tracing::warn!("a Claude state file was a link or had a second name; it is removed");
-            return remove_name(&path);
-        }
-        safe_read::Found::Bytes(bytes) => bytes,
-    };
-    let Ok(serde_json::Value::Object(mut state_json)) = serde_json::from_slice(&bytes) else {
-        tracing::warn!("a Claude state file was not a JSON object; it is removed");
-        return remove_name(&path);
-    };
-    let mut stripped = strip_keys(&mut state_json);
-    if let Some(serde_json::Value::Object(projects)) = state_json.get_mut("projects") {
-        for project in projects.values_mut() {
-            if let serde_json::Value::Object(project) = project {
-                stripped |= strip_keys(project);
-            }
-        }
-    }
-    if !stripped {
-        return Ok(());
-    }
-    let bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(state_json))?;
-    crate::write::replace_private_file(&path, &bytes)
-}
-
-/// Removes [`CLAUDE_JSON_STRIPPED`] from `object`; whether any was there.
-fn strip_keys(object: &mut serde_json::Map<String, serde_json::Value>) -> bool {
-    let mut stripped = false;
-    for key in CLAUDE_JSON_STRIPPED {
-        stripped |= object.remove(key).is_some();
-    }
-    stripped
 }
 
 /// Removes the name `path` itself (never what it points to); a missing one is fine.
@@ -307,22 +267,39 @@ pub(crate) fn prepare(data: &Path, state: &Path, kind: AgentKind) -> Result<(), 
     prepare_with(data, state, kind, true)
 }
 
-/// [`prepare`] for a launch while another session of the agent runs in the matter: no
-/// [`clean`], which would remove that session's files (its tool results, plan note, transcripts
-/// being written); the folder is made, Codex's `tmp` made and Claude's `.claude.json` stripped
-/// all the same. The next launch with no other session running there cleans as usual.
+/// [`prepare`] for a launch while another session of the agent runs in the matter: the live
+/// clean ([`clean`] with `live`), which keeps that session's working files (its tool results,
+/// plan note, to-dos) but still removes every instruction surface; the folder is made, Codex's
+/// `tmp` made and Claude's `.claude.json` rewritten all the same. The next launch with no other
+/// session running there cleans to the strict keep list.
 pub(crate) fn prepare_in_use(data: &Path, state: &Path, kind: AgentKind) -> Result<(), Error> {
     prepare_with(data, state, kind, false)
 }
 
-/// [`prepare`], cleaning only when `cleaned`.
+/// One lock per state folder, so two launches' cleans of one matter's folder never run at once
+/// (each on its own launch-prep thread). Held for the make, the clean and the config rewrite.
+fn folder_lock(state: &Path) -> std::sync::Arc<std::sync::Mutex<()>> {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, LazyLock, Mutex, PoisonError};
+    static LOCKS: LazyLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(BTreeMap::new()));
+    let mut locks = LOCKS.lock().unwrap_or_else(PoisonError::into_inner);
+    Arc::clone(locks.entry(state.to_owned()).or_default())
+}
+
+/// [`prepare`], with the strict clean when `cleaned`, else the live one, under the folder's
+/// lock ([`folder_lock`]).
 fn prepare_with(data: &Path, state: &Path, kind: AgentKind, cleaned: bool) -> Result<(), Error> {
+    let lock = folder_lock(state);
+    let _held = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let who = match kind {
         AgentKind::Claude => "Claude Code",
         AgentKind::Codex => "Codex",
     };
     make(data, state, who)?;
-    let first = if cleaned { clean(state, kind) } else { Ok(()) };
+    let first = clean(state, kind, !cleaned);
     let cleaned = first.and_then(|()| match kind {
         AgentKind::Codex => {
             crate::write::create_private_dirs_under(data, &state.join(CODEX_SHELL_FOLDER))
@@ -538,5 +515,7 @@ pub(crate) fn linked_folders(
     Ok(folders)
 }
 
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod tests;

@@ -455,6 +455,7 @@ fn home_config_holds_only_the_switches() {
             "skills.include_instructions = false",
             "cli_auth_credentials_store = \"file\"",
             "shell_environment_policy.ignore_default_excludes = false",
+            "features.memories = false",
         ]
     );
     assert!(!text.contains("hooks"), "{text}");

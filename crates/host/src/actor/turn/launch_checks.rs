@@ -240,7 +240,9 @@ impl RunFolders {
         Ok(())
     }
 
-    /// The session's own temporary folder, `<run>/tmp`: a jailed agent's `TMPDIR`.
+    /// The session's own temporary folder, `<run>/tmp`: a jailed agent's `TMPDIR`, and a Codex
+    /// session's (R17 PR-C), never the state folder's `tmp`, where Codex keeps the `arg0` links
+    /// it puts first on `PATH`.
     pub(crate) fn tmp(&self) -> PathBuf {
         self.root.join("tmp")
     }
@@ -300,6 +302,11 @@ pub(super) fn prepare(
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
     let reused = reused_login(actor, thread);
+    let gated = actor.wiring.launch_gate.is_some();
+    let gate_agent = actor
+        .threads
+        .get(&thread)
+        .map(|entry| entry.row.agent.clone());
     let state_use = match state_use(actor, thread) {
         Ok(state_use) => state_use,
         Err(error) => {
@@ -367,6 +374,11 @@ pub(super) fn prepare(
                 data_folder::refuse_data_folder(&stored, &data)?;
                 // The working folder the agent starts in, as spawn takes it (`session_folder`).
                 crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
+                // Fail closed: a launch with a state folder shares the one login, and with no
+                // identity check wired (`HostConfig::with_launch_gate`, #554) it may not start.
+                if run.state.is_some() && !gated {
+                    refuse_ungated(gate_agent.as_ref())?;
+                }
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match (codex_home, run.state.clone()) {
@@ -429,6 +441,17 @@ pub(super) fn prepare(
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
+}
+
+/// The refusal of a launch with a state folder when no launch gate is wired: `agent.launch_failed`,
+/// logged with the agent.
+fn refuse_ungated(agent: Option<&AgentId>) -> Result<(), Error> {
+    let agent = agent.map(AgentId::as_str).unwrap_or_default();
+    tracing::warn!(agent, "no identity check is wired; the launch is refused");
+    Err(Error::refused(
+        clauseo_protocol::ErrorCode::AgentLaunchFailed,
+        "Clauseo can't start the agent: no sign-in check is set up.",
+    ))
 }
 
 /// The session's egress proxy, browser claims and case-law relay (`claims`), made on the

@@ -27,6 +27,8 @@ pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
+/// The temp folder variable: a Codex session's is its run folder's `tmp` (`RunFolders::tmp`).
+pub(crate) const TMPDIR_VAR: &str = "TMPDIR";
 /// The user's home folder on macOS and Linux, set to the state folder for Codex.
 pub(crate) const USER_HOME_VAR: &str = "HOME";
 /// The variable codex-acp reads its config from.
@@ -252,12 +254,20 @@ const HOME_CONFIG_HEADER: &str = "# Clauseo manages this file. It is written aga
      Clauseo starts Codex, and any edit is replaced.\n# The switches Clauseo turns off for Codex's \
      app-server at start-up (clauseo_limits::CODEX_OVERRIDES).\n";
 
+/// The switches only the homes' `config.toml` pins, beside `clauseo_limits::CODEX_OVERRIDES`:
+/// Codex's memories off (`features.memories`, research 43 §2), so nothing a session writes
+/// there is read into the matter's later sessions (R17 PR-C).
+pub(crate) const HOME_ONLY_OVERRIDES: [&str; 1] = ["features.memories=false"];
+
 /// The `config.toml` text for a Codex agent's home: [`HOME_CONFIG_HEADER`], then each of
-/// `clauseo_limits::CODEX_OVERRIDES` as a TOML dotted key (each override is already TOML:
-/// `key=value` as Codex's `-c` takes it).
+/// `clauseo_limits::CODEX_OVERRIDES` and [`HOME_ONLY_OVERRIDES`] as a TOML dotted key (each
+/// override is already TOML: `key=value` as Codex's `-c` takes it).
 pub(crate) fn home_config() -> String {
     let mut text = HOME_CONFIG_HEADER.to_owned();
-    for set in clauseo_limits::CODEX_OVERRIDES {
+    for set in clauseo_limits::CODEX_OVERRIDES
+        .iter()
+        .chain(&HOME_ONLY_OVERRIDES)
+    {
         if let Some((key, value)) = set.split_once('=') {
             text.push_str(key);
             text.push_str(" = ");
