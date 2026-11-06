@@ -294,16 +294,19 @@ export function WayTile({
 
 /** A quiet note under the composer's field, above the room's line: plain words, never a gauge. `lead` stands in
  * primary, the rest in the muted tone. `wait` leads it with the clock, where the note says what waits and until
- * when; advice carries no icon, and its words start on the room's line's words. */
+ * when; advice carries no icon, and its words start on the room's line's words. `end` sits at the note's end, such
+ * as a quiet icon button that hides it (U15's out-of-credit note). */
 export function FieldNotice({
   lead,
   rest,
   action,
+  end,
   wait = false,
 }: {
   lead: string;
   rest?: string | null;
   action?: ReactNode;
+  end?: ReactNode;
   wait?: boolean;
 }) {
   return (
@@ -320,6 +323,7 @@ export function FieldNotice({
         )}
         {action != null && <> {action}</>}
       </span>
+      {end != null && <span className="lim-field-end">{end}</span>}
     </p>
   );
 }

@@ -9,6 +9,7 @@ import type {
   AgentId,
   AvailableCommand,
   CommandOutcome,
+  ConnectorsState,
   ErrorCode,
   FolderSupportKind,
   LimitsView,
@@ -87,7 +88,24 @@ export type ThreadState = {
   limits?: LimitsView;
   /** What the host found about the matter's folder (folder_support): folder rights' notice and card reason. */
   folder?: FolderSupportKind;
+  /** The connectors' state on the app feed (U15): the out-of-credit note, the hint's "from" price. With it the room
+   * has the settings window, which the hint and the note open. */
+  connectors?: ConnectorsState;
+  /** Whether the host sends the case-law hint for the thread's TURN (U15), after `connectors`. */
+  hint?: boolean;
 };
+
+/** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
+const connectorsNext = (state: ThreadState, connectors: ConnectorsState): FakeNextHost => ({
+  parts: ["app"],
+  query: () => ({ threads: [] }),
+  first: () => [
+    { connectors_changed: connectors },
+    ...(state.hint === true
+      ? [{ case_law_hint: { matter: MATTER.matter, thread: THREAD, turn: TURN } }]
+      : []),
+  ],
+});
 
 const refusal = (code: ErrorCode) => ({
   code,
@@ -177,13 +195,18 @@ export function threadHost(state: ThreadState): FakeTransport {
           );
         }
       }),
-    ...(state.papers !== undefined || state.papersAnswer !== undefined
-      ? { next: papersNext(state) }
-      : state.restart === true
-        ? {
-            next: { parts: ["restart"], query: () => ({ threads: [] }) } satisfies FakeHost["next"],
-          }
-        : {}),
+    ...(state.connectors !== undefined
+      ? { next: connectorsNext(state, state.connectors), openSettings: () => {} }
+      : state.papers !== undefined || state.papersAnswer !== undefined
+        ? { next: papersNext(state) }
+        : state.restart === true
+          ? {
+              next: {
+                parts: ["restart"],
+                query: () => ({ threads: [] }),
+              } satisfies FakeHost["next"],
+            }
+          : {}),
   });
   if (state.limits !== undefined) transport.limitsChanged(state.limits);
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});

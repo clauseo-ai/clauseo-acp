@@ -44,6 +44,7 @@ import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/mark
 import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
+import { connectorsStoreOf } from "../store/connectors.ts";
 import { StoreContext } from "../store/hooks.ts";
 import { LimitsContext, limitsStoreOf } from "../store/limits.ts";
 import { createViewStore } from "../store/store.ts";
@@ -318,6 +319,9 @@ function RoomFrame({
       : () => void quietly("open_settings", open.call(transport));
   });
   useSettingsKey(openSettings, mac);
+  // the connectors' store listens from the room's start (U15): a case-law hint is in no catch-up, so one sent while no
+  // conversation's composer or thread is up must still be heard
+  useState(() => connectorsStoreOf(transport));
   // Find's key focuses the rail's Find from anywhere in the room, a folded rail opened first
   const [findField] = useState(() => () => document.getElementById(room.id("find")));
   const [openRail] = useState(() => () => setRailOpen(true));

@@ -94,3 +94,45 @@ test("the store sends nothing, whatever the status", () => {
   }
   expect(transport.only("dispatch")).toEqual([]);
 });
+
+const OUT: ConnectorStatus = { out_of_credit: {} };
+const hintOf = (matter: string, thread: string, turn: string) => ({
+  case_law_hint: { matter, thread, turn },
+});
+
+test("hints are kept by thread and turn, dropped by matter, and cleared once the connector is added or off", () => {
+  const transport = withFeed();
+  const store = createConnectorsStore(transport);
+  transport.appEvent({ connectors_changed: state("not_added") });
+  transport.appEvent(hintOf("m1", "t1", "u1"));
+  transport.appEvent(hintOf("m2", "t2", "u2"));
+  expect(store.hint("t1", "u1")?.matter).toBe("m1");
+  expect(store.hint("t1", "u2")).toBeUndefined();
+  store.dropHints("m1");
+  expect(store.hint("t1", "u1")).toBeUndefined();
+  expect(store.hint("t2", "u2")?.matter).toBe("m2");
+  transport.appEvent({ connectors_changed: state("signing_in") });
+  expect(store.hint("t2", "u2")).toBeUndefined();
+  transport.appEvent({ connectors_changed: state("not_added") });
+  transport.appEvent(hintOf("m2", "t2", "u2"));
+  transport.appEvent({ connectors_changed: state("not_added", false) });
+  expect(store.hint("t2", "u2")).toBeUndefined();
+});
+
+test("a hidden note stays hidden while out of credit, and the set empties when credit returns", () => {
+  const transport = withFeed();
+  const store = createConnectorsStore(transport);
+  // nothing to hide before out of credit
+  store.hide("t1");
+  expect(store.hidden("t1")).toBe(false);
+  transport.appEvent({ connectors_changed: state(OUT) });
+  store.hide("t1");
+  expect(store.hidden("t1")).toBe(true);
+  expect(store.hidden("t2")).toBe(false);
+  transport.appEvent({ connectors_changed: state({ out_of_credit: { pay_url: "https://x" } }) });
+  expect(store.hidden("t1")).toBe(true);
+  transport.appEvent({ connectors_changed: state({ signed_in: { low: false } }) });
+  expect(store.hidden("t1")).toBe(false);
+  transport.appEvent({ connectors_changed: state(OUT) });
+  expect(store.hidden("t1")).toBe(false);
+});
