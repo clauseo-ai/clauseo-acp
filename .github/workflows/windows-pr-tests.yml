@@ -314,7 +314,7 @@ jobs:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/^elevated_/)' --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
+          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/(^|::)elevated_/)' --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
 
       - name: Name the failed tests
         if: ${{ failure() && env.MODE == 'run' }}

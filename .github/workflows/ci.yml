@@ -469,7 +469,7 @@ jobs:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/^elevated_/)' --test-threads 1 --no-tests=fail
+          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/(^|::)elevated_/)' --test-threads 1 --no-tests=fail
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under

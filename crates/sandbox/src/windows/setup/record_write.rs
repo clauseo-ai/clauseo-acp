@@ -1,12 +1,15 @@
 //! Writes, reads and deletes the machine record (`HKLM\SOFTWARE\Clauseo\Sandbox`, D-B1) for
 //! `WindowsMachine`. The key is made with `RegCreateKeyExW` in the 64-bit view
 //! (`KEY_WOW64_64KEY`), the key the `record.rs` readers' `RRF_SUBKEY_WOW6464KEY` finds, and every
-//! write sets its protected DACL ([`RECORD_SDDL`]) again, so a key made some other way gets it
+//! write sets its owner (`BUILTIN\Administrators`) and protected DACL ([`RECORD_SDDL`]) again,
+//! so a key made some other way, or by someone else, gets them
 //! too. The values are [`record_values::encode`]'s; reads go through the `record.rs` readers.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry calls")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
-use windows::Win32::Security::{DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION};
+use windows::Win32::Security::{
+    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY,
     REG_CREATE_KEY_DISPOSITION, REG_DWORD, REG_MULTI_SZ, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
@@ -26,8 +29,14 @@ use crate::windows::record::{RecordError, read_dword, read_string, read_units};
 /// The record's key under `HKLM`, as `record.rs` names it.
 pub(super) const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
 
+/// The record key's owner, in SDDL: `BUILTIN\Administrators`.
+pub(super) const RECORD_OWNER: &str = "O:BA";
+
 /// `WRITE_DAC`, which `RegSetKeySecurity` needs for the DACL.
 const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
+
+/// `WRITE_OWNER`, which `RegSetKeySecurity` needs for the owner.
+const WRITE_OWNER: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0008_0000);
 
 /// The record under `HKLM\<key>`; `None` when the key is missing or holds none of its values.
 pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
@@ -47,12 +56,12 @@ pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
 }
 
 /// Writes `record` as `HKLM\<key>`'s values, making the key when it is missing, and sets the
-/// key's DACL to [`RECORD_SDDL`]. A record whose pool holds its owner is refused before any
-/// write.
+/// key's owner to Administrators and its DACL to [`RECORD_SDDL`]. A record whose pool holds its
+/// owner is refused before any write.
 pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineError> {
     let values =
         record_values::encode(record).map_err(|error| MachineError::Other(error.to_string()))?;
-    let descriptor = Descriptor::from_sddl(RECORD_SDDL)?;
+    let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
             .unwrap_or(u32::MAX),
@@ -71,7 +80,7 @@ pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineErro
             None,
             PCWSTR::null(),
             REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE | KEY_QUERY_VALUE | WRITE_DAC | KEY_WOW64_64KEY,
+            KEY_SET_VALUE | KEY_QUERY_VALUE | WRITE_DAC | WRITE_OWNER | KEY_WOW64_64KEY,
             Some(&raw const attributes),
             &raw mut opened,
             Some(&raw mut disposition),
@@ -79,11 +88,15 @@ pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineErro
     };
     check("RegCreateKeyExW", made)?;
     let opened = Key(opened);
-    // SAFETY: the key is open with WRITE_DAC; the descriptor is valid and self-relative.
+    // Before any value: a key that was already there gets the owner and DACL first.
+    // SAFETY: the key is open with WRITE_DAC and WRITE_OWNER; the descriptor is valid and
+    // self-relative, and its owner is a group the elevated token may assign.
     let secured = unsafe {
         RegSetKeySecurity(
             opened.0,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
             descriptor.0,
         )
     };
@@ -154,7 +167,7 @@ impl Drop for Key {
     }
 }
 
-/// `HKLM\<key>`'s DACL as SDDL, read back for the tests.
+/// `HKLM\<key>`'s owner and DACL as SDDL, read back for the tests.
 #[cfg(test)]
 pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
     use windows::Win32::Foundation::{HLOCAL, LocalFree};
@@ -181,22 +194,15 @@ pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
     };
     check("RegOpenKeyExW", open)?;
     let opened = Key(opened);
+    let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
     let mut size = 0u32;
     // SAFETY: no buffer asks only for the size, written to `size`.
-    let _sized =
-        unsafe { RegGetKeySecurity(opened.0, DACL_SECURITY_INFORMATION, None, &raw mut size) };
+    let _sized = unsafe { RegGetKeySecurity(opened.0, wanted, None, &raw mut size) };
     // u64 words, so the descriptor is aligned.
     let mut buffer = vec![0u64; usize::try_from(size).unwrap_or(0).div_ceil(8).max(1)];
     let descriptor = PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast());
     // SAFETY: `buffer` is live, writable and at least `size` bytes long for the call.
-    let got = unsafe {
-        RegGetKeySecurity(
-            opened.0,
-            DACL_SECURITY_INFORMATION,
-            Some(descriptor),
-            &raw mut size,
-        )
-    };
+    let got = unsafe { RegGetKeySecurity(opened.0, wanted, Some(descriptor), &raw mut size) };
     check("RegGetKeySecurity", got)?;
     let mut text = PWSTR::null();
     // SAFETY: the descriptor in `buffer` is valid; `text` is a live out-pointer, freed below.
@@ -204,7 +210,7 @@ pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
         ConvertSecurityDescriptorToStringSecurityDescriptorW(
             descriptor,
             SDDL_REVISION_1,
-            DACL_SECURITY_INFORMATION,
+            wanted,
             &raw mut text,
             None,
         )
@@ -220,4 +226,37 @@ pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
     // SAFETY: allocated by the conversion with LocalAlloc, freed once.
     unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
     sddl
+}
+
+/// Makes `HKLM\<key>` (64-bit view) with the descriptor `sddl`, as someone other than the
+/// set-up might have, for the tests of a write over an existing key.
+#[cfg(test)]
+pub(crate) fn create_key_with(key: &str, sddl: &str) -> Result<(), MachineError> {
+    let descriptor = Descriptor::from_sddl(sddl)?;
+    let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
+            .unwrap_or(u32::MAX),
+        lpSecurityDescriptor: descriptor.0.0,
+        bInheritHandle: false.into(),
+    };
+    let subkey = HSTRING::from(key);
+    let mut opened = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `attributes` and its descriptor live for the call;
+    // `opened` is a live out-pointer, closed by `Key`.
+    let made = unsafe {
+        RegCreateKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            PCWSTR::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE | KEY_WOW64_64KEY,
+            Some(&raw const attributes),
+            &raw mut opened,
+            None,
+        )
+    };
+    check("RegCreateKeyExW", made)?;
+    drop(Key(opened));
+    Ok(())
 }

@@ -1,19 +1,21 @@
 //! `WindowsMachine`'s account, group, hidden-user and record methods on a real Windows. The
 //! unelevated tests run in CI's ordinary step; the `elevated_` ones only in its elevated step
 //! (`#[ignore]`, and skipped at run time unless the token is elevated and
-//! `CLAUSEO_ELEVATED_TESTS=1`, D-B16). They use `ClauseoSbTest` names with a random suffix and
-//! the key `HKLM\SOFTWARE\Clauseo\SandboxTest`, never the real pool or record, and each first
-//! clears what a killed earlier try left (split §8): its record names everything it made.
+//! `CLAUSEO_ELEVATED_TESTS=1`, D-B16). They use names with this family's own prefix
+//! ([`FAMILY`]) and a random suffix, and the key `HKLM\SOFTWARE\Clauseo\SandboxTestAcct`, never
+//! the real pool or record, and each first clears what a killed earlier try of this family left
+//! (split §8), by prefix.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::account_list::names_starting;
 use super::accounts::{self, Kind};
 use super::lock_tests::{suffix, unique_mutex};
 use super::machine::{Machine, MachineError, Password};
 use super::password::is_strong;
 use super::record_values::RECORD_SDDL;
-use super::record_write::{self, key_sddl};
+use super::record_write::{self, create_key_with, key_sddl};
 use super::windows_machine::{Names, WindowsMachine};
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
@@ -23,8 +25,12 @@ use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::elevated_tests_enabled;
 
-/// The tests' record key.
-const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTest";
+/// This test family's record key.
+const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestAcct";
+
+/// The start of every account and group name this test family makes, and only this family:
+/// `ClauseoAcct`, then `U` (user) or `G` (group), then six hex digits: 18 characters.
+const FAMILY: &str = "ClauseoAcct";
 
 /// Surroundings for a machine whose fence never runs here.
 pub(super) struct NoSurroundings;
@@ -49,20 +55,21 @@ impl Surroundings for NoSurroundings {
     }
 }
 
-/// Deletes every account and group the test record names, then the record: what a killed
-/// earlier try left, or this try's own at the end. Each step goes on past a failure.
+/// Deletes every local account and group whose name starts with [`FAMILY`], then the test
+/// key: what a killed earlier try left (an account made before its record write included), or
+/// this try's own at the end. Only this family's names: other test families have their own
+/// prefixes and sweep their own. Each step goes on past a failure.
 fn sweep() {
-    let Ok(Some(record)) = record_write::read(TEST_KEY) else {
-        drop(record_write::delete(TEST_KEY));
-        return;
-    };
-    for sid in &record.pool {
-        if let Ok(Some(name)) = accounts::name_of(sid, Kind::User) {
-            drop(accounts::delete_user(&name));
+    for (kind, delete) in [
+        (
+            Kind::User,
+            accounts::delete_user as fn(&str) -> Result<(), MachineError>,
+        ),
+        (Kind::Group, accounts::delete_group),
+    ] {
+        for name in names_starting(FAMILY, kind).unwrap_or_default() {
+            drop(delete(&name));
         }
-    }
-    if let Ok(Some(name)) = accounts::name_of(&record.group, Kind::Group) {
-        drop(accounts::delete_group(&name));
     }
     drop(record_write::delete(TEST_KEY));
 }
@@ -90,7 +97,7 @@ fn the_record_reader_answers_on_a_machine_with_no_key() {
 #[test]
 fn lookups_answer_for_missing_and_non_local_accounts() {
     let mut machine = WindowsMachine::new(Names::production(), Box::new(NoSurroundings));
-    let nobody = format!("ClauseoSbTest{}", suffix());
+    let nobody = format!("{FAMILY}U{}", suffix());
     assert_eq!(machine.account_sid(&nobody), Ok(None));
     // SYSTEM is a well-known account of NT AUTHORITY, not a local user.
     let system = Sid::parse("S-1-5-18").unwrap();
@@ -134,17 +141,22 @@ fn elevated_accounts_group_hidden_user_and_record() {
     sweep();
     let _sweep = Sweep;
     let tag = suffix();
-    let user = format!("ClauseoSbTest{tag}");
-    assert!(user.len() <= 20, "{user}");
+    let user = format!("{FAMILY}U{tag}");
     let names = Names {
         record_key: TEST_KEY.to_owned(),
-        group: format!("ClauseoSbTestG{tag}"),
+        group: format!("{FAMILY}G{tag}"),
         mutex: unique_mutex().unwrap(),
     };
+    assert!(user.len() <= 20 && names.group.len() <= 20, "{user}");
     let mut machine = WindowsMachine::new(names, Box::new(NoSurroundings));
     machine.lock().unwrap();
 
-    // The group, recorded before any account so a killed try's sweep finds everything.
+    // A key already there, owned by this user with an open DACL: the first write takes it back.
+    let me = current_user_sid().unwrap();
+    create_key_with(TEST_KEY, &format!("O:{me}D:(A;;KA;;;WD)")).unwrap();
+    assert!(key_sddl(TEST_KEY).unwrap().starts_with(&format!("O:{me}")));
+
+    // The group.
     assert_eq!(machine.group(), Ok(None));
     let group = machine.create_group().unwrap();
     assert_eq!(machine.group(), Ok(Some(group.clone())));
@@ -160,11 +172,14 @@ fn elevated_accounts_group_hidden_user_and_record() {
         owner: owner.clone(),
         group: group.clone(),
         pool: vec![],
-        data_dir: PathBuf::from(r"C:\ClauseoSbTest\data"),
+        data_dir: PathBuf::from(r"C:\ClauseoAcct\data"),
         removing: false,
     };
     machine.write_record(&record).unwrap();
     assert_eq!(machine.read_record(), Ok(Some(record.clone())));
+    let taken = key_sddl(TEST_KEY).unwrap();
+    assert!(taken.starts_with("O:BAD:P"), "{taken}");
+    assert!(!taken.contains(";;;WD)"), "{taken}");
 
     // The user: made once, never adopted.
     let password = machine.new_password();
@@ -206,7 +221,7 @@ fn elevated_accounts_group_hidden_user_and_record() {
     machine.write_record(&record).unwrap();
     assert_eq!(machine.read_record(), Ok(Some(record.clone())));
     let sddl = key_sddl(TEST_KEY).unwrap();
-    assert!(sddl.starts_with("D:P"), "{sddl}");
+    assert!(sddl.starts_with("O:BAD:P"), "{sddl}");
     for entry in ["(A;CI;KA;;;SY)", "(A;CI;KA;;;BA)", "(A;CI;KR;;;BU)"] {
         assert!(sddl.contains(entry), "{sddl} lacks {entry} ({RECORD_SDDL})");
     }

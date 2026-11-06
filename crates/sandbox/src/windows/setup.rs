@@ -42,6 +42,9 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
+#[cfg(test)]
+#[cfg(windows)]
+mod account_list;
 #[cfg(windows)]
 mod accounts;
 #[cfg(test)]

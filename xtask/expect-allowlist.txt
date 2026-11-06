@@ -404,6 +404,7 @@ crates/agents/src/config.rs SigninConfig::callback_port clippy::unused_self
 # The Chrome for Testing download's Win32 calls: System32's folder, free space, Authenticode.
 crates/host/src/browser/install/windows.rs - unsafe_code
 crates/sandbox/src/windows/setup/accounts.rs - unsafe_code
+crates/sandbox/src/windows/setup/account_list.rs - unsafe_code
 crates/sandbox/src/windows/setup/lock.rs - unsafe_code
 crates/sandbox/src/windows/setup/record_write.rs - unsafe_code
 crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::disallowed_methods
