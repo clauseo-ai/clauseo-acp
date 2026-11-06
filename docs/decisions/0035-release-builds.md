@@ -65,9 +65,10 @@ Developer ID.
   leg with `::error::` naming the file. A `test` run builds `e2e`, which holds the key on
   purpose. The desktop tests' own checks (0037) cover only the source text and the test binary.
   The same step fails on any e2e-only string, named in the `::error::`: the variables only the
-  `e2e` build reads (`E2E_AGENTS_MANAGED`, `E2E_UPDATE_ENDPOINT`, `E2E_FAKE_UPDATE`), the counts'
-  endpoint override only debug and `e2e` builds read (`CLAUSEO_COUNTS_URL`), and the `e2e`
-  build's marker, `CLAUSEO-E2E-BUILD-MARKER` (a `#[used]` static in `src/e2e.rs`, read at every
+  `e2e` build reads (`E2E_AGENTS_MANAGED`, `E2E_UPDATE_ENDPOINT`, `E2E_FAKE_UPDATE`,
+  `E2E_FAKE_SIGNIN`), the counts' endpoint override only debug and `e2e` builds read
+  (`CLAUSEO_COUNTS_URL`), and the `e2e` build's marker, `CLAUSEO-E2E-BUILD-MARKER` (a `#[used]`
+  static in `src/e2e.rs`, read at every
   `e2e` start so the linker keeps it). The marker catches any `e2e` code that reached a release
   binary, whatever its own strings. Checked locally (2026-11-06): the `e2e` app and unit-test
   binaries hold the marker and the plain ones do not; the scan passes a clean binary and fails one
