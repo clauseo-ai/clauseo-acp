@@ -92,7 +92,7 @@ impl Marks {
     }
 
     /// Starts a read of `agent`: its write count at the start, or `None` when one runs.
-    fn begin(&self, agent: &AgentId) -> Option<u64> {
+    pub(super) fn begin(&self, agent: &AgentId) -> Option<u64> {
         let mut state = lock(&self.state);
         if !state.reading.insert(agent.clone()) {
             return None;
@@ -102,7 +102,7 @@ impl Marks {
 
     /// Takes in a read of `agent` begun at write count `began` that answered `read`; an answer
     /// brings `marker` in step. A change of the mark, or of the key in memory, is noted.
-    fn finish(
+    pub(super) fn finish(
         &self,
         keys: &Keys,
         marker: &KeyMarker,
