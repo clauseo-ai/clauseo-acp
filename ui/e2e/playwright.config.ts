@@ -42,6 +42,9 @@ export default defineConfig({
   // The wait for #app-root: in normal mode on windows-2025, the navigation to the app has taken
   // from 2 s to over 30 s. A slow start shows in msToRoot instead of failing the run.
   expect: { timeout: 90_000 },
+  // A click, fill or press waits as long as an expect does, then fails naming the control: without
+  // it an action waits out the whole test timeout for a control that never comes (#494's hang).
+  use: { actionTimeout: 90_000 },
   // The list reporter's "N flaky" summary is what the flaky-test collector reads.
   reporter: [["list"]],
 });

@@ -518,3 +518,16 @@ fn a_late_follower_gets_info_then_each_agent_s_latest_states() {
     );
     assert!(events.sign_in_running(&codex) && events.sign_in_running(&claude()));
 }
+
+/// Outside the `e2e` build no agent's install is taken as managed by a variable: the setup
+/// reads no `E2E_AGENTS_MANAGED`, whatever the environment holds.
+#[cfg(not(feature = "e2e"))]
+#[test]
+fn a_build_without_e2e_manages_no_agent_by_variable() {
+    for id in ["claude-acp", "codex-acp"] {
+        assert!(
+            !super::start::e2e_managed(&AgentId::new(id).unwrap()),
+            "{id}"
+        );
+    }
+}

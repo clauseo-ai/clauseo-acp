@@ -223,7 +223,7 @@ impl SetupStart {
             .collect();
         let managed = known
             .keys()
-            .filter(|agent| effective.is_locked(&format!("agents.{agent}")))
+            .filter(|agent| effective.is_locked(&format!("agents.{agent}")) || e2e_managed(agent))
             .cloned()
             .collect();
         let settings = SettingsRead::read(effective, known.keys());
@@ -235,6 +235,21 @@ impl SetupStart {
             registry: install.registry.clone(),
             bundle: install.bundle.clone(),
         }
+    }
+}
+
+/// Whether the e2e build's `E2E_AGENTS_MANAGED` names `agent`, whose install setup then takes as
+/// the firm's (`Managed`): nothing to install and no first-run download, as the e2e app's agents
+/// are `fake_agent`. Always false in any other build, which reads no variable.
+pub(super) fn e2e_managed(agent: &AgentId) -> bool {
+    #[cfg(feature = "e2e")]
+    {
+        crate::e2e::agents_managed().contains(agent.as_str())
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        let _ = agent;
+        false
     }
 }
 

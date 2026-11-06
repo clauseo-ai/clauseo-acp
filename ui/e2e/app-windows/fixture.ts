@@ -476,6 +476,8 @@ export interface AppOptions {
   agentArgs: readonly string[];
   /** More agents, with a scenario only: agent id (`codex-acp`) to the scenario it plays. */
   otherAgents: Readonly<Record<string, string>>;
+  /** True starts desktop's agents as on a first run, not installed and signed out (scratch.ts). */
+  firstRun: boolean;
   /**
    * The WebView2 profile of each launch: `fresh` (the default) a new one, as on a first launch;
    * `warm` the worker's one, reused, as on a later launch (the scoreboard's warm start).
@@ -491,6 +493,7 @@ export const test = base.extend<
   matterFiles: [{}, { option: true }],
   agentArgs: [[], { option: true }],
   otherAgents: [{}, { option: true }],
+  firstRun: [false, { option: true }],
   profile: ["fresh", { option: true }],
 
   // One per worker, so it outlives each test's scratch folders; made only when a warm launch asks.
@@ -516,8 +519,8 @@ export const test = base.extend<
     { scope: "worker" },
   ],
 
-  scratch: async ({ scenario, matterFiles, agentArgs, otherAgents }, use) => {
-    const scratch = makeScratch({ scenario, matterFiles, agentArgs, otherAgents }, () =>
+  scratch: async ({ scenario, matterFiles, agentArgs, otherAgents, firstRun }, use) => {
+    const scratch = makeScratch({ scenario, matterFiles, agentArgs, otherAgents, firstRun }, () =>
       fakeAgentPath(process.env, appPath(), process.platform === "win32"),
     );
     try {

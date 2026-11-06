@@ -10,6 +10,10 @@
 //!   folder dialog, and the "always allow" confirm answers `E2E_CONFIRM_ALWAYS` (`accept` or
 //!   `decline`) instead of drawing its dialog. Either variable unset or empty (any other value,
 //!   for the confirm) draws the dialog as usual, for runs by hand.
+//! - Setup takes the installs of the agents named in `E2E_AGENTS_MANAGED` (comma-separated ids)
+//!   as the firm's (`Managed`), as a firm policy locking `agents.<id>` does: the e2e app's agents
+//!   are `fake_agent`, so nothing is installed and no first-run download starts. Unset or empty
+//!   manages none.
 //! - The speed scoreboard's measures (docs/decisions/0012-desktop-bridge.md):
 //!   - each channel event that fits one message wrapped goes as
 //!     `{"timed":{"received_ms":<f64>,"event":<event>}}`, the time the bridge received it from
@@ -37,6 +41,7 @@
 //!   `app.exit` (`lib.rs`, `stop_host_then_exit`): in a Windows session with no visible window,
 //!   `app.exit` never returns from the event loop. So window-state never saves in this build.
 
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -158,6 +163,25 @@ const MATTER_DIR_VAR: &str = "E2E_MATTER_DIR";
 
 /// `accept` or `decline`: the answer the "always allow" confirm gives without a dialog.
 const CONFIRM_ALWAYS_VAR: &str = "E2E_CONFIRM_ALWAYS";
+
+/// Agent ids, comma-separated, whose installs setup takes as the firm's (`setup/start.rs`).
+const AGENTS_MANAGED_VAR: &str = "E2E_AGENTS_MANAGED";
+
+/// The agent ids in `E2E_AGENTS_MANAGED`; none when it is unset or empty.
+pub(crate) fn agents_managed() -> BTreeSet<String> {
+    agents_managed_from(std::env::var(AGENTS_MANAGED_VAR).ok().as_deref())
+}
+
+/// The ids in a comma-separated `value`, each trimmed, empty ones dropped.
+fn agents_managed_from(value: Option<&str>) -> BTreeSet<String> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
 
 /// The folder in `E2E_MATTER_DIR`, when it is set and not empty.
 pub(crate) fn matter_dir() -> Option<PathBuf> {
