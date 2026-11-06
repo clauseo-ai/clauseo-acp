@@ -31,6 +31,7 @@ pub(crate) mod login_link;
 pub(crate) mod login_splits;
 pub(crate) mod plan_note;
 mod spec;
+pub(crate) mod state_folder;
 pub(crate) mod title;
 
 use std::cell::{Cell, RefCell};
