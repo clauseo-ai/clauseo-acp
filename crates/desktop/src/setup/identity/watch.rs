@@ -15,12 +15,16 @@
 //! A change of any stamp (a file that appears, goes, is replaced or is written, a token refresh
 //! included) checks at once, whether or not sessions run, signed in or not while an account is
 //! recorded. With an account recorded and no stamps the verdict holds for, the look checks; it
-//! never takes what is there as the baseline. An unknown verdict is checked again every
-//! [`UNKNOWN_AGAIN`]; a macOS Claude login with an account recorded (its Keychain may hold the
-//! login, which no stat sees) is due again every [`KEYCHAIN_STALE`], files or not. While the
+//! never takes what is there as the baseline. An unknown verdict from a status that failed or
+//! timed out (or a panic) is checked again every [`UNKNOWN_AGAIN`], and no other verdict is (a
+//! sign-out through Clauseo waits for a login file to come back); a macOS Claude login with an
+//! account recorded (its Keychain may hold the login, which no stat sees) is due again every
+//! [`KEYCHAIN_STALE`], files or not. While the
 //! launch env carries a key or a provider, nothing is looked at: a key login, not checked; once
 //! it ends, the login is checked at once. A sign-in through Clauseo under way is not checked
-//! until it ends or its bound passes.
+//! until it ends or its bound passes; a change of the stamps it took meanwhile refuses
+//! `agent.identity_checking` until its record lands, and its bound passing first gives unknown
+//! and a check.
 //!
 //! The follower runs each agent's check on its own (a status run that hangs to its bound holds
 //! up no other agent), starts every agent's startup check at once, and fails closed when it
@@ -53,7 +57,7 @@ pub(crate) fn watched(
     lawyer_home: Option<&Path>,
     reused: bool,
 ) -> Vec<PathBuf> {
-    let store = clauseo_sandbox::CLAUDE_STORE_FILES[0];
+    let [store, ..] = clauseo_sandbox::CLAUDE_STORE_FILES;
     match (kind, reused) {
         (AgentKind::Codex, false) => vec![home.join(LOGIN_FILE)],
         (AgentKind::Codex, true) => {
@@ -102,6 +106,11 @@ enum Look {
     Stale,
     /// The launch env carries a key or a provider now: not checked.
     KeyLogin,
+    /// A pending sign-in's files moved: due until its record lands.
+    Held,
+    /// A pending sign-in's files moved and its bound passed with no record: unknown, then
+    /// checked.
+    Lapsed,
 }
 
 /// What a look at `entry` decides, given the login files' `stamps` now, whether the launch
@@ -130,10 +139,20 @@ fn decide(
         return Look::Check;
     }
     if entry.expecting(now) {
-        return Look::Nothing;
+        // Its files moved: refused until the record lands (R17 review M1).
+        return if entry.hold_if_moved(&stamps) {
+            Look::Held
+        } else {
+            Look::Nothing
+        };
     }
-    // A sign-in's bound passed: checked as any other from here.
-    entry.expect_end();
+    // A sign-in's bound passed: checked as any other from here; one whose files moved and
+    // whose record never landed is unknown, and checked.
+    if entry.expect_end() && entry.verdict == Verdict::Due {
+        entry.verdict = Verdict::Unknown;
+        entry.again = false;
+        return Look::Lapsed;
+    }
     if matches!(entry.verdict, Verdict::Checking | Verdict::Changed) {
         return Look::Nothing;
     }
@@ -149,10 +168,13 @@ fn decide(
     }
     let age = entry.checked_at.map(|at| now.saturating_sub(at));
     let older = |bound: Duration| age.is_none_or(|age| age >= bound);
-    if entry.verdict == Verdict::Unknown && older(UNKNOWN_AGAIN) {
+    if entry.verdict == Verdict::Unknown && entry.again && older(UNKNOWN_AGAIN) {
         return Look::Check;
     }
-    let timed = matches!(entry.verdict, Verdict::Idle | Verdict::Same);
+    let timed = matches!(
+        entry.verdict,
+        Verdict::Idle | Verdict::Same | Verdict::SignedOut
+    );
     if keychain && recorded && timed && older(KEYCHAIN_STALE) {
         entry.verdict = Verdict::Due;
         return Look::Stale;
@@ -200,6 +222,15 @@ async fn looks(backend: &AgentsBackend, now: Duration) -> Vec<AgentId> {
             Look::KeyLogin => {
                 tracing::info!(%agent, kind = "key_login", "identity: not checked");
                 refusal::sync(backend, agent).await;
+            }
+            Look::Held => {
+                tracing::info!(%agent, kind = "changed_during_sign_in", "identity");
+                refusal::sync(backend, agent).await;
+            }
+            Look::Lapsed => {
+                tracing::info!(%agent, kind = "sign_in_lapsed", "identity");
+                refusal::sync(backend, agent).await;
+                checks.push(agent.clone());
             }
         }
     }
@@ -263,6 +294,7 @@ pub(crate) async fn fail_closed(backend: &AgentsBackend) {
         backend.wiring.identity.entry(agent, |entry| {
             if !matches!(entry.verdict, Verdict::KeyLogin | Verdict::Changed) {
                 entry.verdict = Verdict::Unknown;
+                entry.again = true;
                 entry.checked_at = None;
                 entry.generation += 1;
             }

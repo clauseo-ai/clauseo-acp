@@ -12,6 +12,15 @@
 //! - **An identity refusal already in force** (due, checking, unknown, changed): the gate answers
 //!   it, the host's table holding it first.
 //! - **A key login** (`exempt`): `None`.
+//! - **A pending sign-in through Clauseo**: stamps that differ from those the sign-in took make
+//!   a verdict that refuses nothing due (`agent.identity_checking`), held until its record
+//!   lands (R17 review M1).
+//! - **The followers dead** (`setup/supervise.rs`): `agent.identity_unknown` for every agent on
+//!   the shared login.
+//!
+//! **It must not panic:** in release builds a panic aborts the process (`panic = "abort"`), so
+//! the stat path has no `unwrap`, `expect` or indexing; a stat that fails is a stamp of its
+//! own (`Stamp::Unreadable`), which differs from the one held and so checks.
 //!
 //! A launch that passes marks the agent launched, after which an account with no record is
 //! never trusted on first use (`Identities::judge`). Never an open, never a status run; the
@@ -47,8 +56,15 @@ pub(crate) fn gate(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode
     let recorded = identity.recorded_now(agent);
     let now = backend.compose.monotonic();
     let moved = identity.entry(agent, |entry| {
-        let held = matches!(entry.verdict, Verdict::Idle | Verdict::Same);
-        if !held || entry.expecting(now) {
+        if entry.expecting(now) {
+            // A pending sign-in's files moved: refused until its record lands (M1).
+            return entry.hold_if_moved(&stamps);
+        }
+        let rests = matches!(
+            entry.verdict,
+            Verdict::Idle | Verdict::Same | Verdict::SignedOut
+        );
+        if !rests {
             return false;
         }
         let moved = entry

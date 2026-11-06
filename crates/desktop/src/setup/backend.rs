@@ -180,9 +180,11 @@ impl AgentsBackend {
             }
             SetupCommand::SignOut { .. } => {
                 self.refuse_reused(&agent)?;
-                agents
-                    .sign_out(&agent)
-                    .map_err(|error| signin_error(&error))?;
+                self.wiring.identity.signing_out(&agent, true);
+                agents.sign_out(&agent).map_err(|error| {
+                    self.wiring.identity.signing_out(&agent, false);
+                    signin_error(&error)
+                })?;
                 self.replaced(&agent);
             }
             SetupCommand::UseFoundLogin { .. } => {

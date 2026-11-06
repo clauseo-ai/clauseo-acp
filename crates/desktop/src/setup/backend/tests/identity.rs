@@ -301,7 +301,14 @@ fn a_status_that_fails_or_names_no_account_is_unknown_and_checked_again_later() 
     let id = IdRig::new("identity-unknown");
     let (rig, agent) = (&id.rig, codex());
     id.signs_in(&agent, ONE);
-    for read in [AccountRead::Failed, AccountRead::NoAccount] {
+    // No account: unknown, and checked again only when a login file changes.
+    rig.agents.accounts.answers(&agent, AccountRead::NoAccount);
+    assert_eq!(block_on(check(&rig.backend, &agent)), Verdict::Unknown);
+    let reads = id.reads();
+    id.look(0);
+    id.look(60);
+    assert_eq!(id.reads(), reads, "no timer after a status that answered");
+    for read in [AccountRead::NoAccount, AccountRead::Failed] {
         rig.agents.accounts.answers(&agent, read.clone());
         assert_eq!(
             block_on(check(&rig.backend, &agent)),
@@ -315,7 +322,8 @@ fn a_status_that_fails_or_names_no_account_is_unknown_and_checked_again_later() 
             .contains(&refused(&agent, Some(ErrorCode::AgentIdentityUnknown)))
     );
     assert!(!rig.host.calls().contains(&stop(&agent)));
-    // Checked again by itself once `UNKNOWN_AGAIN` has passed, and lifted when it answers.
+    // After a status that failed: checked again by itself once `UNKNOWN_AGAIN` has passed, and
+    // lifted when it answers.
     rig.agents.accounts.names(&agent, ONE);
     id.look(0);
     id.look(60);

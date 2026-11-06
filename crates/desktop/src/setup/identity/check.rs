@@ -61,8 +61,10 @@ pub(crate) fn expect(backend: &AgentsBackend, agent: &AgentId) {
 ///   [`account_changed`]), unless a key login makes it moot, or it names no email, when a check
 ///   is asked for.
 /// - A resting state that is not `SignedIn` ends any sign-in under way and makes the verdict
-///   idle (nothing refused), but the agent stays watched while an account is recorded, its
-///   stamps kept; a changed account stays until a sign-in records again, and a key login holds.
+///   idle, or signed out after a sign-out through Clauseo (nothing refused), but the agent stays
+///   watched while an account is recorded, its stamps kept; a changed account stays until a
+///   sign-in records again, a key login holds, and a sign-in whose files moved while it was
+///   pending stays due and is checked.
 pub(crate) async fn on_state(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -82,14 +84,24 @@ pub(crate) async fn on_state(
         if !failed {
             identity.nameless(agent, false);
         }
-        identity.entry(agent, |entry| {
-            entry.expect_end();
-            let held = matches!(entry.verdict, Verdict::Changed | Verdict::KeyLogin);
-            if !failed && !held {
-                entry.verdict = Verdict::Idle;
+        let signed_out = identity.is_signed_out(agent);
+        let moved = identity.entry(agent, |entry| {
+            // A sign-in that ends with no record after its files moved stays due, and checked.
+            let moved = entry.expect_end();
+            let kept = matches!(entry.verdict, Verdict::Changed | Verdict::KeyLogin);
+            if !failed && !kept && !moved {
+                entry.verdict = if signed_out {
+                    Verdict::SignedOut
+                } else {
+                    Verdict::Idle
+                };
                 entry.generation += 1;
             }
+            moved
         });
+        if moved {
+            identity.ask(agent);
+        }
         refusal::sync(backend, agent).await;
         return Seen::Other;
     };
@@ -225,6 +237,9 @@ fn settle(
     if !current {
         return identity.verdict(agent);
     }
+    if matches!(read, AccountRead::Account(_)) {
+        identity.named(agent);
+    }
     match judged {
         Judged::Record(hash) => {
             tracing::info!(%agent, kind = "first", "identity recorded");
@@ -235,6 +250,8 @@ fn settle(
             if entry.verdict != Verdict::Changed {
                 entry.verdict = verdict;
             }
+            // Only a status that failed or timed out is tried again on the timer.
+            entry.again = matches!(read, AccountRead::Failed);
             entry.checked_at = Some(now);
             entry.verdict
         }),
