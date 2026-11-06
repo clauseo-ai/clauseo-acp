@@ -423,11 +423,12 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
     setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
     agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
-    it, and it launches with the key; a read that failed, or has not answered, sets
-    `agent.key_unreadable`. Such a key never reads as "no key" and the agent never launches
-    without it. Desktop cannot tell "no key stored" without a read that answers, so a read that
-    does not answer counts as a stored key. The log line names the agent, "key unreadable" and
-    the error's kind; never the key, the item's name or a path.
+    it, and it launches with the key; a read that failed sets `agent.key_unreadable`. Such a
+    key never reads as "no key" and the agent never launches without it. A read that has not
+    answered by the bound sets `agent.key_unreadable` only for an agent the "key stored" marker
+    below marks; an unmarked agent has no key Clauseo stored, so it launches without one and no
+    refusal follows. The log line names the agent, "key unreadable" and the error's kind; never
+    the key, the item's name or a path.
   - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,
     outside the keychain, a list of the agents Clauseo stored a key for:
     `<data_dir>/agents/key-stored.json`, `{"agents": ["claude-acp"]}`, beside the `firm-policy`
@@ -436,8 +437,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     and a marker that cannot be written refuses the save (`internal`, nothing stored); a
     keychain write that then fails leaves it on. A clear removes the key first, then the
     marker; a marker that cannot be cleared stays on. Each keychain read that answers (the
-    first load, a late read, a read again) brings it in step, best effort: a key sets it, no
-    item clears it.
+    first load, a late read, a read again, a probe, and the reload a refused first key takes)
+    brings it in step, best effort: a key sets it, no item clears it.
   - *When the keychain never answers by the bound,* an agent the marker marks is refused with
     `agent.key_unreadable`, and one it does not mark launches without a key: Clauseo never
     stored one for it. No marker file (a fresh install) marks no agent; a file that cannot be
@@ -447,7 +448,11 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     leaves the marker stale until a read answers. A stale "on" only refuses the agent, so it
     fails closed; "off" with a key stored can only happen for a key Clauseo never stored, or
     one stored by a build before the marker (dev builds only: no released install predates
-    it).
+    it). A key a pre-marker dev build stored launches keyless on the first launch after the
+    upgrade if the keychain is silent then, since the marker only appears once a read answers;
+    a missing marker file still marks no agent, because treating it as all marked would refuse
+    a fresh plan-only install on a slow keychain. A marker's folder that will not sync after
+    its rename (rare, an I/O error) is logged, not refused: the rename has already landed.
   - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
     agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
     with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read
