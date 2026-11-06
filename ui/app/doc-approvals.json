@@ -15,9 +15,14 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "stage F (provisional; Rohan batch review)",
-    "pr": 473,
+    "pr": 498,
     "title": "Messages the Windows uninstaller shows",
-    "lines": ["deleteAppDataFailed", "deleteAppDataKept", "deleteAppDataKeptFailed"],
+    "lines": [
+      "deleteAppDataFailed",
+      "deleteAppDataKept",
+      "deleteAppDataKeptFailed",
+      "deleteAppDataFailedUnnamed"
+    ],
     "slots": { "$R9": "the data folder", "$R8": "the folder it kept" }
   }
 }
