@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    AccountFuture, AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError,
+    SigninState,
 };
-use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{AgentLaunch, EntryWrite};
@@ -25,8 +25,9 @@ use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
-use crate::setup::confirm::{Ask, SetupConfirm};
+use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
+use crate::setup::identity::Identities;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
@@ -35,6 +36,10 @@ use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
+
+mod small;
+
+pub(super) use self::small::{FakeAccounts, FakeConfirm, FakeCounts, FakeOpener};
 
 /// What the fake `Agents` was asked, by name and agent.
 pub(super) type Calls = Arc<Mutex<Vec<(&'static str, AgentId)>>>;
@@ -63,6 +68,8 @@ pub(super) struct FakeAgents {
     pub(super) feed: Mutex<Option<UnboundedSender<AgentsEvent>>>,
     /// What `install_tries` answers, by agent.
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
+    /// What `read_account` answers (R17).
+    pub(super) accounts: FakeAccounts,
 }
 
 impl FakeAgents {
@@ -164,19 +171,13 @@ impl SetupAgents for FakeAgents {
     fn install_tries(&self, agent: &AgentId) -> Option<u32> {
         lock(&self.tries).get(agent).copied()
     }
+    fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        self.call("read_account", agent);
+        self.accounts.read(agent)
+    }
     fn shutdown(&self, _wait: Duration) -> bool {
         lock(&self.journal).push("agents.shutdown".to_owned());
         true
-    }
-}
-
-/// The usage counts, recording each event.
-#[derive(Default)]
-pub(super) struct FakeCounts(pub(super) Mutex<Vec<Event>>);
-
-impl SetupCounts for FakeCounts {
-    fn bump(&self, event: Event) {
-        lock(&self.0).push(event);
     }
 }
 
@@ -371,36 +372,6 @@ impl SetupHost for RecordingHost {
     }
 }
 
-/// The confirms, answered `answer`, each ask recorded.
-pub(super) struct FakeConfirm {
-    pub(super) answer: bool,
-    pub(super) asked: Mutex<Vec<Ask>>,
-}
-
-impl SetupConfirm for FakeConfirm {
-    fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool> {
-        lock(&self.asked).push(ask);
-        Box::pin(std::future::ready(self.answer))
-    }
-}
-
-/// The opener, each URL recorded.
-#[derive(Default)]
-pub(super) struct FakeOpener(pub(super) Mutex<Vec<String>>);
-
-impl Opener for FakeOpener {
-    fn open_url(&self, url: &str) -> Result<(), HostError> {
-        lock(&self.0).push(url.to_owned());
-        Ok(())
-    }
-    fn open_path(&self, _path: &Path, _kind: &str) -> Result<(), HostError> {
-        Ok(())
-    }
-    fn reveal(&self, _path: &Path) -> Result<(), HostError> {
-        Ok(())
-    }
-}
-
 /// A backend over the fakes, its confirm answering `accept`, and the fakes.
 pub(super) struct Rig {
     pub(super) backend: Arc<AgentsBackend>,
@@ -446,6 +417,31 @@ pub(super) fn rig_locked(plan_locked: bool) -> Rig {
 }
 
 fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool) -> Rig {
+    rig_full(
+        accept,
+        keychain,
+        keys,
+        plan_locked,
+        None,
+        Identities::in_memory(),
+    )
+}
+
+/// [`rig`] with each agent's home `<homes>/<id>` and `identity` as its identity check (R17).
+pub(super) fn rig_identity(homes: &Path, identity: Identities) -> Rig {
+    let keychain = Keychain::memory();
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    rig_full(true, keychain, keys, false, Some(homes), identity)
+}
+
+fn rig_full(
+    accept: bool,
+    keychain: Keychain,
+    keys: KeyCache,
+    plan_locked: bool,
+    homes: Option<&Path>,
+    identity: Identities,
+) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
         journal: Arc::clone(&journal),
@@ -472,7 +468,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             let info = AgentInfo {
                 name: name.to_owned(),
                 hosts: vec!["registry.npmjs.org".to_owned()],
-                home: home(&agent),
+                home: homes.map_or_else(|| home(&agent), |homes| homes.join(agent.as_str())),
                 plan_locked: plan_locked && agent == claude(),
                 provider: false,
             };
@@ -496,7 +492,8 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             SettingsRead::default(),
             Vec::new(),
         )
-        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
+        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
+        .with_identity(identity),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
     });
     Rig {

@@ -311,7 +311,7 @@ fn start_host<R: Runtime>(
         let refusals = setup_read.launch_refusals();
         let keys = setup::KeySlot::default();
         let key_notes = Arc::new(setup::KeyNotes::new());
-        let key_retry = key_notes.retry_hook();
+        let launch_retry = key_notes.retry_hook();
         let launcher: Arc<dyn clauseo_process::Launcher> =
             Arc::new(host_launcher(SystemDirs.home()));
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
@@ -346,7 +346,7 @@ fn start_host<R: Runtime>(
                 reused,
             )))
             .with_sign_in_again(clauseo_agents::is_sign_in_again)
-            .with_key_retry(key_retry)
+            .with_launch_retry(launch_retry)
             .with_limits_reader(readers);
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
             config.with_launch_refused(agent, code)

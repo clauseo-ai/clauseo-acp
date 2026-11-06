@@ -113,9 +113,9 @@ impl LoginCheck for DesktopLoginCheck {
 }
 
 /// Codex's login file, in its home and in the lawyer's `.codex` (S18's `reuse.rs`).
-const LOGIN_FILE: &str = "auth.json";
+pub(crate) const LOGIN_FILE: &str = "auth.json";
 /// The lawyer's Codex folder under their home.
-const LAWYER_CODEX: &str = ".codex";
+pub(crate) const LAWYER_CODEX: &str = ".codex";
 
 /// Whether a stat of `file` (never following a link) failed for any reason but "not found".
 fn stat_failed(file: &Path) -> bool {

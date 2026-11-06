@@ -205,7 +205,7 @@ fn follow_keys_sets_the_refusal_from_each_note_and_a_retry_reads_the_key_again()
         assert!(key_unreadable(shown(&rig, &claude()).as_ref()));
         // The prompt is allowed; a launch meets the refusal and asks for a read again.
         keychain.fail_reads(false);
-        retry(&claude());
+        retry(&claude(), ErrorCode::AgentKeyUnreadable);
         wait_for(told(None)).await;
     };
     let follow = follow_keys(&rig.backend, receiver);

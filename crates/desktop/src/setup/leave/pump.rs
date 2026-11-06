@@ -27,12 +27,17 @@
 //!   has its matter links removed), the reads' hold `UseFoundLogin` took drops, then
 //!   `restart_agents` and `limits_login_changed`.
 //! - Clauseo's own login signed out: `restart_agents` and `limits_login_changed` (ruling 3).
+//! - First of all, R17's identity check sees the state (`identity::on_state`): a sign-in or
+//!   reuse through Clauseo records its account before anything else; a `SignedIn` of another
+//!   account than the recorded one (S18's status check after a swap) stops the agents and is
+//!   never taken as a new sign-in, so nothing restarts on it.
 
 use clauseo_agents::{Found, SigninState, Source};
 use clauseo_protocol::{AgentId, AgentKind, SignInSource};
 
 use super::super::backend::AgentsBackend;
 use super::super::compose::is_running;
+use super::super::identity::{self, Seen};
 use super::after::finish;
 use super::hold::Late;
 use super::{
@@ -42,6 +47,12 @@ use super::{
 
 /// See the module docs.
 pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state: SigninState) {
+    let seen = identity::on_state(backend, agent, &state).await;
+    if seen == Seen::Changed {
+        // Another account than the recorded one: never a new sign-in (R17).
+        backend.compose.signin(agent, state);
+        return;
+    }
     let before = backend.compose.s18(agent);
     let new_sign_in = is_new_sign_in(before.as_ref(), &state);
     let (mut found_hold, mut leave, mut late) = (None, None, None);
@@ -135,7 +146,9 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
     }
     if reuse_ended {
         login_changed(backend, agent).await;
-    } else if signed_out {
+    } else if signed_out || seen == Seen::SignedIn {
+        // A sign-in through Clauseo to the account S18 last named (after a change, say) is no
+        // new `SignedIn` above, but it recorded: the held questions run on it (R17).
         restart_for_login(backend, agent).await;
     }
 }

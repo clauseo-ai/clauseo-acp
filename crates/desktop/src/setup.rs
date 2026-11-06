@@ -45,6 +45,7 @@ mod fake_signin;
 mod firm_policy;
 mod hook;
 mod host_calls;
+mod identity;
 mod keys;
 mod leave;
 mod login_check;

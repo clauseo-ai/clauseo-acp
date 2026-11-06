@@ -7,6 +7,8 @@ mod after;
 mod counts;
 mod endpoint;
 mod fakes;
+mod identity;
+mod identity_start;
 mod key_marker;
 mod key_reads;
 mod key_state;

@@ -55,7 +55,7 @@ pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{FirstRun, checked_endpoint, invalid, plan_method};
+use self::parts::{FirstRun, checked_endpoint, invalid, plan_method, signs_in};
 pub(crate) use self::seam::SetupAgents;
 
 /// One agent as the backend knows it from the snapshot and the locations.
@@ -149,9 +149,8 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
-                agents
-                    .sign_in(&agent, method)
-                    .map_err(|error| signin_error(&error))?;
+                let start = || agents.sign_in(&agent, method);
+                signs_in(&self.wiring.identity, &agent, start)?;
                 self.replaced(&agent);
             }
             SetupCommand::CancelSignIn { .. } => {
@@ -170,9 +169,8 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                agents
-                    .sign_in(&agent, Method::DeviceCode)
-                    .map_err(|error| signin_error(&error))?;
+                let device = || agents.sign_in(&agent, Method::DeviceCode);
+                signs_in(&self.wiring.identity, &agent, device)?;
                 self.replaced(&agent);
             }
             SetupCommand::OpenSignInPage { .. } => {
@@ -198,9 +196,8 @@ impl AgentsBackend {
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                agents
-                    .use_different_account(&agent)
-                    .map_err(|error| signin_error(&error))?;
+                let different = || agents.use_different_account(&agent);
+                signs_in(&self.wiring.identity, &agent, different)?;
                 self.replaced(&agent);
             }
             SetupCommand::StopUsingLogin { .. } => {
@@ -424,11 +421,12 @@ impl AgentsBackend {
             )?),
             None => None,
         };
-        if let Err(error) = self.agents.use_found_login(agent) {
+        let used = || self.agents.use_found_login(agent);
+        if let Err(error) = signs_in(&self.wiring.identity, agent, used) {
             if let Some(token) = token {
                 drop(self.wiring.waiters.take(agent, token));
             }
-            return Err(signin_error(&error));
+            return Err(error);
         }
         self.replaced(agent);
         Ok(())
