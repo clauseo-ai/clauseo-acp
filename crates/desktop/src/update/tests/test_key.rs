@@ -26,16 +26,44 @@ pub(super) fn base64(text: &str) -> Vec<u8> {
     out
 }
 
+/// The minisign key id of a public key as `tauri signer` writes it (base64 of the two-line
+/// `.pub` text), read from the key itself: line 2 decodes to 42 bytes, `Ed` then the id (8
+/// bytes, little-endian, written `%016X`) then the Ed25519 key. The comment line must name the
+/// same id; it is untrusted, so it never decides alone. An error says what is wrong.
+pub(super) fn key_id(pubkey: &str) -> Result<String, String> {
+    let text = String::from_utf8(base64(pubkey))
+        .ok()
+        .ok_or("not UTF-8 once decoded")?;
+    let mut lines = text.lines();
+    let comment = lines.next().ok_or("no comment line")?;
+    let named = comment
+        .strip_prefix("untrusted comment: minisign public key: ")
+        .ok_or("the comment is not a minisign public key's")?
+        .trim();
+    let key = base64(lines.next().ok_or("no key line")?);
+    if key.len() != 42 || key.get(..2) != Some(b"Ed".as_slice()) {
+        return Err(format!(
+            "the key line is not an Ed25519 minisign key ({} bytes)",
+            key.len()
+        ));
+    }
+    let id_bytes: [u8; 8] = key[2..10].try_into().ok().ok_or("no key id")?;
+    let id = format!("{:016X}", u64::from_le_bytes(id_bytes));
+    if id != named {
+        return Err(format!(
+            "the comment names key id {named}, but the key's own id is {id}"
+        ));
+    }
+    Ok(id)
+}
+
 /// The test key in each form it could be wired in by: the file's base64 text, the minisign key
 /// line inside it (`RW...`) and the key id of its comment, all read from `updater-test.pub`.
 fn test_key_forms() -> Vec<String> {
     let file = test_key_file();
     let decoded = String::from_utf8(base64(&file)).unwrap();
-    let mut lines = decoded.lines();
-    let comment = lines.next().unwrap();
-    let id = comment.rsplit(' ').next().unwrap().to_owned();
-    let key = lines.next().unwrap().trim().to_owned();
-    assert_eq!(id.len(), 16, "not a minisign key id: {comment}");
+    let id = key_id(&file).unwrap();
+    let key = decoded.lines().nth(1).unwrap().trim().to_owned();
     assert!(key.starts_with("RW"), "not a minisign key line");
     vec![file, key, id]
 }
