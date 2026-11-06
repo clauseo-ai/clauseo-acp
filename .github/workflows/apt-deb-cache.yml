@@ -6,8 +6,8 @@
 # archive makes a miss expensive (2026-11-05, #469).
 #
 # Each leg is a fresh runner, so its cache entry holds every package that image lacks. The legs
-# match ci.yml: fast-lane, mutants and quarantine on ubuntu-24.04 with WebKitGTK alone, the build
-# job's Linux legs on ubuntu-22.04 with xvfb, and quarantine on ubuntu-22.04 with WebKitGTK alone.
+# match ci.yml: mutants on ubuntu-24.04 with WebKitGTK alone, the build job's Linux legs on
+# ubuntu-22.04 with xvfb, and fast-lane and quarantine on ubuntu-22.04 with WebKitGTK alone.
 
 name: apt-deb-cache
 
