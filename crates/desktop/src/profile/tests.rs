@@ -291,7 +291,7 @@ fn the_launch_packs_go_to_claudes_second_plugin_and_codexs_index() {
 fn the_host_config_gets_the_hook_and_stetdocs_folder() {
     let scratch = Scratch::new("profile-host-config", &[]);
     let hook = DesktopProfile::new(profile(&scratch), true);
-    let config = crate::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
+    let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
     assert!(
         config
             .profile_hook()
@@ -309,7 +309,7 @@ fn stetdoc_not_found_goes_on_no_path() {
     let scratch = Scratch::new("profile-no-stetdoc", &[]);
     let hook = DesktopProfile::new(profile(&scratch), false);
     assert_eq!(hook.path_prepend(), None);
-    let config = crate::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
+    let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
     assert!(
         config
             .profile_hook()
@@ -329,8 +329,8 @@ fn stetdoc_not_found_goes_on_no_path() {
 fn a_relative_path_folder_is_never_prepended() {
     let scratch = Scratch::new("profile-relative-prepend", &[]);
     let absolute = scratch.path().join("bin");
-    assert_eq!(crate::absolute_folder(absolute.clone()), Some(absolute));
-    assert_eq!(crate::absolute_folder(PathBuf::from("bin/stetdoc")), None);
+    assert_eq!(super::absolute_folder(absolute.clone()), Some(absolute));
+    assert_eq!(super::absolute_folder(PathBuf::from("bin/stetdoc")), None);
 }
 
 /// Setup's hook with no key and no plan.
@@ -342,7 +342,7 @@ fn setup_hook() -> crate::setup::SetupHook {
 #[test]
 fn no_profile_leaves_the_host_without_a_hook() {
     let scratch = Scratch::new("profile-none", &[]);
-    let config = crate::with_profile(scratch.config(Vec::new()), None, setup_hook());
+    let config = super::with_profile(scratch.config(Vec::new()), None, setup_hook());
     assert!(
         config
             .profile_hook()

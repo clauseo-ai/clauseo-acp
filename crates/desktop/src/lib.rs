@@ -125,7 +125,7 @@ pub use jailed::{
     AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Stages, SystemProbe, launch,
 };
 pub use pre_write_guard::guard_requested;
-use profile::DesktopProfile;
+use profile::{DesktopProfile, with_profile};
 use quit::{AGENTS_STOP_WAIT, Exit, SetupStop, stop_then_after_host};
 use rust_only::PluginRustOnly;
 use tauri::{
@@ -369,42 +369,6 @@ fn start_host<R: Runtime>(
         let config = update::with_updater(&app, config, &locations);
         update::start_host(&app, with_profile(config, profile, hook))
     })
-}
-
-/// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
-/// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
-/// profile (it could not be built) the hook adds only setup's variables. No egress proxy yet:
-/// stage C's is not wired, so the browser shows `NoProxy` (0030).
-fn with_profile(
-    config: HostConfig,
-    profile: Option<DesktopProfile>,
-    hook: setup::SetupHook,
-) -> HostConfig {
-    let Some(profile) = profile else {
-        return config.with_profile_hook(Box::new(hook));
-    };
-    let config = match profile.path_prepend().and_then(absolute_folder) {
-        Some(folder) => config.with_agent_path_prepend(folder),
-        None => config,
-    };
-    config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
-}
-
-/// `folder` when it is absolute. The host takes the agents' `PATH` folder as given, and a
-/// relative one would name a folder under each agent's working folder, so a relative folder is
-/// a bug (a debug build stops on it) and a release build logs it and prepends nothing.
-fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
-    debug_assert!(
-        folder.is_absolute(),
-        "the agents' PATH folder must be absolute: {}",
-        folder.display()
-    );
-    if folder.is_absolute() {
-        Some(folder)
-    } else {
-        tracing::warn!(folder = %folder.display(), "a relative folder does not go on the agents' PATH");
-        None
-    }
 }
 
 /// Puts `counts` in `app`'s `CountsState` and starts their task, which asks the bridge's host
