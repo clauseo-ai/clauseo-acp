@@ -131,8 +131,14 @@ pub(crate) enum After {
     Requeued(TurnId),
     /// A queued turn's removal (`TurnEnded { Cancelled }`).
     Removed(TurnId),
-    /// A prompt queued held while a hold applies (`hold.rs`), counted as delivered so.
-    Held(TurnId, Delivery),
+    /// A prompt queued held while a hold applies (`hold.rs`), counted as delivered so. With
+    /// `unhold` (the install's hold alone), the queue is no longer held once it is durable,
+    /// unless a hold for the sign-in applies by then.
+    Held {
+        turn: TurnId,
+        delivery: Delivery,
+        unhold: bool,
+    },
 }
 
 pub(super) fn queue(actor: &mut Actor, thread: ThreadId) -> Option<&mut ThreadQueue> {
@@ -260,8 +266,9 @@ fn refuse_stuck(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
 }
 
 /// A prompt joins the end of the queue: one commit of `UserMessage { Queue }`, `TurnQueued`
-/// behind the turn ahead (behind its own thread alone when none is, as a held send on an idle
-/// thread), and the receipt. Refused with `thread.queue_full` at the limit.
+/// behind the turn ahead, and the receipt. Refused with `thread.queue_full` at the limit. A
+/// turn runs or one is queued, so there is a turn ahead (a held send on an idle thread takes
+/// `hold.rs`'s path).
 fn append(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -269,7 +276,7 @@ fn append(
     blocks: Vec<ContentBlock>,
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
-    let ahead = turn_ahead(actor, thread);
+    let ahead = turn_ahead(actor, thread).ok_or_else(|| lost("the turn ahead"))?;
     let queued = |turn, message, content| Queued {
         turn,
         message,
@@ -280,7 +287,7 @@ fn append(
         actor,
         ctx,
         thread,
-        ahead,
+        Some(ahead),
         blocks,
         DeliveryRequest::Queue,
         |turn, message, content, queue| {
@@ -425,12 +432,29 @@ pub(super) fn committed(actor: &mut Actor, thread: ThreadId, after: After, ok: b
             steer::send(actor, thread, *ask);
         }
         (After::Removed(turn), ok) => commands::removed(actor, thread, turn, ok),
-        (After::Held(_, delivery), true) => counting::question_sent(actor, thread, delivery),
+        (
+            After::Held {
+                delivery, unhold, ..
+            },
+            true,
+        ) => {
+            counting::question_sent(actor, thread, delivery);
+            // Only now, so a refused commit leaves a held queue held (`hold.rs`).
+            if unhold
+                && !sign_in::applies(actor, thread)
+                && let Some(queue) = queue(actor, thread)
+            {
+                queue.held = false;
+            }
+            // Nothing starts while the install's hold applies; taken back meanwhile, the
+            // queue moves on now.
+            move_on(actor, thread);
+        }
         (
             After::Appended(turn)
             | After::Jumped(turn)
             | After::Requeued(turn)
-            | After::Held(turn, _),
+            | After::Held { turn, .. },
             false,
         ) => {
             drop_turn(actor, thread, turn);

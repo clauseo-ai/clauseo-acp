@@ -12,7 +12,7 @@
 //!   prepared and stops the agent, so no process of it runs while the login link changes. It
 //!   answers once the agents have ended or its wait ran out (`sign_in/stops.rs`), and holds the
 //!   id, in memory only, until `restart_agents`: no launch of it starts ([`launch_refusal`])
-//!   and a prompt for it queues held (`queue/sign_in.rs`).
+//!   and a prompt for it queues held (`queue/hold.rs`).
 //! - `set_launch_refused` refuses an id's new launches with desktop's code, running sessions
 //!   left alone ([`launch_refusal`]). A launch meeting `agent.keys_loading` waits for it to be
 //!   lifted first, at most `KEYS_WAIT` ([`keys_wait`]).

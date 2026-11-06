@@ -162,7 +162,28 @@ pub(super) fn serving(actor: &mut Actor) {
 
 /// Whether new sends are held: an install under `now` waits for its cancelled turns.
 pub(crate) fn gated(actor: &Actor) -> bool {
+    #[cfg(test)]
+    if TEST_GATE.get() {
+        return true;
+    }
     actor.update.machine.as_ref().is_some_and(Machine::gated)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A unit test holds new sends as an install under `now` would ([`hold_sends`]); the
+    /// rig runs its actor on the test's own thread.
+    static TEST_GATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Holds new sends as an install under `now` does, or lifts that hold as taking the install
+/// back does, with no machine: for unit tests of the turn path.
+#[cfg(test)]
+pub(crate) fn hold_sends(actor: &mut Actor, on: bool) {
+    TEST_GATE.set(on);
+    if !on {
+        super::turn::release(actor);
+    }
 }
 
 /// The download a `BeginInstall` handed over, once: the actor's exit is then `Exit::Install`.

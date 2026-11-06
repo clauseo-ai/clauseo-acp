@@ -395,8 +395,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
 - *Holds compose (R23 PR 4, the code owner's ruling).* A thread's holds are a set, the sign-in's
   (`SignIn`), `stop_agents`' (`Stop`) and an install's under `now` (`UpdateNow`, 0037); a
   prompt sent while any applies takes one held append (`queue/hold.rs`), each lift removes only
-  its own reason, and the queue moves on only once none is left, so a queued prompt stays held
-  while any hold applies; with the sign-in's among them it queues as above.
+  its own reason, and nothing starts while `Stop` or `UpdateNow` is left. `SignIn` holds through
+  the queue's held flag, as any held queue does, which a head sent now passes; otherwise a queued
+  prompt stays held while any hold applies. With the sign-in's among them it queues as above.
 - *`set_launch_refused(agent, Option<ErrorCode>) -> Result<(), HostError>`* refuses the id's
   **new launches only**. The codes come from a list: `signin.policy_unreadable` and
   `agent.keys_loading`. Any other code is a bug: debug builds assert, and release builds refuse

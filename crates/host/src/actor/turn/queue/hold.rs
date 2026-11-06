@@ -48,23 +48,30 @@ impl Holds {
         self.stop
     }
 
+    /// A sign-in's hold applies: `Stop` or `SignIn`. A prompt then queues at the end, held
+    /// for the sign-in, whatever its delivery.
+    pub(super) fn sign_ins(self) -> bool {
+        self.stop || self.sign_in
+    }
+
     /// A hold that keeps anything from starting applies: `Stop` or `UpdateNow`. `SignIn` holds
     /// through the queue's held flag instead, which a head sent now passes.
     pub(super) fn stops_starts(self) -> bool {
         self.stop || self.update_now
     }
 
-    /// The most specific reason, for the log: the sign-in's, then the stop's, then the
-    /// install's.
-    fn reason(self) -> &'static str {
-        if self.sign_in {
-            "sign_in"
-        } else if self.stop {
-            "stop"
-        } else if self.update_now {
-            "update_now"
-        } else {
-            "none"
+    /// Every reason present, most specific first (the sign-in's, the stop's, the install's),
+    /// for the log.
+    fn reasons(self) -> &'static str {
+        match (self.sign_in, self.stop, self.update_now) {
+            (true, true, true) => "sign_in,stop,update_now",
+            (true, true, false) => "sign_in,stop",
+            (true, false, true) => "sign_in,update_now",
+            (true, false, false) => "sign_in",
+            (false, true, true) => "stop,update_now",
+            (false, true, false) => "stop",
+            (false, false, true) => "update_now",
+            (false, false, false) => "none",
         }
     }
 }
@@ -90,7 +97,7 @@ pub(super) fn holds(actor: &Actor, thread: ThreadId) -> Holds {
 ///   for the sign-in, the first turn waiting marked unless one is.
 /// - The install's alone: the place it would have had with nothing running. Sent now, it joins
 ///   the head, sent now, and the held queue moves on after it; queued, it joins the end and the
-///   queue is no longer held. It starts once the hold lifts.
+///   queue is no longer held, both once the commit is durable. It starts once the hold lifts.
 pub(super) fn hold_prompt(
     actor: &mut Actor,
     ctx: CommandCtx,
@@ -100,8 +107,8 @@ pub(super) fn hold_prompt(
     holds: Holds,
 ) -> Result<(), Error> {
     refuse_full(actor, thread)?;
-    tracing::info!(%thread, held_for = holds.reason(), "a prompt queues held");
-    let sent_now = !holds.stop && !holds.sign_in && delivery != DeliveryRequest::Queue;
+    tracing::info!(%thread, held_for = holds.reasons(), "a prompt queues held");
+    let sent_now = !holds.sign_ins() && delivery != DeliveryRequest::Queue;
     let ahead = if sent_now {
         None
     } else {
@@ -126,20 +133,31 @@ pub(super) fn hold_prompt(
                 content,
                 forced: sent_now,
             };
-            if holds.stop || holds.sign_in {
+            if holds.sign_ins() {
                 queue.turns.push_back(queued);
                 queue.held = true;
                 let first = queue.turns.front().map_or(turn, |head| head.turn);
                 queue.sign_in.get_or_insert(first);
-                return After::Held(turn, Delivery::Queued);
+                return After::Held {
+                    turn,
+                    delivery: Delivery::Queued,
+                    unhold: false,
+                };
             }
-            queue.held = false;
-            if sent_now {
+            // The queue's held flag is cleared only once the commit is durable
+            // (`queue::committed`): a refused commit leaves a queue the lawyer held still held,
+            // so taking the install back starts nothing by itself.
+            let delivery = if sent_now {
                 queue.turns.push_front(queued);
-                After::Held(turn, Delivery::Now)
+                Delivery::Now
             } else {
                 queue.turns.push_back(queued);
-                After::Held(turn, Delivery::Queued)
+                Delivery::Queued
+            };
+            After::Held {
+                turn,
+                delivery,
+                unhold: true,
             }
         },
     )
