@@ -52,7 +52,8 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
     any
 }
 
-/// Puts the setting `key` back to its default; for `agents.<id>` or `plans.<id>`, drops that
+/// Puts the setting `key` back to its default (`sandbox.allow_unprotected_auto` to `false`,
+/// its safe value, not its default); for `agents.<id>` or `plans.<id>`, drops that
 /// entry.
 pub(super) fn reset(key: &str, settings: &mut Settings) {
     match key {
@@ -79,10 +80,9 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "skills.allow_scripts" => settings.skills.allow_scripts = false,
         "skills.enabled" => settings.skills.enabled.clear(),
         "sandbox.required" => settings.sandbox.required = SandboxSettings::default().required,
-        "sandbox.allow_unprotected_auto" => {
-            settings.sandbox.allow_unprotected_auto =
-                SandboxSettings::default().allow_unprotected_auto;
-        }
+        // Not its default (on): a value the lawyer mistyped turns auto outside the sandbox off,
+        // the safe side (decision record 0051), as a refused policy value does.
+        "sandbox.allow_unprotected_auto" => settings.sandbox.allow_unprotected_auto = false,
         "network.upstream_proxy" => settings.network.upstream_proxy = None,
         "network.ca_certs" => settings.network.ca_certs.clear(),
         "network.allowed_domains" => settings.network.allowed_domains.clear(),

@@ -50,6 +50,28 @@ settings, no change to any launch).
   confirm (`command.invalid` without a set-up seam). The sandbox crate's `NoSandbox` maps to a
   cause: `UnsupportedOs` and `NotBuilt` to `Unsupported`, `ProbeFailed` and `SetUpFailed` to
   `SetUpFailed`, the rest by name.
+- **Without the sandbox.** What a matter whose computer state is `NotProtected` gets depends
+  only on `sandbox.required`:
+  - **false:** for any cause, the agents run at tier C, in the ask modes; an auto mode only when
+    `sandbox.allow_unprotected_auto` is true. Nothing is refused, and the matter shows
+    `NotProtected { cause }`.
+  - **true:** never a silent fallback. `NeedsSetUp` and `SetUpRefused`, which running the
+    set-up fixes, refuse with `sandbox.setup_required`; every other cause (`Unsupported`,
+    `SetUpFailed`, `PoolFull`, `SwitchedOff`, `Unknown`) with `sandbox.required`. Both at
+    `CreateThread` and at a turn's launch.
+
+  PR-B builds this; PR-A only fixes the docs and the codes' meanings to it.
+- **A protected link.** `clauseo_sandbox::Error::ProtectedLink { at }` maps to
+  `matter.protected_link` (stage C's #522), with `HostError.files = [at]` (`at` as a
+  matter-relative `MatterPath`) and no new field; the window fills its `{path}` from
+  `files[0]`. It is built where the host first calls the sandbox (PR-D and PR-E).
+- **The end of a session.** The host waits for the agent's process group to be gone before it
+  closes the session's proxy and relay. A descendant that calls `setsid` or `setpgid` leaves
+  the group and is not covered by that wait: Chrome is covered by the CDP check (and later by
+  its own group from the guard); anything else is the sandbox's job, in PR-D and PR-E.
+- **The cap.** When the tree is not confirmed gone within the cap (20 s), the session's proxy
+  port, relay port, run folder and (tier B, PR-E) pool user stay held until quit, never freed
+  under a process that may still live (fail closed), with one warning logged.
 
 ### The wire
 
@@ -58,19 +80,22 @@ bump.
 
 - `ProtectionTier { A, B, C }`, closed: the threat model's three tiers.
 - `Protection { Protected { tier }, NotProtected { cause } }`, closed: a matter runs in the
-  sandbox or it does not.
+  sandbox or it does not. `Protected` is only ever at tier A or B; the host never sends
+  `Protected { tier: C }`.
 - `NotProtectedCause`, **open** (`open_data_enum!`, catch-all `Unknown`), since more causes will
   come: `Unsupported`, `NeedsSetUp`, `SetUpRefused`, `SetUpFailed`, `PoolFull`, `SwitchedOff {
   at }`.
-- **`PoolFull`** is new against R17's plan: tier B's pool can answer that every pool user is
-  taken (S15 PR4), and that matter then runs at tier C. It carries counts only, never a SID or an
-  account name: `size` (pool users in all), `open` (held by another live matter's open
-  session), `held` (held by a matter that still has them, no session open), `owed` (a permission
-  hand-back is owed, which clears at the next launch) and `set_aside` (they still own set-aside
-  items). The host logs the SIDs, on the host only, later.
+- **`PoolFull`** is new against R17's plan: tier B's pool can answer that every pool user is taken
+  (S15 PR4), and that matter then has no sandbox (above for what follows). It carries counts only,
+  never a SID or an account name: `size` (pool users in all), `open` (held by another live matter's
+  open session), `held` (held by a matter that still has them, no session open), `owed` (a
+  permission hand-back is owed, which clears at the next launch) and `set_aside` (they still own
+  set-aside items). The host logs the SIDs, on the host only, later.
 - `HostQuery::Protection` answers `QueryResult::Protection(ProtectionView { tier, computer,
   required, unprotected_auto_allowed })`: the computer's best tier now, its protection state, and
-  the two `sandbox` settings.
+  the two `sandbox` settings. `tier` is `computer`'s tier when protected and C when not; the
+  host builds the view with `ProtectionView::new(computer, ..)`, which takes `tier` from
+  `computer` and debug-asserts there is no `Protected { tier: C }`, so the two never disagree.
 - `MatterSummary::protection: Option<Protection>`, left out when `None`: not known yet, or an
   older host.
 - `HostEvent::ProtectionChanged { matter, protection }`: an app event like `CaseLawHint`,
@@ -78,8 +103,8 @@ bump.
   `ListMatters` gives each matter's current protection.
 - `HostCommand::RetryProtection {}` and `HostCommand::RemoveSandboxSetup {}`, no receipt.
 - Error codes, after every existing one: `sandbox.setup_refused` and `sandbox.setup_failed`
-  (retryable), `sandbox.setup_required` and `sandbox.required` (not retryable), each a row in
-  0003.
+  (retryable), `sandbox.setup_required` and `sandbox.required` (not retryable, and only
+  under `sandbox.required`, as above), each a row in 0003.
 
 ### The settings and their safe values
 
@@ -89,7 +114,10 @@ bump.
   `network.allowed_domains` (host names, `*.` for the names under one).
 - All five are in `SECURITY_KEYS`. On an unreadable policy source, or a policy value that does
   not type, `refuse` locks `allow_unprotected_auto` at false, the proxy unset, and the CA map and
-  domain list empty: the lawyer's value never stands in for the firm's unknown one.
+  domain list empty: the lawyer's value never stands in for the firm's unknown one. So does a
+  policy `sandbox` or `network` section that is not an object (`"sandbox": "on"`), for that
+  section's keys. A mistyped `allow_unprotected_auto` in the lawyer's own `settings.json` also
+  falls to false, its safe value, not its default (with a warning, no lock).
 - **`sandbox.required` locks at its default, false.** Locking it at true would stop every agent
   on a computer at tier C (Linux, Windows before its set-up) whenever one policy file fails to
   parse, for firms that never asked for the sandbox. With `allow_unprotected_auto` locked false,
@@ -112,15 +140,17 @@ bump.
    and the bridge refuses the query and both commands. No launch changes.
 2. **PR-B**: the seams, the query's real answer, `MatterSummary::protection`,
    `ProtectionChanged` and the bridge's admission of the query and the commands.
-3. to 5. The state folders and logins, the launch in the sandbox with the proxy, and the
-   settings' enforcement, in the order stage C agrees.
+3. **PR-C**: the state folders and the logins.
+4. **PR-D** and 5. **PR-E**: the launch in the sandbox with the proxy, tier B's pool users
+   (PR-E) and the settings' enforcement, as stage C agrees.
 
 The orchestrator's conditions, which the later pull requests must meet:
 
-- one sign-in serves every matter: the per-matter state folders link to, or read through, the
-  one login home, never a sign-in per matter;
-- a per-matter state fence: no matter's sandbox can read another matter's state folder;
-- a state folder is made in under 50 ms at launch.
+- one sign-in serves every matter (PR-C): the per-matter state folders link to, or read
+  through, the one login home, never a sign-in per matter;
+- a per-matter state fence (PR-C): sessions are isolated, so each session, Claude's and
+  Codex's alike, sees only its own matter's state folder, never another matter's;
+- a state folder is made in under 50 ms at launch (PR-C).
 
 ## Consequences
 

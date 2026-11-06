@@ -143,3 +143,25 @@ fn the_commands_have_their_json_pass_validate_and_refuse_fields() {
         );
     }
 }
+
+/// `ProtectionView::new` takes `tier` from `computer`: its tier when protected, C when not, so
+/// the two never disagree.
+#[test]
+fn the_view_takes_its_tier_from_the_computer() {
+    let protected = ProtectionView::new(
+        Protection::Protected {
+            tier: ProtectionTier::B,
+        },
+        true,
+        false,
+    );
+    assert_eq!(protected.tier, ProtectionTier::B);
+    assert!(protected.required && !protected.unprotected_auto_allowed);
+    for cause in [
+        NotProtectedCause::NeedsSetUp,
+        NotProtectedCause::SetUpFailed,
+    ] {
+        let view = ProtectionView::new(Protection::NotProtected { cause }, false, true);
+        assert_eq!(view.tier, ProtectionTier::C);
+    }
+}

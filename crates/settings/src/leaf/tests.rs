@@ -414,11 +414,10 @@ fn a_refused_key_goes_back_to_its_default() {
         assert_eq!(refused.key(), *key);
         assert!(!refused.is_value());
         refused.apply(&mut settings);
-        assert_eq!(
-            settings,
-            Settings::default(),
-            "{key} did not go back to its default"
-        );
+        // `allow_unprotected_auto` goes to its safe value, `false`, not its default (0051).
+        let mut expected = Settings::default();
+        expected.sandbox.allow_unprotected_auto = *key != "sandbox.allow_unprotected_auto";
+        assert_eq!(settings, expected, "{key} did not go back to its default");
     }
     // An agent's refused key drops that agent and no other.
     let launch = AgentLaunch {

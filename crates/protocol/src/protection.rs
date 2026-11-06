@@ -46,12 +46,15 @@ enum_with_names! {
     #[serde(rename_all = "snake_case")]
     #[cfg_attr(feature = "specta", derive(specta::Type))]
     pub enum Protection {
-        /// The agents run in the sandbox at `tier`, `a` or `b`.
+        /// The agents run in the sandbox at `tier`: `a` or `b` only. The host never sends
+        /// `Protected { tier: c }`; tier C is `NotProtected`.
         Protected {
             /// The sandbox's tier.
             tier: ProtectionTier,
         },
-        /// The agents run without the sandbox (tier C), for `cause`.
+        /// No sandbox for `cause`. Under `sandbox.required` false, the agents run at tier C in
+        /// the ask modes (auto only when `sandbox.allow_unprotected_auto` is true); under
+        /// `sandbox.required` true, no agent starts (`NotProtectedCause` gives which code).
         NotProtected {
             /// Why.
             cause: NotProtectedCause,
@@ -60,21 +63,27 @@ enum_with_names! {
 }
 
 open_data_enum! {
-    /// Why a matter, or this computer, runs without the sandbox. A cause from a newer Clauseo
-    /// decodes to `Unknown`.
+    /// Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
+    /// `Unknown`. What follows depends on `sandbox.required` (decision record 0051): when it is
+    /// false, any cause runs the agents at tier C, in the ask modes (auto only when
+    /// `sandbox.allow_unprotected_auto` is true), with no refusal; when it is true, there is
+    /// never a silent fallback: `NeedsSetUp` and `SetUpRefused`, which the set-up fixes, refuse
+    /// `CreateThread` and a turn's launch with `sandbox.setup_required`, and every other cause
+    /// (`Unknown` included) with `sandbox.required`.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum NotProtectedCause {
         /// This computer has no sandbox Clauseo can use: Linux, Windows on ARM, or a build without
         /// the sandbox.
         Unsupported = "unsupported",
         /// The sandbox needs a one-time set-up with an administrator's consent, not done yet.
+        /// Tier C when `sandbox.required` is false; `sandbox.setup_required` when it is true.
         NeedsSetUp = "needs_set_up",
         /// The set-up was asked for, and the lawyer declined the administrator prompt or Windows
         /// refused to raise it.
         SetUpRefused = "set_up_refused",
         /// The set-up, or the check that the sandbox works, failed.
         SetUpFailed = "set_up_failed",
-        /// Every agent user of the set-up pool is taken, so this matter runs at tier C until one
+        /// Every agent user of the set-up pool is taken, so this matter has no sandbox until one
         /// is free. Counts only, never an account name or a SID.
         PoolFull = "pool_full" {
             /// The pool's users in all.
@@ -116,17 +125,40 @@ open_data_enum! {
 }
 
 /// The answer to `HostQuery::Protection`: this computer's sandbox and the firm's two protection
-/// settings. A struct, so later fields are additive; it accepts fields it does not know.
+/// settings. A struct, so later fields are additive; it accepts fields it does not know. The
+/// host builds it with [`ProtectionView::new`], so `tier` always agrees with `computer`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct ProtectionView {
-    /// The best tier this computer can give now: `c` until a needed set-up is done.
+    /// The best tier this computer can give now: `computer`'s tier when it is `protected`, `c`
+    /// when it is not (until a needed set-up is done, say).
     pub tier: ProtectionTier,
     /// This computer's protection state: `protected` at `tier`, or `not_protected` with why.
     pub computer: Protection,
-    /// `sandbox.required`: the firm requires the sandbox, so no agent starts at tier C.
+    /// `sandbox.required`: the firm requires the sandbox, so no agent starts without it.
     pub required: bool,
     /// `sandbox.allow_unprotected_auto`: an agent outside the sandbox may still run in an auto
     /// mode. When `false`, it runs only in the ask modes.
     pub unprotected_auto_allowed: bool,
+}
+
+impl ProtectionView {
+    /// The view of `computer`, with `tier` taken from it: its tier when protected, C when not.
+    /// `Protected { tier: C }` is a contradiction the host never builds (debug assertion).
+    #[must_use]
+    pub fn new(computer: Protection, required: bool, unprotected_auto_allowed: bool) -> Self {
+        let tier = match &computer {
+            Protection::Protected { tier } => {
+                debug_assert_ne!(*tier, ProtectionTier::C, "protected at tier C");
+                *tier
+            }
+            Protection::NotProtected { .. } => ProtectionTier::C,
+        };
+        Self {
+            tier,
+            computer,
+            required,
+            unprotected_auto_allowed,
+        }
+    }
 }
