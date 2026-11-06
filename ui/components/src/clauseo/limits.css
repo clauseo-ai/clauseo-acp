@@ -318,6 +318,10 @@
   .lim-field-rest {
     display: block;
   }
+  .lim-field-end {
+    flex: none;
+    margin-left: auto;
+  }
   .lim-field-note + .room-line {
     margin-top: var(--s1);
   }

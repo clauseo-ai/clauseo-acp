@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
-// The window split (U15): Settings sends the connector commands; the room (the main window) sends none of them. Over
-// the room as App mounts it, with every ConnectorStatus played, available and not, the fake host's dispatched list
-// holds no connector command; no file under room/ or the room's entry imports the settings window's connector code;
-// and Settings' command type can't carry the room's dismiss_case_law_hint.
+// The window split (U15): Settings sends the connector commands; the room (the main window) sends only the hint's
+// dismiss_case_law_hint and the focus's refresh_balance. Over the room as App mounts it, with every ConnectorStatus
+// played, available and not, the fake host's dispatched list holds no connector command; over an open thread with
+// the case-law hint and the out-of-credit note pressed in every state, it holds none but those two; no file under
+// room/ or the room's entry imports the settings window's connector code, and only room/connectors/main-commands.ts
+// dispatches a connector command; Settings' command type can't carry the room's dismiss_case_law_hint, and the room's
+// can't carry a settings-only command.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act } from "react";
@@ -18,6 +21,9 @@ import { createViewStore } from "../store/store.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { ConnectorStatus, ConnectorsState } from "../transport/protocol.ts";
+import type { MainConnectorCommand } from "../room/connectors/main-commands.ts";
+import { mountRoom } from "../room/thread/harness.ts";
+import { agentText, reset, step, THREAD, TURN, userMessage } from "../testing/stream-script.ts";
 import type { SettingsConnectorCommand } from "./connector-commands.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -86,6 +92,41 @@ test("the room sends no connector command, whatever the connectors' state", asyn
   expect(transport.connectorCommands()).toEqual([]);
 });
 
+test("with the hint and the note pressed in every state, the room sends only dismiss_case_law_hint and refresh_balance", async () => {
+  const h = await mountRoom({
+    next: { parts: ["app"], query: () => ({ threads: [] }) },
+    openSettings: () => {},
+  });
+  h.deliver([
+    reset([userMessage(1, 1, "Find judgments."), agentText(2, 1, "Found some."), step(3)]),
+  ]);
+  await h.settle();
+  const press = async (id: string) => {
+    for (const el of h.all(id)) await h.click(el);
+  };
+  for (const available of [true, false])
+    for (const status of STATUSES) {
+      await act(async () =>
+        h.transport.appEvent({ connectors_changed: stateOf(status, available) }),
+      );
+      await act(async () =>
+        h.transport.appEvent({ case_law_hint: { matter: uuid(1, 2), thread: THREAD, turn: TURN } }),
+      );
+      await h.settle();
+      await press("case-law-set-up");
+      await press("out-of-credit-add");
+      await act(async () => globalThis.dispatchEvent(new Event("focus")));
+      await press("case-law-dismiss");
+      await press("out-of-credit-hide");
+    }
+  const kinds = new Set(h.transport.connectorCommands().map((c) => Object.keys(c)[0]));
+  // the presses happened: the hint showed (not added, available) and the note showed (out of credit, available)
+  expect(kinds).toEqual(new Set(["dismiss_case_law_hint", "refresh_balance"]));
+  expect(h.transport.only("open_settings").every((c) => c.section === "connectors")).toBe(true);
+  expect(h.transport.only("open_settings").length).toBeGreaterThan(0);
+  await h.unmount();
+});
+
 test("no file under room/, nor the room's entry, imports the settings window's connector code", () => {
   const src = join(import.meta.dirname, "..");
   const roomFiles = readdirSync(join(src, "room"), { recursive: true })
@@ -97,6 +138,27 @@ test("no file under room/, nor the room's entry, imports the settings window's c
     expect(text, file).not.toMatch(/settings\/sections\/connectors/);
     expect(text, file).not.toMatch(/settings\/connector-commands/);
   }
+});
+
+test("only room/connectors/main-commands.ts dispatches a connector command from the room", () => {
+  const src = join(import.meta.dirname, "..");
+  const senders = readdirSync(join(src, "room"), { recursive: true })
+    .map((f) => join(src, "room", String(f)))
+    .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .filter((f) => /command: \{ connector:|\bconnector: \{/.test(readFileSync(f, "utf8")));
+  expect(senders.map((f) => f.slice(src.length + 1))).toEqual(["room/connectors/main-commands.ts"]);
+});
+
+test("the room's command type has no settings-only command", () => {
+  const ok: MainConnectorCommand[] = [
+    { dismiss_case_law_hint: { matter: uuid(1, 2) } },
+    { refresh_balance: { id: "case-law" } },
+  ];
+  // @ts-expect-error: Settings' command, which the host refuses from the main window
+  const add: MainConnectorCommand = { add: { id: "case-law" } };
+  // @ts-expect-error: as is open_pay_link
+  const pay: MainConnectorCommand = { open_pay_link: { id: "case-law" } };
+  expect([...ok, add, pay]).toHaveLength(4);
 });
 
 test("Settings' command type has no dismiss_case_law_hint", () => {

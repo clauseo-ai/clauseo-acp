@@ -12,8 +12,9 @@ import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { EntryId, StreamId, Timestamp, ViewEntry } from "../../transport/protocol.ts";
+import type { EntryId, StreamId, Timestamp, TurnId, ViewEntry } from "../../transport/protocol.ts";
 import { AnswerMeta } from "./answer-meta.tsx";
+import { CaseLawHintSlot } from "./case-law-hint.tsx";
 import { stamp } from "./clock.ts";
 import { exchangesPick, latestAsked } from "./exchanges.ts";
 import { sameIds } from "./ids.ts";
@@ -29,6 +30,8 @@ import { pickQueued, useTimeOf } from "./time-of.ts";
 
 /** The composer's limit warning, carried in this chunk with the stop's note (limits/limit-warning.tsx loads it). */
 export { WarningNote } from "./limit-warning-note.tsx";
+/** U15's out-of-credit note, carried here as U12's warning is (room/connectors/out-of-credit.tsx loads it). */
+export { OutOfCreditNote } from "./out-of-credit-note.tsx";
 
 const STEP = "step:";
 
@@ -168,6 +171,7 @@ const LiveExchange = memo(
     ids,
     asked,
     sentNow,
+    turn,
     stream,
     paged,
     latest,
@@ -177,6 +181,8 @@ const LiveExchange = memo(
     ids: readonly EntryId[];
     asked: boolean;
     sentNow: EntryId | null;
+    /** Its turn, for the case-law hint the host may send for it (case-law-hint.tsx). */
+    turn: TurnId | null;
     stream: StreamId;
     paged: ReadonlyMap<EntryId, ViewEntry>;
     latest: boolean;
@@ -217,13 +223,12 @@ const LiveExchange = memo(
           asked ? <RowOf id={ids[0]!} stream={stream} paged={paged} sentNow={false} /> : null
         }
         answer={
-          answer !== null && notes ? (
+          answer === null ? null : (
             <>
               {answer}
-              <SteerNotesOf ids={rest} stream={stream} paged={paged} />
+              {notes && <SteerNotesOf ids={rest} stream={stream} paged={paged} />}
+              <CaseLawHintSlot stream={stream} turn={turn} />
             </>
-          ) : (
-            answer
           )
         }
         asked={question}
@@ -242,6 +247,7 @@ const LiveExchange = memo(
     a.latest === b.latest &&
     a.asked === b.asked &&
     a.sentNow === b.sentNow &&
+    a.turn === b.turn &&
     a.paged === b.paged &&
     a.beforeAsked === b.beforeAsked &&
     a.beforeStep === b.beforeStep &&
@@ -295,6 +301,7 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
                 ids={g.ids}
                 asked={g.asked}
                 sentNow={g.sentNow}
+                turn={g.turn}
                 stream={stream}
                 paged={paged}
                 latest={i === exchanges.length - 1}

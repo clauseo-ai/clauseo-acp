@@ -103,6 +103,13 @@ describe("the limit's note", () => {
     );
     expect(document.querySelector(".lim-field-note .lim-field-icon")).not.toBeNull();
     expect(document.querySelector(".lim-field-rest")).toBeNull();
+    expect(document.querySelector(".lim-field-end")).toBeNull();
+    await act(async () =>
+      root?.render(
+        <FieldNotice lead="Out of case-law credits." end={<button type="button">x</button>} />,
+      ),
+    );
+    expect(document.querySelector(".lim-field-note > .lim-field-end > button")).not.toBeNull();
   });
 
   test("a day's line, a way on, and the band across the work say what they're given", async () => {

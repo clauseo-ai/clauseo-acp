@@ -48,6 +48,7 @@ import { useOtherWait } from "../queue-model.ts";
 import { QueueSlot } from "../queue-slot.tsx";
 import type { BreakLine } from "../thread-break.ts";
 import { LimitWarning } from "../limits/limit-warning.tsx";
+import { OutOfCredit } from "../connectors/out-of-credit.tsx";
 import { useAgentPlan } from "./agent-plan.ts";
 import { useNow } from "../../store/limits.ts";
 import { pausedLine, type Paused } from "./limit-words.ts";
@@ -346,12 +347,17 @@ export function WorkComposer({
           : busy
             ? { state: answering, testId: "working" }
             : stopped);
+  const credit =
+    transport === null ? null : (
+      <OutOfCredit transport={transport} conversation={thread ?? draftKey} />
+    );
   return (
     <Composer
       ref={field}
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
-      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time
-      notice={paused === null ? <LimitWarning /> : null}
+      // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time. With no
+      // warning, U15's out-of-credit note, hidden by this conversation's thread (or its draft's key before it has one)
+      notice={paused === null ? <LimitWarning fallback={credit} /> : credit}
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}

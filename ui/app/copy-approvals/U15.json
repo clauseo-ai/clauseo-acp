@@ -440,6 +440,78 @@
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
+  "U15-58": {
+    "en": "For judgments, Clauseo can search Indian Kanoon directly.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-59": {
+    "en": "It's a paid add-on, from {price}, including GST.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-60": {
+    "en": "It's a paid add-on.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-61": {
+    "en": "Set up in Settings",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-62": {
+    "en": "Don't show again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-63": {
+    "en": "Indian Kanoon suggestion",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-64": {
+    "en": "Out of case-law credits.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-65": {
+    "en": "Searches of Indian Kanoon stop until you add more.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-66": {
+    "en": "Add credits",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
   "U15-67": {
     "en": "Turned off on this computer",
     "hi": null,
@@ -498,6 +570,14 @@
   },
   "U15-74": {
     "en": "Open the payment page",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-75": {
+    "en": "Hide in this conversation",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",

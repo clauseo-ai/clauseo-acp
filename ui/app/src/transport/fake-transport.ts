@@ -31,6 +31,7 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   ConnectorCommand,
+  SettingsSection,
   FileRefId,
   HostError,
   HostQuery,
@@ -65,7 +66,7 @@ export type FakeCall =
   | { call: "open_external"; url: string }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
-  | { call: "open_settings" }
+  | { call: "open_settings"; section: SettingsSection | null }
   | { call: "next_query"; query: NextQuery }
   | { call: "next_command"; command: NextCommand }
   | { call: "setup"; command: SetupCommand }
@@ -134,7 +135,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #limits = new LimitsFeed((problem) => this.problems.push(problem));
   /** H14's settings window, when `host.openSettings` scripts it. */
-  readonly openSettings: (() => Promise<void>) | undefined;
+  readonly openSettings: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /** The setup wire, when `host.setup` scripts it (store/setup.ts's SetupSource). */
   readonly onSetup: ((listener: (event: SetupEvent) => void) => () => void) | undefined;
   readonly setup: ((command: SetupCommand) => Promise<void>) | undefined;
@@ -227,8 +228,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     this.openSettings =
       host.openSettings === undefined
         ? undefined
-        : async () => {
-            this.calls.push({ call: "open_settings" });
+        : async (section = null) => {
+            this.calls.push({ call: "open_settings", section });
             await this.#answer(() => this.host.openSettings?.());
           };
     const setup = host.setup;

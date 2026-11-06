@@ -17,6 +17,7 @@ import type {
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SettingsSection,
   StreamId,
   ThreadId,
   ViewPosition,
@@ -56,9 +57,10 @@ export interface HostTransport {
   openFile(file: FileRefId): Promise<void>;
   /** Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
   reveal(target: RevealTarget): Promise<void>;
-  /** Opens the settings window, or brings it to the front when it is open already (H14's `open_settings`). Only a
-   * transport whose host has that window carries it: the desktop one; the room draws no Settings button without it. */
-  openSettings?: (() => Promise<void>) | undefined;
+  /** Opens the settings window, or brings it to the front when it is open already (H14's `open_settings`), at
+   * `section` when named (R24: the case-law hint and the out-of-credit note open "connectors"). Only a transport whose
+   * host has that window carries it: the desktop one; the room draws no Settings button without it. */
+  openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
    * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last

@@ -32,6 +32,7 @@ import type {
   PickedFolder,
   QueryResult,
   RevealTarget,
+  SettingsSection,
   SetupCommand,
   SetupEvent,
   StreamId,
@@ -148,7 +149,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("matters_changed" in event && event.matters_changed !== undefined) ||
           ("threads_changed" in event && event.threads_changed !== undefined) ||
           ("browser_install" in event && event.browser_install !== undefined) ||
-          ("connectors_changed" in event && event.connectors_changed !== undefined)
+          ("connectors_changed" in event && event.connectors_changed !== undefined) ||
+          ("case_law_hint" in event && event.case_law_hint !== undefined)
         ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
@@ -202,7 +204,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`, `connectors_changed`). The first listener subscribes the window's channel to them;
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`, `connectors_changed`, `case_law_hint`). The first listener subscribes the window's channel to them;
    * read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);
@@ -302,7 +304,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     await call(commands.reveal(target));
   }
   /** Opens the settings window or focuses it: the host's open_or_focus, so a second call makes no second window; at `section` when named (R24: the case-law hint and banner open "connectors"). */
-  async openSettings(section: "connectors" | null = null): Promise<void> {
+  async openSettings(section: SettingsSection | null = null): Promise<void> {
     await call(commands.openSettings(section));
   }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {

@@ -26,6 +26,7 @@ import type {
   ConnectorsState,
   ThreadsChanged,
   Timestamp,
+  TurnId,
   ToolsPatch,
   ToolsSettingsView,
 } from "../transport/protocol.ts";
@@ -204,12 +205,16 @@ export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterI
 
 /** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
  * the Chrome download's state (browser-install.ts); and the connectors' state (R24, store/connectors.ts), the latest in
- * every catch-up. */
+ * every catch-up; and the case-law hint for a turn (R24), never in a catch-up. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
   | { browser_install: { state: BrowserInstallState } }
-  | { connectors_changed: ConnectorsState };
+  | { connectors_changed: ConnectorsState }
+  | { case_law_hint: CaseLawHint };
+
+/** R24: the host's offer of the case-law connector under a turn's answer (store/connectors.ts); never logged. */
+export type CaseLawHint = { matter: MatterId; thread: ThreadId; turn: TurnId };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
 export const WIRE = {

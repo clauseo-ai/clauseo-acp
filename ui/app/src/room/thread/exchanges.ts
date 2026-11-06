@@ -22,6 +22,8 @@ export type Exchange = {
   readonly ids: readonly EntryId[];
   /** Its step's id, when a steer sent now stopped this turn: the step says so in place of its stop line. */
   readonly sentNow: EntryId | null;
+  /** Its turn, once an entry names it: where the case-law hint for that turn goes (case-law-hint.tsx). */
+  readonly turn: TurnId | null;
 };
 
 type Building = {
@@ -122,6 +124,7 @@ export function groupExchanges(
     asked: ex.asked,
     ids: ex.ids,
     sentNow: ex.stopped ? (ex.ids.find((id) => id.startsWith(STEP)) ?? null) : null,
+    turn: ex.turn ?? null,
   }));
 }
 
@@ -151,6 +154,7 @@ const sameExchange = (a: Exchange, b: Exchange) =>
   a.key === b.key &&
   a.asked === b.asked &&
   a.sentNow === b.sentNow &&
+  a.turn === b.turn &&
   a.ids.length === b.ids.length &&
   a.ids.every((id, i) => id === b.ids[i]);
 

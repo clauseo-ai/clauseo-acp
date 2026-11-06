@@ -217,6 +217,7 @@ function appEventOf(event: HostEvent): AppEvent | null {
   if (event.browser_install !== undefined) return { browser_install: event.browser_install };
   if (event.connectors_changed !== undefined)
     return { connectors_changed: event.connectors_changed };
+  if (event.case_law_hint !== undefined) return { case_law_hint: event.case_law_hint };
   return null;
 }
 
