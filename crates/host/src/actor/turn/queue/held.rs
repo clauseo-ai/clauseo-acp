@@ -11,6 +11,9 @@
 //! 3. `update`: an install's hold applies;
 //! 4. `limit`: the queue is held because its last turn stopped at the plan's limit;
 //! 5. `paused`: any other hold for the lawyer (a cancel, an error, a restart).
+//!
+//! `limit` lives in memory only (`held_for_limit`): after a host restart a queue held by a limit
+//! stop shows `paused`, so the app offers "Send next" there as for any hold of the lawyer's.
 
 use clauseo_protocol::{QueueHoldReason, StreamId, ThreadId};
 
