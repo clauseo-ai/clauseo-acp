@@ -240,6 +240,8 @@ const EDGE = {
     "Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है और हर बदलाव से पहले पूछता है।",
   "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before each change.":
     "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह हर बदलाव से पहले पूछता है।",
+  "Windows will now ask to let Clauseo set up its protection. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
+    null, // hi: later
   "Switch off protection": "संरक्षण बंद करें",
   "Switch protection on": "संरक्षण चालू करें",
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":

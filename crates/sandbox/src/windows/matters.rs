@@ -121,6 +121,19 @@ impl MatterSids {
         self.rows.is_empty()
     }
 
+    /// The listed matters with an open session, each read under its set-aside lock (an
+    /// unreadable record counting as open): the set-up's refusal to reset passwords while a
+    /// session runs (D-B6, S15 `PR4h`). A lock that can't be taken is the error.
+    pub fn open_sessions(&self) -> Result<OpenSessions, SetupError> {
+        let mut open = Vec::new();
+        for matter in self.rows.keys() {
+            if session_open(&self.data_dir, matter)? {
+                open.push(*matter);
+            }
+        }
+        Ok(OpenSessions::new(open))
+    }
+
     /// The SID of `matter`. Inside [`MatterSids::change`]'s lock and fresh read, so a matter
     /// another instance added since this one loaded is kept. A matter without a SID gets a new
     /// random one that no matter holds, no row names as a pool user and [`Reserved`] admits,

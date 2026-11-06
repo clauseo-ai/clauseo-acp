@@ -36,7 +36,7 @@ pub(super) fn machine(mutex: &str) -> WindowsMachine {
         mutex: mutex.to_owned(),
         ..Names::production()
     };
-    WindowsMachine::new(names, Box::new(super::accounts_tests::NoSurroundings))
+    super::accounts_tests::machine_on(names, std::path::Path::new(r"C:\ClauseoNoSuchData"))
 }
 
 #[test]

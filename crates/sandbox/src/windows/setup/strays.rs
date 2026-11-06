@@ -44,8 +44,13 @@ pub enum NotPool {
 #[cfg(test)]
 pub(crate) const TEST_PREFIX: &str = "ClauseoSbTL";
 
+/// The account name prefix of the setup exe's elevated test (`PR4h`): `ClauseoSbTS`, four hex
+/// digits for the run, then the pool user's two digits; a pool user's in test builds only.
+#[cfg(test)]
+pub(crate) const SETUP_TEST_PREFIX: &str = "ClauseoSbTS";
+
 /// Whether `name` is a pool user's account name: `ClauseoSbNN` exactly ([`pool_number`]),
-/// or in test builds a [`TEST_PREFIX`] name.
+/// or in test builds a [`TEST_PREFIX`] or [`SETUP_TEST_PREFIX`] name.
 pub fn is_pool_account_name(name: &str) -> bool {
     if pool_number(name).is_some() {
         return true;
@@ -53,6 +58,13 @@ pub fn is_pool_account_name(name: &str) -> bool {
     #[cfg(test)]
     if let Some(suffix) = name.strip_prefix(TEST_PREFIX) {
         return suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit());
+    }
+    #[cfg(test)]
+    if let Some(suffix) = name.strip_prefix(SETUP_TEST_PREFIX) {
+        let (run, user) = suffix.split_at_checked(4).unwrap_or_default();
+        return run.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && run.len() == 4
+            && pool_number(&format!("{}{user}", crate::windows::pool::POOL_PREFIX)).is_some();
     }
     false
 }
@@ -249,6 +261,22 @@ mod tests {
     fn an_unread_user_is_never_stopped() {
         let list = [seen(300, None), seen(301, None)];
         assert_eq!(to_stop(&list, &pool(), 999), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn the_setup_tests_names_pass_only_in_their_exact_form() {
+        assert!(is_pool_account_name("ClauseoSbTSa1f001"));
+        assert!(is_pool_account_name("ClauseoSbTS00ff32"));
+        for other in [
+            "ClauseoSbTSa1f000",
+            "ClauseoSbTSa1f033",
+            "ClauseoSbTSa1f01",
+            "ClauseoSbTSa1g001",
+            "ClauseoSbTS",
+            "ClauseoSbTSa1f0011",
+        ] {
+            assert!(!is_pool_account_name(other), "{other}");
+        }
     }
 
     #[test]

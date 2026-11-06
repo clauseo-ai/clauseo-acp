@@ -417,10 +417,20 @@ pub fn protect_for_owner(
     secrets: &[(Sid, super::setup::Password)],
     pool: &[Sid],
 ) -> Result<(), super::setup::MachineError> {
+    owner.run_as(|| protect_as_this_thread(data_dir, secrets, pool))?
+}
+
+/// [`protect_for_owner`]'s work for a caller whose thread acts as the owner already
+/// (`WindowsMachine::as_owner`, S15 `PR4h`): one impersonation is never nested in another.
+#[cfg(windows)]
+pub(crate) fn protect_as_this_thread(
+    data_dir: &Path,
+    secrets: &[(Sid, super::setup::Password)],
+    pool: &[Sid],
+) -> Result<(), super::setup::MachineError> {
     use super::setup::MachineError;
 
-    let stored = owner.run_as(|| store(data_dir, secrets, pool, dpapi::protect))?;
-    stored.map_err(|error| {
+    store(data_dir, secrets, pool, dpapi::protect).map_err(|error| {
         if let SecretError::Dpapi { call, code } = error {
             MachineError::Os { call, code }
         } else {

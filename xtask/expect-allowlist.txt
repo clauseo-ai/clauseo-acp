@@ -422,7 +422,6 @@ crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::
 crates/sandbox/src/windows/setup/ffi.rs - unsafe_code
 crates/sandbox/src/windows/setup/journal.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon.rs - unsafe_code
-crates/sandbox/src/windows/setup/logon/tests.rs elevated unsafe_code
 crates/sandbox/src/windows/setup/logon/tests.rs powershell clippy::disallowed_methods
 crates/sandbox/src/windows/setup/logon/tests.rs delete_account clippy::disallowed_methods
 crates/sandbox/src/windows/setup/logon/tests.rs TestUser::named clippy::disallowed_methods
@@ -430,3 +429,10 @@ crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
+# S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
+# and the wall clock of a set-aside's folder and of a forget's release.
+crates/sandbox/src/windows/user_setup.rs - unsafe_code
+crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disallowed_methods
+crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
+crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
+crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line clippy::disallowed_methods

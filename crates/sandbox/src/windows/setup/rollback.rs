@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use super::SetupRequest;
 use super::create::write_record;
-use super::machine::{Machine, Password};
+use super::machine::{Machine, Password, owned};
 use super::outcome::cause_of;
 use crate::windows::acl_plan::Grant;
 use crate::windows::ledger::Ledger;
@@ -116,7 +116,7 @@ pub(super) fn roll_back(
     let group_gone = run.group_made && alive == 0 && delete_group(machine, run, &mut left);
     rewrite_record(machine, req, run, &survivors, group_gone, &mut left);
     if !run.reset.is_empty()
-        && let Err(error) = machine.protect_for_owner(&run.reset, &run.kept)
+        && let Err(error) = owned(machine, |m| m.protect_for_owner(&run.reset, &run.kept))
     {
         left.push(format!(
             "secrets.bin, which lacks the sandbox users' new passwords ({}): run set-up again",

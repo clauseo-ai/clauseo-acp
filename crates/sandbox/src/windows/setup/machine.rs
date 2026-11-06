@@ -30,7 +30,7 @@ pub enum MachineError {
     /// Another set-up holds the machine-wide set-up lock.
     #[error("another set-up is running on this computer")]
     LockHeld,
-    /// The call isn't built yet: `WindowsMachine` gains its methods over S15 `PR4e` to `PR4g`.
+    /// The call isn't built yet: `WindowsMachine` gained its methods over S15 `PR4e` to `PR4h`.
     #[error("{0} isn't built yet")]
     Unsupported(&'static str),
     /// Anything else; what failed.
@@ -162,4 +162,24 @@ pub trait Machine {
     ) -> Result<(), MachineError>;
     /// The time now, in seconds since the Unix epoch, for the marker.
     fn now(&mut self) -> u64;
+    /// The owner the machine acts as for the owner's files: the verified parent's token user
+    /// (`Owner::sid`, D-B2). [`set_up`](super::set_up) refuses a request for anyone else.
+    fn owner(&self) -> &Sid;
+    /// Runs `f` with the calling thread acting as [`Machine::owner`] (`Owner::run_as`), then as
+    /// itself again. Every call that reads or writes under `<data_dir>\sandbox\` runs inside
+    /// it: `current_user_sid` follows the thread's token, so outside it an over-the-shoulder
+    /// run would put the administrator's SID in each protected DACL and shut the owner out.
+    /// Called again inside `f`, it runs `f` as it is. A failed impersonation is the `Err`, and
+    /// `f` doesn't run.
+    fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError>
+    where
+        Self: Sized;
+}
+
+/// `f` run through [`Machine::as_owner`], a failed impersonation folded into `f`'s own error.
+pub(super) fn owned<M: Machine, T>(
+    machine: &mut M,
+    f: impl FnOnce(&mut M) -> Result<T, MachineError>,
+) -> Result<T, MachineError> {
+    machine.as_owner(f).and_then(|inner| inner)
 }

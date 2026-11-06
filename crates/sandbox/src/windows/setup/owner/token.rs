@@ -244,41 +244,6 @@ pub(crate) fn thread_has_token() -> bool {
     Token::of_thread().is_ok()
 }
 
-/// Whether the elevated tests run: `CLAUSEO_ELEVATED_TESTS=1` and this process's token
-/// elevated (`TokenElevation`). A token that can't be asked counts as not elevated.
-// TODO(S15 PR4e): PR4e moves the shared elevation helper into `test_acl.rs`; use it on the
-// rebase and drop this copy.
-#[cfg(test)]
-pub(crate) fn elevated_tests_on() -> bool {
-    use windows::Win32::Security::{TOKEN_ELEVATION, TokenElevation};
-
-    if std::env::var_os("CLAUSEO_ELEVATED_TESTS").is_none_or(|value| value != "1") {
-        return false;
-    }
-    let mut handle = HANDLE::default();
-    // SAFETY: GetCurrentProcess is a pseudo-handle that needs no close; `handle` is a live
-    // out-pointer, owned by a `Token` at once.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut handle) }.is_err() {
-        return false;
-    }
-    let token = Token(handle);
-    let mut elevation = TOKEN_ELEVATION::default();
-    let size = u32::try_from(size_of::<TOKEN_ELEVATION>()).unwrap_or(u32::MAX);
-    let mut needed = 0u32;
-    // SAFETY: the token is open with TOKEN_QUERY; `elevation` is live and `size` bytes long,
-    // and the call writes a TOKEN_ELEVATION into it.
-    let asked = unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenElevation,
-            Some((&raw mut elevation).cast()),
-            size,
-            &raw mut needed,
-        )
-    };
-    asked.is_ok() && elevation.TokenIsElevated != 0
-}
-
 impl Drop for Token {
     fn drop(&mut self) {
         // SAFETY: the handle came from OpenProcessToken, DuplicateTokenEx or OpenThreadToken

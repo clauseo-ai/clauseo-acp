@@ -55,6 +55,11 @@ impl OpenSessions {
     pub fn is_open(&self, matter: &MatterId) -> bool {
         self.matters.contains(matter)
     }
+
+    /// Whether no matter has an open session.
+    pub fn is_empty(&self) -> bool {
+        self.matters.is_empty()
+    }
 }
 
 /// Why a pool user can't go to another matter.

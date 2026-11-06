@@ -13,13 +13,16 @@ use super::account_list::names_starting;
 use super::accounts::{self, Kind};
 use super::lock_tests::{suffix, unique_mutex};
 use super::machine::{Machine, MachineError, Password};
+use super::owner::Owner;
 use super::password::is_strong;
 use super::record_values::RECORD_SDDL;
 use super::record_write::{self, create_key_with, key_sddl};
 use super::windows_machine::{Names, WindowsMachine};
+use crate::test_support::TempDir;
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
+use crate::windows::marker::MarkerState;
 use crate::windows::pool::MachineRecord;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
@@ -89,14 +92,14 @@ fn the_record_reader_answers_on_a_machine_with_no_key() {
     assert_eq!(record_write::read(&missing), Ok(None));
     assert_eq!(record_write::delete(&missing), Ok(()));
     // The real key: absent on a runner. Read only.
-    let mut real = WindowsMachine::new(Names::production(), Box::new(NoSurroundings));
+    let mut real = read_only_machine();
     assert!(real.read_record().is_ok());
     assert_eq!(crate::windows::sandbox_pool_sids().ok(), Some(vec![]));
 }
 
 #[test]
 fn lookups_answer_for_missing_and_non_local_accounts() {
-    let mut machine = WindowsMachine::new(Names::production(), Box::new(NoSurroundings));
+    let mut machine = read_only_machine();
     let nobody = format!("{FAMILY}U{}", suffix());
     assert_eq!(machine.account_sid(&nobody), Ok(None));
     // SYSTEM is a well-known account of NT AUTHORITY, not a local user.
@@ -112,21 +115,45 @@ fn lookups_answer_for_missing_and_non_local_accounts() {
     assert!(machine.account_sid("BUILTIN\\Users").is_err());
 }
 
+/// A machine on `names` for this process's user, whose data folder is `data_dir`.
+pub(super) fn machine_on(names: Names, data_dir: &Path) -> WindowsMachine {
+    let owner = Owner::of_this_process().unwrap();
+    WindowsMachine::new(names, owner, data_dir.to_owned(), Box::new(NoSurroundings))
+}
+
+/// A machine on the real names whose data folder is never written.
+fn read_only_machine() -> WindowsMachine {
+    machine_on(Names::production(), Path::new(r"C:\ClauseoNoSuchData"))
+}
+
 #[test]
-fn the_machine_answers_unsupported_for_what_later_prs_build() {
-    let mut machine = WindowsMachine::new(Names::production(), Box::new(NoSurroundings));
+fn the_wired_methods_answer_as_this_user() {
+    let dir = TempDir::new("windows-machine-wired");
+    let data = dir.path().join("data");
+    let mut machine = machine_on(Names::production(), &data);
+    assert!(machine.seclogon().is_ok());
+    assert!(machine.logon_right().is_ok());
+    assert!(machine.program_data().unwrap().join("Microsoft").is_dir());
+    assert_eq!(machine.owner(), &current_user_sid().unwrap());
+    // The owner's files, each as the owner: none yet, then an empty secrets.bin.
+    assert_eq!(machine.read_marker(), MarkerState::Missing);
+    assert_eq!(machine.sessions_open(), Ok(false));
+    assert_eq!(machine.ledger(&[]).unwrap().entries().count(), 0);
+    machine.protect_for_owner(&[], &[]).unwrap();
     assert_eq!(
-        machine.seclogon(),
-        Err(MachineError::Unsupported("seclogon"))
+        crate::windows::secrets::read(&data).unwrap().sids().count(),
+        0
     );
+    // Inside `as_owner`, again: no impersonation is nested, and the thread is itself after.
+    let inner = machine
+        .as_owner(|m| m.as_owner(Machine::read_marker))
+        .unwrap();
+    assert_eq!(inner, Ok(MarkerState::Missing));
     let sid = Sid::parse("S-1-5-21-7-8-9-1010").unwrap();
-    assert_eq!(
-        machine.delete_profile(&sid),
-        Err(MachineError::Unsupported("delete_profile"))
-    );
-    assert_eq!(
-        machine.protect_for_owner(&[], &[]),
-        Err(MachineError::Unsupported("protect_for_owner"))
+    assert_eq!(machine.profile_of(&sid), Ok(None));
+    assert!(
+        machine.delete_profile(&sid).is_err(),
+        "not this machine's pool user"
     );
     assert!(machine.now() > 1_700_000_000);
     assert!(is_strong(&machine.new_password()));
@@ -146,9 +173,12 @@ fn elevated_accounts_group_hidden_user_and_record() {
         record_key: TEST_KEY.to_owned(),
         group: format!("{FAMILY}G{tag}"),
         mutex: unique_mutex().unwrap(),
+        users: format!("{FAMILY}U"),
+        journals: false,
     };
     assert!(user.len() <= 20 && names.group.len() <= 20, "{user}");
-    let mut machine = WindowsMachine::new(names, Box::new(NoSurroundings));
+    let data = TempDir::new("windows-machine-accounts");
+    let mut machine = machine_on(names, data.path());
     machine.lock().unwrap();
 
     // A key already there, owned by this user with an open DACL: the first write takes it back.

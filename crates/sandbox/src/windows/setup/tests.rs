@@ -11,6 +11,9 @@ use crate::windows::fence::MatterFolders;
 mod create;
 mod extend;
 mod fake;
+mod fake_acl;
+mod owner;
+mod registered;
 mod remains;
 mod rollback;
 

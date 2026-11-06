@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# The elevated set-up (S15 PR4h): run by the app's UserSetup and the uninstaller's hook. build.rs
+# embeds its requireAdministrator manifest on msvc.
+[[bin]]
+name = "clauseo-sandbox-setup"
+path = "src/bin/clauseo-sandbox-setup.rs"
+
 [features]
 # Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
 test-support = []
@@ -90,6 +96,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (System_ProcessStatus).
 # secrets.bin (src/windows/secrets/dpapi.rs, setup/owner): CryptProtectData (Security_Cryptography);
 # the set-up's recorded parent from NtQueryInformationProcess (Wdk_System_Threading).
+# The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
+# known folder's string freed with CoTaskMemFree (System_Com).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -108,6 +116,7 @@ windows = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
   "Win32_System_Ioctl",
+  "Win32_System_Com",
   "Win32_System_ProcessStatus",
   "Win32_System_Registry",
   "Win32_System_Services",
