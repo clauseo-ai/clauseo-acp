@@ -417,6 +417,7 @@ dependencies = [
  "serde_json",
  "serde_json_lenient",
  "thiserror",
+ "tracing",
  "unicode-normalization",
  "windows",
 ]
