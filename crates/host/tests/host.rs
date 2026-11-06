@@ -152,6 +152,9 @@ mod hold_appends;
 #[path = "host/hold_reasons.rs"]
 mod hold_reasons;
 #[cfg(test)]
+#[path = "host/idle_stop.rs"]
+mod idle_stop;
+#[cfg(test)]
 #[path = "host/import.rs"]
 mod import;
 #[cfg(test)]

@@ -20,10 +20,22 @@ use clauseo_protocol::{QueueHoldReason, StreamId, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::streams::StreamSlot;
+use super::super::idle::Pending;
 use super::super::sign_in;
-use super::{hold, queue};
+use super::{ThreadQueue, hold, queue};
 use crate::agent::login_link::StopFor;
 use crate::log_file::Cause;
+
+/// What in `queue` keeps its thread's agent from idling (`idle.rs`): a turn held for the sign-in
+/// (marked, or one ended for it and still to be put back), else any queued prompt, steer out, or
+/// removal in flight.
+pub(in crate::actor::turn) fn waits(queue: &ThreadQueue) -> Option<Pending> {
+    if queue.sign_in.is_some() || queue.requeue.is_some() {
+        return Some(Pending::Held);
+    }
+    let waits = !(queue.turns.is_empty() && queue.steers.is_empty() && queue.removing.is_empty());
+    waits.then_some(Pending::Queued)
+}
 
 /// Why `thread`'s queue shows held, or `None` when it does not.
 pub(crate) fn queue_hold(actor: &Actor, thread: ThreadId) -> Option<QueueHoldReason> {

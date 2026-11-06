@@ -26,6 +26,9 @@ use crate::update::{NoUpdater, Updater};
 use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
+mod idle;
+pub(crate) use idle::IdleStop;
+pub use idle::{IDLE_LIMIT, LIVE_AGENTS};
 mod profile_hook;
 pub use profile_hook::{NoProfile, ProfileHook};
 mod wiring;
@@ -95,6 +98,7 @@ pub struct HostConfig {
     counts: Option<Counts>,
     search: SearchSeams,
     update: UpdateSeams,
+    idle: IdleStop,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -123,6 +127,8 @@ pub(crate) struct ConfigParts {
     pub(crate) search: SearchSeams,
     /// The updater and what its machine starts from.
     pub(crate) update: UpdateSeams,
+    /// The idle stop's limit and live-agents cap.
+    pub(crate) idle: IdleStop,
 }
 
 /// The updater and what its machine starts from (decision record 0037).
@@ -176,6 +182,7 @@ impl HostConfig {
                 #[cfg(feature = "test-support")]
                 fail_close: false,
             },
+            idle: IdleStop::default(),
         }
     }
 
@@ -324,6 +331,21 @@ impl HostConfig {
     /// The desktop fills it.
     pub fn with_machine_memory(mut self, bytes: u64) -> Self {
         self.wiring.browser_slots = BrowserSlots::new(Some(bytes));
+        self.idle.memory = Some(bytes);
+        self
+    }
+
+    /// How long an agent with nothing pending stays live before the host stops it (default
+    /// [`IDLE_LIMIT`], 300 s); tests shorten it. `Duration::MAX` never stops one.
+    pub fn with_idle_limit(mut self, limit: std::time::Duration) -> Self {
+        self.idle.limit = limit;
+        self
+    }
+
+    /// How many agents may be live at once on a machine of 8 GB or less (default
+    /// [`LIVE_AGENTS`], 2), the memory from [`Self::with_machine_memory`].
+    pub fn with_live_agents(mut self, agents: usize) -> Self {
+        self.idle.live_agents = agents;
         self
     }
 
@@ -584,6 +606,7 @@ impl HostConfig {
             counts: self.counts,
             search: self.search,
             update: self.update,
+            idle: self.idle,
         }
     }
 }
