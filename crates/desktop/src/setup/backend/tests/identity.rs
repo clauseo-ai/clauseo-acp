@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
+use clauseo_agents::keys::Keychain;
 use clauseo_agents::{AccountHash, AccountRead, SigninState, Source};
 use clauseo_protocol::{AgentId, ErrorCode, SignIn};
 use clauseo_settings::SystemFiles;
@@ -62,13 +63,22 @@ impl IdRig {
 
     /// The rig over `scratch` as it is: a start of the app after an earlier one.
     pub(super) fn over(scratch: Scratch, with: impl FnOnce(Identities) -> Identities) -> Self {
+        Self::over_keys(scratch, Keychain::memory(), with)
+    }
+
+    /// [`IdRig::over`], its keys loaded from `keychain` (a memory one).
+    pub(super) fn over_keys(
+        scratch: Scratch,
+        keychain: Keychain,
+        with: impl FnOnce(Identities) -> Identities,
+    ) -> Self {
         let identity = Identities::load(
             &scratch.path().join("data"),
             Arc::new(SystemFiles),
             Some(scratch.path().join("lawyer")),
             [&claude(), &codex()],
         );
-        let rig = rig_identity(&scratch.path().join("homes"), with(identity));
+        let rig = rig_identity(&scratch.path().join("homes"), with(identity), keychain);
         Self { rig, scratch }
     }
 
