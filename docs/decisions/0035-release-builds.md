@@ -47,6 +47,16 @@ Developer ID.
   third-party build scripts run. Only the macOS legs of `build` take an environment, since only they
   sign there. `.github/scripts/latest-json.test.mjs` fails on a pull request trigger, an unpinned
   action, a job without `permissions:` or a secret outside a step, and runs in CI's fast lane.
+- **The release key, checked before a release builds.** In a `release` run the `check` job reads
+  `plugins.updater.pubkey` from `tauri.conf.json` by its own bytes: line 2 of the decoded `.pub`
+  must decode to 42 bytes starting `Ed`, the key id is bytes 2 to 10 read little-endian
+  (`%016X`), and the untrusted comment must name that id. It refuses, each with its own
+  `::error::`, an empty key, one that does not decode so, R23 PR 6's placeholder
+  (`AC986E7C6BA67AB9`) and the test key (its id read from `updater-test.pub`). Dry and test runs
+  are left alone: a dry run makes its own key and a test run signs with the test key. Unlike the
+  desktop test that refuses the same keys, this check is the one a merge cannot skip. Checked
+  locally (2026-11-06): the placeholder, the test key and a doctored comment are refused; a fresh
+  throwaway key passes.
 - **No test key in a shipped binary.** In every `build` leg of a run that is not `test` (so
   release and dry runs), the step right after `tauri build`, before any signing or upload (on
   Linux, `tauri build --bundles deb,rpm` has already made the packages), scans the app binary as

@@ -186,9 +186,9 @@ pub fn run() -> tauri::Result<()> {
         ))
         // No URL scheme yet: the scheme is not decided.
         .plugin_rust_only(tauri_plugin_deep_link::init());
-    // Reached only through the host's updater (update.rs), which is none while tauri.conf.json
-    // has no endpoint. Linux is left out: it updates through its package manager (R23), so the
-    // plugin never runs there.
+    // Reached only through the host's updater (update.rs): release builds, and the e2e build's
+    // test release; debug builds get none. Linux is left out: it updates through its package
+    // manager (R23), so the plugin never runs there.
     #[cfg(not(target_os = "linux"))]
     let builder = builder.plugin_rust_only(tauri_plugin_updater::Builder::new().build());
     let app = builder

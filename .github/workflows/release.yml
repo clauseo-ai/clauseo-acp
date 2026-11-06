@@ -160,8 +160,32 @@ jobs:
           # The updater key that signs this mode's files must have its public key: in a release
           # the app's own (plugins.updater.pubkey), in a test the throwaway one R23 commits. A
           # dry run makes its own in each signing job.
-          if [ "$mode" = release ] && [ -z "$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)" ]; then
-            fail "plugins.updater.pubkey in tauri.conf.json is empty; a v* release signs updates for it"
+          # In a release that key is read from its own bytes (a minisign .pub's line 2 decodes to 42
+          # bytes: "Ed", the key id as 8 bytes little-endian, the Ed25519 key), must match the id
+          # its untrusted comment names, and must be neither the placeholder R23 PR 6 was built
+          # against nor the test key. This is the control a merge cannot skip (0035, 0037).
+          key_id() {
+            local text comment hex id
+            text=$(printf '%s' "$1" | base64 -d 2>/dev/null) || { echo "it is not base64"; return 1; }
+            comment=$(printf '%s\n' "$text" | sed -n 1p | tr -d '\r')
+            hex=$(printf '%s\n' "$text" | sed -n 2p | tr -d '\r' | base64 -d 2>/dev/null | od -An -v -tx1 | tr -d ' \n') ||
+              { echo "its key line is not base64"; return 1; }
+            [ "${#hex}" = 84 ] && [ "${hex:0:4}" = 4564 ] ||
+              { echo "its key line is not an Ed25519 minisign key ($(( ${#hex} / 2 )) bytes)"; return 1; }
+            id=$(for at in 9 8 7 6 5 4 3 2; do printf '%s' "${hex:$((at * 2)):2}"; done | tr a-f A-F)
+            [ "$comment" = "untrusted comment: minisign public key: $id" ] ||
+              { echo "its comment does not name its own key id $id"; return 1; }
+            echo "$id"
+          }
+          if [ "$mode" = release ]; then
+            pub=$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)
+            [ -n "$pub" ] || fail "plugins.updater.pubkey in tauri.conf.json is empty; a v* release signs updates for it"
+            id=$(key_id "$pub") || fail "plugins.updater.pubkey in tauri.conf.json is not a minisign public key: $id"
+            test_id=$(key_id "$(tr -d '\r\n' < crates/desktop/release/updater-test.pub)") ||
+              fail "crates/desktop/release/updater-test.pub is not a minisign public key: $test_id"
+            [ "$id" != AC986E7C6BA67AB9 ] ||
+              fail "plugins.updater.pubkey is the placeholder (AC986E7C6BA67AB9) R23 PR 6 was built against; Rohan's public key must replace it"
+            [ "$id" != "$test_id" ] || fail "plugins.updater.pubkey is the test key ($test_id); a release signs with Rohan's key"
           fi
           if [ "$mode" = test ] && [ ! -s crates/desktop/release/updater-test.pub ]; then
             fail "crates/desktop/release/updater-test.pub (the test key's public key) is missing"

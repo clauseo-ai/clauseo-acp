@@ -57,6 +57,13 @@ PR 2 (this record's) adds the wire, stubbed, and `update.failed`.
   can never come back; it also refuses the test key, and a pubkey that is not a minisign public
   key. Keeping it costs nothing, and deleting it would leave only "not empty" to catch a wrong
   key.
+  The guard reads the key id from the key's own bytes (line 2 of the `.pub`: 42 bytes, `Ed`, the
+  id little-endian) and requires the untrusted comment to name the same id, so a rewritten
+  comment cannot pass. It also reads `tauri.{macos,windows,linux}.conf.json` when they exist,
+  since Tauri merges them on its own. The guard is a desktop test, not a required check, so
+  `release.yml`'s `check` job refuses the same keys, decoded the same way, in every `release`
+  run (0035, "The release key, checked before a release builds"). That check stays for good
+  after the swap.
 
 ### The `Updater` trait
 
