@@ -204,12 +204,10 @@ function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepP
       void parts.retryProtection(transport, store).then(() => store.set({ step: "done" })),
     notNow: () => store.set({ step: "done" }),
     retry: () => store.set({ step: "ask", failed: null }),
-    // Settings opens at its first section: the wire's SettingsSection has no protection section yet
-    // PR-B1: open "protection"
     settings:
       transport.openSettings === undefined
         ? undefined
-        : () => void transport.openSettings?.(null).catch(() => {}),
+        : () => void transport.openSettings?.("protection").catch(() => {}),
   };
 }
 

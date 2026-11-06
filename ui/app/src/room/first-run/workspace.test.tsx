@@ -71,6 +71,7 @@ async function mount(protection: FakeProtectionHost | undefined) {
   let made: ThreadSummary[] = [];
   const fake: FakeHost = {
     platform: "windows",
+    openSettings: () => {},
     query: async (query) => {
       if (query === "list_matters") return { matters };
       if (typeof query === "object" && "list_threads" in query) return { threads: made };
@@ -185,6 +186,16 @@ test("needs_set_up on Windows: the Windows screen, which is the confirm; the fir
   for (let i = 0; i < 3; i += 1) await settle();
   expect(step()).toBeNull();
   expect(reads(t)).toBe(1);
+});
+
+test("Settings on the Not protected line opens the window at #protection", async () => {
+  const s = scripted(PROT.needs);
+  const t = await mount(s.host);
+  await signInNow(t);
+  await press(byId("workspace-not-now"));
+  for (let i = 0; i < 3; i += 1) await settle();
+  await press(byId("workspace-settings"));
+  expect(t.only("open_settings")).toEqual([{ call: "open_settings", section: "protection" }]);
 });
 
 test("Not now is an outcome: the line says Not protected in Claude's words, with Try again, and the first read starts once", async () => {

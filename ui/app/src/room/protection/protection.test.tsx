@@ -308,7 +308,7 @@ test("a build without protection (unsupported { why: not_built }) reads calmly: 
   expect(noteText()).toContain(
     pw(
       "en",
-      "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
     ),
   );
   expect(document.body.querySelector('[data-testid="protection-setup"]')).toBeNull();

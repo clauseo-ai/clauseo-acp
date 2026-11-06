@@ -89,19 +89,19 @@ export function NotProtectedNote({
       : why === "needs_set_up"
         ? [
             p(
-              "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file on this computer, and asks before changing anything outside this matter's folder.",
+              "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
             ),
           ]
         : why === "not_built"
           ? [
               p(
-                "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.",
+                "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
               ),
             ]
           : why === "cant"
             ? [
                 p(
-                  "This computer can't give Clauseo's protection, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+                  "This computer can't give Clauseo's protection, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
                 ),
               ]
             : why === "pool"
@@ -113,7 +113,7 @@ export function NotProtectedNote({
                 ]
               : [
                   p(
-                    "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+                    "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
                   ),
                   ...(refused
                     ? [

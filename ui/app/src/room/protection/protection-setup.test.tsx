@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 // UC's commands in the room, over FakeTransport with the protection wire: the "Unknown publisher" confirm comes before
 // a retry_protection that asks an administrator, and only confirming sends it (Cancel sends nothing); without R17's
-// retry_asks_admin the fallback asks for needs_set_up and set_up_refused only, and the field wins once it is there. The
-// waiting line ends on the answer or the first protection_changed, then the view is read once; a refusal says its
-// code's words. The firm's requirement holds send with its notice. The window split: the room sends only
-// retry_protection, and nothing under room/ imports Settings' Safe workspace.
+// retry_asks_admin the fallback asks for needs_set_up, set_up_refused and a full pool, and the field alone decides once
+// it is there. The waiting line ends on the answer or the first protection_changed, then the view is read once; a
+// refusal says its code's words. The firm's requirement holds send with its notice. The window split: the room sends
+// only retry_protection, and nothing under room/ imports Settings' Safe workspace.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -15,7 +15,7 @@ import { MATTER } from "../../testing/stream-script.ts";
 import type { Protection, ProtectionView } from "../../transport/protocol.ts";
 import { mountRoom, THE_MATTER, type Harness } from "../thread/harness.ts";
 import type { RoomProtectionCommand } from "./commands.ts";
-import { PROT, view } from "./fixtures.ts";
+import { np, PROT, view } from "./fixtures.ts";
 
 let h: Harness | null = null;
 beforeEach(() =>
@@ -130,15 +130,23 @@ test.each([
   },
 );
 
-test("a full pool's Add room always confirms first", async () => {
-  const pool = {
-    not_protected: { cause: { pool_full: { size: 8, open: 8, held: 0, owed: 0, set_aside: 0 } } },
-  } as Protection;
-  await mount(pool, PROT.b, { retry_asks_admin: false } as Partial<ProtectionView>);
-  await pressRetry();
-  expect(inBody("protection-confirm")?.dataset["act"]).toBe("setup");
-  expect(sentRetries()).toEqual([]);
-});
+test.each([
+  ["retry_asks_admin true", { retry_asks_admin: true }, true],
+  ["retry_asks_admin false", { retry_asks_admin: false }, false],
+  // an older host's view has no field: the fallback, which a full pool's Add room answers with the confirm
+  ["no retry_asks_admin", {}, true],
+] as const)(
+  "a full pool's Add room with %s: the confirm comes first only when it asks",
+  async (_c, over, confirms) => {
+    const pool = {
+      not_protected: { cause: { pool_full: { size: 8, open: 8, held: 0, owed: 0, set_aside: 0 } } },
+    } as Protection;
+    await mount(pool, PROT.b, over as Partial<ProtectionView>);
+    await pressRetry();
+    expect(inBody("protection-confirm") !== null).toBe(confirms);
+    expect(sentRetries()).toEqual(confirms ? [] : ["retry_protection"]);
+  },
+);
 
 test("the wait ends on the answer, then the view is read once; the protected matter's note closes", async () => {
   const answers = await mount(PROT.failed);
@@ -207,6 +215,15 @@ test.each([
   ["set_up_failed", PROT.failed, errorWords("en", "sandbox.required"), false],
   ["unsupported", PROT.unsupported, errorWords("en", "sandbox.required"), false],
   ["switched off", PROT.off, errorWords("en", "sandbox.required"), false],
+  [
+    "a build without protection",
+    np({ unsupported: { why: "not_built" } }),
+    pw(
+      "en",
+      "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.",
+    ),
+    false,
+  ],
   [
     "a full pool",
     PROT.pool,
