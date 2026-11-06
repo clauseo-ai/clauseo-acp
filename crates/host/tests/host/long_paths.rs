@@ -2,9 +2,10 @@
 //! Devanagari part, and a file nested in it to past 300. A turn rewrites the file, the lawyer
 //! undoes the step, and a second turn rewrites it again, each with its checkpoints. On Windows
 //! every write and checkpoint here goes past `MAX_PATH`; on Linux and macOS the test only shows
-//! the same flow passes. The folder stays under 248 units: Windows starts the agent with the
-//! matter folder as its working folder, which `CreateProcessW` caps at `MAX_PATH` whatever
-//! the prefix (std strips `\\?\` there), a limit outside this test.
+//! the same flow passes. The folder stays within `clauseo_matters::WINDOWS_FOLDER_LIMIT` (240):
+//! Windows starts the agent with the matter folder as its working folder, which `CreateProcessW`
+//! caps at `MAX_PATH` whatever the prefix (std strips `\\?\` there), so a deeper folder is
+//! refused as `matter.folder_too_deep`.
 
 use std::path::{Path, PathBuf};
 
@@ -49,7 +50,7 @@ fn a_file_past_300_units_is_written_undone_and_checkpointed() {
         .to_owned();
     let folder = dir.folder(&rel, &[(FILE, "First draft\n")]);
     let file = folder.join(FILE);
-    assert!((190..248).contains(&units(&folder)), "{}", units(&folder));
+    assert!((190..=240).contains(&units(&folder)), "{}", units(&folder));
     assert!(units(&file) > 300, "{}", units(&file));
 
     let matter = host.create_matter("Deep", &folder);

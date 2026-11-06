@@ -63,18 +63,33 @@ fn replace(path: &Path, text: &str) {
 }
 
 /// Create, two checkpoints, the timeline, an undo and a restore, all with history paths over
-/// 300 UTF-16 units and the matter folder over 260; the first object's path is measured, so the
-/// test cannot pass with short paths.
+/// 300 UTF-16 units and the file over 260, in a matter folder Windows can still start programs
+/// in (at most [`WINDOWS_FOLDER_LIMIT`](crate::WINDOWS_FOLDER_LIMIT); a deeper one is refused,
+/// `Refusal::TooDeep`); the first object's path and the file's are measured, so the test cannot
+/// pass with short paths.
 #[test]
 fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() {
     let dir = TestDir::new("long-path-matter");
-    let base = deep(dir.path(), 270);
-    let matters_root = base.join("root");
-    let folder = base.join("मामला");
-    write::create_dir_all(&folder).unwrap();
-    let lease = folder.join("lease.txt");
+    let matters_root = deep(&dir.path().join("data"), 270).join("root");
+    let folder = deep(&dir.path().join("work"), 150).join("मामला");
+    let nested = deep(&folder, 270);
+    write::create_dir_all(&nested).unwrap();
+    let lease = nested.join("lease.txt");
     replace(&lease, "first draft\n");
-    assert!(units(&folder) > 260, "{}", units(&folder));
+    assert!(
+        units(&folder) <= crate::WINDOWS_FOLDER_LIMIT,
+        "{}",
+        units(&folder)
+    );
+    assert!(units(&lease) > 260, "{}", units(&lease));
+    let rel = lease
+        .strip_prefix(&folder)
+        .unwrap()
+        .components()
+        .map(|part| part.as_os_str().to_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("/");
+    let lease_path = || MatterPath::new(&rel).unwrap();
 
     let id: MatterId = "01910000-0000-7000-8000-000000000001".parse().unwrap();
     let settings = Settings {
@@ -111,14 +126,14 @@ fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() 
     let before = matter.before_turn(&meta(2)).unwrap();
     assert_eq!(before.outcome, CheckpointOutcome::Reused(cid(1)));
     replace(&lease, "second draft\n");
-    let tools: BTreeSet<MatterPath> = [MatterPath::new("lease.txt").unwrap()].into();
+    let tools: BTreeSet<MatterPath> = [lease_path()].into();
     let after = matter.after_turn(&meta(3), &tools).unwrap();
     assert_eq!(after.outcome, CheckpointOutcome::Created(cid(3)));
     let ids: Vec<CheckpointId> = matter.timeline().iter().map(|entry| entry.id).collect();
     assert_eq!(ids, [cid(1), cid(3)]);
 
     let decisions = [FileDecision {
-        path: MatterPath::new("lease.txt").unwrap(),
+        path: lease_path(),
         choice: FileChoice::Undo,
     }];
     let undone = matter
@@ -133,7 +148,7 @@ fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() 
             at: at(5),
         })
         .unwrap();
-    assert_eq!(undone.restored, [MatterPath::new("lease.txt").unwrap()]);
+    assert_eq!(undone.restored, [lease_path()]);
     assert_eq!(std::fs::read_to_string(&lease).unwrap(), "first draft\n");
 
     let restored = matter
@@ -145,7 +160,7 @@ fn a_matter_with_history_paths_past_260_units_checkpoints_undoes_and_restores() 
             at: at(7),
         })
         .unwrap();
-    assert_eq!(restored.written, [MatterPath::new("lease.txt").unwrap()]);
+    assert_eq!(restored.written, [lease_path()]);
     assert_eq!(std::fs::read_to_string(&lease).unwrap(), "second draft\n");
     let ids: Vec<CheckpointId> = matter.timeline().iter().map(|entry| entry.id).collect();
     assert_eq!(ids, [cid(1), cid(3), cid(5), cid(7)]);
