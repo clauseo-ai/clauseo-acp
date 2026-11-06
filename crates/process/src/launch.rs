@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use async_process::ChildStdout;
 
 use crate::handle::Handle;
+use crate::live::Live;
 use crate::stderr::{Redactor, Ring, StderrPump};
 use crate::stdin::{AgentStdin, StdinSlot};
 use crate::{Error, LaunchSpec, os};
@@ -115,6 +116,9 @@ pub struct Launched {
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
 /// variables. No shell, ever.
 pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched, Error> {
+    // Counted before the child exists, and refused once desktop's exit closed the gate
+    // (`live.rs`); every failure below gives the count back when `live` drops.
+    let live = Live::enter()?;
     let mut command = std::process::Command::new(spec.program());
     command.args(spec.args());
     if opts.clear_env {
@@ -157,6 +161,6 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         stdin: AgentStdin::new(stdin.clone()),
         stdout,
         stderr: StderrPump::new(stderr, Arc::clone(&ring)),
-        handle: Handle::new(child, tree, root, stdin, ring, redactor),
+        handle: Handle::new(child, tree, root, stdin, ring, redactor, live),
     })
 }

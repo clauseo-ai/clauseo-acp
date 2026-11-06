@@ -15,7 +15,8 @@
 //!   per user.
 //! - **The install** ([`after_host`], `install.rs`): when the host stopped with
 //!   `HostExit::Install`, the stopper thread calls it after the host has stopped, the log was
-//!   flushed and the counts saved: the window state is saved, then the plugin's `install`, which
+//!   flushed and the counts saved: the plugin's `install` (the window state was saved on the
+//!   main thread as the quit began, `quit::on_exit_requested`), which
 //!   verifies the bytes again. Windows exits inside it; anything else restarts the app, which
 //!   reads `update.json` at the next start (`updated_from`, or `failed`).
 //!
@@ -80,7 +81,8 @@ fn watching<R: Runtime>(
 }
 
 /// What the stopper thread does once the host has stopped, the log was flushed and the counts
-/// saved: with `HostExit::Install`, it saves the window state and installs (`install.rs`), and
+/// saved: with `HostExit::Install`, it installs (`install.rs`; the window state was saved on the
+/// main thread as the quit began, `quit::on_exit_requested`), and
 /// then restarts the app, whether the install worked (macOS), failed or hung past its bound.
 /// Windows exits inside the plugin's install. When an agents job outlived its bound at quit
 /// (`agents_stopped` false) nothing is installed and the app restarts as it is. Returns only

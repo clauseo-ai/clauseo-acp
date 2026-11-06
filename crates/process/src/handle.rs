@@ -5,7 +5,6 @@ use std::io;
 use std::pin::{Pin, pin};
 use std::process::ExitStatus;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_process::Child;
@@ -16,6 +15,7 @@ use crate::Timer;
 use crate::descendants::{Descendants, Snapshot};
 #[cfg(unix)]
 use crate::descendants::{Proc, kill_all};
+use crate::live::Live;
 use crate::os::{Root, Tree};
 use crate::stderr::{self, Redactor, SharedRing};
 use crate::stdin::StdinSlot;
@@ -27,17 +27,6 @@ const STDIN_GRACE: Duration = Duration::from_secs(2);
 const TERM_GRACE: Duration = Duration::from_secs(3);
 /// How long shutdown waits for the exit after the kill, before it reports the agent unresponsive.
 const KILL_GRACE: Duration = Duration::from_secs(2);
-
-/// How many [`Handle`]s this process holds: one from each start until its handle is dropped.
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-
-/// How many started processes this process still holds a [`Handle`] for: each counts from
-/// [`crate::spawn_in_tree`] until its handle is dropped, whether or not it has exited. Zero means
-/// no tree started here can still be running. One atomic read, for desktop's exit (whether a
-/// stop has anything to wait for).
-pub fn live_handles() -> usize {
-    LIVE.load(Ordering::Acquire)
-}
 
 /// An agent's process and its tree. Dropping it kills the tree at once, without waiting.
 #[derive(Debug)]
@@ -55,6 +44,8 @@ pub struct Handle {
     /// Whether the tree has been sent its kill, so `Drop` sends none: on Unix a group id can be
     /// reused once the group is gone.
     tree_killed: bool,
+    /// The start's count (`live.rs`), given back when the handle drops, after the tree's kill.
+    _live: Live,
 }
 
 impl Handle {
@@ -65,8 +56,8 @@ impl Handle {
         stdin: StdinSlot,
         ring: SharedRing,
         redactor: Arc<Redactor>,
+        live: Live,
     ) -> Handle {
-        LIVE.fetch_add(1, Ordering::AcqRel);
         Handle {
             child,
             tree,
@@ -76,6 +67,7 @@ impl Handle {
             stdin,
             stderr: StderrSource { ring, redactor },
             tree_killed: false,
+            _live: live,
         }
     }
 
@@ -185,7 +177,6 @@ impl Drop for Handle {
     /// a descendant outside the group outlives a handle dropped without a shutdown.
     fn drop(&mut self) {
         self.kill_tree();
-        LIVE.fetch_sub(1, Ordering::AcqRel);
     }
 }
 

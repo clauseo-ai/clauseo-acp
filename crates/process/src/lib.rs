@@ -41,8 +41,12 @@
 //!   (with what those start meanwhile), but executables the caller keeps (SIGTERM, 2 s, SIGKILL
 //!   on Unix; `TerminateProcess`, 2 s, again on Windows), and says what it did ([`Swept`]).
 //!   [`Handle::shutdown`] takes the snapshot the caller listed (where it chose) for its kill.
-//! - [`live_handles`]: how many handles this process still holds (an atomic counted in
-//!   [`spawn_in_tree`] and `Drop`), so desktop's exit skips its wait when nothing runs.
+//! - [`live_handles`]: how many processes this process has started or is starting and still
+//!   holds a handle for (counted first thing in [`spawn_in_tree`], before the child exists,
+//!   until the handle drops), and [`close_spawns`], the gate desktop's exit closes before it
+//!   reads that count: every later start is refused with [`Error::Closing`] and starts nothing.
+//!   The gate never reopens. So desktop's exit skips its wait only when nothing runs or can
+//!   start (`live.rs`).
 //!   With `test-support`, [`running`] says whether a pid still runs, [`started_before_now`]
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
 //!   process they did not start; on Windows, `image_and_parent` reads one's executable and
@@ -56,6 +60,8 @@
 //!
 //! # Invariants
 //!
+//! - Every start is counted before its child exists, and once [`close_spawns`] has run no start
+//!   happens again in this process: the gate never reopens.
 //! - No shell: never `sh -c`, `cmd.exe`, `npx` or a batch file, and no `PATH` lookup.
 //! - Executor-neutral: no spawn, no sleep, no clock. The caller drives every future, the stderr
 //!   pump included; [`AsyncIoTimer`] is the only real timer, and it is the caller's choice. The
@@ -90,6 +96,7 @@ mod descendants;
 mod error;
 mod handle;
 mod launch;
+mod live;
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod named_tests;
 mod os;
@@ -100,8 +107,9 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
-pub use handle::{ExitReport, Handle, ShutdownOutcome, live_handles};
+pub use handle::{ExitReport, Handle, ShutdownOutcome};
 pub use launch::{Launched, Launcher, PassthroughLauncher, SpawnOptions, spawn_in_tree};
+pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;
 pub use stderr::StderrPump;
 pub use stdin::AgentStdin;

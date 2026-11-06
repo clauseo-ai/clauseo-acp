@@ -295,9 +295,6 @@ impl Steps for Recorded {
     fn installable(&self, _downloaded: &Downloaded) -> bool {
         self.installable
     }
-    fn save_window_state(&mut self) {
-        self.steps.push("window state");
-    }
     fn crash_clean_exit(&mut self) {
         install::crash_clean_exit();
         self.steps.push("crash clean exit");
@@ -332,19 +329,13 @@ pub(super) fn downloaded() -> Downloaded {
 }
 
 #[test]
-fn an_install_saves_the_window_state_first_and_restarts_after() {
+fn an_install_flushes_the_log_first_and_restarts_after() {
     let mut steps = Recorded::new(true, Ok(()));
     let after = after_host(HostExit::Install(downloaded()), &mut steps);
     assert_eq!(after, After::Restart);
     assert_eq!(
         steps.steps,
-        [
-            "window state",
-            "crash clean exit",
-            "flush",
-            "install",
-            "flush"
-        ]
+        ["crash clean exit", "flush", "install", "flush"]
     );
 }
 
@@ -356,13 +347,7 @@ fn a_failed_install_restarts_as_the_old_version() {
     assert_eq!(after, After::Restart);
     assert_eq!(
         steps.steps,
-        [
-            "window state",
-            "crash clean exit",
-            "flush",
-            "install",
-            "flush"
-        ]
+        ["crash clean exit", "flush", "install", "flush"]
     );
 }
 

@@ -28,13 +28,17 @@ pub enum Error {
         /// What the OS said.
         source: io::Error,
     },
+    /// The process is exiting: [`close_spawns`](crate::close_spawns) closed the gate, so nothing
+    /// was started.
+    #[error("the app is exiting: no new process starts")]
+    Closing,
 }
 
 impl Error {
     /// The code a client sees. Every error here is a failed launch.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::InvalidSpec(_) | Error::Spawn { .. } | Error::Os { .. } => {
+            Error::InvalidSpec(_) | Error::Spawn { .. } | Error::Os { .. } | Error::Closing => {
                 ErrorCode::AgentLaunchFailed
             }
         }
@@ -57,6 +61,7 @@ mod tests {
                 what: "could not create a job object",
                 source: io::Error::other("denied"),
             },
+            Error::Closing,
         ];
         for error in &errors {
             assert_eq!(error.code(), ErrorCode::AgentLaunchFailed, "{error}");

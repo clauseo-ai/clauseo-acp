@@ -21,7 +21,7 @@ pub(crate) struct Exit {
     pub(crate) stopping: AtomicBool,
     pub(crate) stopped: AtomicBool,
     /// Set by [`stop_on_exit`] before it waits: the main thread is held in `RunEvent::Exit`, so
-    /// the stopper calls nothing that needs it (the window-state save, the update's install:
+    /// the stopper calls nothing that needs it (the update's install:
     /// tauri-runtime-wry's getters send to the main thread and wait with no bound).
     pub(crate) exiting_on_main: AtomicBool,
     /// `stopped`, under the lock the waiters sleep on.
@@ -79,8 +79,8 @@ pub(crate) fn stop_in_order(agents: impl FnOnce() -> bool, host: impl FnOnce()) 
 /// The stopper thread's steps (`lib.rs`'s `stop_host_then_exit`): the quit's order
 /// ([`stop_in_order`]: `agents`, then `host`, which answers how the host ended), then `flush`
 /// (the host log, 0047), then `save_counts`, and last `after_host` with how the host ended and
-/// whether the agents' jobs all ended in time, which saves the window state and installs a
-/// downloaded update only if they did (`update::after_host`, 0037).
+/// whether the agents' jobs all ended in time, which installs a downloaded update only if they
+/// did (`update::after_host`, 0037).
 pub(crate) fn stop_then_after_host(
     agents: impl FnOnce() -> bool,
     host: impl FnOnce() -> HostExit,
@@ -189,12 +189,16 @@ pub(crate) fn hide_windows<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Whether the quit has nothing to wait for: this process holds no process handle (no agent,
-/// sign-in, install or plan reader runs: `clauseo_process::live_handles`) and `Agents` has no
-/// job (its shutdown with no wait answers that every job ended). The shutdown closes `Agents`
-/// to new jobs, which the stop does first anyway; the handles are read again after it, for a
-/// job that ended its process meanwhile.
+/// Whether the quit has nothing to wait for. It closes `clauseo_process`'s gate first
+/// (`close_spawns`: no process starts in this process again, the host's agents included), then
+/// asks that no process is held or starting (no agent, sign-in, install or plan reader:
+/// `clauseo_process::live_handles`) and that `Agents` has no job (its shutdown with no wait
+/// answers that every job ended; it closes `Agents` to new jobs, which the stop does first
+/// anyway). The count is read again after it, for a job that ended its process meanwhile.
 fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
+    // The gate first, then the count: a start either is refused or was counted (process's
+    // `live.rs`). The app is exiting, so nothing starts again either way.
+    clauseo_process::close_spawns();
     clauseo_process::live_handles() == 0
         && app
             .try_state::<SetupStop>()
@@ -211,7 +215,7 @@ fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
 /// ends when this returns. The windows hide first; then, when nothing runs ([`nothing_runs`]),
 /// it returns at once (the counts saved and the log flushed), so an idle app never holds a
 /// logoff. Else the stop sequence runs on its own thread, waited for at most
-/// [`EXIT_STOP_WAIT`], with no window-state save and no install after it
+/// [`EXIT_STOP_WAIT`], with no install after it
 /// ([`Exit::exiting_on_main`]: the plugin saved before this callback, and the OS is ending the
 /// app, which a restart would fight). When a stopper already runs (a quit signal or a closed
 /// window came first), this waits for it the same way.
@@ -247,9 +251,9 @@ pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) -> 
     )
 }
 
-/// The `ExitRequested` stopper's `after_host` (`update::after_host`: the window state, then the
-/// install), unless [`stop_on_exit`] holds the main thread: then neither runs, and a downloaded
-/// update installs at the next start.
+/// The `ExitRequested` stopper's `after_host` (`update::after_host`: the install), unless
+/// [`stop_on_exit`] holds the main thread: then it does not run, and a downloaded update
+/// installs at the next start.
 pub(crate) fn after_host_unless_exiting(
     exit: &Exit,
     ended: HostExit,
@@ -269,16 +273,30 @@ pub(crate) fn after_host_unless_exiting(
     after_host(ended, agents_stopped);
 }
 
-/// The `ExitRequested` stopper's last step before the exit, once the stop and `after_host`
-/// returned (an install or a restart never returns): `save` saves the window state (the
-/// plugin's save with `window_size::state_flags`, off the main thread, which this path never
-/// holds), unless [`stop_on_exit`] holds the main thread (the plugin saved before it); then
-/// the stop is marked ended.
-pub(crate) fn save_then_mark_stopped(exit: &Exit, save: impl FnOnce()) {
-    if !exit.exiting_on_main.load(Ordering::Acquire) {
+/// `ExitRequested`, on the main thread, once `prevent_exit` holds the exit. The first request
+/// `save`s the window state here (the plugin's save: its getters run inline on the main thread,
+/// and it holds the plugin's cache lock while they run, so it is never called from another
+/// thread, where it could wait on a main thread blocked on that lock), then `hide`s the
+/// windows, then `start`s the stopper (`lib.rs`'s `stop_host_then_exit`). Every quit that
+/// installs an update starts here: the host's `HostExit::Install` asks for the exit
+/// (`update.rs`'s `watching`). A later request does nothing: the stopper runs. Returns
+/// whether this was the first.
+pub(crate) fn on_exit_requested(
+    exit: &Exit,
+    save: impl FnOnce(),
+    hide: impl FnOnce(),
+    start: impl FnOnce(),
+) -> bool {
+    let first = exit
+        .stopping
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok();
+    if first {
         save();
+        hide();
+        start();
     }
-    exit.mark_stopped();
+    first
 }
 
 /// The single-instance callback: a second start raises the main window, unless a quit is
@@ -349,9 +367,6 @@ mod tests {
         fn installable(&self, _downloaded: &Downloaded) -> bool {
             true
         }
-        fn save_window_state(&mut self) {
-            self.0.push("window state");
-        }
         fn crash_clean_exit(&mut self) {
             self.0.push("crash clean exit");
         }
@@ -404,19 +419,10 @@ mod tests {
     fn an_agents_job_still_running_at_quit_skips_the_install_and_restarts() {
         let (after, steps) = install_after_quit(false);
         assert_eq!(after, Some(After::Restart));
-        assert_eq!(steps, ["window state", "flush"]);
+        assert_eq!(steps, ["flush"]);
         let (after, steps) = install_after_quit(true);
         assert_eq!(after, Some(After::Restart));
-        assert_eq!(
-            steps,
-            [
-                "window state",
-                "crash clean exit",
-                "flush",
-                "install",
-                "flush"
-            ]
-        );
+        assert_eq!(steps, ["crash clean exit", "flush", "install", "flush"]);
     }
 
     #[test]

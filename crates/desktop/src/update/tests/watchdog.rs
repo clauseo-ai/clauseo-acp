@@ -112,9 +112,6 @@ fn a_hung_install_restarts_the_app() {
         fn installable(&self, downloaded: &Downloaded) -> bool {
             self.0.installable(downloaded)
         }
-        fn save_window_state(&mut self) {
-            self.0.save_window_state();
-        }
         fn crash_clean_exit(&mut self) {
             self.0.crash_clean_exit();
         }
@@ -136,24 +133,18 @@ fn a_hung_install_restarts_the_app() {
     assert_eq!(after, After::Restart);
     assert_eq!(
         steps.0.steps,
-        [
-            "window state",
-            "crash clean exit",
-            "flush",
-            "install",
-            "flush"
-        ]
+        ["crash clean exit", "flush", "install", "flush"]
     );
 }
 
-/// Without the agents stopped, nothing is installed: the window state is saved and the app
-/// restarts as the old version.
+/// Without the agents stopped, nothing is installed: the log is flushed and the app restarts as
+/// the old version.
 #[test]
 fn an_agents_job_still_running_installs_nothing_and_restarts() {
     let mut steps = Recorded::new(true, Ok(()));
     let after = install::after_host(HostExit::Install(downloaded()), false, &mut steps, SHORT);
     assert_eq!(after, After::Restart);
-    assert_eq!(steps.steps, ["window state", "flush"]);
+    assert_eq!(steps.steps, ["flush"]);
 }
 
 /// The install's watch is the 5 minutes, then the minute of looks, that `Watch::INSTALL`

@@ -15,8 +15,7 @@ use tauri::test::{MockRuntime, mock_builder};
 use tauri::{Manager as _, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 use super::super::{
-    Exit, ExitWait, after_host_unless_exiting, save_then_mark_stopped, stop_on_exit,
-    stop_on_exit_with,
+    Exit, ExitWait, after_host_unless_exiting, on_exit_requested, stop_on_exit, stop_on_exit_with,
 };
 use super::InstallSteps;
 use crate::bridge::lock;
@@ -172,10 +171,10 @@ fn an_idle_app_exits_without_a_stop_or_a_wait() {
 }
 
 /// The host stopped for an update while `RunEvent::Exit` holds the main thread: the stopper's
-/// `after_host` saves no window state and installs nothing (both wait on the main thread).
+/// `after_host` installs nothing (the install waits on the main thread).
 /// Without the flag the install runs as before.
 #[test]
-fn the_flag_skips_the_window_state_and_the_install() {
+fn the_flag_skips_the_install() {
     for flag in [true, false] {
         let exit = Exit::default();
         exit.exiting_on_main.store(flag, Ordering::Release);
@@ -199,29 +198,34 @@ fn the_flag_skips_the_window_state_and_the_install() {
             assert!(steps.0.is_empty(), "{:?}", steps.0);
         } else {
             assert_eq!(after, Some(After::Restart));
-            assert_eq!(steps.0.first(), Some(&"window state"));
             assert!(steps.0.contains(&"install"), "{:?}", steps.0);
         }
     }
 }
 
-/// The `ExitRequested` stopper saves the window state before it marks the stop ended, unless
-/// the main thread is held (the plugin saved before `RunEvent::Exit`'s callback).
+/// `ExitRequested`: the first request saves the window state (on the main thread, where the
+/// arm runs), then hides the windows, then starts the stopper; a later one does none of it. The
+/// stopper and the update path have no save to call: `stop_steps` takes none, and the install's
+/// `Steps` has none (`the_flag_skips_the_install` and `update/tests.rs` record every step).
 #[test]
-fn the_stopper_saves_the_window_state_unless_the_main_thread_is_held() {
+fn an_exit_request_saves_then_hides_then_starts_the_stopper_once() {
     let exit = Exit::default();
-    let saved = AtomicUsize::new(0);
-    save_then_mark_stopped(&exit, || {
-        assert!(!exit.stopped.load(Ordering::Acquire), "saved before marked");
-        saved.fetch_add(1, Ordering::AcqRel);
-    });
-    assert_eq!(saved.load(Ordering::Acquire), 1);
-    assert!(exit.stopped.load(Ordering::Acquire));
-
-    let held = Exit::default();
-    held.exiting_on_main.store(true, Ordering::Release);
-    save_then_mark_stopped(&held, || panic!("the main thread is held"));
-    assert!(held.stopped.load(Ordering::Acquire));
+    let steps = Mutex::new(Vec::new());
+    let saves = AtomicUsize::new(0);
+    for _request in 0..2 {
+        let _first = on_exit_requested(
+            &exit,
+            || {
+                saves.fetch_add(1, Ordering::AcqRel);
+                lock(&steps).push("save");
+            },
+            || lock(&steps).push("hide"),
+            || lock(&steps).push("stopper"),
+        );
+    }
+    assert_eq!(*lock(&steps), ["save", "hide", "stopper"]);
+    assert_eq!(saves.load(Ordering::Acquire), 1);
+    assert!(exit.stopping.load(Ordering::Acquire));
 }
 
 /// An app on the mock runtime with the app's context and its main window.
@@ -237,6 +241,30 @@ fn app() -> tauri::App<MockRuntime> {
     .build()
     .unwrap();
     app
+}
+
+/// The stopper's steps and the update path on the mock runtime with no window-state plugin, so
+/// any window-state save would panic (its cache is not managed): `stop_steps` with
+/// `update::after_host` for a stop to install runs to its end. The download is not the plugin's,
+/// so nothing installs.
+#[test]
+fn the_stopper_and_the_update_path_save_no_window_state() {
+    let app = app();
+    let exit = Exit::default();
+    let mut ended = None;
+    super::super::stop_steps(app.handle(), |host, agents_stopped| {
+        assert!(matches!(host, HostExit::Stopped));
+        after_host_unless_exiting(
+            &exit,
+            HostExit::Install(downloaded()),
+            agents_stopped,
+            |install, stopped| {
+                crate::update::after_host(app.handle(), install, stopped);
+                ended = Some(stopped);
+            },
+        );
+    });
+    assert_eq!(ended, Some(true));
 }
 
 /// The app's `stop_on_exit` on the mock runtime with no host, setup or counts managed: it sets

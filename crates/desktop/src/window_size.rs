@@ -74,18 +74,20 @@ pub(crate) const fn state_denylist() -> &'static [&'static str] {
 
 /// What window-state saves and restores: everything but the decorations, since the frame is the
 /// room's (`window_frame.rs`), never a saved one, and the visibility: a quit hides the windows
-/// before their state is saved (`quit.rs`), and the window is built visible. The updater saves
-/// with it too before an install (`update/install.rs`), which ends the app without the exit event
-/// the plugin saves on, and so does the quit's stopper ([`save_state`]).
+/// before their state is saved (`quit.rs`), and the window is built visible. The quit saves
+/// with it too, on the main thread, as an `ExitRequested` quit begins ([`save_state`]): a restart
+/// or an install after it ends the app without the exit event the plugin saves on.
 pub(crate) fn state_flags() -> tauri_plugin_window_state::StateFlags {
     tauri_plugin_window_state::StateFlags::all()
         - tauri_plugin_window_state::StateFlags::DECORATIONS
         - tauri_plugin_window_state::StateFlags::VISIBLE
 }
 
-/// Saves the windows' state with [`state_flags`] (the plugin's save, which reads each window
-/// through the main thread: never call it while the main thread waits). A failure is logged
-/// without the plugin's text, which can name the config folder.
+/// Saves the windows' state with [`state_flags`]. On the main thread only
+/// (`quit::on_exit_requested`): the plugin's save holds its cache lock while it reads each
+/// window, and off the main thread each read waits on the main thread, which the plugin's own
+/// save at `RunEvent::Exit` can hold on that lock. A failure is logged without the plugin's text,
+/// which can name the config folder.
 #[cfg(not(feature = "e2e"))]
 pub(crate) fn save_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri_plugin_window_state::AppHandleExt as _;
