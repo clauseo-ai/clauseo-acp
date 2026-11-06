@@ -367,3 +367,27 @@ fn a_secret_the_spec_names_is_redacted_whatever_holds_it() {
         " rest"
     );
 }
+
+/// A URL's user name and password never reach the tail: an agent may print the proxy URL it was
+/// given (S17 puts the firm's proxy, which may carry them, in its environment).
+#[test]
+fn a_urls_user_name_and_password_are_redacted() {
+    let rules = no_rules();
+    assert_eq!(
+        rules.redact("connect via http://u:p@proxy:3128 failed"),
+        "connect via http://***@proxy:3128 failed"
+    );
+    assert_eq!(
+        rules.redact("https://user:p%40ss@h/x?y https://h/@x"),
+        "https://***@h/x?y https://h/@x"
+    );
+    assert_eq!(rules.redact("ftp://a@b@c:1"), "ftp://***@c:1");
+    assert_eq!(rules.redact("http://host:80 a@b"), "http://host:80 a@b");
+    let stderr = "error: proxy http://u:p@proxy:3128 refused\n";
+    let tail = tail(&ring_with(stderr.as_bytes()), &rules);
+    assert_eq!(tail, "error: proxy http://***@proxy:3128 refused\n");
+    // A window cut inside the URL leaves out what may be its user name and password.
+    for cut in ["/u:pass@proxy:3128 refused", "pass@proxy:3128 refused"] {
+        assert_eq!(rules.without_cut_secret(cut, true), "proxy:3128 refused");
+    }
+}
