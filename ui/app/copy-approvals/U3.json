@@ -671,5 +671,13 @@
     "status": "provisional",
     "at": "2026-11-05",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-agent.key_unreadable": {
+    "en": "Clauseo couldn't read your saved API key in time. If this computer asks to let Clauseo use it, allow it, then try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

@@ -114,6 +114,9 @@ export const HI = {
   "Clauseo is still finishing. Try again in a moment.": null,
   // hi: later
   "Clauseo is still starting. Try again in a moment.": null,
+  // hi: later
+  "Clauseo couldn't read your saved API key in time. If this computer asks to let Clauseo use it, allow it, then try again.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

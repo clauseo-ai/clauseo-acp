@@ -1553,6 +1553,8 @@ export type ErrorCode =
 "signin.agents_still_running" | 
 /** Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. */
 "agent.keys_loading" | 
+/** A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. */
+"agent.key_unreadable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
