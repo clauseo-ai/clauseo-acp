@@ -2,9 +2,12 @@
 //! until its record lands, which holds for the stamps from before (M1), and its bound passing
 //! first gives unknown and a check; a sign-out through Clauseo is watched with no timer and
 //! leaves launches to the agent's own sign-in refusal (M3); followers that panic past their
-//! restarts pin every shared login at `agent.identity_unknown` (L4).
+//! restarts pin every shared login at `agent.identity_unknown` (L4); and a sign-in through
+//! Clauseo after a launch records its account, by id or by email, while no other path does.
 
-use clauseo_agents::{AccountRead, SigninState, Source, sign_in_limit};
+use std::time::UNIX_EPOCH;
+
+use clauseo_agents::{AccountHash, AccountRead, SigninState, Source, sign_in_limit};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode};
 use serde_json::json;
 
@@ -12,7 +15,7 @@ use super::fakes::command;
 use super::identity::{IdRig, refused, signed_in};
 use super::identity_watch::files::remove;
 use super::{SETTINGS, claude, codex};
-use crate::setup::identity::{Verdict, expect, gate, on_state, stamps};
+use crate::setup::identity::{Verdict, check, expect, gate, on_state, stamps};
 use crate::setup::refusal::wanted;
 use crate::setup::supervise::{RESTARTS, supervise};
 use crate::test_support::block_on;
@@ -154,4 +157,96 @@ fn followers_that_panic_past_their_restarts_pin_every_shared_login_at_unknown() 
         Some(ErrorCode::AgentIdentityUnknown)
     );
     assert!(!rig.host.calls().contains(&refused(&agent, None)));
+}
+
+/// Claude's account id, as its status names an account with no email.
+const ACCOUNT_ID: &str = "4f1c9a2e-0d6b-4c2f-9a51-7e3d2b8c6a10";
+
+/// A `SignedIn` of Clauseo's own login with no email.
+fn signed_in_nameless() -> SigninState {
+    SigninState::SignedIn {
+        email: None,
+        plan: None,
+        source: Source::Own,
+        at: UNIX_EPOCH,
+    }
+}
+
+/// Claude signed in through Clauseo with `ONE`, and launched past the gate.
+fn launched_claude(test: &str) -> IdRig {
+    let id = IdRig::new(test);
+    id.signs_in(&claude(), ONE);
+    assert_eq!(gate(&id.rig.backend, &claude()), None, "launched");
+    id
+}
+
+#[test]
+fn a_sign_in_with_no_email_after_a_launch_records_the_account_its_status_names_by_id() {
+    let id = launched_claude("identity-nameless-after-launch");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    assert_eq!(verdict(&id, &agent), Verdict::Due);
+    let by_id = AccountHash::of(ACCOUNT_ID).unwrap();
+    rig.agents
+        .accounts
+        .answers(&agent, AccountRead::Account(by_id.clone()));
+    assert_eq!(block_on(check(backend, &agent)), Verdict::Same);
+    assert_eq!(backend.wiring.identity.recorded(&agent), Some(by_id));
+    assert_eq!(wanted(backend, &agent), None, "never unknown");
+}
+
+#[test]
+fn a_sign_in_with_an_email_after_a_launch_records_it() {
+    let id = launched_claude("identity-email-after-launch");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in(OTHER, Source::Own)));
+    assert_eq!(verdict(&id, &agent), Verdict::Same);
+    let other = AccountHash::of(OTHER);
+    assert_eq!(backend.wiring.identity.recorded(&agent), other);
+    assert_eq!(wanted(backend, &agent), None);
+}
+
+#[test]
+fn no_other_path_records_an_account_after_a_launch() {
+    // Nothing recorded, launched: a `SignedIn` of S18's own status check is unknown.
+    let id = IdRig::new("identity-background-after-launch");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    assert_eq!(gate(backend, &agent), None, "launched");
+    block_on(on_state(backend, &agent, &signed_in(ONE, Source::Own)));
+    assert_eq!(verdict(&id, &agent), Verdict::Unknown);
+    assert_eq!(backend.wiring.identity.recorded(&agent), None);
+    assert_eq!(
+        wanted(backend, &agent),
+        Some(ErrorCode::AgentIdentityUnknown)
+    );
+}
+
+#[test]
+fn a_sign_in_with_no_email_whose_record_never_lands_is_unknown_and_checked_at_its_bound() {
+    let id = launched_claude("identity-nameless-lapsed");
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    rig.agents.accounts.answers(&agent, AccountRead::Failed);
+    assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);
+    let reads = id.reads();
+    let by_id = AccountHash::of(ACCOUNT_ID).unwrap();
+    rig.agents
+        .accounts
+        .answers(&agent, AccountRead::Account(by_id));
+    let bound = sign_in_limit(AgentKind::Claude).as_secs();
+    id.look(bound + 1);
+    assert_eq!(id.reads(), reads + 1, "checked at the bound");
+    assert_eq!(
+        verdict(&id, &agent),
+        Verdict::Unknown,
+        "past it, nothing records"
+    );
+    assert_eq!(backend.wiring.identity.recorded(&agent), None);
 }
