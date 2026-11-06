@@ -3,6 +3,7 @@
 // fills the registry at once, as the tests, the copy review and the gallery do.
 import { registerHindi } from "./words-core.ts";
 import { HI as breaks } from "./words-breaks.hi.ts";
+import { HI as connectors } from "./words-connectors.hi.ts";
 import { HI as errors } from "./words-errors.hi.ts";
 import { HI as find } from "./words-find.hi.ts";
 import { HI as firstLaunch } from "./words-first-launch.hi.ts";
@@ -35,6 +36,7 @@ import { HI as words } from "./words.hi.ts";
 /** Each words file's Hindi by its area, the file's name less "words-": wordsOf("errors") reads words-errors.hi.ts. */
 export const HINDI = {
   breaks,
+  connectors,
   errors,
   find,
   "first-launch": firstLaunch,

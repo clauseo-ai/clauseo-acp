@@ -23,6 +23,7 @@ import type {
   ThreadId,
   ThreadSummary,
   BrowserInstallState,
+  ConnectorsState,
   ThreadsChanged,
   Timestamp,
   ToolsPatch,
@@ -202,11 +203,13 @@ export type { ThreadsChanged };
 export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterInfo[] };
 
 /** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
- * and the Chrome download's state (browser-install.ts). */
+ * the Chrome download's state (browser-install.ts); and the connectors' state (R24, store/connectors.ts), the latest in
+ * every catch-up. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
-  | { browser_install: { state: BrowserInstallState } };
+  | { browser_install: { state: BrowserInstallState } }
+  | { connectors_changed: ConnectorsState };
 
 /** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
 export const WIRE = {

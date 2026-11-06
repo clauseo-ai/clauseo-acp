@@ -69,3 +69,13 @@ test("uncontrolled: defaultValue starts the text and typing changes it without a
   await type(field()!, "Start, typed");
   expect(field()?.value).toBe("Start, typed");
 });
+
+test("a secret is a password field with no autocomplete and no spellcheck, named for its form", async () => {
+  await render(<TextField secret name="key" label="API key" note="Kept on this computer." />);
+  const input = field();
+  expect(input?.type).toBe("password");
+  expect(input?.getAttribute("autocomplete")).toBe("off");
+  expect(input?.getAttribute("spellcheck")).toBe("false");
+  expect(input?.name).toBe("key");
+  expect(document.querySelector("textarea")).toBeNull();
+});

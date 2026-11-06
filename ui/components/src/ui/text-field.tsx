@@ -31,6 +31,8 @@ export function TextField({
   invalid = false,
   disabled = false,
   multiline = false,
+  secret = false,
+  name,
   lang,
   className,
 }: {
@@ -44,11 +46,23 @@ export function TextField({
   invalid?: boolean;
   disabled?: boolean;
   multiline?: boolean;
+  /** A secret, such as a pasted API key: a password field, with no autocomplete and no spellcheck, so the browser
+   * neither shows, keeps nor sends the words anywhere. Never multiline. */
+  secret?: boolean;
+  /** Optional: the control's name, for a form that reads the words from the field itself when it's sent. */
+  name?: string;
   /** The words' own language, where they stay as filed: a folder's path is lang="en". */
   lang?: "en";
   className?: string;
 } & Words) {
-  const control = multiline ? <textarea rows={3} /> : <Input />;
+  const control =
+    multiline && !secret ? (
+      <textarea rows={3} />
+    ) : secret ? (
+      <Input type="password" autoComplete="off" spellCheck={false} />
+    ) : (
+      <Input />
+    );
   return (
     <Field.Root
       invalid={invalid}
@@ -63,13 +77,14 @@ export function TextField({
         lang={lang}
         className={cn(
           textControl,
-          multiline ? "py-s2 resize-y" : "h-control",
+          multiline && !secret ? "py-s2 resize-y" : "h-control",
           lang === "en" && "font-en",
         )}
         {...(defaultValue === undefined ? {} : { defaultValue })}
         {...(value === undefined ? {} : { value })}
         {...(onValueChange === undefined ? {} : { onValueChange })}
         {...(placeholder === undefined ? {} : { placeholder })}
+        {...(name === undefined ? {} : { name })}
       />
       <Field.Description className={fieldNote}>
         <Mixed>{note}</Mixed>

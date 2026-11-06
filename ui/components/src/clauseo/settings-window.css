@@ -119,6 +119,11 @@
   .set-pane-title {
     @apply text-title font-chrome stretch-voice tracking-title text-primary;
   }
+  /* the head takes focus only when the address opened its section (focusHead): a place to start reading, not a
+     control, so no ring */
+  .set-pane-title:focus {
+    outline: none;
+  }
   .set-pane-lead {
     @apply text-ui-loose text-muted;
   }

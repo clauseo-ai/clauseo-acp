@@ -342,6 +342,18 @@ describe("TauriTransport", () => {
     expect(acks()).toEqual([{ positions: [], messages: 1 }]);
   });
 
+  test("connectors_changed reaches the app listeners, no stream subscriber, and is acked on the next frame", async () => {
+    const { t, got, send, frame, acks } = await rig("a");
+    const heard: unknown[] = [];
+    await t.onAppEvent((e) => heard.push(e)).ready;
+    const state = { available: true, locked: false, connectors: [] };
+    send({ connectors_changed: state });
+    expect(heard).toEqual([{ connectors_changed: state }]);
+    expect(got).toEqual([]);
+    await frame();
+    expect(acks()).toEqual([{ positions: [], messages: 1 }]);
+  });
+
   test("stop removes only that app listener", async () => {
     const { t, send } = await rig();
     const heard: string[] = [];
