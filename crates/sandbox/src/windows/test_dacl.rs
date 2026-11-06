@@ -146,3 +146,37 @@ pub(crate) fn drop_privileges() {
     // SAFETY: the token was opened above and is closed once, here.
     unsafe { CloseHandle(token) }.unwrap();
 }
+
+/// Whether this process's token is elevated. A token that cannot be asked counts as not.
+#[cfg(test)]
+pub(crate) fn elevated() -> bool {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{
+        GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = HANDLE::default();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a
+    // live out-pointer for the call.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }.is_err() {
+        return false;
+    }
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut needed = 0u32;
+    let len = u32::try_from(size_of::<TOKEN_ELEVATION>()).unwrap_or_default();
+    // SAFETY: `elevation` is live and `len` bytes long for the call, which writes a
+    // TOKEN_ELEVATION into it; the handle came from OpenProcessToken.
+    let asked = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            Some((&raw mut elevation).cast()),
+            len,
+            &raw mut needed,
+        )
+    };
+    // SAFETY: the handle is closed once, here; a failed close leaves nothing to do.
+    drop(unsafe { CloseHandle(token) });
+    asked.is_ok() && elevation.TokenIsElevated != 0
+}

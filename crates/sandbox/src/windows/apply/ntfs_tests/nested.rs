@@ -18,7 +18,7 @@ use crate::windows::fence::Neighbours;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{entries, has};
-use crate::windows::test_dacl::{drop_privileges, protect_with};
+use crate::windows::test_dacl::{drop_privileges, elevated, protect_with};
 use crate::windows::test_junction::junction;
 use crate::windows::test_world::{
     FakeFolders, GROUP_SID, OTHER_POOL_SIDS, USER_SID, World, matter_one, reserved, sids, trusted,
@@ -128,6 +128,17 @@ fn denied_to(path: &Path, sid: &Sid) -> bool {
 
 #[test]
 fn the_pool_user_cant_edit_rename_or_delete_a_nested_claude_md_or_git_config() {
+    // The stand-in pool user is this user's own SID, so the write deny the apply writes binds
+    // the apply too: at Medium the files here are this user's, so pool-owned, and the owner
+    // pass needs `WRITE_DAC` and `WRITE_OWNER` on them, which the deny (and OWNER RIGHTS)
+    // refuse, so the walk stops with `ChildShut` (VM run 7). Elevated, an admin's new files
+    // are owned by Administrators, not the stand-in, so the pass leaves them alone. In real
+    // use the pool SID is never the desktop user's, so the deny never binds the apply. CI runs
+    // elevated.
+    if !elevated() {
+        eprintln!("skipped: the stand-in pool user is this user, so this needs an elevated token");
+        return;
+    }
     drop_privileges();
     let w = World::new("apply-ntfs-nested");
     w.dir.file("matter/sub/CLAUDE.md", CLAUDE);
