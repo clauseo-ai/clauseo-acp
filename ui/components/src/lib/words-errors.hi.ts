@@ -120,6 +120,9 @@ export const HI = {
   // hi: later
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
     null,
+  // hi: later
+  "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -121,6 +121,11 @@ pub enum ApplyFailure {
     /// A child in a strict walk that the lawyer can't open (a DACL an agent made shuts the
     /// lawyer out), and that couldn't be set aside.
     ChildShut,
+    /// A read-only path in the matter (a protected name) is a junction or symbolic link when
+    /// its entry is written: an entry on a link protects neither the link nor what it leads to.
+    /// `apply` turns it into [`Error::ProtectedLink`](crate::Error::ProtectedLink), naming the
+    /// item. A final path other than the planned one stays [`ApplyFailure::Changed`].
+    Link,
 }
 
 impl fmt::Display for ApplyFailure {
@@ -137,6 +142,7 @@ impl fmt::Display for ApplyFailure {
             ApplyFailure::Io(kind) => write!(f, "a file-system call failed ({kind})"),
             ApplyFailure::Ledger(kind) => write!(f, "the permission ledger failed ({kind})"),
             ApplyFailure::ChildShut => f.write_str("a folder or file in it can't be opened"),
+            ApplyFailure::Link => f.write_str("it is a junction or symbolic link"),
         }
     }
 }
@@ -154,7 +160,8 @@ impl From<ApplyFailure> for io::Error {
             | ApplyFailure::LinkedFile
             | ApplyFailure::VolumeRoot
             | ApplyFailure::NoDacl
-            | ApplyFailure::ChildShut) => io::Error::other(other),
+            | ApplyFailure::ChildShut
+            | ApplyFailure::Link) => io::Error::other(other),
         }
     }
 }

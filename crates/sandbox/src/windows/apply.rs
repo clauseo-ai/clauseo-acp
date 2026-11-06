@@ -213,9 +213,26 @@ fn run_plan(
             let (path_kind, failure) = (refused.kind, refused.failure);
             tracing::warn!(%path_kind, %failure, "tier B's entries failed; rolling back");
             back::roll_back(ledger, plan, acl, around, &run);
-            Err(refused.error())
+            Err(protected_link(plan, &refused).unwrap_or_else(|| refused.error()))
         }
     }
+}
+
+/// [`Error::ProtectedLink`] for a refusal of a read-only path in the matter that is a link
+/// ([`ApplyFailure::Link`]), naming it relative to the matter folder it is in (S15 `PR4a2`).
+/// `None` for any other refusal, or one whose path isn't below a matter folder of the plan.
+fn protected_link(plan: &AdmittedPlan, refused: &Refused) -> Option<Error> {
+    if refused.failure != ApplyFailure::Link || refused.kind != PathKind::ReadOnlyInMatter {
+        return None;
+    }
+    let at = refused.at.as_deref()?;
+    let at = plan
+        .grants()
+        .iter()
+        .filter(|g| g.kind() == PathKind::Matter)
+        .find_map(|g| at.strip_prefix(g.path()).ok())
+        .filter(|rest| rest.components().next().is_some())?;
+    Some(Error::ProtectedLink { at: at.to_owned() })
 }
 
 /// L5: the credential link is the file the launcher expects, by its file ID. The link sits in
@@ -310,7 +327,12 @@ fn write_all(
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
                 _ => acl.add(grant),
             };
-            match added.map_err(|f| Refused::new(grant.kind(), f))? {
+            // A link at a protected name is named, for `protected_link`.
+            let refusal = |failure| Refused {
+                at: (failure == ApplyFailure::Link).then(|| grant.path().to_owned()),
+                ..Refused::new(grant.kind(), failure)
+            };
+            match added.map_err(refusal)? {
                 Added::Written => run.written.push(i),
                 Added::AlreadyThere => {}
             }

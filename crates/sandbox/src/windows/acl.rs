@@ -370,7 +370,12 @@ pub(crate) fn owner(path: &Path) -> io::Result<Sid> {
 /// a final path other than the planned one; a deny for the whole tree on a volume's root.
 fn check_target(target: &Object, grant: &Grant) -> Result<(), ApplyFailure> {
     if target.name_surrogate() {
-        return Err(ApplyFailure::Changed);
+        // A protected name in the matter that is a link: the lawyer's to move (S15 `PR4a2`).
+        return Err(if grant.kind() == PathKind::ReadOnlyInMatter {
+            ApplyFailure::Link
+        } else {
+            ApplyFailure::Changed
+        });
     }
     let shared_ok = grant.rights().is_deny() || grant.kind() == PathKind::CredentialLink;
     if !target.folder && target.links > 1 && !shared_ok {

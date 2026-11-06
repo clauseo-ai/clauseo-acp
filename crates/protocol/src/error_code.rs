@@ -226,6 +226,10 @@ error_codes! {
         Word document's path is too long for Word to open, even with its folders' short names \
         (Windows): move the matter's folder nearer the top of its drive, or shorten its folder \
         names.";
+    MatterProtectedLink = "matter.protected_link", retryable: false, meaning: "A protected \
+        name in the matter folder (such as a nested CLAUDE.md, AGENTS.md or .claude) is a \
+        shortcut (a junction or symbolic link), which the Windows sandbox can't protect, so the \
+        agent is not started; the lawyer moves or deletes it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
