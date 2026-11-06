@@ -117,6 +117,9 @@ export const HI = {
   // hi: later
   "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.":
     null,
+  // hi: later
+  "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
+    null,
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

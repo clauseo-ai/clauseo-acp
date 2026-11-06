@@ -2,14 +2,14 @@
 // openFile and reveal (H11) unless it is given stand-ins: tests and the copy review page pass theirs to the room
 // explicitly (stand-ins.test.tsx fails if their types drift from HostTransport's). versionsFolder and diskUse wait for
 // H12: until then nothing passes them in the desktop app, so their affordances are absent, never a button that fails.
-import type { FileRefId, MatterId } from "../../transport/protocol.ts";
+import type { FileRefId, MatterId, OpenedFile } from "../../transport/protocol.ts";
 
 /** What H11's reveal shows: a matter's folder, or Clauseo's own data folder, where versions are kept. */
 export type RevealTarget = { matter: MatterId } | "app_data";
 
 export type StandIns = {
   /** H11: opens a file of the matter in the program the computer opens it with. Rejects with a HostError. */
-  openFile?: (file: FileRefId) => Promise<void>;
+  openFile?: (file: FileRefId) => Promise<OpenedFile>;
   /** H11: shows a folder in Finder or File Explorer. Rejects with a HostError. */
   reveal?: (target: RevealTarget) => Promise<void>;
   /** H12: Clauseo's own folder for the matter's versions, as the computer writes it. */

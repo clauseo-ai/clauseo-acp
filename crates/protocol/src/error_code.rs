@@ -222,6 +222,10 @@ error_codes! {
         could not be read from the system's key store (no answer in time, or the read was \
         refused, often at a permission prompt); no agent was started. Trying again once it can \
         be read can succeed.";
+    MatterDocumentPathTooLong = "matter.document_path_too_long", retryable: false, meaning: "A \
+        Word document's path is too long for Word to open, even with its folders' short names \
+        (Windows): move the matter's folder nearer the top of its drive, or shorten its folder \
+        names.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

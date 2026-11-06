@@ -679,5 +679,13 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-matter.document_path_too_long": {
+    "en": "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

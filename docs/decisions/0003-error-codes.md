@@ -106,6 +106,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `signin.agents_still_running` | An agent was still running after Clauseo waited for it to stop, so the login was not changed and nothing was removed; trying again once it has stopped can succeed. | yes | desktop (the leave order's stop_agents timed out) |
 | `agent.keys_loading` | Clauseo has not finished loading the stored API keys; no agent was started; trying again in a moment can succeed. | yes | host (a launch while desktop still loads the stored API keys, decision record 0048) |
 | `agent.key_unreadable` | A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. | yes | host (a launch for an agent whose stored API key could not be read, decision record 0048) |
+| `matter.document_path_too_long` | A Word document's path is too long for Word to open, even with its folders' short names (Windows): move the matter's folder nearer the top of its drive, or shorten its folder names. | no | desktop (`open_file` for a Word document on Windows, decision record 0026) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

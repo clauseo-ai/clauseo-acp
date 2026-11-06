@@ -13,13 +13,14 @@ mod mac_app;
 mod native;
 #[cfg(test)]
 mod tests;
+mod word_path;
 mod words;
 
 use std::path::{Path, PathBuf};
 
 pub(crate) use clauseo_host::LocatedFile;
 use clauseo_protocol::{ErrorCode, FileRefId, HostError, Language, MatterId};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::dialogs::BoxFuture;
 
@@ -81,6 +82,21 @@ pub(crate) trait Opener: Send + Sync {
     fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError>;
     /// Shows `path` selected in its parent folder, in Finder or File Explorer.
     fn reveal(&self, path: &Path) -> Result<(), HostError>;
+    /// The 8.3 short form of the folder `folder`, for a Word document whose path is too long
+    /// for Word (`word_path`): `GetShortPathNameW` on Windows. `None`, as for a volume without
+    /// short names, unless an opener says otherwise.
+    fn short_folder(&self, _folder: &Path) -> Option<PathBuf> {
+        None
+    }
+}
+
+/// What `open_file` tells the page about a document it opened.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+pub(crate) struct OpenedFile {
+    /// Word opens it in Protected View: its path was too long for Word, so it opened through its
+    /// folders' short names (`word_path`), and the lawyer chooses Enable Editing to change it.
+    pub(crate) protected_view: bool,
 }
 
 /// A `command.invalid` failure with `message`.
@@ -198,21 +214,35 @@ pub(crate) async fn open_external(
 
 /// `open_file`: through `gate` (one at a time, and at most one document opened per
 /// [`BETWEEN_OPENS`]: `command.conflict`), asks the host what `file` names, checks it
-/// (`check_document`) and opens it with the default app for its type.
+/// (`check_document`) and opens it with the default app for its type. A Word document whose
+/// path is too long for Word opens through its folders' short names, in Protected View, or is
+/// refused as `matter.document_path_too_long` (`word_path`).
 pub(crate) async fn open_file(
     locate: &dyn Locate,
     opener: &dyn Opener,
     gate: &gate::Gate,
     now: Now<'_>,
     file: FileRefId,
-) -> Result<(), HostError> {
+) -> Result<OpenedFile, HostError> {
     let pass = gate.enter(now())?;
     let located = locate.locate_file(file).await?;
     let document = check_document(&located.path, &located.folder)?;
+    let (path, protected_view) =
+        word_path::word_open_path(&document.path, |folder| opener.short_folder(folder))
+            .map_err(|word_path::TooLong| {
+                HostError::new(
+                    ErrorCode::MatterDocumentPathTooLong,
+                    format!(
+                        "the document's path is over {} UTF-16 units, too long for Word, even with its folders' short names",
+                        word_path::WORD_PATH_LIMIT
+                    ),
+                )
+            })?;
     // Only a call that gets this far holds the next one back: a page sending refs that are
     // refused cannot keep the lawyer's own clicks out.
     pass.quiet_for(now(), BETWEEN_OPENS);
-    opener.open_path(&document.path, &document.kind)
+    opener.open_path(&path, &document.kind)?;
+    Ok(OpenedFile { protected_view })
 }
 
 /// `reveal`: shows the matter's folder, or `app_data`, selected in its parent folder.

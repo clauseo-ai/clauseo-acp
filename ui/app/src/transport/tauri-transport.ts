@@ -26,6 +26,7 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   FileRefId,
+  OpenedFile,
   HostEvent,
   HostQuery,
   PermissionRequestId,
@@ -297,8 +298,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   async openExternal(url: string): Promise<void> {
     await call(commands.openExternal(url));
   }
-  async openFile(file: FileRefId): Promise<void> {
-    await call(commands.openFile(file));
+  async openFile(file: FileRefId): Promise<OpenedFile> {
+    return call(commands.openFile(file));
   }
   async reveal(target: RevealTarget): Promise<void> {
     await call(commands.reveal(target));

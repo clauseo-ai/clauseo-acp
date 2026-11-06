@@ -25,7 +25,7 @@ use tauri::{AppHandle, Runtime, State, Webview};
 use crate::bridge::Bridge;
 use crate::counts::{CountsState, UiCount};
 use crate::frame::Frame;
-use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, RevealTarget};
+use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFile, RevealTarget};
 use crate::picked::PickedFolder;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
@@ -260,7 +260,8 @@ pub(crate) async fn open_external<R: Runtime>(
 /// Opens the document `file` names with its default app. Refused with `command.invalid` when
 /// the host did not issue the ref, when the file is not inside its matter's folder, and when
 /// it is not a document type (`open::DOCUMENT_TYPES`). One at a time and at most one a second:
-/// `command.conflict` otherwise.
+/// `command.conflict` otherwise. A Word document whose path is too long for Word opens in
+/// Protected View (`protected_view`), or is refused with `matter.document_path_too_long`.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn open_file<R: Runtime>(
@@ -268,7 +269,7 @@ pub(crate) async fn open_file<R: Runtime>(
     bridge: State<'_, Bridge>,
     gates: State<'_, OpenGates>,
     file: FileRefId,
-) -> Result<(), HostError> {
+) -> Result<OpenedFile, HostError> {
     let opener = NativeOpener::new(app);
     crate::open::open_file(
         bridge.host().await?,
