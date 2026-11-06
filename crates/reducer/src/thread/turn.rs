@@ -38,7 +38,8 @@ pub(super) fn detached(state: &mut ThreadState, reason: &DetachReason, out: &mut
     let status = match reason {
         DetachReason::Exited { .. } | DetachReason::Unknown { .. } => ThreadStatus::AgentExited,
         DetachReason::Closed => ThreadStatus::Idle,
-        DetachReason::Restarting | DetachReason::IdleStopped => {
+        DetachReason::IdleStopped => ThreadStatus::IdleStopped,
+        DetachReason::Restarting => {
             not_yet(out, "agent_session_detached");
             return;
         }

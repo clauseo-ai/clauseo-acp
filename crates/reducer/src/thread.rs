@@ -60,11 +60,20 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
                 set_some(&mut h.agent_name, &event.agent_name)
             });
         }
-        // An attach changes the status not yet: the next prompt gives it. Going back to `Idle`
-        // after an exit is a restart transition, not folded yet. Its capabilities say whether a
-        // steer joins the running turn.
+        // An attach leaves `IdleStopped` for the settled status, so the stopped agent's thread
+        // shows its real state again. Going back to `Idle` after an exit is a restart
+        // transition, not folded yet. Its capabilities say whether a steer joins the running
+        // turn.
         DomainEvent::AgentSessionAttached(event) => {
             queue::session_attached(state, &event.capabilities, out);
+            if state.status() == ThreadStatus::IdleStopped {
+                let status = turn::settled_status(state);
+                set_status(state, "agent_session_attached", out, status);
+            }
+            // A stop held for a running turn's end is over too: the new session is live.
+            if state.after_turn == Some(ThreadStatus::IdleStopped) {
+                state.after_turn = None;
+            }
         }
         DomainEvent::WebSearchRecorded(event) => web::search_recorded(state, event, out),
         DomainEvent::PageVisited(event) => web::page_visited(state, event, out),
