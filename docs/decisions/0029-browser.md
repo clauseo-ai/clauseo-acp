@@ -314,8 +314,9 @@ Behaviour that changes with it:
   no restart.
 - **Downloads** land in `<cwd>/downloads` as before, now moved there by the guard
   (`browser_guard/downloads.rs`): Chrome downloads into `<profile>/downloads-staging`, and every
-  200 ms the guard moves each finished file (Chrome renames `*.crdownload` only when done) into
-  the downloads folder. A name in the sandbox's `PROTECTED_NAMES` (`.codex`, `.claude`,
+  200 ms the guard moves each finished file (Chrome renames `*.crdownload`, or on Windows its
+  first name `<guid>.tmp`, only when done: "Windows fixes from G17", below) into the downloads
+  folder. A name in the sandbox's `PROTECTED_NAMES` (`.codex`, `.claude`,
   `.agents`, `.clauseo`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`) becomes
   `<stem> (download)<ext>`, compared without ASCII case, trailing dots and spaces, and with `ſ`
   read as `s`; a taken name gets ` (2)`. The move never replaces a file (`write::move_new`: a hard
@@ -684,6 +685,101 @@ record is read-only, probed and never signalled or killed, and every doubt fails
 rule's danger does not arise. The guard and the reaper kill only the pids they spawned or were
 told over the pipe, as before, and, for a `starting` record, the processes a fresh listing
 shows running with the run's own profile.
+
+### Windows fixes from G17 (`downloads.rs`, `logon.rs`)
+
+G17's Windows run (clauseo-acp-private #436, `measurements/g17-browser/results/windows/NOTES.md`,
+Chrome for Testing 157.0.8103.38, Google Chrome 157.0.8103.39, Edge 156.0.4314.58) found two
+bugs in the guard. Chromium source below is `main` as of 2026-11-06.
+
+#### Downloads on Windows: Chrome's `<guid>.tmp`
+
+**The bug.** Item 7's download failed to land in 7 of 10 runs with Chrome for Testing and 1 of 4
+with Google Chrome (`requested but not found in any download folder within 20 s: cancelled`).
+Before Chrome knows a download's name it writes it to the file `base::CreateTemporaryFileInDir`
+makes in the download folder (`components/download/internal/common/base_file.cc`,
+`BaseFile::Initialize`); on Windows that is `<uuid>.tmp`, a lowercase random UUID
+(`base/files/file_util_win.cc`, `CreateAndOpenTemporaryFileInDirWithFlags` and
+`FormatTemporaryFileName`); on Unix `.com.google.Chrome.XXXXXX`, which the mover already skipped.
+The mover skipped only `*.crdownload` and the Unix names, so it moved the half-written file to
+`downloads\<guid>.tmp` (a watcher saw it there 126 ms later) and Chrome's rename to the final
+name never happened.
+
+**The fix.** `in_progress` treats `<8-4-4-4-12 hex>.tmp` as in progress on every OS (upper case
+too, since Windows names ignore case); any other `.tmp`, such as `notes.tmp`, is a finished
+download and moves. A move Windows refuses because the file is open without delete sharing
+(`MoveFileExW`'s sharing violation, from Chrome or a scanner) leaves the file in staging for the
+next sweep, as before; a unit test now holds it.
+
+**Accepted:** a page can name its download `<guid>.tmp` (`Content-Disposition` or
+`<a download>`). That file never moves and is deleted with the profile: the download is lost,
+but nothing gets past the guard.
+
+#### No failed logon at start (`logon.rs`)
+
+**The bug.** Item 2: every launch of Chrome for Testing and of Edge wrote one event 4625 (process
+`chrome.exe` or `msedge.exe`, the signed-in user, logon type 2, sub-status `0xc000006a`, bad
+password); 20 launches gave 20. With the lockout policy (5 tries in 30 minutes) the account
+locked out (4740), and `win ssh` to the machine failed until it unlocked. A lawyer's machine
+with a lockout policy would lock the lawyer out of their own account.
+
+**The cause.** Chromium's blank-password check,
+`chrome/browser/password_manager/password_manager_util_win.cc` `CheckBlankPasswordWithPrefs`,
+calls `LogonUser(<user>, L".", L"", LOGON32_LOGON_INTERACTIVE, ...)`: an interactive (type 2)
+logon with an empty password, which fails with a bad password on any account that has one. It is
+the only `LogonUser` in the browser (the others are in `remoting/` and the Google credential
+provider). At start it is reached from the first tab: `ChromeAutofillClient`'s constructor calls
+`SupportsDeviceReauth` when `AutofillAiWalletPrivatePasses` or `AutofillAmbientAutofill` is on
+and the entity data manager has not checked yet (`chrome_autofill_client.cc`,
+`entity_data_manager.cc` `ShouldUpdateReauthAvailability`: once per launch), which goes
+`CanAuthenticateWithBiometricOrScreenLock` (`device_reauth/win`),
+`AuthenticatorWin::CanAuthenticateWithScreenLock`, `DeviceAuthenticationPresent`,
+`CheckBlankPassword`. Other callers (payments' and Autofill AI's re-auth, the password
+manager's re-auth) go the same way. A domain-joined machine never gets there
+(`base::win::IsEnrolledToDomain` in `DeviceAuthenticationPresent`), and neither does an account
+`NetUserGetInfo` cannot read; a local account on a stand-alone machine, as on the VM, does.
+
+**The fix.** `CheckBlankPasswordWithPrefs` skips the logon when Local State's
+`password_manager.os_password_last_changed` is above 0 and not older than the account's password
+(`NetUserGetInfo`'s password age, which logs no logon), and then returns
+`password_manager.os_password_blank`. The guard writes both into a new profile's `Local State`:
+`os_password_last_changed` = `"9223372036854775807"` (`i64::MAX`, as a string: Chrome keeps an
+int64 preference as a decimal string, `base::ValueToInt64`, and a number there would read as the
+default 0 and recheck) and `os_password_blank` = `false`. That is the narrowest setting: it
+stops this one call on every path to it, whichever feature asked; it changes no switch, no
+feature, no sandbox and no site isolation. Chrome then believes the account has a password, so a
+re-auth prompt (never reached headless) would ask for it. A feature switch was rejected: the
+callers are several features, with one `--disable-features` shared with "No background hosts".
+
+**Restarts on the kept profile** (lazy start). Before each start on the run's kept profile,
+`ready_profile` reads Chrome's own `Local State` and puts back either key that is missing or
+that Chrome would not read (`os_password_last_changed` not a decimal string above 0,
+`os_password_blank` not a boolean), keeping everything else Chrome stored there. Chrome's own
+rewrite of the two keys is kept: after the skipped check it stores the password's real change
+time plus 1 s and the answer it read (`CheckBlankPasswordWithPrefs`, the end), which keeps
+skipping the logon while the account's password is unchanged. If the lawyer changes the
+Windows password during the session, the next restart's check would run once and log one 4625;
+re-asserting `i64::MAX` at every start would avoid that, but would overwrite Chrome's own
+value, so the guard keeps Chrome's.
+
+The profile also turns off **Chrome's password manager** (`credentials_enable_service`,
+`credentials_enable_autosignin` and `credentials_enable_passkeys` false in
+`Default/Preferences`): the agent should not save or fill passwords or passkeys. That alone
+would not stop the logon (the autofill path above does not read it). These preferences are
+merged into `Default/Preferences` beside the "No background hosts" ones (`quiet.rs`), whose
+keys they do not share, and put back at every restart like them. A new profile's
+`Local State` holds only the two `password_manager` keys.
+
+**Edge.** Edge is Chromium and logged the same event; its Local State is expected to hold the same
+`password_manager.os_password_*` keys, from the shared `components/password_manager` code. Edge's
+source is not public, so this rests on the VM's re-run, which found 0 events 4625 for Edge as for
+Chrome (Not verified).
+
+**Tests.** `downloads/tests.rs`: Chrome's in-progress names (GUID `.tmp` in both cases,
+near-GUIDs that are not), a half-written `<guid>.tmp` that stays through sweeps and moves once
+renamed, a `notes.tmp` that moves, and on Windows a file held open without sharing that a later
+sweep moves. `logon.rs`: the written `Local State` and `Preferences` hold the settings, in the
+types Chrome reads.
 
 ### Requirements on stage C's proxy and jail
 
@@ -1330,6 +1426,15 @@ The download (part 3):
   run: curl, `ditto` or `tar`, `codesign` and `WinVerifyTrust`, the free-space reads, and
   whether Chrome for Testing is signed (the by-hand steps above). The Windows code
   (`install/windows.rs`) was checked with clippy for `x86_64-pc-windows-msvc` in a crate of its own.
+
+- G17's Windows fixes: the logon fix ran on the Windows VM at e609c223 (60 launches of Chrome
+  for Testing, Google Chrome and Edge with the lockout policy on: 0 events 4625, 0 events 4740).
+  Since then `logon.rs` adds only `credentials_enable_passkeys`; since #549 its preferences are
+  merged after `quiet.rs`'s, with no key in common; since lazy start (#560) a restart on the
+  kept profile puts missing or unreadable logon keys back. A new profile's `Local State` is
+  unchanged. The restart path ran as unit tests only. The `<guid>.tmp` fix ran as unit tests on
+  Linux; its Windows test passes `cargo clippy --target x86_64-pc-windows-gnu` and runs on CI's
+  Windows job; the VM's item 7 re-run is its proof.
 
 ## Status
 

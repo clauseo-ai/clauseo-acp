@@ -124,8 +124,8 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     assert_eq!(preferences["net"]["network_prediction_options"], 2);
 }
 
-/// The profile's own preferences and `quiet`'s share no top-level key, so neither may hide the
-/// other's: both arrive whole.
+/// The profile's own preferences, `quiet`'s and `logon`'s share no top-level key, so none may
+/// hide another's: all arrive whole.
 #[test]
 fn the_profile_keeps_the_download_preferences_and_quiets_whole() {
     let dir = std::env::temp_dir().join(format!("clauseo-mcp-prefs-{}", std::process::id()));
@@ -136,12 +136,19 @@ fn the_profile_keeps_the_download_preferences_and_quiets_whole() {
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     let quiet = super::quiet::preferences();
     let quiet = quiet.as_object().unwrap();
+    let logon = super::logon::preferences();
+    let logon = logon.as_object().unwrap();
     for own in ["download", "savefile", "profile"] {
         assert!(!quiet.contains_key(own), "quiet sets {own}");
+        assert!(!logon.contains_key(own), "logon sets {own}");
     }
+    assert!(
+        logon.keys().all(|key| !quiet.contains_key(key)),
+        "{logon:?}"
+    );
     assert_eq!(
         written.as_object().unwrap().len(),
-        3 + quiet.len(),
+        3 + quiet.len() + logon.len(),
         "{written}"
     );
     assert_eq!(written["download"]["prompt_for_download"], false);

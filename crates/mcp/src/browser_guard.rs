@@ -31,6 +31,7 @@ mod env;
 mod filter;
 #[cfg(windows)]
 mod job;
+mod logon;
 mod parent;
 mod port_file;
 mod quiet;

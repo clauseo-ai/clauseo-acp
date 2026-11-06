@@ -100,6 +100,17 @@ pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(windows)]
 mod windows;
 
+/// A file opened with no sharing at all, as a program that holds it open would, for the unit
+/// tests' fixtures: Windows then refuses to move or delete it.
+#[cfg(all(test, windows))]
+pub(crate) fn open_unshared(file: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(file)
+}
+
 /// `os::unix::fs::symlink`, for the unit tests' fixtures.
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
