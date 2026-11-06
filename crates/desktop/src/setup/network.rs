@@ -486,7 +486,7 @@ pub(crate) fn shown(proxy: &str) -> String {
 
 mod follow;
 
-pub(crate) use follow::{Follower, NetworkFollow, follow};
+pub(crate) use follow::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, follow};
 
 /// The launch hook's and the limits readers' snapshot of the route.
 pub(crate) type NetworkSlot = Arc<RwLock<NetworkRoute>>;

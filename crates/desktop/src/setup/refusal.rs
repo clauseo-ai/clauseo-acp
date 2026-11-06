@@ -6,13 +6,16 @@
 //!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
-//! `agent.keys_loading` is the host's from its start until the first load is over; [`sync`]
-//! replaces it, once the keys have loaded or the bound has passed, with the refusal in force.
+//! `agent.keys_loading` is the host's from its start until the first load is over and the
+//! first network route is known (S17: a launch at start must not go direct behind a proxy set
+//! only in the OS); [`lift_at_start`] replaces it, once the keys have loaded or the bound has
+//! passed and the route has landed or `FIRST_ROUTE_WAIT` has passed, with the refusal in force.
 //! [`follow_keys`] keeps it in step later: each [`KeyNote::Read`] sets the agent's refusal
 //! again (a slow read that answered, a read again that succeeded, a key set or cleared), and
 //! each [`KeyNote::Retry`] (a launch met `agent.key_unreadable`) reads the key again.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use clauseo_protocol::{AgentId, ErrorCode};
 use futures::StreamExt as _;
@@ -75,6 +78,14 @@ pub(crate) async fn sync_all(backend: &AgentsBackend) {
     for agent in backend.known.keys() {
         sync(backend, agent).await;
     }
+}
+
+/// The start's first [`sync_all`], once the keys' first load is over (the caller's): it waits,
+/// at most `wait`, for the first network route to reach `Agents` and the launch hook, so the
+/// `agent.keys_loading` the host started with holds every launch until its proxy is known.
+pub(crate) async fn lift_at_start(backend: &AgentsBackend, wait: Duration) {
+    backend.wiring.network.ready_within(wait).await;
+    sync_all(backend).await;
 }
 
 /// The first load is over and no backend follows (no platform): each of `known` but those in

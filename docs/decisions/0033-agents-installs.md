@@ -278,7 +278,8 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    only. Limits: one proxy serves a launch's every host, the OS's answer for the agent's primary
    API host; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log says
    `os` for both; an install, retry or sign-in pressed before the OS's first answer lands waits
-   for it (at most 20 s), so its first try never goes direct, but a launch before it takes none. Chaining the sandbox's
+   for it (at most 20 s), so its first try never goes direct, and the start's `agent.keys_loading`
+   launch refusal stays until then too, so no agent launched at start goes direct. Chaining the sandbox's
    egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives it
    `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
    `https://` setting, which that proxy cannot chain to, is logged once per change.
