@@ -37,6 +37,19 @@ pub(in crate::actor::turn) fn waits(queue: &ThreadQueue) -> Option<Pending> {
     waits.then_some(Pending::Queued)
 }
 
+/// Marks a turn ended for the sign-in, still to be put back (`Some`), or none (`None`), with
+/// nothing else in `queue`: the idle stop's test of the held check on its own (`idle.rs`).
+#[cfg(test)]
+pub(in crate::actor::turn) fn set_requeue_for_test(
+    queue: &mut ThreadQueue,
+    turn: Option<clauseo_protocol::TurnId>,
+) {
+    queue.requeue = turn.map(|turn| super::Requeue {
+        turn,
+        content: Vec::new(),
+    });
+}
+
 /// Why `thread`'s queue shows held, or `None` when it does not.
 pub(crate) fn queue_hold(actor: &Actor, thread: ThreadId) -> Option<QueueHoldReason> {
     let queue = &actor.threads.get(&thread)?.turn.queue;

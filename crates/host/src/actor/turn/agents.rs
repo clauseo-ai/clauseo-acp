@@ -30,7 +30,7 @@ use crate::sent::SentView;
 mod ended;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{idle_stop, log_detach, on_ended, stop};
+pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]

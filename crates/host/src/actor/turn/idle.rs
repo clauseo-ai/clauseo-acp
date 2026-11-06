@@ -5,17 +5,22 @@
 //!
 //! - Nothing pending ([`pending`]): no turn (current, or its end not durable yet), no queued
 //!   prompt, no turn held for the sign-in, no pending permission or elicitation, no launch or
-//!   load, and no config or mode call in flight.
+//!   load, no config or mode call in flight, and no case-law relay call in flight (the relay
+//!   tells the actor when each forwarded message starts and ends, [`relay_call`]).
 //! - Each agent's idle clock (`Mark::since`) starts when the last pending item ends: after every
 //!   input the actor handles, [`tick`] clears it for an agent with something pending, and starts
-//!   it at the host clock's time for one with nothing.
+//!   it at the host clock's time for one with nothing. Any event from the agent (an update or a
+//!   request, in a turn or between turns) clears it too ([`active`]), so an agent still at
+//!   work after its turn's end is stopped a full limit after its last event, not before.
 //! - One deadline: the earliest idle agent's, armed on the host clock; none while no agent is
 //!   idle. When it fires, [`on_due`] looks at every agent again, inside the actor, and stops only
 //!   those that still have nothing pending and whose clock reached the limit: work handled in
 //!   the same tick, before the fire (a `SendPrompt`), keeps its agent.
 //! - The cap ([`make_room`]): on a machine of 8 GB or less (or of unknown memory), a launch that
 //!   finds `live_agents` (2) agents live idle-stops the one idle longest with nothing pending
-//!   first. When every live agent is busy the launch goes ahead and the host logs a warning.
+//!   first, if it has been idle at least `cap_min_idle` (60 s). When no live agent qualifies
+//!   (every one is busy, or went idle less than `cap_min_idle` ago) the launch goes ahead and
+//!   the host logs a warning.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -28,7 +33,8 @@ use super::super::commands::arriving_for;
 use super::super::input::Input;
 use super::agents::{self, Stage};
 use super::{TurnState, host_stopping, queue, state};
-use crate::config::IdleStop;
+use crate::config::{IdleStop, SessionKey};
+use crate::connectors::RelayCall;
 use crate::log_file::LIFECYCLE;
 
 /// What keeps an agent from idling.
@@ -44,7 +50,7 @@ pub(super) enum Pending {
     Ask,
     /// The agent is launching or loading its session, or work waits for it.
     Launch,
-    /// A config or mode call is in flight.
+    /// A config or mode call, or a case-law relay call, is in flight.
     Call,
     /// A command that gives the agent work (a prompt, a config option, a mode) waits for its
     /// receipt check: it arrived and has not run yet.
@@ -57,7 +63,7 @@ pub(super) struct Mark {
     /// When it last had nothing pending, on the host's monotonic clock; `None` while something
     /// is pending.
     pub(super) since: Option<Duration>,
-    /// Its config and mode calls in flight.
+    /// Its config and mode calls, and its case-law relay calls, in flight.
     calls: u32,
 }
 
@@ -132,11 +138,12 @@ pub(super) fn pending_in(actor: &Actor, thread: ThreadId) -> Option<Pending> {
     pending(state).or_else(|| arriving_for(actor, thread).then_some(Pending::Arriving))
 }
 
-/// Whether `thread`'s agent may be idle-stopped now: attached, its connection up, nothing
-/// pending; `None` when it has no agent.
+/// Whether `thread`'s agent may be idle-stopped now: not stopping or closed already, its
+/// connection up, nothing pending; `None` when it has no agent. A launching agent is kept by
+/// [`pending`] (`Pending::Launch`) alone, so each item of the hard rule holds on its own.
 fn stoppable(actor: &Actor, thread: ThreadId) -> Option<bool> {
     let agent = actor.threads.get(&thread)?.turn.agent.as_deref()?;
-    let up = agent.stage == Stage::Attached && !agent.link.closed();
+    let up = !matches!(agent.stage, Stage::Stopping | Stage::Closed) && !agent.link.closed();
     Some(up && pending_in(actor, thread).is_none())
 }
 
@@ -162,6 +169,32 @@ pub(super) fn call_ended(actor: &mut Actor, thread: ThreadId) {
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.idle.calls = agent.idle.calls.saturating_sub(1);
     }
+}
+
+/// A case-law relay message of `session` started or ended (`RelayEvent::Call`): it counts as
+/// a call in flight of the thread's agent, in a turn or between turns. A stopped session's
+/// relay (not the thread's current run) counts for nothing.
+pub(crate) fn relay_call(actor: &mut Actor, session: SessionKey, call: RelayCall) {
+    let Some(state) = state(actor, session.thread) else {
+        return;
+    };
+    if state.run.as_ref().map(|run| run.key) != Some(session) {
+        return;
+    }
+    let Some(agent) = state.agent.as_deref_mut() else {
+        return;
+    };
+    match call {
+        RelayCall::Started => agent.idle.calls += 1,
+        RelayCall::Ended => agent.idle.calls = agent.idle.calls.saturating_sub(1),
+    }
+    agent.idle.since = None;
+}
+
+/// The agent sent an event (an update or a request), in a turn or between turns: its idle
+/// clock starts again from the tick after this input.
+pub(super) fn active(mark: &mut Mark) {
+    mark.since = None;
 }
 
 /// After each input: every live agent's idle clock brought up to date at `now`, and the one
@@ -290,8 +323,8 @@ fn stop(actor: &mut Actor, thread: ThreadId, idle_for: Duration, why: &'static s
 
 /// Before `starting`'s agent launches: when the cap applies and `live_agents` agents of other
 /// threads are live (or launching), the one idle longest with nothing pending, looked at now, is
-/// idle-stopped. When every one is busy the launch goes ahead past the cap, with a warning
-/// (provisional until G3 item 3's 8 GB numbers).
+/// idle-stopped, if it has been idle at least `cap_min_idle`. When none qualifies the launch
+/// goes ahead past the cap, with a warning (provisional until G3 item 3's 8 GB numbers).
 pub(super) fn make_room(actor: &mut Actor, starting: ThreadId) {
     let config = actor.turn_path.idle.config;
     if !config.capped() {
@@ -321,8 +354,16 @@ pub(super) fn make_room(actor: &mut Actor, starting: ThreadId) {
         .iter()
         .filter(|thread| **thread != starting)
         .filter_map(|thread| {
-            let since = actor.threads.get(thread)?.turn.agent.as_deref()?.idle.since;
-            stoppable(actor, *thread)?.then_some((since.unwrap_or(now), *thread))
+            let since = actor
+                .threads
+                .get(thread)?
+                .turn
+                .agent
+                .as_deref()?
+                .idle
+                .since?;
+            let long_enough = now.saturating_sub(since) >= config.cap_min_idle;
+            (long_enough && stoppable(actor, *thread)?).then_some((since, *thread))
         })
         .min();
     if let Some((since, thread)) = victim {
@@ -332,7 +373,7 @@ pub(super) fn make_room(actor: &mut Actor, starting: ThreadId) {
             thread = %starting,
             live,
             cap = config.live_agents,
-            "every live agent is busy, so one more agent starts past the live-agents cap"
+            "no live agent is idle long enough to stop; one more starts past the live-agents cap"
         );
     }
 }

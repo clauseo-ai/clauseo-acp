@@ -71,6 +71,19 @@ pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
     stop(actor, thread);
 }
 
+/// Stops `thread`'s agent for a sign-in hold or restart (`sign_in.rs`). An idle stop already
+/// under way becomes the hold's own stop: its `Ended` logs `Closed`, once, not `IdleStopped`,
+/// so the thread shows the hold beside its queue, not an idle stop.
+pub(in super::super) fn hold_stop(actor: &mut Actor, thread: ThreadId) {
+    if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut())
+        && agent.stage == Stage::Stopping
+        && agent.stop_cause == StopCause::IdleStopped
+    {
+        agent.stop_cause = StopCause::Asked;
+    }
+    stop(actor, thread);
+}
+
 /// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
 /// agent for work that came while it stopped.
 pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {

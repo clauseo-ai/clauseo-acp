@@ -254,8 +254,8 @@ pub use clock::{Clock, Now, SystemClock};
 #[cfg(feature = "test-support")]
 pub use config::TestProxy;
 pub use config::{
-    EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS, NoProfile, PackRequest, ProfileHook,
-    SessionKey,
+    CAP_MIN_IDLE, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS, NoProfile, PackRequest,
+    ProfileHook, SessionKey,
 };
 pub use encode::EncodedEvent;
 pub use error::Error;
