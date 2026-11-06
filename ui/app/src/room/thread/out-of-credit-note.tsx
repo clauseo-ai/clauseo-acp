@@ -29,7 +29,14 @@ export function OutOfCreditNote({
         rest={cr(lang, "Searches of Indian Kanoon stop until you add more.")}
         action={
           onAdd === null ? null : (
-            <Button kind="link" size="small" data-testid="out-of-credit-add" onClick={onAdd}>
+            // inline at the end of the second sentence, as words: no padding of its own, so no stray indent
+            <Button
+              kind="link"
+              size="small"
+              className="min-h-0 px-0 py-0 text-primary align-baseline underline underline-offset-2"
+              data-testid="out-of-credit-add"
+              onClick={onAdd}
+            >
               {cr(lang, "Add credits")}
             </Button>
           )

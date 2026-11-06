@@ -294,7 +294,8 @@ export function WayTile({
 
 /** A quiet note under the composer's field, above the room's line: plain words, never a gauge. `lead` stands in
  * primary, the rest in the muted tone. `wait` leads it with the clock, where the note says what waits and until
- * when; advice carries no icon, and its words start on the room's line's words. `end` sits at the note's end, such
+ * when; advice carries no icon, and its words start on the room's line's words. `action` follows the last sentence
+ * inline, wrapping as its words do. `end` sits at the note's end, such
  * as a quiet icon button that hides it (U15's out-of-credit note). */
 export function FieldNotice({
   lead,
@@ -316,12 +317,14 @@ export function FieldNotice({
         <span className="lim-field-lead">
           <Say>{lead}</Say>
         </span>
-        {rest != null && rest !== "" && (
+        {rest != null && rest !== "" ? (
           <span className="lim-field-rest">
             <Say>{rest}</Say>
+            {action != null && <> {action}</>}
           </span>
+        ) : (
+          action != null && <> {action}</>
         )}
-        {action != null && <> {action}</>}
       </span>
       {end != null && <span className="lim-field-end">{end}</span>}
     </p>
