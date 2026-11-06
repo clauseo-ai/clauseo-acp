@@ -1,0 +1,223 @@
+# windows tests (PR): the workspace's nextest on Windows x64 for a pull request, before it can
+# join the merge queue (Rohan's CI decision, 2026-11-06). Without it a pull request only lints on
+# Windows (PR_LINT_ONLY in ci.yml) and the tests first run in the merge group; 4 of the 8 merge-queue
+# ejections of 2026-11-05 caused by our own code were Windows-only test failures. The check is
+# required on main.
+#
+# It runs when the pull request is ready for it, so a draft's pushes take no Windows runner: when
+# it has the label `ready` (`gh pr edit <n> --add-label ready`, added when you ask for review), or
+# an approving review of its current head. Until then the check fails and says so.
+#
+# Per event:
+# - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted): the
+#   job `decide` picks one of four modes, and `build` acts on it:
+#   - norust: the pull request changes no Rust (.github/scripts/changes.sh's `rust`, the output
+#     ci.yml's build jobs read): the check passes in seconds on ubuntu.
+#   - run: the label `ready`, the review that started the run is an approval, or an approval of
+#     the head commit is on record: nextest on windows-2025, the steps of ci.yml's Windows x64
+#     build entry (no clippy: ci.yml's pull request job runs it). Each failed test becomes an
+#     annotation and a row of the job summary (.github/scripts/windows-pr-failures.sh).
+#   - wait: none of these: the check fails, naming the label.
+# - merge_group: the check passes in seconds; ci.yml's `build (x86_64-pc-windows-msvc)` runs the
+#   same tests in the merge group.
+#
+# - `build` is never skipped as a whole: a required check skipped that way counts as passed. It
+#   always runs and branches on the mode inside. A failed `decide` runs the tests.
+# - The job id is `build`, as in ci.yml, so Swatinem/rust-cache's key (prefix, key, job id, the
+#   CARGO_* and RUST_* variables: none are set here) is the one main's nightly run saves for
+#   Windows x64, and the tests restore it. This job saves nothing.
+# - A path the files API or changes.sh cannot classify, or a failure of either, counts as a Rust
+#   change, as in ci.yml.
+# - Every action is pinned by commit SHA, with its tag in a comment, copied from ci.yml.
+#
+# Relevant runs. Only some events can change the outcome: a merge group, a push to the
+# pull request (opened, synchronize, reopened), the label `ready` being added, or an approval while
+# the label is off (with it on, the labeled or synchronize run already tested the head). Any other
+# label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
+# start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
+# is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
+# its jobs are skipped under another name (`..., no change`), because the newest check run of a
+# name decides it and a skipped one counts as passed. The expression is repeated in the concurrency
+# group and each job's `name` and `if` (a workflow env reaches neither); keep the copies equal.
+
+name: windows-pr-tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  pull_request_review:
+    types: [submitted]
+  # The required check must report in the merge queue too.
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# A pull request keeps only its newest relevant run; each merge group, and each run that is not
+# relevant, has a group of its own.
+concurrency:
+  group: windows-pr-tests-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{ !(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_review' }}
+
+jobs:
+  decide:
+    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'decide' || 'decide, no change' }}
+    if: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      # changes.sh as the base branch has it, not as the pull request changes it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'merge_group'
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/scripts/
+
+      - name: Decide whether the Windows tests run
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          READY: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+        run: |
+          set -euo pipefail
+          mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
+          if [ "$EVENT" = merge_group ]; then mode merge_group; fi
+
+          # The files API lists a rename's new path; previous_filename adds the old one, as
+          # `git diff --no-renames` would. A path with a newline in it splits into paths no rule
+          # knows, which run everything.
+          rust=true
+          if gh api "repos/$REPO/pulls/$PR/files" --paginate \
+              -q '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed"; then
+            echo "Changed paths:"
+            cat "$RUNNER_TEMP/changed"
+            if out=$(tr '\n' '\0' < "$RUNNER_TEMP/changed" | bash .github/scripts/changes.sh); then
+              echo "$out"
+              rust=$(sed -n 's/^rust=//p' <<< "$out")
+            else
+              echo "::warning::changes.sh failed; counting this as a Rust change"
+            fi
+          else
+            echo "::warning::The files API failed; counting this as a Rust change"
+          fi
+          if [ "$rust" = false ]; then mode norust; fi
+
+          if [ "$READY" = true ]; then
+            echo "The label ready is on the pull request."
+            mode run
+          fi
+          if [ "$EVENT" = pull_request_review ] && [ "$REVIEW_STATE" = approved ]; then
+            echo "This run's review approves."
+            mode run
+          fi
+          # A failed read runs the tests rather than fail an approved pull request's check.
+          if ! approved=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+              -q '.[] | select(.state == "APPROVED") | .commit_id'); then
+            echo "::warning::The reviews API failed; running the tests"
+            mode run
+          fi
+          if grep -qxF "$HEAD_SHA" <<< "$approved"; then
+            echo "An approval of the head commit $HEAD_SHA is on record."
+            mode run
+          fi
+          mode wait
+
+  # The job id must stay `build`: see the note at the top.
+  build:
+    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'windows tests (PR)' || 'windows tests (PR), no change' }}
+    needs: decide
+    # Never skipped as a whole in a relevant run, a failed `decide` included (its mode is then run).
+    if: ${{ !cancelled() && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) }}
+    runs-on: ${{ (needs.decide.result != 'success' || needs.decide.outputs.mode == 'run') && 'windows-2025' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    # None of these names starts with CARGO or RUST, so none enters rust-cache's key.
+    env:
+      MODE: ${{ needs.decide.result == 'success' && needs.decide.outputs.mode || 'run' }}
+      TARGET: x86_64-pc-windows-msvc
+      PR: ${{ github.event.pull_request.number }}
+      NEXTEST_LOG: ${{ github.workspace }}/nextest.log
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Covered by the merge group's Windows x64 build
+        if: env.MODE == 'merge_group'
+        run: echo "covered by build (x86_64-pc-windows-msvc) in this merge group"
+
+      - name: Skip, no Rust change
+        if: env.MODE == 'norust'
+        run: echo "no Rust change; nothing to test on Windows"
+
+      - name: Wait for the label ready or an approval
+        if: env.MODE == 'wait'
+        run: |
+          echo "::error title=windows tests (PR) not run yet::Add the label ready (gh pr edit $PR --add-label ready) when you ask for review, or approve; the Windows x64 tests run then."
+          exit 1
+
+      # From here on, ci.yml's build job as its Windows x64 entry runs it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.MODE == 'run'
+        with:
+          persist-credentials: false
+
+      # Why: ci.yml's step of the same name.
+      - name: Put the temp folder on drive D (Windows)
+        if: env.MODE == 'run'
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+          "temp folder: $t"
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        if: env.MODE == 'run'
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      # main's entry, restored only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.MODE == 'run'
+        with:
+          prefix-key: v1-rust
+          key: x86_64-pc-windows-msvc
+          cache-bin: "false"
+          save-if: false
+
+      - name: Install nextest at its pin
+        if: env.MODE == 'run'
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      # ci.yml's Test step, with no --target as there: the host's target is x86_64-pc-windows-msvc,
+      # and --target would build into target/x86_64-pc-windows-msvc/, where main's cache holds only
+      # clippy's metadata, not the test build in target/debug/. nextest writes its status lines to
+      # stderr, so both streams go to the log.
+      - name: Test
+        if: env.MODE == 'run'
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --no-tests=pass 2>&1 | tee "$NEXTEST_LOG"
+
+      - name: Name the failed tests
+        if: ${{ failure() && env.MODE == 'run' }}
+        run: |
+          if [ -f "$NEXTEST_LOG" ]; then
+            bash .github/scripts/windows-pr-failures.sh "$NEXTEST_LOG"
+          else
+            echo "No nextest log: the job failed before the tests."
+          fi

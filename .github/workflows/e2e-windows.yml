@@ -11,8 +11,12 @@
 # with smoke's app on windows-2025 and uploads scoreboard-windows.json as the artifact
 # scoreboard-windows, on demand only.
 #
-# Per event (Rohan's CI decision, 2026-11-04):
-# - pull_request: smoke (windows-2025) when the app changed, else a quick skip; not required.
+# Per event (Rohan's CI decisions, 2026-11-04 and 2026-11-06):
+# - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted):
+#   smoke (windows-2025) when the app changed and the pull request is ready for it, else a quick
+#   skip; not required. Ready means what windows-pr-tests.yml's `decide` job reads: the label
+#   `ready`, an approving review that started the run, or an approval of the head commit on record
+#   (2026-11-06, to save Windows minutes: a draft's pushes no longer start a Windows runner).
 # - merge_group: e2e-changes only; smoke is skipped (2026-11-04).
 # - push: no trigger. The merge queue already tested the code.
 # - schedule: smoke on x64 (the pull request's LTO-off profile, which saves the Rust cache pull
@@ -30,6 +34,16 @@
 #   notes). On demand and on ARM64 the smoke test builds full LTO, the shipping profile, and runs
 #   the full suite on it; scoreboard.yml plays a full-LTO x64 build nightly and on demand.
 # - Every action is pinned by commit SHA, with its tag in a comment.
+#
+# Relevant runs. Only some events can change the outcome: a merge group, the nightly run, a run on demand, a push to the
+# pull request (opened, synchronize, reopened), the label `ready` being added, or an approval while
+# the label is off (with it on, the labeled or synchronize run already tested the head). Any other
+# label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
+# start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
+# is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
+# its jobs are skipped under another name (`..., no change`), because the newest check run of a
+# name decides it and a skipped one counts as passed. The expression is repeated in the concurrency
+# group and each job's `name` and `if` (a workflow env reaches neither); keep the copies equal.
 
 name: e2e-windows
 
@@ -41,8 +55,11 @@ name: e2e-windows
 # - `product`: it touches product code (crates/, ui/, Cargo.toml, Cargo.lock: the paths for which
 #   scoreboard-comment.yml comments, comment.ts's isProductPath). With `app`, scoreboard-windows
 #   plays smoke's build.
-# A pull request that touches neither starts smoke and skips every step, so the check reports in
-# seconds. A path no rule knows, or a failed decision, runs everything, so the check always
+# and a third of its own:
+# - `ready`: on a pull request event, the pull request has the label `ready` or an approval (see
+#   the per-event list above); true on every other event. Without it the smoke steps skip too.
+# A pull request that touches neither, or is not ready, starts smoke and skips every step, so the
+# check reports in seconds. A path no rule knows, or a failed decision, runs everything, so the check always
 # reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
 # `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
 # scoreboard-windows is not a required check, so it is skipped as a whole when it has nothing to do.
@@ -52,6 +69,10 @@ name: e2e-windows
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  # An approval starts smoke on a pull request without the label ready.
+  pull_request_review:
+    types: [submitted]
   # A pull request in main's merge queue runs what a pull request runs (ci.yml).
   merge_group:
   schedule:
@@ -64,18 +85,24 @@ permissions:
 # A pull request keeps only its newest run; each nightly run, run on demand and merge group has a
 # group of its own.
 concurrency:
-  group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{ !((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_review' }}
 
 jobs:
   # Not named changes (ci.yml's required check). The same script decides for both workflows.
   e2e-changes:
-    name: e2e-changes
+    name: ${{ ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'e2e-changes' || 'e2e-changes, no change' }}
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # pull-requests: the reviews, for `ready`.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       app: ${{ steps.filter.outputs.app }}
       product: ${{ steps.filter.outputs.product }}
+      ready: ${{ steps.ready.outputs.ready }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,7 +123,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != pull_request_review ] && [ "$EVENT" != merge_group ]; then
             printf '%s\n' app=true product=true | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -111,31 +138,59 @@ jobs:
           git diff --no-renames -z --name-only refs/ci/base...refs/ci/head > "$RUNNER_TEMP/changed"
           bash "$scripts/changes.sh" < "$RUNNER_TEMP/changed" | tee -a "$GITHUB_OUTPUT"
 
+      # The same test as windows-pr-tests.yml's `decide` job. A failed read of the reviews counts
+      # as ready, so an approved pull request still gets its smoke test.
+      - name: Decide whether the pull request is ready for the smoke test
+        id: ready
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+        run: |
+          set -euo pipefail
+          ready() { echo "ready=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != pull_request_review ]; then ready true; fi
+          if [ "$LABELLED" = true ]; then ready true; fi
+          if [ "$EVENT" = pull_request_review ] && [ "$REVIEW_STATE" = approved ]; then ready true; fi
+          if ! approved=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+              -q '.[] | select(.state == "APPROVED") | .commit_id'); then
+            echo "::warning::The reviews API failed; counting the pull request as ready"
+            ready true
+          fi
+          if grep -qxF "$HEAD_SHA" <<< "$approved"; then ready true; fi
+          echo "No label ready and no approval of the head commit $HEAD_SHA: smoke skips."
+          ready false
+
   smoke:
-    name: smoke (${{ matrix.runner }})
+    name: ${{ ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('smoke ({0})', matrix.runner) || 'smoke, no change' }}
     needs: e2e-changes
     # Not in a merge group (2026-11-04): smoke left the merge-group requirement for main's nightly
     # run, to cut the time from approval to merge; it still runs on pull requests that change the
     # app, nightly and on demand, and a red one on main goes to its owner.
-    if: ${{ !cancelled() && github.event_name != 'merge_group' }}
-    # A pull request that leaves the app alone only skips, on an ubuntu runner, which starts faster
-    # than a Windows one. A failed e2e-changes runs everything on Windows.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true' && 'ubuntu-24.04' || matrix.runner }}
+    # Skipped too in a run that is not relevant (the note at the top).
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && ((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) }}
+    # A pull request that leaves the app alone or is not ready only skips, on an ubuntu runner,
+    # which starts faster than a Windows one. A failed e2e-changes runs everything on Windows.
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && (needs.e2e-changes.outputs.app != 'true' || needs.e2e-changes.outputs.ready == 'false') && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      # x64 always; ARM64 on every event but a pull request or a merge group. One JSON list per
+      # x64 always; ARM64 on every event but a pull request (or its review) or a merge group. One JSON list per
       # case, because an `include` entry that matches no other entry is added as a combination of
       # its own.
       matrix:
         include: >-
-          ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'merge_group')
+          ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'merge_group')
             && '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"}]'
             || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
       # A failed decision runs everything, so the check always reports.
-      RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.app == 'true' }}
+      RUN: ${{ needs.e2e-changes.result != 'success' || (needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.ready != 'false') }}
       TARGET: ${{ matrix.target }}
       # LTO off and 16 codegen units on a pull request, a merge group and the nightly run (x64), so
       # the nightly run saves the Rust cache under the key pull requests look up (rust-cache hashes
@@ -153,9 +208,16 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, the app is unchanged
+      - name: Skip, the app is unchanged or the pull request is not ready
         if: env.RUN != 'true'
-        run: echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test."
+        env:
+          APP: ${{ needs.e2e-changes.outputs.app }}
+        run: |
+          if [ "$APP" != true ]; then
+            echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test."
+          else
+            echo "The pull request has neither the label ready nor an approval of its head; smoke runs once it has one."
+          fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN == 'true'
@@ -246,7 +308,7 @@ jobs:
       # nightly run and a run on demand run it. It takes 2.6 min of smoke's 12, and smoke sets the pull
       # request's wall time; from 2026-11-02 to 11-03 it failed alone once in 214 pull request runs.
       - name: Tests and numbers with --disable-gpu
-        if: ${{ env.RUN == 'true' && github.event_name != 'pull_request' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && github.event_name != 'pull_request' && github.event_name != 'pull_request_review' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
         env:
           E2E_DISABLE_GPU: "1"
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-disable-gpu.json

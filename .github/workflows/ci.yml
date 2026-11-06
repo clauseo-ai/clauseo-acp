@@ -203,6 +203,11 @@ jobs:
       - name: Test launch-xvfb.sh
         run: bash .github/scripts/launch-xvfb-test.sh
 
+      # windows-pr-tests.yml's reading of a failed nextest log, against a fake one: a FAIL with a
+      # panic and a TMT are named, a FLAKY test is not.
+      - name: Test windows-pr-failures.sh
+        run: bash .github/scripts/windows-pr-failures-test.sh
+
       # How reducer-bench reads the label bench-ok at run time, against a fake gh.
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh
