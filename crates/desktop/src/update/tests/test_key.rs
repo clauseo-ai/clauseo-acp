@@ -7,7 +7,7 @@ use super::{crate_dir, test_key_file};
 
 /// Standard base64 (`tauri signer` writes its keys so), decoded. The test keeps no copy of the
 /// key's text or id, so none is compiled into this test binary.
-fn base64(text: &str) -> Vec<u8> {
+pub(super) fn base64(text: &str) -> Vec<u8> {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let (mut bits, mut held, mut out) = (0u32, 0u32, Vec::new());
     for byte in text

@@ -3,12 +3,13 @@
 //!
 //! - **Which updater** ([`with_updater`]). Linux always gives the host `PackageManaged`
 //!   (`package.rs`), shown as `managed` by `package`: it updates through its package manager.
-//!   Elsewhere a build with no endpoint gives the host none, so it keeps `NoUpdater` and shows
-//!   `managed` by `unavailable`: debug builds, and release builds while
-//!   `plugins.updater.endpoints` in `tauri.conf.json` is empty (until R23 PR 6). The plugin's
-//!   own `build` would fail with `EmptyEndpoints` there, so it is never called. The `e2e` build
-//!   alone takes an endpoint from `E2E_UPDATE_ENDPOINT` and trusts the throwaway test key with
-//!   it, or offers a fake update from `E2E_FAKE_UPDATE` (`choice.rs`).
+//!   Elsewhere a release build takes the plugin over `tauri.conf.json`'s endpoint and key
+//!   (R23 PR 6). A debug build gives the host none, so it keeps `NoUpdater` and shows
+//!   `managed` by `unavailable`, and so would a release build whose
+//!   `plugins.updater.endpoints` were empty: the plugin's own `build` would fail with
+//!   `EmptyEndpoints` there, so it is never called. The `e2e` build alone takes an endpoint
+//!   from `E2E_UPDATE_ENDPOINT` and trusts the throwaway test key with it, or offers a fake
+//!   update from `E2E_FAKE_UPDATE` (`choice.rs`).
 //! - **The adapter** (`plugin.rs`): `check` and `download` run on Tauri's runtime and hand the
 //!   host a future over a oneshot; dropping it aborts the task. The download (which the plugin
 //!   verifies) is saved as the one file of `updates/<version>/`.
