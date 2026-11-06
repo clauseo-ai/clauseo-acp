@@ -1,6 +1,7 @@
 //! Automatic leaves on the recording fakes, the waits driven by hand (`timing.rs`): S18 ending a
 //! reuse by itself (`ReusedChanged`), a split whose stop times out (the hold kept, `Switching`
-//! shown across two tries again, then the try that finishes restarting the agents), `stuck` at
+//! shown across two tries again, then, with nothing usable, the try that finishes keeping it and
+//! showing signed out; `after.rs` has the restarts), `stuck` at
 //! 2 minutes, another agent unaffected, a new sign-in ending the tries, and a lawyer's leave told
 //! apart from an automatic one.
 
@@ -163,7 +164,7 @@ fn reused_line() -> SignIn {
 }
 
 #[test]
-fn a_split_shows_switching_and_stays_held_across_two_tries_again_then_restarts() {
+fn a_split_shows_switching_and_stays_held_across_two_tries_again_and_after_with_nothing_usable() {
     let rig = reused_codex();
     *lock(&rig.host.stopped) = AgentsStopped::TimedOut;
     lock(&rig.agents.answers).insert("stop_using_login", SPLIT);
@@ -203,14 +204,14 @@ fn a_split_shows_switching_and_stays_held_across_two_tries_again_then_restarts()
         [switching(false), SignIn::SignedOut { found }],
         "Switching the whole time, from the first try's end; then the state after the leave"
     );
-    let calls = rig.host.calls();
     assert_eq!(
-        calls[calls.len() - 2..],
-        [
-            HostCall::RestartAgents(codex()),
-            HostCall::LoginChanged(codex())
-        ],
-        "the held questions run once the try again finished"
+        rig.host.calls().last(),
+        Some(&HostCall::LoginChanged(codex()))
+    );
+    assert_eq!(
+        count(&rig, &HostCall::RestartAgents(codex())),
+        0,
+        "no key, endpoint or own login: held for the next login"
     );
     assert!(!rig.backend.wiring.reused.get(&codex()));
 }

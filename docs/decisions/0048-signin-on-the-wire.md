@@ -475,13 +475,16 @@ reads' hold dropped and `limits_login_changed`.
   moment") with nothing stored or started, since the late end could rewrite the entry under
   their change, or fail. When the job ends, the pump runs the last three steps if the reuse
   stopped (never on a `Failed`: the stop failed, and nothing else changes), `Switching` ends,
-  then `restart_agents` lifts the hold and the reads' guard drops; meanwhile another leave of
+  then the hold lifts (`restart_agents`) if the stop failed or the reuse holds, or follows the
+  rule below if the reuse stopped, and the reads' guard drops; meanwhile another leave of
   the agent answers `command.conflict`. Nothing changes under running agents. **A stop job
   that never reports keeps the agent held until the app restarts.** A `Failed` while the login
   is reused never counts as the reuse's end. A leave dropped before it ends (a panic, or its command
   dropped) lifts the hold from a drop guard. A failed `restart_agents` is tried once more, then
-  logged as a warning. A leave that finishes keeps the hold until the new login, key or endpoint
-  is in place.
+  logged as a warning. A leave that finishes follows the rule below; one that is the first
+  step of `SetAgentKey` or `SetFirmEndpoint` leaves the restart to its command, which calls
+  `restart_agents` once the key or the endpoint is stored (or by the rule, should the store
+  fail), so the agents restart once and never before the new key or endpoint is in place.
 - *An automatic leave* is a split the host's check found, or a reuse S18 ended by itself:
   `ReusedFailed`, `ReusedChanged`, or `ReusedSignedOut` from its status check. It runs on a task
   of its own, never inside the pump. After `ReusedChanged`, no agent goes on with the account the
@@ -490,7 +493,7 @@ reads' hold dropped and `limits_login_changed`.
   **keeps the hold**, so nothing launches on the old or changed login or on a split copy of the
   lawyer's file. Questions sent meanwhile queue held and marked (P4d). It tries again after 5 s,
   30 s, then every 5 minutes, until a try finishes or a new `SignedIn` arrives. It never gives
-  up. A try again that finishes calls `restart_agents`, so the held questions run once. An
+  up. A try that finishes, the first or a try again, follows the rule below. An
   automatic leave refused because another leave runs is run again when that one ends without
   leaving. **A new login ends it, never the other way round** (reviews A1, H1′): before its
   first try, before each try again, and right before `stop_using_login` (under the sign-in
@@ -503,6 +506,16 @@ reads' hold dropped and `limits_login_changed`.
   the agent stays held and the sign-in shows over `Switching`; should it fail, `Switching`
   shows again and the next try runs, so no hold is silent. A panic in an automatic leave lifts its hold and ends `Switching`,
   and the setup thread's other followers go on (review A3; release builds abort on a panic).
+- *After any leave that finishes* (an automatic one's first try or a try again, a lawyer's,
+  or a lawyer's that gave up and whose stop job then ended the reuse; the orchestrator's
+  ruling, 2026-11-06), one function decides (`setup/leave/after.rs`, `usable_after_leave`):
+  when a usable login remains for the agent, a stored API key, an endpoint or a provider (the
+  lawyer's `plans.<id>` or the firm's policy's, what makes a sign-in answer
+  `signin.endpoint_in_use` or `signin.firm_managed`), or Clauseo's own login signed in,
+  desktop calls `restart_agents` once, and the held questions run on it. Otherwise it does not:
+  the queue stays held for the next login, whose `SignedIn` the pump restarts on (or the key or
+  endpoint command, once stored). That hold is never silent: with no key or endpoint the
+  composed state has no `ApiKey` or `Firm` line, so the agent shows S18's `SignedOut`.
 - *`SignIn::Switching { since, stuck }`* is a new variant of the closed `SignIn`, shown from the
   first try's end. `since` is that moment, and a try again never moves it. `stuck` turns true 2
   minutes after `since`, on the timer S18's `Waiting { nudge }` runs on. A running sign-in still

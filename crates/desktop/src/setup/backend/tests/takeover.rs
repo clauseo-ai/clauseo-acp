@@ -71,8 +71,8 @@ fn a_running_sign_in_skips_the_tries_and_once_it_fails_switching_shows_and_they_
     assert_eq!(count(&rig, &HostCall::StopAgents(codex())), 2);
     assert_eq!(
         count(&rig, &HostCall::RestartAgents(codex())),
-        1,
-        "the try that finished"
+        0,
+        "the try that finished, with nothing usable: held for the next login"
     );
     assert!(!rig.backend.wiring.reused.get(&codex()));
 }

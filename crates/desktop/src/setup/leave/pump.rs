@@ -4,8 +4,10 @@
 //!   new `SignedIn` is handled as below first, and only then is a leave waiting told
 //!   (`Ended::NewSignIn`): a sign-in that lands during a leave is never swallowed (review A1).
 //! - A lawyer's leave that gave up (`Waiter::Late`): S18's stop job's end is handled as below,
-//!   then `Switching` ends and the host's hold lifts (`restart_agents`, unless the new sign-in's
-//!   own did) and the reads' with it, so nothing changes under running agents (review A2).
+//!   then `Switching` ends and the reads' hold drops, so nothing changes under running agents
+//!   (review A2). The host's hold lifts (`restart_agents`) when the stop failed or left the
+//!   reuse in place; when the reuse ended, the leave finished, and the rule of `after.rs`
+//!   decides, as for any leave that finished; a new sign-in's own `restart_agents` lifted it.
 //! - A `Failed` while the login is reused (a stop job of S18's that failed) is not the reuse's
 //!   end: no steps after the stop run, and nothing else changes.
 //! - A reuse that ends with no leave waiting (a `SignedIn { Reused }` followed by any other
@@ -26,6 +28,7 @@ use clauseo_protocol::{AgentId, AgentKind, SignInSource};
 
 use super::super::backend::AgentsBackend;
 use super::super::compose::is_running;
+use super::after::finish;
 use super::hold::Late;
 use super::{Ended, Waiter, after_stop, login_changed, restart_for_login, set_reused};
 
@@ -105,7 +108,11 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
     if let Some(Late { hold, reads, .. }) = late {
         tracing::info!(%agent, "the stop a leave gave up on ended: lifting its hold");
         backend.compose.end_switching(agent);
-        hold.lift().await;
+        if reuse_ended {
+            finish(backend, agent, hold).await;
+        } else {
+            hold.lift().await;
+        }
         drop(reads);
         backend.wiring.leaves.end_late(agent, reuse_ended);
     }
