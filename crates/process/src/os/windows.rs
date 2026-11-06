@@ -164,8 +164,7 @@ impl Tree {
     }
 }
 
-/// How many pids the first job query makes room for; a short answer is retried with more room,
-/// up to [`MAX_JOB_PIDS`].
+/// The first job query's room, in pids; a short answer retries with more, up to [`MAX_JOB_PIDS`].
 const FIRST_JOB_PIDS: usize = 64;
 /// The most processes of one job the listing reads.
 const MAX_JOB_PIDS: usize = 65_536;
@@ -597,3 +596,5 @@ fn os_error(what: &'static str, error: windows::core::Error) -> Error {
         source: io::Error::from(error),
     }
 }
+
+pub(crate) mod watch;

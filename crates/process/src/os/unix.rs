@@ -71,6 +71,28 @@ impl Tree {
     }
 }
 
+/// A [`Watch`] on `tree`'s group.
+pub(crate) fn watch(tree: &Tree) -> Watch {
+    Watch { group: tree.group }
+}
+
+/// Asks whether the agent's group is gone, from any thread and after the [`Tree`] dropped.
+#[derive(Debug, Clone)]
+pub(crate) struct Watch {
+    group: Pid,
+}
+
+impl Watch {
+    /// Whether no process is left in the group: `killpg(group, 0)` answers `ESRCH`. A zombie
+    /// still counts, so the agent itself (the group's leader) has been reaped too. Once it is
+    /// reaped its pid, the group's id, can be reused by an unrelated group, and then this never
+    /// answers true: the caller's wait runs into its cap and fails closed. A descendant that
+    /// called `setsid` or `setpgid` has left the group, and this does not see it.
+    pub(crate) fn gone(&self) -> bool {
+        matches!(killpg(self.group, None), Err(Errno::ESRCH))
+    }
+}
+
 /// Where a listing of the agent's descendants starts: the agent's pid and its start, read while
 /// the agent was this process's unreaped child, so a later reuse of the pid is told apart.
 #[derive(Debug, Clone)]

@@ -1,12 +1,16 @@
 //! The launch prep's egress part (S16's proxy, R17's seam): the session's proxy, opened on the
-//! launch-prep thread beside its browser claims, and closed in the run folder's removal
-//! (`discard`), off the actor, once the agent's process tree was killed or the agent never
-//! started. A prep nobody waits for closes it too (`undo_late`).
+//! launch-prep thread once its Chrome and browser claims are found, and held by an
+//! [`EgressGuard`] on the session's `RunFolders`. The guard closes the proxy when it drops: in
+//! the run folder's removal (`discard`), off the actor and after the agent's tree and its Chrome
+//! are gone (`straggler`), at host stop for a session held past that wait, or wherever a panic
+//! or a dropped task lets go of the run first, so nothing leaks the proxy.
 //!
 //! A session gets a proxy only when it can get the browser: a proxy is set
 //! (`HostConfig::with_egress_proxy`), `tools.browser` is on, a browser slot is free and the
-//! profile hook offers a `browser` entry ([`super::browser::BrowserPrep::wanted`]). A proxy
-//! that does not open leaves the browser out (`NoProxy`), with a log line; the launch goes on.
+//! profile hook offers a `browser` entry ([`super::browser::BrowserPrep::wanted`]), and then
+//! only once its sidecars, Chrome and ports were found, so a `BrowserNotInstalled` session holds
+//! none of the proxy's ports (Windows' range is 100). A proxy that does not open leaves the
+//! browser out (`NoProxy`), with a log line; the launch goes on.
 //!
 //! Tier C (no jail): the agent's own environment is left alone, with no proxy variable, and only
 //! the browser entry reaches the proxy, through `{proxy_port}`. The proxy is advisory there:
@@ -18,41 +22,58 @@
 //! (`browser::seed_sites`). There is no `network.allowed_domains` setting yet, so no firm list
 //! is added. Chrome's background hosts (`browser::deny_hosts`) are refused silently. The
 //! upstream is the OS's (`Upstream::System`; R17 PR-D adds `network.upstream_proxy`). Refusals
-//! go to [`CountDenials`], which logs a count with the agent and the thread, never the host
-//! (decision record 0047); R18 replaces it.
+//! go to [`CountDenials`], which only counts them on the proxy's thread; the guard logs the
+//! session's total when the proxy closes, never a host (decision record 0047). R18 replaces it.
 
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clauseo_protocol::{AgentId, AgentKind, ThreadId};
+use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_sandbox::{
     Allowlist, Denial, DenialSink, LoginKind, ProxyConfig, Upstream, builtin_allowlist,
 };
 
 use super::super::super::Actor;
-use super::RunFolders;
 use super::browser::BrowserPrep;
 use crate::browser::deny_hosts::DENY_HOSTS;
 use crate::browser::seed_sites::SEED_SITES;
 use crate::config::{EgressProxy, SessionKey};
 
-/// A session's open proxy: the proxy that opened it, closed once with [`close`].
-#[derive(Clone)]
-pub(crate) struct Egress {
+/// A session's open proxy. Dropping it closes the proxy (`EgressProxy::close`, which may block
+/// while the proxy's thread is joined) and logs the session's refusals. It sits last on
+/// `RunFolders`, so the run's browser claims and relay drop before it.
+pub(crate) struct EgressGuard {
     proxy: Arc<dyn EgressProxy>,
+    key: SessionKey,
+    denials: Arc<CountDenials>,
 }
 
-impl fmt::Debug for Egress {
+impl fmt::Debug for EgressGuard {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Egress").finish_non_exhaustive()
+        f.debug_struct("EgressGuard")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
     }
 }
 
-impl Egress {
+impl EgressGuard {
     /// The session's browser listener port, as the proxy answers it.
-    pub(crate) fn port_for(&self, key: SessionKey) -> Option<u16> {
-        self.proxy.port_for(key)
+    pub(crate) fn port(&self) -> Option<u16> {
+        self.proxy.port_for(self.key)
+    }
+}
+
+impl Drop for EgressGuard {
+    fn drop(&mut self) {
+        self.proxy.close(self.key);
+        tracing::info!(
+            matter = %self.key.matter,
+            thread = %self.key.thread,
+            launch = self.key.launch,
+            refused = self.denials.count(),
+            "egress: the session's proxy closed"
+        );
     }
 }
 
@@ -60,7 +81,7 @@ impl Egress {
 pub(super) struct EgressPrep {
     /// The proxy, when one is set and the session can get the browser.
     proxy: Option<Arc<dyn EgressProxy>>,
-    /// The agent, for its built-in hosts and the denial log.
+    /// The agent, for its built-in hosts.
     agent: AgentId,
 }
 
@@ -76,10 +97,15 @@ pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep)
 impl EgressPrep {
     /// Opens `key`'s proxy, when the session gets one. Starts a thread and binds two loopback
     /// listeners: off the actor.
-    pub(super) fn open(self, key: SessionKey) -> Option<Egress> {
+    pub(super) fn open(self, key: SessionKey) -> Option<Arc<EgressGuard>> {
         let proxy = self.proxy?;
-        match proxy.open(key, proxy_config(&self.agent, key.thread)) {
-            Ok(()) => Some(Egress { proxy }),
+        let denials = Arc::new(CountDenials::default());
+        match proxy.open(key, proxy_config(&self.agent, Arc::clone(&denials))) {
+            Ok(()) => Some(Arc::new(EgressGuard {
+                proxy,
+                key,
+                denials,
+            })),
             Err(error) => {
                 // The kind only: a config error's text names the host it refused.
                 let why = if matches!(error, clauseo_sandbox::Error::ProxyStart(_)) {
@@ -98,16 +124,9 @@ impl EgressPrep {
     }
 }
 
-/// `run`'s session has ended (its agent's tree killed) or never started: its proxy, if it has
-/// one, is closed now. Blocks while the proxy's thread is joined: off the actor.
-pub(super) fn close(run: &mut RunFolders) {
-    if let Some(egress) = run.egress.take() {
-        egress.proxy.close(run.key);
-    }
-}
-
-/// The proxy config for `agent`'s session on `thread` (see the module header).
-pub(crate) fn proxy_config(agent: &AgentId, thread: ThreadId) -> ProxyConfig {
+/// The proxy config for `agent`'s session, its refusals counted in `denials` (see the module
+/// header).
+pub(crate) fn proxy_config(agent: &AgentId, denials: Arc<CountDenials>) -> ProxyConfig {
     // The plan sign-in's hosts hold the API-key sign-in's: the session's real sign-in is read
     // from its final environment in R17 PR-D.
     let builtin = match AgentKind::of(agent) {
@@ -119,11 +138,7 @@ pub(crate) fn proxy_config(agent: &AgentId, thread: ThreadId) -> ProxyConfig {
         allow: builtin.union(hosts(SEED_SITES.iter().copied())),
         silent: hosts(DENY_HOSTS.iter().map(|deny| deny.host)),
         upstream: Upstream::System,
-        denials: Arc::new(CountDenials {
-            agent: agent.clone(),
-            thread,
-            count: AtomicU64::new(0),
-        }),
+        denials,
         record: None,
     }
 }
@@ -141,18 +156,15 @@ fn hosts<'a>(names: impl Iterator<Item = &'a str>) -> Allowlist {
     })
 }
 
-/// The session's denial sink until R18's: it counts the proxy's refusals and logs each with the
-/// count, the agent and the thread, never the URL or the host (decision record 0047). It never
-/// blocks: a counter and a log line.
+/// The session's denial sink until R18's. It runs on the proxy's thread, so it only adds to an
+/// atomic counter: no log, no lock, nothing that blocks. [`EgressGuard`] logs the total.
+#[derive(Debug, Default)]
 pub(crate) struct CountDenials {
-    agent: AgentId,
-    thread: ThreadId,
     count: AtomicU64,
 }
 
 impl CountDenials {
     /// The refusals so far.
-    #[cfg(test)]
     pub(crate) fn count(&self) -> u64 {
         self.count.load(Ordering::Relaxed)
     }
@@ -166,16 +178,7 @@ impl DenialSink for CountDenials {
         } else {
             1
         };
-        let count = self
-            .count
-            .fetch_add(refused, Ordering::Relaxed)
-            .saturating_add(refused);
-        tracing::info!(
-            agent = self.agent.as_str(),
-            thread = %self.thread,
-            count,
-            "egress: the session's proxy refused a request"
-        );
+        self.count.fetch_add(refused, Ordering::Relaxed);
     }
 }
 

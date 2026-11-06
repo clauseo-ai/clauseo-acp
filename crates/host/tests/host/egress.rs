@@ -1,7 +1,8 @@
 //! The session's egress proxy through the host (S16, R17's seam): opened once per launch that
-//! can get the browser, closed once after the agent's tree has gone (in the run folder's
-//! removal), closed too after a launch that failed once it was opened, and never named in the
-//! agent's environment. A proxy that does not open leaves the browser out with `NoProxy`.
+//! can get the browser and found its Chrome, closed once after the agent's tree has gone (in the
+//! run folder's removal), closed too after a launch that failed once it was opened, and never
+//! named in the agent's environment. A proxy that does not open leaves the browser out with
+//! `NoProxy`. `egress_wait.rs` has the removal's wait for stragglers.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -33,14 +34,14 @@ const PROXY_VARS: [&str; 8] = [
 
 /// A proxy that records each call, in order, beside the run folder removals; `open` fails when
 /// `refuse` is set. Each close is also sent on `closed`.
-struct Recording {
+pub(crate) struct Recording {
     calls: Arc<Mutex<Vec<String>>>,
     refuse: bool,
     closed: Mutex<Sender<SessionKey>>,
 }
 
 impl Recording {
-    fn new(refuse: bool) -> (Arc<Self>, Arc<Mutex<Vec<String>>>, Receiver<SessionKey>) {
+    pub(crate) fn new(refuse: bool) -> (Arc<Self>, Arc<Mutex<Vec<String>>>, Receiver<SessionKey>) {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let (closed, closes) = channel();
         let proxy = Arc::new(Self {
@@ -87,7 +88,7 @@ impl EgressProxy for Recording {
 
 /// The calls so far, launch ids replaced by their order of first appearance, so `open 1`
 /// and `close 1` name the same launch.
-fn calls(log: &Mutex<Vec<String>>) -> Vec<String> {
+pub(crate) fn calls(log: &Mutex<Vec<String>>) -> Vec<String> {
     let mut launches: Vec<String> = Vec::new();
     log.lock()
         .unwrap()
@@ -110,7 +111,11 @@ fn calls(log: &Mutex<Vec<String>>) -> Vec<String> {
 
 /// `config` with the browser hook, `proxy`, a forced Chrome, the run folder removal recorded in
 /// `log`, and an inherited environment without any proxy variable.
-fn wired(config: HostConfig, proxy: Arc<Recording>, log: Arc<Mutex<Vec<String>>>) -> HostConfig {
+pub(crate) fn wired(
+    config: HostConfig,
+    proxy: Arc<Recording>,
+    log: Arc<Mutex<Vec<String>>>,
+) -> HostConfig {
     let inherited: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| !PROXY_VARS.iter().any(|var| name == var))
         .collect();
@@ -129,16 +134,21 @@ fn wired(config: HostConfig, proxy: Arc<Recording>, log: Arc<Mutex<Vec<String>>>
 
 /// A Claude scenario whose `session/new` carries exactly `servers`.
 fn claude(dir: &Dir, servers: &serde_json::Value) {
-    let scenario = template(
-        dir,
+    claude_then(dir, servers, &[]);
+}
+
+/// [`claude`] with `then` played after the prompt's answer.
+pub(crate) fn claude_then(dir: &Dir, servers: &serde_json::Value, then: &[serde_json::Value]) {
+    let mut lines = agent_lines(
         "claude",
-        &agent_lines(
-            "claude",
-            "session/new",
-            &json!({"mcpServers": servers}),
-            &[],
-        ),
+        "session/new",
+        &json!({"mcpServers": servers}),
+        &[],
     );
+    for line in then {
+        lines = format!("{lines}\n{line}");
+    }
+    let scenario = template(dir, "claude", &lines);
     settings(
         dir,
         agents(&[(CLAUDE, &scenario, json!({}))]),
@@ -270,6 +280,37 @@ fn no_proxy_opens_with_the_browser_off() {
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     let thread = host.create_thread(matter, CLAUDE);
     turn(&host, thread);
+    host.shutdown();
+    assert_eq!(calls(&log), ["removal"]);
+}
+
+/// A session whose Chrome is not found opens no proxy: the browser is `BrowserNotInstalled`,
+/// and none of the proxy's ports are held.
+#[test]
+fn no_proxy_opens_without_chrome() {
+    let dir = Dir::new("egress_no_chrome", &[]);
+    claude(&dir, &json!([]));
+    let (proxy, log, _closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let roots = crate::browser_install::roots(&dir);
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        wired(config, proxy, removals)
+            .with_browser_executable(None)
+            .with_chrome_roots(roots)
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    let browser = first_frame_tools(&host, thread)
+        .into_iter()
+        .find(|state| state.tool == clauseo_protocol::ClauseoTool::Browser)
+        .expect("the header shows the browser");
+    assert_eq!(
+        browser.availability,
+        clauseo_protocol::ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::BrowserNotInstalled
+        }
+    );
     host.shutdown();
     assert_eq!(calls(&log), ["removal"]);
 }

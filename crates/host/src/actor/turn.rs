@@ -68,6 +68,7 @@ pub(crate) use end::limits_read;
 pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as idle_tick};
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
+pub(crate) use launch_checks::HeldRuns;
 pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
