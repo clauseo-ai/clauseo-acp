@@ -160,10 +160,10 @@ jobs:
           # The updater key that signs this mode's files must have its public key: in a release
           # the app's own (plugins.updater.pubkey), in a test the throwaway one R23 commits. A
           # dry run makes its own in each signing job.
-          # In a release that key is read from its own bytes (a minisign .pub's line 2 decodes to 42
-          # bytes: "Ed", the key id as 8 bytes little-endian, the Ed25519 key), must match the id
-          # its untrusted comment names, and must be neither the placeholder R23 PR 6 was built
-          # against nor the test key. This is the control a merge cannot skip (0035, 0037).
+          # That key is read from its own bytes (a minisign .pub's line 2 decodes to 42
+          # bytes: "Ed", the key id as 8 bytes little-endian, the Ed25519 key) and must match the id
+          # its untrusted comment names; a release also refuses the placeholder R23 PR 6 was built
+          # against and the test key. This is the control a merge cannot skip (0035, 0037).
           key_id() {
             local text comment hex id
             text=$(printf '%s' "$1" | base64 -d 2>/dev/null) || { echo "it is not base64"; return 1; }
@@ -177,15 +177,22 @@ jobs:
               { echo "its comment does not name its own key id $id"; return 1; }
             echo "$id"
           }
-          if [ "$mode" = release ]; then
-            pub=$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)
+          # Every mode decodes both keys, so each dry run runs this decoder on a runner; only a
+          # release refuses the placeholder and the test key.
+          test_id=$(key_id "$(tr -d '\r\n' < crates/desktop/release/updater-test.pub)") ||
+            fail "crates/desktop/release/updater-test.pub is not a minisign public key: $test_id"
+          pub=$(jq -r '.plugins.updater.pubkey // ""' crates/desktop/tauri.conf.json)
+          if [ "$mode" = release ] || [ -n "$pub" ]; then
             [ -n "$pub" ] || fail "plugins.updater.pubkey in tauri.conf.json is empty; a v* release signs updates for it"
             id=$(key_id "$pub") || fail "plugins.updater.pubkey in tauri.conf.json is not a minisign public key: $id"
-            test_id=$(key_id "$(tr -d '\r\n' < crates/desktop/release/updater-test.pub)") ||
-              fail "crates/desktop/release/updater-test.pub is not a minisign public key: $test_id"
+            echo "plugins.updater.pubkey is key $id; the test key is $test_id"
+          fi
+          if [ "$mode" = release ]; then
             [ "$id" != AC986E7C6BA67AB9 ] ||
               fail "plugins.updater.pubkey is the placeholder (AC986E7C6BA67AB9) R23 PR 6 was built against; Rohan's public key must replace it"
             [ "$id" != "$test_id" ] || fail "plugins.updater.pubkey is the test key ($test_id); a release signs with Rohan's key"
+          elif [ "${id:-}" = AC986E7C6BA67AB9 ]; then
+            echo "::warning::plugins.updater.pubkey is still the placeholder (AC986E7C6BA67AB9); a v* release refuses it"
           fi
           if [ "$mode" = test ] && [ ! -s crates/desktop/release/updater-test.pub ]; then
             fail "crates/desktop/release/updater-test.pub (the test key's public key) is missing"
