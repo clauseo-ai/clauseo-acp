@@ -68,15 +68,18 @@ pub(crate) fn protected(path: &Path) -> bool {
 
 /// Whether an `elevated_` test may run: the token is elevated **and**
 /// `CLAUSEO_ELEVATED_TESTS=1` (CI's elevated step sets it, split §8), so these tests never run
-/// on a developer's machine by accident. Says why when not.
+/// on a developer's machine by accident. Unset, it skips and says so; set on a token that isn't
+/// elevated, it panics, so a CI runner that lost its elevation fails instead of passing.
 pub(crate) fn elevated_tests_enabled() -> bool {
     if std::env::var_os("CLAUSEO_ELEVATED_TESTS").is_none_or(|value| value != "1") {
         eprintln!("skipped: CLAUSEO_ELEVATED_TESTS=1 is not set");
         return false;
     }
-    if !super::test_dacl::elevated() {
-        eprintln!("skipped: the token is not elevated");
-        return false;
-    }
+    // CI's elevated step sets the variable on a runner whose token is elevated (probe #509). If
+    // a runner image ever stops giving one, fail loudly rather than pass having tested nothing.
+    assert!(
+        super::test_dacl::elevated(),
+        "CLAUSEO_ELEVATED_TESTS=1 but the token is not elevated"
+    );
     true
 }
