@@ -82,6 +82,8 @@ export type ThreadState = {
   papers?: PaperSummary[];
   /** open_file says Word opened the file in Protected View, as for a path too long for Word (U9). */
   protectedView?: boolean;
+  /** open_file is refused with this code, as matter.document_path_too_long for a path too long for Word (U9). */
+  openRefused?: string;
   /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
    * refused, or with the list stopping short (truncated). Without it, the list answers in full. */
   papersAnswer?: "pending" | "failed" | "truncated";
@@ -198,6 +200,13 @@ export function threadHost(state: ThreadState): FakeTransport {
         }
       }),
     ...(state.protectedView === true ? { openFile: () => ({ protected_view: true }) } : {}),
+    ...(state.openRefused !== undefined
+      ? {
+          openFile: () => {
+            throw { code: state.openRefused, message: "refused", retryable: false };
+          },
+        }
+      : {}),
     ...(state.connectors !== undefined
       ? { next: connectorsNext(state, state.connectors), openSettings: () => {} }
       : state.papers !== undefined || state.papersAnswer !== undefined
