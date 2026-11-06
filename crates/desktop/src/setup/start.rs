@@ -364,6 +364,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             events: parts.events,
             known: read.known,
             signin_gate: Mutex::new(()),
+            rechecks: Mutex::default(),
             wiring,
             counts: parts.counts,
         });
@@ -390,7 +391,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
                     follow_keys(&follower, notes).await;
                 }
             };
-            let follows = join(join(settings, keys), join(follow_splits(&follower), leaves));
+            let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
+            let follows = join(join(settings, keys), join(splits, leaves));
             futures::executor::block_on(follows);
         });
     if let Err(err) = host_thread {
@@ -462,6 +464,23 @@ async fn follow_splits(backend: &AgentsBackend) {
             Found::CodexLinkSplit
         };
         backend.wiring.leaves.submit(&split.agent, Some(why));
+    }
+}
+
+/// Each queue newly held for an agent's sign-in, which a launch or a turn failing with
+/// `agent.auth_required` leaves: that agent's status checked again
+/// ([`AgentsBackend::recheck_sign_in`]), so the sign-in line never stays "signed in" under the
+/// error. Until the host stops.
+pub(crate) async fn follow_sign_in_holds(backend: &AgentsBackend) {
+    let mut holds = match backend.host.sign_in_holds().await {
+        Ok(holds) => holds,
+        Err(error) => {
+            tracing::warn!(code = error.code().as_str(), "sign-in holds not followed");
+            return;
+        }
+    };
+    while let Some(agent) = holds.next().await {
+        backend.recheck_sign_in(&agent);
     }
 }
 

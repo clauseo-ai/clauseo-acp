@@ -356,7 +356,7 @@ pub(crate) async fn after_stop(
         tracing::warn!(%agent, code = error.code().as_str(), "matter links not removed");
         first_error.get_or_insert(error);
     }
-    backend.write_entry_as(agent, SignInSource::Own).await;
+    super::backend::write_entry_as(backend, agent, SignInSource::Own).await;
     first_error
 }
 

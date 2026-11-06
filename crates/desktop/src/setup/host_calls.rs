@@ -5,13 +5,17 @@
 //! Piece A calls [`SetupHost::set_agent_launch`] (an install's `Ready`) and
 //! [`SetupHost::set_endpoint`] (`SetFirmEndpoint`); piece B the leave order's calls, the
 //! restarts, `limits_login_changed` (P4d), the launch refusal for an unreadable policy (P4d),
-//! the splits (P4b) and the settings changes, which come from an app subscription.
+//! the splits (P4b) and the settings changes and the sign-in holds, which come from an app
+//! subscription.
 
+use std::collections::BTreeSet;
 use std::future::ready;
 use std::sync::Arc;
 
 use clauseo_host::{AgentsStopped, LoginSplits};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, Principal};
+use clauseo_protocol::{
+    AgentId, AgentKind, ErrorCode, HostError, Principal, QueueHoldReason, ThreadId, ThreadsChanged,
+};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
@@ -74,6 +78,11 @@ pub(crate) trait SetupHost: Send + Sync {
     /// One item per `SettingsChanged`, the current settings' first, from an app subscription;
     /// it ends when the host stops.
     fn settings_changes(&self) -> BoxFuture<'_, Result<BoxStream<'static, ()>, HostError>>;
+
+    /// One item per thread whose queue comes to be held for its agent's sign-in (a turn or a
+    /// launch that failed with `agent.auth_required`), naming the agent ([`SignInHolds`]),
+    /// from an app subscription; it ends when the host stops.
+    fn sign_in_holds(&self) -> BoxFuture<'_, Result<BoxStream<'static, AgentId>, HostError>>;
 }
 
 /// The app's [`SetupHost`]: each call waits for the host's start in the bridge's cell.
@@ -91,9 +100,50 @@ impl CellHost {
 /// Whether `json` is a `HostEvent::SettingsChanged` (external tagging, snake case: its one
 /// key comes first), read from the text so the other app events are not decoded.
 fn is_settings_changed(json: &str) -> bool {
+    is_event(json, "\"settings_changed\"")
+}
+
+/// Whether `json`'s one key is `key` (quoted).
+fn is_event(json: &str, key: &str) -> bool {
     json.trim_start()
         .strip_prefix('{')
-        .is_some_and(|rest| rest.trim_start().starts_with("\"settings_changed\""))
+        .is_some_and(|rest| rest.trim_start().starts_with(key))
+}
+
+/// A `HostEvent::ThreadsChanged`, decoded alone.
+#[derive(serde::Deserialize)]
+struct ThreadsFrame {
+    threads_changed: ThreadsChanged,
+}
+
+/// The threads whose queue the app subscription last showed held for the sign-in, so a row
+/// sent again for another change (seen, a title, a catch-up) is no new hold.
+#[derive(Debug, Default)]
+pub(crate) struct SignInHolds {
+    held: BTreeSet<ThreadId>,
+}
+
+impl SignInHolds {
+    /// The agents, each once, of the threads that `json` (an app event) shows newly held for
+    /// the sign-in; none for any other event.
+    pub(crate) fn entered(&mut self, json: &str) -> Vec<AgentId> {
+        if !is_event(json, "\"threads_changed\"") {
+            return Vec::new();
+        }
+        let Ok(frame) = serde_json::from_str::<ThreadsFrame>(json) else {
+            return Vec::new();
+        };
+        let mut agents = Vec::new();
+        for row in frame.threads_changed.threads {
+            let held = row.queue_held && row.queue_held_reason == Some(QueueHoldReason::SignIn);
+            if !held {
+                self.held.remove(&row.thread);
+            } else if self.held.insert(row.thread) && !agents.contains(&row.agent) {
+                agents.push(row.agent);
+            }
+        }
+        agents
+    }
 }
 
 impl SetupHost for CellHost {
@@ -185,6 +235,17 @@ impl SetupHost for CellHost {
             let changes =
                 events.filter_map(|event| ready(is_settings_changed(event.json()).then_some(())));
             Ok(changes.boxed())
+        })
+    }
+
+    fn sign_in_holds(&self) -> BoxFuture<'_, Result<BoxStream<'static, AgentId>, HostError>> {
+        Box::pin(async move {
+            let host = self.cell.host().await?;
+            let events = host.subscribe_app(Principal::LocalDesktop).await?;
+            let mut holds = SignInHolds::default();
+            let entered =
+                events.flat_map(move |event| futures::stream::iter(holds.entered(event.json())));
+            Ok(entered.boxed())
         })
     }
 }

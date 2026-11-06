@@ -12,7 +12,9 @@
 //!   `SignInChanged`. `OpenUrl` (an address S18's shim captured and checked against the
 //!   snapshot's sign-in hosts) opens with `open::open_url_unconfirmed`, https only. A
 //!   `SigninNote` is logged by its code and detail (`events::note`). The status check runs once
-//!   an agent's install is `Ready`; an agent not installed shows `SignedOut`.
+//!   an agent's install is `Ready`; an agent not installed shows `SignedOut`. A queue newly held
+//!   for an agent's sign-in (`agent.auth_required`) checks its status again
+//!   (`recheck_sign_in`), one at a time per agent.
 //! - **Confirms.** `InstallAgent` and `SetFirmEndpoint` ask the lawyer first; a decline runs
 //!   nothing and answers `transport.unauthorized`. `RetryAgentInstall` asks nothing, so it is
 //!   `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
@@ -32,11 +34,7 @@ use std::sync::{Arc, Mutex};
 use clauseo_agents::{
     AgentsEvent, InstallState, Method, PasteCode, SigninError, SigninState, Source,
 };
-use clauseo_protocol::{
-    AgentId, AgentKind, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent,
-    SignInSource,
-};
-use clauseo_settings::EntryWrite;
+use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use futures::{Stream, StreamExt as _};
 
 use super::admit::{key_stored, sign_in_barred};
@@ -57,6 +55,8 @@ pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{FirstRun, checked_endpoint, invalid, plan_method};
 pub(crate) use self::seam::SetupAgents;
+use self::write::write_entry;
+pub(crate) use self::write::write_entry_as;
 
 /// One agent as the backend knows it from the snapshot and the locations.
 #[derive(Debug, Clone)]
@@ -90,6 +90,9 @@ pub(crate) struct AgentsBackend {
     /// Held from a sign-in start's check to its call, and from a key's or an endpoint's end of
     /// a running sign-in to its cancel, so a start never slips past a key or an endpoint.
     pub(crate) signin_gate: Mutex<()>,
+    /// The agents whose status check [`AgentsBackend::recheck_sign_in`] asked for and whose
+    /// next sign-in state has not come yet: a second hold meanwhile asks for none.
+    pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
@@ -152,6 +155,7 @@ impl AgentsBackend {
                 agents
                     .sign_in(&agent, method)
                     .map_err(|error| signin_error(&error))?;
+                tracing::info!(%agent, method = ?method, "sign-in started");
                 self.replaced(&agent);
             }
             SetupCommand::CancelSignIn { .. } => {
@@ -173,6 +177,7 @@ impl AgentsBackend {
                 agents
                     .sign_in(&agent, Method::DeviceCode)
                     .map_err(|error| signin_error(&error))?;
+                tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
                 self.replaced(&agent);
             }
             SetupCommand::OpenSignInPage { .. } => {
@@ -503,6 +508,7 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::Signin { agent, state } => {
+                    lock(&self.rechecks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
                 }
@@ -535,7 +541,7 @@ impl AgentsBackend {
             });
         }
         if matches!(state, InstallState::Ready { .. }) {
-            self.write_entry(agent).await;
+            write_entry(self, agent).await;
             if checked.insert(agent.clone())
                 && let Err(error) = self.agents.check_status(agent)
             {
@@ -547,46 +553,24 @@ impl AgentsBackend {
         }
     }
 
-    /// Writes `agent`'s `agents.<id>` entry from its install, for the login's source as S18
-    /// last said.
-    async fn write_entry(&self, agent: &AgentId) {
-        let source = match self.compose.s18(agent) {
-            Some(SigninState::SignedIn {
-                source: Source::Reused,
-                ..
-            }) => SignInSource::Reused,
-            _ => SignInSource::Own,
-        };
-        self.write_entry_as(agent, source).await;
-    }
-
-    /// Writes `agent`'s `agents.<id>` entry from its install for a login of `source`, logging
-    /// the outcome by code; a written entry is what the limits readers read from then on.
-    pub(crate) async fn write_entry_as(&self, agent: &AgentId, source: SignInSource) {
-        let (Some(info), Some(installed)) = (self.known.get(agent), self.agents.installed(agent))
-        else {
+    /// `agent`'s status checked again after a launch or a turn of it failed with
+    /// `agent.auth_required` (`start::follow_sign_in_holds`), so a login that is gone shows as
+    /// gone. At most one at a time per agent: none while a sign-in of it is going (its own end
+    /// says how it stands) or while the last one asked for has sent no state yet; and S18 runs
+    /// one job per agent, so a check asked while another job runs starts none.
+    pub(crate) fn recheck_sign_in(&self, agent: &AgentId) {
+        if !self.known.contains_key(agent) || self.agents.sign_in_going(agent) {
             return;
-        };
-        let Some(launch) = launch(agent, &installed, &info.home, source) else {
-            tracing::warn!(%agent, "the install's paths are not UTF-8: no entry written");
+        }
+        if !lock(&self.rechecks).insert(agent.clone()) {
+            tracing::info!(%agent, "auth required: a status check is already on its way");
             return;
-        };
-        match self
-            .host
-            .set_agent_launch(agent.clone(), launch.clone())
-            .await
-        {
-            Ok(EntryWrite::Written) => {
-                tracing::info!(%agent, "agent entry written");
-                if let Some(kind) = AgentKind::of(agent) {
-                    self.wiring.readers.set_entry(kind, Some(launch));
-                }
-            }
-            Ok(EntryWrite::LeftAlone) => {
-                tracing::info!(%agent, "agent entry left alone: it is the lawyer's or the firm's");
-            }
+        }
+        match self.agents.check_status(agent) {
+            Ok(()) => tracing::info!(%agent, "auth required: sign-in status checked again"),
             Err(error) => {
-                tracing::warn!(%agent, code = error.code().as_str(), "agent entry not written");
+                lock(&self.rechecks).remove(agent);
+                tracing::warn!(%agent, %error, "auth required: no status check");
             }
         }
     }
@@ -598,3 +582,4 @@ mod parts;
 mod seam;
 #[cfg(test)]
 mod tests;
+mod write;
