@@ -488,7 +488,8 @@ impl HostConfig {
 
     /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
     /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
-    /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys. As
+    /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys (and
+    /// counted as `agent.key_unreadable` past its bound). As
     /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
     /// is a bug: debug builds assert, and release builds log it and set nothing.
     #[must_use]
@@ -500,6 +501,16 @@ impl HostConfig {
         if let Err(error) = self.wiring.sign_in.refused.set(agent, Some(code)) {
             tracing::warn!(code = error.code().as_str(), "a launch refusal was not set");
         }
+        self
+    }
+
+    /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
+    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
+    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
+    /// must not block.
+    #[must_use]
+    pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
+        self.wiring.sign_in.refused.set_key_retry(retry);
         self
     }
 

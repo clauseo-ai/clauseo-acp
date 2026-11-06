@@ -18,19 +18,19 @@ use crate::codex::{Recording, turn_failed};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 
 /// The key the hook hands out once the "keys" are loaded.
-const KEY: &str = "sk-test-keys-loading-0123456789";
+pub(crate) const KEY: &str = "sk-test-keys-loading-0123456789";
 
 /// The host's wait for an `agent.keys_loading` refusal.
-const KEYS_WAIT: Duration = Duration::from_secs(2);
+pub(crate) const KEYS_WAIT: Duration = Duration::from_secs(2);
 
 /// The fake agent's id.
-fn fake() -> AgentId {
+pub(crate) fn fake() -> AgentId {
     AgentId::new(FAKE).unwrap()
 }
 
 /// A profile hook adding `ANTHROPIC_API_KEY` once its slot holds a key, as desktop's does once
 /// the keychain has loaded.
-struct SlotKey(Arc<Mutex<Option<String>>>);
+pub(crate) struct SlotKey(pub(crate) Arc<Mutex<Option<String>>>);
 
 impl ProfileHook for SlotKey {
     fn session_meta(
@@ -52,7 +52,7 @@ impl ProfileHook for SlotKey {
 }
 
 /// Waits until the host has armed a timer of [`KEYS_WAIT`] (a launch began its wait).
-fn until_keys_wait_armed(host: &Running) {
+pub(crate) fn until_keys_wait_armed(host: &Running) {
     for _ in 0..256 {
         if wait("a timer armed", host.clock.next_armed()) == KEYS_WAIT {
             return;

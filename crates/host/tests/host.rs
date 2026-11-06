@@ -145,6 +145,8 @@ mod import;
 #[cfg(test)]
 #[path = "host/key_retry.rs"]
 mod key_retry;
+#[path = "host/key_unreadable.rs"]
+mod key_unreadable;
 #[cfg(test)]
 #[path = "host/keys_loading.rs"]
 mod keys_loading;

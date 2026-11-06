@@ -27,7 +27,7 @@ use super::close::TurnClose;
 use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
-use crate::agent::launch_refusals::KEYS_WAIT;
+use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
 use crate::agent::login_link::{LoginLink, LoginSplit, Seen};
 use crate::error::Error;
 
@@ -146,7 +146,11 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
         ));
     }
     let agent = &actor.threads.get(&thread)?.row.agent;
-    let code = actor.wiring.sign_in.refused.get(agent)?;
+    let code = actor
+        .wiring
+        .sign_in
+        .refused
+        .in_force(agent, actor.clock.now().mono)?;
     tracing::info!(%agent, code = code.as_str(), "a launch is refused");
     Some(Error::refused(
         code,
@@ -154,9 +158,11 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     ))
 }
 
-/// Whether `thread`'s launch waits for its agent's `agent.keys_loading` refusal: when it is the
-/// refusal in force (no `stop_agents` hold), the wait, at most [`KEYS_WAIT`] on the host clock
-/// and woken when the refusal lifts or changes. The launch checks the refusals again after it
+/// Whether `thread`'s launch waits for its agent's `agent.keys_loading` or
+/// `agent.key_unreadable` refusal: when it is the refusal in force (no `stop_agents` hold), the
+/// wait, at most [`KEYS_WAIT`] on the host clock and woken when the refusal lifts or changes.
+/// For `agent.key_unreadable` desktop is first asked to read the key again, so a read that
+/// now succeeds lifts it. The launch checks the refusals again after it
 /// (`launch_checks::on_prepared`).
 pub(super) fn keys_wait(
     actor: &mut Actor,
@@ -166,10 +172,17 @@ pub(super) fn keys_wait(
         return None;
     }
     let agent = actor.threads.get(&thread)?.row.agent.clone();
-    if actor.wiring.sign_in.refused.get(&agent) != Some(ErrorCode::AgentKeysLoading) {
+    let refused = &actor.wiring.sign_in.refused;
+    let code = refused.in_force(&agent, actor.clock.now().mono)?;
+    if !WAITED_OUT.contains(&code) {
         return None;
     }
-    tracing::info!(%agent, "a launch waits for the stored keys to load");
+    if code == ErrorCode::AgentKeyUnreadable {
+        tracing::info!(%agent, "a launch waits for its stored key to be read again");
+        refused.retry_key(&agent);
+    } else {
+        tracing::info!(%agent, "a launch waits for the stored keys to load");
+    }
     let timer = actor.clock.after(KEYS_WAIT);
     Some(actor.wiring.sign_in.refused.wait(&agent, timer))
 }
