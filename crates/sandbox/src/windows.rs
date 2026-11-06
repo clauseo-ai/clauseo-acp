@@ -67,6 +67,7 @@ pub mod pool;
 mod private_dir;
 #[cfg(windows)]
 mod record;
+pub mod secrets;
 mod set_aside;
 // Set-up's engine calls `fence_registered`, which builds where it does.
 #[cfg(any(windows, test, feature = "test-support"))]

@@ -66,6 +66,8 @@ mod lock_tests;
 pub mod logon;
 mod machine;
 mod outcome;
+#[cfg(any(windows, test))]
+pub mod owner;
 pub mod password;
 #[cfg(windows)]
 pub mod preflight;

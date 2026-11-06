@@ -15,8 +15,8 @@ use std::path::PathBuf;
 
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-    ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, HLOCAL, LocalFree,
-    WIN32_ERROR,
+    ERROR_NO_TOKEN, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, HLOCAL,
+    LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
@@ -24,7 +24,9 @@ use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_MULTI_SZ,
     RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
 };
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
+};
 use windows::core::{HRESULT, PCWSTR, PWSTR, w};
 
 use super::pool::{MultiSzError, pool_sids_from_multi_sz};
@@ -195,15 +197,25 @@ fn present(code: WIN32_ERROR) -> Result<bool, RecordError> {
     }
 }
 
-/// This process's user (`TokenUser`), in the canonical form `ConvertSidToStringSidW` writes.
+/// This thread's user (`TokenUser`), in the canonical form `ConvertSidToStringSidW` writes: the
+/// user of its impersonation token when it has one (set-up acting as the owner, S15 `PR4g`), so
+/// the sandbox folder and its files are made for that user; else the process's user.
 pub(crate) fn current_user_sid() -> io::Result<Sid> {
     let mut token = HANDLE::default();
-    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a live
-    // out-pointer for the call.
-    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }?;
+    // SAFETY: GetCurrentThread returns a pseudo-handle that needs no close; `token` is a live
+    // out-pointer for the call. Opened as self: the process's identity checks the open.
+    match unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &raw mut token) } {
+        Ok(()) => {}
+        Err(error) if error.code() == ERROR_NO_TOKEN.to_hresult() => {
+            // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token`
+            // is a live out-pointer for the call.
+            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }?;
+        }
+        Err(error) => return Err(error.into()),
+    }
     let text = user_of(token);
-    // SAFETY: the handle came from OpenProcessToken and is closed once, here. A failed close
-    // leaves nothing to do.
+    // SAFETY: the handle came from OpenThreadToken or OpenProcessToken and is closed once, here.
+    // A failed close leaves nothing to do.
     drop(unsafe { CloseHandle(token) });
     Sid::parse(&text?).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
