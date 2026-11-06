@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use futures::future::Either;
 
-use clauseo_host::{McpServer, PackRequest, ProfileHook};
+use clauseo_host::{HostConfig, McpServer, PackRequest, ProfileHook};
 use clauseo_process::{AsyncIoTimer, PassthroughLauncher, SpawnOptions, Timer as _};
 use clauseo_profile::skills::stetdoc;
 use clauseo_profile::{
@@ -24,6 +24,8 @@ use clauseo_profile::{
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::Locations;
 use serde_json::{Map, Value};
+
+use crate::setup::SetupHook;
 
 /// stetdoc's program name, without the OS's suffix.
 const STETDOC: &str = "stetdoc";
@@ -302,6 +304,42 @@ impl ProfileHook for DesktopProfile {
             request.entries().to_vec(),
             request.allow_scripts(),
         )
+    }
+}
+
+/// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
+/// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
+/// profile (it could not be built) the hook adds only setup's variables. No egress proxy yet:
+/// stage C's is not wired, so the browser shows `NoProxy` (0030).
+pub(crate) fn with_profile(
+    config: HostConfig,
+    profile: Option<DesktopProfile>,
+    hook: SetupHook,
+) -> HostConfig {
+    let Some(profile) = profile else {
+        return config.with_profile_hook(Box::new(hook));
+    };
+    let config = match profile.path_prepend().and_then(absolute_folder) {
+        Some(folder) => config.with_agent_path_prepend(folder),
+        None => config,
+    };
+    config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
+}
+
+/// `folder` when it is absolute. The host takes the agents' `PATH` folder as given, and a
+/// relative one would name a folder under each agent's working folder, so a relative folder is
+/// a bug (a debug build stops on it) and a release build logs it and prepends nothing.
+fn absolute_folder(folder: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    debug_assert!(
+        folder.is_absolute(),
+        "the agents' PATH folder must be absolute: {}",
+        folder.display()
+    );
+    if folder.is_absolute() {
+        Some(folder)
+    } else {
+        tracing::warn!(folder = %folder.display(), "a relative folder does not go on the agents' PATH");
+        None
     }
 }
 
