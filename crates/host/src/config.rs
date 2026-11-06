@@ -1,5 +1,6 @@
 //! What `Host::start` needs: the settings, the launcher, and the parts tests swap out.
 
+#[cfg(feature = "test-support")]
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
+#[cfg(feature = "test-support")]
 use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
