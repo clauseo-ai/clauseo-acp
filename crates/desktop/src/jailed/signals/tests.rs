@@ -1,6 +1,6 @@
 use std::io;
 
-use super::{Failure, Token, decide};
+use super::{Failure, Signal, Token, decide};
 
 /// The fake process's user.
 const USER: &str = "S-1-5-21-1-2-3-1001";
@@ -87,15 +87,16 @@ fn no_record() -> impl FnOnce() -> Result<Vec<String>, Failure> {
     || Ok(Vec::new())
 }
 
-/// `decide` with `Ok(token)`, as a short string: "jailed", "free" or "error: <message>".
+/// `decide` with `Ok(token)`, as a short string: the signal's name (`AppContainer`,
+/// `RestrictedToken`, `BelowMedium`, `PoolUser`, `Unreadable`), "free" or "error: <message>".
 fn verdict(token: Fake, record: impl FnOnce() -> Result<Vec<String>, Failure>) -> String {
     show(decide(Ok(token), record))
 }
 
-fn show(answer: io::Result<bool>) -> String {
+fn show(answer: io::Result<Option<Signal>>) -> String {
     match answer {
-        Ok(true) => "jailed".to_owned(),
-        Ok(false) => "free".to_owned(),
+        Ok(Some(signal)) => format!("{signal:?}"),
+        Ok(None) => "free".to_owned(),
         Err(error) => format!("error: {error}"),
     }
 }
@@ -107,32 +108,32 @@ fn no_signal_and_no_pool_record_is_not_sandboxed() {
 
 #[test]
 fn a_pool_user_is_sandboxed_and_any_other_user_is_not() {
-    assert_eq!(verdict(PLAIN, record(USER)), "jailed");
+    assert_eq!(verdict(PLAIN, record(USER)), "PoolUser");
     assert_eq!(verdict(PLAIN, record(OTHER)), "free");
 }
 
 #[test]
 fn the_user_is_compared_with_every_pool_sid() {
-    assert_eq!(verdict(PLAIN, pool(&[OTHER, THIRD, USER])), "jailed");
-    assert_eq!(verdict(PLAIN, pool(&[USER, OTHER])), "jailed");
+    assert_eq!(verdict(PLAIN, pool(&[OTHER, THIRD, USER])), "PoolUser");
+    assert_eq!(verdict(PLAIN, pool(&[USER, OTHER])), "PoolUser");
     assert_eq!(verdict(PLAIN, pool(&[OTHER, THIRD])), "free");
     // A SID in the list that does not parse counts as sandboxed, wherever it is.
-    assert_eq!(verdict(PLAIN, pool(&[OTHER, "BA"])), "jailed");
+    assert_eq!(verdict(PLAIN, pool(&[OTHER, "BA"])), "Unreadable");
 }
 
 #[test]
 fn a_malformed_pool_record_is_sandboxed() {
     // `windows::sandbox_pool_sids` maps a malformed `PoolSids` (an empty string inside, a
     // non-SID, a repeat) and one that is not UTF-16 to `NotASid`.
-    assert_eq!(verdict(PLAIN, || Err(Failure::NotASid)), "jailed");
+    assert_eq!(verdict(PLAIN, || Err(Failure::NotASid)), "Unreadable");
 }
 
 #[test]
 fn a_record_that_is_denied_the_wrong_type_or_not_a_sid_is_sandboxed() {
-    assert_eq!(verdict(PLAIN, || Err(Failure::Denied)), "jailed");
-    assert_eq!(verdict(PLAIN, || Err(Failure::WrongType)), "jailed");
-    assert_eq!(verdict(PLAIN, record("not a sid")), "jailed");
-    assert_eq!(verdict(PLAIN, record("")), "jailed");
+    assert_eq!(verdict(PLAIN, || Err(Failure::Denied)), "Unreadable");
+    assert_eq!(verdict(PLAIN, || Err(Failure::WrongType)), "Unreadable");
+    assert_eq!(verdict(PLAIN, record("not a sid")), "Unreadable");
+    assert_eq!(verdict(PLAIN, record("")), "Unreadable");
 }
 
 #[test]
@@ -152,12 +153,12 @@ fn an_app_container_or_restricting_sids_are_sandboxed_without_the_record() {
         app_container: Answer::Yes,
         ..PLAIN
     };
-    assert_eq!(verdict(container, watched), "jailed");
+    assert_eq!(verdict(container, watched), "AppContainer");
     let restricted = Fake {
         restricted: Answer::Yes,
         ..PLAIN
     };
-    assert_eq!(verdict(restricted, no_record()), "jailed");
+    assert_eq!(verdict(restricted, no_record()), "RestrictedToken");
     assert!(!read.get(), "a positive token signal needs no record");
 }
 
@@ -165,7 +166,7 @@ fn an_app_container_or_restricting_sids_are_sandboxed_without_the_record() {
 fn a_token_that_cannot_be_opened_for_access_denied_is_sandboxed() {
     assert_eq!(
         show(decide::<Fake>(Err(Failure::Denied), no_record())),
-        "jailed"
+        "Unreadable"
     );
     assert_eq!(
         show(decide::<Fake>(
@@ -190,9 +191,9 @@ fn each_token_read_denied_is_sandboxed() {
         user: Some(Answer::Denied),
         ..PLAIN
     };
-    assert_eq!(verdict(denied_container, no_record()), "jailed");
-    assert_eq!(verdict(denied_restricted, no_record()), "jailed");
-    assert_eq!(verdict(denied_user, record(OTHER)), "jailed");
+    assert_eq!(verdict(denied_container, no_record()), "Unreadable");
+    assert_eq!(verdict(denied_restricted, no_record()), "Unreadable");
+    assert_eq!(verdict(denied_user, record(OTHER)), "Unreadable");
 }
 
 #[test]
@@ -202,12 +203,12 @@ fn a_broken_read_fails_open_only_when_no_other_signal_answers() {
         ..PLAIN
     };
     assert_eq!(verdict(broken_container, no_record()), "error: broken");
-    assert_eq!(verdict(broken_container, record(USER)), "jailed");
+    assert_eq!(verdict(broken_container, record(USER)), "PoolUser");
     let and_restricted = Fake {
         restricted: Answer::Yes,
         ..broken_container
     };
-    assert_eq!(verdict(and_restricted, no_record()), "jailed");
+    assert_eq!(verdict(and_restricted, no_record()), "RestrictedToken");
     let broken_user = Fake {
         user: Some(Answer::Broken),
         ..PLAIN
@@ -221,8 +222,8 @@ fn low_integrity_is_sandboxed_whatever_the_record_says() {
         low: Answer::Yes,
         ..PLAIN
     };
-    assert_eq!(verdict(low, no_record()), "jailed");
-    assert_eq!(verdict(low, record(OTHER)), "jailed");
+    assert_eq!(verdict(low, no_record()), "BelowMedium");
+    assert_eq!(verdict(low, record(OTHER)), "BelowMedium");
     // Medium (or above) with no pool: not sandboxed.
     assert_eq!(verdict(PLAIN, no_record()), "free");
 }
@@ -234,6 +235,47 @@ fn an_integrity_level_that_cannot_be_read_is_sandboxed() {
             low: unreadable,
             ..PLAIN
         };
-        assert_eq!(verdict(token, no_record()), "jailed");
+        assert_eq!(verdict(token, no_record()), "BelowMedium");
     }
+}
+
+#[test]
+fn the_first_signal_in_order_is_the_one_named() {
+    let all = Fake {
+        app_container: Answer::Yes,
+        restricted: Answer::Yes,
+        low: Answer::Yes,
+        user: None,
+    };
+    assert_eq!(verdict(all, record(USER)), "AppContainer");
+    let no_container = Fake {
+        app_container: Answer::No,
+        ..all
+    };
+    assert_eq!(verdict(no_container, record(USER)), "RestrictedToken");
+    let low_pool_user = Fake {
+        restricted: Answer::No,
+        ..no_container
+    };
+    assert_eq!(verdict(low_pool_user, record(USER)), "BelowMedium");
+    // A refused read names `Unreadable` where it happens, before any later signal.
+    let denied_first = Fake {
+        app_container: Answer::Denied,
+        ..all
+    };
+    assert_eq!(verdict(denied_first, record(USER)), "Unreadable");
+    let restricted_then_denied = Fake {
+        user: Some(Answer::Denied),
+        ..no_container
+    };
+    assert_eq!(
+        verdict(restricted_then_denied, record(OTHER)),
+        "RestrictedToken"
+    );
+    // A broken read before a later signal: the later signal, no error.
+    let broken_then_low = Fake {
+        restricted: Answer::Broken,
+        ..low_pool_user
+    };
+    assert_eq!(verdict(broken_then_low, no_record()), "BelowMedium");
 }

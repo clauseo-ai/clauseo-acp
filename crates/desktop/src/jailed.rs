@@ -7,13 +7,14 @@
 //! - `main` calls [`launch`] with the arguments after the program and nothing else has run.
 //!   [`launch`] answers `--pre-write-guard` first ([`guard_requested`]): the guard runs inside
 //!   the sandbox by design, so it never asks. `--delete-app-data` (the uninstaller's,
-//!   `delete_app_data.rs`) asks next and runs only on a plain `Ok(false)`: sandboxed, it refuses
+//!   `delete_app_data.rs`) asks next and runs only on a plain `Ok(None)`: sandboxed, it refuses
 //!   as below; a failed probe refuses it with `delete_app_data::FAILED` and deletes nothing.
 //!   Every other start asks the [`SandboxProbe`] next, before logging, settings, the Tauri
 //!   builder and its single-instance plugin: a jailed start must not forward its arguments (deep
 //!   links included) to a running window.
-//! - Sandboxed: one line, [`REFUSAL`], on stderr (no path, no secret) and exit code
-//!   [`SANDBOXED_EXIT`]; no window, nothing else runs. Not sandboxed: the app starts.
+//! - Sandboxed: one line on stderr ([`refusal`]: [`REFUSAL`] naming the [`Signal`] that fired,
+//!   no path, no SID, no secret) and exit code [`SANDBOXED_EXIT`]; no window, nothing else runs,
+//!   and nothing goes to the log. Not sandboxed: the app starts.
 //! - The probe failing is not "sandboxed": one stderr line says the check failed and why, and
 //!   the app starts, so a broken API never locks a lawyer out. What counts as a positive answer
 //!   rather than a failure is each OS's rule below.
@@ -53,27 +54,68 @@ use crate::{delete_app_data, guard_requested};
 /// the guard's own codes (0, and `clauseo_host::pre_write_guard::DENY`).
 pub const SANDBOXED_EXIT: i32 = 77;
 
-/// The one stderr line of a refused start.
+/// The fixed text of a refused start's stderr line; [`refusal`] adds the signal before its
+/// period.
 pub const REFUSAL: &str = "Clauseo will not start inside the agent sandbox.";
+
+/// What told the check this process runs inside the agent sandbox.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Signal {
+    /// Windows: the token is an `AppContainer`.
+    AppContainer,
+    /// Windows: the token has restricting SIDs.
+    RestrictedToken,
+    /// Windows: the token's integrity level is below Medium, or could not be read.
+    BelowMedium,
+    /// Windows: the token's user is one of S15's pool users.
+    PoolUser,
+    /// Windows: the token or the sandbox record could not be read (access denied), or the record
+    /// is not a list of SIDs.
+    Unreadable,
+    /// macOS: the process runs under a Seatbelt profile (or `sandbox_check` failed).
+    Seatbelt,
+}
+
+impl Signal {
+    /// The signal's fixed phrase in the refusal line: no path, no SID.
+    pub const fn phrase(self) -> &'static str {
+        match self {
+            Self::AppContainer => "AppContainer",
+            Self::RestrictedToken => "restricted token",
+            Self::BelowMedium => "below-Medium integrity",
+            Self::PoolUser => "pool user",
+            Self::Unreadable => "unreadable token or sandbox record",
+            Self::Seatbelt => "Seatbelt sandbox",
+        }
+    }
+}
+
+/// The one stderr line of a start refused for `signal`, without its newline: [`REFUSAL`] with
+/// the signal's phrase in parentheses before the period.
+pub fn refusal(signal: Signal) -> String {
+    let stem = REFUSAL.strip_suffix('.').unwrap_or(REFUSAL);
+    format!("{stem} ({}).", signal.phrase())
+}
 
 /// Whether this process runs inside the agent sandbox. A seam, so tests can give each answer.
 pub trait SandboxProbe {
-    /// `Ok(true)` inside the sandbox, `Ok(false)` outside, `Err` when the OS could not say.
-    fn sandboxed(&self) -> io::Result<bool>;
+    /// `Ok(Some(signal))` inside the sandbox, with the first signal that fired; `Ok(None)`
+    /// outside; `Err` when the OS could not say.
+    fn sandboxed(&self) -> io::Result<Option<Signal>>;
 }
 
 /// The OS's answer (the contract above has each OS's call).
 pub struct SystemProbe;
 
 impl SandboxProbe for SystemProbe {
-    fn sandboxed(&self) -> io::Result<bool> {
+    fn sandboxed(&self) -> io::Result<Option<Signal>> {
         #[cfg(windows)]
         return windows::sandboxed();
         #[cfg(target_os = "macos")]
         return Ok(macos::sandboxed());
         // The Linux agent jail is not a target: nothing to ask.
         #[cfg(not(any(windows, target_os = "macos")))]
-        return Ok(false);
+        return Ok(None);
     }
 }
 
@@ -132,9 +174,9 @@ pub fn launch(
         && delete_app_data::requested(first)
     {
         return Launched::Exit(match probe.sandboxed() {
-            Ok(false) => stages.delete_app_data(rest),
-            Ok(true) => {
-                say(stderr, REFUSAL);
+            Ok(None) => stages.delete_app_data(rest),
+            Ok(Some(signal)) => {
+                say(stderr, &refusal(signal));
                 SANDBOXED_EXIT
             }
             Err(error) => {
@@ -150,11 +192,11 @@ pub fn launch(
         });
     }
     match probe.sandboxed() {
-        Ok(true) => {
-            say(stderr, REFUSAL);
+        Ok(Some(signal)) => {
+            say(stderr, &refusal(signal));
             return Launched::Exit(SANDBOXED_EXIT);
         }
-        Ok(false) => {}
+        Ok(None) => {}
         Err(error) => say(
             stderr,
             &format!(

@@ -122,7 +122,8 @@ use clauseo_settings::{
 };
 use host_start::{HostCell, HostStart};
 pub use jailed::{
-    AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Stages, SystemProbe, launch,
+    AppStages, Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Signal, Stages, SystemProbe,
+    launch, refusal,
 };
 pub use pre_write_guard::guard_requested;
 use profile::{DesktopProfile, with_profile};
