@@ -4,6 +4,10 @@
 // matter, and, with a scenario, whose `agents.claude-acp` starts `fake_agent` on it), the matter folder
 // (`E2E_MATTER_DIR`, which the e2e build's pick_folder returns instead of opening the dialog), and
 // the WebView2 data folder of each launch: new per launch, or one per worker reused (`Profile`).
+// Unless a test asks for the first run, desktop's agents start set up (`SETUP_AGENTS`): each one's
+// `plans.<id>` names a provider, which desktop shows as signed in by the firm from its first setup
+// event, and `E2E_AGENTS_MANAGED` has the e2e build take their installs as the firm's, so nothing
+// downloads and the first run's sign-in gate never takes the composer's Send (#494).
 // Pure file work, no app: scratch.test.ts runs it on any OS.
 //
 //   E2E_FAKE_AGENT    absolute path to fake_agent(.exe); default: beside E2E_APP
@@ -24,6 +28,12 @@ import { dirname, isAbsolute, join, relative, sep } from "node:path";
 /** The settings key the window's threads use: `agents.claude-acp`. */
 export const AGENT_ID = "claude-acp";
 
+/**
+ * The agents desktop sets up (its snapshot's), which every test but a first run's starts with
+ * installed and signed in: so a conversation on either plan, the test's agent or not, sends.
+ */
+export const SETUP_AGENTS: readonly string[] = [AGENT_ID, "codex-acp"];
+
 /** What a test asks of its folders. */
 export interface ScratchOptions {
   /** A scenario bundled with fake_agent (`fake_agent --scenario <name>`), or null for no agent. */
@@ -34,6 +44,11 @@ export interface ScratchOptions {
   agentArgs?: readonly string[];
   /** More agents beside `agents.claude-acp`: agent id (`codex-acp`) to the scenario it plays. */
   otherAgents?: Readonly<Record<string, string>>;
+  /**
+   * True leaves desktop's agents as on a lawyer's first run: not installed and signed out, so
+   * the first run's install line and sign-in gate show. False (the default) starts them set up.
+   */
+  firstRun?: boolean;
 }
 
 /** One test's folders. */
@@ -48,6 +63,8 @@ export interface Scratch {
   mattersDir: string;
   /** The fake_agent the settings start, or null when the test has no scenario. */
   agentCommand: string | null;
+  /** The agents that start set up (`E2E_AGENTS_MANAGED`, `plans`): none on a first run. */
+  setUp: readonly string[];
 }
 
 /**
@@ -76,9 +93,20 @@ export function agentSettings(
 }
 
 /**
+ * The `plans` section that signs `agents` in: `provider: anthropic`, which desktop counts as the
+ * firm's plan (`SignedIn` by `firm`) and which adds no variable to the agent's launch, so
+ * fake_agent runs as without it.
+ */
+export function signedInPlans(agents: readonly string[]): Record<string, unknown> {
+  return agents.length === 0
+    ? {}
+    : { plans: Object.fromEntries(agents.map((id) => [id, { provider: "anthropic" }])) };
+}
+
+/**
  * The whole `settings.json`: new matters in `mattersDir` (S5 `matters.default_location`, absolute;
  * without it the host's Scratch matter lands in the real Documents/Clauseo), plus the agent when
- * there is one.
+ * there is one, plus the plans that sign `setUp` in.
  */
 export function scratchSettings(
   mattersDir: string,
@@ -88,6 +116,7 @@ export function scratchSettings(
     args?: readonly string[];
     others?: Readonly<Record<string, string>>;
   } | null,
+  setUp: readonly string[] = [],
 ): Record<string, unknown> {
   if (!isAbsolute(mattersDir)) {
     throw new Error(`matters.default_location must be an absolute path, not ${mattersDir}`);
@@ -97,6 +126,7 @@ export function scratchSettings(
     ...(agent === null
       ? {}
       : agentSettings(agent.command, agent.scenario, agent.args, agent.others)),
+    ...signedInPlans(setUp),
   };
 }
 
@@ -152,6 +182,7 @@ export function makeScratch(
         );
       }
     }
+    const setUp = options.firstRun === true ? [] : SETUP_AGENTS;
     const settings = scratchSettings(
       mattersDir,
       agentCommand === null || options.scenario === null
@@ -162,9 +193,10 @@ export function makeScratch(
             args: options.agentArgs ?? [],
             others: options.otherAgents ?? {},
           },
+      setUp,
     );
     writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
-    return { root, dataDir, matterDir, mattersDir, agentCommand };
+    return { root, dataDir, matterDir, mattersDir, agentCommand, setUp };
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;
@@ -366,13 +398,15 @@ export async function readyReusedProfile(
 
 /**
  * The variables every launch gets. `E2E_CONFIRM_ALWAYS=accept` makes the e2e build answer the
- * native "always allow" confirmation itself, which CDP cannot click.
+ * native "always allow" confirmation itself, which CDP cannot click; `E2E_AGENTS_MANAGED` has it
+ * take the set-up agents' installs as the firm's, so none downloads (empty on a first run).
  */
 export function scratchEnv(scratch: Scratch): Record<string, string> {
   return {
     CLAUSEO_DATA_DIR: scratch.dataDir,
     E2E_MATTER_DIR: scratch.matterDir,
     E2E_CONFIRM_ALWAYS: "accept",
+    E2E_AGENTS_MANAGED: scratch.setUp.join(","),
   };
 }
 
