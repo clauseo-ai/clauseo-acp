@@ -4,13 +4,14 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use super::journal_plan::{JournalAction, journal_plan};
 use super::machine::{LogonRight, Machine, Password, ServiceStart};
 use super::outcome::{
     JournalOutcome, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step,
     cause_of,
 };
 use super::rollback::{Made, Run, roll_back};
-use super::{JOURNAL_DELTA, JOURNAL_MAX, POOL_START, SetupRequest};
+use super::{POOL_START, SetupRequest};
 use crate::windows::apply::{Applied, fence_registered};
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
 use crate::windows::pool::{MachineRecord, POOL_CAP, PoolUser, pool_name, pool_number};
@@ -551,7 +552,8 @@ fn fence(
         .map_err(|error| (Step::Fence, error.to_string()))
 }
 
-/// Step 9: each chosen volume's change journal made [`JOURNAL_MAX`] when smaller (D-B12).
+/// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller
+/// ([`journal_plan`], D-B12).
 /// Failures are listed, never fatal: they cost only full walks later.
 fn journals(
     machine: &mut impl Machine,
@@ -568,10 +570,14 @@ fn journals(
     let mut done = Vec::new();
     for volume in volumes {
         let outcome = match machine.journal_size(&volume) {
-            Ok(Some(size)) if size >= JOURNAL_MAX => JournalOutcome::Left(size),
-            Ok(_) => match machine.grow_journal(&volume, JOURNAL_MAX, JOURNAL_DELTA) {
-                Ok(()) => JournalOutcome::Grown,
-                Err(error) => JournalOutcome::Failed(cause_of(&error)),
+            Ok(size) => match journal_plan(size) {
+                JournalAction::Leave => JournalOutcome::Left(size.unwrap_or_default()),
+                JournalAction::Grow { max, delta } => {
+                    match machine.grow_journal(&volume, max, delta) {
+                        Ok(()) => JournalOutcome::Grown,
+                        Err(error) => JournalOutcome::Failed(cause_of(&error)),
+                    }
+                }
             },
             Err(error) => JournalOutcome::Failed(cause_of(&error)),
         };

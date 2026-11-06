@@ -209,7 +209,7 @@ pub(crate) fn current_user_sid() -> io::Result<Sid> {
 }
 
 /// The SID string of `token`'s user.
-fn user_of(token: HANDLE) -> io::Result<String> {
+pub(crate) fn user_of(token: HANDLE) -> io::Result<String> {
     let mut needed = 0u32;
     // SAFETY: no buffer and a zero length ask only for the size, written to `needed`.
     match unsafe { GetTokenInformation(token, TokenUser, None, 0, &raw mut needed) } {
