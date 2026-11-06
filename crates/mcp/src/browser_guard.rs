@@ -27,6 +27,7 @@ mod filter;
 mod job;
 mod parent;
 mod port_file;
+mod quiet;
 #[cfg(unix)]
 pub mod reaper;
 mod relay;

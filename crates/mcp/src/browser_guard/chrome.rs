@@ -36,7 +36,7 @@ use std::time::Duration;
 use super::downloads::Mover;
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
-use super::{env, pause};
+use super::{env, pause, quiet};
 use crate::write;
 
 /// How long Chrome has to print its `DevTools` endpoint.
@@ -55,7 +55,8 @@ const LISTENING: &str = "DevTools listening on ";
 const CANNOT_LISTEN: &str = "Cannot start http server for devtools";
 
 /// agent-browser v0.41.1's flags for a headless launch with no extensions, webgpu or real
-/// keychain (`chrome.rs:466-560`), less its `--remote-debugging-port=0`.
+/// keychain (`chrome.rs:466-560`), less its `--remote-debugging-port=0` and its
+/// `--disable-features` and `--enable-features`, which [`quiet::FEATURES`] extends.
 const HEADLESS_ARGS: &[&str] = &[
     "--no-first-run",
     "--no-default-browser-check",
@@ -67,8 +68,6 @@ const HEADLESS_ARGS: &[&str] = &[
     "--disable-popup-blocking",
     "--disable-prompt-on-repost",
     "--disable-sync",
-    "--disable-features=Translate",
-    "--enable-features=NetworkService,NetworkServiceInProcess,WebMCPTesting,DevToolsWebMCPSupport",
     "--metrics-recording-only",
     "--password-store=basic",
     "--use-mock-keychain",
@@ -324,7 +323,8 @@ pub(crate) fn remove_profile(profile: &Path) {
     ));
 }
 
-/// Makes `profile` from nothing, with `Default/Preferences` sending downloads to `staging`.
+/// Makes `profile` from nothing, with `Default/Preferences` sending downloads to `staging` and
+/// [`quiet::preferences`]'s services off.
 ///
 /// agent-browser's launch let every download through (`Browser.setDownloadBehavior` `allow`);
 /// connected to the guard's Chrome it sets `default` (`browser.rs:2563-2574`), so Chrome's own
@@ -339,7 +339,7 @@ fn fresh_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
     }
     write::create_dir_all(&profile.join("Default"))?;
     write::create_dir_all(staging)?;
-    let preferences = serde_json::json!({
+    let mut preferences = serde_json::json!({
         "download": {
             "default_directory": staging,
             "prompt_for_download": false,
@@ -350,6 +350,11 @@ fn fresh_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
             "http://*:*,*": {"setting": 1},
         }}}},
     });
+    if let (Some(own), serde_json::Value::Object(quiet)) =
+        (preferences.as_object_mut(), quiet::preferences())
+    {
+        own.extend(quiet);
+    }
     write::write(
         &profile.join("Default").join("Preferences"),
         preferences.to_string(),
@@ -359,6 +364,12 @@ fn fresh_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
 /// Chrome's arguments, in order.
 pub(crate) fn chrome_args(spec: &Spec<'_>, profile: &Path) -> Vec<OsString> {
     let mut args: Vec<OsString> = HEADLESS_ARGS.iter().map(OsString::from).collect();
+    args.extend(
+        quiet::FEATURES
+            .iter()
+            .chain(quiet::ARGS)
+            .map(OsString::from),
+    );
     let mut proxy = OsString::from("--proxy-server=");
     proxy.push(spec.proxy);
     args.push(proxy);
