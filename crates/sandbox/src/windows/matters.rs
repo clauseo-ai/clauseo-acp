@@ -148,12 +148,14 @@ impl MatterSids {
     }
 
     /// The pool user of `matter`, from `pool` (the machine record's `PoolSids`). Inside
-    /// [`MatterSids::change`]'s lock and fresh read, where `ledger` is called to read the ACL
-    /// ledger and the set-aside manifests are read (`set_aside.rs`), so an entry, hand-back or
-    /// item recorded before the lock was taken is seen. A matter that holds one keeps it, and
-    /// nothing is written. Otherwise the user [`pool::assign`](super::pool::assign) picks, by its
-    /// reuse rule, is saved in the matter's row before it is returned; if the save fails, the
-    /// matter holds none. A released matter asking again gets a fresh pick, and its old user goes
+    /// [`MatterSids::change`]'s lock and fresh read. A matter that holds a user still in `pool`
+    /// gets it back at once: nothing else is read and nothing written, so a launch pays no
+    /// ledger read and no set-aside walk. Otherwise `ledger` is called there to read the ACL
+    /// ledger and the set-aside manifests and trees are read (`set_aside.rs`), so an entry,
+    /// hand-back or item recorded before the lock was taken is seen. Then the user
+    /// [`pool::assign`](super::pool::assign) picks, by its reuse rule, is saved in the matter's
+    /// row before it is returned; if the save fails, the matter holds none. A released matter
+    /// asking again gets a fresh pick, and its old user goes
     /// to `held_before`. No free user is [`Assign::PoolFull`]. `open` is the caller's read;
     /// see [`OpenSessions`] for why a stale one is safe.
     ///
@@ -172,6 +174,13 @@ impl MatterSids {
         let data_dir = self.data_dir.clone();
         let owner_of = self.owner_of;
         self.change(|rows, _| {
+            // The launch path: a matter keeping its user reads neither the ledger nor the
+            // set-aside trees.
+            if let Some(user) = rows.get(matter).and_then(MatterRow::holds)
+                && pool.contains(user)
+            {
+                return Ok((user.clone(), false));
+            }
             let ledger =
                 ledger().map_err(|error| SetupError::Failed(format!("the ACL ledger: {error}")))?;
             let set_aside = set_aside::set_aside_owners(&data_dir, owner_of);

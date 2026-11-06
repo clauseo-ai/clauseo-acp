@@ -123,3 +123,24 @@ fn assign_refuses_a_new_pick_for_a_matter_with_no_open_session() {
         "kept"
     );
 }
+
+/// A matter keeping its user gets it without the ledger being read.
+#[test]
+fn a_keeping_call_reads_no_ledger() {
+    let temp = TempDir::new("review2-keep");
+    let records = TempDir::new("review2-keep-ledger");
+    let ledger = ledger_in(records.path(), &pool(1));
+    let one = matter();
+    let none = OpenSessions::default();
+    let mut sids = sids_in(&temp);
+    assert_eq!(
+        sids.launch(&one, &pool(1), reread(&ledger), &none),
+        Ok(user(1))
+    );
+    let unread = || -> io::Result<Ledger> { panic!("a keeping call read the ledger") };
+    assert_eq!(sids.assign(&one, &pool(1), unread, &none), Ok(user(1)));
+    assert_eq!(
+        sids_in(&temp).assign(&one, &pool(2), unread, &none),
+        Ok(user(1))
+    );
+}
