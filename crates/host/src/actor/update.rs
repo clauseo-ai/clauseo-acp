@@ -22,6 +22,7 @@
 
 mod effects;
 mod files;
+mod gate;
 mod turns;
 
 use std::sync::Arc;
@@ -44,6 +45,10 @@ use crate::update::{
 };
 
 pub(crate) use files::Done as FilesDone;
+pub(crate) use gate::gated;
+#[cfg(test)]
+pub(crate) use gate::hold_sends;
+use gate::show_gate;
 
 /// The settings key the machine's mode mirrors.
 const MODE_KEY: &str = "update.mode";
@@ -160,32 +165,6 @@ pub(super) fn serving(actor: &mut Actor) {
     start_machine(actor, marker, cached);
 }
 
-/// Whether new sends are held: an install under `now` waits for its cancelled turns.
-pub(crate) fn gated(actor: &Actor) -> bool {
-    #[cfg(test)]
-    if TEST_GATE.get() {
-        return true;
-    }
-    actor.update.machine.as_ref().is_some_and(Machine::gated)
-}
-
-#[cfg(test)]
-thread_local! {
-    /// A unit test holds new sends as an install under `now` would ([`hold_sends`]); the
-    /// rig runs its actor on the test's own thread.
-    static TEST_GATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Holds new sends as an install under `now` does, or lifts that hold as taking the install
-/// back does, with no machine: for unit tests of the turn path.
-#[cfg(test)]
-pub(crate) fn hold_sends(actor: &mut Actor, on: bool) {
-    TEST_GATE.set(on);
-    if !on {
-        super::turn::release(actor);
-    }
-}
-
 /// The download a `BeginInstall` handed over, once: the actor's exit is then `Exit::Install`.
 pub(super) fn take_install(actor: &mut Actor) -> Option<Downloaded> {
     actor.update.install.take()
@@ -295,9 +274,11 @@ fn start_machine(actor: &mut Actor, marker: Option<UpdateMarker>, cached: Option
         cached,
         jitter: Jitter::new(seed),
     };
+    let was = gated(actor);
     let (machine, fx) = Machine::start(start, now.wall);
     actor.update.machine = Some(machine);
     effects::run(actor, fx);
+    show_gate(actor, was);
 }
 
 /// `update.mode` in force, from the settings, and whether policy locks it.
@@ -350,9 +331,11 @@ fn feed(actor: &mut Actor, input: Input) {
     if !matches!(actor.phase, HostPhase::Serving) {
         return;
     }
+    let was = gated(actor);
     if let Ok(fx) = stepped(actor, input) {
         effects::run(actor, fx);
     }
+    show_gate(actor, was);
 }
 
 /// Steps the machine with `input`, keeping the next machine; its effects are the caller's.
@@ -389,12 +372,14 @@ pub(super) fn command(actor: &mut Actor, ctx: &CommandCtx, asked: Asked) {
         Asked::Install(when) => Input::InstallRequested(when),
         Asked::CancelScheduled => Input::CancelScheduled,
     };
+    let was = gated(actor);
     match stepped(actor, input) {
         Ok(fx) => {
             // Before any effect: `BeginInstall` stops the host, and a stopping host drops
             // answers.
             actor.finish_command(ctx.id, Ok(clauseo_protocol::CommandOutcome::Done));
             effects::run(actor, fx);
+            show_gate(actor, was);
         }
         Err(refusal) => actor.finish_command(ctx.id, Err(refused(refusal))),
     }

@@ -41,6 +41,7 @@ fn thread() -> ThreadSummary {
         agent: AgentId::new("fake-agent").unwrap(),
         status: ThreadStatus::Idle,
         queue_held: false,
+        queue_held_reason: None,
         seen: true,
         snoozed_until: None,
         done: false,

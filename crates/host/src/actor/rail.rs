@@ -214,6 +214,7 @@ pub(crate) fn thread_facts(actor: &Actor, thread: &ThreadEntry) -> ThreadFacts {
 /// permission of it waits (which the row does not show but the matter's status does).
 pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSummary, bool) {
     let read = read(actor, thread);
+    let hold = super::turn::queue_hold(actor, thread.row.id);
     let summary = ThreadSummary {
         thread: thread.row.id,
         matter: thread.row.matter,
@@ -223,7 +224,8 @@ pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSumm
             .or_else(|| thread.row.title.as_deref().map(CompactString::from)),
         agent: thread.row.agent.clone(),
         status: read.status,
-        queue_held: super::turn::queue_held(actor, thread.row.id),
+        queue_held: hold.is_some(),
+        queue_held_reason: hold,
         seen: seen(thread),
         snoozed_until: read.header.and_then(|header| header.snoozed_until),
         done: read.header.is_some_and(|header| header.done),

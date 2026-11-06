@@ -165,14 +165,15 @@ impl Serialize for ThreadState {
     }
 }
 
-/// The header as the fold left it: `queue_held` is the host's flag, set after each load
-/// ([`crate::set_queue_held`]), so a snapshot writes it `false` and still equals the fold of the
-/// log. Copies the header only while the flag is set.
+/// The header as the fold left it: `queue_held` and its reason are the host's, set after each
+/// load ([`crate::set_queue_held`]), so a snapshot writes them `false` and `None` and still
+/// equals the fold of the log. Copies the header only while either is set.
 fn unheld(header: Option<&HeaderEntry>) -> Option<std::borrow::Cow<'_, HeaderEntry>> {
     header.map(|header| {
-        if header.queue_held {
+        if header.queue_held || header.queue_held_reason.is_some() {
             std::borrow::Cow::Owned(HeaderEntry {
                 queue_held: false,
+                queue_held_reason: None,
                 ..header.clone()
             })
         } else {

@@ -7,8 +7,8 @@
 //! held exactly as after any other stop but `EndTurn` (a refused permission's `NotAllowed`
 //! included), so `queue_held` and the queued prompt look the same whatever held it, and it is
 //! marked as waiting for the sign-in. `HostHandle::restart_agents` resumes it once; a lawyer's
-//! `ResumeQueue` or `SendQueuedNow` moves it as usual, and the mark goes when the queue no
-//! longer shows held (`held.rs`).
+//! `ResumeQueue` or `SendQueuedNow` moves it as usual, and the mark goes when the queue is no
+//! longer held or empties (`held.rs`).
 //!
 //! While the queue is held for the sign-in, or `HostHandle::stop_agents` holds the agent
 //! (decision record 0048, P4d), a hold applies ([`applies`]): a prompt sent while nothing runs
@@ -104,6 +104,7 @@ fn log(actor: &mut Actor, thread: ThreadId, requeue: Requeue) -> Result<(), Erro
         },
     );
     queue.held = true;
+    queue.held_for_limit = false;
     queue.sign_in = Some(turn);
     tracing::info!(%thread, "a turn is held for its agent's sign-in");
     let sent = out.send(actor, Then::Queue(After::Requeued(turn)));

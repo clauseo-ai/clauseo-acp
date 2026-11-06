@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContextUsage, ThreadStatus, ToolState};
+use super::{ContextUsage, QueueHoldReason, ThreadStatus, ToolState};
 use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
@@ -43,6 +43,11 @@ pub struct HeaderEntry {
     /// Missing reads as `false`, so a header written before the field still decodes.
     #[serde(default)]
     pub queue_held: bool,
+    /// Why the queue waits, the most specific reason that applies; set only while `queue_held`
+    /// is true. Filled by the host, as `queue_held` is. Missing reads as `None`, so a header
+    /// written before the field still decodes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue_held_reason: Option<QueueHoldReason>,
     /// Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
     /// true only for an agent whose steer adds to the answer, which needs both of
     /// [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False

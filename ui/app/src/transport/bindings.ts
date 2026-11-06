@@ -1829,6 +1829,12 @@ export type HeaderEntry = {
 	 */
 	queue_held?: boolean,
 	/**
+	 *  Why the queue waits, the most specific reason that applies; set only while `queue_held`
+	 *  is true. Filled by the host, as `queue_held` is. Missing reads as `None`, so a header
+	 *  written before the field still decodes.
+	 */
+	queue_held_reason?: QueueHoldReason,
+	/**
 	 *  Whether a steered message joins the running turn (`SendPrompt` with `delivery: steer`):
 	 *  true only for an agent whose steer adds to the answer, which needs both of
 	 *  [`SteeringCapability`](crate::SteeringCapability)'s flags (claude-agent-acp). False
@@ -3815,6 +3821,35 @@ export type QueryResult =
 /**  For `ListSkillPacks`. */
 ({ skill_packs: PackStatus[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never };
 
+/**
+ *  Why a thread's queued turns wait, the most specific reason that applies. Set only while
+ *  `queue_held` is true.
+ * 
+ *  A plain string; a reason from a newer Clauseo decodes to `Unknown`.
+ */
+export type QueueHoldReason = 
+/**
+ *  The queue waits for its agent's sign-in: a turn needed one and went back to the
+ *  queue's head. It runs once the agent starts again with the new login.
+ */
+"sign_in" | 
+/**
+ *  The login is switching: Clauseo stopped the agent (`stop_agents`) and starts it again
+ *  once the new login is in place.
+ */
+"switching" | 
+/**  An update is installing: queued turns wait for it, and nothing starts meanwhile. */
+"update" | 
+/**  The last turn stopped at the plan's limit; the queue waits for the lawyer. */
+"limit" | 
+/**
+ *  The queue waits for the lawyer: the last turn was stopped, failed, or the app started
+ *  again.
+ */
+"paused" | 
+/**  A reason from a newer Clauseo; written back as the plain string `kind`. */
+string;
+
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {
 	/**  The queued turn. */
@@ -4804,6 +4839,12 @@ export type ThreadSummary = {
 	 *  missing reads as `false`.
 	 */
 	queue_held?: boolean,
+	/**
+	 *  Why its queue waits, as
+	 *  [`HeaderEntry::queue_held_reason`](crate::HeaderEntry::queue_held_reason); set only while
+	 *  `queue_held` is true. Missing reads as `None`.
+	 */
+	queue_held_reason?: QueueHoldReason,
 	/**
 	 *  Whether the lawyer has seen how its last turn ended: true when no turn ended after its
 	 *  last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.

@@ -388,6 +388,7 @@ mod host_event {
                 agent: agent("claude-acp"),
                 status: ThreadStatus::Idle,
                 queue_held: false,
+                queue_held_reason: None,
                 seen: false,
                 snoozed_until: Some(Timestamp::new(1_760_086_400_000).unwrap()),
                 done: false,

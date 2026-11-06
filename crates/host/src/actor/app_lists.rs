@@ -313,6 +313,7 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         agent,
         status,
         queue_held,
+        queue_held_reason,
         seen,
         snoozed_until,
         done,
@@ -325,6 +326,7 @@ fn same_thread(a: &ThreadSummary, b: &ThreadSummary) -> bool {
         && *agent == b.agent
         && *status == b.status
         && *queue_held == b.queue_held
+        && *queue_held_reason == b.queue_held_reason
         && *seen == b.seen
         && *snoozed_until == b.snoozed_until
         && *done == b.done

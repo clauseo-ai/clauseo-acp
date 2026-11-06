@@ -1,14 +1,16 @@
 //! The thread's queue at the interface: a prompt sent while a turn runs waits and starts after
 //! an `EndTurn`; the cap; every other stop (a cancel, a refusal that ended the turn, the usage
-//! limit, the agent exiting) holds the queue until `ResumeQueue`; archive waits for the queue.
+//! limit, the agent exiting) holds the queue until `ResumeQueue`, with its reason shown (`limit`
+//! for the limit, `paused` for the others); archive waits for the queue.
 //! The helpers here serve `queue_moves.rs` and `steer.rs` too.
 
 use std::time::Duration;
 
 use clauseo_protocol::{
     CommandOutcome, Delivery, DeliveryRequest, DomainEvent, ErrorCode, HostCommand,
-    MAX_QUEUED_TURNS, MatterId, MessageId, PromptBlock, QueuedPromptEdited, SteerResolved,
-    StopReason, StreamId, ThreadId, TurnId, UserMessage, ViewEntry, ViewPatchBody,
+    MAX_QUEUED_TURNS, MatterId, MessageId, PromptBlock, QueueHoldReason, QueuedPromptEdited,
+    SteerResolved, StopReason, StreamHeader, StreamId, ThreadId, TurnId, UserMessage, ViewEntry,
+    ViewPatchBody,
 };
 
 use crate::codex::CODEX;
@@ -95,6 +97,40 @@ pub(crate) fn held(host: &Running, matter: MatterId, thread: ThreadId) -> bool {
         .find(|summary| summary.thread == thread)
         .unwrap_or_else(|| panic!("thread {thread} not listed"))
         .queue_held
+}
+
+/// Why `thread`'s queue shows held, `None` when it does not: its `ListThreads` row and the header
+/// of a fresh view of it, which must agree, each with `queue_held` set exactly when a reason is.
+pub(crate) fn hold_reason(
+    host: &Running,
+    matter: MatterId,
+    thread: ThreadId,
+) -> Option<QueueHoldReason> {
+    let row = host
+        .threads(matter)
+        .into_iter()
+        .find(|summary| summary.thread == thread)
+        .unwrap_or_else(|| panic!("thread {thread} not listed"));
+    assert_eq!(row.queue_held, row.queue_held_reason.is_some(), "{row:?}");
+    let mut view = host.view(StreamId::Thread(thread), None);
+    view.until("the view's reset", |view| view.patches().next().is_some());
+    let Some(ViewPatchBody::Reset { view_window }) = view.patches().next().map(|patch| &patch.body)
+    else {
+        panic!("the view did not start with a reset: {}", view.dump());
+    };
+    let Some(StreamHeader::Thread(header)) = &view_window.header else {
+        panic!("the view has no thread header: {}", view.dump());
+    };
+    assert_eq!(
+        header.queue_held,
+        header.queue_held_reason.is_some(),
+        "{header:?}"
+    );
+    assert_eq!(
+        header.queue_held_reason, row.queue_held_reason,
+        "the header and the row disagree"
+    );
+    row.queue_held_reason
 }
 
 /// How many `TurnStarted` of `turn` were received.
@@ -291,6 +327,10 @@ fn held_until_resume_queue(
     );
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "the queue is not held");
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Paused)
+    );
     assert_eq!(starts(&events, second), 0, "{}", events.dump());
 
     assert_eq!(
@@ -301,6 +341,7 @@ fn held_until_resume_queue(
     settle(&host, &mut events);
     assert_eq!(events.turn_text(second), text);
     assert!(!held(&host, matter, thread), "still held after the resume");
+    assert_eq!(hold_reason(&host, matter, thread), None);
 
     // On an empty queue it answers Done and logs nothing (its receipt is not an event).
     let head = events.head();
@@ -356,6 +397,10 @@ fn held_after_a_limit_stop() {
     assert_eq!(events.until_turn_ended(first).stop, StopReason::AtLimit);
     settle(&host, &mut events);
     assert!(held(&host, matter, thread), "the queue is not held");
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Limit)
+    );
     assert_eq!(starts(&events, second), 0, "{}", events.dump());
 
     assert_eq!(
@@ -365,6 +410,8 @@ fn held_after_a_limit_stop() {
     assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
     settle(&host, &mut events);
     assert_eq!(events.turn_text(second), "Second answer.");
+    // The queue moved on and emptied: no reason is left.
+    assert_eq!(hold_reason(&host, matter, thread), None);
     host.shutdown();
 }
 
@@ -391,6 +438,10 @@ fn held_after_agent_exit_then_resume() {
     });
     assert_eq!(exited, 1, "{}", events.dump());
     assert!(held(&host, matter, thread), "the queue is not held");
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Paused)
+    );
     assert_eq!(starts(&events, second), 0, "{}", events.dump());
 
     assert_eq!(

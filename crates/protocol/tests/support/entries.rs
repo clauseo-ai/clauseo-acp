@@ -14,9 +14,9 @@ use clauseo_protocol::{
     HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
     MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
     PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry,
-    ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry,
-    ViewEntry, WebResult,
+    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
+    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
+    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
@@ -47,6 +47,7 @@ pub fn header_entry() -> HeaderEntry {
         agent_name: None,
         status: ThreadStatus::Idle,
         queue_held: true,
+        queue_held_reason: Some(QueueHoldReason::Paused),
         steer_joins_turn: true,
         tools: vec![],
         snoozed_until: None,

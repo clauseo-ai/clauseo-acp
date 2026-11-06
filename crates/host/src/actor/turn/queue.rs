@@ -9,8 +9,9 @@
 //! `SendQueuedNow` or a new `SendPrompt` (which only queues held while a hold applies: the
 //! sign-in's or an install's, `hold.rs`). While a steer request is out, it waits for the answer,
 //! so a requeued steer takes the head. The held flag lives here only (nothing is logged for it);
-//! the view shows it through `clauseo_reducer::set_queue_held`. At start-up every queued turn
-//! comes back held, rebuilt from the log ([`restore`]).
+//! the view shows it, with why the queue waits, through `clauseo_reducer::set_queue_held`
+//! (`held.rs`). At start-up every queued turn comes back held, rebuilt from the log
+//! ([`restore`]).
 
 mod commands;
 mod held;
@@ -25,7 +26,7 @@ use std::collections::VecDeque;
 use clauseo_counts::schema::Delivery;
 use clauseo_protocol::{
     CommandOutcome, ContentBlock, DeliveryRequest, ErrorCode, MAX_QUEUED_TURNS, MessageId,
-    PromptBlock, StopReason, StreamId, ThreadId, TurnId, TurnQueued,
+    PromptBlock, QueueHoldReason, StopReason, StreamId, ThreadId, TurnId, TurnQueued,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -38,8 +39,10 @@ use crate::log_file::Cause;
 
 use commands::put_content;
 pub(super) use commands::{edit, remove, resume, send_now};
-pub(crate) use held::queue_held;
+#[cfg(test)]
+pub(super) use held::queue_held;
 pub(super) use held::sync_held;
+pub(crate) use held::{queue_hold, sync_all_held};
 pub(crate) use install::{any_active, any_running, cancel_all, release};
 pub(super) use restore::restore;
 pub(super) use sign_in::{Requeue, keep as keep_for_sign_in, resume as resume_sign_in};
@@ -57,12 +60,15 @@ pub(crate) struct ThreadQueue {
     /// A current turn the lawyer removed before it started: its end neither holds nor moves
     /// the queue differently from the turn before it.
     removed: Option<TurnId>,
-    /// The `queue_held` last shown.
-    shown: bool,
+    /// The queue was held by a turn that stopped at the plan's limit (`AtLimit`): its reason
+    /// shows `limit`. Cleared with `held` (`held.rs`), and set again by each new hold.
+    held_for_limit: bool,
+    /// The `queue_held` last shown, with its reason: `None` while it does not show held.
+    shown: Option<QueueHoldReason>,
     /// The queue is held for its agent's sign-in, with this turn put back at its head:
-    /// `restart_agents` resumes it once (`sign_in.rs`). Cleared whenever the queue no longer
-    /// shows held, and when the lawyer removes that turn, which leaves the queue held the
-    /// usual way (#408), waiting for "Send next".
+    /// `restart_agents` resumes it once (`sign_in.rs`). Cleared whenever the queue is no longer
+    /// held or empties (`held.rs`), and when the lawyer removes that turn, which leaves the
+    /// queue held the usual way (#408), waiting for "Send next".
     sign_in: Option<TurnId>,
     /// A turn that ended for the sign-in, put back once its close is durable.
     requeue: Option<Requeue>,
@@ -480,6 +486,7 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
         queue.held = false;
     } else if !forced && !removed && stop != StopReason::EndTurn {
         queue.held = true;
+        queue.held_for_limit = stop == StopReason::AtLimit;
     }
     move_on(actor, thread);
     sync_held(actor, thread);
@@ -576,5 +583,6 @@ fn put_back(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         forced: false,
     });
     state.queue.held = true;
+    state.queue.held_for_limit = false;
     sync_held(actor, thread);
 }

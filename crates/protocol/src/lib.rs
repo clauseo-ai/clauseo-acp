@@ -285,6 +285,7 @@ wire_types! {
         VersionEntry, ViewEntry,
     },
     view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
+    view::{QueueHoldReason},
 }
 
 // Re-exports that are not wire types: constants, functions, and types that never cross the

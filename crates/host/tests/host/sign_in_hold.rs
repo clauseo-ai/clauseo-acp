@@ -9,13 +9,13 @@
 
 use clauseo_protocol::{
     AgentId, CommandOutcome, ContentBlock, DeliveryRequest, DomainEvent, ErrorCode, HostCommand,
-    MatterId, StopReason, StreamId, ThreadId, ThreadStatus, TurnId,
+    MatterId, QueueHoldReason, StopReason, StreamId, ThreadId, ThreadStatus, TurnId,
 };
 
 use crate::codex::{CODEX, codex_dir};
 use crate::observe::Events;
 use crate::permissions::{answer_from, until_first_request};
-use crate::queue::{allow, held, send, settle, starts, until_queued, view_queue};
+use crate::queue::{allow, held, hold_reason, send, settle, starts, until_queued, view_queue};
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, text, wait};
 
 /// The prompt every test sends first.
@@ -168,6 +168,10 @@ fn a_held_sign_in_shows_as_a_refused_permissions_hold_does() {
     assert_eq!(events.until_turn_ended(first).stop, StopReason::NotAllowed);
     host.settle();
     let refused = shown(&host, matter, thread);
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::Paused)
+    );
     host.shutdown();
 
     let dir = Dir::new(
@@ -183,6 +187,11 @@ fn a_held_sign_in_shows_as_a_refused_permissions_hold_does() {
     host.settle();
     assert_eq!(shown(&host, matter, thread), refused);
     assert!(refused.0);
+    // Only the reason tells them apart.
+    assert_eq!(
+        hold_reason(&host, matter, thread),
+        Some(QueueHoldReason::SignIn)
+    );
     host.shutdown();
 }
 

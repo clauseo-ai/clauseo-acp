@@ -46,8 +46,8 @@
 //!   changes nothing and adds an [`Anomaly`]; an unknown kind advances `seq` and changes nothing.
 //!   The restart and idle-stop detach reasons are not folded yet: they advance `seq` and add
 //!   [`Anomaly::NotYetFolded`].
-//! - `queue_held` is the host's: no event sets it, [`set_queue_held`] does, and a snapshot
-//!   writes it `false`.
+//! - `queue_held` and `queue_held_reason` are the host's: no event sets them,
+//!   [`set_queue_held`] does, and a snapshot writes them `false` and `None`.
 //! - No change for an unchanged entry: each field is compared as it is set, and an `Upsert` is
 //!   emitted only when something changed.
 //! - No change carries more than `INLINE_LIMIT_BYTES` of text, counted as `escaped_len` counts
@@ -159,12 +159,17 @@ pub const fn wakes_thread(event: &clauseo_protocol::DomainEvent) -> bool {
     thread::wakes(event)
 }
 
-/// Sets the thread's `queue_held` ([`HeaderEntry::queue_held`](clauseo_protocol::HeaderEntry)),
-/// the host's in-memory flag that no event carries, and returns the header's `Upsert` when it
-/// changed. `None` also before `ThreadCreated`. A snapshot writes the flag `false`, so the
-/// host sets it again after each load.
-pub fn set_queue_held(state: &mut ThreadState, held: bool) -> Option<ViewChange> {
-    thread::set_queue_held(state, held)
+/// Sets the thread's `queue_held` and `queue_held_reason`
+/// ([`HeaderEntry::queue_held`](clauseo_protocol::HeaderEntry)) together: held with `hold`'s
+/// reason, or not held and no reason for `None`. They are the host's, in memory, and no event
+/// carries them. Returns the header's one `Upsert` when either changed; `None` also before
+/// `ThreadCreated`. A snapshot writes them `false` and `None`, so the host sets them again after
+/// each load.
+pub fn set_queue_held(
+    state: &mut ThreadState,
+    hold: Option<clauseo_protocol::QueueHoldReason>,
+) -> Option<ViewChange> {
+    thread::set_queue_held(state, hold)
 }
 
 /// Folds display-stage text into the thread: appends it to its message's shown text (an

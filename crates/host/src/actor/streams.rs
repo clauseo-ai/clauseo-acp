@@ -182,10 +182,10 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
     {
         sent.on_sent(std::slice::from_ref(envelope));
     }
-    // The queue's held flag is the host's, never in the log or a snapshot.
+    // The queue's held flag and its reason are the host's, never in the log or a snapshot.
     if let (StreamId::Thread(thread), Some(thread_state)) = (stream, state.as_thread_mut()) {
         actor.triage.loaded();
-        let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_held(actor, thread));
+        let _ = clauseo_reducer::set_queue_held(thread_state, turn::queue_hold(actor, thread));
     }
     let loaded = Box::new(Loaded {
         state,

@@ -67,7 +67,7 @@ pub(crate) use failure::blocked as stream_blocked;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub use launch_checks::PackRequest;
 pub(crate) use out::flush_text;
-pub(crate) use queue::{any_active, any_running, cancel_all, queue_held, release};
+pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
     RestoreAsk, committed as restore_committed, on_restored, restore_version,
 };
