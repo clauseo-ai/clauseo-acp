@@ -100,6 +100,12 @@ fn a_child_whose_hand_back_fails_refuses_the_launch_naming_it() {
         !ledger.entries().any(|e| e.state == EntryState::Applied),
         "the launch's entries rolled back"
     );
+    let matter = w.canonical("matter");
+    assert!(
+        !acl.aces.iter().any(|(p, ..)| *p == matter),
+        "the root's entries are off it: {:?}",
+        acl.aces
+    );
     let shown = CHILD.to_string();
     assert!(!shown.contains('\\') && !shown.contains("S-1-"), "{shown}");
 }

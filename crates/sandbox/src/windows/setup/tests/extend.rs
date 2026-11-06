@@ -351,3 +351,29 @@ fn an_extend_skips_a_matter_whose_root_cant_be_handed_back_and_fences_the_other(
         );
     }
 }
+
+/// S15 `PR4h`: an item in a registered matter that another matter's pool user owns, and whose
+/// hand-back fails, refuses that matter's fence walk: the extend skips the matter, says so, and
+/// fences the other.
+#[test]
+fn an_extend_skips_a_matter_whose_child_cant_be_handed_back_and_fences_the_other() {
+    let mut machine = FakeMachine::new("setup-extend-skip-child");
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let (owned, fenced) = (&matters[0], &matters[1]);
+    let child = canonical(&owned.folders.root).join("moved.txt");
+    acl.owners.insert(child.clone(), fenced.pool_user.clone());
+    acl.keeps_owner.insert(child.clone());
+    let req = request(&mut machine, 4, matters.clone());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+
+    assert_eq!(report.fence_skipped.len(), 1, "{:?}", report.fence_skipped);
+    let (skipped, why) = &report.fence_skipped[0];
+    assert_eq!(*skipped, owned.id);
+    assert!(why.contains("another sandbox user owns an item"), "{why}");
+    assert_eq!(acl.owners[&child], fenced.pool_user, "nothing handed back");
+    let made: Vec<Sid> = report.made.iter().map(|u| u.sid.clone()).collect();
+    assert!(fenced_against(&acl, fenced, &made));
+    assert!(!fenced_against(&acl, owned, &made));
+}

@@ -211,3 +211,47 @@ fn growing_the_pool_hands_back_a_registered_root_its_own_user_owns() {
         }
     }
 }
+
+/// The root hand-back strips the pool's explicit allows, the matter's own `Modify` included,
+/// which the ledger lists as applied. An extend's fence-only plan doesn't plan that grant, so
+/// the hand-back writes the root's listed entries again at once.
+#[test]
+fn an_extends_root_hand_back_puts_the_matters_own_grants_back() {
+    let w = world("root-owners-extend-own", &[]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &[]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
+    let matter = w.canonical("matter");
+    assert!(has(&acl, &matter, USER_SID, Rights::Modify));
+    acl.owners.insert(matter.clone(), USER_SID.to_owned());
+    let one = RegisteredMatter {
+        id: matter_one(),
+        folders: MatterFolders {
+            root: w.at("matter"),
+            state: w.at(STATE),
+            notes: Some(w.at(NOTES)),
+        },
+        pool_user: sid(USER_SID),
+        fenced: true,
+    };
+    let registered = [one, matter_two_at(&w)];
+    let pool = [
+        sid(USER_SID),
+        sid(OTHER_POOL_SIDS[0]),
+        sid(OTHER_POOL_SIDS[1]),
+    ];
+
+    let fenced = fence_each(&mut ledger, &registered, &pool, &mut acl, &mut around(&w)).unwrap();
+
+    assert!(fenced.skipped.is_empty());
+    assert_eq!(acl.owners[&matter], LAWYER);
+    assert!(
+        has(&acl, &matter, USER_SID, Rights::Modify),
+        "the matter's own grant is back"
+    );
+}

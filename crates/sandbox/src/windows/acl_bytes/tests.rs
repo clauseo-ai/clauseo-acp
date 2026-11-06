@@ -342,15 +342,15 @@ fn a_descriptor_is_built_and_read_back() {
     assert!(Acl::parse(&dacl[..dacl.len() - 1]).is_err());
 }
 
-/// N13: a hand-back writes the cleaned DACL before the owner, so a failure between them leaves
-/// a file a pool user still owns, which the next hand-back takes again.
+/// S15 `PR4h` (was N13): a hand-back writes the owner before the cleaned DACL, so the pool user
+/// can't put an allow back as owner between the two.
 #[test]
-fn a_hand_back_writes_the_dacl_before_the_owner() {
+fn a_hand_back_writes_the_owner_before_the_dacl() {
     assert_eq!(
         writes(true, true, true),
-        [Write::Dacl, Write::Owner, Write::Label]
+        [Write::Owner, Write::Dacl, Write::Label]
     );
-    assert_eq!(writes(true, true, false), [Write::Dacl, Write::Owner]);
+    assert_eq!(writes(true, true, false), [Write::Owner, Write::Dacl]);
     assert_eq!(writes(false, true, true), [Write::Owner, Write::Label]);
     assert_eq!(writes(false, false, false), []);
 }

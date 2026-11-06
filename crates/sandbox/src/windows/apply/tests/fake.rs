@@ -320,6 +320,10 @@ impl AclWriter for FakeAcl {
             return Err(ApplyFailure::ChildShut);
         }
         LAWYER.clone_into(owner);
+        // `NtfsAcl`'s cleaning: the explicit allows and the label come off the item.
+        let file = self.file(path);
+        self.aces
+            .retain(|(p, _, rights, _)| *p != file || !(rights.is_allow() || rights.is_label()));
         Ok(true)
     }
 

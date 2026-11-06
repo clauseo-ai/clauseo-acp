@@ -276,17 +276,20 @@ pub trait AclWriter {
     /// desktop user (this process's user, through the lawyer's `WRITE_OWNER`), its explicit
     /// label and the allows a strict walk would strip removed, its protection cleared; then
     /// every child's inherited entries are worked out again, as [`AclWriter::propagate`] does.
-    /// A file with more than one link is handed back too (N2). The cleaned DACL is written
-    /// before the owner, so a failure between them leaves a file a pool user still owns, which
-    /// the next hand-back takes again (N13). A pool user's child whose handle lacks
-    /// `WRITE_DAC` or `WRITE_OWNER` is refused as [`ApplyFailure::ChildShut`] (N3).
+    /// A file with more than one link is handed back too (N2). The owner is written before the
+    /// cleaned DACL, and the child read again after through its handle: an owner other than the
+    /// desktop user, or a pool user's allow left, refuses as [`ApplyFailure::PoolOwned`] (S15
+    /// `PR4h`, replacing N13's order). A pool user's child whose handle lacks `WRITE_DAC` or
+    /// `WRITE_OWNER` is refused as [`ApplyFailure::ChildShut`] (N3).
     fn reclaim(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
     /// [`AclWriter::reclaim`]'s hand-back for `path` itself (never what a link at it names):
     /// when one of `pool` owns it, it is handed to the desktop user and cleaned as a reclaimed
     /// child is, against its folder's entries. Whether it was. `Ok(false)` when another user
     /// owns it, or when `path` is missing, a link or not at its final path, which the write
     /// that follows refuses. An owner gets `WRITE_DAC` before any deny is read, so a pool
-    /// user's protected item goes to the lawyer before its deny is written (S15 `PR4a2`).
+    /// user's protected item goes to the lawyer before its deny is written (S15 `PR4a2`). A
+    /// pool user's file with more than one link is refused as [`ApplyFailure::LinkedFile`],
+    /// never re-owned through one name (S15 `PR4h`).
     fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure>;
     /// The owner pass below `root`, a protected tree or a set-aside item (S15 `PR4a2`): each
     /// child's owner read through its folder's handle, never following a link; one that one of

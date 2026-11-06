@@ -33,6 +33,8 @@ pub(super) struct FakeAcl {
     pub(super) owners: BTreeMap<PathBuf, Sid>,
     /// Paths whose hand-back fails as `NtfsAcl`'s does on a handle with no `WRITE_OWNER`.
     pub(super) keeps_owner: BTreeSet<PathBuf>,
+    /// The child the last failed walk refused.
+    pub(super) refused: Option<PathBuf>,
 }
 
 pub(super) fn key(grant: &Grant) -> Key {
@@ -84,15 +86,38 @@ impl AclWriter for FakeAcl {
         Ok(self.aces.contains(&key(grant)))
     }
 
+    /// A strict walk in a matter's tree hands each child below `root` that a pool SID other
+    /// than the matter's own owns to the lawyer; one in `keeps_owner` refuses, named (S15
+    /// `PR4h`).
     fn propagate(
         &mut self,
         root: &Path,
         _reach: Reach,
-        _strict: Option<&Strict>,
+        strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure> {
         self.walks.push(root.to_owned());
         if self.fail_walk.as_deref() == Some(root) {
             return Err(ApplyFailure::ProtectedChild);
+        }
+        let Some(strict) = strict.filter(|s| !s.assigned.is_empty()) else {
+            return Ok(Walked::default());
+        };
+        let foreign: Vec<PathBuf> = self
+            .owners
+            .iter()
+            .filter(|(path, owner)| {
+                let below = path.starts_with(root) && *path != root;
+                below && strict.pool.contains(owner) && !strict.assigned.contains(owner)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        if let Some(kept) = foreign.iter().find(|p| self.keeps_owner.contains(*p)) {
+            self.refused = Some(kept.clone());
+            let owned = crate::windows::writer::Owned::Child;
+            return Err(ApplyFailure::PoolOwned { owned });
+        }
+        for path in &foreign {
+            self.owners.remove(path);
         }
         Ok(Walked::default())
     }
@@ -123,7 +148,7 @@ impl AclWriter for FakeAcl {
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {
-        None
+        self.refused.take()
     }
 
     fn reclaim(&mut self, _root: &Path, _pool: &[Sid]) -> Result<Walked, ApplyFailure> {
@@ -142,6 +167,9 @@ impl AclWriter for FakeAcl {
             return Err(ApplyFailure::ChildShut);
         }
         self.owners.remove(path);
+        // `NtfsAcl`'s cleaning: the explicit allows and the label come off the item.
+        self.aces
+            .retain(|(p, _, rights, _)| p != path || !(rights.is_allow() || rights.is_label()));
         Ok(true)
     }
 

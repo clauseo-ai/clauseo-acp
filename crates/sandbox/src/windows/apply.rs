@@ -228,7 +228,7 @@ fn run_plan(
 ) -> Result<Run, Error> {
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
-    roots::hand_back_roots(plan, acl, pool)?;
+    roots::hand_back_roots(plan, ledger, acl, pool)?;
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;

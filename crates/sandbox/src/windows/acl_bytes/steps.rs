@@ -20,15 +20,17 @@ impl Write {
     }
 }
 
-/// The writes a child needs, in the order they are made: the DACL, then the owner, then the
-/// label. The DACL goes before the owner so a hand-back that fails between the two leaves a
-/// file a pool user still owns, which the next hand-back takes again; the other order would
-/// leave a file the lawyer owns that still carries the agent's broad allows, which no hand-back
-/// would touch again, since no pool user owns it (N13).
+/// The writes a child needs, in the order they are made: the owner, then the DACL, then the
+/// label (S15 `PR4h`). The owner goes first, so once the cleaned DACL strips a pool user's
+/// allows, that user owns the child no more and can't put one back through an owner's implied
+/// `WRITE_DAC`; the hand-back is read again after (`handed`). A failure between the two leaves a
+/// child the lawyer owns with the agent's allows still on it: the next strict walk refuses it as
+/// [`BroadAllowChild`](crate::windows::writer::ApplyFailure::BroadAllowChild), fail closed. (N13
+/// wrote the DACL first, which left the pool user owning the child in between.)
 pub(crate) fn writes(dacl: bool, owner: bool, label: bool) -> Vec<Write> {
     [
-        (dacl, Write::Dacl),
         (owner, Write::Owner),
+        (dacl, Write::Dacl),
         (label, Write::Label),
     ]
     .into_iter()
