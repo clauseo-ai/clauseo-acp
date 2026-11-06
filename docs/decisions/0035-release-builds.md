@@ -47,6 +47,16 @@ Developer ID.
   third-party build scripts run. Only the macOS legs of `build` take an environment, since only they
   sign there. `.github/scripts/latest-json.test.mjs` fails on a pull request trigger, an unpinned
   action, a job without `permissions:` or a secret outside a step, and runs in CI's fast lane.
+- **The release key, checked before a release builds.** In a `release` run the `check` job reads
+  `plugins.updater.pubkey` from `tauri.conf.json` by its own bytes: line 2 of the decoded `.pub`
+  must decode to 42 bytes starting `Ed`, the key id is bytes 2 to 10 read little-endian
+  (`%016X`), and the untrusted comment must name that id. It refuses, each with its own
+  `::error::`, an empty key, one that does not decode so, R23 PR 6's placeholder
+  (`AC986E7C6BA67AB9`) and the test key (its id read from `updater-test.pub`). Dry and test runs
+  are left alone: a dry run makes its own key and a test run signs with the test key. Unlike the
+  desktop test that refuses the same keys, this check is the one a merge cannot skip. Checked
+  locally (2026-11-06): the placeholder, the test key and a doctored comment are refused; a fresh
+  throwaway key passes.
 - **No test key in a shipped binary.** In every `build` leg of a run that is not `test` (so
   release and dry runs), the step right after `tauri build`, before any signing or upload (on
   Linux, `tauri build --bundles deb,rpm` has already made the packages), scans the app binary as
@@ -54,6 +64,15 @@ Developer ID.
   throwaway test key (`updater-test.pub`): its base64 text, its `RW…` key line and its key id, in ASCII or UTF-16 (NULs dropped first). A hit fails the
   leg with `::error::` naming the file. A `test` run builds `e2e`, which holds the key on
   purpose. The desktop tests' own checks (0037) cover only the source text and the test binary.
+  The same step fails on any e2e-only string, named in the `::error::`: the variables only the
+  `e2e` build reads (`E2E_AGENTS_MANAGED`, `E2E_UPDATE_ENDPOINT`, `E2E_FAKE_UPDATE`,
+  `E2E_FAKE_SIGNIN`), the counts' endpoint override only debug and `e2e` builds read
+  (`CLAUSEO_COUNTS_URL`), and the `e2e` build's marker, `CLAUSEO-E2E-BUILD-MARKER` (a `#[used]`
+  static in `src/e2e.rs`, read at every
+  `e2e` start so the linker keeps it). The marker catches any `e2e` code that reached a release
+  binary, whatever its own strings. Checked locally (2026-11-06): the `e2e` app and unit-test
+  binaries hold the marker and the plain ones do not; the scan passes a clean binary and fails one
+  with each string, in ASCII or UTF-16LE.
 - **Artefacts by tier.** Tier 1, which must build: `Clauseo_<v>_aarch64.dmg` and
   `Clauseo_<v>_aarch64.app.tar.gz` (`macos-15`), `Clauseo_<v>_x64-setup.exe` and
   `Clauseo_<v>_x64-machine-setup.exe` (`windows-2025`). Tier 2, `continue-on-error`, named in the
