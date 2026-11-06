@@ -680,7 +680,9 @@ changes (`setup/identity.rs`).
   alone is checked:** `ANTHROPIC_BASE_URL`, or a Codex endpoint, which adds no variable, still
   launches on the shared login. Any change of a key, an endpoint or a provider works the
   exemption out again from the launch env, drops a check in flight, and, when the exemption
-  ends, sets `agent.identity_checking` before `restart_for_login` relaunches.
+  ends, sets `agent.identity_checking` before `restart_for_login` relaunches. A Codex key login has
+  no shared file to swap: R17 PR-C links no `auth.json` into a matter whose launch env carries
+  `CODEX_API_KEY` (the host thread, 2026-11-06), so Codex can only use the env key.
 - *The state table.* Watched: a change of a login file's stamps checks it. Timer: checked
   again by itself. A pending sign-in through Clauseo is the exception to every row below.
 
