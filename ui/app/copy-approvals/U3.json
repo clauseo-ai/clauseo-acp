@@ -793,11 +793,13 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-signin.reuse_other_volume": {
-    "en": "Clauseo can't reuse your Codex login because its data folder is on a different disk. Move Clauseo's data folder to the same disk, or sign in to Codex in Clauseo.",
-    "hi": null,
-    "hi_status": "later",
+    "en": "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.",
+    "hi": "Clauseo इस कंप्यूटर पर पहले से मौजूद Codex साइन इन का उपयोग नहीं कर सकता, क्योंकि Clauseo का डेटा फ़ोल्डर आपके होम फ़ोल्डर से अलग ड्राइव पर है। इसके बजाय Clauseo में Codex में साइन इन करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   }
 }

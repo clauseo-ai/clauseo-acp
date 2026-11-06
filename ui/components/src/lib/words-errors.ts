@@ -181,7 +181,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "sandbox.required":
     "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
   "signin.reuse_other_volume":
-    "Clauseo can't reuse your Codex login because its data folder is on a different disk. Move Clauseo's data folder to the same disk, or sign in to Codex in Clauseo.",
+    "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
