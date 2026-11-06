@@ -1,26 +1,64 @@
-//! The quit's pieces (`lib.rs`'s `ExitRequested` stops the app through `stop_host_then_exit`):
-//! the agents' installs and sign-ins are shut down first (`setup`, `BackendCell::shutdown`),
-//! then the host stops ([`stop_in_order`]).
+//! The quit's pieces (`lib.rs`'s `ExitRequested` stops the app through `stop_host_then_exit`,
+//! and its `RunEvent::Exit` through [`stop_on_exit`] when no stop ran before it): the agents'
+//! installs and sign-ins are shut down first (`setup`, `BackendCell::shutdown`), then the host
+//! stops ([`stop_in_order`]).
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Duration;
 
 use clauseo_host::HostExit;
+use tauri::{AppHandle, Manager as _, Runtime};
 
-use crate::setup;
+use crate::bridge::Bridge;
+use crate::{counts, host_log, host_start, setup};
 
 /// Where exit stands: a stopper started, and the host stopped (so the next request exits).
+/// `stopped` is set through [`Exit::mark_stopped`] only, which also wakes
+/// [`Exit::wait_stopped`].
 #[derive(Default)]
 pub(crate) struct Exit {
     pub(crate) stopping: AtomicBool,
     pub(crate) stopped: AtomicBool,
+    /// `stopped`, under the lock the waiters sleep on.
+    done: Mutex<bool>,
+    ended: Condvar,
+}
+
+impl Exit {
+    /// Records that the stop sequence has ended, and wakes every [`Exit::wait_stopped`].
+    pub(crate) fn mark_stopped(&self) {
+        let mut done = self.done.lock().unwrap_or_else(PoisonError::into_inner);
+        *done = true;
+        self.stopped.store(true, Ordering::Release);
+        drop(done);
+        self.ended.notify_all();
+    }
+
+    /// Waits at most `bound` for [`Exit::mark_stopped`]; true once it has run.
+    pub(crate) fn wait_stopped(&self, bound: Duration) -> bool {
+        let done = self.done.lock().unwrap_or_else(PoisonError::into_inner);
+        let (done, _timed_out) = self
+            .ended
+            .wait_timeout_while(done, bound, |done| !*done)
+            .unwrap_or_else(PoisonError::into_inner);
+        *done
+    }
 }
 
 /// The setup backend the quit shuts down: `Agents`' installs and sign-ins.
 pub(crate) struct SetupStop(pub(crate) Arc<setup::BackendCell>);
 
 /// How long the quit waits for the agents' jobs to end and their children to be killed.
-pub(crate) const AGENTS_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+pub(crate) const AGENTS_STOP_WAIT: Duration = Duration::from_secs(3);
+
+/// How long `RunEvent::Exit` waits for the stop sequence when nothing stopped the host before it
+/// (macOS's quit: the app menu's Quit, the Dock, logout and shutdown; [`stop_on_exit`]):
+/// [`AGENTS_STOP_WAIT`] for the agents' installs and sign-ins, then 10 s for the host, whose
+/// agents' ladders run side by side (stdin 2 s, SIGTERM 3 s, SIGKILL 2 s: `clauseo-process`)
+/// with 3 s for their pipes and the host thread's join. Past it the event returns and the OS
+/// ends the process with what is left.
+pub(crate) const EXIT_STOP_WAIT: Duration = Duration::from_secs(3 + 10);
 
 /// The quit's two steps in their order: `agents` shuts `Agents` down (its answer says whether
 /// its jobs ended in time), then `host` stops the host. A job still running is logged, and the
@@ -53,6 +91,71 @@ pub(crate) fn stop_then_after_host(
     after_host(ended, agents_stopped);
 }
 
+/// The stop sequence, blocking: the agents' installs and sign-ins first, their children killed
+/// (#386), then the host (waits for its start, shuts it down, joins it); then the log, the
+/// counts and `after_host`, in that order (quit.rs).
+pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce(HostExit, bool)) {
+    let cell = app.try_state::<Bridge>().map(|bridge| bridge.cell());
+    stop_then_after_host(
+        || {
+            app.try_state::<SetupStop>()
+                .is_none_or(|setup| setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT))
+        },
+        || cell.as_deref().map_or(HostExit::Stopped, host_start::stop),
+        // The log's queued lines go to the file before the exit skips the drops.
+        || host_log::flush_app(app),
+        // After the host, whose last counts go in too.
+        || {
+            if let Some(counts) = app.try_state::<counts::CountsState>() {
+                counts.save();
+            }
+        },
+        after_host,
+    );
+}
+
+/// `RunEvent::Exit` with the host not stopped. On macOS the app menu's Quit (Cmd-Q, muda's
+/// `terminate:`), the Dock's Quit, logout and shutdown all reach only this: tao 0.37 gives its
+/// app delegate no `applicationShouldTerminate:`, and its `applicationWillTerminate:` sends
+/// `LoopDestroyed`, which tauri-runtime-wry turns into `RunEvent::Exit` and never into
+/// `ExitRequested`. The process ends when this returns, so the stop sequence runs here, on its
+/// own thread, waited for at most [`EXIT_STOP_WAIT`]; with no install after it (the OS is
+/// ending the app, and a restart would fight it). When a stopper already runs (a quit signal or
+/// a closed window came first), this waits for it the same way.
+pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) {
+    if exit.stopped.load(Ordering::Acquire) {
+        return;
+    }
+    if let Some(counts) = app.try_state::<counts::CountsState>() {
+        drop(counts.stop_ticker());
+    }
+    let first = exit
+        .stopping
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok();
+    if first {
+        let stopper_app = app.clone();
+        let stopper_exit = Arc::clone(exit);
+        let stopper = std::thread::Builder::new()
+            .name("clauseo-host-stop".to_owned())
+            .spawn(move || {
+                stop_steps(&stopper_app, |_ended, _agents_stopped| {});
+                stopper_exit.mark_stopped();
+            });
+        if stopper.is_err() {
+            // No thread for it: the host's next start repairs what it left open.
+            host_log::flush_app(app);
+            return;
+        }
+    }
+    if !exit.wait_stopped(EXIT_STOP_WAIT) {
+        tracing::warn!(
+            "the stop at exit did not end in time: what it had not stopped is left running"
+        );
+        host_log::flush_app(app);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -62,7 +165,11 @@ mod tests {
 
     use clauseo_host::{Downloaded, HostExit, Opaque, UpdaterError};
 
-    use super::{stop_in_order, stop_then_after_host};
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use super::{Exit, stop_in_order, stop_then_after_host};
     use crate::bridge::lock;
     use crate::update::install::{self, After, Steps, Watch};
 
@@ -171,6 +278,21 @@ mod tests {
                 "flush"
             ]
         );
+    }
+
+    #[test]
+    fn a_wait_for_the_stop_ends_when_another_thread_marks_it_stopped() {
+        let exit = Arc::new(Exit::default());
+        // Nothing marked it: the wait gives up at its bound.
+        assert!(!exit.wait_stopped(Duration::ZERO));
+        assert!(!exit.stopped.load(Ordering::Acquire));
+        let marker = Arc::clone(&exit);
+        let marked = std::thread::spawn(move || marker.mark_stopped());
+        assert!(exit.wait_stopped(Duration::from_secs(120)));
+        assert!(exit.stopped.load(Ordering::Acquire));
+        marked.join().unwrap();
+        // Once marked, every later wait answers at once.
+        assert!(exit.wait_stopped(Duration::ZERO));
     }
 
     #[test]
