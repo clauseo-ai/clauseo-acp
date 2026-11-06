@@ -97,6 +97,8 @@ export type ThreadState = {
   connectors?: ConnectorsState;
   /** Whether the host sends the case-law hint for the thread's TURN (U15), after `connectors`. */
   hint?: boolean;
+  /** How read_blob answers, by hash (U17): with the blob's text, never ("pending"), or refused. */
+  blobs?: Record<string, { text: string } | "pending" | "refused">;
 };
 
 /** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
@@ -157,6 +159,11 @@ export function threadHost(state: ThreadState): FakeTransport {
         return {
           threads: [{ thread: THREAD, matter: MATTER.matter, agent, status: "idle" }],
         };
+      const blob = typeof query === "object" ? query.read_blob : undefined;
+      const got = blob === undefined ? undefined : state.blobs?.[blob.hash];
+      if (got === "pending") return new Promise(() => {});
+      if (got === "refused") throw refusal("store.io");
+      if (got !== undefined) return { blob: { offset: 0, end: got.text.length, text: got.text } };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },
     dispatch: (envelope): CommandOutcome => {

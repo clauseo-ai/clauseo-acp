@@ -159,7 +159,8 @@ function probeEntry(): Plugin {
  * jump-entry chunk they share with the list (isLazyShared); the tool line (its own chunk) only the first load, and its
  * popover only those and the line; UD1's first run only the first load (U2's form, which it shares with New matter, it
  * loads lazily itself, as Start a new matter is pressed); UD2's first read's start only the first load and the small
- * marks and words chunks it shares with the first run and the list (isLazyShared). The Hindi words (ui/components' words-hi.ts, every words
+ * marks and words chunks it shares with the first run and the list (isLazyShared); U17's tool result block only those
+ * and the list. The Hindi words (ui/components' words-hi.ts, every words
  * file's .hi.ts) import only the first load's words registry: display.ts loads them before a Hindi display shows.
  * The dialogs that share the dialog primitives are
  * PRELOADED_CHUNKS, not here. vite-config.test.ts checks that, and that no chunk carries a preload list except the
@@ -177,6 +178,7 @@ export const BARE_CHUNKS = [
   "find-results",
   "tool-line-room",
   "tool-popover",
+  "result",
   "first-run",
   "first-read-start",
   "words-hi",

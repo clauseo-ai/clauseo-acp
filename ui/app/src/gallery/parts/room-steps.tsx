@@ -1,5 +1,6 @@
 // The step group's states, as the thread shows them between the answer's words: folded to its summary, opened to its
-// rows, live with the step in hand, with a failure kept on its line, and parted by a permission prompt among its steps.
+// rows, live with the step in hand, with a failure kept on its line, parted by a permission prompt among its steps, and
+// opened to rows that offer what came back (U17), drawn by the room's own CallRow.
 // The words are the app's own (words-steps.ts, words-steps-live.ts), in the page's language.
 import { PermissionPrompt } from "@clauseo/components/clauseo/permission.tsx";
 import { Who } from "@clauseo/components/clauseo/answer.tsx";
@@ -9,6 +10,8 @@ import { steps } from "@clauseo/components/lib/words-steps.ts";
 import { stepLive } from "@clauseo/components/lib/words-steps-live.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
+import { CallRow } from "../../room/thread/step-group-parts.tsx";
+import * as F from "../../room/thread/tool-result/fixtures.ts";
 import { Sample } from "./frame.tsx";
 import { PERMISSION_PAPER, nothing } from "./room-data.ts";
 
@@ -172,6 +175,30 @@ function AmongSteps() {
   );
 }
 
+/** U17's calls: an MCP search's text, a JSON answer and an error, each finished with no content and a raw output. */
+const RESULTS = [
+  F.called(F.MCP_JUDGMENTS, { title: "Search Indian Kanoon" }),
+  F.called(F.JSON_RESULT, { title: "Fetch the judgment's details" }),
+  F.called(F.OPAQUE_ERROR, { title: "Search Indian Kanoon again" }),
+];
+
+/** Opened, its rows each offering "Show the result", which opens what came back under the row. */
+function WithResults() {
+  const { lang } = useDisplay();
+  return (
+    <StepGroup
+      id="tool_call:1"
+      kinds={["other"]}
+      line={steps(lang, "Did {n} other things.", { n: RESULTS.length })}
+      defaultOpen
+    >
+      {RESULTS.map((call) => (
+        <CallRow key={call.tool_call} id={call.tool_call} call={call} lang={lang} />
+      ))}
+    </StepGroup>
+  );
+}
+
 export function StepSamples() {
   return (
     <>
@@ -195,6 +222,9 @@ export function StepSamples() {
       </Sample>
       <Sample name="StepGroup, parted by a permission prompt" wide>
         <AmongSteps />
+      </Sample>
+      <Sample name="StepGroup, opened to rows that show what came back">
+        <WithResults />
       </Sample>
     </>
   );

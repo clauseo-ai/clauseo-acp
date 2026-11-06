@@ -29,6 +29,7 @@ import { HI as stepsLive } from "./words-steps-live.hi.ts";
 import { HI as steps } from "./words-steps.hi.ts";
 import { HI as thread } from "./words-thread.hi.ts";
 import { HI as toolbar } from "./words-toolbar.hi.ts";
+import { HI as toolResult } from "./words-tool-result.hi.ts";
 import { HI as toolsLine } from "./words-tools-line.hi.ts";
 import { HI as tools } from "./words-tools.hi.ts";
 import { HI as triageLate } from "./words-triage-late.hi.ts";
@@ -66,6 +67,7 @@ export const HINDI = {
   steps,
   thread,
   toolbar,
+  "tool-result": toolResult,
   "tools-line": toolsLine,
   tools,
   "triage-late": triageLate,
