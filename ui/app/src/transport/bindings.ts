@@ -1654,7 +1654,7 @@ export type FilesChanged = {
  */
 export type Finite = number;
 
-/**  Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": ".."}}`. */
+/**  Where a folder lives. JSON: `"local"`, `"network"` or `{"synced": {"service": "one_drive"}}`. */
 export type FolderPlace = 
 /**  On a disk of this computer, and no cloud service Clauseo knows syncs it. */
 "local" | 
@@ -1662,11 +1662,8 @@ export type FolderPlace =
 "network" | 
 /**  In a folder a cloud service syncs. */
 { synced: {
-	/**
-	 *  The service, from the synced folder's name: `OneDrive`, `GoogleDrive`,
-	 *  `iCloud Drive`.
-	 */
-	service: string,
+	/**  The service, from the synced folder's name. */
+	service: SyncService,
 } };
 
 /**
@@ -4657,6 +4654,25 @@ export type SubscribeEvents = {
 	/**  The last `seq` the subscriber has. */
 	after_seq?: Seq,
 };
+
+/**
+ *  The cloud service that syncs a folder: [`FolderPlace::Synced`]'s `service`. Closed, as
+ *  `FolderPlace` is never logged (decision record 0002): a newer value fails to decode. JSON:
+ *  `"one_drive"`, `"dropbox"`, `"google_drive"`, `"icloud"`, `"box"` or `"other"`.
+ */
+export type SyncService = 
+/**  Microsoft `OneDrive`, personal or a work or school account. */
+"one_drive" | 
+/**  Dropbox. */
+"dropbox" | 
+/**  Google Drive. */
+"google_drive" | 
+/**  Apple's iCloud Drive. */
+"icloud" | 
+/**  Box. */
+"box" | 
+/**  A service Clauseo does not name. */
+"other";
 
 /**  Text appended to an agent's answer or thought. */
 export type TextAppended = {
