@@ -80,8 +80,59 @@ fn a_temp_folder_on_or_over_the_home_or_state_folder_is_refused() {
         "the temp folder may not equal or hold the state folder",
         &w.at("state"),
     );
-    // Inside the state folder is the fallback's own place, and fine.
-    w.builder().tmpdir(w.at("state/tmp")).build().unwrap();
+    // The fallback's own place, inside the state folder, is not a session's.
+    refused(
+        w.builder().tmpdir(w.at("state/tmp")).build(),
+        "the temp folder must be `<data_dir>/run/<session>/tmp`",
+        &w.at("state/tmp"),
+    );
+}
+
+/// Review M1: `Path` drops a trailing `.`, so `run/s1/.` would name `s1`, the folder that holds
+/// the token, and `run/s1/..` the run folder; both are refused as written.
+#[test]
+fn a_temp_folder_ending_in_dots_is_refused() {
+    let w = with_run("tmpdir-dots");
+    let rule = "the temp folder may not end in `.` or `..`";
+    for rel in [
+        "data/run/s1/.",
+        "data/run/s1/..",
+        "data/run/s1/./",
+        "data/run/s1/../",
+    ] {
+        let p = PathBuf::from(format!("{}/{rel}", w.dir.path().display()));
+        match w.builder().tmpdir(&p).build() {
+            Err(Error::Policy(message)) => assert!(message.contains(rule), "{message}"),
+            other => panic!("{rel}: {other:?}"),
+        }
+    }
+}
+
+/// Only `.../run/<session>/tmp`: another name, the run folder's own `tmp`, or a `tmp` elsewhere
+/// in the hidden data folder (an agent's folder) is refused.
+#[test]
+fn a_temp_folder_not_shaped_run_session_tmp_is_refused() {
+    let w = with_run("tmpdir-shape");
+    w.dir.dir("data/agents/x");
+    let rule = "the temp folder must be `<data_dir>/run/<session>/tmp`";
+    for rel in [
+        "data/run/s1/scratch",
+        "data/run/tmp",
+        "data/agents/x/tmp",
+        "data/agents/x",
+    ] {
+        let p = w.at(rel);
+        refused(
+            w.builder().hidden(w.at("data")).tmpdir(&p).build(),
+            rule,
+            &p,
+        );
+    }
+    w.builder()
+        .hidden(w.at("data"))
+        .tmpdir(w.at("data/run/s1/tmp"))
+        .build()
+        .unwrap();
 }
 
 #[test]

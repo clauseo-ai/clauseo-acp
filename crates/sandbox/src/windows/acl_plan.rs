@@ -8,7 +8,8 @@
 //! - Every allow names the matter's pool user, and also the matter's SID when the launch asks
 //!   for it ([`Subjects::matter`], off by default; spike B found it adds nothing measured).
 //! - `Modify` on the matter, the state and notes folders, the session's temp folder
-//!   (`<data_dir>\run\<session>\tmp`, never the run folder above it) and the credential link;
+//!   (`<data_dir>\run\<session>\tmp`, never the run folder above it; nothing sets or makes it
+//!   on Windows yet: PR5's runner sets `TEMP`/`TMP` to it and makes it) and the credential link;
 //!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
 //!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
 //! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state,
