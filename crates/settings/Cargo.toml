@@ -16,6 +16,7 @@ serde_json_lenient = { workspace = true, features = [
 ] }
 schemars = { workspace = true, features = ["std", "derive", "indexmap2"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 # NFKC for the misnamed-section rule (policy names).
 unicode-normalization = { workspace = true }
 # The key names in macOS managed preferences files; plain Rust, so tested on every OS.

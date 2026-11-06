@@ -136,6 +136,48 @@ fn saving_keeps_the_files_permissions() {
 
 #[cfg(unix)]
 #[test]
+fn a_write_syncs_its_folder_and_the_file_reads_back() {
+    // The rename is synced through its folder (`files.rs`): the write still succeeds, the
+    // file reads back whole, and the folder holds that file alone.
+    let root = fresh("folder-sync").unwrap();
+    let path = root.join("key-stored.json");
+    SystemFiles
+        .write_atomic(&path, b"{\"agents\": [\"claude-acp\"]}")
+        .unwrap();
+    SystemFiles
+        .write_atomic(&path, b"{\"agents\": []}")
+        .unwrap();
+    assert_eq!(
+        SystemFiles.read(&path).unwrap().as_deref(),
+        Some(&b"{\"agents\": []}"[..])
+    );
+    let names: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["key-stored.json"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_that_will_not_sync_still_takes_the_write() {
+    // The rename is in place before the folder is synced; a folder that cannot be opened to
+    // sync (no read permission here) is logged, and the write is not a failed one.
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = fresh("folder-no-sync").unwrap();
+    let path = root.join("settings.json");
+    write::set_permissions(&root, std::fs::Permissions::from_mode(0o300)).unwrap();
+    let written = SystemFiles.write_atomic(&path, b"{}");
+    write::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    written.unwrap();
+    assert_eq!(
+        SystemFiles.read(&path).unwrap().as_deref(),
+        Some(&b"{}"[..])
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_settings_path_under_a_file_is_an_error_and_creates_nothing() {
     // `file.txt` is a regular file, so the link check of `file.txt/settings.json` fails with
     // ENOTDIR (not NotFound), and the write returns that error before it creates anything.
