@@ -90,6 +90,33 @@ fn claude_detection_runs_without_the_home_variables() {
     );
 }
 
+/// No sign-in or status run gets `NODE_OPTIONS` or `NODE_PATH`, though the base environment
+/// sets both: neither reaches the fake CLI's environment nor any run's spec.
+#[test]
+fn a_status_run_gets_neither_node_options_nor_node_path() {
+    let mut fx = Fixture::new("reuse-claude-node-env", "ok-after:0");
+    for name in clauseo_process::NODE_ENV {
+        fx.config
+            .signin
+            .base_env
+            .insert(name.into(), fx.data.path().join("stray").into_os_string());
+    }
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    let (agents, events) = fx.start();
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), found(EMAIL));
+    let names = fx.env_names();
+    assert!(names.iter().any(|got| got == "HOME"), "{names:?}");
+    for name in clauseo_process::NODE_ENV {
+        assert!(!names.iter().any(|got| got == name), "{name}: {names:?}");
+    }
+    assert!(fx.launches().iter().all(|run| {
+        clauseo_process::NODE_ENV
+            .iter()
+            .all(|name| !run.env.contains_key(OsStr::new(name)))
+    }));
+}
+
 /// "a `claude.ai` status gives `LoginFound { from: ClaudeCode, email }` with the status output's
 /// email, no login run and no reuse".
 #[test]

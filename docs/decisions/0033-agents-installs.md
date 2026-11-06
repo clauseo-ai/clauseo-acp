@@ -143,7 +143,12 @@ which npm 11 would otherwise apply to the `file:` tarballs (npm 10 accepts the f
 copies each tarball it reads into the private cache, so the cache folder stays. No proxy and no
 CA file reach npm (no `--proxy`, `--https-proxy`, `--cafile` or
 `NODE_EXTRA_CA_CERTS`): npm never uses the network here, and a proxy's password on a command line is
-visible to other local users. Each npm run gets `NODE_OPTIONS` set empty. Each run is raced against
+visible to other local users. No install, sign-in, reader or agent process gets `NODE_OPTIONS` or
+`NODE_PATH`, whichever Node runs it: `clauseo_process::spawn_in_tree` drops both from the
+inherited environment and the spec, and the builders that copy an environment drop them too.
+Each install and each start logs one info line naming its Node, `node=user version=v24.22.0
+program=node` or `node=pinned version=v24.22.0`, with only the file name of the user's Node.
+Each run is raced against
 a pause and a 10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An
 `ENOSPC` code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written
 last. npm runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child

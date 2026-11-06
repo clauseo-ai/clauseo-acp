@@ -7,7 +7,8 @@
 //! the lawyer's own store). Nothing here touches this process's environment.
 //!
 //! The rules, from the brief (S18, "The environment of every run"):
-//! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`";
+//! - "the inherited one minus every `SSH_*`, `NO_BROWSER` and `CLAUDE_CODE_REMOTE`", and minus
+//!   `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops anyway);
 //! - "plus the agent's home variables";
 //! - "`ANTHROPIC_API_KEY=""` for Claude and `CODEX_API_KEY=""` for Codex, so a stray key cannot
 //!   win and status reports only the plan login";
@@ -200,6 +201,7 @@ fn stripped(name: &OsStr) -> bool {
         .iter()
         .any(|prefix| upper.starts_with(prefix))
         || STRIPPED.contains(&upper.as_str())
+        || clauseo_process::is_node_env(name)
 }
 
 /// Sets `name` to `value`, first removing the base's spelling of it in any case, so a Windows

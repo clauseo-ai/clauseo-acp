@@ -13,7 +13,7 @@
 //!
 //! Every npm run starts through the launcher as `node --single-threaded <npm-cli.js> …` (no V8
 //! background tasks, so Node cannot deadlock as it exits: `NODE_SINGLE_THREADED`), with
-//! `NODE_OPTIONS` empty, the private cache, and empty `agents/npmrc` and `agents/npmrc-global`
+//! neither `NODE_OPTIONS` nor `NODE_PATH` (the spawn drops both), the private cache, and empty `agents/npmrc` and `agents/npmrc-global`
 //! files as its user and global config (npm refuses one file for both).
 //! `npm ci` runs with `--offline --ignore-scripts --no-bin-links --no-audit --no-fund` and
 //! `--allow-file=all` (npm 11 reads `npm_config_allow_file` from the environment the launch
@@ -37,7 +37,7 @@ use futures::future::{Either, join3, select};
 use super::files::{Fetched, npm_cache};
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
-use crate::node;
+use crate::node::{self, NodeSource, node_line};
 use crate::receipt::{Receipt, install_folder, install_root, script_path, write_receipt};
 use crate::state::{InstallState, Installed};
 use crate::write;
@@ -99,6 +99,11 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             )
         }
     };
+    let source = match node_choice {
+        NodeChoice::User(_) => NodeSource::User,
+        NodeChoice::Runtime { .. } => NodeSource::Pinned,
+    };
+    tracing::info!(%agent, "agent install: {}", node_line(source, &program, &version));
     if !job.emit(InstallState::Installing, false) {
         return Err(TryError::cancelled());
     }
@@ -127,7 +132,6 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             NodeChoice::User(_) => None,
         },
         common: common_flags(&cache, &npmrc, &global),
-        env: BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]),
     };
     let done = async {
         let lock = pins
@@ -226,7 +230,6 @@ struct Npm<'a, T> {
     /// cannot load its own modules, so the next try fetches Node again.
     runtime: Option<&'a Path>,
     common: Vec<OsString>,
-    env: BTreeMap<OsString, OsString>,
 }
 
 impl<T> Npm<'_, T> {
@@ -257,7 +260,7 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         let spec = LaunchSpec::new(
             self.program.to_owned(),
             argv,
-            self.env.clone(),
+            BTreeMap::new(),
             cwd.to_owned(),
         )
         .map_err(refused)?;

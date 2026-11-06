@@ -45,6 +45,28 @@ pub(crate) struct FoundNode {
     pub(crate) version: String,
 }
 
+/// Whose Node an install or a start uses, for [`node_line`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NodeSource {
+    /// The user's own, found on `PATH` or in a known place.
+    User,
+    /// The pinned download under the data folder.
+    Pinned,
+}
+
+/// What the info line at each install and each start says about its Node: `node=user` or
+/// `node=pinned`, the version (`v24.22.0`), and for the user's Node its file name only
+/// (`program=node`): a full path would carry the user's name.
+pub(crate) fn node_line(source: NodeSource, program: &Path, version: &str) -> String {
+    match source {
+        NodeSource::User => {
+            let name = program.file_name().unwrap_or_default().to_string_lossy();
+            format!("node=user version={version} program={name}")
+        }
+        NodeSource::Pinned => format!("node=pinned version={version}"),
+    }
+}
+
 /// Why a candidate was not used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NotUsed {
@@ -148,7 +170,8 @@ pub(crate) async fn check_node<T: Timer>(
     }
 }
 
-/// Runs `program --version` with `NODE_OPTIONS` empty and returns its first line, trimmed.
+/// Runs `program --version` (without `NODE_OPTIONS` or `NODE_PATH`: the spawn drops both) and
+/// returns its first line, trimmed.
 /// stdout is read to its end while the stderr pump drains and the exit is awaited, all under
 /// [`VERSION_LIMIT`]; past it the handle is dropped, which kills the tree.
 async fn node_version<T: Timer>(
@@ -157,9 +180,13 @@ async fn node_version<T: Timer>(
     timer: &T,
 ) -> Result<String, NotUsed> {
     let cwd = program.parent().map(Path::to_path_buf).unwrap_or_default();
-    let env = BTreeMap::from([(OsString::from("NODE_OPTIONS"), OsString::new())]);
-    let spec = LaunchSpec::new(program.to_owned(), vec!["--version".into()], env, cwd)
-        .map_err(|err| NotUsed::LaunchFailed(err.to_string()))?;
+    let spec = LaunchSpec::new(
+        program.to_owned(),
+        vec!["--version".into()],
+        BTreeMap::new(),
+        cwd,
+    )
+    .map_err(|err| NotUsed::LaunchFailed(err.to_string()))?;
     let Launched {
         stdin,
         mut stdout,
