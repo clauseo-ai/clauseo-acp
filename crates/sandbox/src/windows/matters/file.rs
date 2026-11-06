@@ -1,6 +1,6 @@
 //! `matters.json`'s format. Version 2 is written: one row per matter, `{ sid?, pool_user?,
-//! released_at? }`. Version 1 (matter id to SID) is read as rows with only a SID, and is
-//! upgraded on the next write. Any other version is refused.
+//! released_at?, held_before? }`. Version 1 (matter id to SID) is read as rows with only a SID,
+//! and is upgraded on the next write. Any other version is refused.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -37,6 +37,10 @@ pub struct MatterRow {
     /// ([`super::MatterSids::release`]); none while it holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_at: Option<u64>,
+    /// The pool users the matter held before `pool_user`, oldest first: each a released one
+    /// it gave up when assigned again. Kept so the open-session check still finds them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held_before: Vec<Sid>,
 }
 
 impl MatterRow {
@@ -45,6 +49,11 @@ impl MatterRow {
         self.pool_user
             .as_ref()
             .filter(|_| self.released_at.is_none())
+    }
+
+    /// Whether the row names `user`, now or before: its `pool_user` or in `held_before`.
+    pub fn named(&self, user: &Sid) -> bool {
+        self.pool_user.as_ref() == Some(user) || self.held_before.contains(user)
     }
 }
 
@@ -147,7 +156,7 @@ fn check(rows: &Rows, reserved: &Reserved) -> Result<(), String> {
     let mut sids = BTreeSet::new();
     let mut held = BTreeMap::new();
     for (matter, row) in rows {
-        if row.sid.is_none() && row.pool_user.is_none() {
+        if row.sid.is_none() && row.pool_user.is_none() && row.held_before.is_empty() {
             return Err(format!("{matter} has neither a SID nor a pool user"));
         }
         if row.released_at.is_some() && row.pool_user.is_none() {
@@ -172,7 +181,10 @@ fn check(rows: &Rows, reserved: &Reserved) -> Result<(), String> {
             return Err(format!("pool user {user} is held by {other} and {matter}"));
         }
     }
-    let pool_users: BTreeSet<&Sid> = rows.values().filter_map(|r| r.pool_user.as_ref()).collect();
+    let pool_users: BTreeSet<&Sid> = rows
+        .values()
+        .flat_map(|r| r.pool_user.iter().chain(&r.held_before))
+        .collect();
     if let Some(sid) = sids.iter().find(|sid| pool_users.contains(*sid)) {
         return Err(format!("{sid} is both a matter SID and a pool user"));
     }
