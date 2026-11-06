@@ -67,7 +67,7 @@ test("signing in: the line, and Open the sign-in page again sends add again", as
   await sends(r, "Open the sign-in page again", { add: { id: ID } });
 });
 
-test("signed in with a balance: credits as the numeral, the account's actions, the side gives the credits; no rupees anywhere", async () => {
+test("signed in with a balance: credits as the numeral, the account's actions, the side gives the credits", async () => {
   const r = await open({ status: SIGNED_IN });
   expect(r.text()).toContain("Ready to search.");
   const tile = r.el.querySelector('[data-testid="connectors-balance"]');
@@ -75,9 +75,11 @@ test("signed in with a balance: credits as the numeral, the account's actions, t
   expect(tile?.querySelector(".set-window-used")?.getAttribute("aria-label")).toBe(
     "10,000 credits left",
   );
-  // Balance.paise is the account's figure before GST: never on screen (every amount shown is GST-inclusive)
-  expect(tile?.textContent).not.toContain("Worth");
-  expect(r.text()).not.toContain("₹");
+  // the worth is the balance's gross rupees, GST included; the side keeps the credits
+  expect(tile?.querySelector('[data-testid="connectors-worth"]')?.textContent).toBe(
+    "Worth ₹1,180.",
+  );
+  expect(tile?.querySelector('[data-testid="connectors-as-of"]')).toBeNull();
   expect(r.note("Connectors")).toBe("10,000 credits left");
   expect(r.buttons()).toEqual(["Add credits", "Sign out", "Remove", "Turn off"]);
   await sends(r, "Sign out", { sign_out: { id: ID } });
@@ -101,10 +103,10 @@ test("signed in before the first read: Balance not read yet, Check balance sends
 
 test("low: the balance in credits, the running-low line in primary, Add credits first", async () => {
   const r = await open({
-    status: { signed_in: { balance: { credits: 180, paise: 1_800 }, low: true } },
+    status: { signed_in: { balance: { credits: 180, paise: 2_124 }, low: true } },
   });
   expect(r.el.querySelector(".set-numeral")?.textContent).toBe("180");
-  expect(r.text()).not.toContain("₹");
+  expect(r.text()).toContain("Worth ₹21.24.");
   const low = r.el.querySelector('[data-testid="connectors-low"]');
   expect(low?.textContent).toBe("Running low. Add credits to keep searching.");
   expect(low?.className).toContain("text-primary");
@@ -114,7 +116,7 @@ test("low: the balance in credits, the running-low line in primary, Add credits 
   expect(r.buttons()[0]).toBe("Add credits");
 });
 
-test("recent spend: today first, then each readable day newest first, credits only; nothing spent; no group without it", async () => {
+test("recent spend: today first, then each readable day newest first, in credits when no rupees come; nothing spent; no group without it", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 10, 6, 12));
   const r = await open({

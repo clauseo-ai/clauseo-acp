@@ -49,9 +49,15 @@ const of = (
   ],
 });
 
-const BALANCE: ConnectorView["status"] = {
-  signed_in: { balance: { credits: 10_000, paise: 1_00_000 }, low: false },
-};
+/** A read at 4:29 pm today, the clock the cell's day is read against (registry-u12's READ). */
+const READ = (() => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 16, 29).getTime();
+})();
+
+/** 10,000 credits, worth ₹1,180 gross: 11.8 paise a credit, the pack's rate (200 credits for ₹23.60, GST included). */
+const BALANCE_READ = { credits: 10_000, paise: 1_18_000, as_of: READ };
+const BALANCE: ConnectorView["status"] = { signed_in: { balance: BALANCE_READ, low: false } };
 
 /** Each row's state, and the button pressed once it shows (none when left out). */
 const STATES = {
@@ -60,8 +66,11 @@ const STATES = {
   balance: { state: of({ status: BALANCE }) },
   "balance-unread": { state: of({ status: { signed_in: { low: false } } }) },
   low: {
-    state: of({ status: { signed_in: { balance: { credits: 180, paise: 1_800 }, low: true } } }),
+    state: of({
+      status: { signed_in: { balance: { credits: 180, paise: 2_124 }, low: true } },
+    }),
   },
+
   spend: {
     state: of({
       status: BALANCE,
@@ -76,6 +85,32 @@ const STATES = {
   },
   "spend-none": {
     state: of({ status: BALANCE, recent_spend: { today_credits: 0, days: [] } }),
+  },
+  "key-line": {
+    state: of({ status: { signed_in: { balance: BALANCE_READ, low: false, method: "api_key" } } }),
+  },
+  "persist-failed": {
+    state: of({
+      status: {
+        error: { message: "the keychain refused the credential twice", kind: "persist_failed" },
+      },
+    }),
+  },
+  "recharge-paid": { state: of({ status: BALANCE, last_recharge: "paid" }) },
+  "recharge-expired": { state: of({ status: BALANCE, last_recharge: "expired" }) },
+  "recharge-cancelled": { state: of({ status: BALANCE, last_recharge: "cancelled" }) },
+  "spend-rupees": {
+    state: of({
+      status: BALANCE,
+      recent_spend: {
+        today_credits: 340,
+        today_paise: 4_012,
+        days: [
+          { day: "2026-11-04", credits: 1_200, paise: 14_160 },
+          { day: "2026-11-03", credits: 560, paise: 6_608 },
+        ],
+      },
+    }),
   },
   "out-of-credit": { state: of({ status: { out_of_credit: {} } }) },
   "signed-out": { state: of({ status: "signed_out" }) },
@@ -110,9 +145,9 @@ const entry = (
   },
 });
 
-/** The section's entries, each id written as it is: an id never moves when an entry is added or taken out. U15-15 and
- * U15-16 are reserved: the balance's worth and rupees left arrive with stage E's gross per-credit rate, GST included
- * (the orchestrator's GST ruling of 2026-11-06); until then the balance and spend show in credits only. */
+/** The section's entries, each id written as it is: an id never moves when an entry is added or taken out. U15-15 is the
+ * balance's worth, GST included (the orchestrator's GST ruling of 2026-11-06). U15-16 is retired: the rupees-left form
+ * was not built. U15-82 is spend's rupee line: the same words as U15-42, its own cell. */
 export const U15: Entry[] = [
   entry("U15-01", "Connectors", "not-added"),
   entry("U15-02", "Paid sources Clauseo can search while it answers.", "not-added"),
@@ -132,6 +167,17 @@ export const U15: Entry[] = [
   entry("U15-12", "Open the sign-in page again", "signing-in"),
   entry("U15-13", "Ready to search.", "balance"),
   entry("U15-14", "{credits} credits left", "balance"),
+  entry("U15-15", "Worth {rupees}.", "balance"),
+  entry("U15-76", "As of {time}.", "balance"),
+  entry("U15-77", "Using your firm's key.", "key-line"),
+  entry(
+    "U15-78",
+    "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
+    "persist-failed",
+  ),
+  entry("U15-79", "Payment received.", "recharge-paid"),
+  entry("U15-80", "That payment page expired. Add credits to try again.", "recharge-expired"),
+  entry("U15-81", "The payment was cancelled.", "recharge-cancelled"),
   entry("U15-17", "Balance not read yet.", "balance-unread"),
   entry("U15-18", "Check balance", "balance-unread"),
   entry("U15-19", "Running low. Add credits to keep searching.", "low"),
@@ -141,6 +187,7 @@ export const U15: Entry[] = [
   entry("U15-23", "Recent spend", "spend", 900),
   entry("U15-24", "Today", "spend", 900),
   entry("U15-25", "{credits} credits", "spend", 900),
+  entry("U15-82", "{credits} credits, {rupees}", "spend-rupees", 900),
   entry("U15-26", "Nothing spent yet.", "spend-none", 900),
   entry("U15-27", "Out of credit", "out-of-credit"),
   entry("U15-28", "No credits left. Case-law searches stop until you add more.", "out-of-credit"),

@@ -3,13 +3,14 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { count, rupees } from "@clauseo/components/lib/money.ts";
 import { listOf } from "@clauseo/components/lib/words-core.ts";
-import { cw } from "@clauseo/components/lib/words-connectors.ts";
+import { cw, type ConnectorsKey } from "@clauseo/components/lib/words-connectors.ts";
 import { PLAN_NAME } from "../../room/limits/plan-model.ts";
 import type {
   AgentKind,
   ConnectorStatus,
   LimitsView,
   PackView,
+  RechargeOutcome,
   RecentSpend,
 } from "../../transport/protocol.ts";
 
@@ -40,6 +41,13 @@ export const packLabel = (lang: Lang, pack: PackView): string =>
     rupees: rupees(pack.paise),
   });
 
+/** How a watched recharge ended, as the section's quiet line says it (ConnectorView.last_recharge). */
+export const RECHARGE_LINE: Record<RechargeOutcome, ConnectorsKey> = {
+  paid: "Payment received.",
+  expired: "That payment page expired. Add credits to try again.",
+  cancelled: "The payment was cancelled.",
+};
+
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** The local calendar date of a moment, as the account writes days. */
@@ -66,16 +74,35 @@ export function dayName(lang: Lang, day: string): string | null {
   }).format(at);
 }
 
-export type SpendRow = { day: string; label: string; credits: number };
+/** One spend line: its day's label, its credits, and its rupees when the host sent them (paise: undefined when not). */
+export type SpendRow = { day: string; label: string; credits: number; paise: number | undefined };
+
+/** A spend's figure: "340 credits", or "340 credits, ₹40.12" once its rupees are read (GST-inclusive, the gross). */
+export function spendFigure(lang: Lang, credits: number, paise?: number): string {
+  return paise === undefined
+    ? cw(lang, "{credits} credits", { credits: count(credits) })
+    : cw(lang, "{credits} credits, {rupees}", {
+        credits: count(credits),
+        rupees: rupees(paise),
+      });
+}
 
 /** The rows recent spend shows: today first, then the other readable days, newest first. */
 export function spendRows(lang: Lang, spend: RecentSpend, today: string): SpendRow[] {
   const days = spend.days
     .filter((d) => d.day !== today)
-    .map((d) => ({ day: d.day, label: dayName(lang, d.day), credits: d.credits }))
-    .filter((d): d is SpendRow => d.label !== null)
+    .flatMap((d): SpendRow[] => {
+      const label = dayName(lang, d.day);
+      return label === null ? [] : [{ day: d.day, label, credits: d.credits, paise: d.paise }];
+    })
     .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
-  return [{ day: today, label: cw(lang, "Today"), credits: spend.today_credits }, ...days];
+  const todayRow: SpendRow = {
+    day: today,
+    label: cw(lang, "Today"),
+    credits: spend.today_credits,
+    paise: spend.today_paise,
+  };
+  return [todayRow, ...days];
 }
 
 const KINDS: readonly AgentKind[] = ["claude", "codex"];

@@ -36,6 +36,8 @@ export function connectorsNote(state: ConnectorsState, lang: Lang): string | und
   }
   if ("out_of_credit" in status && status.out_of_credit !== undefined)
     return cw(lang, "Out of credit");
-  if ("error" in status && status.error !== undefined) return cw(lang, "Sign-in failed");
+  // a sign-in that worked but could not be saved says "You're signed in" on the block, so the side says nothing
+  if ("error" in status && status.error !== undefined)
+    return status.error.kind === "persist_failed" ? undefined : cw(lang, "Sign-in failed");
   return undefined;
 }

@@ -112,6 +112,14 @@
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
   },
+  "U15-15": {
+    "en": "Worth {rupees}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
   "U15-17": {
     "en": "Balance not read yet.",
     "hi": null,
@@ -578,6 +586,62 @@
   },
   "U15-75": {
     "en": "Hide in this conversation",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-76": {
+    "en": "As of {time}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-77": {
+    "en": "Using your firm's key.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-78": {
+    "en": "You're signed in, but Clauseo couldn't save the sign-in on this computer. Sign in again after Clauseo restarts.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-79": {
+    "en": "Payment received.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-80": {
+    "en": "That payment page expired. Add credits to try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-81": {
+    "en": "The payment was cancelled.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U15-82": {
+    "en": "{credits} credits, {rupees}",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",

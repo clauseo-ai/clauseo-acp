@@ -1,13 +1,13 @@
-// Connectors' recent spend (U15): today's credits, then each recent day the account lists, newest first, credits
-// only, since the wire carries no rupee figure for spend. Today's is "Today", the others "Wednesday 4 November", as
-// the thread's day lines read (limit-note.tsx's DayLine); a day the app can't read is left out (connectors-model.ts).
+// Connectors' recent spend (U15): today's credits, then each recent day the account lists, newest first. A figure
+// shows its rupees, GST-inclusive, when the host sends them (today_paise, paise), else its credits alone. Today's is
+// "Today", the others "Wednesday 4 November", as the thread's day lines read (limit-note.tsx's DayLine); a day the app
+// can't read is left out (connectors-model.ts).
 import type { Lang } from "@clauseo/components/lib/display.ts";
-import { count } from "@clauseo/components/lib/money.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { say } from "@clauseo/components/lib/words-ui.ts";
 import { useNow } from "../../store/limits.ts";
 import type { RecentSpend } from "../../transport/protocol.ts";
-import { dateOf, spendRows } from "./connectors-model.ts";
+import { dateOf, spendFigure, spendRows } from "./connectors-model.ts";
 import { Group, PlateRow } from "./parts.tsx";
 
 export function Spend({ spend, lang }: { spend: RecentSpend; lang: Lang }) {
@@ -26,9 +26,7 @@ export function Spend({ spend, lang }: { spend: RecentSpend; lang: Lang }) {
         rows.map((row) => (
           <PlateRow key={row.day} className="set-cn-spend">
             <p className="text-ui text-primary">{say(row.label)}</p>
-            <p className="set-cn-figure">
-              {say(cw(lang, "{credits} credits", { credits: count(row.credits) }))}
-            </p>
+            <p className="set-cn-figure">{say(spendFigure(lang, row.credits, row.paise))}</p>
           </PlateRow>
         ))
       )}
