@@ -75,6 +75,8 @@ import { tauriWindowControls, type WindowControls } from "../transport/window-co
 import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import { hasSetup } from "./first-run/hold.ts";
+import { ProtectionContext } from "./protection/context.ts";
+import { useRoomProtection } from "./protection/use-room-protection.tsx";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
@@ -339,6 +341,8 @@ function RoomFrame({
       ? undefined
       : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
+  // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
+  const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
   // the tool line's room: the plan's name its words use, Settings, and the transport whose Chrome download it offers
   // (browser-install.ts, made by the line's chunk once it is in)
   const toolRoom = useMemo(
@@ -380,7 +384,8 @@ function RoomFrame({
         caption={caption}
         nativeLights={controls !== null}
         search={false}
-        unprotected={unprotectedFolder(open?.folder_support)}
+        unprotected={unprotectedFolder(open?.folder_support) || shield.explain !== undefined}
+        onUnprotected={shield.explain}
         versions={open !== null}
         {...versions.toolbar}
         plan={null}
@@ -444,6 +449,7 @@ function RoomFrame({
           />
         </Suspense>
       )}
+      {shield.note}
       <main className="room-centre" ref={nodes.slot("centre")}>
         {setup && (
           <Suspense fallback={null}>
@@ -502,21 +508,23 @@ function RoomFrame({
               <WordOpenContext value={word}>
                 <AgentPlanContext value={agentPlan}>
                   <ToolLineContext value={toolRoom}>
-                    <Work
-                      key={talks.open ?? open?.matter ?? "none"}
-                      transport={transport}
-                      matter={open}
-                      drafts={drafts}
-                      draftKey={talks.open}
-                      conversation={link}
-                      choice={choice}
-                      plan={plan}
-                      focus={talks.focus?.n ?? null}
-                      archived={talks.archived}
-                      onThread={matters.onThread}
-                      conversations={conversations}
-                      folderShut={folderShut}
-                    />
+                    <ProtectionContext value={shield.composer}>
+                      <Work
+                        key={talks.open ?? open?.matter ?? "none"}
+                        transport={transport}
+                        matter={open}
+                        drafts={drafts}
+                        draftKey={talks.open}
+                        conversation={link}
+                        choice={choice}
+                        plan={plan}
+                        focus={talks.focus?.n ?? null}
+                        archived={talks.archived}
+                        onThread={matters.onThread}
+                        conversations={conversations}
+                        folderShut={folderShut}
+                      />
+                    </ProtectionContext>
                   </ToolLineContext>
                 </AgentPlanContext>
               </WordOpenContext>

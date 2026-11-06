@@ -10,6 +10,7 @@ import {
   IconConversation,
   IconLanguage,
   IconPlanLimit,
+  IconSafeWorkspace,
   IconSearch,
   IconSend,
 } from "@clauseo/components/icons/icons.tsx";
@@ -36,6 +37,8 @@ import { Usage } from "./sections/usage.tsx";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
+import { WorkspaceSection } from "./sections/workspace-load.tsx";
+import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
 import { usageNote } from "./sections/usage-note.ts";
 
@@ -123,6 +126,15 @@ export const SECTIONS: readonly SectionEntry[] = [
     note: (ctx, lang) => connectorsNote(ctx.connectors, lang),
     shown: (ctx) => ctx.connectors.connectors.length > 0,
     Body: ConnectorsSection,
+  },
+  {
+    // UC: this computer's protection, where the transport carries its wire; built now, live once R17 PR-B admits
+    // this window (Ruled, 7). No side note, so the protection store stays out of the first load
+    id: "workspace",
+    name: "Safe workspace",
+    icon: IconSafeWorkspace,
+    shown: (ctx) => carriesProtectionWire(ctx.transport),
+    Body: WorkspaceSection,
   },
   {
     id: "language",

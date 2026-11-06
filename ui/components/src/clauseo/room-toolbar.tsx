@@ -77,6 +77,8 @@ export type RoomToolbarProps = {
   subtitle?: string;
   /** Optional: the current matter isn't protected. Its line carries the short Not protected mark, last. */
   unprotected?: boolean;
+  /** Optional: a press on the Not protected mark explains it (UC's note); without it the mark isn't pressable. */
+  onUnprotected?: (() => void) | undefined;
   /** Optional: a matter on the rail waits on the lawyer, with a question or for permission. While the rail is
    * folded behind Matters, the button carries one 8 px court-yellow dot, so the wait is seen without opening it. */
   railWaits?: boolean;
@@ -223,7 +225,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
               <span className="room-case">
                 {/* a dot only between two parts: with no subtitle, Not protected starts the line */}
                 {p.subtitle !== "" && <Dot />}
-                <NotProtectedMark short />
+                <NotProtectedMark short onPress={p.onUnprotected} />
               </span>
             )}
           </p>
@@ -241,7 +243,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
             {p.unprotected === true && (
               <span className="room-case">
                 <Dot />
-                <NotProtectedMark short />
+                <NotProtectedMark short onPress={p.onUnprotected} />
               </span>
             )}
           </p>

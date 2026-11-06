@@ -182,16 +182,23 @@ export const BARE_CHUNKS = [
   "words-hi",
 ];
 
-/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx)
+/** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx), Plans' (UD2) and the Safe workspace's (UC)
  * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
-export const SETTINGS_BARE_CHUNKS = ["connectors", "plans"];
+export const SETTINGS_BARE_CHUNKS = ["connectors", "plans", "workspace"];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left
  * the first load with New matter's dialog (room.tsx, lazy), these three import them: New matter, change-note-ask and
  * versions-chunk. Their preloads fetch the primitives in parallel, not in a waterfall after the click. vite-config.test.ts
  * checks that only the chunks importing one of these carry a preload list. */
-export const PRELOADED_CHUNKS = ["new-matter", "change-note-ask", "versions-chunk"];
+export const PRELOADED_CHUNKS = [
+  "new-matter",
+  "change-note-ask",
+  "versions-chunk",
+  // UC: the Not protected note, the set-up confirm and the firm's notice, which take the alert dialog's primitives;
+  // UD1's first run takes its Safe workspace step from this chunk too, loaded on its way (note-load.ts)
+  "note-chunk",
+];
 
 const HELPER = "__vitePreload(() => ";
 const DEPS = ", __VITE_PRELOAD__)";

@@ -72,6 +72,9 @@ export type TauriOptions = {
 
 export class TauriTransport implements HostTransport, AppFeedSource, LimitsSource {
   readonly kind = "tauri";
+  /** UC: the desktop carries the protection wire (settings/sections/workspace-shown.ts); before R17 PR-B its host
+   * answers `command.invalid`, which hides or quiets every protection line. */
+  readonly protectionWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
@@ -152,12 +155,16 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("browser_install" in event && event.browser_install !== undefined) ||
           ("connectors_changed" in event && event.connectors_changed !== undefined) ||
           ("case_law_hint" in event && event.case_law_hint !== undefined) ||
-          ("folder_scanned" in event && event.folder_scanned !== undefined)
+          ("folder_scanned" in event && event.folder_scanned !== undefined) ||
+          ("protection_changed" in event && event.protection_changed !== undefined) ||
+          // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
+          Object.hasOwn(event, "protection_view_changed")
         ) {
           // app-wide: no stream and no position, so the message counts as processed at once (#onMessage)
           for (const listener of this.#appListeners) {
             try {
-              listener(event);
+              // protection_view_changed (R17 PR-B) isn't in HostEvent yet; the room reads it loosely
+              listener(event as HostEvent);
             } catch (error) {
               warn(`an app event listener threw: ${String(error)}`);
             }
@@ -206,7 +213,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#appReady;
   }
 
-  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`). The first listener subscribes the window's channel to them;
+  /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`, `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`, `protection_changed`). The first listener subscribes the window's channel to them;
    * read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);

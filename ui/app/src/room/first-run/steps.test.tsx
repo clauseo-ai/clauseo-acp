@@ -1,5 +1,6 @@
-// UD1, Done-when 1: the Safe workspace step is skipped until UC merges (decision 2 of the lead's brief), the case-law
-// card's slot draws nothing until R24 merges, and the first run leaves no timer or animation frame at rest (G1b).
+// UD1, Done-when 1: the case-law card's slot draws nothing until R24 merges, and the first run leaves no timer or
+// animation frame at rest (G1b). The Safe workspace step is UC's (workspace.test.tsx); without the protection wire
+// there is none, and after the first sign-in the composer takes the question.
 // @vitest-environment happy-dom
 import { act } from "react";
 import { expect, test, vi } from "vitest";
@@ -16,10 +17,8 @@ import {
   signIn,
   text,
 } from "./rig.tsx";
-import { workspaceStep } from "./workspace.ts";
 
-test("the Safe workspace step is skipped before UC merges: none is needed, and after the first sign-in the composer takes the question", async () => {
-  expect(workspaceStep()).toBeNull();
+test("without the protection wire there is no Safe workspace step: after the first sign-in the composer takes the question", async () => {
   const t = await mountFirstRun({
     first: [install(CLAUDE, READY), signIn(CLAUDE, { signed_out: {} })],
   });

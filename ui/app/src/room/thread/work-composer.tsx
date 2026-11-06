@@ -58,6 +58,7 @@ import { ComposerSteer } from "./composer-steer.tsx";
 import { asksWords } from "./step-names.ts";
 import { useHold } from "../first-run/hold.ts";
 import type { AskHow, Drafts } from "./session.ts";
+import { ProtectionContext } from "../protection/context.ts";
 
 export function WorkComposer({
   ref,
@@ -150,6 +151,8 @@ export function WorkComposer({
   const agentPlan = useAgentPlan();
   // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
   const hold = useHold(transport);
+  // UC: the room's protection line, and the firm's hold on send while the open matter has no protection
+  const shield = use(ProtectionContext);
   const gated = hold?.gate !== undefined && !gateYields;
   const field = useRef<ComposerHandle>(null);
   // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
@@ -218,7 +221,7 @@ export function WorkComposer({
   // words, but not past the cap, when they stay in the field; while another conversation holds the matter, it raises
   // the wait instead, whose Queue sends
   const ask = (asked: string) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     if (busy) {
       queue(asked);
       return;
@@ -235,7 +238,7 @@ export function WorkComposer({
     send(asked, { behind: true });
   };
   const send = (asked: string, how?: AskHow) => {
-    if (disabled || gated || asked.trim() === "") return;
+    if (disabled || shield?.blocked === true || gated || asked.trim() === "") return;
     // idle, Ask waits for the turn it sent; Queue (another's wait) and the hint's buttons go behind or steer
     if (how === undefined && busy) return;
     if (lost !== null) setLost(null);
@@ -364,7 +367,11 @@ export function WorkComposer({
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
       // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time. With no
       // warning, U15's out-of-credit note, hidden by this conversation's thread (or its draft's key before it has one)
-      notice={(noteFor ?? same)(paused === null ? <LimitWarning fallback={credit} /> : credit)}
+      notice={
+        shield?.blocked === true
+          ? shield.notice
+          : (noteFor ?? same)(paused === null ? <LimitWarning fallback={credit} /> : credit)
+      }
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
@@ -424,8 +431,8 @@ export function WorkComposer({
           )}
         </>
       }
-      disabled={disabled}
-      line={hold?.line ?? false}
+      disabled={disabled || shield?.blocked === true}
+      line={hold?.line ?? (shield === null ? false : shield.line)}
       testIds={{
         field: "composer",
         ask: "send",

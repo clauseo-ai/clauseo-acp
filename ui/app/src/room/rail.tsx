@@ -41,6 +41,7 @@ import { clockOf, dayOf, groupMatters } from "./when.ts";
 import { matterSnooze, snoozedShelf, splitConversations, useSnooze } from "./rail-snooze.tsx";
 import { preloadSnooze } from "./snooze-load.ts";
 import { useRailClock } from "./sweep.ts";
+import { notProtected } from "./protection/causes.ts";
 
 /** A row's status as MatterRow takes it: the state, and its moment as words. Working never names a time (no end
  * estimates), so it says "Answering."; a stop or a reset on another day gives its day. */
@@ -217,6 +218,8 @@ export function RoomRail({
       ...(current ? { state: "idle" as const } : stateWords(triaged?.status, now, zone, w.lang)),
       ...(behind === null ? {} : { where: behind.title ?? untitled }),
       testIds: { row: "matter-row" },
+      // UC: Not protected, as the row has it now (matters.ts takes protection_changed onto it)
+      unprotected: notProtected(m.protection),
       // the open matter's conversations, once its list is in
       ...matterSnooze(sc, m, every.lists.get(m.matter), placed.group.get(m.matter)),
       ...(split !== null

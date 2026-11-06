@@ -40,6 +40,8 @@ import type {
   HostQuery,
   PermissionRequestId,
   PickedFolder,
+  Protection,
+  ProtectionView,
   QueryResult,
   RevealTarget,
   SetupCommand,
@@ -126,6 +128,17 @@ export type FakeHost = {
   /** With it, the fake carries the setup wire (`onSetup`, `setup`, `countUi`), and the room loads the first run.
    * Without it the fake has none of the three, like a host before R20. Read when the fake is made. */
   setup?: FakeSetupHost;
+  /** UC: with it, the fake carries the protection wire (`protectionWire`), as R17 PR-B's host will. Read when made. */
+  protection?: FakeProtectionHost;
+};
+
+/** UC's protection wire, scripted: the `protection` query and the two commands. Their events are the test's to play
+ * (`protectionChanged`, `protectionViewChanged`, which need `host.next`'s app part). */
+export type FakeProtectionHost = {
+  /** Answers each `protection` query; throwing refuses it (`command.invalid`, before PR-B admits it). */
+  view: () => ProtectionView | Promise<ProtectionView>;
+  /** Answers `retry_protection` and `remove_sandbox_setup`; throwing refuses. Done when left out. */
+  command?: (command: "retry_protection" | "remove_sandbox_setup") => void | Promise<void>;
 };
 
 /** A scan the fake host says nothing of: cancelled, nothing counted. */
@@ -141,6 +154,8 @@ const quietScan = (folder: FolderRefId): FolderScanned => ({
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
+  /** UC: whether the protection wire is scripted (`host.protection`). */
+  readonly protectionWire: boolean;
   readonly calls: FakeCall[] = [];
   /** Problems the channel reader reported. */
   readonly problems: string[] = [];
@@ -244,6 +259,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   constructor(host: FakeHost = {}) {
     this.host = host;
+    this.protectionWire = host.protection !== undefined;
     this.openSettings =
       host.openSettings === undefined
         ? undefined
@@ -382,6 +398,27 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#appHeard) listener(event);
   }
 
+  /** UC: plays `protection_changed` for a matter, as the host sends it to every window. */
+  protectionChanged(matter: string, protection: Protection): void {
+    this.appEvent({ protection_changed: { matter, protection } });
+  }
+
+  /** UC: plays R17 PR-B's `protection_view_changed`, the whole view (not in bindings.ts yet). */
+  protectionViewChanged(view: unknown): void {
+    this.appEvent({ protection_view_changed: { view } });
+  }
+
+  /** UC: the protection commands dispatched, in order. */
+  protectionCommands(): ("retry_protection" | "remove_sandbox_setup")[] {
+    return this.only("dispatch").flatMap(({ command }) =>
+      command.command.retry_protection !== undefined
+        ? ["retry_protection" as const]
+        : command.command.remove_sandbox_setup !== undefined
+          ? ["remove_sandbox_setup" as const]
+          : [],
+    );
+  }
+
   async #nextCommand(command: NextCommand): Promise<NextOutcome> {
     this.calls.push({ call: "next_command", command });
     try {
@@ -419,7 +456,15 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
     let outcome: CommandOutcome = "done";
-    if (this.host.dispatch !== undefined)
+    const protecting =
+      command.command.retry_protection !== undefined
+        ? "retry_protection"
+        : command.command.remove_sandbox_setup !== undefined
+          ? "remove_sandbox_setup"
+          : null;
+    if (protecting !== null && this.host.protection !== undefined)
+      await this.#answer(() => this.host.protection?.command?.(protecting));
+    else if (this.host.dispatch !== undefined)
       try {
         outcome = await this.host.dispatch(command);
       } catch (error) {
@@ -434,6 +479,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   async query(query: HostQuery): Promise<QueryResult> {
     this.calls.push({ call: "query", query });
+    const protection = this.host.protection;
+    if (query === "protection" && protection !== undefined)
+      return { protection: await this.#answer(() => protection.view()) };
     if (this.host.query === undefined) throw internalError("the fake host answers no query");
     try {
       return await this.host.query(query);

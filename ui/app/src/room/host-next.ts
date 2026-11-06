@@ -20,6 +20,7 @@ import type {
   MatterSummary,
   MattersChanged,
   MessageId,
+  Protection,
   QueryResult,
   SettingsView,
   ThreadId,
@@ -217,7 +218,13 @@ export type AppEvent =
   | { browser_install: { state: BrowserInstallState } }
   | { connectors_changed: ConnectorsState }
   | { case_law_hint: CaseLawHint }
-  | { folder_scanned: FolderScanned };
+  | { folder_scanned: FolderScanned }
+  | { protection_changed: ProtectionChanged }
+  | { protection_view_changed: unknown };
+
+/** UC: a matter's protection now (decision record 0051), app-wide and in no catch-up. `protection_view_changed` is R17
+ * PR-B's whole ProtectionView, not in bindings.ts yet: store/protection.ts reads it defensively. */
+export type ProtectionChanged = { matter: MatterId; protection: Protection };
 
 /** R24: the host's offer of the case-law connector under a turn's answer (store/connectors.ts); never logged. */
 export type CaseLawHint = { matter: MatterId; thread: ThreadId; turn: TurnId };

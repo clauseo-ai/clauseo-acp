@@ -203,6 +203,21 @@
     padding: var(--s1-5) 0 var(--s1-5) var(--s2);
     max-width: 100%;
   }
+  /* UC: the room's line after the Safe workspace step ended without protection: the mark, a refusal, its two acts */
+  .fl-ws-off {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+  }
+  .fl-ws-failed {
+    flex-basis: 100%;
+    color: var(--primary);
+  }
+  .fl-ws-acts {
+    display: inline-flex;
+    gap: var(--s1);
+  }
   .fl-gate-pair {
     display: inline-flex;
     flex-wrap: wrap;
