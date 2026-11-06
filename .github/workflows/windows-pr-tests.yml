@@ -305,6 +305,17 @@ jobs:
           set -o pipefail
           cargo nextest run --workspace --profile ci --no-tests=pass 2>&1 | tee "$NEXTEST_LOG"
 
+      # The `elevated_` tests (D-B16): ignored everywhere else, and each skips unless the token is
+      # elevated and CLAUSEO_ELEVATED_TESTS=1. The hosted runner's token is elevated (probe #509).
+      # One at a time: they make and delete local accounts, a group and an HKLM key.
+      - name: Elevated tests, one at a time
+        if: env.MODE == 'run'
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          cargo nextest run --workspace --profile ci --run-ignored only -E 'test(/^elevated_/)' --test-threads 1 --no-tests=fail 2>&1 | tee -a "$NEXTEST_LOG"
+
       - name: Name the failed tests
         if: ${{ failure() && env.MODE == 'run' }}
         run: |

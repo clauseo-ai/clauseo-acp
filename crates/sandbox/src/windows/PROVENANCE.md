@@ -18,4 +18,6 @@ allow scans read plain allows only (`ACCESS_ALLOWED_ACE_TYPE`), where the strict
 object or compound allow of any SID, and it edits no mandatory label.
 
 Nothing else under `windows/` is derived from Codex. User creation, DPAPI and WFP (PR4, PR7) add
-their rows when they land.
+their rows when they land. S15 PR4e's sign-in screen hiding (`setup/accounts.rs`) and set-up mutex
+(`setup/lock.rs`) follow the approach of Codex's `hide_users.rs` and `setup_mutex.rs`, and take no
+code from them.

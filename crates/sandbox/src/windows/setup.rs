@@ -42,10 +42,26 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
+#[cfg(windows)]
+mod accounts;
+#[cfg(test)]
+#[cfg(windows)]
+mod accounts_tests;
 mod create;
+#[cfg(windows)]
+mod lock;
+#[cfg(test)]
+#[cfg(windows)]
+mod lock_tests;
 mod machine;
 mod outcome;
+pub mod password;
+pub mod record_values;
+#[cfg(windows)]
+mod record_write;
 mod rollback;
+#[cfg(windows)]
+mod windows_machine;
 
 pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart};
 pub use outcome::{
@@ -53,6 +69,8 @@ pub use outcome::{
     LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
     Step, launch_error,
 };
+#[cfg(windows)]
+pub use windows_machine::{Names, WindowsMachine};
 
 /// How many pool users a first set-up makes, and how many an extend adds by default (D-B5).
 pub const POOL_START: usize = 4;
