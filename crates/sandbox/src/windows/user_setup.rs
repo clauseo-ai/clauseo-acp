@@ -6,10 +6,12 @@
 //! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). It runs
 //! hidden, with no error box from the shell (`SEE_MASK_FLAG_NO_UI`), and the wait has no limit:
 //! R17 calls `run` off the actor thread. A prompt declined (1223) is [`SetupError::Refused`];
-//! 1260 (a policy) and 1385 (a logon right) are [`SetupError::Blocked`], named for IT
-//! (`launch_error`), and `state` reports a block as [`SetupState::Blocked`] until a set-up
-//! succeeds. Once the exe ends, its exit code and `setup-result.json` say how
-//! ([`result_file::outcome`]).
+//! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, and a 1385 from
+//! the launch (the approving account's sign-in) a failure saying so (`launch_error`). Once the
+//! exe ends, its exit code and `setup-result.json` say how ([`result_file::outcome`]): its
+//! 1385 (a sandbox user's logon right) is [`SetupError::Blocked`] too, and a data folder not
+//! owned by this user a failure saying so. `state` reports a block as [`SetupState::Blocked`]
+//! until a set-up succeeds.
 #![expect(
     unsafe_code,
     reason = "FFI to ShellExecuteExW and the started process's handle"
@@ -128,12 +130,12 @@ impl UserSetup {
 
 impl SandboxSetup for UserSetup {
     /// The marker and record's state, or [`SetupState::Blocked`] while the last set-up was
-    /// blocked and nothing is set up since (`result_file::state_with`).
+    /// blocked and nothing is set up since (`result_file::state_with`). Never writes: the result
+    /// file is read unchanged, and ignored unless it is this user's alone
+    /// (`result_file::read_unchanged`); `run` repairs it.
     fn state(&self) -> SetupState {
-        result_file::state_with(
-            setup_state(&self.data_dir),
-            &result_file::read(&self.data_dir),
-        )
+        let last = result_file::read_unchanged(&self.data_dir);
+        result_file::state_with(setup_state(&self.data_dir), &last)
     }
 
     fn run(&self) -> Result<(), SetupError> {

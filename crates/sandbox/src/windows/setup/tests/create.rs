@@ -299,14 +299,14 @@ fn exit_codes_round_trip() {
     let codes: Vec<u8> = SetupExit::ALL.iter().map(|exit| exit.as_code()).collect();
     assert_eq!(
         codes,
-        [0, 1, 2, 3, 4, 5],
+        [0, 1, 2, 3, 4, 5, 6],
         "appended from here on, never renumbered"
     );
     for exit in SetupExit::ALL {
         assert_eq!(SetupExit::from_code(u32::from(exit.as_code())), Some(exit));
     }
     for other in [
-        6,
+        7,
         77,
         255,
         ERROR_CANCELLED,

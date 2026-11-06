@@ -136,39 +136,68 @@ pub(crate) fn read_owned_file(path: &Path, cap: u64) -> io::Result<Option<Vec<u8
     }
     #[cfg(not(windows))]
     {
-        use std::io::Read as _;
-        use std::os::unix::fs::MetadataExt as _;
-
-        use rustix::fs::{Mode, OFlags};
-        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let file = match rustix::fs::open(path, flags, Mode::empty()) {
-            Ok(fd) => File::from(fd),
-            Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
-            Err(error) => return Err(io::Error::from(error)),
-        };
-        let metadata = file.metadata()?;
-        let found = Found {
-            reparse: false,
-            right_kind: metadata.is_file(),
-            links: u32::try_from(metadata.nlink()).unwrap_or(u32::MAX),
-            owner_allowed: true,
-        };
-        repair_plan(found).map_err(|why| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{}: {why}", path.display()),
-            )
-        })?;
-        let mut bytes = Vec::new();
-        file.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
-        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{} is larger than {cap} bytes", path.display()),
-            ));
-        }
-        Ok(Some(bytes))
+        read_posix(path, cap, false)
     }
+}
+
+/// [`read_owned_file`] for a caller that must never write (`UserSetup::state`): one handle
+/// opened for reading only, nothing repaired. A link, a non-file or a second hard link is
+/// refused; a file that isn't this user's alone is `None`, as if missing: on Windows one whose
+/// owner isn't this user or whose DACL isn't the protected one naming only this user, `SYSTEM`
+/// and `Administrators`; elsewhere (the tests' stand-in) one whose mode gives the group or
+/// others any access.
+#[cfg(any(windows, test))]
+pub(crate) fn read_owned_file_unchanged(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    #[cfg(windows)]
+    {
+        super::private_dir::read_unchanged(path, cap)
+    }
+    #[cfg(not(windows))]
+    {
+        read_posix(path, cap, true)
+    }
+}
+
+/// The tests' stand-in for the two reads: opened without following a link, checked through
+/// that descriptor, then read up to `cap` bytes. With `owner_only`, a mode giving the group
+/// or others any access makes it `None`.
+#[cfg(all(test, not(windows)))]
+fn read_posix(path: &Path, cap: u64, owner_only: bool) -> io::Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    use std::os::unix::fs::MetadataExt as _;
+
+    use rustix::fs::{Mode, OFlags};
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file = match rustix::fs::open(path, flags, Mode::empty()) {
+        Ok(fd) => File::from(fd),
+        Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+        Err(error) => return Err(io::Error::from(error)),
+    };
+    let metadata = file.metadata()?;
+    let found = Found {
+        reparse: false,
+        right_kind: metadata.is_file(),
+        links: u32::try_from(metadata.nlink()).unwrap_or(u32::MAX),
+        owner_allowed: true,
+    };
+    repair_plan(found).map_err(|why| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: {why}", path.display()),
+        )
+    })?;
+    if owner_only && metadata.mode() & 0o077 != 0 {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    file.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
 }
 
 /// How long [`lock_exclusive`] waits for another holder.

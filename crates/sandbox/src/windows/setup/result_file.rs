@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::outcome::{SetupExit, SetupFailure, SetupReport};
+use super::outcome::{DATA_DIR_NOT_OWNED, SetupExit, SetupFailure, SetupReport};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
 use crate::{Blocked, SetupError, SetupState};
@@ -147,6 +147,9 @@ pub fn outcome(
             "another Windows user set Clauseo's protection up on this computer".to_owned()
         }
         Some(SetupExit::LockHeld) => "another set-up is running on this computer".to_owned(),
+        Some(SetupExit::DataDirNotOwned) => {
+            return Err(SetupError::Failed(DATA_DIR_NOT_OWNED.to_owned()));
+        }
         Some(SetupExit::Usage) => {
             format!("Clauseo's set-up program was started wrongly (exit {code})")
         }
@@ -163,21 +166,37 @@ pub fn outcome(
     }))
 }
 
-/// The set-up state `UserSetup::state` reports: `state`, read from the marker and record, unless
-/// it isn't [`SetupState::Ready`] and the last result (as [`read`] gave it) says a setting
-/// blocked that run; then [`SetupState::Blocked`]. A later set-up that succeeds writes a result
-/// with no block, and a Ready marker always wins.
+/// The set-up state `UserSetup::state` reports: `state`, read from the marker and record,
+/// unless it is [`SetupState::Needed`] or [`SetupState::Outdated`] and the last result (as
+/// [`read_unchanged`] gave it) says a setting blocked that run; then [`SetupState::Blocked`]. Every
+/// other state comes first, so a stale block never hides a pool another user owns, a removal
+/// that stopped part way, records that can't be read, or a Ready set-up. A later set-up that
+/// succeeds writes a result with no block.
 pub fn state_with(state: SetupState, last: &Result<Option<SetupResult>, String>) -> SetupState {
     match (state, last) {
-        (SetupState::Ready, _) => SetupState::Ready,
         (
-            _,
+            SetupState::Needed | SetupState::Outdated { .. },
             Ok(Some(SetupResult {
                 blocked: Some(blocked),
                 ..
             })),
         ) => SetupState::Blocked(*blocked),
         (state, _) => state,
+    }
+}
+
+/// Reads the file for `state`, which never writes: through one handle opened for reading only,
+/// with nothing repaired (`write::read_owned_file_unchanged`). A file that isn't this user's
+/// alone (its DACL or owner, or on other systems its mode) is ignored, as no result; only
+/// `run`'s [`read`] repairs it. A link or a second hard link is refused, as by [`read`].
+#[cfg(any(windows, test))]
+pub fn read_unchanged(data_dir: &Path) -> Result<Option<SetupResult>, String> {
+    match write::read_owned_file_unchanged(&path(data_dir), RESULT_CAP) {
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|error| error.to_string()),
+        Ok(None) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 

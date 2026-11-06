@@ -22,6 +22,14 @@ pub const ERROR_LOGON_TYPE_NOT_GRANTED: u32 = 1385;
 /// The cause when a pool user's logon gets error 1385 (D-B4).
 pub const LOGON_NOT_GRANTED: &str = "Windows' \"Allow log on locally\" setting doesn't include \
      the sandbox users (error 1385): IT can add the Users group to it";
+/// The cause when `ShellExecuteExW` itself gets error 1385: Windows refused the sign-in of the
+/// account that approved the prompt, before the set-up program ran.
+pub const APPROVER_LOGON_REFUSED: &str = "Windows refused the sign-in of the account that \
+     approved the set-up (error 1385): ask whoever looks after this computer";
+/// The cause when the data folder isn't owned by the user who asked
+/// ([`SetupExit::DataDirNotOwned`]).
+pub const DATA_DIR_NOT_OWNED: &str = "this computer's Clauseo data folder isn't owned by you: \
+     ask whoever looks after this computer";
 /// The cause when the Secondary Logon service is disabled.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
      set it to start manually";
@@ -45,17 +53,21 @@ pub enum SetupExit {
     RemovedPartly,
     /// 5: another set-up holds the machine-wide lock.
     LockHeld,
+    /// 6: the data folder isn't owned by the user who asked (one an elevated run made, owned
+    /// by Administrators, for one); no result file is written there.
+    DataDirNotOwned,
 }
 
 impl SetupExit {
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 6] = [
+    pub const ALL: [SetupExit; 7] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
         SetupExit::Failed,
         SetupExit::RemovedPartly,
         SetupExit::LockHeld,
+        SetupExit::DataDirNotOwned,
     ];
 
     /// The process exit code.
@@ -67,6 +79,7 @@ impl SetupExit {
             SetupExit::Failed => 3,
             SetupExit::RemovedPartly => 4,
             SetupExit::LockHeld => 5,
+            SetupExit::DataDirNotOwned => 6,
         }
     }
 
@@ -80,13 +93,15 @@ impl SetupExit {
 }
 
 /// What a launch error from `ShellExecuteExW` means for the set-up (D-B4): 1223 (the prompt
-/// declined) is [`SetupError::Refused`]; 1260 is [`Blocked::Policy`] and 1385
-/// [`Blocked::LogonRight`], named for IT; any other code is a failure naming it.
+/// declined) is [`SetupError::Refused`]; 1260 is [`Blocked::Policy`], named for IT. A 1385 here
+/// is the approving account's own sign-in, refused before the set-up program ran, so it is a
+/// failure saying so ([`APPROVER_LOGON_REFUSED`]); [`Blocked::LogonRight`] is the exe's 1385 only,
+/// from a sandbox user's logon. Any other code is a failure naming it.
 pub fn launch_error(code: u32) -> SetupError {
     match code {
         ERROR_CANCELLED => SetupError::Refused,
         ERROR_ACCESS_DISABLED_BY_POLICY => SetupError::Blocked(Blocked::Policy),
-        ERROR_LOGON_TYPE_NOT_GRANTED => SetupError::Blocked(Blocked::LogonRight),
+        ERROR_LOGON_TYPE_NOT_GRANTED => SetupError::Failed(APPROVER_LOGON_REFUSED.to_owned()),
         other => SetupError::Failed(format!(
             "Clauseo's set-up program didn't start (error {other})"
         )),

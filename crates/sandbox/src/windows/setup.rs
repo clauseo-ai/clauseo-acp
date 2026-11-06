@@ -95,9 +95,9 @@ mod windows_machine;
 
 pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart};
 pub use outcome::{
-    ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_LOGON_TYPE_NOT_GRANTED, JournalOutcome,
-    LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
-    Step, launch_error,
+    APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
+    ERROR_LOGON_TYPE_NOT_GRANTED, JournalOutcome, LOGON_NOT_GRANTED, LOGON_REFUSED,
+    SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, launch_error,
 };
 #[cfg(windows)]
 pub use windows_machine::{Names, WindowsMachine};
