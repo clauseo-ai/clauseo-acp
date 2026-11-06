@@ -158,7 +158,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "signin.agents_still_running": "Clauseo is still finishing. Try again in a moment.",
   "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
   "agent.key_unreadable":
-    "Clauseo couldn't read your saved API key in time. If this computer asks to let Clauseo use it, allow it, then try again.",
+    "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
