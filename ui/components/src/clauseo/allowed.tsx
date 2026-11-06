@@ -63,7 +63,7 @@ export function WorkspaceLine({
             {...(unprotected.why === "setup"
               ? {
                   meaning: w.v(
-                    "Clauseo can read any file on this computer and asks before each change.",
+                    "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.",
                   ),
                 }
               : {})}
@@ -234,7 +234,7 @@ export function AllowedList({
                       { time: w.clock(unprotected.since) },
                     )
                   : w.v(
-                      "Couldn't be set up on this computer. Clauseo can read any file on it and asks before each change.",
+                      "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.",
                     )}
             </Say>
           </span>

@@ -7,6 +7,8 @@ export const HI = {
   // and the first run's chunk share no words chunk of their own
   "Choose Yes in the window Windows shows.": "Windows जो विंडो दिखाता है, उसमें Yes चुनें।",
   "Setting up the Safe workspace.": "सुरक्षित कार्यक्षेत्र तैयार हो रहा है।",
+  // the check's own waiting line (R17 PR-B's in_progress "check"), provisional
+  "Checking the Safe workspace.": "सुरक्षित कार्यक्षेत्र की जाँच हो रही है।",
   // the set-up confirm (UC-11, UC-12, UC-40)
   "Set up protection?": "संरक्षण सेट अप करें?",
   "Windows will ask to let Clauseo set up its protection. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
@@ -20,16 +22,16 @@ export const HI = {
     "इसके बाद, जब तक आप इसे फिर से सेट अप नहीं करते, Clauseo इस कंप्यूटर पर बिना संरक्षण के काम करेगा।",
   "Remove set-up": "सेटअप हटाएँ",
   // the notes (UC-22, UC-23, UC-25)
-  "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file on this computer, and asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर संरक्षण अभी सेट अप नहीं है। तब तक Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "This computer can't give Clauseo's protection, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.":
-    "यह कंप्यूटर Clauseo का संरक्षण नहीं दे सकता, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.":
+    "इस कंप्यूटर पर संरक्षण अभी सेट अप नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
+    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This computer can't give Clauseo's protection, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
+    "यह कंप्यूटर Clauseo का संरक्षण नहीं दे सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   // a build without protection (R17 PR-B's unsupported { why: "not_built" }, every real build until desktop wires
   // protection in), said calmly (UC-38)
-  "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.":
-    "Clauseo का यह बिल्ड संरक्षण के बिना आता है, इसलिए Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.":
+    "Clauseo के इस संस्करण में अभी संरक्षण नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   // the pool, counts only (UC-27 to UC-32, UC-34, UC-35)
   "All {size} of this computer's protected spaces are in use, so this matter works without protection for now. It's protected again once one is free.":
     "इस कंप्यूटर के सभी {size} संरक्षित स्थान उपयोग में हैं, इसलिए यह मामला अभी बिना संरक्षण के चलता है। एक स्थान खाली होते ही यह फिर से संरक्षित हो जाएगा।",
@@ -50,4 +52,6 @@ export const HI = {
     "आपकी फ़र्म इस कंप्यूटर पर संरक्षण अनिवार्य करती है। इसे एक बार सेट अप करें, फिर यहाँ पूछें।",
   "Your firm requires protection, and all of this computer's protected spaces are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.":
     "आपकी फ़र्म संरक्षण अनिवार्य करती है, और इस कंप्यूटर के सभी संरक्षित स्थान उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक स्थान खाली करने के लिए किसी दूसरे मामले की बातचीत समाप्त करें।",
+  "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.":
+    "आपकी फ़र्म को संरक्षण चाहिए, और Clauseo के इस संस्करण में यह अभी नहीं है, इसलिए Clauseo यहाँ जवाब नहीं दे सकता। संरक्षण एक अपडेट में आएगा।",
 } as const;

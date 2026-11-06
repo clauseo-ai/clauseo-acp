@@ -114,8 +114,8 @@ export const HI = {
     "Clauseo का संरक्षण अभी Linux पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "Clauseo's protection isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.":
     "Clauseo का संरक्षण अभी Windows on ARM पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.":
-    "Clauseo का यह बिल्ड संरक्षण के बिना आता है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.":
+    "Clauseo के इस संस्करण में अभी संरक्षण नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "Your firm requires protection, so Clauseo doesn't answer on this computer until it's protected.":
     "आपकी फ़र्म संरक्षण अनिवार्य करती है, इसलिए संरक्षित होने तक Clauseo इस कंप्यूटर पर उत्तर नहीं देता।",
   "Your firm doesn't allow Clauseo to work without asking on this computer.":

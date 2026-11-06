@@ -30,9 +30,12 @@ async function hostHash(id: string) {
   });
 }
 
-test("a hash is a section's id", () => {
+test("a hash is a section's id, and #protection is the Safe workspace's", () => {
   expect(hashId("#connectors")).toBe("connectors");
   expect(hashId("")).toBe("");
+  expect(hashId("#protection")).toBe("workspace");
+  expect(hashId("#workspace")).toBe("workspace");
+  expect(hashId("#constructor")).toBe("constructor");
 });
 
 test("opened at #connectors before any state: the first section, then the first state listing it opens Connectors and focuses its head", async () => {

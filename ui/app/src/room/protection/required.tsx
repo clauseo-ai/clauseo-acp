@@ -1,7 +1,8 @@
 // UC: the firm requires protection (ProtectionView.required) and the open matter has none: the composer's send is held
 // (room.tsx's context) and this notice says why in its notice slot, saving the host's round trip; U10's error line
 // stays the fallback. Where the set-up would fix it (needs_set_up, set_up_refused), "Set up protection" goes through the
-// set-up confirm; a full pool says R17 PR-E's sandbox.pool_full words; every other cause says sandbox.required's.
+// set-up confirm; a full pool says R17 PR-E's sandbox.pool_full words; a build without protection says it comes in
+// an update (not_built); every other cause says sandbox.required's.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -16,6 +17,7 @@ import { useProtection } from "../../store/protection-run.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
 import { retryProtection } from "./commands.ts";
+import { whyOf } from "./detail.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
 
 export function RequiredNotice({
@@ -35,6 +37,7 @@ export function RequiredNotice({
     () => void retryProtection(transport, store),
   );
   const fixable = cause.name === "needs_set_up" || cause.name === "set_up_refused";
+  const notBuilt = whyOf(cause) === "not_built";
   const waiting = fixable ? waitingWords(lang, state, cause) : null;
   const failed = fixable ? failedWords(lang, state) : null;
   return (
@@ -53,7 +56,12 @@ export function RequiredNotice({
               )
             : cause.group === "pool"
               ? protectionErrorWords(lang, POOL_FULL_CODE)
-              : errorWords(lang, "sandbox.required")}
+              : notBuilt
+                ? pw(
+                    lang,
+                    "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.",
+                  )
+                : errorWords(lang, "sandbox.required")}
         </Say>
       </p>
       {fixable &&

@@ -29,6 +29,7 @@ import type {
 } from "../transport/protocol.ts";
 import { APP_VERSION } from "./version.ts";
 import { lockKey, type LiveSettings } from "./use-settings.ts";
+import { hashId } from "./use-hash-section.ts";
 import { About } from "./sections/about.tsx";
 import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
@@ -214,8 +215,9 @@ export function contextOf(
 export const shownSections = (ctx: SectionContext): readonly SectionEntry[] =>
   SECTIONS.filter((s) => s.shown?.(ctx) ?? true);
 
-/** The section an address opens at: its hash's (`#appearance`) where that one shows, else the first. */
+/** The section an address opens at: its hash's (`#appearance`, `#protection` for the Safe workspace) where that one
+ * shows, else the first. */
 export function sectionOf(hash: string, shown: readonly SectionEntry[]): SectionId | undefined {
-  const id = hash.replace(/^#/, "");
+  const id = hashId(hash);
   return (shown.find((s) => s.id === id) ?? shown[0])?.id;
 }
