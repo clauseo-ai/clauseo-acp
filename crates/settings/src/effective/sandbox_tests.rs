@@ -235,3 +235,48 @@ fn the_registry_sets_each_key_by_its_type() {
         assert!(effective.is_locked(key), "{key}");
     }
 }
+
+/// A mistyped `allow_unprotected_auto` in the lawyer's own `settings.json` turns auto outside
+/// the sandbox off, its safe value, not back on at its default; with a warning, and no lock.
+#[test]
+fn a_mistyped_allow_unprotected_auto_from_the_lawyer_falls_to_false() {
+    let files = user(r#"{"sandbox": {"allow_unprotected_auto": "yes"}}"#);
+    let effective = Effective::load(&locations(), &files, &[]);
+    assert!(!effective.settings().sandbox.allow_unprotected_auto);
+    assert!(!effective.is_locked("sandbox.allow_unprotected_auto"));
+    assert!(
+        effective.warnings().iter().any(|warning| matches!(
+            &warning.kind,
+            WarningKind::InvalidValue { key, .. } if key == "sandbox.allow_unprotected_auto"
+        )),
+        "{:?}",
+        effective.warnings()
+    );
+}
+
+/// A policy whose `sandbox` or `network` section is not an object names those keys in a form
+/// this version cannot read, so each key of that section is locked at its safe value, as an
+/// unreadable source locks it, and the other section is untouched.
+#[test]
+fn a_policy_section_that_is_not_an_object_locks_its_keys_at_their_safe_values() {
+    for (section, locked) in [("sandbox", &KEYS[..2]), ("network", &KEYS[2..])] {
+        let text = format!(r#"{{"{section}": "on"}}"#);
+        let firm = policy("firm", &text);
+        let effective = Effective::load(&locations(), &lawyers_auto_on(), &[&firm]);
+        let settings = effective.settings();
+        for key in KEYS {
+            assert_eq!(
+                effective.is_locked(key),
+                locked.contains(&key),
+                "{section}: {key}"
+            );
+        }
+        if section == "sandbox" {
+            assert!(!settings.sandbox.allow_unprotected_auto && !settings.sandbox.required);
+            assert!(settings.network.upstream_proxy.is_some());
+        } else {
+            assert_eq!(settings.network, NetworkSettings::default());
+            assert!(settings.sandbox.allow_unprotected_auto && settings.sandbox.required);
+        }
+    }
+}

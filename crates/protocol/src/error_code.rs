@@ -235,10 +235,14 @@ error_codes! {
         it; asking again can succeed.";
     SandboxSetupFailed = "sandbox.setup_failed", retryable: true, meaning: "The sandbox's set-up, \
         or the check that the sandbox works, failed; trying again can succeed.";
-    SandboxSetupRequired = "sandbox.setup_required", retryable: false, meaning: "An agent \
-        launch needs the sandbox's one-time set-up, which is not done, so no agent was started.";
+    SandboxSetupRequired = "sandbox.setup_required", retryable: false, meaning: "The firm \
+        requires the sandbox (sandbox.required) and this computer needs its one-time set-up \
+        first (not done, or its administrator prompt declined), so no agent was started; \
+        running the set-up fixes it.";
     SandboxRequired = "sandbox.required", retryable: false, meaning: "The firm requires the \
-        sandbox (sandbox.required) and this computer cannot give it now, so no agent was started.";
+        sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does \
+        not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a \
+        newer cause), so no agent was started.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

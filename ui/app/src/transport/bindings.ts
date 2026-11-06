@@ -1564,9 +1564,9 @@ export type ErrorCode =
 "sandbox.setup_refused" | 
 /** The sandbox's set-up, or the check that the sandbox works, failed; trying again can succeed. */
 "sandbox.setup_failed" | 
-/** An agent launch needs the sandbox's one-time set-up, which is not done, so no agent was started. */
+/** The firm requires the sandbox (sandbox.required) and this computer needs its one-time set-up first (not done, or its administrator prompt declined), so no agent was started; running the set-up fixes it. */
 "sandbox.setup_required" | 
-/** The firm requires the sandbox (sandbox.required) and this computer cannot give it now, so no agent was started. */
+/** The firm requires the sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a newer cause), so no agent was started. */
 "sandbox.required" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
@@ -3210,8 +3210,13 @@ export type Motion =
 "full";
 
 /**
- *  Why a matter, or this computer, runs without the sandbox. A cause from a newer Clauseo
- *  decodes to `Unknown`.
+ *  Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
+ *  `Unknown`. What follows depends on `sandbox.required` (decision record 0051): when it is
+ *  false, any cause runs the agents at tier C, in the ask modes (auto only when
+ *  `sandbox.allow_unprotected_auto` is true), with no refusal; when it is true, there is
+ *  never a silent fallback: `NeedsSetUp` and `SetUpRefused`, which the set-up fixes, refuse
+ *  `CreateThread` and a turn's launch with `sandbox.setup_required`, and every other cause
+ *  (`Unknown` included) with `sandbox.required`.
  */
 export type NotProtectedCause = 
 /**
@@ -3219,7 +3224,10 @@ export type NotProtectedCause =
  *  the sandbox.
  */
 "unsupported" | 
-/**  The sandbox needs a one-time set-up with an administrator's consent, not done yet. */
+/**
+ *  The sandbox needs a one-time set-up with an administrator's consent, not done yet.
+ *  Tier C when `sandbox.required` is false; `sandbox.setup_required` when it is true.
+ */
 "needs_set_up" | 
 /**
  *  The set-up was asked for, and the lawyer declined the administrator prompt or Windows
@@ -3229,7 +3237,7 @@ export type NotProtectedCause =
 /**  The set-up, or the check that the sandbox works, failed. */
 "set_up_failed" | 
 /**
- *  Every agent user of the set-up pool is taken, so this matter runs at tier C until one
+ *  Every agent user of the set-up pool is taken, so this matter has no sandbox until one
  *  is free. Counts only, never an account name or a SID.
  */
 ({ pool_full: {
@@ -3869,12 +3877,19 @@ export type PromptCapabilities = {
  *  named (`ProtectionView::computer`).
  */
 export type Protection = 
-/**  The agents run in the sandbox at `tier`, `a` or `b`. */
+/**
+ *  The agents run in the sandbox at `tier`: `a` or `b` only. The host never sends
+ *  `Protected { tier: c }`; tier C is `NotProtected`.
+ */
 ({ protected: {
 	/**  The sandbox's tier. */
 	tier: ProtectionTier,
 } }) & { not_protected?: never } | 
-/**  The agents run without the sandbox (tier C), for `cause`. */
+/**
+ *  No sandbox for `cause`. Under `sandbox.required` false, the agents run at tier C in
+ *  the ask modes (auto only when `sandbox.allow_unprotected_auto` is true); under
+ *  `sandbox.required` true, no agent starts (`NotProtectedCause` gives which code).
+ */
 ({ not_protected: {
 	/**  Why. */
 	cause: NotProtectedCause,
@@ -3900,14 +3915,18 @@ export type ProtectionTier =
 
 /**
  *  The answer to `HostQuery::Protection`: this computer's sandbox and the firm's two protection
- *  settings. A struct, so later fields are additive; it accepts fields it does not know.
+ *  settings. A struct, so later fields are additive; it accepts fields it does not know. The
+ *  host builds it with [`ProtectionView::new`], so `tier` always agrees with `computer`.
  */
 export type ProtectionView = {
-	/**  The best tier this computer can give now: `c` until a needed set-up is done. */
+	/**
+	 *  The best tier this computer can give now: `computer`'s tier when it is `protected`, `c`
+	 *  when it is not (until a needed set-up is done, say).
+	 */
 	tier: ProtectionTier,
 	/**  This computer's protection state: `protected` at `tier`, or `not_protected` with why. */
 	computer: Protection,
-	/**  `sandbox.required`: the firm requires the sandbox, so no agent starts at tier C. */
+	/**  `sandbox.required`: the firm requires the sandbox, so no agent starts without it. */
 	required: boolean,
 	/**
 	 *  `sandbox.allow_unprotected_auto`: an agent outside the sandbox may still run in an auto
