@@ -240,6 +240,42 @@ jobs:
             exit 1
           fi
 
+      # The guard's real-Chrome tests (crates/mcp/tests/guard/real_chrome.rs) are Linux-only and skip,
+      # passing, without agent-browser; xtask check's nextest below runs them once these values are
+      # set, as the merge group's Linux build does. Only on a pull request that touches the browser
+      # guard's crate, the agent-browser pin or this file: #549 (2026-11-06) added such a test that
+      # failed first in the merge group, because the pull request's run had skipped it. The tests
+      # run one at a time (nextest's real-chrome group) and the runner's Google Chrome is preinstalled.
+      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
+        if: github.event_name == 'pull_request'
+        env:
+          TARGET: x86_64-unknown-linux-gnu
+        run: |
+          set -euo pipefail
+          # The merge commit's first parent is main; the second, the pull request's head.
+          if ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
+            pin=crates/desktop/agent-browser.toml
+            value() {
+              awk -v table="[$TARGET]" -v key="$1" '
+                $0 == table { inside = 1; next }
+                /^\[/ { inside = 0 }
+                inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+            }
+            url=$(value url)
+            sum=$(value sha256)
+            test -n "$url" && test -n "$sum"
+            curl --fail --silent --show-error --location --retry 3 \
+              --output "$RUNNER_TEMP/agent-browser" "$url"
+            echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
+            chmod +x "$RUNNER_TEMP/agent-browser"
+            test -x /usr/bin/google-chrome
+            echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
+            echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+            echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+          else
+            echo "The browser guard is unchanged: its real-Chrome tests skip here and run in the merge group."
+          fi
+
       - name: cargo xtask check
         run: CI=1 cargo xtask check
 
