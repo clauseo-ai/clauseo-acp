@@ -8,5 +8,8 @@
 @import "./usage.css";
 @import "./privacy.css";
 @import "./connectors.css";
+/* Plans (UD2): its blocks, and UD1's sign-in gate it shows inline; its body is a bare chunk, so its CSS is the entry's */
+@import "@clauseo/components/clauseo/first-launch/first-launch.css";
+@import "./plans.css";
 @source ".";
 @source not "./**/*.test.*";

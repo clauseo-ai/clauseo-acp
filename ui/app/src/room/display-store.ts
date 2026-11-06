@@ -101,6 +101,8 @@ export interface DisplayStore {
   locked(): readonly string[];
   /** The tools' switches as the host last said, or undefined while it sends none (today's host). */
   tools(): ToolsSettingsView | undefined;
+  /** Each agent's firm plan as the host last said (SettingsView.plans): Plans' firm address (UD2); undefined with none. */
+  plans(): Settings["plans"];
   /** The lawyer's change to a tool's switch, sent to the host as a patch; nothing without a host that takes one. */
   setTools(patch: ToolsPatch): void;
   display(): Display;
@@ -181,6 +183,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   const host = env.host;
   let locked: readonly string[] = [];
   let tools: ToolsSettingsView | undefined;
+  let plans: Settings["plans"];
   let stopHost = () => {};
   /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
   let heard = 0;
@@ -188,6 +191,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     stored = { ...DEFAULT_UI, ...uiPatchOf(settings.ui) };
     locked = settings.locked;
     tools = settings.tools;
+    plans = settings.plans;
     try {
       env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));
     } catch {
@@ -229,6 +233,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     ui,
     locked: () => locked,
     tools: () => tools,
+    plans: () => plans,
     setTools(patch) {
       if (host === null || tools === undefined) return;
       tools = { ...tools, ...patch };

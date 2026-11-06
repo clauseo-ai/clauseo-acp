@@ -109,15 +109,30 @@ test(
     for (const frame of ["room/room.tsx", "room/rail.tsx", "main.tsx", "App.tsx"])
       expect(modules(settings[0]!)).not.toContain(frame);
     expect(settings[0]!.code).not.toContain("room-window");
-    // Connectors' body (U15) is a chunk of its own, imported bare: no preload helper, so its CSS is the entry's
+    // Connectors' body (U15) and Plans' (UD2) are chunks of their own, imported bare: no preload helper, so their CSS
+    // is the entry's
     const lazy = pages["settings.html"]!.chunks.filter((c) =>
       SETTINGS_BARE_CHUNKS.some((name) => c.fileName.startsWith(`assets/${name}-`)),
     );
-    expect(lazy.map((c) => c.isDynamicEntry)).toEqual([true]);
-    expect(settings[0]!.dynamicImports).toContain(lazy[0]!.fileName);
-    expect(settings[0]!.code).not.toMatch(/__vitePreload\(\(\) => import\(.\.\/connectors-/);
-    expect(settings[0]!.code).toMatch(/import\(.\.\/connectors-/);
+    expect(lazy.map((c) => c.isDynamicEntry)).toEqual(SETTINGS_BARE_CHUNKS.map(() => true));
+    for (const name of SETTINGS_BARE_CHUNKS) {
+      const chunk = lazy.find((c) => c.fileName.startsWith(`assets/${name}-`));
+      expect(settings[0]!.dynamicImports).toContain(chunk!.fileName);
+      expect(settings[0]!.code).not.toContain(`__vitePreload(() => import("./${name}-`);
+      expect(settings[0]!.code).toMatch(new RegExp(`import\\(.\\./${name}-`));
+      // each imports the first load, and at most a part the two share (TextField), which only they import
+      for (const file of chunk!.imports) {
+        if (file === settings[0]!.fileName) continue;
+        const importers = pages["settings.html"]!.chunks.filter((c) => c.imports.includes(file));
+        expect(
+          importers.every((c) => lazy.includes(c)),
+          file,
+        ).toBe(true);
+      }
+    }
     expect(modules(settings[0]!)).not.toContain("settings/sections/connectors.tsx");
+    for (const lazyPart of ["settings/sections/plans.tsx", "store/setup.ts"])
+      expect(modules(settings[0]!)).not.toContain(lazyPart);
   },
 );
 

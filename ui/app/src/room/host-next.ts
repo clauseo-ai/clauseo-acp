@@ -20,6 +20,7 @@ import type {
   MattersChanged,
   MessageId,
   QueryResult,
+  SettingsView,
   ThreadId,
   ThreadSummary,
   BrowserInstallState,
@@ -76,6 +77,8 @@ export type Settings = {
    * without a host (the settings then live in localStorage, and nothing would apply the switches), or from a fake that
    * leaves them out; Privacy's switches show only with them. */
   tools?: ToolsSettingsView;
+  /** Each agent's firm plan (`plans.<id>`, SettingsView.plans): Plans shows the firm's address from it (UD2). */
+  plans?: SettingsView["plans"];
 };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */

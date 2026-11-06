@@ -182,7 +182,7 @@ export const BARE_CHUNKS = [
 
 /** The settings window's lazy chunks, bare as BARE_CHUNKS' are: Connectors' body (U15, settings/sections/connectors.tsx)
  * imports only the settings window's first load. vite-config.test.ts checks it carries no preload. */
-export const SETTINGS_BARE_CHUNKS = ["connectors"];
+export const SETTINGS_BARE_CHUNKS = ["connectors", "plans"];
 
 /** The lazy chunks that keep Vite's preload list, though not bare: a lazy part behind a click whose chunk imports
  * shared chunks the first load lacks. Since the dialog primitives (dialog-start, DialogRoot, DialogDescription) left

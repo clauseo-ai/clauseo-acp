@@ -67,6 +67,7 @@ export function roomSettingsOf(view: SettingsView): Settings {
     },
     tools: view.tools,
     locked: view.locked,
+    ...(view.plans === undefined ? {} : { plans: view.plans }),
   };
 }
 

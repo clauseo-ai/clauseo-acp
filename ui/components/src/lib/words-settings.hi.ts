@@ -54,6 +54,35 @@ export const HI = {
   "Search the web and read pages.": null,
   Browser: null,
   "Runs on this computer.": null,
+  // Plans (UD2): each plan's block, its confirms, and the other ways in; English only for now
+  Plans: null, // hi: later
+  "The plans Clauseo works with. Each signs in through its own page in your browser.": null, // hi: later
+  "Sign out": null, // hi: later
+  "Sign out of {name}?": null, // hi: later
+  "Your matters and conversations stay on this computer. Questions wait until you sign in again.":
+    null, // hi: later
+  "Signed out of {name}.": null, // hi: later
+  "Stop using it here": null, // hi: later
+  "Stop using {app}'s sign-in here?": null, // hi: later
+  "This doesn't sign you out of {app}. Clauseo stops using its sign-in, and you can sign in here instead.":
+    null, // hi: later
+  "Look for my {app} sign-in": null, // hi: later
+  "Uses your ChatGPT plan.": null, // hi: later
+  "Add ChatGPT": null, // hi: later
+  "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.": null, // hi: later
+  "Other ways in": null, // hi: later
+  "Change key": null, // hi: later
+  "Remove key": null, // hi: later
+  "Remove the API key?": null, // hi: later
+  "Questions wait until you sign in or add a key again.": null, // hi: later
+  "Sign in again": null, // hi: later
+  "Your firm's address": null, // hi: later
+  "Your IT team gives you this. Questions go through your firm's own account, on its terms.": null, // hi: later
+  Connect: null, // hi: later
+  "Remove address": null, // hi: later
+  // what a search for the CLI's login found, once the host says (stage D's FoundLogin none_found and reuse_off)
+  "No {app} sign-in on this computer.": null, // hi: later
+  "Clauseo isn't using {app}'s sign-in here.": null, // hi: later
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

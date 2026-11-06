@@ -103,7 +103,7 @@ test("only the sections built so far bring their strings: no later section's nam
   const src = ["./words-settings.ts", "./words-settings.hi.ts"]
     .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
     .join("\n");
-  for (const later of ["Plans", "Indian Kanoon", "Safe workspace", "Updates"])
+  for (const later of ["Indian Kanoon", "Safe workspace", "Updates"])
     expect(Object.keys(settingsWords), later).not.toContain(later);
   // the design's facts (its version and date) stay in the design
   expect(src).not.toMatch(/3\.0\.4|October/);
