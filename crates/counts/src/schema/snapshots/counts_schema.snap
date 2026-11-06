@@ -1505,7 +1505,8 @@ expression: counts_schema()
         "signin.agents_still_running",
         "agent.keys_loading",
         "agent.key_unreadable",
-        "matter.document_path_too_long"
+        "matter.document_path_too_long",
+        "matter.protected_link"
       ],
       "type": "string"
     },
