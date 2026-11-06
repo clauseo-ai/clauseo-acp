@@ -142,7 +142,7 @@ pub(crate) async fn auto_leave(
         End::Left => finish(backend, agent, hold).await,
         End::TakenOver if own_login_shown(backend, agent) || leaves.told_signed_in(agent) => {
             // The pump may have lifted it before this leave's last `stop_agents`.
-            hold.lift().await;
+            hold.lift(backend).await;
         }
         End::NewSignIn | End::TakenOver => hold.keep(),
     }

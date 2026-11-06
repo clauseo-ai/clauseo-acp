@@ -188,7 +188,7 @@ pub(crate) async fn leave_reused(
         }
         Err(not_left) => {
             tracing::info!(%agent, code = not_left.code().as_str(), "a leave did not finish");
-            hold.lift().await;
+            hold.lift(backend).await;
             drop(reads);
             Err(not_left.into_error(agent))
         }

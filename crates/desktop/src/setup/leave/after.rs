@@ -46,7 +46,7 @@ pub(crate) fn usable_after_leave(backend: &AgentsBackend, agent: &AgentId) -> bo
 pub(crate) async fn finish(backend: &AgentsBackend, agent: &AgentId, hold: HostHold) {
     if usable_after_leave(backend, agent) {
         tracing::info!(%agent, "a leave finished: restarting on the login that remains");
-        hold.lift().await;
+        hold.lift(backend).await;
     } else {
         tracing::info!(%agent, "a leave finished: held for the next login");
         hold.keep();
