@@ -4,7 +4,8 @@
 //! # Owns
 //!
 //! - The mode. It is picked by the file name of `argv[1]`, the script the engine runs:
-//!   `claude-cli` for Claude Code, `codex.js` for Codex. The engine's argv is then
+//!   `claude-cli` for Claude Code, `codex.js` for Codex, and `codex-acp/dist/index.js` for
+//!   codex-acp's adapter run by mistake ([`Mode::CodexAdapter`]). The engine's argv is then
 //!   `<node> <script> <args>`, as in production. The script is never read, so a test may make it
 //!   an empty file.
 //! - The commands each mode takes, the lines it prints, its exit codes and its marker file.
@@ -40,6 +41,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use self::app_server::{adapter, app_server};
 use crate::write;
 use crate::{EXIT_LOAD, EXIT_OK, diagnostic, park_forever};
 
@@ -104,14 +106,24 @@ pub(crate) enum Mode {
     Claude,
     /// Codex, from a script named `codex.js`.
     Codex,
+    /// codex-acp's ACP adapter, from a script at `codex-acp/dist/index.js`, as codex-acp 2.2.2
+    /// behaves when the Codex CLI's commands are sent to it: it reads only `argv[2]`, so any
+    /// arguments start its ACP server, which answers `initialize` with -32602 and every other
+    /// method with -32601, prints nothing else, and exits 0 once stdin closes. A sign-in that runs
+    /// it instead of `codex.js` must never read as signed in.
+    CodexAdapter,
 }
 
 /// The mode the script `argv[1]` names, by its file name in any folder, or `None` when it is
 /// another program (then the normal command line runs).
 pub(crate) fn mode(script: &OsStr) -> Option<Mode> {
-    match Path::new(script).file_name()?.to_str()? {
+    let path = Path::new(script);
+    match path.file_name()?.to_str()? {
         "claude-cli" => Some(Mode::Claude),
         "codex.js" => Some(Mode::Codex),
+        "index.js" if path.ends_with(Path::new("codex-acp").join("dist").join("index.js")) => {
+            Some(Mode::CodexAdapter)
+        }
         _ => None,
     }
 }
@@ -142,6 +154,12 @@ pub(crate) enum Script {
     /// variable would: a reused session's status then looks in `CLAUDE_CONFIG_DIR` (the
     /// run-time fallback's case). Otherwise as [`Script::OkAfter`] with 0.
     SecureIgnored,
+    /// Codex's `app-server` answers every request with a JSON-RPC error, as the adapter does
+    /// ([`Mode::CodexAdapter`]); every other command is as [`Script::OkAfter`] with 0.
+    AppServerError,
+    /// `codex.js` behaves as codex-acp's adapter for every command ([`Mode::CodexAdapter`]):
+    /// what the engine sees if the adapter sits where it looks for the CLI.
+    Adapter,
 }
 
 impl Script {
@@ -155,6 +173,8 @@ impl Script {
             "device-off" => Self::DeviceOff,
             "port-busy" => Self::PortBusy,
             "secure-ignored" => Self::SecureIgnored,
+            "app-server-error" => Self::AppServerError,
+            "adapter" => Self::Adapter,
             _ => value
                 .strip_prefix("reuse:")
                 .filter(|method| !method.is_empty())
@@ -173,6 +193,12 @@ impl Script {
 
 /// Runs the sign-in `mode` with `args`, the arguments after the script, and returns the exit code.
 pub(crate) fn run(mode: Mode, args: &[OsString]) -> i32 {
+    if mode == Mode::CodexAdapter {
+        return adapter().unwrap_or_else(|error| {
+            stderr_write(&diagnostic(format_args!("{error}")));
+            FAILED
+        });
+    }
     session(mode, args).unwrap_or_else(|error| {
         stderr_write(&diagnostic(format_args!("{error}")));
         FAILED
@@ -199,10 +225,13 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
             std::env::var_os("CLAUDE_CONFIG_DIR"),
             &home,
         ),
-        Mode::Codex => codex_home(std::env::var_os("CODEX_HOME"), &home),
+        Mode::Codex | Mode::CodexAdapter => codex_home(std::env::var_os("CODEX_HOME"), &home),
     };
     if let Script::Reuse(method) = &script {
         plant(&folder, method)?;
+    }
+    if mode == Mode::Codex && script == Script::Adapter {
+        return adapter();
     }
     let Some(args) = args
         .iter()
@@ -213,7 +242,7 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
     };
     match mode {
         Mode::Claude => claude(&args, &script, &folder),
-        Mode::Codex => codex(&args, &script, &folder),
+        Mode::Codex | Mode::CodexAdapter => codex(&args, &script, &folder),
     }
 }
 
@@ -221,7 +250,7 @@ fn session(mode: Mode, args: &[OsString]) -> io::Result<i32> {
 fn usage(mode: Mode) -> i32 {
     stderr_write(&diagnostic(match mode {
         Mode::Claude => CLAUDE_USAGE,
-        Mode::Codex => CODEX_USAGE,
+        Mode::Codex | Mode::CodexAdapter => CODEX_USAGE,
     }));
     EXIT_LOAD
 }
@@ -351,10 +380,11 @@ fn codex(args: &[&str], script: &Script, folder: &Path) -> io::Result<i32> {
         args = rest;
     }
     match args {
-        ["login", "status"] => codex_status(folder),
+        ["login", "status"] => Ok(codex_status(folder)),
         ["login"] => codex_browser_login(script, folder),
         ["login", "--device-auth"] => codex_device_login(script, folder),
         ["logout"] => logout(folder, CODEX_LOGOUT_LINE),
+        ["app-server"] if *script == Script::AppServerError => adapter(),
         ["app-server"] => app_server(folder),
         _ => Ok(usage(Mode::Codex)),
     }
@@ -380,76 +410,15 @@ fn codex_device_login(script: &Script, folder: &Path) -> io::Result<i32> {
     complete(script, || plant(folder, "chatgpt"), CODEX_SUCCESS)
 }
 
-/// `login status`: exit 0 with the signed-in line when the marker is there, else exit 1.
-fn codex_status(folder: &Path) -> io::Result<i32> {
+/// `login status`: exit 0 with the signed-in line when the marker is there, else exit 1 with
+/// `Not logged in`; on stderr, as Codex 0.162.1 prints them.
+fn codex_status(folder: &Path) -> i32 {
     if marker_method(folder).is_some() {
-        say(CODEX_STATUS_IN)?;
-        Ok(EXIT_OK)
+        stderr_write(&format!("{CODEX_STATUS_IN}\n"));
+        EXIT_OK
     } else {
-        say(CODEX_STATUS_OUT)?;
-        Ok(FAILED)
-    }
-}
-
-/// `app-server`: answers each JSON-RPC line on stdin with one line on stdout, until stdin closes.
-fn app_server(folder: &Path) -> io::Result<i32> {
-    for line in io::stdin().lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(reply) = reply(&line, folder) {
-            say(&reply)?;
-        }
-    }
-    Ok(EXIT_OK)
-}
-
-/// The reply to one client line, as JSON text, or `None` for a notification (a message with no
-/// `id`). `initialize` and `account/read` answer as Codex's schema says; any other method is an
-/// error.
-fn reply(line: &str, folder: &Path) -> Option<String> {
-    let request: Value = match serde_json::from_str(line) {
-        Ok(request) => request,
-        Err(error) => {
-            return Some(
-                json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": format!("parse error: {error}")}})
-                    .to_string(),
-            );
-        }
-    };
-    let id = request.get("id")?.clone();
-    let method = request["method"].as_str().unwrap_or_default();
-    let reply = match method {
-        "initialize" => json!({"jsonrpc": "2.0", "id": id, "result": {
-            "codexHome": folder.to_string_lossy(),
-            "platformFamily": if cfg!(windows) { "windows" } else { "unix" },
-            "platformOs": std::env::consts::OS,
-            "userAgent": "fake_agent codex-cli",
-        }}),
-        "account/read" => json!({"jsonrpc": "2.0", "id": id, "result": account_read(folder)}),
-        _ => json!({"jsonrpc": "2.0", "id": id, "error": {
-            "code": -32601, "message": format!("method not found: {method}"),
-        }}),
-    };
-    Some(reply.to_string())
-}
-
-/// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`, or, when the marker's `authMethod` is `apikey`, an API-key
-/// account, which names no email. Without it, the signed-out reply: `account` null and
-/// `requiresOpenaiAuth` true.
-fn account_read(folder: &Path) -> Value {
-    let method = marker_method(folder);
-    if method.as_deref() == Some(API_KEY_METHOD) {
-        json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
-    } else if method.is_some() {
-        json!({
-            "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},
-            "requiresOpenaiAuth": false,
-        })
-    } else {
-        json!({"account": null, "requiresOpenaiAuth": true})
+        stderr_write(&format!("{CODEX_STATUS_OUT}\n"));
+        FAILED
     }
 }
 
@@ -555,5 +524,6 @@ fn stderr_write(text: &str) {
     stderr.write_all(text.as_bytes()).unwrap_or_default();
 }
 
+mod app_server;
 #[cfg(test)]
 mod tests;
