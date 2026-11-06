@@ -22,6 +22,7 @@ use windows::Win32::Security::{
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::core::{HRESULT, HSTRING};
 
+use super::Signal;
 use super::signals::{self, Failure};
 
 // The restricting SIDs' count is read as the buffer's first u32.
@@ -31,9 +32,9 @@ const _: () = assert!(std::mem::offset_of!(TOKEN_GROUPS, GroupCount) == 0);
 /// Low (0x1000).
 const MEDIUM_RID: u32 = 0x2000;
 
-/// Whether the process token is an `AppContainer`, has restricting SIDs or belongs to any pool
-/// user, or a read was refused (`signals::decide`).
-pub(super) fn sandboxed() -> io::Result<bool> {
+/// The first signal that fires: the process token is an `AppContainer`, has restricting SIDs, is
+/// below Medium or belongs to any pool user, or a read was refused (`signals::decide`).
+pub(super) fn sandboxed() -> io::Result<Option<Signal>> {
     signals::decide(Token::open(), sandbox_pool_sids)
 }
 

@@ -2,19 +2,31 @@ use std::cell::Cell;
 use std::ffi::OsString;
 use std::io;
 
-use super::{Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Stages, SystemProbe, launch};
+use super::{
+    Launched, REFUSAL, SANDBOXED_EXIT, SandboxProbe, Signal, Stages, SystemProbe, launch, refusal,
+};
+
+/// Every signal.
+const SIGNALS: [Signal; 6] = [
+    Signal::AppContainer,
+    Signal::RestrictedToken,
+    Signal::BelowMedium,
+    Signal::PoolUser,
+    Signal::Unreadable,
+    Signal::Seatbelt,
+];
 
 /// No guard run.
 const NO_GUARD: [Vec<OsString>; 0] = [];
 
 /// A probe with a fixed answer, counting the times it was asked.
 struct Probe {
-    answer: fn() -> io::Result<bool>,
+    answer: fn() -> io::Result<Option<Signal>>,
     asked: Cell<u32>,
 }
 
 impl Probe {
-    fn new(answer: fn() -> io::Result<bool>) -> Self {
+    fn new(answer: fn() -> io::Result<Option<Signal>>) -> Self {
         Self {
             answer,
             asked: Cell::new(0),
@@ -23,9 +35,18 @@ impl Probe {
 }
 
 impl SandboxProbe for Probe {
-    fn sandboxed(&self) -> io::Result<bool> {
+    fn sandboxed(&self) -> io::Result<Option<Signal>> {
         self.asked.set(self.asked.get() + 1);
         (self.answer)()
+    }
+}
+
+/// A probe that always answers with one signal.
+struct Fired(Signal);
+
+impl SandboxProbe for Fired {
+    fn sandboxed(&self) -> io::Result<Option<Signal>> {
+        Ok(Some(self.0))
     }
 }
 
@@ -55,7 +76,7 @@ impl Stages for Counted {
 }
 
 /// Runs `launch` on `args` with `probe`; returns the outcome, stderr and the stages.
-fn start(args: &[&str], probe: &Probe) -> (Launched, String, Counted) {
+fn start(args: &[&str], probe: &dyn SandboxProbe) -> (Launched, String, Counted) {
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let mut stderr = Vec::new();
     let mut stages = Counted::default();
@@ -66,24 +87,62 @@ fn start(args: &[&str], probe: &Probe) -> (Launched, String, Counted) {
 #[test]
 fn sandboxed_refuses_with_its_code_and_line_and_never_reaches_the_app() {
     // A deep link, as a second launch would forward it to the running window.
-    let probe = Probe::new(|| Ok(true));
+    let probe = Probe::new(|| Ok(Some(Signal::BelowMedium)));
     let (launched, stderr, stages) = start(&["clauseo://open"], &probe);
     assert!(
         matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
         "{launched:?}"
     );
     assert_eq!(SANDBOXED_EXIT, 77);
-    assert_eq!(stderr, "Clauseo will not start inside the agent sandbox.\n");
-    assert_eq!(stderr, format!("{REFUSAL}\n"));
+    assert_eq!(
+        stderr,
+        "Clauseo will not start inside the agent sandbox (below-Medium integrity).\n"
+    );
     assert_eq!(stages.apps, 0);
     assert_eq!(stages.guards, NO_GUARD);
     assert_eq!(probe.asked.get(), 1);
 }
 
 #[test]
+fn each_signal_refuses_with_one_line_that_names_it() {
+    let lines = [
+        "Clauseo will not start inside the agent sandbox (AppContainer).",
+        "Clauseo will not start inside the agent sandbox (restricted token).",
+        "Clauseo will not start inside the agent sandbox (below-Medium integrity).",
+        "Clauseo will not start inside the agent sandbox (pool user).",
+        "Clauseo will not start inside the agent sandbox (unreadable token or sandbox record).",
+        "Clauseo will not start inside the agent sandbox (Seatbelt sandbox).",
+    ];
+    for (signal, line) in SIGNALS.into_iter().zip(lines) {
+        assert_eq!(refusal(signal), line);
+        // Through `launch`, for a start and for the uninstaller's deletion.
+        for args in [&["clauseo://open"][..], &["--delete-app-data"][..]] {
+            let (launched, stderr, stages) = start(args, &Fired(signal));
+            assert!(
+                matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
+                "{launched:?}"
+            );
+            assert_eq!(stderr, format!("{line}\n"));
+            assert_eq!((stages.deletes.len(), stages.apps), (0, 0));
+        }
+    }
+}
+
+#[test]
+fn no_refusal_line_names_a_path_or_a_sid() {
+    let stem = REFUSAL.strip_suffix('.').unwrap();
+    for signal in SIGNALS {
+        let line = refusal(signal);
+        assert!(line.starts_with(stem), "{line}");
+        assert!(!line.contains(['/', '\\', '\n']), "{line}");
+        assert!(!line.contains("S-1-"), "{line}");
+    }
+}
+
+#[test]
 fn not_sandboxed_starts_the_app_once_and_says_nothing() {
     for args in [&[][..], &["clauseo://open"][..]] {
-        let probe = Probe::new(|| Ok(false));
+        let probe = Probe::new(|| Ok(None));
         let (launched, stderr, stages) = start(args, &probe);
         assert!(matches!(launched, Launched::App(Ok(()))), "{launched:?}");
         assert_eq!(stderr, "");
@@ -108,7 +167,7 @@ fn a_failed_check_says_so_once_and_starts_the_app() {
 
 #[test]
 fn the_guard_runs_inside_the_sandbox_without_asking() {
-    let probe = Probe::new(|| Ok(true));
+    let probe = Probe::new(|| Ok(Some(Signal::BelowMedium)));
     let (launched, stderr, stages) = start(&["--pre-write-guard", "--matter", "/m"], &probe);
     assert!(matches!(launched, Launched::Exit(2)), "{launched:?}");
     assert_eq!(stderr, "");
@@ -122,7 +181,7 @@ fn the_guard_runs_inside_the_sandbox_without_asking() {
 
 #[test]
 fn the_guard_flag_anywhere_but_first_is_refused_when_sandboxed() {
-    let probe = Probe::new(|| Ok(true));
+    let probe = Probe::new(|| Ok(Some(Signal::BelowMedium)));
     let (launched, _, stages) = start(&["clauseo://open", "--pre-write-guard"], &probe);
     assert!(
         matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
@@ -134,7 +193,7 @@ fn the_guard_flag_anywhere_but_first_is_refused_when_sandboxed() {
 
 #[test]
 fn the_uninstallers_deletion_runs_with_its_arguments_outside_the_sandbox_only() {
-    let probe = Probe::new(|| Ok(false));
+    let probe = Probe::new(|| Ok(None));
     let (launched, stderr, stages) = start(&["--delete-app-data", "--sandbox-removed"], &probe);
     assert!(matches!(launched, Launched::Exit(3)), "{launched:?}");
     assert_eq!(stderr, "");
@@ -143,13 +202,13 @@ fn the_uninstallers_deletion_runs_with_its_arguments_outside_the_sandbox_only() 
     assert_eq!(probe.asked.get(), 1);
 
     // Inside the sandbox: refused as every start is, nothing deleted.
-    let probe = Probe::new(|| Ok(true));
+    let probe = Probe::new(|| Ok(Some(Signal::BelowMedium)));
     let (launched, stderr, stages) = start(&["--delete-app-data"], &probe);
     assert!(
         matches!(launched, Launched::Exit(SANDBOXED_EXIT)),
         "{launched:?}"
     );
-    assert_eq!(stderr, format!("{REFUSAL}\n"));
+    assert_eq!(stderr, format!("{}\n", refusal(Signal::BelowMedium)));
     assert_eq!((stages.deletes.len(), stages.apps), (0, 0));
 }
 
@@ -177,7 +236,7 @@ fn the_deletion_flag_anywhere_but_first_starts_the_app() {
         &["--delete-app-data=1"][..],
         &["--Delete-App-Data"][..],
     ] {
-        let probe = Probe::new(|| Ok(false));
+        let probe = Probe::new(|| Ok(None));
         let (launched, _, stages) = start(args, &probe);
         assert!(matches!(launched, Launched::App(Ok(()))), "{launched:?}");
         assert_eq!((stages.deletes.len(), stages.apps), (0, 1), "{args:?}");
@@ -191,5 +250,5 @@ fn the_system_probe_answers_without_an_error() {
     let answer = SystemProbe.sandboxed();
     assert!(answer.is_ok(), "{answer:?}");
     #[cfg(not(any(windows, target_os = "macos")))]
-    assert!(!answer.unwrap());
+    assert_eq!(answer.unwrap(), None);
 }
