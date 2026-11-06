@@ -86,21 +86,38 @@ fn watching<R: Runtime>(
 /// then restarts the app, whether the install worked (macOS), failed or hung past its bound.
 /// Windows exits inside the plugin's install. When an agents job outlived its bound at quit
 /// (`agents_stopped` false) nothing is installed and the app restarts as it is. Returns only
-/// when there was nothing to install.
-pub(crate) fn after_host<R: Runtime>(app: &AppHandle<R>, ended: HostExit, agents_stopped: bool) {
+/// when there was nothing to install. `before_restart` runs right before the restart, after the
+/// install (the stopper marks the stop ended there: tauri lets a restart past `prevent_exit`,
+/// so `RunEvent::Exit`'s `quit::stop_on_exit` would otherwise wait out its bound).
+pub(crate) fn after_host<R: Runtime>(
+    app: &AppHandle<R>,
+    ended: HostExit,
+    agents_stopped: bool,
+    before_restart: impl FnOnce(),
+) {
     #[cfg(not(target_os = "linux"))]
-    if install::after_host(
-        ended,
-        agents_stopped,
-        &mut install::AppSteps::new(app),
-        install::Watch::INSTALL,
-    ) == install::After::Restart
-    {
-        app.restart();
-    }
+    restart_after(
+        install::after_host(
+            ended,
+            agents_stopped,
+            &mut install::AppSteps::new(app),
+            install::Watch::INSTALL,
+        ),
+        before_restart,
+        || app.restart(),
+    );
     // Linux never installs: its host has `NoUpdater`, which never offers one.
     #[cfg(target_os = "linux")]
-    drop((app, ended, agents_stopped));
+    drop((app, ended, agents_stopped, before_restart));
+}
+
+/// With `After::Restart`, `before_restart` then `restart`; with `After::Exit`, neither.
+#[cfg(any(test, not(target_os = "linux")))]
+fn restart_after(after: install::After, before_restart: impl FnOnce(), restart: impl FnOnce()) {
+    if after == install::After::Restart {
+        before_restart();
+        restart();
+    }
 }
 
 /// Starts the host with `config`, watched ([`watching`]).

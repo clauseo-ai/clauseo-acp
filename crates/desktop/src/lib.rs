@@ -480,7 +480,9 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
             // saved on the main thread before this thread started.
             quit::stop_steps(&app, |ended, agents_stopped| {
                 quit::after_host_unless_exiting(&exit, ended, agents_stopped, |ended, stopped| {
-                    update::after_host(&app, ended, stopped);
+                    // Marked ended right before a restart, which skips `prevent_exit`; never
+                    // before the install, which an exit meanwhile must wait for.
+                    update::after_host(&app, ended, stopped, || exit.mark_stopped());
                 });
             });
             exit.mark_stopped();
