@@ -148,6 +148,8 @@ impl HostHold {
     pub(crate) async fn lift(mut self, backend: &AgentsBackend) {
         self.armed = false;
         super::super::refusal::sync(backend, &self.agent).await;
+        // The restart covers an endpoint that arrived before it (`Leaves::covered_by_restart`).
+        backend.wiring.leaves.covered_by_restart(&self.agent);
         lift(&*self.host, &self.agent).await;
     }
 }

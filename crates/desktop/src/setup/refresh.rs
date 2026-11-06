@@ -103,9 +103,11 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
     }
     super::refusal::sync_all(backend).await;
     for agent in arrived {
-        // A leave of the agent holds its restart: the leave's end sees the endpoint and restarts
-        // by the rule (`after.rs`). Lifting the hold now would let agents launch mid-leave.
-        if backend.wiring.leaves.running_for(agent) {
+        // Lifting the hold now would let agents launch mid-leave. The check and the record are
+        // one critical section (`Leaves::endpoint_arrived`): a leave of the agent that frees its
+        // slot after it sees the endpoint and restarts by the rule (`after.rs`); one that freed
+        // it before leaves no leave here, and this restarts.
+        if backend.wiring.leaves.endpoint_arrived(agent) {
             tracing::info!(%agent, "an endpoint arrived during a leave: its end restarts");
             continue;
         }

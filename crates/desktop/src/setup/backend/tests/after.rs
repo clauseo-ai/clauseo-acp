@@ -276,6 +276,63 @@ fn an_endpoint_through_the_settings_during_a_given_up_leave_waits_for_the_late_e
 }
 
 #[test]
+fn an_endpoint_landing_after_an_automatic_leave_read_its_facts_restarts_once() {
+    let rig = reused_claude(false);
+    lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
+    let (reached, go) = rig.backend.wiring.leaves.arm_pause("auto.free");
+    let agent = claude();
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let drive = async {
+        // The leave has read its facts (nothing usable, so it keeps the hold) and waits to free.
+        reached.await.expect("the leave reaches its free");
+        assert_eq!(restarts(&rig, &claude()), 0, "held before the free");
+        apply_settings(&rig.backend, endpoint_arrives()).await;
+        assert_eq!(
+            restarts(&rig, &claude()),
+            0,
+            "the leave restarts at its free"
+        );
+        let _sent = go.send(());
+    };
+    let (left, ()) = rig.pumped(join(leave, drive));
+    assert_eq!(left, Ok(()));
+    assert_eq!(restarts(&rig, &claude()), 1, "once, at the leave's free");
+    assert_eq!(
+        method(shown(&rig, &claude()).as_ref()),
+        Some(SignInMethod::Firm)
+    );
+}
+
+#[test]
+fn an_endpoint_landing_after_a_given_up_leave_read_its_facts_restarts_once() {
+    let rig = reused_claude(false);
+    let mut script = rig.timer.script();
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, stop_using_command(&claude()));
+    let (reached, go) = rig.backend.wiring.leaves.arm_pause("given_up.end");
+    let answer = rig.pumped(async {
+        let (answer, ()) = join(send, script.fire(Wait::SignedOut)).await;
+        rig.s18_sends(&claude(), OUT);
+        reached.await.expect("the late end reaches its end");
+        assert_eq!(
+            restarts(&rig, &claude()),
+            0,
+            "held before the late end frees"
+        );
+        apply_settings(&rig.backend, endpoint_arrives()).await;
+        assert_eq!(restarts(&rig, &claude()), 0, "the late end restarts");
+        let _sent = go.send(());
+        answer
+    });
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert_eq!(restarts(&rig, &claude()), 1, "once, at the late end");
+    assert_eq!(
+        method(shown(&rig, &claude()).as_ref()),
+        Some(SignInMethod::Firm)
+    );
+}
+
+#[test]
 fn a_hold_lifted_while_the_key_is_unreadable_is_refused_before_the_restart() {
     let keychain = Keychain::memory();
     keychain.store(&claude(), OLD_KEY).unwrap();

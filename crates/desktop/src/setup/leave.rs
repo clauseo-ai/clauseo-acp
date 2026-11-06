@@ -154,7 +154,7 @@ pub(crate) async fn leave_reused(
     let Some(kind) = AgentKind::of(agent) else {
         return Err(HostError::new(ErrorCode::CommandInvalid, "no such agent"));
     };
-    let mut slot = backend.wiring.leaves.begin(agent)?;
+    let mut slot = backend.wiring.leaves.begin(agent, &backend.host)?;
     tracing::info!(%agent, "leaving a reused login");
     let reads = backend.wiring.readers.hold(kind).await;
     let hold = HostHold::new(std::sync::Arc::clone(&backend.host), agent.clone());
@@ -166,7 +166,7 @@ pub(crate) async fn leave_reused(
         slot.linger();
         return Ok(Left::Pending);
     };
-    match tried {
+    let result = match tried {
         Ok(first_error) => {
             slot.left();
             drop(reads);
@@ -192,7 +192,12 @@ pub(crate) async fn leave_reused(
             drop(reads);
             Err(not_left.into_error(agent))
         }
+    };
+    // The slot frees here on every end, and an endpoint that arrived meanwhile is restarted.
+    if slot.free() {
+        restart_if_usable(backend, agent).await;
     }
+    result
 }
 
 /// One try of the leave order (module docs, steps 1 to 3). `Ok` carries the first error of

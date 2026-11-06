@@ -50,7 +50,9 @@ use futures::{FutureExt as _, StreamExt as _};
 use super::super::backend::AgentsBackend;
 use super::after::{finish, own_login_shown};
 use super::hold::HostHold;
-use super::{NotLeft, Over, Wait, Whose, attempt, login_changed, retry_after, taken_over};
+use super::{
+    NotLeft, Over, Wait, Whose, attempt, login_changed, restart_if_usable, retry_after, taken_over,
+};
 
 /// Runs each automatic leave queued, each on its own, until the queue ends. A leave that panics
 /// is caught here: its hold lifted already, `Switching` ends, and the rest go on.
@@ -98,7 +100,7 @@ pub(crate) async fn auto_leave(
     let Some(kind) = AgentKind::of(agent) else {
         return Ok(());
     };
-    let mut slot = match backend.wiring.leaves.begin(agent) {
+    let mut slot = match backend.wiring.leaves.begin(agent, &backend.host) {
         Ok(slot) => slot,
         Err(conflict) => {
             backend.wiring.leaves.defer(agent, why);
@@ -147,6 +149,12 @@ pub(crate) async fn auto_leave(
         End::NewSignIn | End::TakenOver => hold.keep(),
     }
     login_changed(backend, agent).await;
+    // The slot frees last, and an endpoint that arrived meanwhile is restarted by the rule.
+    #[cfg(test)]
+    backend.wiring.leaves.pause("auto.free").await;
+    if slot.free() {
+        restart_if_usable(backend, agent).await;
+    }
     Ok(())
 }
 

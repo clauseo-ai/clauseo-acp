@@ -533,7 +533,10 @@ reads' hold dropped and `limits_login_changed`.
   desktop calls `restart_agents` once, and the held questions run on it. Otherwise it does not:
   the queue stays held for the next login, whose `SignedIn` the pump restarts on (or the key or
   endpoint command, once stored). That hold is never silent: with no key or endpoint the
-  composed state has no `ApiKey` or `Firm` line, so the agent shows S18's `SignedOut`.
+  composed state has no `ApiKey` or `Firm` line, so the agent shows S18's `SignedOut`. A leave
+  that starts while an endpoint restart is in its own host awaits can let agents launch on the
+  reused login against the endpoint, within two host round-trips, until the new leave's
+  `stop_agents` holds them; this is a tracked follow-up.
 - *`SignIn::Switching { since, stuck }`* is a new variant of the closed `SignIn`, shown from the
   first try's end. `since` is that moment, and a try again never moves it. `stuck` turns true 2
   minutes after `since`, on the timer S18's `Waiting { nudge }` runs on. A running sign-in still
