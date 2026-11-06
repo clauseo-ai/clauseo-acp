@@ -48,6 +48,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentKeysLoading,
             "the stored API keys have not loaded yet",
         ),
+        failed(
+            ErrorCode::AgentKeyUnreadable,
+            "a stored API key could not be read",
+        ),
     ]
 }
 

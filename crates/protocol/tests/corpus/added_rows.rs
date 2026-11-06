@@ -394,4 +394,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (356, 0x985f_ebc0_9cbe_3bc0),
         (258, 0x2d11_c08f_4196_5dd4),
     ),
+    (
+        "added/turn_failed-AgentKeyUnreadable",
+        include_bytes!("added/turn_failed-AgentKeyUnreadable.jsonl"),
+        include_bytes!("added/turn_failed-AgentKeyUnreadable.msgpack"),
+        (353, 0xc410_7170_fdb4_985c),
+        (255, 0x2e69_08c2_29d7_393b),
+    ),
 ];
