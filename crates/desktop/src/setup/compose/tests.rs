@@ -265,3 +265,48 @@ fn compose_sends_each_change_once_in_order_and_a_key_over_a_running_sign_in_wait
         ]
     );
 }
+
+#[test]
+fn each_find_login_ends_in_one_sign_in_changed_even_when_unchanged() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    compose.signin(&claude(), none.clone());
+    // A search that finds nothing again: its answer goes out though nothing changed.
+    compose.searching(&claude());
+    compose.signin(&claude(), none.clone());
+    // The same state with no search waiting goes out no more.
+    compose.signin(&claude(), none.clone());
+    // A search the call refused waits for no answer.
+    compose.searching(&claude());
+    compose.no_search(&claude());
+    compose.signin(&claude(), none);
+    let off = SignIn::SignedOut {
+        found: Some(FoundLogin::NoneFound),
+    };
+    assert_eq!(sent(&mut feed), [off.clone(), off]);
+}
+
+#[test]
+fn a_search_waits_through_running_states_for_its_resting_answer() {
+    let events = Arc::new(SetupEvents::default());
+    let mut feed = events.follow();
+    let compose = Compose::new(Arc::clone(&events), Arc::new(Fixed));
+    let off = SigninState::SignedOut {
+        found: Some(Found::ReuseOff),
+    };
+    compose.signin(&claude(), off.clone());
+    compose.searching(&claude());
+    compose.signin(&claude(), SigninState::Queued);
+    compose.signin(&claude(), off);
+    let reuse_off = SignIn::SignedOut {
+        found: Some(FoundLogin::ReuseOff),
+    };
+    assert_eq!(
+        sent(&mut feed),
+        [reuse_off.clone(), SignIn::Queued, reuse_off]
+    );
+}

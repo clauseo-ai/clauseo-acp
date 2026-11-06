@@ -3,7 +3,7 @@
 //! calls refused, and no status run after the end.
 
 use clauseo_agents::testing::write_file;
-use clauseo_agents::{Method, PasteCode, SigninCode, SigninError, SigninState, Source};
+use clauseo_agents::{Found, Method, PasteCode, SigninCode, SigninError, SigninState, Source};
 
 use crate::support::{
     Events, Fixture, LOGIN_LIMIT, NUDGE, POLL, STATUS_LIMIT, Seen, claude, codex, now,
@@ -234,9 +234,12 @@ fn sign_out_runs_the_logout_then_status() {
         "auth".to_owned(),
         "logout".to_owned()
     ]));
-    // A status check now agrees.
+    // A status check now agrees, and finds no login of the lawyer's.
     agents.check_status(&claude()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
+    let none = SigninState::SignedOut {
+        found: Some(Found::NoLogin),
+    };
+    assert_eq!(events.until_end().1, none);
 }
 
 #[test]

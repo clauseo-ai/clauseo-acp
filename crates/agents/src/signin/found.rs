@@ -54,14 +54,16 @@ fn reused_signed_in<T: Timer + Send + Sync>(
     }
 }
 
-/// Stops reuse with `why` and gives `SignedOut { found: why }`; never a logout. No reason:
-/// `no-reuse` is written. For Codex, a reused home's link is removed. Then the reuse record is
-/// cleared. `signin.failed` when a marker cannot be written, since the next start could then
-/// reuse again without asking.
+/// Stops reuse with `why` and gives `SignedOut { found: why }`; never a logout. No reason
+/// (or one that is no stop reason, [`Found::is_stop_reason`]): `no-reuse` is written, and the
+/// state is `SignedOut { found: ReuseOff }`. For Codex, a reused home's link is removed. Then
+/// the reuse record is cleared. `signin.failed` when a marker cannot be written, since the next
+/// start could then reuse again without asking.
 pub(crate) async fn stop<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     why: Option<Found>,
 ) -> SigninState {
+    let why = why.filter(|why| why.is_stop_reason());
     let data = &job.config.data_dir;
     let agent = &job.ticket.agent;
     if why.is_none() && marker::write_no_reuse(data, agent).is_err() {
@@ -87,7 +89,9 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
     if marker::clear_source(data, agent).is_err() {
         return job.failed(SigninCode::Failed);
     }
-    SigninState::SignedOut { found: why }
+    SigninState::SignedOut {
+        found: Some(why.unwrap_or(Found::ReuseOff)),
+    }
 }
 
 /// The status check: see the module docs. `None` leaves the state as it is (a run could not
@@ -117,7 +121,9 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
         return Some(claude::signed_in(job, identity));
     }
     if marker::no_reuse(&job.config.data_dir, &job.ticket.agent) {
-        return Some(SigninState::SignedOut { found: None });
+        return Some(SigninState::SignedOut {
+            found: Some(Found::ReuseOff),
+        });
     }
     Some(detect::claude(job, cancel).await?.state)
 }
@@ -184,18 +190,25 @@ async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Signi
         return Some(codex::signed_in(job, identity));
     }
     if marker::no_reuse(&job.config.data_dir, &job.ticket.agent) {
-        return Some(SigninState::SignedOut { found: None });
+        return Some(SigninState::SignedOut {
+            found: Some(Found::ReuseOff),
+        });
     }
     Some(detect::codex(job, cancel).await?.state)
 }
 
 /// `find_login` (UD2's "Look for my … login"): "deletes `no-reuse` and detects again", through
-/// the status check.
+/// the status check. It always ends in a state, so the lawyer who asked gets an answer: a check
+/// that could not tell is `signin.failed` here, never the state left as it was.
 pub(crate) async fn find_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {
     if marker::remove_no_reuse(&job.config.data_dir, &job.ticket.agent).is_err() {
         return Some(job.failed(SigninCode::Failed));
     }
-    check(job).await
+    Some(
+        check(job)
+            .await
+            .unwrap_or_else(|| job.failed(SigninCode::Failed)),
+    )
 }
 
 /// `use_found_login` (the lawyer's "Use it"): "R20 writes Claude's env, or S18 makes Codex's

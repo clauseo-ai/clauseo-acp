@@ -186,7 +186,8 @@ pub enum SigninState {
     },
 }
 
-/// A login seen but not reusable, or why reuse stopped: `SignedOut`'s `found`.
+/// What the status check saw (a login not reusable, none, or reuse off), or why reuse stopped:
+/// `SignedOut`'s `found`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Found {
@@ -205,6 +206,19 @@ pub enum Found {
     ReusedChanged,
     /// Reuse stopped: the two names of Codex's login are no longer one file.
     CodexLinkSplit,
+    /// Detection ran and found no login of the lawyer's. Never a reason reuse stopped.
+    NoLogin,
+    /// `no-reuse` is there, so nothing was looked for; `find_login` deletes it. Never a reason
+    /// reuse stopped.
+    ReuseOff,
+}
+
+impl Found {
+    /// Whether it is a reason reuse stopped, which `stop_using_login` takes: not `NoLogin`
+    /// or `ReuseOff`, which say what the status check saw.
+    pub const fn is_stop_reason(self) -> bool {
+        !matches!(self, Self::NoLogin | Self::ReuseOff)
+    }
 }
 
 /// Whose login [`SigninState::LoginFound`] found.

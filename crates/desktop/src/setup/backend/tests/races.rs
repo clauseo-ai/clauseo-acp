@@ -156,9 +156,17 @@ fn a_start_replaced_by_find_login_or_sign_out_before_it_reports_leaves_no_mark()
         s18(&rig, signed_out());
         assert_eq!(start(&rig, MAIN), DONE, "{replace}");
         assert_eq!(send(&rig, SETTINGS, replace, &json!({})), DONE, "{replace}");
-        // The replacing job's end: the same state as before, so nothing new is sent.
+        // The replacing job's end: the same state as before, so nothing new is sent, but for
+        // a search, whose answer goes out once though unchanged.
         let mut feed = rig.events.follow();
         let _replay = shown(&mut feed);
+        s18(&rig, signed_out());
+        let answers = usize::from(replace == "find_login");
+        assert_eq!(
+            shown(&mut feed).len(),
+            answers,
+            "{replace}: the search's answer only"
+        );
         s18(&rig, signed_out());
         assert_eq!(shown(&mut feed), [], "{replace}: unchanged, not sent");
         assert_eq!(start(&rig, MAIN), DONE, "{replace}");

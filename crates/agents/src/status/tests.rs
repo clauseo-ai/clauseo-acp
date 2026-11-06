@@ -102,18 +102,22 @@ fn claude_detection_finds_only_a_first_party_claude_ai_login() {
             Some(status("oauth_token", None)),
             out(Some(Found::ClaudeSettings)),
         ),
-        (Some(0), Some(status("none", None)), out(None)),
+        (
+            Some(0),
+            Some(status("none", None)),
+            out(Some(Found::NoLogin)),
+        ),
         (
             Some(1),
             Some(status("claude.ai", Some("firstParty"))),
-            out(None),
+            out(Some(Found::NoLogin)),
         ),
         (
             None,
             Some(status("claude.ai", Some("firstParty"))),
-            out(None),
+            out(Some(Found::NoLogin)),
         ),
-        (Some(0), None, out(None)),
+        (Some(0), None, out(Some(Found::NoLogin))),
     ];
     for (exit, status, want) in table {
         assert_eq!(
@@ -186,7 +190,9 @@ fn codex_detection_reads_the_exit_code_and_the_stat() {
     );
     assert_eq!(
         CodexDetect::SignedOut.state(None),
-        SigninState::SignedOut { found: None }
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin)
+        }
     );
 }
 

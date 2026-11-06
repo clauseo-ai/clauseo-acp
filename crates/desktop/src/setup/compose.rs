@@ -187,6 +187,8 @@ fn found_login(found: Found) -> Option<FoundLogin> {
         Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
         Found::ReusedChanged => FoundLogin::ReusedChanged,
         Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
+        Found::NoLogin => FoundLogin::NoneFound,
+        Found::ReuseOff => FoundLogin::ReuseOff,
         _ => return None,
     })
 }
@@ -240,6 +242,21 @@ struct Known {
     /// first state, and is dropped (not shown, and no starting mark ended), so it never shows
     /// over the new sign-in. The new job's first state ends the watch.
     stale: bool,
+    /// Where a `FindLogin`'s answer is: S18's next resting state goes out even when it is the
+    /// one last sent, so each search ends in one `SignInChanged`.
+    search: Search,
+}
+
+/// A `FindLogin`'s answer, for [`Known`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Search {
+    /// No search waits.
+    #[default]
+    None,
+    /// A search waits for S18's next resting state.
+    Waiting,
+    /// That state came: the next composed state goes out even when unchanged.
+    Answer,
 }
 
 impl Compose {
@@ -278,8 +295,25 @@ impl Compose {
                     state = SigninState::SignedOut { found: None };
                 }
             }
+            if known.search == Search::Waiting && !is_running(&state) {
+                known.search = Search::Answer;
+            }
             known.s18 = Some(state);
         });
+    }
+
+    /// A `FindLogin` for `agent` is about to start: its answer, S18's next resting state, is
+    /// sent even when unchanged. Set before the call, so an answer that comes first is not
+    /// lost; undone with [`Compose::no_search`] when the call is refused.
+    pub(crate) fn searching(&self, agent: &AgentId) {
+        lock(&self.agents).entry(agent.clone()).or_default().search = Search::Waiting;
+    }
+
+    /// The `FindLogin` [`Compose::searching`] marked was refused: no answer will come.
+    pub(crate) fn no_search(&self, agent: &AgentId) {
+        if let Some(known) = lock(&self.agents).get_mut(agent) {
+            known.search = Search::None;
+        }
     }
 
     /// The backend is about to end `agent`'s running sign-in for a key or an endpoint: the
@@ -443,15 +477,19 @@ impl Compose {
     }
 
     /// Changes `agent`'s facts with `change`, then sends its composed state when it differs
-    /// from the last one sent: all under the one lock, so states go out in the order they
-    /// changed.
+    /// from the last one sent (or is a search's answer, [`Compose::searching`]): all under the
+    /// one lock, so states go out in the order they changed.
     fn change(&self, agent: &AgentId, change: impl FnOnce(&mut Known, SystemTime)) {
         let now = self.clock.now();
         let mut agents = lock(&self.agents);
         let known = agents.entry(agent.clone()).or_default();
         change(known, now);
         let state = compose(agent, known.s18.as_ref(), known.facts);
-        if state.is_none() || state == known.sent {
+        let force = known.search == Search::Answer;
+        if force {
+            known.search = Search::None;
+        }
+        if state.is_none() || (!force && state == known.sent) {
             return;
         }
         known.sent.clone_from(&state);

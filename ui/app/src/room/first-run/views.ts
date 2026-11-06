@@ -42,8 +42,12 @@ export function gateView(
       typeof install === "object" && "waiting" in install && install.waiting !== undefined;
     return { kind: "queued", offline };
   }
-  if ("signed_out" in signIn && signIn.signed_out !== undefined)
-    return { kind: "signed-out", found: signIn.signed_out.found };
+  if ("signed_out" in signIn && signIn.signed_out !== undefined) {
+    // none found and reuse off are the plain sign-in screen here; Plans (UD2) says them
+    const found = signIn.signed_out.found;
+    const plain = found === "none_found" || found === "reuse_off";
+    return { kind: "signed-out", found: plain ? undefined : found };
+  }
   if ("waiting" in signIn && signIn.waiting !== undefined)
     return { kind: "waiting", nudge: signIn.waiting.nudge, pasting: state.pasting };
   if ("device_code" in signIn && signIn.device_code !== undefined)

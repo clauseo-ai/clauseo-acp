@@ -213,9 +213,11 @@ impl AgentsBackend {
                 let _left = leave::leave_reused(self, &agent, leave::After::Rule).await?;
             }
             SetupCommand::FindLogin { .. } => {
-                agents
-                    .find_login(&agent)
-                    .map_err(|error| signin_error(&error))?;
+                self.compose.searching(&agent);
+                agents.find_login(&agent).map_err(|error| {
+                    self.compose.no_search(&agent);
+                    signin_error(&error)
+                })?;
                 self.replaced(&agent);
             }
             SetupCommand::SetAgentKey { key, .. } => self.set_key(&agent, key, key_write).await?,
