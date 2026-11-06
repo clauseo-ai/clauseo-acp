@@ -38,7 +38,7 @@ use std::time::Duration;
 use super::downloads::Mover;
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
-use super::{env, pause, quiet};
+use super::{env, logon, pause, quiet};
 use crate::write;
 
 /// How long Chrome has to print its `DevTools` endpoint.
@@ -345,9 +345,11 @@ pub(crate) fn remove_profile(profile: &Path) {
 }
 
 /// Keeps `profile` when an earlier start of this run made it (a real folder, not a link), with
-/// its staging folder, and merges [`quiet::preferences`] into the `Default/Preferences` Chrome
-/// rewrote, so every start of the run gets them; else makes it from nothing, with
-/// `Default/Preferences` sending downloads to `staging` and those services off.
+/// its staging folder, and merges [`quiet::preferences`] and [`logon::preferences`] into the
+/// `Default/Preferences` Chrome rewrote, and [`logon::ready_local_state`] into its `Local
+/// State`, so every start of the run gets them; else makes it from nothing, with
+/// `Default/Preferences` sending downloads to `staging` and those services off, and
+/// [`logon::local_state`] as `Local State`, so Chrome makes no failed Windows logon.
 ///
 /// agent-browser's launch let every download through (`Browser.setDownloadBehavior` `allow`);
 /// connected to the guard's Chrome it sets `default` (`browser.rs:2563-2574`), so Chrome's own
@@ -356,7 +358,7 @@ pub(crate) fn remove_profile(profile: &Path) {
 /// Chrome waives that rule where the page's "insecure content" setting is allow, so the profile
 /// allows it for `http://` pages only: there no content is mixed, so nothing else changes. A
 /// download over `http://` from an `https://` page stays blocked, as in Chrome by default.
-fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result<()> {
+pub(super) fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result<()> {
     let file = profile.join("Default").join("Preferences");
     match std::fs::symlink_metadata(profile) {
         Ok(found) if found.is_dir() => {
@@ -372,6 +374,12 @@ fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
                 .filter(serde_json::Value::is_object)
                 .unwrap_or_else(|| first_preferences(staging, downloads));
             merge(&mut preferences, quiet::preferences());
+            merge(&mut preferences, logon::preferences());
+            let local_state = profile.join("Local State");
+            let kept = std::fs::read(&local_state)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            write::write(&local_state, logon::ready_local_state(kept).to_string())?;
             return write::write(&file, preferences.to_string());
         }
         Ok(_) => write::remove_dir_all(profile).or_else(|_| write::remove_file(profile))?,
@@ -379,11 +387,15 @@ fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
     }
     write::create_dir_all(&profile.join("Default"))?;
     write::create_dir_all(staging)?;
+    write::write(
+        &profile.join("Local State"),
+        logon::local_state().to_string(),
+    )?;
     write::write(&file, first_preferences(staging, downloads).to_string())
 }
 
-/// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above
-/// and [`quiet::preferences`].
+/// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above,
+/// [`quiet::preferences`] and [`logon::preferences`].
 fn first_preferences(staging: &Path, downloads: &Path) -> serde_json::Value {
     let mut preferences = serde_json::json!({
         "download": {
@@ -397,6 +409,7 @@ fn first_preferences(staging: &Path, downloads: &Path) -> serde_json::Value {
         }}}},
     });
     merge(&mut preferences, quiet::preferences());
+    merge(&mut preferences, logon::preferences());
     preferences
 }
 
