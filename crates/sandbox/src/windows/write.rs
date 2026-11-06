@@ -175,6 +175,27 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_atomic_with(path, bytes, Write::write_all)
 }
 
+/// Whether `name` is exactly the temp name [`write_atomic`] gives a new file beside the file
+/// named `target`: `.<target>.<16 lowercase hex>.tmp`. For clearing ones a crash left.
+#[cfg(any(windows, test))]
+pub(crate) fn is_atomic_temp(target: &std::ffi::OsStr, name: &std::ffi::OsStr) -> bool {
+    let (Some(target), Some(name)) = (target.to_str(), name.to_str()) else {
+        return false;
+    };
+    let Some(hex) = name
+        .strip_prefix('.')
+        .and_then(|rest| rest.strip_prefix(target))
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    hex.len() == 16
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// [`write_atomic`] with the write itself as a parameter, so a test can fail it partway.
 pub(crate) fn write_atomic_with(
     path: &Path,
@@ -241,6 +262,48 @@ mod tests {
         ] {
             assert!(repair_plan(refused).is_err(), "{refused:?}");
         }
+    }
+
+    #[test]
+    fn the_temp_name_matches_what_write_atomic_makes_and_nothing_else() {
+        use std::ffi::OsStr;
+
+        use crate::test_support::TempDir;
+
+        let temp = TempDir::new("atomic-temp-name");
+        let target = temp.path().join("secrets.bin");
+        let folder = temp.path().to_owned();
+        let mut seen = Vec::new();
+        write_atomic_with(&target, b"x", |file, bytes| {
+            for entry in std::fs::read_dir(&folder)? {
+                seen.push(entry?.file_name());
+            }
+            file.write_all(bytes)
+        })
+        .unwrap();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert!(
+            is_atomic_temp(OsStr::new("secrets.bin"), &seen[0]),
+            "{seen:?}"
+        );
+        let name = OsStr::new("secrets.bin");
+        for other in [
+            "secrets.bin",
+            ".secrets.bin.0123456789ABCDEF.tmp",
+            ".secrets.bin.0123456789abcde.tmp",
+            ".secrets.bin.0123456789abcdef0.tmp",
+            ".secrets.bin.0123456789abcdeg.tmp",
+            ".secrets.bin.0123456789abcdef.tmp.old",
+            "x.secrets.bin.0123456789abcdef.tmp",
+            ".matters.json.0123456789abcdef.tmp",
+            ".secrets.bin..0123456789abcdef.tmp",
+        ] {
+            assert!(!is_atomic_temp(name, OsStr::new(other)), "{other}");
+        }
+        assert!(is_atomic_temp(
+            name,
+            OsStr::new(".secrets.bin.0123456789abcdef.tmp")
+        ));
     }
 
     #[cfg(unix)]
