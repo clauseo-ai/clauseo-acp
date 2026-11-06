@@ -187,7 +187,7 @@ fn hooks_go_in_whole() {
 /// Every variable the host forces on a Codex agent, whatever the settings say.
 #[test]
 fn launch_env_forces_mode_home_config_and_no_filtering() {
-    let home = Path::new("/data/agents/codex-acp/home");
+    let home = Path::new("/data/agent-state/m1/codex-acp");
     let settings = BTreeMap::from([
         (
             "INITIAL_AGENT_MODE".to_owned(),
@@ -199,7 +199,7 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
             "false".to_owned(),
         ),
     ]);
-    let env = launch_env(home, &settings, Map::new(), None);
+    let env = super::launch_env_on(home, &settings, Map::new(), None, false);
     let get = |name: &str| env.get(&OsString::from(name)).cloned();
     assert_eq!(get("INITIAL_AGENT_MODE"), Some("workspace-write".into()));
     assert_eq!(get("CODEX_HOME"), Some(home.as_os_str().to_owned()));
@@ -208,6 +208,18 @@ fn launch_env_forces_mode_home_config_and_no_filtering() {
     let parsed: Value = serde_json::from_str(text.to_str().unwrap()).unwrap();
     assert_eq!(parsed, pinned());
     assert_eq!(env.len(), 4);
+    // On macOS and Linux `HOME` is the state folder too (R17 PR-C), so Codex's
+    // `~/.agents/skills` and the shell's start-up files are the folder each launch cleans.
+    let unix = super::launch_env_on(home, &settings, Map::new(), None, true);
+    assert_eq!(
+        unix.get(&OsString::from("HOME")),
+        Some(&home.as_os_str().to_owned())
+    );
+    assert_eq!(unix.len(), 5);
+    assert_eq!(
+        launch_env(home, &settings, Map::new(), None).len(),
+        if cfg!(unix) { 5 } else { 4 }
+    );
 }
 
 #[test]

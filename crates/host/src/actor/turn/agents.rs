@@ -272,7 +272,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
+        let forced = agent::codex::launch_env(&prepared.state, &settings.env, prepared.keys, hooks);
         let codex = CodexAgent {
             folder: prepared.folder,
             guard,
@@ -280,11 +280,17 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         };
         (forced, Some((codex, prepared.login)))
     } else {
-        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
+        // A Claude agent's state folder goes in before `plans_folder` reads the merged map
+        // below; its login store is the login home, or the lawyer's default store while
+        // desktop says the login is reused.
+        let reused = actor.wiring.sign_in.reused.contains(&row.agent);
+        let store = prepared.claude_home.as_deref().filter(|_| !reused);
         let forced = prepared
-            .claude_home
+            .run
+            .state
             .as_deref()
-            .map(agent::home::claude_launch_env);
+            .filter(|_| prepared.claude_home.is_some())
+            .map(|state| agent::home::claude_launch_env(state, store));
         (forced.unwrap_or_default(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));

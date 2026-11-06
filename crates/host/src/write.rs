@@ -110,6 +110,14 @@ pub(crate) fn remove_link(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Makes `link` a second name for the file `original` (`std::fs::hard_link`, which opens
+/// neither file for its contents): a matter's Codex `auth.json` (`agent/state_folder.rs`). A
+/// name already at `link` fails with `AlreadyExists`; across volumes it fails
+/// (`CrossesDevices`), and nothing is copied.
+pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(original, link)
+}
+
 /// Sets the folder `path` to 0700 when it is not already (a link is left as it is).
 #[cfg(unix)]
 pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {

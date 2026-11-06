@@ -1,7 +1,8 @@
 //! The data-folder fence in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`, decision
 //! record 0030), checked from `codex.rs`'s launch test: denies scoped under the data folder,
 //! `run` and `agent-state` whole (the own folders reopen as `write` entries, checked in
-//! `profile.rs`), never Codex's home. Windows gets none.
+//! `profile.rs`), the login home whole, never the session's state folder (its `CODEX_HOME`,
+//! R17 PR-C) but the login link and the config surfaces in it. Windows gets none.
 
 use std::path::Path;
 
@@ -11,7 +12,8 @@ use serde_json::{Value, json};
 use crate::support::Dir;
 
 /// Checks the fence keys in `config` for a Codex session of `matter` whose run folder is `run`
-/// and whose Codex home is `home`, and returns them as they are, for the exact comparison.
+/// and whose Codex home (its state folder) is `home`, and returns them as they are, for the
+/// exact comparison.
 pub(crate) fn checked_keys(
     config: &Value,
     dir: &Dir,
@@ -35,8 +37,7 @@ pub(crate) fn checked_keys(
         "run",
         "agent-state",
         "agents/claude-acp",
-        "agents/codex-acp/home/auth.json",
-        "agents/codex-acp/home/history.jsonl",
+        "agents/codex-acp/home",
     ] {
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
@@ -47,6 +48,10 @@ pub(crate) fn checked_keys(
         }
         assert_eq!(mode, &json!("deny"), "{subpath}");
         let denied = dir.data().join(subpath);
+        if denied.starts_with(home) {
+            // The login link, the transcripts and the config surfaces in the state folder.
+            continue;
+        }
         for own in [run, notes.as_path(), home] {
             assert!(!own.starts_with(&denied), "{subpath}");
         }

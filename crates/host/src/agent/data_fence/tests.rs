@@ -63,9 +63,11 @@ pub(super) fn text(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// Claude's rules name each Clauseo-only subtree and file for Read and Edit, in the `//` form,
-/// the search index and the built-in plugin too, and never the run folders, the notes or the
-/// plans a session needs (those of other sessions are named per launch, `launch_tests.rs`).
+/// Claude's rules name each Clauseo-only subtree and file for Read and Edit, in the `//` form, the
+/// search index too, both login homes whole, every matter's Codex state folder and the config
+/// surfaces and transcripts in every matter's Claude state folder (R17 PR-C), and never the
+/// built-in plugin, the run folders, the notes, a Claude state folder whole or the plans a session
+/// needs (those of other sessions are named per launch, `launch_tests.rs`).
 #[test]
 fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
     let rules = claude_deny_rules(&LaunchDeny::fixed(vec![PathBuf::from("/d/ata")]));
@@ -74,7 +76,11 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Edit(//d/ata/skill-packs/**)",
         "Read(//d/ata/matters/**)",
         "Read(//d/ata/agents/codex-acp/**)",
-        "Read(//d/ata/agents/claude-acp/home/.credentials.json)",
+        "Read(//d/ata/agents/claude-acp/**)",
+        "Read(//d/ata/agent-state/*/codex-acp/**)",
+        "Read(//d/ata/agent-state/*/claude-acp/projects/*/*.jsonl)",
+        "Edit(//d/ata/agent-state/*/claude-acp/settings.json)",
+        "Edit(//d/ata/agent-state/*/claude-acp/hooks/**)",
         "Read(//d/ata/settings.json)",
         "Edit(//d/ata/state.sqlite*)",
         "Read(//d/ata/search.sqlite*)",
@@ -84,12 +90,14 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
     }
     for kept in [
         "/run/",
-        "/agent-state",
+        "/agent-state/**",
+        "/agent-state/*/notes",
+        "/agent-state/*/claude-acp/**",
         "/plans",
+        "/projects/**",
         "/profile",
         "(//d/ata/**)",
         "(//d/ata/agents/**)",
-        "claude-acp/home/**",
     ] {
         // The relay token files are the one thing under `run` denied (R24); the run folders
         // themselves never are.

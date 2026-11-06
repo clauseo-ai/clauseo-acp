@@ -436,13 +436,14 @@ impl HostHandle {
         self.splits.clone()
     }
 
-    /// Step 3 of the leave order: removes each matter's link to `agent`'s login file, without
-    /// a restart. The actor only names the folders; the removal runs on a thread of its own with
-    /// a bounded wait, so no file call blocks the actor. Matters get links in stage C (R17):
-    /// until then there are none and nothing is removed. Rust only.
+    /// Step 3 of the leave order: removes each matter's link to `agent`'s login file
+    /// (`<data>/agent-state/*/codex-acp/auth.json`, R17 PR-C), without a restart, so a sign-out
+    /// or an account switch reaches every matter. The actor only names the data folder; the
+    /// folders are listed and the links removed on a thread of its own with a bounded wait, so
+    /// no file call blocks the actor. Claude links nothing: nothing is removed for it. Rust only.
     pub async fn remove_login_links(&self, agent: AgentId) -> Result<(), HostError> {
         let asked = agent.clone();
-        let homes = self
+        let data = self
             .call(|reply| {
                 Request::SignIn(SignInRequest::LinkHomes {
                     agent: asked,
@@ -450,7 +451,7 @@ impl HostHandle {
                 })
             })
             .await?;
-        login_link::remove_links(agent, homes)
+        login_link::remove_links(agent, data)
             .await
             .map_err(HostError::from)
     }

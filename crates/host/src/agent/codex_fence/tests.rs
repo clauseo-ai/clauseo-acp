@@ -38,8 +38,9 @@ fn notes() -> PathBuf {
     data().join("agent-state").join("m1").join("notes")
 }
 
-fn codex_home() -> PathBuf {
-    locations().agent_home("codex-acp")
+/// The matter's Codex state folder, the session's `CODEX_HOME` (R17 PR-C).
+fn state() -> PathBuf {
+    data().join("agent-state").join("m1").join("codex-acp")
 }
 
 fn matter() -> PathBuf {
@@ -47,11 +48,11 @@ fn matter() -> PathBuf {
 }
 
 fn fence() -> Map<String, Value> {
-    let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
+    let (run_root, notes, state) = (run_root(), notes(), state());
     let session = Session {
         run_root: &run_root,
         notes: &notes,
-        codex_home: &codex_home,
+        state: &state,
     };
     keys(&locations(), session, false)
 }
@@ -139,7 +140,7 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
         Turn::Profile => rules.extend(exact),
         Turn::Rebuilt => {
             rules.extend(exact.into_iter().filter(|(_, mode)| mode == "deny"));
-            rules.extend([run_root(), notes()].map(|root| (root, "write".to_owned())));
+            rules.extend([run_root(), notes(), state()].map(|root| (root, "write".to_owned())));
         }
     }
     rules
@@ -184,9 +185,12 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "search.sqlite-wal",
         "skill-packs",
         "agents/claude-acp",
-        "agents/codex-acp/home/auth.json",
-        "agents/codex-acp/home/state_5.sqlite",
-        "agents/codex-acp/home/history.jsonl",
+        "agents/codex-acp/home",
+        "agent-state/m1/codex-acp/auth.json",
+        "agent-state/m1/codex-acp/state_5.sqlite",
+        "agent-state/m1/codex-acp/history.jsonl",
+        "agent-state/m1/codex-acp/config.toml",
+        "agent-state/m1/codex-acp/hooks.json",
         "run",
         "agent-state",
         SET_ASIDE_GLOB,
@@ -194,7 +198,8 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         assert_eq!(scoped.get(subpath), Some(&json!("deny")), "{subpath}");
     }
     for (subpath, value) in scoped {
-        let own = ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str());
+        let own = ["run/s1", "agent-state/m1/notes", "agent-state/m1/codex-acp"]
+            .contains(&subpath.as_str());
         assert_eq!(
             value,
             &json!(if own { "write" } else { "deny" }),
@@ -277,27 +282,44 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
             .join("claude-acp")
             .join("home")
             .join(".credentials.json"),
-        codex_home().join("auth.json"),
-        codex_home().join("state_5.sqlite-wal"),
-        codex_home().join("history.jsonl"),
-        codex_home().join("sessions").join("2026").join("t.jsonl"),
+        state().join("auth.json"),
+        state().join("state_5.sqlite-wal"),
+        state().join("history.jsonl"),
+        state().join("sessions").join("2026").join("t.jsonl"),
+        state().join("config.toml"),
+        state().join("AGENTS.md"),
+        state().join("hooks.json"),
+        state().join("rules").join("default.rules"),
+        state().join(".profile"),
+        // The login home whole: its login and the transcripts from before R17 PR-C.
+        locations().agent_home("codex-acp").join("auth.json"),
+        locations()
+            .agent_home("codex-acp")
+            .join("sessions")
+            .join("old.jsonl"),
+        // Another matter's state folder (R17 PR-C), made before or after the launch.
+        data.join("agent-state")
+            .join("m2")
+            .join("codex-acp")
+            .join("sessions")
+            .join("r.jsonl"),
+        data.join("agent-state")
+            .join("m2")
+            .join("claude-acp")
+            .join("projects"),
     ] {
         assert!(!readable(&keys, &path), "{} is readable", path.display());
     }
 }
 
 #[test]
-fn the_own_folders_codex_home_and_the_built_in_skills_stay_readable() {
+fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
     let keys = fence();
     for path in [
         run_root().join("work").join("notes.md"),
         run_root().join("skill-packs").join("x").join("SKILL.md"),
         notes().join("matter-brief.md"),
-        codex_home().join("config.toml"),
-        codex_home()
-            .join("tmp")
-            .join("arg0")
-            .join("codex-linux-sandbox"),
+        state().join("tmp").join("arg0").join("codex-linux-sandbox"),
         data()
             .join("agents")
             .join("codex-acp")
@@ -314,6 +336,9 @@ fn the_own_folders_codex_home_and_the_built_in_skills_stay_readable() {
         assert!(readable(&keys, &path), "{} is denied", path.display());
     }
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
+    // The own state folder is a writable root (a read-only carve-back under the deny of
+    // `agent-state` stays hidden on Linux), its config surfaces denied inside it.
+    assert_eq!(access(&keys, &state().join("tmp")), "write");
 }
 
 /// Every path `Locations` defines under the data folder is denied, or allowed for a reason
@@ -353,11 +378,11 @@ fn every_locations_path_is_denied_or_allowed_with_a_reason() {
 
 #[test]
 fn windows_gets_no_fence() {
-    let (run_root, notes, codex_home) = (run_root(), notes(), codex_home());
+    let (run_root, notes, state) = (run_root(), notes(), state());
     let session = Session {
         run_root: &run_root,
         notes: &notes,
-        codex_home: &codex_home,
+        state: &state,
     };
     assert!(keys(&locations(), session, true).is_empty());
 }
@@ -366,15 +391,15 @@ fn windows_gets_no_fence() {
 fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_glob() {
     let locations = Locations::under_root(Path::new("/srv/Clauseo[1]"));
     let data = locations.data_dir().to_path_buf();
-    let (run_root, notes, codex_home) = (
+    let (run_root, notes, state) = (
         data.join("run").join("s1"),
         data.join("agent-state").join("m1").join("notes"),
-        locations.agent_home("codex-acp"),
+        data.join("agent-state").join("m1").join("codex-acp"),
     );
     let session = Session {
         run_root: &run_root,
         notes: &notes,
-        codex_home: &codex_home,
+        state: &state,
     };
     let keys = keys(&locations, session, false);
     let scoped = keys["permissions"][PROFILE]["filesystem"][data.to_str().unwrap()]

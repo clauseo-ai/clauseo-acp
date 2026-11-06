@@ -8,8 +8,8 @@
 //!   other run folders, `run.old-*`, anything else), in the flag settings of every Claude
 //!   session. Claude Code applies them to its file tools and to the file commands it recognises
 //!   in Bash. A deny rule has no exceptions, so the session's own run folder, this matter's notes
-//!   and Claude's plans folder are left out by naming their siblings instead, and so are the
-//!   tool results Claude saves in its own project folder. Run folders, matters' notes and other
+//!   and the matter's state folder for the agent (R17 PR-C; Claude's plans and tool results are
+//!   there) are left out by naming their siblings instead. Run folders, matters' notes and other
 //!   matters' Claude projects made after the launch are the accepted residual of these rules.
 //! - The host's auto-deny ([`FenceCheck`]): a permission request whose paths ([`candidates`]:
 //!   the request's locations and diffs, `rawInput`'s path keys and every string in it shaped
@@ -48,17 +48,22 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// the usage counts, the Windows sandbox's ledger, the limits reader's state, the browser's config,
 /// the settings file, the updater's marker, the counts' first-act marker, the host's store, the
 /// search index (every matter's prompts and answers). Not the built-in plugin ([`SHARED`]).
-/// Under `agents`: Codex's home, the installs, the runtime and npm folders, the sign-in shim and
-/// markers, and in Claude's own home its login, its settings, its transcripts (every project's,
-/// with its subagents' and its memory; not the whole of `projects`, which also holds the large
-/// tool results the model must Read back, `launch.rs`), its skills and
-/// plugins, and what it keeps across sessions, so across matters: the prompt history, the
-/// edited files' copies, the to-do lists and the shell snapshots. Not Claude's home whole:
-/// Claude Code writes its plan note to `plans` there with its own Edit tool, and a deny rule
-/// has no exceptions. And in every run folder, the own one too, the case-law relay's token file
+/// Under `agents`: both agents' folders whole (the login homes, where the login store and the
+/// transcripts from before R17 PR-C are, the installs and the sign-in markers), the runtime and
+/// npm folders and the sign-in shim. Under `agent-state` (R17 PR-C), in every matter, the own
+/// one too, so a matter made after the launch is covered: Codex's state folders whole, and in
+/// Claude's its login store if one lands there, its `.claude.json`, its settings and the config
+/// surfaces the launch cleans (`state_folder::CLAUDE_REMOVED`), its transcripts (every
+/// project's, with its subagents' and its memory; not the whole of `projects`, which also holds
+/// the large tool results the model must Read back, `launch.rs`), and what it keeps across
+/// sessions: the prompt history, the edited files' copies, the to-do lists and the shell
+/// snapshots. Not Claude's state folder whole: Claude Code writes its plan note to `plans`
+/// there with its own Edit tool, and a deny rule has no exceptions; another matter's state
+/// folder that exists at the launch is denied whole (`launch.rs`). And in every run folder,
+/// the own one too, the case-law relay's token file
 /// (R24): `clauseo-mcp` reads it itself, so Claude's tools never need it, and a token read
 /// through them would land in the transcript.
-pub(crate) const DENIED: [&str; 35] = [
+pub(crate) const DENIED: [&str; 41] = [
     "run/*/relay-token",
     "skill-packs/**",
     "matters/**",
@@ -74,21 +79,27 @@ pub(crate) const DENIED: [&str; 35] = [
     "state.sqlite*",
     "search.sqlite*",
     "agents/codex-acp/**",
-    "agents/claude-acp/install/**",
-    "agents/claude-acp/login-source",
-    "agents/claude-acp/no-reuse",
-    "agents/claude-acp/home/.credentials.json",
-    "agents/claude-acp/home/.claude.json*",
-    "agents/claude-acp/home/settings.json",
-    "agents/claude-acp/home/projects/*/*.jsonl",
-    "agents/claude-acp/home/projects/*/*/subagents/**",
-    "agents/claude-acp/home/projects/*/memory/**",
-    "agents/claude-acp/home/skills/**",
-    "agents/claude-acp/home/plugins/**",
-    "agents/claude-acp/home/history.jsonl",
-    "agents/claude-acp/home/file-history/**",
-    "agents/claude-acp/home/todos/**",
-    "agents/claude-acp/home/shell-snapshots/**",
+    "agents/claude-acp/**",
+    "agent-state/*/codex-acp/**",
+    "agent-state/*/claude-acp/.credentials.json",
+    "agent-state/*/claude-acp/.claude.json*",
+    "agent-state/*/claude-acp/settings.json",
+    "agent-state/*/claude-acp/settings.local.json",
+    "agent-state/*/claude-acp/CLAUDE.md",
+    "agent-state/*/claude-acp/rules/**",
+    "agent-state/*/claude-acp/skills/**",
+    "agent-state/*/claude-acp/plugins/**",
+    "agent-state/*/claude-acp/agents/**",
+    "agent-state/*/claude-acp/commands/**",
+    "agent-state/*/claude-acp/output-styles/**",
+    "agent-state/*/claude-acp/hooks/**",
+    "agent-state/*/claude-acp/projects/*/*.jsonl",
+    "agent-state/*/claude-acp/projects/*/*/subagents/**",
+    "agent-state/*/claude-acp/projects/*/memory/**",
+    "agent-state/*/claude-acp/history.jsonl",
+    "agent-state/*/claude-acp/file-history/**",
+    "agent-state/*/claude-acp/todos/**",
+    "agent-state/*/claude-acp/shell-snapshots/**",
     "agents/runtime/**",
     "agents/downloads/**",
     "agents/npm-cache/**",
@@ -188,9 +199,10 @@ fn escape(text: &str) -> String {
     out
 }
 
-/// Whether `plans` is a plans folder in one of Clauseo's agents' homes under `data`
-/// (`<data>/agents/<agent id>/home/plans`, `Locations::agent_home`), where Claude Code writes
-/// its plan note (`agent/plan_note.rs`) when its home is Clauseo's.
+/// Whether `plans` is a plans folder where Claude Code writes its plan note
+/// (`agent/plan_note.rs`) when its config folder is Clauseo's: a matter's state folder's
+/// (`<data>/agent-state/<matter>/<agent id>/plans`, `agent/state_folder.rs`). A login home's
+/// `plans` (before R17 PR-C) no longer counts: no session writes there.
 pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
     let Ok(place) = plans.strip_prefix(data) else {
         return false;
@@ -198,8 +210,8 @@ pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
     let names: Vec<_> = place.components().collect();
     matches!(
         names.as_slice(),
-        [Component::Normal(agents), Component::Normal(_), Component::Normal(home), Component::Normal(folder)]
-            if *agents == "agents" && *home == "home" && *folder == "plans"
+        [Component::Normal(root), Component::Normal(_), Component::Normal(_), Component::Normal(folder)]
+            if *root == super::state_folder::STATE_ROOT && *folder == "plans"
     )
 }
 

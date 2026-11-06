@@ -179,6 +179,14 @@ pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
         .join("notes")
 }
 
+/// `matter`'s state folder for `agent` (R17 PR-C): `<data>/agent-state/<matter>/<agent>`.
+pub(crate) fn state_folder(dir: &Dir, matter: MatterId, agent: &str) -> PathBuf {
+    dir.data()
+        .join("agent-state")
+        .join(matter.to_string())
+        .join(agent)
+}
+
 /// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with
 /// `profile`, that profile's keys for the launch's skills token), `servers` and `skills` for
 /// every agent. `tokens` records the token each Codex launch's keys were built from.

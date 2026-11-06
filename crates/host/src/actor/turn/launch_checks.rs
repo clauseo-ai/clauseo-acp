@@ -1,13 +1,16 @@
-//! An agent's launch, in two phases so no file system call runs on the actor. Phase one sends
-//! the checks to a `clauseo-codex-fs` thread (`agent/codex/prepare.rs`): for every agent the
+//! An agent's launch, in two phases so no file system call runs on the actor. Phase one sends the
+//! checks to a `clauseo-codex-fs` thread (`agent/codex/prepare.rs`): for every agent the
 //! data-folder refusal (`agent/data_folder.rs`), and for a Codex agent its preparation
-//! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the
-//! `.codex` refusal, the folder check, the home made and the home's `config.toml`; for a Claude
-//! agent the folder check, `agent/folder_support.rs`, and its home made, the folder it gets as
-//! `CLAUDE_CONFIG_DIR`, with Claude Code's user settings written there, `agent/home.rs`). The
-//! work that waits for the agent is held on the thread's turn state meanwhile. Phase two, when
-//! they answer, launches the agent on the actor with what they found ([`agents::launch_now`]), or
-//! fails the waiting work.
+//! ([`crate::agent::codex::prepare_launch`]: the matter folder resolved through links, the `.codex`
+//! refusal, the folder check, the home made and the home's `config.toml`; for a Claude agent the
+//! folder check, `agent/folder_support.rs`, and its login home made, the folder it gets as its
+//! login store, with Claude Code's user settings written there, `agent/home.rs`). Then, for an
+//! agent with a kind, the matter's state folder (`agent/state_folder.rs`, R17 PR-C): made through
+//! no link at `agent-state`, cleaned of the config surfaces, with Clauseo's own `settings.json` or
+//! `config.toml` written whole, and for Codex on Clauseo's own login the hard link to the login
+//! home's `auth.json` (while reused, made after the sign-in hook answered). The work that waits for
+//! the agent is held on the thread's turn state meanwhile. Phase two, when they answer, launches
+//! the agent on the actor with what they found ([`agents::launch_now`]), or fails the waiting work.
 //!
 //! After both refusals, the same thread makes the session's folders ([`RunFolders`]: its
 //! stand-in `run/<session id>` folder with `work` and `browser` under it, and the matter's
@@ -50,6 +53,7 @@ use super::{TurnInput, host_stopping, state};
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
 use crate::agent::login_link::{self, Checked, LoginCheck};
+use crate::agent::state_folder::StateLink;
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -92,9 +96,13 @@ pub(crate) struct Prepared {
 pub(crate) struct RunFolders {
     /// The session.
     pub(crate) key: SessionKey,
-    /// `<data>/run/<session id>`: the stand-in for stage C's per-agent state folder, made at
-    /// the launch and removed when the agent ends.
+    /// `<data>/run/<session id>`: the session's own folder, made at the launch and removed
+    /// when the agent ends.
     pub(crate) root: PathBuf,
+    /// `<data>/agent-state/<matter id>/<agent id>`: the matter's state folder for an agent
+    /// with a kind (`agent/state_folder.rs`), its `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, made at
+    /// the matter's first launch of the agent and kept; `None` for an agent without a kind.
+    pub(crate) state: Option<PathBuf>,
     /// `{work_folder}`, `<root>/work`.
     pub(crate) work: PathBuf,
     /// `{browser_dir}`, `<root>/browser`.
@@ -150,12 +158,19 @@ impl RunFolders {
             relay_token: relay::token_file(&root),
             notes: notes_dir(data, key.matter),
             root,
+            state: None,
             chrome: None,
             browser_session: None,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
         }
+    }
+
+    /// These folders with `state`, the agent's state folder for the matter.
+    pub(crate) fn with_state(mut self, state: Option<PathBuf>) -> Self {
+        self.state = state;
+        self
     }
 
     /// Makes them, each through no link below `data`. Before that, the host's first launch sets
@@ -210,14 +225,22 @@ impl RunFolders {
 pub(crate) struct CodexPrepared {
     /// The matter folder resolved through links: `_codex/hooks/list` names it.
     pub(super) folder: PathBuf,
-    /// The agent's home, made and checked, as `CODEX_HOME`.
+    /// The agent's login home, made and checked: where its own `auth.json` is, and what the
+    /// sign-in hook is asked about.
     pub(super) home: PathBuf,
+    /// The matter's state folder (`agent/state_folder.rs`), made, cleaned and with its
+    /// `config.toml`: the launch's `CODEX_HOME` (and `HOME` on macOS and Linux).
+    pub(super) state: PathBuf,
     /// The launch profile's `CODEX_CONFIG` keys, filled on the actor
     /// (`profile_loads::launch_keys`).
     pub(super) keys: serde_json::Map<String, serde_json::Value>,
     /// What the sign-in hook found for the home (`agent/login_link.rs`), asked after the
     /// rest succeeded; `None` with no hook set.
     pub(super) login: Option<Checked>,
+    /// The state folder's `auth.json` link (`state_folder::link_own`, or `link_reused` once the
+    /// hook found the reused login's link holding); `None` when it was not tried (reused, and
+    /// the hook found no shared login: the split check refuses the launch then).
+    pub(super) link: Option<Result<StateLink, Error>>,
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
@@ -233,6 +256,7 @@ pub(super) fn prepare(
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
+    let reused = reused_login(actor, thread);
     let LaunchPaths {
         stored,
         data,
@@ -274,33 +298,23 @@ pub(super) fn prepare(
                 crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
-                let codex = match codex_home {
-                    Some(home) => {
-                        let (folder, support) =
-                            codex::prepare_launch(&check, &stored, &data, &home)?;
+                let codex = match (codex_home, run.state.clone()) {
+                    (Some(home), Some(state)) => {
+                        let (prepared, support) =
+                            prepare_codex(&check, &stored, &data, home, state, reused)?;
                         answer = Some(support);
-                        Some(CodexPrepared {
-                            folder,
-                            home,
-                            keys: serde_json::Map::new(),
-                            login: None,
-                        })
+                        Some(prepared)
                     }
-                    None => None,
+                    _ => None,
                 };
                 // Claude is never refused for its folder: the answer decides its forced ask.
                 if let Some(home) = &claude_home {
                     answer = Some(check.run(&crate::agent::session_folder(&stored)));
-                    codex::make_agent_home(&data, home, "Claude Code")?;
-                    if let Err(error) = crate::agent::home::write_claude_settings(home) {
-                        tracing::warn!(
-                            error = %Cause(&error),
-                            "Claude's home settings were not written"
-                        );
-                    }
+                    prepare_claude(&data, home, run.state.as_deref())?;
                 }
                 run.make(&data, &sweep)?;
-                run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
+                let claude_state = run.state.clone().filter(|_| claude);
+                run.data_deny = launch_deny(&run, &stored, &data, claude_state.as_deref());
                 claim(&mut run, &data, claims);
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
@@ -322,12 +336,23 @@ pub(super) fn prepare(
             (Ok(mut prepared), Some((hook, agent))) => {
                 if let Some(codex) = prepared.codex.as_mut() {
                     let home = codex.home.clone();
-                    let checked = login_link::check(check_clock, matter, hook, agent, home).await;
+                    let checked =
+                        login_link::check(Arc::clone(&check_clock), matter, hook, agent, home)
+                            .await;
                     codex.login = Some(checked);
                 }
                 Ok(prepared)
             }
             (result, _) => result,
+        };
+        let result = match result {
+            Ok(mut prepared) if reused => {
+                if let Some(codex) = prepared.codex.as_mut() {
+                    link_reused_after(check_clock, matter, codex).await;
+                }
+                Ok(prepared)
+            }
+            result => result,
         };
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
@@ -530,6 +555,8 @@ mod folders;
 use folders::{launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
+mod state_prep;
+use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login};
 
 #[cfg(test)]
 mod tests;

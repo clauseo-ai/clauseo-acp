@@ -19,8 +19,15 @@
 //! may be retried), and the guard refuses as for a shared file ([`treated_as_shared`]), as S18's
 //! checks do for a stat that fails. The logs name the agent and the outcome, never a path.
 //!
-//! `HostHandle::remove_login_links` removes each matter's `auth.json` link ([`remove_links`])
-//! on a thread of its own, never the actor's.
+//! `HostHandle::remove_login_links` removes each matter's `auth.json` link ([`remove_links`],
+//! every `<data>/agent-state/*/codex-acp/auth.json`, R17 PR-C) on a thread of its own, never
+//! the actor's. A matter's link itself is made at its launch (`agent/state_folder.rs`): on
+//! Clauseo's own login from the login home whenever the file ids differ; while reused only when
+//! this hook finds the home's link holding, and a matter's link that is not the home's file is
+//! a split, refused with no re-link.
+//!
+//! TODO(R17-C2): stage C's blocking point 2, the shared-login swap check (the shared login is
+//! writable from every matter's session), waits on the orchestrator's ruling.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -258,37 +265,43 @@ pub(crate) async fn check(
     }
 }
 
-/// Removes the `auth.json` link in each of `homes` on a `clauseo-codex-fs` thread, waiting at
-/// most [`REMOVE_WAIT`] on the system clock; a missing file is no error. The first failure
-/// fails the call with `agent.launch_failed`, its message naming no path.
-pub(crate) async fn remove_links(agent: AgentId, homes: Vec<PathBuf>) -> Result<(), Error> {
-    if homes.is_empty() {
-        return Ok(());
-    }
+/// Removes the `auth.json` link in each of `agent`'s state folders under `data`
+/// (`state_folder::linked_folders`: every matter's, listed through no link) on a
+/// `clauseo-codex-fs` thread, waiting at most [`REMOVE_WAIT`] on the system clock; a missing file
+/// is no error, and an agent with no links (Claude) removes nothing. The first failure fails the
+/// call with `agent.launch_failed`, its message naming no path.
+pub(crate) async fn remove_links(agent: AgentId, data: PathBuf) -> Result<(), Error> {
     let job = Job {
         what: "login link removal",
         matter: None,
         wait: REMOVE_WAIT,
     };
     let clock: Arc<dyn Clock> = Arc::new(crate::clock::SystemClock);
+    let listed = agent.clone();
     let removed = off_actor(clock, job, move || {
-        for home in &homes {
-            match crate::write::remove_link(&home.join("auth.json")) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(Error::refused(
-                        ErrorCode::AgentLaunchFailed,
-                        format!("a matter's login link was not removed: {}", error.kind()),
-                    ));
-                }
-            }
-        }
-        Ok(())
+        let folders = super::state_folder::linked_folders(&data, listed.as_str());
+        remove_in(&folders)
     })
     .await;
     if let Err(error) = &removed {
         tracing::warn!(%agent, code = error.code().as_str(), "the login links were not removed");
     }
     removed
+}
+
+/// Removes the `auth.json` link in each of `folders`, never what it points to.
+fn remove_in(folders: &[PathBuf]) -> Result<(), Error> {
+    for folder in folders {
+        match crate::write::remove_link(&folder.join(super::state_folder::LOGIN_FILE)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Error::refused(
+                    ErrorCode::AgentLaunchFailed,
+                    format!("a matter's login link was not removed: {}", error.kind()),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

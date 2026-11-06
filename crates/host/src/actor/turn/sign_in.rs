@@ -30,6 +30,7 @@ use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
 use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
 use crate::agent::login_link::{LoginLink, LoginSplit, Seen, StopFor};
+use crate::agent::state_folder::StateLink;
 use crate::error::Error;
 
 mod stops;
@@ -62,10 +63,10 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
             let _gone = reply.send(Ok(()));
         }
         SignInRequest::LinkHomes { agent, reply } => {
-            // Stage C's R17 names each matter's state folder linked to the login here; until
-            // then no matter has a link.
-            tracing::info!(%agent, "the matters' login links: none before stage C");
-            let _gone = reply.send(Ok(Vec::new()));
+            // The state folders are listed off the actor, by `login_link::remove_links`.
+            tracing::info!(%agent, "the matters' login links are removed");
+            let data = actor.effective.locations().data_dir().to_owned();
+            let _gone = reply.send(Ok(data));
         }
         SignInRequest::LaunchRefused { agent, code, reply } => {
             let _gone = reply.send(set_refused(actor, agent, code));
@@ -245,15 +246,22 @@ pub(super) fn requeue_of(
 /// guard; while desktop says the login is reused, an answer but [`LoginLink::Shared`] refuses
 /// the launch with `agent.auth_required` (so its turn is held), sets the reused flag to false
 /// and sends the split; no answer refuses it with `agent.launch_failed` and changes nothing.
+/// The matter's state folder link (R17 PR-C, `agent/state_folder.rs`) counts too: one that
+/// could not be made refuses with its own code (`signin.reuse_other_volume` across volumes),
+/// and while reused a matter's `auth.json` that is not the login's file
+/// ([`StateLink::Split`]) is a split, refused with no re-link.
 pub(super) fn check_launch(
     actor: &mut Actor,
     thread: ThreadId,
     prepared: &Prepared,
 ) -> Result<(), Error> {
-    let Some(checked) = prepared.codex.as_ref().and_then(|codex| codex.login) else {
+    let Some(codex) = prepared.codex.as_ref() else {
         return Ok(());
     };
-    let seen = checked.link;
+    if let Some(Err(error)) = &codex.link {
+        return Err(Error::Refused(error.to_wire()));
+    }
+    let state_split = matches!(codex.link, Some(Ok(StateLink::Split)));
     let Some(agent) = actor
         .threads
         .get(&thread)
@@ -262,10 +270,20 @@ pub(super) fn check_launch(
         return Ok(());
     };
     let sign_in = &mut actor.wiring.sign_in;
-    sign_in.seen.insert(agent.clone(), checked);
+    if let Some(checked) = codex.login {
+        sign_in.seen.insert(agent.clone(), checked);
+    }
     if !sign_in.reused.contains(&agent) {
         return Ok(());
     }
+    // An unset hook checks nothing, the state folder's link included.
+    let Some(checked) = codex.login else {
+        return Ok(());
+    };
+    let seen = match checked.link {
+        Seen::Answered(LoginLink::Shared) if state_split => Seen::Answered(LoginLink::Split),
+        seen @ (Seen::Answered(_) | Seen::Unknown) => seen,
+    };
     match seen {
         Seen::Answered(LoginLink::Shared) => Ok(()),
         Seen::Answered(link) => {

@@ -27,6 +27,8 @@ pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
+/// The user's home folder on macOS and Linux, set to the state folder for Codex.
+pub(crate) const USER_HOME_VAR: &str = "HOME";
 /// The variable codex-acp reads its config from.
 pub(crate) const CONFIG_VAR: &str = "CODEX_CONFIG";
 /// Set to `true`, codex-acp passes the session's MCP servers as they are, without dropping those
@@ -52,21 +54,38 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
-/// name: the ask mode, `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, and no MCP
-/// filtering.
+/// name: the ask mode, `home` (the matter's state folder, `agent/state_folder.rs`) as
+/// `CODEX_HOME`, and on macOS and Linux as `HOME` too, so Codex's `~/.agents/skills` and the
+/// shell's start-up files are the state folder's, which each launch cleans, never the lawyer's
+/// (research 43:61; Windows: S15's runner); [`config`] as `CODEX_CONFIG`, and no MCP filtering.
 pub(crate) fn launch_env(
     home: &Path,
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
     hooks: Option<Map<String, Value>>,
 ) -> BTreeMap<OsString, OsString> {
+    launch_env_on(home, settings_env, profile, hooks, cfg!(unix))
+}
+
+/// [`launch_env`], with `HOME` set when `unix`.
+pub(crate) fn launch_env_on(
+    home: &Path,
+    settings_env: &BTreeMap<String, String>,
+    profile: Map<String, Value>,
+    hooks: Option<Map<String, Value>>,
+    unix: bool,
+) -> BTreeMap<OsString, OsString> {
     let config = Value::Object(config(settings_env, profile, hooks)).to_string();
-    BTreeMap::from([
+    let mut env = BTreeMap::from([
         (OsString::from(MODE_VAR), OsString::from(ASK_MODE)),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
         (OsString::from(CONFIG_VAR), OsString::from(config)),
         (OsString::from(MCP_FILTER_VAR), OsString::from("true")),
-    ])
+    ]);
+    if unix {
+        env.insert(OsString::from(USER_HOME_VAR), home.as_os_str().to_owned());
+    }
+    env
 }
 
 /// The top-level keys `config` takes from the launch profile's side
