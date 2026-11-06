@@ -19,10 +19,14 @@
 //!   rather than a failure is each OS's rule below.
 //! - [`SystemProbe`] on Windows (`signals.rs` decides, `windows.rs` reads): the process token
 //!   is an `AppContainer` (`TokenIsAppContainer`), has restricting SIDs
-//!   (`GetTokenInformation(TokenRestrictedSids)`, a non-empty list), or its user
-//!   (`TokenUser`) is any of S15's pool users, compared with `EqualSid` against each SID S15's
-//!   set-up records in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `PoolSids` (a `REG_MULTI_SZ` of
-//!   SIDs in the `S-1-…` form, 64-bit view; missing means no pool). `ERROR_ACCESS_DENIED` on the
+//!   (`GetTokenInformation(TokenRestrictedSids)`, a non-empty list), has an integrity level
+//!   below Medium (`TokenIntegrityLevel`'s last sub-authority under
+//!   `SECURITY_MANDATORY_MEDIUM_RID`, 0x2000; pool users always run at Low, so this holds for a
+//!   stray pool process whatever the record says, and a level that can't be read for any reason
+//!   counts as sandboxed), or its user (`TokenUser`) is any of S15's pool users, compared with
+//!   `EqualSid` against each SID S15's set-up records in `HKLM\SOFTWARE\Clauseo\Sandbox`, value
+//!   `PoolSids` (a `REG_MULTI_SZ` of SIDs in the `S-1-…` form, 64-bit view; missing means no
+//!   pool). `ERROR_ACCESS_DENIED` on the
 //!   token or the record, a record that is not a `REG_MULTI_SZ`, or one that is not a list of
 //!   `S-1-…` SIDs (an empty string inside, an alias such as `BA`, a repeat), also counts as
 //!   sandboxed; any other failure fails open as above. On macOS

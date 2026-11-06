@@ -47,6 +47,8 @@ fn an_unsandboxed_token_has_no_signal() {
         .unwrap();
     assert!(matches!(token.app_container(), Ok(false)));
     assert!(matches!(token.restricted(), Ok(false)));
+    // The CI runner runs at Medium or High.
+    assert!(matches!(token.below_medium(), Ok(false)));
 }
 
 #[test]

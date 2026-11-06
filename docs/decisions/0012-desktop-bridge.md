@@ -132,22 +132,26 @@ whether the process is sandboxed before anything else starts; inside, it writes 
 stderr ("Clauseo will not start inside the agent sandbox.") and exits with code 77 (sysexits'
 `EX_NOPERM`). The checks on Windows, any one of which refuses: the process token is an
 `AppContainer` (`TokenIsAppContainer`); it has restricting SIDs
-(`GetTokenInformation(TokenRestrictedSids)` is not empty); or its user (`TokenUser`) is S15's
-sandbox user, the separate local account tier B runs the agent as (ADR 0038), which has neither of
-the first two. S15 owns that account and the record of its SID: its elevated set-up writes the SID
-string to `HKLM\SOFTWARE\Clauseo\Sandbox`, value `UserSid` (`REG_SZ`, a SID in the `S-1-…` form,
-readable by everyone). The app reads it in the 64-bit view (`KEY_WOW64_64KEY`), unexpanded
-(`RRF_NOEXPAND`, so a `REG_EXPAND_SZ` is refused as another type), and compares with `EqualSid`
-after `ConvertStringSidToSidW`, never by account name; an alias such as `BA` is not a SID here. A
-missing key or value means no sandbox user on this machine. One function, `sandbox_user_sid()`,
-names the record; when S15 lands it moves into `clauseo-sandbox` beside the writer. (S15 PR4b,
-design B: the record is now `PoolSids`, a `REG_MULTI_SZ` of every pool user's SID, read by
-`clauseo_sandbox::windows::sandbox_pool_sids`; the check refuses when the token user is any of
-them, and a malformed list counts as sandboxed. ADR 0049 has the layout.)
-`ERROR_ACCESS_DENIED` on opening or reading the token, or on
+(`GetTokenInformation(TokenRestrictedSids)` is not empty); its integrity level
+(`TokenIntegrityLevel`, the mandatory label's last sub-authority) is below Medium
+(`SECURITY_MANDATORY_MEDIUM_RID`, 0x2000), since S15's pool users always run at Low, so a stray
+pool process whose account was deleted and made again under a new SID, or one that outlived a
+removal, still refuses; or its user (`TokenUser`) is any of S15's pool users, the local accounts
+tier B runs the agent as (ADR 0038 and 0049, design B: one per matter), which have neither of the
+first two. S15 owns those accounts and their record: its elevated set-up writes
+`HKLM\SOFTWARE\Clauseo\Sandbox` (protected DACL, readable by `Users`) with `OwnerSid` (`REG_SZ`,
+the user who owns the set-up), `PoolSids` (`REG_MULTI_SZ`, every pool user's SID in the `S-1-…`
+form), `GroupSid` (`REG_SZ`, the `ClauseoSandboxUsers` group), `DataDir` (`REG_SZ`, the owner's
+data folder) and `Removing` (`REG_DWORD`, set while a removal is unfinished); ADR 0049 has the
+layout. The check reads `PoolSids` in the 64-bit view (`KEY_WOW64_64KEY`) through
+`clauseo_sandbox::windows::sandbox_pool_sids`, beside the writer, and compares the token user with
+each SID with `EqualSid` after `ConvertStringSidToSidW`, never by account name. A missing key or
+value means no pool on this machine. `ERROR_ACCESS_DENIED` on opening or reading the token, or on
 reading the record, also refuses: an unjailed process can always read both, and a hostile agent
-could deny them (its own default DACL) to slip past. So does a record that is not a `REG_SZ` or
-not an `S-1-…` SID, since only S15's set-up writes there. On macOS,
+could deny them (its own default DACL) to slip past. So does a record that is not a
+`REG_MULTI_SZ` or not a list of `S-1-…` SIDs (an empty string inside, an alias such as `BA`, a
+repeat), since only S15's set-up writes there, and an integrity level that can't be read for any
+reason. On macOS,
 `sandbox_check(getpid(), NULL, SANDBOX_FILTER_NONE)` is non-zero (its -1 error result counts as
 sandboxed). Linux has no check: the Linux agent jail is not a target. Any other failure (another
 token or registry error, such as `ERROR_MORE_DATA`) is reported on stderr and the app starts, so a
