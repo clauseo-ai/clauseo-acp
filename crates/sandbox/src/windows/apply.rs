@@ -119,6 +119,16 @@ pub fn apply(
 /// Everything else is as [`apply`] does it: each grant checked and written if missing, and each
 /// tree whose entry this run wrote or that was still pending walked. A check made for other
 /// walk inputs than `plan`'s is taken as the full walk.
+///
+/// The read-only denies (`Policy::read_only_in_matter`: the protected names at the root, and
+/// each `.git`, `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md` at any depth, S15
+/// `PR4a2`) don't depend on the check. The policy's walk of the matter finds them at every
+/// launch, whatever the check decides, and each is checked here and written if missing, with its
+/// own walk. A targeted launch so writes the deny of an item new in a changed folder. A skipped
+/// launch found nothing changed in the trees since a clean close: the walk lists the items it
+/// listed then, each deny is found in place (an explicit entry on the item itself), and nothing
+/// is written. They aren't walk inputs (`WalkInputs`): no own-tree walk depends on them, so a
+/// changed set of them can't make a skip leave anything out.
 pub fn apply_checked(
     ledger: &mut Ledger,
     plan: &mut AdmittedPlan,

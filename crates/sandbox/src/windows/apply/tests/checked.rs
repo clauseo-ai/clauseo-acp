@@ -12,6 +12,9 @@ use crate::windows::set_aside::Checked;
 /// `USN_REASON_SECURITY_CHANGE`.
 const SECURITY: u32 = 0x800;
 
+/// `USN_REASON_FILE_CREATE`.
+const CREATE: u32 = 0x100;
+
 /// A matter launched once (siblings `sib1`, `sib2`), its session ended clean, and a fake
 /// journal over its own trees: the matter (ID 100), then the state and notes folders.
 struct Launched {
@@ -24,7 +27,15 @@ struct Launched {
 
 impl Launched {
     fn new(test: &str) -> Launched {
+        Launched::with(test, &[])
+    }
+
+    /// [`Launched::new`] with the lawyer's `files`, below the matter, there at the first launch.
+    fn with(test: &str, files: &[&str]) -> Launched {
         let w = world(test, &[]);
+        for rel in files {
+            w.dir.file(&format!("matter/{rel}"), "# the lawyer's\n");
+        }
         let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
         let mut plan = launch_plan(&w, &["sib1", "sib2"]);
         apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
@@ -195,4 +206,107 @@ fn forgetting_the_matter_removes_its_clean_close_record() {
     let mut around = around(&l.w);
     forget_matter(&mut l.ledger, matter_one(), &mut l.acl, &mut around).unwrap();
     assert!(!path.exists());
+}
+
+/// The state of the ledger's entry for the pool user's write-deny on `rel` in the matter, and
+/// whether the ACL holds that deny.
+fn nested_deny(l: &Launched, rel: &str) -> (Option<EntryState>, bool) {
+    let path = l.roots[0].join(rel);
+    let entry = l.ledger.entries().find(|e| {
+        e.path == path
+            && e.kind == PathKind::ReadOnlyInMatter
+            && e.rights == Rights::DenyWrite
+            && e.sid == sid(USER_SID)
+    });
+    let held = has(&l.acl, &path, USER_SID, Rights::DenyWrite);
+    (entry.map(|e| e.state), held)
+}
+
+/// S15 `PR4a2`: each nested protected name there at the first launch gets the pool user's
+/// write-deny, recorded `applied`. A later launch the check skips writes nothing and walks no
+/// own tree, and every deny still stands: nothing changed, so the plan lists the same items.
+#[test]
+fn nested_denies_stand_when_the_check_skips() {
+    let mut l = Launched::with(
+        "checked-nested-skip",
+        &[
+            "sub/CLAUDE.md",
+            "sub/.claude/settings.json",
+            "a/b/agents.md",
+            "a/.mcp.json",
+            "deep/x/.git/config",
+        ],
+    );
+    let denied = [
+        "sub/CLAUDE.md",
+        "sub/.claude",
+        "a/b/agents.md",
+        "a/.mcp.json",
+        "deep/x/.git",
+    ];
+    for rel in denied {
+        assert_eq!(
+            nested_deny(&l, rel),
+            (Some(EntryState::Applied), true),
+            "{rel}"
+        );
+    }
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Skipped);
+    let applied = l.apply(&check).unwrap();
+    assert_eq!(applied.written, 0);
+    assert_eq!(l.own_walks(), Vec::new());
+    for rel in denied {
+        assert_eq!(
+            nested_deny(&l, rel),
+            (Some(EntryState::Applied), true),
+            "{rel}"
+        );
+    }
+}
+
+/// S15 `PR4a2`: a nested `CLAUDE.md` the lawyer made between sessions makes the launch
+/// targeted at its folder; the policy's walk at that launch finds it, and its deny is written,
+/// walked strictly and recorded.
+#[test]
+fn a_nested_claude_md_made_between_sessions_gets_its_deny_on_a_targeted_launch() {
+    let mut l = Launched::new("checked-nested-targeted");
+    assert_eq!(nested_deny(&l, "a/CLAUDE.md"), (None, false));
+    l.w.dir.file("matter/a/CLAUDE.md", "# the lawyer's, new\n");
+    // A new file in folder `a` (ID 101).
+    l.journal.change(100_900, 101, CREATE, false);
+    let check = l.check();
+    assert_eq!(check.path(), LaunchPath::Targeted(1));
+    let applied = l.apply(&check).unwrap();
+    assert!(applied.written > 0);
+    assert_eq!(
+        nested_deny(&l, "a/CLAUDE.md"),
+        (Some(EntryState::Applied), true)
+    );
+    let claude = l.roots[0].join("a/CLAUDE.md");
+    let walks = l.own_walks();
+    assert!(walks.contains(&(l.roots[0].join("a"), Reach::Children, true)));
+    assert!(walks.contains(&(claude, Reach::Tree, true)), "{walks:?}");
+}
+
+/// S15 `PR4a2`: forgetting the matter hands its nested denies back like every other entry.
+#[test]
+fn forgetting_the_matter_hands_back_its_nested_denies() {
+    let mut l = Launched::with(
+        "checked-nested-forget",
+        &["sub/CLAUDE.md", "a/.Claude/settings.json"],
+    );
+    for rel in ["sub/CLAUDE.md", "a/.Claude"] {
+        assert_eq!(
+            nested_deny(&l, rel),
+            (Some(EntryState::Applied), true),
+            "{rel}"
+        );
+    }
+    let mut around = around(&l.w);
+    forget_matter(&mut l.ledger, matter_one(), &mut l.acl, &mut around).unwrap();
+    for rel in ["sub/CLAUDE.md", "a/.Claude"] {
+        assert_eq!(nested_deny(&l, rel), (None, false), "{rel}");
+    }
+    assert_eq!(l.ledger.entries().count(), 0);
 }

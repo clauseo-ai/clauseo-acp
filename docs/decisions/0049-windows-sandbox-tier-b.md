@@ -196,6 +196,28 @@ build 26100):
     (`list_set_aside`), and `restore_set_aside` moves one back only if its name is free. An item on
     another volume than the data folder can't be moved there by a rename: the pass is refused naming
     the item (`OtherVolume`), the item stays, and no copy is made.
+  - **Write-denies at any depth (S15 PR4a2).** The policy's walk of the matter (`scan_matter`,
+    run by `PolicyBuilder::build` at every launch) lists every `.git`, `.claude`, `.mcp.json`,
+    `CLAUDE.md` and `AGENTS.md` at any depth (`PROTECTED_AT_ANY_DEPTH`, the set-aside's nested
+    list too), by a name check on the listings it reads anyway, ASCII case ignored as NTFS
+    compares these names. `Policy::read_only_in_matter` holds each as a subpath rule, unless a
+    folder it lists already holds it, and the plan gives the pool user the same inherited deny
+    of writes as the root names (`0xd0156`, `DELETE` and `FILE_DELETE_CHILD` included). With
+    `Modify` alone on the matter (no `FILE_DELETE_CHILD`), the agent can't write, delete, rename
+    or replace one that exists at launch, and the lawyer's copy stays as it is. The ledger
+    records each deny, and forget hands it back like any other. A link with one of these names
+    that leads into the matter is listed too, as a `.git` link is, so the permission write
+    refuses the launch there, as at the root. macOS reads the same list: its profile gains one
+    subpath parameter per item.
+  - The policy's walk runs at every launch, whatever the launch check (PR3d) decides: the check
+    leaves out only the own-tree walks and the set-aside's scan. Every read-only deny is checked
+    at every launch and written if it is missing, with its own walk (`apply_checked`). So a
+    nested `CLAUDE.md` the lawyer made between sessions gets its deny on a targeted launch. On
+    a skipped launch nothing in the trees changed, so the walk lists the same items and each
+    deny is found in place. The read-only set is not among the walk inputs (`WalkInputs`) because
+    no own-tree walk depends on it, so a changed set can't make a skip miss anything. PR3d's
+    measured times leave out the policy's walk; the PR4a2 timing row reports it. If PR6 reuses a
+    walk across launches, it must still walk the changed folders again for these names.
 - **Records.**
   - `HKLM\SOFTWARE\Clauseo\Sandbox`, with the protected DACL
     `D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)(A;CI;KR;;;BU)`: `PoolSids` (`REG_MULTI_SZ`), every pool
@@ -306,16 +328,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   the next launch walks those deny trees strictly and still refuses what it would have refused.
   No agent runs in between, and the allow names only the matter's own pool user on its own matter
   (accepted; no launch marker).
-- **A nested protected item edited in place** is not set aside. The set-aside compares file IDs
-  only, so a nested item is caught when it is created, replaced, renamed in or swapped (a new
-  file ID), not when it is edited in place. A nested `CLAUDE.md`, `AGENTS.md`, `.claude` or
-  `.mcp.json` that exists at launch can be edited in place, and the next launch loads it: Windows
-  has no write-deny for them below the root. This gap is open until S15 PR4a2; it is not accepted.
-  A nested `.git` is write-denied at any depth (`read_only_in_matter`, applied by `acl_plan`),
-  so its `config` and hooks can't be edited.
 - **A nested protected item one session's agent makes** is visible to a second session of the
   same matter running at the same time, until a set-aside pass runs (at that session's end or
-  the next launch).
+  the next launch). A permission entry can't deny a name that doesn't exist yet, so nothing
+  stops the agent making one; what stops it loading in a later session is the set-aside
+  (accepted). One that exists at launch can't be edited, renamed or deleted by the agent (S15
+  PR4a2, below).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for

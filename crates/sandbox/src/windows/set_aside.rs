@@ -66,12 +66,12 @@
 //! Known limits:
 //! - The check compares file IDs only, so a nested protected item is caught when it is
 //!   created, replaced, renamed in or swapped (a new file ID), not when it is edited in place.
-//!   A nested `CLAUDE.md`, `AGENTS.md`, `.claude` or `.mcp.json` that exists at launch can be
-//!   edited in place, and the next launch loads it: Windows has no write-deny for them below
-//!   the root. This gap is open until S15 `PR4a2`. A nested `.git` is write-denied at any
-//!   depth (`Policy::read_only_in_matter`), so its `config` and hooks can't be edited.
+//!   The agent can't edit one in place: every nested name that exists at launch is
+//!   write-denied to the pool user, as the root names are (`Policy::read_only_in_matter`,
+//!   S15 `PR4a2`), so an in-place edit is the lawyer's own and stays.
 //! - A nested protected item one session's agent makes is visible to a second session of the
-//!   matter running at the same time until a set-aside pass runs.
+//!   matter running at the same time until a set-aside pass runs: a permission entry can't deny
+//!   a name that doesn't exist yet (accepted).
 //! - A `CLAUDE.local.md` or `AGENTS.override.md` below the root is not checked (D-B17: two
 //!   more opens per folder cost over 5% of the scan).
 //!

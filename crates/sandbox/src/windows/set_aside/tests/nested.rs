@@ -2,8 +2,15 @@
 //! set aside when new or changed, each at its own path in the pass's folder. S15 `PR4a` adds the
 //! instruction files Claude and Codex load from the folder they work in.
 
+use std::path::{Path, PathBuf};
+
 use super::{aside, exit, exit_as, key, launch, launch_as, none, record, volume, world};
+use crate::windows::FolderSupport;
+use crate::windows::acl_plan::{Rights, plan};
+use crate::windows::admit::{PathKind, admit_with};
+use crate::windows::fence::Neighbours;
 use crate::windows::set_aside::Reason;
+use crate::windows::test_world::{FakeFolders, World, matter_one, sids, user_sid};
 use crate::windows::write::rename_new;
 
 /// N1: the agent fills a lawyer folder with hooks and renames it to `sub\.git`; the lawyer
@@ -153,20 +160,40 @@ fn a_nested_claude_md_made_during_a_session_is_set_aside() {
     assert!(root.join("a/b/brief.md").is_file());
 }
 
-/// `PR4a`: nested instruction files there at launch and only edited in place keep their file
-/// IDs, so they stay where they are. This pins ID-only detection: an in-place edit is not a
-/// change to the set-aside, even when the agent made it.
-// TODO(S15 PR4a2): a nested CLAUDE.md, AGENTS.md, .claude or .mcp.json there at launch can be
-// edited in place (no write-deny below the root on Windows); nested .git is write-denied at any
-// depth (read_only_in_matter). Once PR4a2 denies the rest, this shows the lawyer's edit stays.
+/// The paths matter one's plan for `w` write-denies to its pool user in the matter, as
+/// `acl_plan` makes them from the policy.
+fn denied_to_the_pool_user(w: &World) -> Vec<PathBuf> {
+    let policy = w.builder().build().unwrap();
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let none = FakeFolders::default();
+    let admitted = admit_with(&policy, &w.at("data"), &Neighbours::default(), ok, &none).unwrap();
+    plan(&admitted, &sids(), matter_one())
+        .unwrap()
+        .grants()
+        .iter()
+        .filter(|g| g.kind() == PathKind::ReadOnlyInMatter && g.rights() == Rights::DenyWrite)
+        .filter(|g| *g.sid() == user_sid())
+        .map(|g| g.path().to_owned())
+        .collect()
+}
+
+/// `PR4a`, `PR4a2`: nested instruction files there at launch keep their file IDs when edited
+/// in place, so the set-aside leaves them where they are (ID-only detection). The agent can't
+/// make that edit: the launch's plan write-denies each to the pool user, as at the root
+/// (`apply/ntfs_tests/nested.rs` tries the agent's edit on NTFS). So an in-place edit is the
+/// lawyer's, and it stays.
 #[test]
-fn nested_instruction_files_there_at_launch_and_unchanged_stay() {
+fn nested_instruction_files_there_at_launch_are_write_denied_and_the_lawyers_edit_stays() {
     let (w, root, data) = world("aside-nested-claude-kept");
     w.dir.file("matter/sub/CLAUDE.md", "# the lawyer's\n");
     w.dir.file("matter/sub/AGENTS.md", "# the lawyer's\n");
+    let denied = denied_to_the_pool_user(&w);
+    for rel in ["sub/CLAUDE.md", "sub/AGENTS.md"] {
+        assert!(denied.contains(&root.join(rel)), "{rel}: {denied:?}");
+    }
     launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
     assert!(record(&data).names.contains_key(&key("sub/CLAUDE.md")));
-    w.dir.file("matter/sub/CLAUDE.md", "# edited in place\n");
+    w.dir.file("matter/sub/CLAUDE.md", "# the lawyer's edit\n");
 
     assert_eq!(
         exit_as(&volume(), &root, &data, "s1", exit()).unwrap(),
@@ -174,6 +201,8 @@ fn nested_instruction_files_there_at_launch_and_unchanged_stay() {
     );
     assert!(root.join("sub/CLAUDE.md").is_file());
     assert!(root.join("sub/AGENTS.md").is_file());
+    let kept = std::fs::read_to_string(root.join("sub/CLAUDE.md")).unwrap();
+    assert_eq!(kept, "# the lawyer's edit\n");
 }
 
 /// `PR4a`: a nested `AGENTS.md` swapped for another file (another file ID) is set aside as

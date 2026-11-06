@@ -13,6 +13,9 @@ use crate::windows::test_acl::{Place, grant, has};
 use crate::windows::test_dacl::{drop_privileges, protect_with};
 use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID, matter_one, reserved, trusted};
 
+/// S15 `PR4a2`: the pool user against a nested `CLAUDE.md` and `.git\config`.
+mod nested;
+
 fn ledger(place: &Place) -> Ledger {
     Ledger::open(ledger_path(&place.at("data")), &trusted(), &reserved()).unwrap()
 }
