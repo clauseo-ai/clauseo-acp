@@ -292,6 +292,9 @@ mod steer;
 #[path = "host/steer_at_head.rs"]
 mod steer_at_head;
 #[cfg(test)]
+#[path = "host/stop_for.rs"]
+mod stop_for;
+#[cfg(test)]
 #[path = "host/stop_hold.rs"]
 mod stop_hold;
 #[cfg(test)]

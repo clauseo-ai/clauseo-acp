@@ -7,7 +7,8 @@
 //! queued turns wait too, the queue not held. The reason is the most specific that applies:
 //!
 //! 1. `switching`: `stop_agents` holds the agent while its login changes;
-//! 2. `sign_in`: the queue is held for its agent's sign-in (`sign_in.rs`);
+//! 2. `sign_in`: the queue is held for its agent's sign-in (`sign_in.rs`), and so is a queue
+//!    under a `stop_agents_for(SignInAgain)` stop, when the account on the shared login changed;
 //! 3. `update`: an install's hold applies;
 //! 4. `limit`: the queue is held because its last turn stopped at the plan's limit;
 //! 5. `paused`: any other hold for the lawyer (a cancel, an error, a restart).
@@ -19,7 +20,9 @@ use clauseo_protocol::{QueueHoldReason, StreamId, ThreadId};
 
 use super::super::super::Actor;
 use super::super::super::streams::StreamSlot;
+use super::super::sign_in;
 use super::{hold, queue};
+use crate::agent::login_link::StopFor;
 use crate::log_file::Cause;
 
 /// Why `thread`'s queue shows held, or `None` when it does not.
@@ -33,7 +36,10 @@ pub(crate) fn queue_hold(actor: &Actor, thread: ThreadId) -> Option<QueueHoldRea
         return None;
     }
     let reason = if holds.stop() {
-        QueueHoldReason::Switching
+        match sign_in::stop_for(actor, thread) {
+            Some(StopFor::SignInAgain) => QueueHoldReason::SignIn,
+            _ => QueueHoldReason::Switching,
+        }
     } else if queue.held && queue.sign_in.is_some() {
         QueueHoldReason::SignIn
     } else if holds.update_now() {

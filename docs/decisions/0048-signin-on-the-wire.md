@@ -274,7 +274,10 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   - `stop_agents(agent)` is step 1 of the leave order (P4d, below, has its answer and hold). It cancels each
     turn of that id through the Cancel path (the lawyer's Stop, so what the turn left running
     ends too) and marks the turn to go back held. It drops a launch still being prepared, whose
-    waiting work fails as closed, and stops every live agent of that id.
+    waiting work fails as closed, and stops every live agent of that id. `stop_agents_for(agent,
+    StopFor)` does the same with a reason: `StopFor::LoginSwitch` (what `stop_agents` gives) shows
+    the held queues as `switching`, and `StopFor::SignInAgain`, for an account change on the shared
+    login, shows them as `sign_in`, so the app asks for a sign-in; the questions stay held either way.
   - `set_reused_login(agent, bool) -> Result<(), HostError>` records desktop's word on the
     login's source. While it is `true`, the split check runs at each Codex launch.
   - `login_splits() -> LoginSplits` carries `LoginSplit { agent, lawyers_file_gone }`, sent

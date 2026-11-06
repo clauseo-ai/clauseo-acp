@@ -2,8 +2,8 @@
 //! A hold applies to a thread for any of three reasons, a set ([`Holds`]) each of whose members
 //! its own owner lifts:
 //!
-//! - `Stop`: `stop_agents` holds the thread's agent; `restart_agents` lifts it
-//!   (`sign_in/stops.rs`).
+//! - `Stop`: `stop_agents` (or `stop_agents_for`) holds the thread's agent; `restart_agents`
+//!   lifts it (`sign_in/stops.rs`).
 //! - `SignIn`: the queue is held for its agent's sign-in (`sign_in.rs`); `restart_agents`
 //!   lifts it, or the lawyer's `ResumeQueue` or `SendQueuedNow` unless `Stop` applies too.
 //! - `UpdateNow`: an install under `now` holds new sends while its turns stop

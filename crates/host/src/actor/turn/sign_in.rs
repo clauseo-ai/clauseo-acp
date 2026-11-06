@@ -7,12 +7,13 @@
 //! - `restart_agents` stops each live agent of an id that is not in a turn, with the shutdown
 //!   ladder's stop, so the next question launches with the new login, and resumes each queue
 //!   held for that agent's sign-in, once.
-//! - `stop_agents` cancels each turn of an id through the Cancel path (the lawyer's Stop, which
-//!   also ends what the turn left running), marks it to go back held, drops a launch being
-//!   prepared and stops the agent, so no process of it runs while the login link changes. It
-//!   answers once the agents have ended or its wait ran out (`sign_in/stops.rs`), and holds the
-//!   id, in memory only, until `restart_agents`: no launch of it starts ([`launch_refusal`])
-//!   and a prompt for it queues held (`queue/hold.rs`).
+//! - `stop_agents` (`stop_agents_for` with [`StopFor::LoginSwitch`]) cancels each turn of an id
+//!   through the Cancel path (the lawyer's Stop, which also ends what the turn left running),
+//!   marks it to go back held, drops a launch being prepared and stops the agent, so no process
+//!   of it runs while the login link changes. It answers once the agents have ended or its wait
+//!   ran out (`sign_in/stops.rs`), and holds the id, in memory only, until `restart_agents`: no
+//!   launch of it starts ([`launch_refusal`]) and a prompt for it queues held (`queue/hold.rs`).
+//!   The hold's [`StopFor`] is the reason its queues show (`queue/held.rs`).
 //! - `set_launch_refused` refuses an id's new launches with desktop's code, running sessions
 //!   left alone ([`launch_refusal`]). A launch meeting `agent.keys_loading` waits for it to be
 //!   lifted first, at most `KEYS_WAIT` ([`keys_wait`]).
@@ -28,7 +29,7 @@ use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
 use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
-use crate::agent::login_link::{LoginLink, LoginSplit, Seen};
+use crate::agent::login_link::{LoginLink, LoginSplit, Seen, StopFor};
 use crate::error::Error;
 
 mod stops;
@@ -42,8 +43,8 @@ pub(crate) fn on_request(actor: &mut Actor, request: SignInRequest) {
             restart(actor, &agent);
             let _gone = reply.send(Ok(()));
         }
-        SignInRequest::Stop { agent, reply } => {
-            stop(actor, &agent);
+        SignInRequest::Stop { agent, why, reply } => {
+            stop(actor, &agent, why);
             stops::wait(actor, agent, reply);
         }
         SignInRequest::Reused {
@@ -106,10 +107,11 @@ fn restart(actor: &mut Actor, agent: &AgentId) {
 }
 
 /// `stop_agents`: every turn of `agent` cancelled and marked to go back held, every launch
-/// being prepared dropped (its waiting work fails as closed), every agent stopped.
-fn stop(actor: &mut Actor, agent: &AgentId) {
-    tracing::info!(%agent, "the agents stop while the login changes");
-    actor.wiring.sign_in.held.insert(agent.clone());
+/// being prepared dropped (its waiting work fails as closed), every agent stopped. `why` is the
+/// reason its held queues show, the latest stop's.
+fn stop(actor: &mut Actor, agent: &AgentId, why: StopFor) {
+    tracing::info!(%agent, ?why, "the agents stop while the login changes");
+    actor.wiring.sign_in.held.insert(agent.clone(), why);
     for thread in threads_of(actor, agent) {
         if let Some(turn) = current(actor, thread)
             .filter(|current| !current.cancelled)
@@ -136,7 +138,13 @@ pub(super) fn holds(actor: &Actor, thread: ThreadId) -> bool {
     actor
         .threads
         .get(&thread)
-        .is_some_and(|entry| actor.wiring.sign_in.held.contains(&entry.row.agent))
+        .is_some_and(|entry| actor.wiring.sign_in.held.contains_key(&entry.row.agent))
+}
+
+/// The reason `stop_agents` holds `thread`'s agent with, when it does (`queue/held.rs`).
+pub(super) fn stop_for(actor: &Actor, thread: ThreadId) -> Option<StopFor> {
+    let entry = actor.threads.get(&thread)?;
+    actor.wiring.sign_in.held.get(&entry.row.agent).copied()
 }
 
 /// Why a launch of `thread`'s agent may not start: `stop_agents` holds it, so what waits fails
