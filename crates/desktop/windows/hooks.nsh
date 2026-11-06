@@ -14,7 +14,8 @@
 ; 1. When the sandbox's set-up tool (S15, clauseo-sandbox-setup.exe) is beside the app, the
 ;    uninstaller asks it to remove what it set up, elevated, so a currentUser uninstall raises one
 ;    UAC prompt. It reads its records under the data folder's `sandbox` folder to take its access
-;    rules back off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
+;    rules back off the lawyer's folders. Until S15's binaries are bundled the file is never there
+;    and this step does nothing.
 ; 2. When the "Also delete conversations, saved versions and settings" box is ticked, the app
 ;    deletes its data folders itself (`Clauseo.exe --delete-app-data`, delete_app_data.rs), never
 ;    following a link, and the box is cleared so the template's `RmDir /r` never runs: NSIS 3.11's
