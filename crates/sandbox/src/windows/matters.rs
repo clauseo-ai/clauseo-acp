@@ -1,91 +1,51 @@
-//! The matter SIDs' file: one random SID per matter, the restricting SID that keeps one matter's
-//! agent out of another's folders (S15, "The token"), kept in `<data_dir>\sandbox\matters.json`
-//! (matter id to SID). A matter's SID is made at its first launch, from the OS's randomness, and
-//! kept for good: nothing here removes one, and only `forget_matter` (S15 PR3, S15a) will. A SID
-//! is never handed to a second matter, and never one of this machine's accounts or their domain
+//! The matters' file, `<data_dir>\sandbox\matters.json`: for each matter, its own random SID
+//! and the pool user it holds.
+//!
+//! A matter's SID is the restricting SID that keeps one matter's agent out of another's folders
+//! (S15, "The token"). It is made at the matter's first launch, from the OS's randomness, and kept
+//! for good: nothing here removes one, and only `forget_matter` (S15 PR3, S15a) will. A SID is
+//! never handed to a second matter, and never one of this machine's accounts or their domain
 //! ([`Reserved`]).
+//!
+//! A matter's pool user (design B, D9) is assigned by [`MatterSids::assign`] under the reuse rule
+//! in [`pool::assign`](super::pool::assign), and kept until [`MatterSids::release`] after a full
+//! forget. A released row stays, naming the user and when it was released: the pick order and
+//! the open-session check read it.
+//!
+//! The file is version 2 (`file.rs`); a version 1 file is read and upgraded on the next write.
 //!
 //! Built on every OS so its tests run everywhere; only Windows uses it.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clauseo_protocol::MatterId;
-use serde::de::{self, MapAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
 
+use super::ledger::Ledger;
+use super::pool::assign::{self, Assign, OpenSessions, Pick};
 use super::sids::{Reserved, Sid};
 use super::write;
 use crate::SetupError;
 
+mod file;
+
+pub use file::{MatterRow, Rows};
+
 /// The folder under the data folder that holds the sandbox's records.
 pub const SANDBOX_DIR: &str = "sandbox";
-/// The matter SIDs' file, in [`SANDBOX_DIR`].
+/// The matters' file, in [`SANDBOX_DIR`].
 pub const MATTERS_FILE: &str = "matters.json";
 /// The lock file every change of [`MATTERS_FILE`] holds, in [`SANDBOX_DIR`].
 pub const MATTERS_LOCK: &str = "matters.lock";
-/// The version `matters.json` is written at; a file at another version is refused, not
-/// rewritten.
-const MATTERS_VERSION: u32 = 1;
 
-/// `matters.json` as it is written.
-#[derive(Serialize)]
-struct MattersOut<'a> {
-    version: u32,
-    matters: &'a BTreeMap<MatterId, Sid>,
-}
-
-/// `matters.json` as it is read.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MattersIn {
-    version: u32,
-    matters: UniqueMatters,
-}
-
-/// The matters map, refused when it names one matter twice (JSON allows a repeated key, and a
-/// plain map would keep the last silently).
-struct UniqueMatters(BTreeMap<MatterId, Sid>);
-
-impl<'de> Deserialize<'de> for UniqueMatters {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Entries;
-
-        impl<'de> Visitor<'de> for Entries {
-            type Value = UniqueMatters;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a map of matter ids to SIDs")
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<UniqueMatters, A::Error> {
-                let mut matters = BTreeMap::new();
-                while let Some((matter, sid)) = map.next_entry::<MatterId, Sid>()? {
-                    if matters.insert(matter, sid).is_some() {
-                        return Err(de::Error::custom(format!(
-                            "matter {matter} is listed twice"
-                        )));
-                    }
-                }
-                Ok(UniqueMatters(matters))
-            }
-        }
-
-        deserializer.deserialize_map(Entries)
-    }
-}
-
-/// The matter SIDs of one data folder.
+/// The matters of one data folder: their SIDs and pool users.
 #[derive(Debug)]
 pub struct MatterSids {
     folder: PathBuf,
     reserved: Reserved,
-    sids: BTreeMap<MatterId, Sid>,
-    /// How long [`MatterSids::sid_for`] waits for `matters.lock`; `None` is
-    /// [`write::LOCK_WAIT`].
+    rows: Rows,
+    /// How long a change waits for `matters.lock`; `None` is [`write::LOCK_WAIT`].
     lock_wait: Option<Duration>,
 }
 
@@ -107,17 +67,18 @@ impl MatterSids {
     }
 
     /// Loads `<data_dir>\sandbox\matters.json`, reading only; no file is no matters. A file
-    /// that can't be read or parsed, is at another version, names a matter twice, holds a SID
-    /// not of the matter form or one `reserved` refuses, or holds one SID twice is an error, and
-    /// is left as it is: rewriting it would lose matters' SIDs, and with them the way to remove
-    /// their permission entries.
+    /// that can't be read or parsed, is at a version other than 1 or 2, names a matter twice,
+    /// has a row with neither a SID nor a pool user, holds a SID not of the matter form or one
+    /// `reserved` refuses, holds one SID twice, or has one pool user held by two matters is an
+    /// error, and is left as it is: rewriting it would lose matters' SIDs and pool users, and
+    /// with them the way to remove their permission entries.
     pub fn load_with(data_dir: &Path, reserved: Reserved) -> Result<MatterSids, SetupError> {
         let folder = data_dir.join(SANDBOX_DIR);
-        let sids = read(&folder.join(MATTERS_FILE), &reserved)?;
+        let rows = file::read(&folder.join(MATTERS_FILE), &reserved)?;
         Ok(MatterSids {
             folder,
             reserved,
-            sids,
+            rows,
             lock_wait: None,
         })
     }
@@ -130,28 +91,111 @@ impl MatterSids {
 
     /// The SID `matter` had when this was loaded or last changed, if any.
     pub fn get(&self, matter: &MatterId) -> Option<&Sid> {
-        self.sids.get(matter)
+        self.rows.get(matter).and_then(|row| row.sid.as_ref())
     }
 
-    /// How many matters have a SID.
+    /// The pool user `matter` held when this was loaded or last changed, if any: none once
+    /// released.
+    pub fn pool_user(&self, matter: &MatterId) -> Option<&Sid> {
+        self.rows.get(matter).and_then(MatterRow::holds)
+    }
+
+    /// Every matter's row, as loaded or last changed.
+    pub fn rows(&self) -> &Rows {
+        &self.rows
+    }
+
+    /// How many matters are listed.
     pub fn len(&self) -> usize {
-        self.sids.len()
+        self.rows.len()
     }
 
-    /// Whether no matter has a SID.
+    /// Whether no matter is listed.
     pub fn is_empty(&self) -> bool {
-        self.sids.is_empty()
+        self.rows.is_empty()
     }
 
-    /// The SID of `matter`. Makes the sandbox folder if missing (`write::make_sandbox_dir`),
+    /// The SID of `matter`. Inside [`MatterSids::change`]'s lock and fresh read, so a matter
+    /// another instance added since this one loaded is kept. A matter without a SID gets a new
+    /// random one that no matter holds, no row names as a pool user and [`Reserved`] admits,
+    /// and the file is saved with it before it is returned; if the save fails, the matter has no
+    /// SID.
+    pub fn sid_for(&mut self, matter: &MatterId) -> Result<Sid, SetupError> {
+        self.change(|rows, reserved| {
+            if let Some(sid) = rows.get(matter).and_then(|row| row.sid.clone()) {
+                return Ok((sid, false));
+            }
+            let taken = |sid: &Sid| {
+                rows.values()
+                    .any(|row| row.sid.as_ref() == Some(sid) || row.pool_user.as_ref() == Some(sid))
+            };
+            let sid = loop {
+                let sid = Sid::random_matter()
+                    .map_err(|why| SetupError::Failed(format!("matter SID: {why}")))?;
+                if reserved.admits(&sid) && !taken(&sid) {
+                    break sid;
+                }
+            };
+            rows.entry(*matter).or_default().sid = Some(sid.clone());
+            Ok((sid, true))
+        })
+    }
+
+    /// The pool user of `matter`, from `pool` (the machine record's `PoolSids`). Inside
+    /// [`MatterSids::change`]'s lock and fresh read. A matter that holds one keeps it, and
+    /// nothing is written. Otherwise the user [`pool::assign`](super::pool::assign) picks, by
+    /// its reuse rule against `ledger` (as last read: open it fresh) and `open`, is saved in
+    /// the matter's row before it is returned; if the save fails, the matter holds none. A
+    /// released matter asking again gets a fresh pick. No free user is [`Assign::PoolFull`].
+    pub fn assign(
+        &mut self,
+        matter: &MatterId,
+        pool: &[Sid],
+        ledger: &Ledger,
+        open: &OpenSessions,
+    ) -> Result<Sid, Assign> {
+        self.change(
+            |rows, _| match assign::decide(matter, rows, pool, ledger, open)? {
+                Pick::Kept(user) => Ok((user, false)),
+                Pick::New(user) => {
+                    let row = rows.entry(*matter).or_default();
+                    row.pool_user = Some(user.clone());
+                    row.released_at = None;
+                    Ok((user, true))
+                }
+            },
+        )
+    }
+
+    /// Gives back `matter`'s pool user, after a full forget (`forget_matter` with no hand-back
+    /// left owed): its row keeps the user, with `now` (whole seconds since the Unix epoch; 0
+    /// for a time before it) as `released_at`. Inside [`MatterSids::change`]'s lock and fresh
+    /// read. Whether a user was released: a matter with none, or released already, is left as
+    /// it is.
+    pub fn release(&mut self, matter: &MatterId, now: SystemTime) -> Result<bool, SetupError> {
+        let at = now
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        self.change(|rows, _| {
+            let Some(row) = rows.get_mut(matter).filter(|row| row.holds().is_some()) else {
+                return Ok((false, false));
+            };
+            row.released_at = Some(at);
+            Ok((true, true))
+        })
+    }
+
+    /// One change of the file. Makes the sandbox folder if missing (`write::make_sandbox_dir`),
     /// checks `matters.lock` (`write::check_owned_file`) and holds it (an exclusive OS file
     /// lock, so no other process or instance changes the file meanwhile; waiting at most 10 s,
     /// or [`MatterSids::with_lock_wait`], then an error naming the lock), and checks and reads
-    /// the file again inside it, so a matter another instance added since this one loaded is
-    /// kept. A matter without a SID gets a new random one
-    /// that no matter holds and [`Reserved`] admits, and the file is saved with it before it is
-    /// returned; if the save fails, the matter has no SID.
-    pub fn sid_for(&mut self, matter: &MatterId) -> Result<Sid, SetupError> {
+    /// the file again inside it. `change` gets the rows read and the reservations, and returns
+    /// its result and whether it changed the rows; changed rows are saved, at version 2, and
+    /// kept here only once saved.
+    fn change<T, E: From<SetupError>>(
+        &mut self,
+        change: impl FnOnce(&mut Rows, &Reserved) -> Result<(T, bool), E>,
+    ) -> Result<T, E> {
         let failed =
             |why: io::Error| SetupError::Failed(format!("{}: {why}", self.folder.display()));
         write::make_sandbox_dir(&self.folder).map_err(failed)?;
@@ -164,255 +208,21 @@ impl MatterSids {
         .map_err(|error| SetupError::Failed(format!("matter SIDs: {error}")))?;
         // A lock file the open above just made gets the same explicit DACL.
         write::check_owned_file(&lock).map_err(failed)?;
-        let file = self.folder.join(MATTERS_FILE);
-        write::check_owned_file(&file).map_err(failed)?;
-        self.sids = read(&file, &self.reserved)?;
-        if let Some(sid) = self.sids.get(matter) {
-            return Ok(sid.clone());
+        let path = self.folder.join(MATTERS_FILE);
+        write::check_owned_file(&path).map_err(failed)?;
+        let read = file::read(&path, &self.reserved)?;
+        self.rows = read.clone();
+        let mut rows = read;
+        let (value, changed) = change(&mut rows, &self.reserved)?;
+        if changed {
+            file::save(&path, &rows)?;
+            self.rows = rows;
+            // The save put a new file in place; it gets the same explicit DACL.
+            write::check_owned_file(&path).map_err(failed)?;
         }
-        let sid = loop {
-            let sid = Sid::random_matter()
-                .map_err(|why| SetupError::Failed(format!("matter SID: {why}")))?;
-            if self.reserved.admits(&sid) && !self.sids.values().any(|held| *held == sid) {
-                break sid;
-            }
-        };
-        let mut sids = self.sids.clone();
-        sids.insert(*matter, sid.clone());
-        save(&file, &sids)?;
-        self.sids = sids;
-        // The save put a new file in place; it gets the same explicit DACL.
-        write::check_owned_file(&file).map_err(failed)?;
-        Ok(sid)
+        Ok(value)
     }
-}
-
-/// Reads and checks the file `path`, as [`MatterSids::load_with`] describes.
-fn read(path: &Path, reserved: &Reserved) -> Result<BTreeMap<MatterId, Sid>, SetupError> {
-    let failed = |why: String| SetupError::Failed(format!("{}: {why}", path.display()));
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(failed(error.to_string())),
-    };
-    let file: MattersIn =
-        serde_json::from_slice(&bytes).map_err(|error| failed(error.to_string()))?;
-    if file.version != MATTERS_VERSION {
-        return Err(failed(format!(
-            "version {}, not {MATTERS_VERSION}",
-            file.version
-        )));
-    }
-    let mut seen = BTreeSet::new();
-    for (matter, sid) in &file.matters.0 {
-        if !sid.is_matter_form() {
-            return Err(failed(format!("{matter}'s SID {sid} is not a matter SID")));
-        }
-        if !reserved.admits(sid) {
-            return Err(failed(format!(
-                "{matter}'s SID {sid} is or shares a domain with an account of this machine"
-            )));
-        }
-        if !seen.insert(sid) {
-            return Err(failed(format!("{sid} is held by two matters")));
-        }
-    }
-    Ok(file.matters.0)
-}
-
-/// Writes `sids` to `path` atomically.
-fn save(path: &Path, sids: &BTreeMap<MatterId, Sid>) -> Result<(), SetupError> {
-    let failed = |why: String| SetupError::Failed(format!("{}: {why}", path.display()));
-    let file = MattersOut {
-        version: MATTERS_VERSION,
-        matters: sids,
-    };
-    let mut bytes = serde_json::to_vec_pretty(&file).map_err(|error| failed(error.to_string()))?;
-    bytes.push(b'\n');
-    write::write_atomic(path, &bytes).map_err(|error| failed(error.to_string()))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::TempDir;
-
-    /// A fresh matter id: a v7 UUID from random bytes, enough for distinct test matters.
-    fn matter() -> MatterId {
-        let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes).unwrap();
-        bytes[6] = (bytes[6] & 0x0f) | 0x70;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let hex = |range: std::ops::Range<usize>| -> String {
-            bytes[range]
-                .iter()
-                .flat_map(|byte| [byte >> 4, byte & 0xf])
-                .map(|nibble| char::from_digit(u32::from(nibble), 16).unwrap())
-                .collect()
-        };
-        let text = format!(
-            "{}-{}-{}-{}-{}",
-            hex(0..4),
-            hex(4..6),
-            hex(6..8),
-            hex(8..10),
-            hex(10..16)
-        );
-        text.parse().unwrap()
-    }
-
-    #[test]
-    fn two_matters_get_different_sids_and_keep_them_across_reloads() {
-        let temp = TempDir::new("matter-sids");
-        let (a, b) = (matter(), matter());
-        let sid_a = matter_sid(temp.path(), &a).unwrap();
-        let sid_b = matter_sid(temp.path(), &b).unwrap();
-        assert_ne!(sid_a, sid_b);
-        assert_eq!(matter_sid(temp.path(), &a).unwrap(), sid_a);
-        let loaded = MatterSids::load(temp.path()).unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded.get(&a), Some(&sid_a));
-        assert_eq!(loaded.get(&b), Some(&sid_b));
-    }
-
-    #[test]
-    fn the_file_is_replaced_whole_and_reloads() {
-        let temp = TempDir::new("matter-sids-file");
-        let a = matter();
-        let mut sids = MatterSids::load(temp.path()).unwrap();
-        assert!(sids.is_empty());
-        let sid = sids.sid_for(&a).unwrap();
-        let folder = temp.path().join(SANDBOX_DIR);
-        let text = std::fs::read_to_string(folder.join(MATTERS_FILE)).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(json["version"], 1);
-        assert_eq!(json["matters"][a.to_string()], sid.as_str());
-        let mut names: Vec<String> = std::fs::read_dir(&folder)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        assert_eq!(
-            names,
-            [MATTERS_FILE, MATTERS_LOCK],
-            "no temporary file is left"
-        );
-        let b = matter();
-        let sid_b = sids.sid_for(&b).unwrap();
-        let again = MatterSids::load(temp.path()).unwrap();
-        assert_eq!((again.get(&a), again.get(&b)), (Some(&sid), Some(&sid_b)));
-    }
-
-    #[test]
-    fn a_bad_file_is_refused_and_left_as_it_is() {
-        let temp = TempDir::new("matter-sids-bad");
-        let a = matter().to_string();
-        let b = matter().to_string();
-        let sid = "S-1-5-21-1-2-3-1000";
-        for bad in [
-            "not json".to_owned(),
-            r#"{"version":2,"matters":{}}"#.to_owned(),
-            format!(r#"{{"version":1,"matters":{{"{a}":"S-1-5-32-544"}}}}"#),
-            format!(r#"{{"version":1,"matters":{{"{a}":"{sid}","{b}":"{sid}"}}}}"#),
-            format!(r#"{{"version":1,"matters":{{"not-a-matter":"{sid}"}}}}"#),
-            r#"{"version":1,"matters":{},"extra":1}"#.to_owned(),
-        ] {
-            let path = temp.file(&format!("{SANDBOX_DIR}/{MATTERS_FILE}"), &bad);
-            assert!(MatterSids::load(temp.path()).is_err(), "{bad}");
-            assert!(matter_sid(temp.path(), &matter()).is_err(), "{bad}");
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), bad);
-        }
-    }
-
-    #[test]
-    fn a_repeated_matter_is_refused() {
-        let temp = TempDir::new("matter-sids-repeat");
-        let a = matter();
-        let path = format!("{SANDBOX_DIR}/{MATTERS_FILE}");
-        // The review's repro, without a version, and the same with one.
-        let entries = format!(r#""{a}":"S-1-5-21-1-2-3-1000","{a}":"S-1-5-21-4-5-6-1000""#);
-        temp.file(&path, &format!(r#"{{"matters":{{{entries}}}}}"#));
-        assert!(MatterSids::load(temp.path()).is_err());
-        temp.file(
-            &path,
-            &format!(r#"{{"version":1,"matters":{{{entries}}}}}"#),
-        );
-        let Err(SetupError::Failed(why)) = MatterSids::load(temp.path()) else {
-            panic!("a repeated matter loaded");
-        };
-        assert!(why.contains("listed twice"), "{why}");
-    }
-
-    #[test]
-    fn a_sid_of_or_beside_a_machine_account_is_refused() {
-        let temp = TempDir::new("matter-sids-reserved");
-        let a = matter();
-        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
-        let reserved = || Reserved::new([lawyer.clone()]);
-        let path = format!("{SANDBOX_DIR}/{MATTERS_FILE}");
-        for sid in ["S-1-5-21-7-8-9-1001", "S-1-5-21-7-8-9-424242"] {
-            temp.file(
-                &path,
-                &format!(r#"{{"version":1,"matters":{{"{a}":"{sid}"}}}}"#),
-            );
-            assert!(
-                MatterSids::load_with(temp.path(), reserved()).is_err(),
-                "{sid}"
-            );
-            assert!(
-                MatterSids::load_with(temp.path(), Reserved::default()).is_ok(),
-                "{sid}"
-            );
-        }
-        temp.file(
-            &path,
-            &format!(r#"{{"version":1,"matters":{{"{a}":"S-1-5-21-7-8-10-1001"}}}}"#),
-        );
-        assert!(MatterSids::load_with(temp.path(), reserved()).is_ok());
-    }
-
-    #[test]
-    fn new_sids_are_admitted_by_the_reservations() {
-        let temp = TempDir::new("matter-sids-new-reserved");
-        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
-        let reserved = Reserved::new([lawyer]);
-        let mut sids = MatterSids::load_with(temp.path(), reserved.clone()).unwrap();
-        for _ in 0..50 {
-            let sid = sids.sid_for(&matter()).unwrap();
-            assert!(reserved.admits(&sid), "{sid}");
-        }
-    }
-
-    #[test]
-    fn two_instances_adding_matters_keep_both() {
-        let temp = TempDir::new("matter-sids-two");
-        let mut first = MatterSids::load(temp.path()).unwrap();
-        let mut second = MatterSids::load(temp.path()).unwrap();
-        let (a, b) = (matter(), matter());
-        let sid_a = first.sid_for(&a).unwrap();
-        let sid_b = second.sid_for(&b).unwrap();
-        // The second re-read the file under the lock, so it saw A before adding B.
-        assert_eq!(second.get(&a), Some(&sid_a));
-        let again = MatterSids::load(temp.path()).unwrap();
-        assert_eq!((again.get(&a), again.get(&b)), (Some(&sid_a), Some(&sid_b)));
-        // And the first, asked for A again, keeps its SID.
-        assert_eq!(first.sid_for(&a).unwrap(), sid_a);
-    }
-
-    #[test]
-    fn a_held_lock_makes_sid_for_give_up_after_its_wait() {
-        let temp = TempDir::new("matter-sids-held");
-        let folder = temp.path().join(SANDBOX_DIR);
-        write::make_sandbox_dir(&folder).unwrap();
-        let _held = write::lock_exclusive(&folder.join(MATTERS_LOCK)).unwrap();
-        let mut sids = MatterSids::load(temp.path())
-            .unwrap()
-            .with_lock_wait(Duration::from_millis(200));
-        let Err(SetupError::Failed(why)) = sids.sid_for(&matter()) else {
-            panic!("sid_for went ahead while the lock was held");
-        };
-        assert!(why.contains(MATTERS_LOCK), "{why}");
-        assert!(!why.contains(&*folder.to_string_lossy()), "{why}");
-        assert!(sids.is_empty());
-    }
-}
+mod tests;

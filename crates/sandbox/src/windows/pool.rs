@@ -2,7 +2,8 @@
 //! `ClauseoSbNN` ([`pool_name`]), all in the group `ClauseoSandboxUsers`, at most [`POOL_CAP`] on
 //! a machine (D-B5). The machine's record of them ([`MachineRecord`]) is
 //! `HKLM\SOFTWARE\Clauseo\Sandbox`, which the elevated set-up writes (S15 `PR4e`) and `record.rs`
-//! reads, and [`pool_sids_from_multi_sz`] decodes its `PoolSids` value.
+//! reads, and [`pool_sids_from_multi_sz`] decodes its `PoolSids` value. Which matter gets which
+//! pool user, and when one may go to another matter, is [`assign`].
 //!
 //! Pure: built on every OS so its tests run everywhere.
 
@@ -10,6 +11,8 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use super::sids::Sid;
+
+pub mod assign;
 
 /// The most pool users a machine has (D-B5: 4 at first, 4 more at a time, at most 32).
 pub const POOL_CAP: u8 = 32;
