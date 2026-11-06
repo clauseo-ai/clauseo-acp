@@ -12,7 +12,8 @@
 //!   `RefreshBalance` ([`Reads`], by the host's clock); a sign-in, a new key or a paid recharge
 //!   reads it at once. The connectors crate's own copy is as old as a minute at most.
 //! - The relays' events (`ConnectorEvents`, bound at start) arrive as inputs: a credential that
-//!   ended, out of credit (with a watch on its recharge), a paid result (a read, if due).
+//!   ended, out of credit (with a watch on its recharge), a paid result (a read, if due), a paid
+//!   `recharge` result (its balance, and a read at once).
 //! - The state reaches every app subscriber as `ConnectorsChanged` when it changes, and every
 //!   app catch-up carries it ([`current`]).
 //! - Sign-out, remove and the switch going off bump the credential generation: a key or a
@@ -47,7 +48,7 @@ use crate::connectors::{ConnectorOpener, ConnectorsWiring, CredentialEnd, RelayE
 use crate::error::Error;
 use jobs::{Change, Finished, Job, Post, Reach, Refusal};
 use limits::{Reads, UsedIds};
-use watch::{Watch, end_recharges, open_recharge, out_of_credit};
+use watch::{Watch, end_recharges, open_recharge, out_of_credit, recharged};
 
 /// The least time between two account reads that a paid result, `Check` or `RefreshBalance`
 /// asks for.
@@ -422,6 +423,7 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     if let Some(credential) = finished.credential {
         state.set_credential(credential);
     }
+    let read_account = finished.account.is_some();
     // Only while signed in: a read that came back after the credential ended is dropped.
     if let Some(account) = finished.account
         && state.signed_in()
@@ -440,7 +442,16 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
         }
         Change::Failed(message) => state.error = Some(Failure::sign_in(message)),
         Change::Reset => state.reset(),
-        Change::Recharge { recharge, outcome } => {
+        Change::Recharge {
+            recharge,
+            outcome,
+            balance,
+        } => {
+            if let Some(credits) = balance
+                && !read_account
+            {
+                state.set_balance(credits, now.wall);
+            }
             let current = connectors
                 .watch
                 .as_ref()
@@ -480,6 +491,9 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             end_recharges(actor);
         }
         RelayEvent::OutOfCredit { payment, .. } => out_of_credit(actor, payment),
+        RelayEvent::RechargePaid {
+            balance_credits, ..
+        } => recharged(actor, balance_credits),
         RelayEvent::CaseLawFound { session, found } => {
             super::turn::case_law::found(actor, session.thread, found);
             return;

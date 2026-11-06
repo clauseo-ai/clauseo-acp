@@ -182,17 +182,68 @@ impl ApiState {
         value
     }
 
+    /// A recharge as `GET /recharges/{id}` answers it: the `recharge` tool's `structuredContent`,
+    /// in the connector's shapes (`recharge-get-*.json`). Paid has no `recharge_id` and no
+    /// `payment`; expired's `payment` is the open (or a new) recharge, a fresh link.
+    fn poll_json(&mut self, base: &str, id: &str) -> Value {
+        let Some((paid, ended)) = self.recharges.get(id).map(|r| (r.paid, r.ended)) else {
+            return Value::Null;
+        };
+        match (paid, ended) {
+            (true, _) => {
+                let mut value = fixtures::value("recharge-get-paid.json", base);
+                value["balance_credits"] = json!(self.balance);
+                value["balance_inr"] = json!(inr(self.balance));
+                value
+            }
+            (false, None) => {
+                let mut value = fixtures::value("recharge-get-awaiting.json", base);
+                self.payment_now(base, id, &mut value);
+                value
+            }
+            (false, Some("expired")) => {
+                let mut value = fixtures::value("recharge-get-expired.json", base);
+                match self.open_or_new(base) {
+                    Some(fresh) => self.payment_now(base, &fresh, &mut value),
+                    None => {
+                        if let Some(object) = value.as_object_mut() {
+                            object.remove("payment");
+                            object.remove("next");
+                        }
+                    }
+                }
+                value
+            }
+            (false, Some(status)) => {
+                let mut value = fixtures::value("recharge-get-held.json", base);
+                value["status"] = json!(status);
+                value
+            }
+        }
+    }
+
+    /// Fills a poll answer's `payment` and `next` with recharge `id`, the one to pay now.
+    fn payment_now(&self, base: &str, id: &str, value: &mut Value) {
+        let Some(recharge) = self.recharges.get(id) else {
+            return;
+        };
+        let payment = &mut value["payment"];
+        payment["recharge_id"] = json!(id);
+        payment["url"] = json!(
+            self.pay_url
+                .clone()
+                .unwrap_or_else(|| format!("{base}/pay/{id}"))
+        );
+        payment["amount"] = recharge.amount.clone();
+        payment["credits"] = json!(recharge.credits);
+        value["next"][0]["arguments"]["recharge_id"] = json!(id);
+    }
+
     /// `account.json` with the balance and the open payment now.
     fn account_json(&self, base: &str) -> Value {
         let mut value = fixtures::value("account.json", base);
         value["balance_credits"] = json!(self.balance);
-        let paise = self.balance.saturating_mul(10);
-        value["balance_inr"] = json!(format!(
-            "{}{}.{:02}",
-            if paise < 0 { "-" } else { "" },
-            (paise / 100).abs(),
-            (paise % 100).abs()
-        ));
+        value["balance_inr"] = json!(inr(self.balance));
         value["open_payment"] = self
             .open_recharge()
             .map_or(Value::Null, |id| self.recharge_json(base, &id));
@@ -212,6 +263,17 @@ impl ApiState {
         }
         body
     }
+}
+
+/// Credits as rupees at 0.10 INR each, as the connector writes `balance_inr`.
+fn inr(credits: i64) -> String {
+    let paise = credits.saturating_mul(10);
+    format!(
+        "{}{}.{:02}",
+        if paise < 0 { "-" } else { "" },
+        (paise / 100).abs(),
+        (paise % 100).abs()
+    )
 }
 
 fn pack_name(pack: &Value) -> Option<String> {
@@ -330,7 +392,8 @@ pub(super) fn get_recharge(shared: &Shared, request: &RecordedRequest, id: &str)
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
-    Response::json(200, &state.api.recharge_json(&shared.base, id))
+    let body = state.api.poll_json(&shared.base, id);
+    Response::json(200, &body)
 }
 
 /// `POST /mcp/case-law`: JSON-RPC, one message per request.
@@ -450,7 +513,7 @@ fn tool_call(shared: &Shared, params: &Value) -> ToolAnswer {
     ToolAnswer::Result(result)
 }
 
-/// The `recharge` tool: `recharge_id` reads a recharge, `pack` opens one.
+/// The `recharge` tool: `recharge_id` reads a recharge, `pack` opens one. (No `resume`.)
 fn recharge_tool(api: &mut ApiState, base: &str, arguments: Option<&Value>) -> Value {
     let arguments = arguments.cloned().unwrap_or(Value::Null);
     let id = match arguments.get("recharge_id").and_then(Value::as_str) {
@@ -459,8 +522,10 @@ fn recharge_tool(api: &mut ApiState, base: &str, arguments: Option<&Value>) -> V
     };
     match id.filter(|id| api.recharges.contains_key(id)) {
         Some(id) => {
-            let payment = api.recharge_json(base, &id);
-            json!({"content": [{"type": "text", "text": "The recharge."}], "structuredContent": {"payment": payment}, "isError": false})
+            // The connector's shape: `structuredContent` is the GET's answer, and the first
+            // text block is that JSON.
+            let status = api.poll_json(base, &id);
+            json!({"content": [{"type": "text", "text": status.to_string()}], "structuredContent": status, "isError": false})
         }
         None => {
             json!({"content": [{"type": "text", "text": "No such recharge or pack."}], "isError": true})

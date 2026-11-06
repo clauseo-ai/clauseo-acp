@@ -21,6 +21,8 @@ pub use manual::ManualClock;
 pub(crate) const SIGNIN_TIMEOUT: Duration = Duration::from_mins(5);
 /// How long `wait_recharge` polls before `RechargeTimedOut`.
 pub(crate) const RECHARGE_DEADLINE: Duration = Duration::from_mins(15);
+/// How often `wait_recharge` polls: the connector's own advice for its free status GET.
+pub(crate) const RECHARGE_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How the crate reaches the connector, and where it keeps its state.
 #[derive(Clone)]
@@ -35,6 +37,8 @@ pub struct Config {
     pub signin_timeout: Duration,
     /// How long `wait_recharge` polls.
     pub recharge_deadline: Duration,
+    /// The least time between the starts of two `wait_recharge` polls.
+    pub recharge_interval: Duration,
     /// The one source of time.
     pub clock: Arc<dyn Clock>,
     /// `<data_dir>/connectors/state.json`.
@@ -50,6 +54,7 @@ impl Config {
             proxy: ProxyChoice::Env,
             signin_timeout: SIGNIN_TIMEOUT,
             recharge_deadline: RECHARGE_DEADLINE,
+            recharge_interval: RECHARGE_INTERVAL,
             clock: Arc::new(SystemClock),
             state_file,
         }
@@ -64,6 +69,7 @@ impl fmt::Debug for Config {
             .field("proxy", &self.proxy)
             .field("signin_timeout", &self.signin_timeout)
             .field("recharge_deadline", &self.recharge_deadline)
+            .field("recharge_interval", &self.recharge_interval)
             .field("state_file", &self.state_file)
             .finish_non_exhaustive()
     }

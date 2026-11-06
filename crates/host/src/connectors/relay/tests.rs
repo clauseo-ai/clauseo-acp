@@ -9,5 +9,6 @@ mod handshake_refusals;
 mod input_limits;
 mod lifetime;
 mod raw_replies;
+mod recharge_reply;
 mod spend;
 mod support;

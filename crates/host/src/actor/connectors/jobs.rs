@@ -110,10 +110,12 @@ pub(crate) enum Change {
     Failed(&'static str),
     /// Signed out or removed: the account, out of credit and the pay link go.
     Reset,
-    /// A recharge settled: how, when the host can tell (`None` when the watch failed).
+    /// A recharge settled: how, when the host can tell (`None` when the watch failed), and the
+    /// balance its answer carried, shown when no account read came with it.
     Recharge {
         recharge: String,
         outcome: Option<RechargeOutcome>,
+        balance: Option<i64>,
     },
     /// A liveness check ended without an answer (a panic): nothing waits on it any longer.
     NoLiveness,
@@ -149,6 +151,8 @@ pub(super) enum Job {
     Remove,
     /// The account, holding the read slot.
     Read,
+    /// The account after a relay's paid `recharge` result, at once and without the slot.
+    Recharged,
 }
 
 impl Job {
@@ -167,7 +171,8 @@ impl Job {
             | Job::Watch { .. }
             | Job::SignOut
             | Job::Remove
-            | Job::Read => Change::Nothing,
+            | Job::Read
+            | Job::Recharged => Change::Nothing,
         }
     }
 
@@ -186,7 +191,8 @@ impl Job {
             | Job::ApiKey(_)
             | Job::SignOut
             | Job::Remove
-            | Job::Read => None,
+            | Job::Read
+            | Job::Recharged => None,
         }
     }
 }
@@ -322,6 +328,11 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
         } => watch(handle, recharge, &cancel)?,
         Job::SignOut | Job::Remove => sign_out(handle, command, matches!(job, Job::Remove)),
         Job::Read => read(handle, command),
+        Job::Recharged => {
+            let mut finished = Finished::new(command);
+            read_into(handle, &mut finished);
+            finished
+        }
     };
     // Read last, so it holds what every call above did to the credential.
     finished.credential = Some(handle.status());
@@ -494,13 +505,18 @@ fn credits(
     watch(&reach.handle, recharge.recharge_id, cancel)
 }
 
-/// Waits for `recharge` to settle, then reads the account if it was paid. `None` when
-/// cancelled: a newer recharge or a sign-out took its place. A watch that reaches its deadline
-/// counts as expired; one that fails otherwise has no outcome.
+/// Waits for `recharge` to settle, then reads the account if it was paid (the connectors crate
+/// dropped its copy), keeping the balance the paid answer carried for when the read fails.
+/// `None` when cancelled: a newer recharge or a sign-out took its place. A watch that reaches its
+/// deadline counts as expired; one that fails otherwise has no outcome.
 fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Option<Finished> {
     let mut finished = Finished::new(None);
+    let mut balance = None;
     let outcome = match handle.wait_recharge(&recharge, cancel) {
-        Ok(settled) => recharge_outcome(&settled.status),
+        Ok(settled) => {
+            balance = settled.balance_credits;
+            recharge_outcome(&settled.status)
+        }
         Err(Failed::Cancelled) => return None,
         Err(error) => {
             tracing::info!(
@@ -515,7 +531,11 @@ fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Opt
     if outcome == Some(RechargeOutcome::Paid) {
         read_into(handle, &mut finished);
     }
-    finished.change = Change::Recharge { recharge, outcome };
+    finished.change = Change::Recharge {
+        recharge,
+        outcome,
+        balance,
+    };
     Some(finished)
 }
 

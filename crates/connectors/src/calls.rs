@@ -11,9 +11,11 @@ use crate::cancel::CancelFlag;
 use crate::connectors::{ConnectorHandle, lock};
 use crate::credential::{Credential, CredentialKind};
 use crate::error::{AuthError, Error, parse_error};
-use crate::http::{self, POLL_TIMEOUT, Reply, Route, SendBody};
+use crate::http::{self, Reply, Route, SendBody};
 use crate::mcp::{McpBody, McpReply, McpRequestHeaders, parse_event_stream};
-use crate::recharge::{Recharge, RechargeStatus, insufficient_credits_402, parse_recharge};
+use crate::recharge::{
+    Recharge, RechargeStatus, insufficient_credits_402, parse_recharge, parse_recharge_poll,
+};
 use crate::secret::Secret;
 use serde_json::value::RawValue;
 use zeroize::Zeroizing;
@@ -22,9 +24,6 @@ use zeroize::Zeroizing;
 pub const ACCOUNT_MIN_INTERVAL: Duration = Duration::from_mins(1);
 /// How long `wait_recharge` waits after a network error before polling again.
 const POLL_BACKOFF: Duration = Duration::from_secs(5);
-/// The least time between the starts of two recharge polls, so a connector (or a proxy) that
-/// answers `awaiting_payment` at once is not polled in a loop.
-const POLL_MIN_INTERVAL: Duration = Duration::from_secs(2);
 /// How often a waiting `wait_recharge` looks at the cancel flag and the deadline.
 const POLL_TICK: Duration = Duration::from_millis(20);
 
@@ -119,11 +118,19 @@ pub(crate) fn create_recharge(handle: &ConnectorHandle, pack: &str) -> Result<Re
     }
 }
 
-/// Polls `GET /v1/case-law/recharges/{id}?wait=40` until the recharge is no longer awaiting
-/// payment, the recharge deadline passes (`RechargeTimedOut`) or `cancel` is set
-/// (`Cancelled`, within about 20 ms, even mid-poll). A paid one drops the account's copy, so the
-/// next `account` reads the new balance. Polls start at least 2 s apart. A network
-/// error or a 5xx waits 5 s and polls again. An answer for another recharge is `Parse`.
+/// Polls `GET /v1/case-law/recharges/{id}` until the recharge is settled
+/// ([`RechargeStatus::settled`]), the recharge deadline passes (`RechargeTimedOut`) or
+/// `cancel` is set (`Cancelled`, within about 20 ms, even mid-poll). A paid one drops the
+/// account's copy, so the next `account` reads the new balance.
+///
+/// Each poll is a plain GET, with no query: `wait` would hold a long wait, which the connector
+/// caps per account (the agent's own `recharge` call waits too), and `resume` would claim the
+/// call the agent's `recharge` resumes. The connector does not limit or charge these GETs;
+/// polls start [`Config::recharge_interval`] apart (3 s). A network error or a 5xx waits 5 s
+/// and polls again. An answer is read by [`parse_recharge_poll`]: one whose top-level
+/// `recharge_id` is another recharge's is `Parse`.
+///
+/// [`Config::recharge_interval`]: crate::Config::recharge_interval
 pub(crate) fn wait_recharge(
     handle: &ConnectorHandle,
     recharge_id: &str,
@@ -143,23 +150,21 @@ pub(crate) fn wait_recharge(
         .now()
         .checked_add(config.recharge_deadline)
         .ok_or_else(|| Error::Parse("recharge: the deadline is out of range".to_owned()))?;
-    let url = format!(
-        "{}/recharges/{recharge_id}?wait=40",
-        handle.inner.urls.api_base
-    );
+    let url = format!("{}/recharges/{recharge_id}", handle.inner.urls.api_base);
+    let timeout = handle.inner.shared.timeout();
     loop {
         let remaining = time_left(handle, deadline, cancel)?;
         let started = config.clock.now();
-        let failure = match poll_once(handle, &url, remaining.min(POLL_TIMEOUT), cancel, deadline)?
-        {
+        let failure = match poll_once(handle, &url, remaining.min(timeout), cancel, deadline)? {
             Ok(reply) if reply.status == 200 => {
-                let recharge = recharge_from(handle, &reply)?;
-                if recharge.recharge_id != recharge_id {
-                    return Err(Error::Parse(
-                        "recharge: the answer is for another recharge".to_owned(),
-                    ));
-                }
-                if recharge.status != RechargeStatus::AwaitingPayment {
+                let shared = &handle.inner.shared;
+                let recharge = parse_recharge_poll(
+                    &reply.body,
+                    handle.inner.known,
+                    &shared.config.origin,
+                    recharge_id,
+                )?;
+                if recharge.status.settled() {
                     if recharge.status == RechargeStatus::Paid {
                         // The balance changed: the next account read asks the connector.
                         *lock(&handle.inner.account) = None;
@@ -171,7 +176,7 @@ pub(crate) fn wait_recharge(
                     .now()
                     .duration_since(started)
                     .unwrap_or_default();
-                let gap = POLL_MIN_INTERVAL.saturating_sub(took);
+                let gap = config.recharge_interval.saturating_sub(took);
                 if !gap.is_zero() {
                     let remaining = time_left(handle, deadline, cancel)?;
                     if cancel.wait_timeout(remaining.min(gap)) {

@@ -139,6 +139,18 @@ impl CaseLaw {
         self.account_at = Some(at);
     }
 
+    /// A balance a paid recharge's answer carried, applied at `at` to the account held (none
+    /// held, nothing to show it on): above nothing, it ends the out-of-credit state.
+    pub(crate) fn set_balance(&mut self, credits: i64, at: Timestamp) {
+        if let Some(account) = &mut self.account {
+            account.balance_credits = credits;
+            self.account_at = Some(at);
+        }
+        if credits > 0 {
+            self.out_of_credit = None;
+        }
+    }
+
     /// The connectors crate's `persist_failed` now: signed in, its turning `true` shows
     /// [`Failure::PERSIST`] until the next command.
     pub(crate) fn note_persist(&mut self, failed: bool) {

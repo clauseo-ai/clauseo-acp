@@ -71,6 +71,14 @@ pub enum RelayEvent {
         /// The session whose call it was.
         session: SessionKey,
     },
+    /// A `recharge` call answered paid (`structuredContent.status`), with the balance its answer
+    /// carried. The relay has dropped the connectors crate's account copy, so a read is fresh.
+    RechargePaid {
+        /// The session whose call it was.
+        session: SessionKey,
+        /// `structuredContent.balance_credits`, when it is a whole number.
+        balance_credits: Option<i64>,
+    },
     /// A `search_law` or `read_document` call answered without an error: what it found, for
     /// the thread's sources (`sources/case_law.rs` joins it to the agent's tool call).
     CaseLawFound {
