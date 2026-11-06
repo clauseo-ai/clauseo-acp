@@ -10,10 +10,11 @@ use clauseo_agents::{AgentsEvent, FailureKind, InstallState, SigninCode, SigninS
 use clauseo_counts::schema::{
     Agent, AgentInstall, Billing, Event, InstallResult, SignIn, SignInResult, Took, Tries,
 };
-use clauseo_protocol::AgentId;
+use clauseo_protocol::{AgentId, CommandOutcome};
+use serde_json::json;
 
-use super::fakes::rig;
-use super::{claude, codex};
+use super::fakes::{command, rig};
+use super::{KEY, MAIN, SETTINGS, claude, codex};
 use crate::bridge::lock;
 use crate::setup::SetupBackend;
 use crate::test_support::block_on;
@@ -162,4 +163,60 @@ fn the_quit_shuts_agents_down() {
     // An empty cell: `Agents` never started, so nothing is left running.
     let (cell, _start) = crate::setup::BackendCell::new();
     assert!(cell.shutdown(Duration::ZERO));
+}
+
+fn waiting() -> SigninState {
+    SigninState::Waiting {
+        since: UNIX_EPOCH,
+        nudge: false,
+    }
+}
+
+fn cancelled() -> SigninState {
+    SigninState::Failed {
+        code: SigninCode::Cancelled,
+        at: UNIX_EPOCH,
+    }
+}
+
+#[test]
+fn a_key_or_an_endpoint_that_ends_a_sign_in_counts_none() {
+    for (name, fields) in [
+        ("set_agent_key", json!({ "key": KEY })),
+        (
+            "set_firm_endpoint",
+            json!({ "url": "https://gateway.firm.example" }),
+        ),
+    ] {
+        let rig = rig(true);
+        let setup = rig.setup();
+        let setting = command(name, &claude(), &fields);
+        let answer = rig.pumped(async {
+            rig.s18_sends(&claude(), waiting());
+            let answer = setup.run(SETTINGS, setting).await;
+            // S18 then ends the run the key or the endpoint took over.
+            rig.s18_sends(&claude(), cancelled());
+            answer
+        });
+        assert_eq!(answer, Ok(CommandOutcome::Done), "{name}");
+        assert_eq!(*lock(&rig.counts.0), [], "{name}: not the lawyer's cancel");
+    }
+}
+
+#[test]
+fn a_lawyers_cancel_of_a_sign_in_counts_once() {
+    let rig = rig(true);
+    let setup = rig.setup();
+    let cancel = command("cancel_sign_in", &claude(), &json!({}));
+    let answer = rig.pumped(async {
+        rig.s18_sends(&claude(), waiting());
+        let answer = setup.run(MAIN, cancel).await;
+        rig.s18_sends(&claude(), cancelled());
+        answer
+    });
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert_eq!(
+        *lock(&rig.counts.0),
+        [signin_count(Agent::Claude, SignInResult::Cancelled)]
+    );
 }

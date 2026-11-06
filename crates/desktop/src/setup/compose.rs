@@ -310,6 +310,26 @@ impl Compose {
         )
     }
 
+    /// Whether `state`, the next state S18 reports for `agent`, is an end [`Compose::signin`]
+    /// takes as the backend's and not as a failure: a failure of the sign-in a key or an
+    /// endpoint ended ([`Compose::expect_end`]), or a replaced job's late `Cancelled`. Read
+    /// before `signin` takes the state in.
+    pub(crate) fn is_expected_end(&self, agent: &AgentId, state: &SigninState) -> bool {
+        let agents = lock(&self.agents);
+        let Some(known) = agents.get(agent) else {
+            return false;
+        };
+        let failed = matches!(state, SigninState::Failed { .. });
+        let cancelled = matches!(
+            state,
+            SigninState::Failed {
+                code: SigninCode::Cancelled,
+                ..
+            }
+        );
+        (known.ending && failed) || (known.stale && cancelled)
+    }
+
     /// Undoes [`Compose::expect_end`].
     pub(crate) fn no_end(&self, agent: &AgentId) {
         if let Some(known) = lock(&self.agents).get_mut(agent) {

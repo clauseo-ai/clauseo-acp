@@ -488,7 +488,7 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::Signin { agent, state } => {
-                    tally.signin(&*self.counts, &agent, &state);
+                    tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;
                 }
                 AgentsEvent::OpenUrl { agent, url } => {
