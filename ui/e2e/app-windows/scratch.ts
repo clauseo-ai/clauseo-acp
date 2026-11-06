@@ -49,6 +49,22 @@ export interface ScratchOptions {
    * the first run's install line and sign-in gate show. False (the default) starts them set up.
    */
   firstRun?: boolean;
+  /**
+   * Agents whose sign-in the e2e build scripts (`E2E_FAKE_SIGNIN`): `ok` plays Queued, Waiting,
+   * then signed in; `fail` ends failed. Each starts installed (`E2E_AGENTS_MANAGED`) but signed
+   * out: it is left out of `plans`, so its sign-in card shows.
+   */
+  fakeSignIn?: Readonly<Record<string, FakeSignIn>>;
+}
+
+/** How a scripted sign-in ends. */
+export type FakeSignIn = "ok" | "fail";
+
+/** `E2E_FAKE_SIGNIN`'s value for `scripts`: `<agent>=<script>`, comma-separated. */
+export function fakeSignInVar(scripts: Readonly<Record<string, FakeSignIn>>): string {
+  return Object.entries(scripts)
+    .map(([agent, script]) => `${agent}=${script}`)
+    .join(",");
 }
 
 /** One test's folders. */
@@ -65,6 +81,8 @@ export interface Scratch {
   agentCommand: string | null;
   /** The agents that start set up (`E2E_AGENTS_MANAGED`, `plans`): none on a first run. */
   setUp: readonly string[];
+  /** `E2E_FAKE_SIGNIN`'s value, empty when no sign-in is scripted. */
+  fakeSignIn?: string;
 }
 
 /**
@@ -193,10 +211,11 @@ export function makeScratch(
             args: options.agentArgs ?? [],
             others: options.otherAgents ?? {},
           },
-      setUp,
+      setUp.filter((id) => options.fakeSignIn?.[id] === undefined),
     );
     writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
-    return { root, dataDir, matterDir, mattersDir, agentCommand, setUp };
+    const fakeSignIn = fakeSignInVar(options.fakeSignIn ?? {});
+    return { root, dataDir, matterDir, mattersDir, agentCommand, setUp, fakeSignIn };
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;
@@ -407,6 +426,7 @@ export function scratchEnv(scratch: Scratch): Record<string, string> {
     E2E_MATTER_DIR: scratch.matterDir,
     E2E_CONFIRM_ALWAYS: "accept",
     E2E_AGENTS_MANAGED: scratch.setUp.join(","),
+    ...(scratch.fakeSignIn ? { E2E_FAKE_SIGNIN: scratch.fakeSignIn } : {}),
   };
 }
 

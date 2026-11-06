@@ -329,6 +329,10 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             Arc::new(PassthroughLauncher::new(options)) as Arc<dyn Launcher>
         });
         let (agents, source) = Agents::start_with_launchers(config, install, signin, AsyncIoTimer);
+        let agents: Arc<dyn super::backend::SetupAgents> = Arc::new(agents);
+        // The e2e build's scripted sign-ins (`E2E_FAKE_SIGNIN`); no other build has them.
+        #[cfg(feature = "e2e")]
+        let (agents, source) = super::fake_signin::wrap(agents, source, Arc::clone(&clock));
         parts.events.publish(SetupEvent::SetupInfo {
             keys_available: keys.available(),
         });
@@ -348,7 +352,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             refused_at_start,
         );
         let backend = Arc::new(AgentsBackend {
-            agents: Arc::new(agents),
+            agents,
             keys,
             compose,
             host: parts.host,
