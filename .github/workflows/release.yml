@@ -358,8 +358,9 @@ jobs:
           fi
 
       # Only a test run's e2e build may hold the throwaway test key (crates/desktop/release/
-      # updater-test.pub). Every other run's app binary, as linked and before anything bundles,
-      # signs or uploads it (the macOS .app's main executable is this file), holds none of it: not
+      # updater-test.pub). Every other run's app binary, as linked and before anything signs or
+      # uploads it (on Linux the deb and rpm are already built; the macOS .app's main executable
+      # is this file), holds none of it: not
       # the file's base64 text, its RW... key line or its key id (B142942ACEC5F521), in ASCII or
       # UTF-16 (the NULs are dropped first). This scan, not the desktop tests, is the control.
       - name: The app binary holds no form of the test updater key
