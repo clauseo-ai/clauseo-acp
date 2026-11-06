@@ -514,17 +514,21 @@ fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders, tree: Option<Tr
             if let Some(wait_hook) = &wait_hook {
                 wait_hook(browser.map(|session| session.ports.cdp.port()));
             }
-            if let Err(straggler) = straggler::wait_gone(tree.as_ref(), browser, cap) {
+            let stopping = || held.stopping();
+            if let Err(straggler) = straggler::wait_gone(tree.as_ref(), browser, cap, stopping) {
+                let key = run.key;
+                // After the host's stop has released the held runs, this one is freed at once.
+                let after_stop = !held.hold(run);
                 tracing::warn!(
-                    matter = %run.key.matter,
-                    thread = %run.key.thread,
-                    launch = run.key.launch,
+                    matter = %key.matter,
+                    thread = %key.thread,
+                    launch = key.launch,
                     cap_ms = u64::try_from(cap.as_millis()).unwrap_or(u64::MAX),
                     still_there = straggler.as_str(),
+                    after_stop,
                     "a session's processes outlived the wait; its proxy, relay, ports and run \
                      folder are held until the host stops"
                 );
-                held.hold(run);
                 return Ok(());
             }
             // The token is revoked before its file goes with the folder.

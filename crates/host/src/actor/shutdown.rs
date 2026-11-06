@@ -16,6 +16,9 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
         return;
     }
     actor.phase = HostPhase::Stopping(reply.into_iter().collect());
+    // A run folder removal still waiting for a session's processes stops waiting: the stop
+    // releases every held run anyway (`close`).
+    actor.wiring.held.begin_stop();
     super::matters::cancel_imports(actor);
     super::scan::cancel_all(actor);
     super::browser_install::shutdown(actor);

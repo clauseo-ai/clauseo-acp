@@ -190,6 +190,50 @@ fn a_straggler_past_the_cap_holds_the_proxy_and_folder_until_the_host_stops() {
     group::reap(helper);
 }
 
+/// A stop while a removal waits for a straggler ends that wait at once: shutdown answers well
+/// before the cap, the proxy closes, and the folder stays for the next start's sweep.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_stop_mid_wait_frees_the_proxy_without_waiting_out_the_cap() {
+    group::become_reaper();
+    let dir = Dir::new("egress_stop_mid_wait", &[]);
+    claude_then(
+        &dir,
+        &json!([{"name": "browser"}]),
+        &[group::helper(), exit()],
+    );
+    let (proxy, log, closes) = Recording::new(false);
+    let launcher = Wired::new(&dir);
+    let removals = Arc::clone(&log);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        wired(config, proxy, removals).with_tree_wait(Duration::from_secs(600))
+    });
+    let folder = dir.folder("m", &[]);
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    let helper = group::pid(&folder);
+    group::until_zombie(helper);
+    no_close_within(&closes, Duration::from_millis(500));
+    let (stopped, stop) = channel();
+    std::thread::spawn(move || {
+        host.shutdown();
+        let _gone = stopped.send(());
+    });
+    stop.recv_timeout(Duration::from_secs(30))
+        .expect("the stop did not wait out the 600 s cap");
+    assert_eq!(
+        calls(&log),
+        ["open 1", "close 1"],
+        "closed at stop, not removed"
+    );
+    assert!(
+        run_folder(&launcher).exists(),
+        "the next start's sweep takes it"
+    );
+    group::reap(helper);
+}
+
 /// Something listening on the session's Chrome debugging port after the agent has exited, as a
 /// Chrome that leads a group of its own would, holds the proxy until it stops listening.
 #[test]
