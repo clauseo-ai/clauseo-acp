@@ -33,11 +33,19 @@ mod folder_support;
 mod skill_packs;
 
 /// Where new matters go, for display (`GetDefaultLocation`).
+/// With none (no Documents folder, issue #365) it answers `command.invalid`, and the form asks
+/// for a folder, as it does when the read fails.
 fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
-    let display =
-        super::rail::folder_display(actor.effective.default_matters_dir(), &actor.home_spellings);
-    let answer = QueryResult::DefaultLocation(clauseo_protocol::DefaultLocation { display });
-    let _gone = reply.send(Ok(answer));
+    let answer = match actor.effective.default_matters_dir() {
+        Some(location) => {
+            let display = super::rail::folder_display(location, &actor.home_spellings);
+            Ok(QueryResult::DefaultLocation(
+                clauseo_protocol::DefaultLocation { display },
+            ))
+        }
+        None => Err(super::matters::no_default_location()),
+    };
+    let _gone = reply.send(answer);
 }
 
 /// A query the host does not answer yet (`Protection`: decision record 0051 answers it once the

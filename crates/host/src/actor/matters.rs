@@ -230,9 +230,7 @@ fn matter_folder(
     let (parent, import) = match source {
         MatterSource::NewFolder { folder } => (registered(actor, *folder)?, false),
         MatterSource::ExistingFolder { folder } => (registered(actor, *folder)?, true),
-        MatterSource::DefaultLocation => {
-            (actor.effective.default_matters_dir().to_path_buf(), false)
-        }
+        MatterSource::DefaultLocation => (default_location(actor)?, false),
     };
     if import {
         return Ok((parent, true));
@@ -249,6 +247,24 @@ fn matter_folder(
         ));
     }
     Ok((path, false))
+}
+
+/// The default matters folder, or `command.invalid` when there is none (no Documents folder,
+/// issue #365).
+pub(super) fn default_location(actor: &Actor) -> Result<PathBuf, Error> {
+    actor
+        .effective
+        .default_matters_dir()
+        .map(Path::to_path_buf)
+        .ok_or_else(no_default_location)
+}
+
+/// The refusal for a default location the host does not have.
+pub(super) fn no_default_location() -> Error {
+    Error::refused(
+        ErrorCode::CommandInvalid,
+        "this host has no default location",
+    )
 }
 
 /// The folder `folder` names, or `command.invalid` when it names none.
@@ -365,9 +381,13 @@ impl RefusalNames {
 }
 
 /// Starts creating the Scratch matter in the first free folder of
-/// `<default_matters_dir>/Scratch`, `Scratch 2`, ...
+/// `<default_matters_dir>/Scratch`, `Scratch 2`, ... With no default matters folder (no
+/// Documents folder, issue #365) there is no Scratch matter this run.
 pub(super) fn create_scratch(actor: &mut Actor) {
-    let base = actor.effective.default_matters_dir().to_path_buf();
+    let Some(base) = actor.effective.default_matters_dir().map(Path::to_path_buf) else {
+        tracing::warn!("no default matters folder: no Scratch matter");
+        return;
+    };
     let folder = (1_u32..=u32::MAX)
         .map(|n| match n {
             1 => base.join(SCRATCH),

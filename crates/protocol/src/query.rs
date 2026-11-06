@@ -158,7 +158,10 @@ pub enum HostQuery {
     /// The agents in the settings, for a new thread's choice of agent.
     ListAgents,
     /// Where `MatterSource::DefaultLocation` makes new matters, for display: the form's folder
-    /// line before a pick. JSON: `"get_default_location"`.
+    /// line before a pick. JSON: `"get_default_location"`. A host with no default location (no
+    /// `matters.default_location` and no Documents folder, issue #365) refuses it with
+    /// `command.invalid`, as it refuses a `DefaultLocation` create; the form then asks for a
+    /// folder.
     GetDefaultLocation,
     /// Search inside matters and conversations (decision 0043). Answered
     /// `QueryResult::Search`.
