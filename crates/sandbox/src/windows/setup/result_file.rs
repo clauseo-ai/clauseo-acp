@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::outcome::{SetupExit, SetupFailure, SetupReport};
-use crate::SetupError;
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
+use crate::{Blocked, SetupError, SetupState};
 
 /// The file's name, in `<data_dir>\sandbox\`.
 pub const RESULT_FILE: &str = "setup-result.json";
@@ -31,6 +31,10 @@ pub struct SetupResult {
     /// Why; none when it didn't fail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
+    /// The setting that blocked it, when one did (D-B4): what `UserSetup::state` reports until
+    /// a later set-up succeeds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<Blocked>,
 }
 
 impl SetupResult {
@@ -41,11 +45,13 @@ impl SetupResult {
                 exit: SetupExit::Done.as_code(),
                 step: None,
                 cause: None,
+                blocked: None,
             },
             Err(failure) => SetupResult {
                 exit: failure.exit.as_code(),
                 step: Some(failure.step.to_string()),
                 cause: Some(failure.cause.clone()),
+                blocked: failure.blocked(),
             },
         }
     }
@@ -56,6 +62,7 @@ impl SetupResult {
             exit: exit.as_code(),
             step: Some(step.to_owned()),
             cause: Some(cause.into()),
+            blocked: None,
         }
     }
 }
@@ -80,16 +87,19 @@ pub fn write(data_dir: &Path, result: &SetupResult) -> io::Result<()> {
     write::check_owned_file(&file)
 }
 
-/// Reads the file: `Ok(None)` when it is missing; why when it can't be read or parsed, or is
-/// a link or has a second hard link (`write::check_owned_file`).
+/// The most a result file may hold: far more than any result, so a larger one is not one.
+pub const RESULT_CAP: u64 = 64 * 1024;
+
+/// Reads the file through the one handle its checks go through (`write::read_owned_file`):
+/// `Ok(None)` when it is missing; why when it can't be read or parsed, is a link, has a second
+/// hard link, or holds more than [`RESULT_CAP`] bytes.
+#[cfg(any(windows, test))]
 pub fn read(data_dir: &Path) -> Result<Option<SetupResult>, String> {
-    let file = path(data_dir);
-    write::check_owned_file(&file).map_err(|error| error.to_string())?;
-    match std::fs::read(&file) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
+    match write::read_owned_file(&path(data_dir), RESULT_CAP) {
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(|error| error.to_string()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Ok(None) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -111,6 +121,12 @@ pub fn outcome(
     let exit = SetupExit::from_code(code);
     if exit == Some(SetupExit::Done) {
         return Ok(());
+    }
+    if let Some(Ok(Some(told))) = result
+        && u32::from(told.exit) == code
+        && let Some(blocked) = told.blocked
+    {
+        return Err(SetupError::Blocked(blocked));
     }
     let told = match result {
         Some(Ok(Some(told))) if u32::from(told.exit) == code => {
@@ -145,6 +161,24 @@ pub fn outcome(
         Some(told) => format!("{words}: {told}"),
         None => format!("{words}{unread}"),
     }))
+}
+
+/// The set-up state `UserSetup::state` reports: `state`, read from the marker and record, unless
+/// it isn't [`SetupState::Ready`] and the last result (as [`read`] gave it) says a setting
+/// blocked that run; then [`SetupState::Blocked`]. A later set-up that succeeds writes a result
+/// with no block, and a Ready marker always wins.
+pub fn state_with(state: SetupState, last: &Result<Option<SetupResult>, String>) -> SetupState {
+    match (state, last) {
+        (SetupState::Ready, _) => SetupState::Ready,
+        (
+            _,
+            Ok(Some(SetupResult {
+                blocked: Some(blocked),
+                ..
+            })),
+        ) => SetupState::Blocked(*blocked),
+        (state, _) => state,
+    }
 }
 
 #[cfg(test)]

@@ -401,6 +401,18 @@ PR3b first planned doesn't close this: the creator passes its own DACL, and `C:\
 shared-write-place deny PR and the bypass-traverse spike. A third is to weigh a directory
 watcher that repairs new pool-owned files during a session.
 
+### Accepted risk: the setup exe in a per-user install folder
+
+The setup exe (`clauseo-sandbox-setup.exe`, S15 PR4h) runs elevated from the install folder. In a
+per-user install that folder is the lawyer's own, so a standard user's process can write it.
+Malware running as that user can swap the exe, and when an administrator then types their
+password at the prompt (over-the-shoulder elevation) the malware runs as administrator. Its
+publisher shows as unknown either way, since Windows ships unsigned for now. A DLL planted beside
+the exe is closed: static imports load from System32 only (`/DEPENDENTLOADFLAG:0x800`) and the exe
+calls `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first. Swapping the exe itself
+stays open in a per-user install. The mitigation is the per-machine install, whose folder under
+Program Files only administrators can write (PR4j's `--per-machine`, with stage F).
+
 ### Shared writable places
 
 A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:

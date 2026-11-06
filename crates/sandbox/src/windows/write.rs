@@ -123,6 +123,54 @@ pub(crate) fn check_owned_file(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Reads a file this crate keeps in the sandbox folder through the one handle its checks go
+/// through ([`check_owned_file`]'s, opened for reading too), so the bytes are the file checked,
+/// never a second open by path: `None` when it is missing; refused when it holds more than `cap`
+/// bytes. Elsewhere, where only tests use it, it opens without following a link and refuses a
+/// link, a non-file or a second hard link through that one descriptor.
+#[cfg(any(windows, test))]
+pub(crate) fn read_owned_file(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    #[cfg(windows)]
+    {
+        super::private_dir::read_checked_file(path, cap)
+    }
+    #[cfg(not(windows))]
+    {
+        use std::io::Read as _;
+        use std::os::unix::fs::MetadataExt as _;
+
+        use rustix::fs::{Mode, OFlags};
+        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let file = match rustix::fs::open(path, flags, Mode::empty()) {
+            Ok(fd) => File::from(fd),
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(None),
+            Err(error) => return Err(io::Error::from(error)),
+        };
+        let metadata = file.metadata()?;
+        let found = Found {
+            reparse: false,
+            right_kind: metadata.is_file(),
+            links: u32::try_from(metadata.nlink()).unwrap_or(u32::MAX),
+            owner_allowed: true,
+        };
+        repair_plan(found).map_err(|why| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: {why}", path.display()),
+            )
+        })?;
+        let mut bytes = Vec::new();
+        file.take(cap.saturating_add(1)).read_to_end(&mut bytes)?;
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is larger than {cap} bytes", path.display()),
+            ));
+        }
+        Ok(Some(bytes))
+    }
+}
+
 /// How long [`lock_exclusive`] waits for another holder.
 pub(crate) const LOCK_WAIT: Duration = Duration::from_secs(10);
 /// How often a waiting lock tries again.

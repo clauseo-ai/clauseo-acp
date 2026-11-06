@@ -8,6 +8,7 @@ use super::*;
 fn step_of(call: &str) -> Step {
     match call.split(' ').next().unwrap() {
         "read_record" => Step::ReadRecord,
+        "registered_matters" => Step::Matters,
         "seclogon" => Step::SecondaryLogon,
         "logon_right" => Step::LogonRight,
         "group" | "create_group" => Step::Group,
@@ -29,7 +30,7 @@ fn failing_at(test: &str, call: &str) -> (SetupFailure, FakeMachine, FakeAcl, St
     machine.fail(call);
     let before = machine.state.clone();
     let mut acl = FakeAcl::default();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     (failure, machine, acl, before)
 }
@@ -186,7 +187,7 @@ fn a_failed_shared_write_fails_the_set_up_and_keeps_the_deny() {
         ..FakeAcl::default()
     };
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::SharedWrites);
     let device_sync = machine.device_sync();
@@ -225,7 +226,7 @@ fn a_user_the_rollback_cannot_delete_stays_recorded() {
     machine.fail("write_marker");
     machine.fail("delete_user ClauseoSb03");
     let mut acl = FakeAcl::default();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Marker);
     assert!(!failure.rolled_back);
@@ -247,7 +248,7 @@ fn a_failed_re_run_keeps_every_account_that_was_there() {
     set_up_fresh(&mut machine, &mut acl);
     let record = machine.state.record.clone();
     machine.fail("write_marker");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Marker);
     assert!(failure.rolled_back);

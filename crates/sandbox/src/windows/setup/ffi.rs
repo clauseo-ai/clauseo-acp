@@ -1,7 +1,10 @@
 //! What the set-up's Windows calls share (S15 `PR4f`): a failed call as a [`MachineError`],
 //! NUL-terminated UTF-16, a token's user as a [`Sid`], the `HKLM` reads of `ProfileList`, and
-//! the `ProgramData` known folder (`PR4h`).
-#![expect(unsafe_code, reason = "FFI to RegGetValueW and SHGetKnownFolderPath")]
+//! the `ProgramData` known folder and the setup exe's DLL search (`PR4h`).
+#![expect(
+    unsafe_code,
+    reason = "FFI to RegGetValueW, SHGetKnownFolderPath and SetDefaultDllDirectories"
+)]
 
 use std::ffi::{OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
@@ -11,6 +14,9 @@ use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HANDLE, WIN32_ERROR,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::System::LibraryLoader::{
+    LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+};
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
     RegGetValueW,
@@ -178,4 +184,13 @@ pub(super) fn program_data() -> Result<PathBuf, MachineError> {
         ));
     }
     Ok(PathBuf::from(OsString::from_wide(units)))
+}
+
+/// Keeps every later DLL load of this process to System32 (`SetDefaultDllDirectories`), so a
+/// DLL planted beside the setup exe, in a folder a standard user may write, never loads into the
+/// elevated process. Static imports are kept there by the link flag `/DEPENDENTLOADFLAG:0x800`.
+pub(super) fn restrict_dll_search() -> Result<(), MachineError> {
+    // SAFETY: a flags-only call with no pointers.
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) }
+        .map_err(|error| os("SetDefaultDllDirectories", &error))
 }

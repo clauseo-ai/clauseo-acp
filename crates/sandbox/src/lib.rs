@@ -188,6 +188,6 @@ pub use proxy::{
     Allowlist, Exchange, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route, Upstream,
     Verdict, builtin_allowlist, start_proxy, upstream_for,
 };
-pub use setup::{SandboxSetup, SetAside, SetupError, SetupState};
+pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]
 pub use windows::UserSetup;

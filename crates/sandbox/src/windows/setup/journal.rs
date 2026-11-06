@@ -17,6 +17,7 @@ use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::{
     CREATE_USN_JOURNAL_DATA, FSCTL_CREATE_USN_JOURNAL, FSCTL_QUERY_USN_JOURNAL, USN_JOURNAL_DATA_V0,
 };
+use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows::core::PCWSTR;
 
 use super::ffi::{PROFILE_LIST, os, reg_string, wide};
@@ -28,15 +29,13 @@ use crate::windows::clean_close::{Journal as _, NtfsJournal};
 /// `MAX_PATH` and its NUL.
 const MAX_PATH_WIDE: usize = 261;
 
-/// The volumes whose journal set-up enlarges (D-B12): those holding any of `roots`,
-/// `%SystemDrive%` and the profiles' folder, kept only when NTFS and fixed
-/// ([`select_volumes`]). A root whose volume can't be read is passed over.
+/// The volumes whose journal set-up enlarges (D-B12): those holding any of `roots`, the
+/// Windows folder (`GetSystemWindowsDirectoryW`, never the `SystemDrive` variable, which the
+/// process that started the set-up could set) and the profiles' folder, kept only when NTFS
+/// and fixed ([`select_volumes`]). A root whose volume can't be read is passed over.
 pub fn journal_volumes(roots: &[&Path]) -> Result<Vec<PathBuf>, MachineError> {
     let mut paths: Vec<PathBuf> = roots.iter().map(|root| root.to_path_buf()).collect();
-    let drive = std::env::var_os("SystemDrive").unwrap_or_else(|| OsString::from("C:"));
-    let mut system = drive;
-    system.push(r"\");
-    paths.push(PathBuf::from(system));
+    paths.push(windows_folder()?);
     if let Some(profiles) = reg_string(PROFILE_LIST, "ProfilesDirectory")? {
         paths.push(PathBuf::from(profiles));
     }
@@ -139,6 +138,25 @@ fn volume_root(path: &Path) -> Option<PathBuf> {
     let end = root.iter().position(|&unit| unit == 0)?;
     root.truncate(end);
     Some(PathBuf::from(OsString::from_wide(&root)))
+}
+
+/// The Windows folder (`C:\Windows`), as Windows reports it.
+fn windows_folder() -> Result<PathBuf, MachineError> {
+    let mut buffer = vec![0u16; MAX_PATH_WIDE];
+    // SAFETY: `buffer` is writable for its length, which the call is given with it.
+    let written = unsafe { GetSystemWindowsDirectoryW(Some(&mut buffer)) };
+    let written = usize::try_from(written).unwrap_or(usize::MAX);
+    if written == 0 || written >= buffer.len() {
+        return Err(MachineError::Os {
+            call: "GetSystemWindowsDirectoryW",
+            code: std::io::Error::last_os_error()
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok())
+                .unwrap_or(u32::MAX),
+        });
+    }
+    buffer.truncate(written);
+    Ok(PathBuf::from(OsString::from_wide(&buffer)))
 }
 
 /// Opens the volume whose root is `volume` for `access`, by its volume GUID path

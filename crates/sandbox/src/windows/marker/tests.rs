@@ -220,7 +220,8 @@ fn show(state: &SetupState) -> String {
         | SetupState::Needed
         | SetupState::Refused
         | SetupState::Outdated { .. }
-        | SetupState::SetUpByOtherUser => format!("{state:?}"),
+        | SetupState::SetUpByOtherUser
+        | SetupState::Blocked(_) => format!("{state:?}"),
     }
 }
 

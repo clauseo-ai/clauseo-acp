@@ -19,7 +19,8 @@
 //! 7. the shared-write denies over `DeviceSync` and every pool user's `LocalLow`; any failed
 //!    target is a failure, and what was written stays (D12);
 //! 8. when this run made users and matters are registered, every registered matter fenced
-//!    against the grown pool (`fence_registered`);
+//!    against the grown pool (`fence_registered`); the matters are read from the owner's
+//!    `matters.json` and ledger right after step 1, under the lock, as the owner;
 //! 9. the change journal of each chosen volume enlarged (D-B12); a failure here is listed and
 //!    never fails the set-up, since it only costs full walks;
 //! 10. `secrets.bin`, protected as the owner;
@@ -38,7 +39,6 @@
 
 use std::path::PathBuf;
 
-use crate::windows::fence::RegisteredMatter;
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
@@ -62,6 +62,7 @@ mod ffi;
 #[cfg(windows)]
 pub mod journal;
 pub mod journal_plan;
+mod late_steps;
 #[cfg(windows)]
 mod lock;
 #[cfg(test)]
@@ -115,10 +116,10 @@ pub struct SetupRequest {
     pub owner: Sid,
     /// The owner's data folder, which holds `sandbox\`.
     pub data_dir: PathBuf,
-    /// 0 for a set-up or re-run; above 0, an extend by that many users.
+    /// 0 for a set-up or re-run; above 0, an extend by that many users. The registered matters
+    /// step 8 fences are read from the owner's files once the lock is held
+    /// (`Machine::registered_matters`), never taken from the caller.
     pub add: u8,
-    /// Every registered matter with its pool user, for step 8's fence.
-    pub matters: Vec<RegisteredMatter>,
 }
 
 /// Runs the set-up as the module says, under the machine-wide lock, which a guard gives back

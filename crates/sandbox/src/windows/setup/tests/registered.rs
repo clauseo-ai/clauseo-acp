@@ -20,7 +20,7 @@ fn each_matter_holding_a_pool_user_comes_back_with_the_folders_its_ledger_names(
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     let matters = two_matters(&machine);
-    let req = request(&machine, 4, matters.clone());
+    let req = request(&mut machine, 4, matters.clone());
     set_up(&mut machine, &mut acl, &req).unwrap();
     let record = machine.state.record.clone().unwrap();
     let mut trusted = record.pool.clone();

@@ -22,12 +22,18 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
         .collect();
     let matters = two_matters(&machine);
     let from = machine.calls.len();
-    let req = request(&machine, 4, matters.clone());
+    let req = request(&mut machine, 4, matters.clone());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
 
-    let mut expected: Vec<String> = ["lock", "read_record", "seclogon", "logon_right"]
-        .map(str::to_owned)
-        .into();
+    let mut expected: Vec<String> = [
+        "lock",
+        "read_record",
+        "registered_matters",
+        "seclogon",
+        "logon_right",
+    ]
+    .map(str::to_owned)
+    .into();
     expected.extend((1001..=1004).map(|r| format!("account_name {r}")));
     expected.push("group".to_owned());
     expected.extend((1001..=1004).map(|r| format!("profile_of {r}")));
@@ -110,12 +116,18 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
     machine.state.marker = None;
     let record = machine.state.record.clone();
     let from = machine.calls.len();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
 
-    let mut expected: Vec<String> = ["lock", "read_record", "seclogon", "logon_right"]
-        .map(str::to_owned)
-        .into();
+    let mut expected: Vec<String> = [
+        "lock",
+        "read_record",
+        "registered_matters",
+        "seclogon",
+        "logon_right",
+    ]
+    .map(str::to_owned)
+    .into();
     expected.extend((1001..=1004).map(|r| format!("account_name {r}")));
     expected.extend(["sessions_open", "group"].map(str::to_owned));
     for n in 1..=4 {
@@ -156,7 +168,7 @@ fn a_re_run_refuses_while_a_session_is_open() {
     set_up_fresh(&mut machine, &mut acl);
     machine.sessions_open = true;
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!((failure.step, failure.rolled_back), (Step::Sessions, true));
     assert_eq!(machine.calls.last().map(String::as_str), Some("unlock"));
@@ -170,7 +182,7 @@ fn a_re_run_makes_a_deleted_account_again_under_a_new_sid() {
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     machine.state.accounts.remove("ClauseoSb02");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.made.len(), 1);
     assert_eq!(report.made[0].name, "ClauseoSb02");
@@ -188,11 +200,11 @@ fn a_dead_sid_the_ledger_names_stays_recorded_and_is_made_again_once() {
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     let matters = two_matters(&machine);
-    let req = request(&machine, 4, matters.clone());
+    let req = request(&mut machine, 4, matters.clone());
     set_up(&mut machine, &mut acl, &req).unwrap();
     // The fence's ledger entries name every pool user; one account is then deleted by hand.
     machine.state.accounts.remove("ClauseoSb06");
-    let req = request(&machine, 0, matters.clone());
+    let req = request(&mut machine, 0, matters.clone());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.kept_dead, [sid(1006)]);
     assert_eq!(report.dropped, []);
@@ -236,12 +248,12 @@ fn a_dead_sid_the_ledger_names_stays_recorded_and_is_made_again_once() {
 fn an_extend_at_the_cap_refuses_before_any_change() {
     let mut machine = FakeMachine::new("setup-cap");
     let mut acl = FakeAcl::default();
-    let req = request(&machine, 32, Vec::new());
+    let req = request(&mut machine, 32, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.pool.len(), 32);
     assert_eq!(report.pool[31].name, "ClauseoSb32");
     let before = machine.state.clone();
-    let req = request(&machine, 4, Vec::new());
+    let req = request(&mut machine, 4, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!((failure.step, failure.rolled_back), (Step::Pool, true));
     assert!(failure.cause.contains("32"), "{}", failure.cause);

@@ -11,10 +11,14 @@
     reason = "FFI to the file and security calls on the sandbox folder"
 )]
 
-use std::io;
+use std::ffi::OsString;
+use std::fs::File;
+use std::io::{self, Read as _};
 use std::iter::once;
-use std::os::windows::ffi::OsStrExt as _;
-use std::path::Path;
+use std::mem::ManuallyDrop;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::windows::io::FromRawHandle as _;
+use std::path::{Component, Path, PathBuf};
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
@@ -32,8 +36,10 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle,
+    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
 
@@ -114,12 +120,16 @@ pub(crate) fn protect(path: &Path) -> io::Result<()> {
 /// or refused naming the owner; then given [`file_sddl`]'s protected DACL, the folder's three
 /// entries written explicitly.
 pub(crate) fn check_file(path: &Path) -> io::Result<()> {
+    match Handle::open_with(path, 0) {
+        Ok(handle) => secure_file(path, handle).map(drop),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(named(path, "can't be opened to check", &error)),
+    }
+}
+
+/// [`check_file`]'s checks and DACL through `handle`, which it gives back.
+fn secure_file(path: &Path, handle: Handle) -> io::Result<Handle> {
     let user = current_user_sid()?;
-    let handle = match Handle::open(path) {
-        Ok(handle) => handle,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(named(path, "can't be opened to check", &error)),
-    };
     let handle = repair(path, handle, &user, false)?;
     let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
     let dacl = descriptor.dacl()?;
@@ -129,7 +139,79 @@ pub(crate) fn check_file(path: &Path) -> io::Result<()> {
             None,
             Some(dacl),
         )
-        .map_err(|error| named(path, "its DACL can't be set", &error))
+        .map_err(|error| named(path, "its DACL can't be set", &error))?;
+    Ok(handle)
+}
+
+/// Reads the record file `path` through the one handle [`check_file`]'s checks go through,
+/// opened for reading too, so what is read is the file checked; no second open by path.
+/// `None` when it is missing; refused when it holds more than `cap` bytes.
+pub(crate) fn read_checked_file(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    let handle = match Handle::open_with(path, FILE_READ_DATA.0 | SYNCHRONIZE.0) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(named(path, "can't be opened to read", &error)),
+    };
+    let mut bytes = Vec::new();
+    secure_file(path, handle)?
+        .into_file()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
+/// The folder `path` (a full local path, `args.rs`'s form) resolved one component at a time,
+/// each opened without following a link and refused if it is one (a junction, a symbolic link
+/// or any other reparse point), the last refused unless a folder: its canonical form
+/// (`GetFinalPathNameByHandleW`, `\\?\` dropped) and its owner. The caller acts as the
+/// user who asked, so a folder that user can't open is refused too.
+pub(crate) fn resolve_folder(path: &Path) -> io::Result<(PathBuf, Sid)> {
+    let mut walked = PathBuf::new();
+    let mut last = None;
+    for component in path.components() {
+        walked.push(component);
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        if matches!(component, Component::CurDir | Component::ParentDir) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} has a . or .. part", path.display()),
+            ));
+        }
+        let handle = Handle::open_for(&walked, FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+            .map_err(|error| named(&walked, "can't be opened", &error))?;
+        let info = handle
+            .information()
+            .map_err(|error| named(&walked, "can't be read", &error))?;
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is a junction or a link", walked.display()),
+            ));
+        }
+        if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is not a folder", walked.display()),
+            ));
+        }
+        last = Some(handle);
+    }
+    let handle = last.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} names no folder", path.display()),
+        )
+    })?;
+    let owner = handle.owner()?;
+    Ok((handle.final_path()?, owner))
 }
 
 #[cfg(test)]
@@ -218,7 +300,12 @@ impl Handle {
     /// WRITE_OWNER`). When `WRITE_OWNER` is refused it opens without it, and a re-own then fails
     /// naming the owner.
     fn open(path: &Path) -> io::Result<Handle> {
-        let base = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0;
+        Handle::open_with(path, 0)
+    }
+
+    /// [`Handle::open`], asking for `extra` access too (reading the file, for one).
+    fn open_with(path: &Path, extra: u32) -> io::Result<Handle> {
+        let base = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0 | extra;
         match Handle::open_for(path, base | WRITE_OWNER.0) {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
                 Handle::open_for(path, base)
@@ -245,6 +332,38 @@ impl Handle {
         }
         .map(Handle)
         .map_err(|error| os_error(&error))
+    }
+
+    /// The file it names, read and closed through `File` from here.
+    fn into_file(self) -> File {
+        let handle = ManuallyDrop::new(self).0;
+        // SAFETY: `handle` is open and owned by this `Handle` alone, whose drop is skipped, so
+        // the `File` takes it over and closes it once.
+        unsafe { File::from_raw_handle(handle.0) }
+    }
+
+    /// Its full path as Windows resolves it, without the `\\?\` prefix when it is a drive path.
+    fn final_path(&self) -> io::Result<PathBuf> {
+        let mut buffer = vec![0u16; 512];
+        loop {
+            // SAFETY: the handle is open and `buffer` is writable for its length.
+            let length = unsafe {
+                GetFinalPathNameByHandleW(
+                    self.0,
+                    &mut buffer,
+                    GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0),
+                )
+            };
+            match usize::try_from(length).unwrap_or(0) {
+                0 => return Err(io::Error::last_os_error()),
+                n if n < buffer.len() => {
+                    buffer.truncate(n);
+                    let path = PathBuf::from(OsString::from_wide(&buffer));
+                    return Ok(dunce::simplified(&path).to_path_buf());
+                }
+                n => buffer.resize(n + 1, 0),
+            }
+        }
     }
 
     /// Its attributes and link count.

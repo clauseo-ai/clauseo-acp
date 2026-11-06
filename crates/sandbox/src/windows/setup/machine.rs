@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 use crate::windows::apply::Surroundings;
+use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
@@ -140,6 +141,14 @@ pub trait Machine {
     /// Whether any matter of the owner's has an open session (the set-aside record's
     /// open-sessions sets).
     fn sessions_open(&mut self) -> Result<bool, MachineError>;
+    /// The owner's registered matters for step 8: each matter `matters.json` lists as holding
+    /// a pool user, with the folders its ledger entries name (`registered.rs`), the ledger
+    /// trusting `trusted`. The engine calls it as the owner, once the lock is held. A missing
+    /// `matters.json` is no matters; one that can't be read is the error.
+    fn registered_matters(
+        &mut self,
+        trusted: &[Sid],
+    ) -> Result<Vec<RegisteredMatter>, MachineError>;
     /// The owner's ledger, `<data_dir>\sandbox\acl-ledger.json`, opened trusting `trusted` (the
     /// pool users and the group) against this machine's reserved accounts.
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger>;

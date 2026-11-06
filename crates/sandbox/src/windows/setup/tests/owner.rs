@@ -46,7 +46,7 @@ fn an_extend_fences_the_matters_as_the_owner_and_the_shared_folders_as_itself() 
     set_up_fresh(&mut machine, &mut acl);
     let matters = two_matters(&machine);
     acl.adds.clear();
-    let req = request(&machine, 4, matters.clone());
+    let req = request(&mut machine, 4, matters.clone());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     all_as_owner(&machine);
     assert!(report.fenced.unwrap().written > 0);
@@ -71,7 +71,7 @@ fn a_re_run_reads_the_marker_the_ledger_and_the_sessions_as_the_owner() {
     let mut acl = FakeAcl::of(&machine);
     set_up_fresh(&mut machine, &mut acl);
     machine.state.accounts.remove("ClauseoSb02");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.made.len(), 1);
     for call in ["read_marker", "ledger", "sessions_open"] {
@@ -86,7 +86,7 @@ fn a_rolled_back_re_run_writes_secrets_back_as_the_owner() {
     let mut acl = FakeAcl::of(&machine);
     set_up_fresh(&mut machine, &mut acl);
     machine.fail("write_marker");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Marker);
     let protects = machine
@@ -101,7 +101,7 @@ fn a_rolled_back_re_run_writes_secrets_back_as_the_owner() {
 #[test]
 fn a_request_for_another_user_is_refused_before_the_lock() {
     let mut machine = FakeMachine::new("setup-owner-other");
-    let mut req = request(&machine, 0, Vec::new());
+    let mut req = request(&mut machine, 0, Vec::new());
     req.owner = Sid::parse(OTHER_OWNER).unwrap();
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Owner);
@@ -114,7 +114,7 @@ fn a_request_for_another_user_is_refused_before_the_lock() {
     // The machine's owner decides, whatever the request says: a machine acting for the other
     // user refuses the request for the owner.
     machine.owner = Sid::parse(OTHER_OWNER).unwrap();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Owner);
     assert_eq!(machine.calls, Vec::<String>::new());
@@ -122,19 +122,22 @@ fn a_request_for_another_user_is_refused_before_the_lock() {
 
 #[test]
 fn an_owner_that_cant_be_impersonated_fails_the_set_up_and_rolls_it_back() {
+    // Refused from the first read of the owner's files: nothing is made.
     let mut machine = FakeMachine::new("setup-owner-refused");
     machine.refuse_owner = true;
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert_eq!(failure.step, Step::Matters);
+    assert!(failure.cause.contains("impersonating"), "{}", failure.cause);
+    assert!(!machine.calls.iter().any(|c| c.starts_with("create")));
+
+    // Refused only later, at secrets.bin: what this run made is rolled back.
+    let mut machine = FakeMachine::new("setup-owner-refused-late");
+    machine.fail("protect_for_owner 1001,1002,1003,1004");
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Secrets);
-    assert!(failure.cause.contains("impersonating"), "{}", failure.cause);
     assert!(failure.rolled_back, "{}", failure.cause);
-    assert!(
-        !machine
-            .calls
-            .iter()
-            .any(|c| c.starts_with("protect_for_owner"))
-    );
     assert!(!machine.calls.iter().any(|c| c == "write_marker"));
     let users = machine
         .state
@@ -143,4 +146,45 @@ fn an_owner_that_cant_be_impersonated_fails_the_set_up_and_rolls_it_back() {
         .filter(|n| n.starts_with("ClauseoSb"));
     assert_eq!(users.count(), 0, "every user made is gone again");
     assert_eq!(machine.state.marker, None);
+}
+
+#[test]
+fn the_registered_matters_are_read_as_the_owner_after_the_lock_and_the_record() {
+    let mut machine = FakeMachine::new("setup-owner-matters-order");
+    let mut acl = FakeAcl::of(&machine);
+    set_up_fresh(&mut machine, &mut acl);
+    let matters = two_matters(&machine);
+    let from = machine.calls.len();
+    let req = request(&mut machine, 4, matters);
+    set_up(&mut machine, &mut acl, &req).unwrap();
+    let calls = machine.calls_since(from);
+    let at = |call: &str| calls.iter().position(|c| *c == call).unwrap();
+    assert!(at("lock") < at("read_record"), "{calls:?}");
+    assert!(at("read_record") < at("registered_matters"), "{calls:?}");
+    assert!(at("registered_matters") < at("seclogon"), "{calls:?}");
+    all_as_owner(&machine);
+}
+
+#[test]
+fn an_unreadable_matters_file_fails_closed_at_its_own_step_with_nothing_made() {
+    let mut machine = FakeMachine::new("setup-owner-matters-bad");
+    machine.fail("registered_matters");
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert_eq!(
+        (failure.step, failure.exit),
+        (Step::Matters, SetupExit::Failed)
+    );
+    assert!(
+        failure.cause.contains("registered matters"),
+        "{}",
+        failure.cause
+    );
+    assert!(failure.rolled_back);
+    assert!(
+        !machine.calls.iter().any(|c| c.starts_with("create")),
+        "{:?}",
+        machine.calls
+    );
+    assert_eq!(machine.calls.last().map(String::as_str), Some("unlock"));
 }

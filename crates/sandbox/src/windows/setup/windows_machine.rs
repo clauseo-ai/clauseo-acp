@@ -24,9 +24,11 @@ use super::machine::{
 };
 use super::owner::Owner;
 use super::record_write::{self, RECORD_KEY};
+use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::apply::Surroundings;
+use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
@@ -164,7 +166,7 @@ impl Drop for Acting {
 fn from_setup(error: SetupError) -> MachineError {
     match error {
         SetupError::Failed(why) => MachineError::Other(why),
-        SetupError::Refused => MachineError::Other(error.to_string()),
+        SetupError::Refused | SetupError::Blocked(_) => MachineError::Other(error.to_string()),
     }
 }
 
@@ -296,6 +298,23 @@ impl Machine for WindowsMachine {
                 .and_then(|matters| matters.open_sessions())
                 .map_err(from_setup)?;
             Ok(!open.is_empty())
+        })
+    }
+
+    fn registered_matters(
+        &mut self,
+        trusted: &[Sid],
+    ) -> Result<Vec<RegisteredMatter>, MachineError> {
+        owned(self, |m| {
+            // A missing file is no matters; one that can't be read is the error.
+            let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
+            if matters.is_empty() {
+                return Ok(Vec::new());
+            }
+            let ledger = m
+                .ledger(trusted)
+                .map_err(|error| MachineError::Other(format!("the permission ledger: {error}")))?;
+            Ok(registered(matters.rows(), &ledger))
         })
     }
 

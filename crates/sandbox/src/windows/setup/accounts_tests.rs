@@ -160,6 +160,44 @@ fn the_wired_methods_answer_as_this_user() {
 }
 
 #[test]
+fn as_owner_reverts_after_a_return_an_error_a_nested_call_and_a_panic() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use super::owner::thread_has_token;
+
+    let dir = TempDir::new("windows-machine-as-owner");
+    let mut machine = machine_on(Names::production(), dir.path());
+    assert!(!thread_has_token());
+    // A return: acting as the owner inside, itself after.
+    assert_eq!(machine.as_owner(|_| thread_has_token()), Ok(true));
+    assert!(!thread_has_token());
+    // An error from inside: still reverted.
+    let failed: Result<Result<(), MachineError>, _> =
+        machine.as_owner(|_| Err(MachineError::Other("a step failed".to_owned())));
+    assert!(matches!(failed, Ok(Err(MachineError::Other(_)))));
+    assert!(!thread_has_token());
+    // Nested: the inner call runs as the owner without a second impersonation, and the outer
+    // one still acts as the owner after it returns.
+    let nested = machine.as_owner(|m| {
+        let inner = m.as_owner(|_| thread_has_token());
+        (inner, thread_has_token())
+    });
+    assert_eq!(nested, Ok((Ok(true), true)));
+    assert!(!thread_has_token());
+    // A panic: the guard reverts during the unwind.
+    let unwound = catch_unwind(AssertUnwindSafe(|| {
+        machine.as_owner(|_| panic!("a write failed while acting as the owner"))
+    }));
+    assert!(unwound.is_err());
+    assert!(!thread_has_token(), "reverted during the unwind");
+    assert_eq!(
+        machine.as_owner(|_| thread_has_token()),
+        Ok(true),
+        "usable again"
+    );
+}
+
+#[test]
 #[ignore = "elevated: CI's elevated step runs it (CLAUSEO_ELEVATED_TESTS=1)"]
 fn elevated_accounts_group_hidden_user_and_record() {
     if !elevated_tests_enabled() {
