@@ -248,13 +248,24 @@ fn settle(
     let current = identity.entry(agent, |entry| {
         ticket.is_none_or(|Ticket(generation)| generation == entry.generation)
     });
+    // On macOS Claude may keep its login in the Keychain, which no stamp sees: a no-email
+    // sign-in's window lasts for its first check only, whatever it read or whatever overtook it
+    // (a record this check makes shuts it after).
+    let keychain = identity.keychain_fallback && AgentKind::of(agent) == Some(AgentKind::Claude);
+    if keychain && ticket.is_some() {
+        identity.entry(agent, |entry| {
+            if matches!(entry.window, Window::Open(_)) {
+                entry.window = Window::Broken;
+            }
+        });
+    }
     if !current {
         return identity.verdict(agent);
     }
     if matches!(read, AccountRead::Account(_)) {
         identity.named(agent);
     }
-    let verdict = match judged {
+    match judged {
         Judged::Record(hash) => {
             tracing::info!(%agent, kind = "first", "identity recorded");
             identity.record(agent, Some(hash), now, None)
@@ -269,18 +280,7 @@ fn settle(
             entry.checked_at = Some(now);
             entry.verdict
         }),
-    };
-    // On macOS Claude may keep its login in the Keychain, which no stamp sees: a no-email
-    // sign-in's window lasts for its first check only, whatever it read (a record shut it).
-    let keychain = identity.keychain_fallback && AgentKind::of(agent) == Some(AgentKind::Claude);
-    if keychain && ticket.is_some() {
-        identity.entry(agent, |entry| {
-            if matches!(entry.window, Window::Open(_)) {
-                entry.window = Window::Broken;
-            }
-        });
     }
-    verdict
 }
 
 /// `agent`'s account is not the recorded one: `signin.account_changed` on its launches first,

@@ -11,11 +11,13 @@ use std::time::UNIX_EPOCH;
 use clauseo_agents::{AccountHash, AccountRead, SigninState, Source, sign_in_limit};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode};
 use clauseo_settings::{Effective, Locations, SystemFiles};
+use futures::future::join;
 use serde_json::json;
 
 use super::fakes::command;
 use super::identity::{IdRig, refused, signed_in};
 use super::identity_watch::files::remove;
+use super::identity_watch::until;
 use super::{SETTINGS, claude, codex};
 use crate::bridge::lock;
 use crate::setup::identity::{Verdict, check, expect, gate, on_state, stamps};
@@ -420,5 +422,38 @@ fn on_the_keychain_path_a_no_email_sign_in_s_window_closes_at_its_first_check() 
         Verdict::Unknown,
         "and recorded nothing"
     );
+    assert_eq!(backend.wiring.identity.recorded(&agent), None);
+}
+
+#[test]
+fn on_the_keychain_path_a_first_check_overtaken_still_closes_the_window() {
+    let id = IdRig::with("identity-nameless-keychain-overtaken", |identity| {
+        identity.with_keychain_fallback(true)
+    });
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    id.signs_in(&agent, ONE);
+    assert_eq!(gate(backend, &agent), None, "launched");
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    let by_id = AccountHash::of(ACCOUNT_ID).unwrap();
+    let open = rig.agents.accounts.hold(&agent);
+    rig.agents
+        .accounts
+        .answers(&agent, AccountRead::Account(by_id));
+    // The first check is overtaken: S18 says signed out while its read runs.
+    let overtakes = async {
+        until("the check runs", || {
+            verdict(&id, &agent) == Verdict::Checking
+        })
+        .await;
+        let out = SigninState::SignedOut { found: None };
+        on_state(backend, &agent, &out).await;
+        open.send(()).unwrap();
+    };
+    block_on(join(check(backend, &agent), overtakes));
+    assert_eq!(backend.wiring.identity.recorded(&agent), None);
+    // A later read records nothing: the window closed with that first check.
+    assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);
     assert_eq!(backend.wiring.identity.recorded(&agent), None);
 }
