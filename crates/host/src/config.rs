@@ -491,7 +491,8 @@ impl HostConfig {
     /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
     /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
     /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys (and
-    /// counted as `agent.key_unreadable` past its bound). As
+    /// counted as `agent.key_unreadable` past its bound), and the identity codes
+    /// (`agent.identity_checking`, `agent.identity_unknown`, `signin.account_changed`). As
     /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
     /// is a bug: debug builds assert, and release builds log it and set nothing.
     #[must_use]

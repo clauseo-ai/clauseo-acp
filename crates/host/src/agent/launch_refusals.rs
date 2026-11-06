@@ -8,11 +8,15 @@
 //! - A refusal applies to new launches; a running session ends normally.
 //!   `agent.key_unreadable` once this agent's stored key was tried and its read failed or did
 //!   not answer in time.
-//! - `agent.keys_loading` and `agent.key_unreadable` are waited out: a launch either meets
-//!   waits at most [`KEYS_WAIT`] on the host's clock ([`LaunchRefusals::wait`]) and is woken as
-//!   soon as the refusal is lifted or changed, then the launch checks the refusals again.
-//!   Desktop holds the facts and sends the one in force: a policy refusal is never lifted by
-//!   the keys' load.
+//! - `agent.identity_checking` while desktop confirms which account the agent's login belongs
+//!   to, `agent.identity_unknown` once that check failed or gave no account, and
+//!   `signin.account_changed` once the login belongs to another account than the one signed
+//!   in through Clauseo, so its agents were stopped (decision record 0048, R17).
+//! - `agent.keys_loading`, `agent.key_unreadable` and `agent.identity_checking` are waited out:
+//!   a launch either meets waits at most [`KEYS_WAIT`] on the host's clock
+//!   ([`LaunchRefusals::wait`]) and is woken as soon as the refusal is lifted or changed, then
+//!   the launch checks the refusals again. Desktop holds the facts and sends the one in force:
+//!   a policy refusal is never lifted by the keys' load.
 //! - A launch meeting `agent.key_unreadable` asks desktop to read that key again
 //!   ([`LaunchRefusals::retry_key`], `HostConfig::with_key_retry`) before its wait: a read
 //!   that succeeds lifts the refusal, so the launch, or the next, goes on with the key.
@@ -34,15 +38,21 @@ use crate::error::Error;
 
 /// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
 /// launches.
-pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 3] = [
+pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 6] = [
     ErrorCode::SigninPolicyUnreadable,
     ErrorCode::AgentKeysLoading,
     ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentIdentityChecking,
+    ErrorCode::AgentIdentityUnknown,
+    ErrorCode::SigninAccountChanged,
 ];
 
 /// The refusals a launch waits out, at most [`KEYS_WAIT`], before it fails with them.
-pub(crate) const WAITED_OUT: [ErrorCode; 2] =
-    [ErrorCode::AgentKeysLoading, ErrorCode::AgentKeyUnreadable];
+pub(crate) const WAITED_OUT: [ErrorCode; 3] = [
+    ErrorCode::AgentKeysLoading,
+    ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentIdentityChecking,
+];
 
 /// How long `agent.keys_loading` may stand from the host's start before it counts as
 /// `agent.key_unreadable`: desktop's own 10 s bound on the first load, and a margin, since
@@ -232,6 +242,24 @@ mod tests {
     }
 
     #[test]
+    fn identity_codes_are_taken_and_an_unlisted_code_is_still_command_invalid() {
+        let mut refusals = LaunchRefusals::default();
+        for code in [
+            ErrorCode::AgentIdentityChecking,
+            ErrorCode::AgentIdentityUnknown,
+            ErrorCode::SigninAccountChanged,
+        ] {
+            refusals.set(fake(), Some(code)).unwrap();
+            assert_eq!(refusals.get(&fake()), Some(code));
+        }
+        let error = refusals
+            .set(fake(), Some(ErrorCode::AgentLaunchFailed))
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::CommandInvalid);
+        assert_eq!(refusals.get(&fake()), Some(ErrorCode::SigninAccountChanged));
+    }
+
+    #[test]
     fn keys_loading_counts_as_key_unreadable_past_the_load_bound() {
         let mut refusals = LaunchRefusals::default();
         refusals
@@ -303,6 +331,24 @@ mod tests {
         // Set again to the same code: still waiting.
         refusals
             .set(fake(), Some(ErrorCode::AgentKeysLoading))
+            .unwrap();
+        assert_eq!(poll_once(&mut waiting), Poll::Pending);
+        refusals.set(fake(), None).unwrap();
+        assert_eq!(poll_once(&mut waiting), Poll::Ready(()));
+    }
+
+    #[test]
+    fn a_waiting_launch_wakes_when_the_identity_checking_refusal_lifts_and_not_before() {
+        let mut refusals = LaunchRefusals::default();
+        refusals
+            .set(fake(), Some(ErrorCode::AgentIdentityChecking))
+            .unwrap();
+        let mut waiting: Pin<Box<dyn Future<Output = ()> + Send>> =
+            Box::pin(refusals.wait(&fake(), Box::pin(futures::future::pending())));
+        assert_eq!(poll_once(&mut waiting), Poll::Pending);
+        // Set again to the same code: still waiting.
+        refusals
+            .set(fake(), Some(ErrorCode::AgentIdentityChecking))
             .unwrap();
         assert_eq!(poll_once(&mut waiting), Poll::Pending);
         refusals.set(fake(), None).unwrap();
