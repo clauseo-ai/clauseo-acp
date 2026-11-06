@@ -10,6 +10,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use super::Around;
+use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, Sid, Subjects, plan};
 use crate::windows::admit::{PathKind, admit_with};
 use crate::windows::apply::{apply, forget_matter};
@@ -18,8 +19,9 @@ use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{entries, has};
 use crate::windows::test_dacl::{drop_privileges, protect_with};
+use crate::windows::test_junction::junction;
 use crate::windows::test_world::{
-    FakeFolders, GROUP_SID, OTHER_POOL_SIDS, World, matter_one, reserved,
+    FakeFolders, GROUP_SID, OTHER_POOL_SIDS, USER_SID, World, matter_one, reserved, sids, trusted,
 };
 use crate::windows::{FolderSupport, NtfsAcl};
 
@@ -182,4 +184,52 @@ fn the_pool_user_cant_edit_rename_or_delete_a_nested_claude_md_or_git_config() {
         assert!(!denied_to(path, &me), "{}", path.display());
     }
     agent(Try::Append, &claude, &claude).unwrap();
+}
+
+/// S15 `PR4a2`: a junction named `.claude` in the matter, leading elsewhere in it, refuses the
+/// launch as a protected link, named relative to the matter, and leaves no entry written.
+#[test]
+fn a_junction_named_claude_refuses_the_launch_naming_it() {
+    let w = World::new("apply-ntfs-protected-junction");
+    w.dir.file("matter/settings/settings.json", "{}");
+    w.dir.dir("matter/sub");
+    let matter = w.canonical("matter");
+    junction(
+        &matter.join("sub").join(".claude"),
+        &matter.join("settings"),
+    )
+    .unwrap();
+    let policy = w.builder().build().unwrap();
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let none = FakeFolders::default();
+    let admitted = admit_with(&policy, &w.at("data"), &Neighbours::default(), ok, &none).unwrap();
+    // The pool user's `Modify` on the matter and the read-only denies.
+    let grants = plan(&admitted, &sids(), matter_one())
+        .unwrap()
+        .grants()
+        .iter()
+        .filter(|g| matches!(g.kind(), PathKind::Matter | PathKind::ReadOnlyInMatter))
+        .filter(|g| g.sid().as_str() == USER_SID)
+        .cloned()
+        .collect();
+    let mut plan = AdmittedPlan::from_grants(matter_one(), grants);
+    let data = w.canonical("data");
+    let mut ledger = Ledger::open(ledger_path(&data), &trusted(), &reserved()).unwrap();
+    let error = apply(
+        &mut ledger,
+        &mut plan,
+        &mut NtfsAcl::new().unwrap(),
+        &mut Around,
+    )
+    .unwrap_err();
+    let Error::ProtectedLink { at } = &error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(at, &Path::new("sub").join(".claude"));
+    assert!(
+        error.to_string().starts_with("sub\\.claude is a shortcut"),
+        "{error}"
+    );
+    assert_eq!(ledger.entries().count(), 0);
+    assert!(!has(&matter, USER_SID, false));
 }

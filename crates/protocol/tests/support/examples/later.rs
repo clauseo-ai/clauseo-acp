@@ -56,6 +56,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::MatterDocumentPathTooLong,
             "the document's path is too long for Word",
         ),
+        failed(
+            ErrorCode::MatterProtectedLink,
+            "sub\\AGENTS.md is a shortcut, and Clauseo can't protect a shortcut",
+        ),
     ]
 }
 

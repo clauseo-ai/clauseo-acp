@@ -75,6 +75,7 @@ export type ErrorCode =
   | "agent.keys_loading"
   | "agent.key_unreadable"
   | "matter.document_path_too_long"
+  | "matter.protected_link"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -162,6 +163,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
   "matter.document_path_too_long":
     "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
+  // provisional: the item's path joins it once PR6 carries it as a field
+  "matter.protected_link":
+    "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

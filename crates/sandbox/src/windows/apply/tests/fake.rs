@@ -8,7 +8,7 @@ use clauseo_protocol::MatterId;
 
 use crate::windows::FolderSupport;
 use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
-use crate::windows::admit::{FolderList, ReadDir};
+use crate::windows::admit::{FolderList, PathKind, ReadDir};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::RecordedFile;
 use crate::windows::writer::{
@@ -73,6 +73,8 @@ pub(super) struct FakeAcl {
     pub(super) gone: BTreeSet<PathBuf>,
     /// Files no longer there under any name: an open by their ID finds nothing.
     pub(super) vanished: BTreeSet<PathBuf>,
+    /// A write on this path fails with this failure, as `NtfsAcl` would (S15 `PR4a2`).
+    pub(super) fail_add_with: Option<(PathBuf, ApplyFailure)>,
 }
 
 impl FakeAcl {
@@ -155,6 +157,19 @@ impl AclWriter for FakeAcl {
                 self.fail_add = None;
             }
             return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
+        if let Some((_, failure)) = self
+            .fail_add_with
+            .as_ref()
+            .filter(|(p, _)| p == grant.path())
+        {
+            return Err(*failure);
+        }
+        // `NtfsAcl`'s rule: a protected name in the matter that is a link on disk.
+        let link =
+            std::fs::symlink_metadata(grant.path()).is_ok_and(|m| m.file_type().is_symlink());
+        if link && grant.kind() == PathKind::ReadOnlyInMatter {
+            return Err(ApplyFailure::Link);
         }
         let key = self.key_of(grant);
         Ok(if self.aces.insert(key) {

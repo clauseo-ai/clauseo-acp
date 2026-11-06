@@ -17,6 +17,7 @@ use crate::windows::writer::Label;
 
 mod checked;
 mod fake;
+mod protected_link;
 mod review;
 mod round2;
 mod round3;

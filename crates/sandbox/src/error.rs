@@ -82,6 +82,20 @@ pub enum Error {
     /// is refused rather than run with it in place (S15 `PR3d`).
     #[error("the sandbox couldn't remove the record of the matter's last clean close ({0})")]
     CleanClose(io::ErrorKind),
+    /// Windows tier B found a protected name in the matter (a `.git`, `.claude`, `.mcp.json`,
+    /// `CLAUDE.md` or `AGENTS.md` at any depth, or another protected name at the root) that
+    /// is a junction or symbolic link, so no entry can protect it (`windows::apply`, S15
+    /// `PR4a2`). The launch's new entries were rolled back. The lawyer moves or deletes it.
+    #[error(
+        "{} is a shortcut, and Clauseo can't protect a shortcut. Move or delete it, then open \
+         the matter again.",
+        at.display()
+    )]
+    ProtectedLink {
+        /// The item's path relative to the matter (`sub\AGENTS.md`), never an absolute path:
+        /// for PR6 to show the lawyer.
+        at: std::path::PathBuf,
+    },
 }
 
 impl Error {
@@ -99,6 +113,7 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_) => ErrorCode::AgentLaunchFailed,
+            Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
         }

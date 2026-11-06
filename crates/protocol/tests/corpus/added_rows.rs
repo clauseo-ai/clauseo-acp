@@ -408,4 +408,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (368, 0x9d86_9346_283d_6480),
         (270, 0x1931_dad4_d2f0_1e3c),
     ),
+    (
+        "added/turn_failed-MatterProtectedLink",
+        include_bytes!("added/turn_failed-MatterProtectedLink.jsonl"),
+        include_bytes!("added/turn_failed-MatterProtectedLink.msgpack"),
+        (386, 0x133d_7e2e_0e29_6d5e),
+        (287, 0x15f4_b1f6_5587_e5ab),
+    ),
 ];
