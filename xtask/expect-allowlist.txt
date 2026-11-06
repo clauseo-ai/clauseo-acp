@@ -148,6 +148,7 @@ crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
 
+crates/sandbox/examples/run_sandboxed.rs jail::remove_secret clippy::disallowed_methods
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).
 crates/sandbox/src/proxy/upstream/macos.rs - unsafe_code
 crates/sandbox/src/proxy/upstream/windows.rs - unsafe_code
