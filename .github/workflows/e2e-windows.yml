@@ -13,11 +13,14 @@
 #
 # Per event (Rohan's CI decisions, 2026-11-04 and 2026-11-06):
 # - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted):
-#   smoke (windows-2025) when the app changed and the pull request is ready for it, else a quick
-#   skip; not required. Ready means what windows-pr-tests.yml's `decide` job reads: the label
-#   `ready`, an approving review that started the run, or an approval of the head commit on record
-#   (2026-11-06, to save Windows minutes: a draft's pushes no longer start a Windows runner).
-# - merge_group: e2e-changes only; smoke is skipped (2026-11-04).
+#   smoke (windows-2025) when the app changed and the pull request is ready for it. Required on
+#   main again since 2026-11-06 (the orchestrator's decision, B: two app regressions in 24 h, #494
+#   and #544, merged with their own smoke red). Ready means what windows-pr-tests.yml's `decide`
+#   job reads: the label `ready`, an approving review that started the run, or an approval of the
+#   head commit on record (2026-11-06, to save Windows minutes: a draft's pushes no longer start a
+#   Windows runner). Until then the check fails and says so, as windows tests (PR) does.
+# - merge_group: smoke passes in seconds on ubuntu (the pull request's own smoke is the gate); the
+#   merge group runs no Windows e2e (2026-11-04).
 # - push: no trigger. The merge queue already tested the code.
 # - schedule: smoke on x64 (the pull request's LTO-off profile, which saves the Rust cache pull
 #   requests restore) and ARM64 (full LTO).
@@ -35,17 +38,24 @@
 #   the full suite on it; scoreboard.yml plays a full-LTO x64 build nightly and on demand.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 #
-# Relevant runs. Only some events can change the outcome: a merge group, the nightly run, a run on demand, a push to the
-# pull request (opened, synchronize, reopened), the label `ready` being added, or an approval while
-# the label is off (with it on, the labeled or synchronize run already tested the head). Any other
-# label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
-# start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
-# is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
-# e2e-changes says so (`relevant`): smoke then only skips, on ubuntu, under another name
-# (`smoke, no change`). It is not skipped as a job: the newest check run of a name decides it and a
-# skipped one counts as passed, and a skipped job's name shows unevaluated. The expression is
-# repeated in the concurrency group and in e2e-changes' RELEVANT (a workflow env reaches neither);
-# keep the two copies equal.
+# Modes (e2e-changes' `mode` output; smoke acts on it), the design of windows-pr-tests.yml (#512,
+# #556), since a required check is read from the newest run of the workflow:
+# - run: the app changed and the pull request is ready, or a nightly run or a run on demand: the
+#   smoke test on Windows.
+# - noapp: the pull request leaves the app alone: passes in seconds on ubuntu.
+# - wait: the app changed but the pull request is not ready: fails in seconds, naming the label.
+# - covered: another run already passed `smoke (windows-2025)` for this head commit: passes in
+#   seconds, naming it. Nothing is tested twice.
+# - failed: a label or review that cannot change the result, on a commit whose last smoke failed:
+#   fails again in seconds, naming that run.
+# - stale: the pull request's head moved on while this run waited: passes on that old commit,
+#   which no required check reads, and cancels nothing.
+# - merge_group: passes in seconds.
+# No run is cancelled for an event on the same head commit: the concurrency group is the pull
+# request and its head commit, with cancel-in-progress off (#508: GitHub cancels in no set order,
+# and a cancelled newest run leaves a required check "expected"). e2e-changes cancels the pull
+# request's unfinished runs for any head other than the current one (actions: write). smoke is
+# never skipped as a whole (a skipped matrix job reports under the unexpanded name).
 
 name: e2e-windows
 
@@ -60,8 +70,8 @@ name: e2e-windows
 # and a third of its own:
 # - `ready`: on a pull request event, the pull request has the label `ready` or an approval (see
 #   the per-event list above); true on every other event. Without it the smoke steps skip too.
-# A pull request that touches neither, or is not ready, starts smoke and skips every step, so the
-# check reports in seconds. A path no rule knows, or a failed decision, runs everything, so the check always
+# A pull request that leaves the app alone passes in seconds; one that is not ready fails in
+# seconds until it is. A path no rule knows, or a failed decision, runs everything, so the check always
 # reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
 # `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
 # scoreboard-windows is not a required check, so it is skipped as a whole when it has nothing to do.
@@ -84,11 +94,11 @@ on:
 permissions:
   contents: read
 
-# A pull request keeps only its newest run; each nightly run, run on demand and merge group has a
-# group of its own.
+# One group per pull request and head commit, nothing cancelled in it (the note on modes); each
+# nightly run, run on demand and merge group has a group of its own.
 concurrency:
-  group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{ !((github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('-{0}', github.run_id) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_review' }}
+  group: e2e-windows-${{ github.event.pull_request.number && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}-{1}', github.event_name, github.sha) }}
+  cancel-in-progress: false
 
 jobs:
   # Not named changes (ci.yml's required check). The same script decides for both workflows.
@@ -96,15 +106,17 @@ jobs:
     name: e2e-changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # pull-requests: the reviews, for `ready`.
+    # pull-requests: the reviews, for `ready`; actions: write, to cancel runs for an older head.
     permissions:
       contents: read
       pull-requests: read
+      actions: write
     outputs:
       app: ${{ steps.filter.outputs.app }}
       product: ${{ steps.filter.outputs.product }}
       ready: ${{ steps.ready.outputs.ready }}
-      relevant: ${{ steps.relevant.outputs.relevant }}
+      mode: ${{ steps.mode.outputs.mode }}
+      prior: ${{ steps.mode.outputs.prior }}
     steps:
       # The note at the top: a label or review that cannot change the result is not relevant.
       - name: Decide whether this event is relevant
@@ -171,20 +183,86 @@ jobs:
             ready true
           fi
           if grep -qxF "$HEAD_SHA" <<< "$approved"; then ready true; fi
-          echo "No label ready and no approval of the head commit $HEAD_SHA: smoke skips."
+          echo "No label ready and no approval of the head commit $HEAD_SHA: smoke waits for one."
           ready false
 
+      # The note on modes. A failed read of the head cancels nothing; a failed read of this
+      # commit's earlier result decides without it.
+      - name: Decide the mode
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_ID: ${{ github.run_id }}
+          RELEVANT: ${{ steps.relevant.outputs.relevant }}
+          APP: ${{ steps.filter.outputs.app }}
+          READY: ${{ steps.ready.outputs.ready }}
+        run: |
+          set -euo pipefail
+          mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
+          case "$EVENT" in
+            merge_group) mode merge_group ;;
+            pull_request | pull_request_review) ;;
+            *) mode run ;;
+          esac
+
+          if current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) && [ -n "$current" ]; then
+            if [ "$current" != "$HEAD_SHA" ]; then
+              echo "This run is for $HEAD_SHA; the pull request's head is now $current."
+              mode stale
+            fi
+            if older=$(gh api -X GET "repos/$REPO/actions/workflows/e2e-windows.yml/runs" \
+                -f branch="$HEAD_REF" -f per_page=50 \
+                -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
+              for id in $older; do
+                if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
+                  echo "Cancelled run $id, for an older head."
+                else
+                  echo "::warning::Could not cancel run $id, for an older head"
+                fi
+              done
+            else
+              echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+            fi
+          else
+            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+          fi
+
+          # The newest finished smoke (windows-2025) of another run for this head commit. A rerun
+          # of this run does not count, so it tests again.
+          if ! prior=$(gh api -X GET "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+              -f check_name="smoke (windows-2025)" -f filter=all -f per_page=100 \
+              -q "[.check_runs[] | select(.status == \"completed\" and (.details_url | contains(\"/runs/$RUN_ID/\") | not))]
+                  | sort_by(.completed_at) | last // empty | \"\(.conclusion) \(.details_url)\""); then
+            echo "::warning::The check runs API failed; deciding without this commit's earlier result"
+            prior=""
+          fi
+          if [ -n "$prior" ]; then
+            echo "This commit's last smoke: $prior"
+            echo "prior=${prior#* }" >> "$GITHUB_OUTPUT"
+          fi
+          case "$prior" in
+            "success "*) mode covered ;;
+            "failure "* | "timed_out "* | "cancelled "*)
+              if [ "$RELEVANT" != true ]; then mode failed; fi
+              ;;
+          esac
+          if [ "$APP" != true ]; then mode noapp; fi
+          if [ "$READY" != true ]; then mode wait; fi
+          mode run
+
   smoke:
-    name: ${{ needs.e2e-changes.outputs.relevant == 'false' && 'smoke, no change' || format('smoke ({0})', matrix.runner) }}
+    name: smoke (${{ matrix.runner }})
     needs: e2e-changes
-    # Not in a merge group (2026-11-04): smoke left the merge-group requirement for main's nightly
-    # run, to cut the time from approval to merge; it still runs on pull requests that change the
-    # app, nightly and on demand, and a red one on main goes to its owner.
-    # In a run that is not relevant it only skips, on ubuntu (the note at the top).
-    if: ${{ !cancelled() && github.event_name != 'merge_group' }}
-    # A pull request that leaves the app alone or is not ready only skips, on an ubuntu runner,
-    # which starts faster than a Windows one. A failed e2e-changes runs everything on Windows.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review' || github.event_name == 'merge_group') && needs.e2e-changes.result == 'success' && (needs.e2e-changes.outputs.relevant == 'false' || needs.e2e-changes.outputs.app != 'true' || needs.e2e-changes.outputs.ready == 'false') && 'ubuntu-24.04' || matrix.runner }}
+    # Every mode but run passes or fails in seconds on an ubuntu runner, which starts faster than a
+    # Windows one (the note on modes); in a merge group it passes there. A failed e2e-changes runs
+    # everything on Windows. Never skipped as a whole: the check must report under its name.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.mode != 'run' && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -199,7 +277,7 @@ jobs:
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
       # A failed decision runs everything, so the check always reports.
-      RUN: ${{ needs.e2e-changes.result != 'success' || (needs.e2e-changes.outputs.relevant != 'false' && needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.ready != 'false') }}
+      RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.mode == 'run' }}
       TARGET: ${{ matrix.target }}
       # LTO off and 16 codegen units on a pull request, a merge group and the nightly run (x64), so
       # the nightly run saves the Rust cache under the key pull requests look up (rust-cache hashes
@@ -217,19 +295,25 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, the app is unchanged or the pull request is not ready
+      - name: Not run here (the mode says why)
         if: env.RUN != 'true'
         env:
-          APP: ${{ needs.e2e-changes.outputs.app }}
-          RELEVANT: ${{ needs.e2e-changes.outputs.relevant }}
+          MODE: ${{ needs.e2e-changes.outputs.mode }}
+          PRIOR: ${{ needs.e2e-changes.outputs.prior }}
         run: |
-          if [ "$RELEVANT" = false ]; then
-            echo "A label or review that cannot change the result; smoke keeps this pull request's last result."
-          elif [ "$APP" != true ]; then
-            echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test."
-          else
-            echo "The pull request has neither the label ready nor an approval of its head; smoke runs once it has one."
-          fi
+          case "$MODE" in
+            merge_group) echo "A merge group: the pull request's own smoke (windows-2025) is the gate." ;;
+            noapp) echo "No change to the app's crates, fake_agent, ui/, the Rust config or CI; nothing to smoke-test." ;;
+            covered) echo "smoke (windows-2025) already passed for this commit in $PRIOR" ;;
+            stale) echo "The pull request's head moved on while this run waited; its own runs decide the check." ;;
+            failed)
+              echo "::error title=smoke (windows-2025) failed for this commit::Its last smoke failed: $PRIOR. A label other than ready, or a review that does not approve, does not run it again: add the label ready, push a fix, or re-run that job."
+              exit 1 ;;
+            wait)
+              echo "::error title=smoke (windows-2025) waits for the label ready::The app changed; smoke runs once the pull request has the label ready (gh pr edit <n> --add-label ready) or an approval of its head."
+              exit 1 ;;
+            *) echo "::error::Unknown mode '$MODE'"; exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN == 'true'
