@@ -92,9 +92,10 @@ export const reasonOf = (t: KnownTool): ToolsLineKey | null =>
 export const toolName = (t: KnownTool): ToolsLineKey =>
   t.tool === "web_search" ? "Web search" : "Browser";
 
-/** A reason inside a sentence: its first letter in lower case, unless the first two letters are both capitals. */
-const midSentence = (s: string) =>
-  /^\p{Lu}\p{Ll}/u.test(s) ? s.charAt(0).toLocaleLowerCase("en") + s.slice(1) : s;
+/** A reason inside an English sentence: its first letter in lower case, unless the first two letters are both
+ * capitals. Hindi has no case, and its reasons may start with a brand name (Chrome), so they stay as they are. */
+const midSentence = (lang: Lang, s: string) =>
+  lang === "en" && /^\p{Lu}\p{Ll}/u.test(s) ? s.charAt(0).toLocaleLowerCase("en") + s.slice(1) : s;
 
 /** The tool line's accessible name and tooltip: one sentence per tool, "Web search: on. Browser: off, needs
  * Chrome."; null with no tools to speak for. Off in Settings: "Web search: off, in Settings." */
@@ -106,7 +107,9 @@ export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | nu
       const state =
         reason === null
           ? toolsLine(lang, "on")
-          : toolsLine(lang, "off, {reason}", { reason: midSentence(toolsLine(lang, reason)) });
+          : toolsLine(lang, "off, {reason}", {
+              reason: midSentence(lang, toolsLine(lang, reason)),
+            });
       return toolsLine(lang, "{tool}: {state}.", { tool: toolsLine(lang, toolName(t)), state });
     })
     .join(" ");

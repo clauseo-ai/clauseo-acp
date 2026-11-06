@@ -4,16 +4,16 @@ import type { Hindi } from "./words-core.ts";
 
 export const HI = {
   // UD2-12, UD2-13: the conversation's title, and its question as the thread shows it
-  "First read": null, // hi: later
-  "Clauseo's first read": null, // hi: later
+  "First read": "प्रारंभिक अध्ययन",
+  "Clauseo's first read": "Clauseo का प्रारंभिक अध्ययन",
   // UD2-14 to UD2-17: while it reads
-  "Reading {n} files.": null, // hi: later
-  "Reading {n} files. Now {title}.": null, // hi: later
-  "Reading 1 file.": null, // hi: later
-  "Reading 1 file. Now {title}.": null, // hi: later
+  "Reading {n} files.": "{n} फ़ाइलें पढ़ी जा रही हैं।",
+  "Reading {n} files. Now {title}.": "{n} फ़ाइलें पढ़ी जा रही हैं। अभी {title}।",
+  "Reading 1 file.": "1 फ़ाइल पढ़ी जा रही है।",
+  "Reading 1 file. Now {title}.": "1 फ़ाइल पढ़ी जा रही है। अभी {title}।",
   // UD2-18, UD2-19: read
-  "Read {n} files.": null, // hi: later
-  "Read 1 file.": null, // hi: later
+  "Read {n} files.": "{n} फ़ाइलें पढ़ी गईं।",
+  "Read 1 file.": "1 फ़ाइल पढ़ी गई।",
   // UD2-20: stopped
-  "Clauseo stopped. The answer so far is kept.": null, // hi: later
+  "Clauseo stopped. The answer so far is kept.": "Clauseo रुक गया। अब तक का उत्तर सुरक्षित है।",
 } satisfies Hindi<string>;

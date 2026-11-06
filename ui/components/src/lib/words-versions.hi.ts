@@ -91,12 +91,14 @@ const OWN = {
     "{papers} पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
   "Close '{file}' in Word to restore it.": "पुनर्स्थापित करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में '{file}' बंद करें।",
-  // two or more Word documents, named in one line (hi: later)
-  "Close {files} in Word to undo the change.": null,
-  "Close {files} in Word to restore it.": null,
-  // the second sentence under Word's lines: a Word that has crashed, with the file no longer open in it (hi: later)
-  "If it isn't open in Word, close Word and try again.": null, // hi: later
-  "If they aren't open in Word, close Word and try again.": null, // hi: later
+  // two or more Word documents, named in one line
+  "Close {files} in Word to undo the change.": "बदलाव पूर्ववत करने के लिए Word में {files} बंद करें।",
+  "Close {files} in Word to restore it.": "पुनर्स्थापित करने के लिए Word में {files} बंद करें।",
+  // the second sentence under Word's lines: a Word that has crashed, with the file no longer open in it
+  "If it isn't open in Word, close Word and try again.":
+    "अगर यह Word में खुली नहीं है, तो Word बंद करें और फिर से प्रयास करें।",
+  "If they aren't open in Word, close Word and try again.":
+    "अगर ये Word में खुली नहीं हैं, तो Word बंद करें और फिर से प्रयास करें।",
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",
@@ -233,10 +235,11 @@ const EDGE = {
   "Off since {time} today. Clauseo can reach any file on this computer without asking.":
     "आज {time} बजे से बंद। Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
   "Couldn't be set up on this computer. Clauseo can read any file on it and asks before each change.":
-    null, // hi: later
-  "Clauseo can read any file on this computer and asks before each change.": null, // hi: later
+    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है और हर बदलाव से पहले पूछता है।",
+  "Clauseo can read any file on this computer and asks before each change.":
+    "Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है और हर बदलाव से पहले पूछता है।",
   "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before each change.":
-    null, // hi: later
+    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह हर बदलाव से पहले पूछता है।",
   "Switch off protection": "संरक्षण बंद करें",
   "Switch protection on": "संरक्षण चालू करें",
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":

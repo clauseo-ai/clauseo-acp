@@ -36,8 +36,10 @@ test("an object kind this version does not know gives null, so the row shows its
   expect(noticeLine(null as unknown as NoticeKind, en)).toBeNull();
 });
 
-test("the Hindi line is the English until its Hindi comes (hi: later)", () => {
-  expect(noticeLine("context_not_restored", words("hi"))).toBe(CONTEXT);
+test("the Hindi line is its Hindi", () => {
+  expect(noticeLine("context_not_restored", words("hi"))).toBe(
+    "Clauseo को इस बातचीत के पहले के प्रश्न और उत्तर याद नहीं हैं। उनसे जो ज़रूरी हो, उसे अपने अगले प्रश्न में शामिल करें।",
+  );
 });
 
 test("one paper that came back: its name, and the singular line", () => {
@@ -87,31 +89,40 @@ test("an object kind with no files and no more gives null, so the row shows its 
 const skipped = (reason: string): NoticeKind =>
   ({ skill_pack_not_loaded: { pack: "nda-kit", reason } }) as NoticeKind;
 
-test.each<[PackSkipReason, string]>([
+test.each<[PackSkipReason, string, string]>([
   [
     "not_turned_on",
     "Clauseo didn't load the skill pack 'nda-kit'. This matter is set to use it, but it isn't turned on.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। यह मामला इसे इस्तेमाल करने के लिए सेट है, पर यह चालू नहीं है।",
   ],
   [
     "not_admitted",
     "Clauseo didn't load the skill pack 'nda-kit'. The skill pack settings on this computer don't allow it.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। इस कंप्यूटर की स्किल पैक सेटिंग्स इसकी अनुमति नहीं देतीं।",
   ],
   [
     "changed",
     "Clauseo didn't load the skill pack 'nda-kit'. Its files changed after it was turned on. Turn it on again to use it.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। चालू किए जाने के बाद इसकी फ़ाइलें बदल गईं। इसे इस्तेमाल करने के लिए फिर से चालू करें।",
   ],
   [
     "missing",
     "Clauseo didn't load the skill pack 'nda-kit'. Clauseo couldn't find it on this computer.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। Clauseo को यह इस कंप्यूटर पर नहीं मिला।",
   ],
-  ["invalid", "Clauseo didn't load the skill pack 'nda-kit'. Its files aren't a valid skill pack."],
+  [
+    "invalid",
+    "Clauseo didn't load the skill pack 'nda-kit'. Its files aren't a valid skill pack.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
+  ],
   [
     "too_many",
     "Clauseo didn't load the skill pack 'nda-kit'. Clauseo loads at most 16 skill packs at a time.",
+    "Clauseo ने स्किल पैक 'nda-kit' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
   ],
-])("a skill pack left out for %s gives its line, with the pack named", (reason, line) => {
+])("a skill pack left out for %s gives its line, with the pack named", (reason, line, hi) => {
   expect(noticeLine(skipped(reason), en)).toBe(line);
-  expect(noticeLine(skipped(reason), words("hi"))).toBe(line);
+  expect(noticeLine(skipped(reason), words("hi"))).toBe(hi);
 });
 
 test("a skill pack left out for a reason this version does not know gives null, so the row shows its text", () => {

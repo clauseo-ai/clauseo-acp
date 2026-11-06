@@ -1,23 +1,15 @@
 // The words tool-line.spec.ts expects are the words the window says: each is a key of words-tools-line.ts or
-// words-tools.ts, the line's name once its slots are filled. Each file's keys are its list's, in the .hi.ts beside it
-// (words-tools-line.hi.ts, words-tools.hi.ts), each English key with its Hindi, null while it is still to come; the
-// words file imports the list's type alone.
+// words-tools.ts, the line's name once its slots are filled. Each file's keys are its list's English, the keys of the
+// HI object in the .hi.ts beside it (words-tools-line.hi.ts, words-tools.hi.ts), read as the module exports them, so
+// the check holds whatever each key's Hindi is and however the list is laid out.
 
-import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { HI as POPOVER_HI } from "../../components/src/lib/words-tools.hi.ts";
+import { HI as LINE_HI } from "../../components/src/lib/words-tools-line.hi.ts";
 import { BROWSER_REASONS, OFF, ON, WEB_ON } from "./tool-line-words.ts";
 
-/** A words file's keys, read from the list in its .hi.ts: each quoted or bare key that opens an entry (`"…":` or
- * `On:`) whose Hindi is still to come. */
-const keysOf = (file: string) =>
-  [
-    ...readFileSync(new URL(`../../components/src/lib/${file}`, import.meta.url), "utf8").matchAll(
-      /^\s*(?:"((?:[^"\\]|\\.)*)"|([A-Za-z]+)):\s*null,/gm,
-    ),
-  ].map((m) => (m[2] ?? JSON.parse(`"${m[1]}"`)) as string);
-
-const line = keysOf("words-tools-line.hi.ts");
-const popover = keysOf("words-tools.hi.ts");
+const line: string[] = Object.keys(LINE_HI);
+const popover: string[] = Object.keys(POPOVER_HI);
 
 test("every line the tool line spec looks for is one the words files have", () => {
   expect(line.length).toBeGreaterThan(5);

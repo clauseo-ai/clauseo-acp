@@ -8,11 +8,17 @@
  *
  * provisional: words that follow DESIGN.md and the word list, added without waiting for Rohan, who reviews them in
  * batches on the running page (scripts/copy-running.mjs). A provisional entry names when it was added (at, a date)
- * and by whom (by: a thread or "app track"); its Hindi may be null without "hi_status". */
+ * and by whom (by: a thread or "app track"); its Hindi may be null without "hi_status".
+ *
+ * Hindi provisional: a Hindi line added before a Hindi-speaking lawyer has read it, on an entry whose English keeps its
+ * own status, at and by: "hi_status": "provisional", with hi_at (a date, YYYY-MM-DD) and hi_by (who added it). It
+ * shows on the running page too. */
 export type Approval = {
   en: string;
   hi: string | null;
-  hi_status?: "later";
+  hi_status?: "later" | "provisional";
+  hi_at?: string;
+  hi_by?: string;
   status: "approved" | "change" | "provisional";
   note?: string;
   at: string;
@@ -105,6 +111,13 @@ const isDate = (v: unknown): boolean =>
   DATE.test(v) &&
   new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
+/** A Hindi line's own status: none (it shares the English's), or provisional with its date and who added it. hi_at and
+ * hi_by go only with "hi_status": "provisional". */
+const hindiOk = (e: Record<string, unknown>): boolean =>
+  e.hi_status === "provisional"
+    ? isDate(e.hi_at) && typeof e.hi_by === "string" && e.hi_by.trim() !== ""
+    : e.hi_status === undefined && e.hi_at === undefined && e.hi_by === undefined;
+
 const isEntry = (a: unknown): boolean => {
   if (typeof a !== "object" || a === null || Array.isArray(a)) return false;
   const e = a as Record<string, unknown>;
@@ -113,20 +126,20 @@ const isEntry = (a: unknown): boolean => {
     (e.note === undefined || typeof e.note === "string") &&
     (e.by === undefined || typeof e.by === "string");
   if (!common) return false;
+  // hi_at and hi_by go with Hindi of its own status only
+  if (typeof e.hi !== "string" && (e.hi_at !== undefined || e.hi_by !== undefined)) return false;
   if (e.status === "provisional")
     return (
-      // Hindi may be null (with or without hi_status: later); hi_status only goes with null Hindi
+      // Hindi may be null (with or without hi_status: later); a Hindi line may be provisional on its own
       (typeof e.hi === "string"
-        ? e.hi_status === undefined
+        ? hindiOk(e)
         : e.hi === null && (e.hi_status === undefined || e.hi_status === "later")) &&
       isDate(e.at) &&
       typeof e.by === "string" &&
       e.by.trim() !== ""
     );
   return (
-    (typeof e.hi === "string"
-      ? e.hi_status === undefined
-      : e.hi === null && e.hi_status === "later") &&
+    (typeof e.hi === "string" ? hindiOk(e) : e.hi === null && e.hi_status === "later") &&
     (e.status === "approved" || e.status === "change") &&
     typeof e.at === "string"
   );
@@ -140,7 +153,8 @@ export function parseApprovals(json: unknown, file = "copy-approvals"): Approval
   for (const [id, a] of Object.entries(json)) {
     if (!isEntry(a))
       throw new Error(
-        `${file}: ${id} needs en, hi (or "hi": null with "hi_status": "later"), status ("approved" or "change") and at; ` +
+        `${file}: ${id} needs en, hi (or "hi": null with "hi_status": "later"; or Hindi with "hi_status": "provisional", ` +
+          `hi_at, a date, and hi_by), status ("approved" or "change") and at; ` +
           `or, with "status": "provisional", en, hi (null allowed), at (a date, YYYY-MM-DD) and by (a thread or "app track")`,
       );
   }

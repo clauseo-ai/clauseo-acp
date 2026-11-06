@@ -10,6 +10,7 @@ export const HI = {
     "Clauseo बिना पूछे इस मामले के फ़ोल्डर से बाहर पहुँच सकता है।",
   // UC: the room's Not protected line by plan; UC-03 is the design's (Said By Its Cause), with its Hindi
   "Clauseo asks before each change in this matter.": "Clauseo इस मामले में हर बदलाव से पहले पूछता है।",
-  // hi: later: new (QC.6's approved English), its Hindi null until it comes
-  "Clauseo can change files in this matter without asking. It asks before going beyond it.": null,
+  // new (QC.6's approved English)
+  "Clauseo can change files in this matter without asking. It asks before going beyond it.":
+    "Clauseo इस मामले में बिना पूछे फ़ाइलें बदल सकता है। इससे बाहर जाने से पहले यह पूछता है।",
 } as const;
