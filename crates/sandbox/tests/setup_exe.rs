@@ -4,6 +4,8 @@
 //! one line. Its PE load configuration keeps static imports to System32
 //! (`DependentLoadFlags` = `LOAD_LIBRARY_SEARCH_SYSTEM32`, `/DEPENDENTLOADFLAG:0x800`).
 
+// Used by the msvc tests and the off-Windows one; windows-gnu builds neither.
+#[cfg(any(not(windows), target_env = "msvc"))]
 const EXE: &str = env!("CARGO_BIN_EXE_clauseo-sandbox-setup");
 
 #[cfg(all(windows, target_env = "msvc"))]
