@@ -1,0 +1,49 @@
+# Throwaway probe for stage C (S15 PR4): are the hosted Windows runners elevated, and can a test
+# create a local account and an HKLM key? The pull request that adds this file is closed unmerged.
+name: tmp-runner-probe
+
+on:
+  pull_request:
+    paths: [".github/workflows/tmp-runner-probe.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - name: whoami
+        shell: cmd
+        run: |
+          whoami
+          whoami /user
+          whoami /groups
+          whoami /priv
+      - name: Elevation, UAC, local account and HKLM
+        shell: pwsh
+        run: |
+          $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $p = [Security.Principal.WindowsPrincipal]::new($id)
+          "user: $($id.Name) sid: $($id.User.Value)"
+          "in Administrators role (elevated token): $($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          "EnableLUA: $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System').EnableLUA)"
+          net localgroup Administrators
+          $name = 'ClauseoSbProbe1'
+          $pw = ConvertTo-SecureString ('Aa1!' + [guid]::NewGuid().ToString('N')) -AsPlainText -Force
+          New-LocalUser -Name $name -Password $pw -AccountNeverExpires -Description 'probe' | Out-Null
+          "created local user: $((Get-LocalUser -Name $name).SID.Value)"
+          Remove-LocalUser -Name $name
+          "deleted local user: $(-not (Get-LocalUser -Name $name -ErrorAction SilentlyContinue))"
+          $k = 'HKLM:\SOFTWARE\ClauseoSbProbe'
+          New-Item -Path $k -Force | Out-Null
+          New-ItemProperty -Path $k -Name probe -Value 1 -PropertyType DWord | Out-Null
+          "HKLM key written: $((Get-ItemProperty $k).probe)"
+          Remove-Item -Path $k -Recurse
+          "HKLM key removed: $(-not (Test-Path $k))"
