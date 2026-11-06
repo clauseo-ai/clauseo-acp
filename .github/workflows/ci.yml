@@ -226,6 +226,16 @@ jobs:
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh
 
+      # fuzz/ has a lock file of its own, which a new dependency of a fuzzed crate leaves stale:
+      # on 2026-11-06 clauseo-settings' plist, nix and unicode-normalization failed the nightly
+      # fuzz run's `cargo fetch --locked`. The same fetch here fails the pull request instead.
+      - name: fuzz/Cargo.lock is up to date
+        run: |
+          if ! cargo fetch --locked --manifest-path fuzz/Cargo.toml; then
+            echo "::error title=fuzz/Cargo.lock is stale::Run cargo fetch --manifest-path fuzz/Cargo.toml and commit fuzz/Cargo.lock."
+            exit 1
+          fi
+
       - name: cargo xtask check
         run: CI=1 cargo xtask check
 
