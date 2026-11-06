@@ -1,5 +1,6 @@
-//! The session's Chrome, which the guard starts itself before agent-browser and which
-//! agent-browser only connects to (`AGENT_BROWSER_CDP`, `env.rs`).
+//! The session's Chrome, which the guard starts itself before agent-browser, at the first tool
+//! call and again after each stop (`session.rs`), and which agent-browser only connects to
+//! (`AGENT_BROWSER_CDP`, `env.rs`).
 //!
 //! agent-browser's own launch cannot use the host's claimed debugging port: it puts
 //! `--remote-debugging-port=0` first and waits for the `DevToolsActivePort` file, which Chrome
@@ -11,8 +12,9 @@
 //! [`START_WAIT`]); and refuses unless the port is exactly the claimed one. The start is two
 //! steps, [`launch`] and [`Chrome::endpoint`], so the reaper knows Chrome before the wait.
 //!
-//! The profile is the run's own, `<cwd>/chrome-profile-<run id>` (`runs.rs`), made fresh and
-//! deleted when the guard drops [`Chrome`]. Its `Default/Preferences` sends Chrome's own
+//! The profile is the run's own, `<cwd>/chrome-profile-<run id>` (`runs.rs`), made at the first
+//! start and kept by every later one, so tabs, cookies and storage outlive an idle stop or a
+//! crash; the guard deletes it when it exits. Its `Default/Preferences` sends Chrome's own
 //! downloads to a staging folder inside it, from which `downloads.rs` moves each finished file
 //! into `<cwd>/downloads`.
 //!
@@ -92,14 +94,13 @@ pub(crate) struct Spec<'a> {
     pub(crate) env: &'a BTreeMap<String, OsString>,
 }
 
-/// The running Chrome. Dropping it kills Chrome's tree, moves the last finished downloads and
-/// deletes the profile.
+/// The running Chrome. Dropping it kills Chrome's tree and moves the last finished downloads;
+/// the profile stays.
 pub(crate) struct Chrome {
     child: Arc<Mutex<Tracked>>,
     /// Unix: also the id of Chrome's process group.
     #[cfg(unix)]
     pid: u32,
-    profile: PathBuf,
     /// Where Chrome downloads to, and where the mover puts each file.
     staging: PathBuf,
     downloads: PathBuf,
@@ -151,16 +152,13 @@ pub(crate) fn launch(
     let profile = spec.profile.to_owned();
     let staging = profile.join(STAGING);
     let downloads = spec.cwd.join("downloads");
-    fresh_profile(&profile, &staging, &downloads)
+    ready_profile(&profile, &staging, &downloads)
         .map_err(|error| format!("cannot make Chrome's profile: {error}"))?;
-    let mut child = spawn(spec, &chrome_args(spec, &profile)).map_err(|error| {
-        remove_profile(&profile);
-        format!("cannot start Chrome: {error}")
-    })?;
+    let mut child = spawn(spec, &chrome_args(spec, &profile))
+        .map_err(|error| format!("cannot start Chrome: {error}"))?;
     #[cfg(windows)]
     job.adopt(&mut child, "Chrome").map_err(|error| {
         drop(child.wait());
-        remove_profile(&profile);
         format!("cannot start Chrome: {error}")
     })?;
     let (seen, inbox) = mpsc::channel();
@@ -174,7 +172,6 @@ pub(crate) fn launch(
             child,
             on_reap: None,
         })),
-        profile,
         staging,
         downloads,
         starting: Some(inbox),
@@ -248,6 +245,31 @@ impl Chrome {
         self.pid
     }
 
+    /// What the run's Chrome record says once Chrome is spawned (`record.rs`): on Unix its group,
+    /// on Windows its pid and creation time, or `starting` (read as alive) when that time cannot
+    /// be read.
+    pub(crate) fn recorded(&self) -> super::record::ChromeState {
+        use super::record::{ChromeProcess, ChromeState};
+        #[cfg(unix)]
+        {
+            ChromeState::Running(ChromeProcess {
+                id: self.pid,
+                created: 0,
+            })
+        }
+        #[cfg(windows)]
+        {
+            let tracked = lock(&self.child);
+            match super::record::windows::created(&tracked.child) {
+                Some(created) => ChromeState::Running(ChromeProcess {
+                    id: tracked.child.id(),
+                    created,
+                }),
+                None => ChromeState::Starting,
+            }
+        }
+    }
+
     /// Calls `on_exit` once if Chrome exits before this value drops.
     pub(crate) fn watch(&mut self, on_exit: impl FnOnce() + Send + 'static) {
         let (stop, stopped) = mpsc::channel::<()>();
@@ -290,7 +312,6 @@ impl Drop for Chrome {
         if let Some(mover) = self.mover.take() {
             mover.finish();
         }
-        remove_profile(&self.profile);
     }
 }
 
@@ -323,8 +344,10 @@ pub(crate) fn remove_profile(profile: &Path) {
     ));
 }
 
-/// Makes `profile` from nothing, with `Default/Preferences` sending downloads to `staging` and
-/// [`quiet::preferences`]'s services off.
+/// Keeps `profile` when an earlier start of this run made it (a real folder, not a link), with
+/// its staging folder, and merges [`quiet::preferences`] into the `Default/Preferences` Chrome
+/// rewrote, so every start of the run gets them; else makes it from nothing, with
+/// `Default/Preferences` sending downloads to `staging` and those services off.
 ///
 /// agent-browser's launch let every download through (`Browser.setDownloadBehavior` `allow`);
 /// connected to the guard's Chrome it sets `default` (`browser.rs:2563-2574`), so Chrome's own
@@ -333,12 +356,35 @@ pub(crate) fn remove_profile(profile: &Path) {
 /// Chrome waives that rule where the page's "insecure content" setting is allow, so the profile
 /// allows it for `http://` pages only: there no content is mixed, so nothing else changes. A
 /// download over `http://` from an `https://` page stays blocked, as in Chrome by default.
-fn fresh_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result<()> {
-    if std::fs::symlink_metadata(profile).is_ok() {
-        write::remove_dir_all(profile)?;
+fn ready_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result<()> {
+    let file = profile.join("Default").join("Preferences");
+    match std::fs::symlink_metadata(profile) {
+        Ok(found) if found.is_dir() => {
+            if !std::fs::symlink_metadata(staging).is_ok_and(|found| found.is_dir()) {
+                drop(write::remove_file(staging));
+                write::create_dir_all(staging)?;
+            }
+            write::create_dir_all(&profile.join("Default"))?;
+            // Chrome's own rewrite, or ours again if it is gone or unreadable.
+            let mut preferences = std::fs::read(&file)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .filter(serde_json::Value::is_object)
+                .unwrap_or_else(|| first_preferences(staging, downloads));
+            merge(&mut preferences, quiet::preferences());
+            return write::write(&file, preferences.to_string());
+        }
+        Ok(_) => write::remove_dir_all(profile).or_else(|_| write::remove_file(profile))?,
+        Err(_) => {}
     }
     write::create_dir_all(&profile.join("Default"))?;
     write::create_dir_all(staging)?;
+    write::write(&file, first_preferences(staging, downloads).to_string())
+}
+
+/// A new profile's `Default/Preferences`: downloads to `staging`, the mixed-content rule above
+/// and [`quiet::preferences`].
+fn first_preferences(staging: &Path, downloads: &Path) -> serde_json::Value {
     let mut preferences = serde_json::json!({
         "download": {
             "default_directory": staging,
@@ -350,15 +396,20 @@ fn fresh_profile(profile: &Path, staging: &Path, downloads: &Path) -> io::Result
             "http://*:*,*": {"setting": 1},
         }}}},
     });
-    if let (Some(own), serde_json::Value::Object(quiet)) =
-        (preferences.as_object_mut(), quiet::preferences())
-    {
-        own.extend(quiet);
+    merge(&mut preferences, quiet::preferences());
+    preferences
+}
+
+/// Puts `from`'s entries into `into`, object by object: what `into` has beside them stays.
+fn merge(into: &mut serde_json::Value, from: serde_json::Value) {
+    match (into, from) {
+        (serde_json::Value::Object(into), serde_json::Value::Object(from)) => {
+            for (key, value) in from {
+                merge(into.entry(key).or_insert(serde_json::Value::Null), value);
+            }
+        }
+        (into, from) => *into = from,
     }
-    write::write(
-        &profile.join("Default").join("Preferences"),
-        preferences.to_string(),
-    )
 }
 
 /// Chrome's arguments, in order.

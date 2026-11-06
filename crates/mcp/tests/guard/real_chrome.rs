@@ -1,7 +1,8 @@
 //! The regression test for S27: the real `clauseo-mcp browser-guard` in front of the real
 //! agent-browser v0.41.1 and a real Chrome. Before the guard started Chrome itself, every
 //! `agent_browser_open` timed out after 30 s (decision record 0029, "Chrome on the claimed
-//! port").
+//! port"). Lazy start with the real binaries is in `real_lazy.rs` (`real_chrome::lazy`), on
+//! these helpers.
 //!
 //! Inputs: `CLAUSEO_TEST_AGENT_BROWSER`, the agent-browser binary (CI's Linux job downloads the
 //! pinned one); `CLAUSEO_TEST_CHROME`, a Chrome, else `/usr/bin/google-chrome` or
@@ -32,9 +33,13 @@ use crate::write;
 
 #[path = "real_chrome/idle.rs"]
 mod idle;
+// Lazy start with the real binaries, under `real_chrome::` so it joins nextest's `real-chrome`
+// test group (`.config/nextest.toml`).
+#[path = "real_lazy.rs"]
+mod lazy;
 
 /// The binaries, or `None` (with a note) when the test cannot run here.
-fn binaries() -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn binaries() -> Option<(PathBuf, PathBuf)> {
     let Some(agent_browser) = std::env::var_os("CLAUSEO_TEST_AGENT_BROWSER") else {
         eprintln!(
             "SKIPPED: set CLAUSEO_TEST_AGENT_BROWSER to agent-browser v0.41.1 (and \
@@ -84,7 +89,11 @@ fn free_port() -> String {
 }
 
 /// The guard as the host starts it, or under `parent_stub`, through the test's proxy.
-fn command(scratch: &Scratch, binaries: &(PathBuf, PathBuf), proxy: &PageProxy) -> Command {
+pub(crate) fn command(
+    scratch: &Scratch,
+    binaries: &(PathBuf, PathBuf),
+    proxy: &PageProxy,
+) -> Command {
     command_with(scratch, binaries, proxy, false).0
 }
 
@@ -130,7 +139,7 @@ fn command_on(
 
 /// Sends a request and returns its result, skipping notifications; fails on an error or a tool
 /// error.
-fn request(guard: &mut Guard, id: u64, method: &str, params: &Value) -> Value {
+pub(crate) fn request(guard: &mut Guard, id: u64, method: &str, params: &Value) -> Value {
     guard.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
     loop {
         let reply = guard.read();
@@ -144,7 +153,7 @@ fn request(guard: &mut Guard, id: u64, method: &str, params: &Value) -> Value {
     }
 }
 
-fn call(guard: &mut Guard, id: u64, tool: &str, arguments: &Value) -> Value {
+pub(crate) fn call(guard: &mut Guard, id: u64, tool: &str, arguments: &Value) -> Value {
     let started = Instant::now();
     let result = request(
         guard,
@@ -157,7 +166,7 @@ fn call(guard: &mut Guard, id: u64, tool: &str, arguments: &Value) -> Value {
 }
 
 /// `initialize` and `tools/list`; the tools the test calls are listed.
-fn handshake(guard: &mut Guard) {
+pub(crate) fn handshake(guard: &mut Guard) {
     let init = json!({
         "protocolVersion": "2025-11-25",
         "capabilities": {},
@@ -187,14 +196,14 @@ fn handshake(guard: &mut Guard) {
 /// `/proc/*/cmdline`), agent-browser's daemon (its pid file, if it started), and any process
 /// whose command line names the scratch folder (Chrome's crashpad handlers lead groups of their
 /// own).
-struct Session {
-    chrome_group: i32,
+pub(crate) struct Session {
+    pub(crate) chrome_group: i32,
     daemon: Option<i32>,
     scratch: PathBuf,
 }
 
 impl Session {
-    fn find(scratch: &Scratch) -> Self {
+    pub(crate) fn find(scratch: &Scratch) -> Self {
         let flag = format!(
             "--user-data-dir={}",
             scratch.cwd().join("chrome-profile-").display()
@@ -219,7 +228,7 @@ impl Session {
     }
 
     /// What of the session still runs (zombies not counted).
-    fn left(&self) -> Vec<String> {
+    pub(crate) fn left(&self) -> Vec<String> {
         processes()
             .into_iter()
             .filter_map(|pid| {
@@ -235,7 +244,7 @@ impl Session {
             .collect()
     }
 
-    fn assert_gone(&self, scratch: &Scratch) {
+    pub(crate) fn assert_gone(&self, scratch: &Scratch) {
         let gone = (0..200).any(|_| {
             let none = self.left().is_empty();
             if !none {
@@ -251,7 +260,7 @@ impl Session {
     }
 }
 
-fn processes() -> Vec<i32> {
+pub(crate) fn processes() -> Vec<i32> {
     std::fs::read_dir("/proc")
         .unwrap()
         .flatten()
@@ -416,6 +425,9 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     let proxy = PageProxy::start();
     let (command, cdp) = command_with(&scratch, &binaries, &proxy, true);
     let mut guard = Guard::start(command);
+    // The first call starts Chrome (the guard's lazy start); its answer never comes.
+    guard.send(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "agent_browser_open", "arguments": {"url": "http://page.test/"}}}));
     guard.stderr_until("Chrome started; waiting for it to listen");
     // 60 s: on the loaded CI runner Chrome once took over 10 s to listen (.config/nextest.toml).
     let listening = (0..1200).any(|_| {

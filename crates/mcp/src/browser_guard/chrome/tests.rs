@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
-use super::{Spec, check_endpoint, chrome_args, fresh_profile};
+use super::{Spec, check_endpoint, chrome_args, ready_profile};
 
 #[test]
 fn the_endpoint_must_be_loopback_on_the_claimed_port() {
@@ -124,13 +124,13 @@ fn chrome_gets_one_feature_list_of_each_kind_and_no_weakened_security() {
     assert_eq!(preferences["net"]["network_prediction_options"], 2);
 }
 
-/// The profile's own preferences and `quiet`'s are merged at the top level only, so neither may
-/// hide the other's keys: both arrive whole.
+/// The profile's own preferences and `quiet`'s share no top-level key, so neither may hide the
+/// other's: both arrive whole.
 #[test]
 fn the_profile_keeps_the_download_preferences_and_quiets_whole() {
     let dir = std::env::temp_dir().join(format!("clauseo-mcp-prefs-{}", std::process::id()));
     let (profile, staging, downloads) = (dir.join("p"), dir.join("p/s"), dir.join("d"));
-    fresh_profile(&profile, &staging, &downloads).unwrap();
+    ready_profile(&profile, &staging, &downloads).unwrap();
     let written = std::fs::read_to_string(profile.join("Default").join("Preferences")).unwrap();
     crate::write::remove_dir_all(&dir).unwrap();
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
@@ -153,5 +153,35 @@ fn the_profile_keeps_the_download_preferences_and_quiets_whole() {
     assert_eq!(exceptions["mixed_script"]["http://*:*,*"]["setting"], 1);
     for (key, value) in quiet {
         assert_eq!(&written[key], value, "{key}");
+    }
+}
+
+/// A restart keeps the profile Chrome rewrote, its own entries included, and puts `quiet`'s
+/// preferences back over whatever Chrome wrote for them, so every start gets them.
+#[test]
+fn a_restart_puts_the_quiet_preferences_back_into_the_kept_profile() {
+    let dir = std::env::temp_dir().join(format!("clauseo-mcp-prefs-again-{}", std::process::id()));
+    let (profile, staging, downloads) = (dir.join("p"), dir.join("p/s"), dir.join("d"));
+    ready_profile(&profile, &staging, &downloads).unwrap();
+    let file = profile.join("Default").join("Preferences");
+    // Chrome's rewrite: its own keys, and one of quiet's changed back.
+    let rewritten = serde_json::json!({
+        "download": {"default_directory": staging, "prompt_for_download": false},
+        "safebrowsing": {"enabled": true, "other": 7},
+        "chrome_own": {"kept": true},
+    });
+    crate::write::write(&file, rewritten.to_string()).unwrap();
+    ready_profile(&profile, &staging, &downloads).unwrap();
+    let written = std::fs::read_to_string(&file).unwrap();
+    crate::write::remove_dir_all(&dir).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(written["chrome_own"]["kept"], true, "{written}");
+    assert_eq!(written["safebrowsing"]["other"], 7, "{written}");
+    assert_eq!(written["download"]["prompt_for_download"], false);
+    let quiet = super::quiet::preferences();
+    for (key, value) in quiet.as_object().unwrap() {
+        for (inner, setting) in value.as_object().unwrap() {
+            assert_eq!(&written[key][inner], setting, "{key}.{inner}");
+        }
     }
 }

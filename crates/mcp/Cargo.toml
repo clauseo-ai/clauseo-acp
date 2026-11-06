@@ -9,6 +9,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# Tests only: the guard's idle stop can be shortened through `CLAUSEO_TEST_GUARD_IDLE_MS`
+# (src/browser_guard/session.rs). Never on in a shipped build.
+[features]
+test-support = []
+
 [[bin]]
 name = "clauseo-mcp"
 path = "src/main.rs"
@@ -36,3 +41,7 @@ nix = { workspace = true, features = ["socket"] }
 # (src/write/windows.rs).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
+# Itself with test-support, so the guard the tests run reads the test's idle stop.
+[dev-dependencies]
+clauseo-mcp = { path = ".", features = ["test-support"] }

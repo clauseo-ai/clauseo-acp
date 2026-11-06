@@ -1,15 +1,16 @@
-//! The guard's own Chrome and agent-browser's detached daemon: whichever way the guard ends
-//! (stdin's end, a SIGKILL of the guard, a SIGKILL of its parent, Chrome's own exit, a refusal),
-//! no process of the session is left, and Chrome's profile is gone. Also Chrome's start checks
-//! and the download mover. These tests poll, at most [`GONE_WAIT`], for processes to end and
-//! files to move.
+//! The guard's own Chrome and agent-browser's detached daemon, both started by the first tool
+//! call: whichever way the guard ends (stdin's end, a SIGKILL of the guard, a SIGKILL of its
+//! parent, Chrome's second exit, a refusal), no process of the session is left, and Chrome's
+//! profile is gone. Lazy start, the idle stop and the crash restart are in `lazy.rs`. Also
+//! Chrome's start checks and the download mover. These tests poll, at most [`GONE_WAIT`], for
+//! processes to end and files to move.
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::support::{Guard, Scratch, example, guard_command, profiles, run, run_files};
+use crate::support::{Guard, Scratch, example, guard_command, profiles, run_files};
 use crate::write;
 
 /// How long a test waits for a process to end or a file to appear.
@@ -85,7 +86,7 @@ pub(crate) fn sigkill(pid: i32) {
 
 /// The daemon stub's and the Chrome stand-in's pids, once both run.
 #[cfg(unix)]
-fn session_pids(scratch: &Scratch) -> [i32; 2] {
+pub(crate) fn session_pids(scratch: &Scratch) -> [i32; 2] {
     let mut daemon = None;
     let found = within(|| {
         daemon = crate::support::daemon_pid_file(&scratch.socket_dir());
@@ -98,7 +99,7 @@ fn session_pids(scratch: &Scratch) -> [i32; 2] {
 
 /// Neither process is left, and Chrome's profile is gone.
 #[cfg(unix)]
-fn assert_nothing_left(scratch: &Scratch, pids: [i32; 2]) {
+pub(crate) fn assert_nothing_left(scratch: &Scratch, pids: [i32; 2]) {
     let [daemon, chrome] = pids;
     assert!(within(|| !alive(daemon)), "the daemon {daemon} is left");
     assert!(within(|| !alive(chrome)), "Chrome {chrome} is left");
@@ -114,7 +115,8 @@ pub(crate) fn no_args() -> [&'static OsStr; 0] {
 #[test]
 fn the_end_of_stdin_ends_the_daemon_and_chrome() {
     let scratch = Scratch::new("life_eof");
-    let guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
+    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
+    guard.call("open");
     let pids = session_pids(&scratch);
     assert_eq!(profiles(&scratch.cwd()).len(), 1);
     let (status, _) = guard.finish();
@@ -129,7 +131,8 @@ fn the_end_of_stdin_ends_the_daemon_and_chrome() {
 fn a_killed_guard_leaves_nothing_behind() {
     let scratch = Scratch::new("life_kill");
     let linger = [OsStr::new("linger")];
-    let guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &linger));
+    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &linger));
+    guard.call("open");
     let pids = session_pids(&scratch);
     let lingering = pid_in(&scratch.socket_dir().join("linger.pid"));
     sigkill(i32::try_from(guard.pid()).unwrap());
@@ -149,7 +152,8 @@ fn a_killed_guard_leaves_nothing_behind() {
 fn what_agent_browser_leaves_in_its_group_is_ended() {
     let scratch = Scratch::new("life_linger");
     let linger = [OsStr::new("linger")];
-    let guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &linger));
+    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &linger));
+    guard.call("open");
     let pids = session_pids(&scratch);
     let lingering = pid_in(&scratch.socket_dir().join("linger.pid"));
     let (status, _) = guard.finish();
@@ -175,7 +179,8 @@ fn a_killed_parent_leaves_nothing_behind() {
         .args(guard_args(&scratch, &example("daemon_stub"), &no_args()))
         .envs(host_env(&scratch))
         .env("PARENT_STUB_CHILD_PID", &guard_pid_file);
-    let parent = Guard::start(command);
+    let mut parent = Guard::start(command);
+    parent.call("open");
     let guard = pid_in(&guard_pid_file);
     let pids = session_pids(&scratch);
     sigkill(i32::try_from(parent.pid()).unwrap());
@@ -184,12 +189,22 @@ fn a_killed_parent_leaves_nothing_behind() {
     drop(parent);
 }
 
+/// Chrome's second death ends the guard (its first is in `lazy.rs`).
 #[cfg(unix)]
 #[test]
-fn chrome_that_dies_ends_agent_browser_and_the_guard() {
+fn chrome_that_dies_twice_ends_agent_browser_and_the_guard() {
     let scratch = Scratch::new("life_chrome");
     let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
-    let pids = session_pids(&scratch);
+    guard.call("open");
+    let first = session_pids(&scratch);
+    sigkill(first[1]);
+    assert!(within(|| !alive(first[0])), "the first daemon is left");
+    guard.call("again");
+    let mut pids = [0, 0];
+    assert!(within(|| {
+        pids = session_pids(&scratch);
+        pids != first && alive(pids[1])
+    }));
     sigkill(pids[1]);
     assert_eq!(guard.wait().code(), Some(1));
     let stderr = guard.stderr_text();
@@ -200,13 +215,27 @@ fn chrome_that_dies_ends_agent_browser_and_the_guard() {
     assert_nothing_left(&scratch, pids);
 }
 
+/// The first call's start fails: the call gets an error and the guard exits 1.
+fn start_fails(scratch: &Scratch) -> String {
+    let log = scratch.log();
+    let mut guard = Guard::start(guard_command(
+        scratch,
+        &example("echo_stub"),
+        &[log.as_os_str()],
+    ));
+    let answer = guard.call("open");
+    assert_eq!(answer["error"]["code"], -32603, "{answer}");
+    let (status, rest) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1));
+    assert_eq!(rest.0, "");
+    rest.1
+}
+
 #[test]
 fn chrome_on_another_port_is_refused_before_agent_browser_starts() {
     let scratch = Scratch::new("life_port");
     scratch.chrome_mode("wrong-port");
-    let output = run(guard_command(&scratch, &example("echo_stub"), &no_args()));
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = start_fails(&scratch);
     assert_eq!(
         stderr.trim_end().lines().last(),
         Some(
@@ -222,9 +251,7 @@ fn chrome_on_another_port_is_refused_before_agent_browser_starts() {
 fn chrome_that_exits_at_its_start_is_refused() {
     let scratch = Scratch::new("life_exit");
     scratch.chrome_mode("exit");
-    let output = run(guard_command(&scratch, &example("echo_stub"), &no_args()));
-    assert_eq!(output.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = start_fails(&scratch);
     assert!(
         stderr.lines().last().is_some_and(|line| line.starts_with(
             "clauseo-mcp browser-guard: Chrome stopped before it listened on the claimed \
@@ -240,7 +267,8 @@ fn chrome_that_exits_at_its_start_is_refused() {
 #[test]
 fn downloads_with_protected_names_are_renamed() {
     let scratch = Scratch::new("life_downloads");
-    let guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
+    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
+    guard.call("open");
     assert!(within(|| profiles(&scratch.cwd()).len() == 1), "no profile");
     let staging = profiles(&scratch.cwd())[0].join("downloads-staging");
     assert!(within(|| staging.is_dir()), "no staging folder");

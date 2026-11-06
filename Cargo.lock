@@ -1153,6 +1153,7 @@ dependencies = [
 name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
+ "clauseo-mcp",
  "nix",
  "serde",
  "serde_json",

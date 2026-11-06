@@ -7,7 +7,7 @@ use std::process::{
     Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio,
 };
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::write;
 
@@ -272,6 +272,12 @@ pub(crate) fn left_in(scratch: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A tool call with `id`: `agent_browser_open` on a public address, which the filter passes.
+pub(crate) fn open_call(id: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": "agent_browser_open", "arguments": {"url": "https://example.com"}}})
+}
+
 /// Runs a command to its end with stdin closed.
 #[expect(
     clippy::disallowed_methods,
@@ -324,6 +330,21 @@ impl Guard {
         self.send_raw(message.to_string().as_bytes());
     }
 
+    /// Sends a tool call with `id`, which starts the browser if it is stopped (the guard's lazy
+    /// start), without reading its answer.
+    pub(crate) fn send_call(&mut self, id: &str) {
+        self.send(&open_call(id));
+    }
+
+    /// Sends a tool call and returns its answer: once it is back, Chrome's stand-in and
+    /// agent-browser's run.
+    pub(crate) fn call(&mut self, id: &str) -> Value {
+        self.send_call(id);
+        let answer = self.read();
+        assert_eq!(answer["id"], id, "{answer}");
+        answer
+    }
+
     /// The next stdout line, parsed. Panics at EOF.
     pub(crate) fn read(&mut self) -> Value {
         let mut line = String::new();
@@ -335,6 +356,34 @@ impl Guard {
         );
         assert!(line.ends_with('\n'), "a whole line: {line:?}");
         serde_json::from_str(&line).unwrap()
+    }
+
+    /// Writes the messages `make` gives (the n-th for `n`) as fast as the guard takes them,
+    /// throwing its stdout away meanwhile, until a write fails or the guard has exited; then
+    /// closes stdin and returns the exit status.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn flood(&mut self, mut make: impl FnMut(u64) -> Value) -> ExitStatus {
+        let Self {
+            child,
+            stdin,
+            stdout,
+            ..
+        } = self;
+        let mut stdin = stdin.take().expect("stdin is closed");
+        std::thread::scope(|scope| {
+            scope.spawn(|| drop(std::io::copy(stdout, &mut std::io::sink())));
+            for n in 0.. {
+                if child.try_wait().unwrap().is_some() {
+                    break;
+                }
+                let line = format!("{}\n", make(n));
+                if stdin.write_all(line.as_bytes()).is_err() {
+                    break;
+                }
+            }
+            drop(stdin);
+            child.wait().unwrap()
+        })
     }
 
     /// Reads stdout to its end, leaving stdin open.
@@ -364,6 +413,15 @@ impl Guard {
         let mut rest = String::new();
         self.stdout.read_to_string(&mut rest).unwrap();
         (self.child.wait().unwrap(), rest)
+    }
+
+    /// [`Self::finish`], with stderr too: the exit status, then what stdout still held and
+    /// stderr's text.
+    pub(crate) fn finish_with_stderr(mut self) -> (ExitStatus, (String, String)) {
+        self.close_stdin();
+        let rest = self.read_rest();
+        let status = self.wait();
+        (status, (rest, self.stderr_text()))
     }
 
     /// Reads stderr lines until one contains `needle`, and returns that line. Panics at EOF.

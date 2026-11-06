@@ -5,8 +5,9 @@
 //! Each carries `#[cfg(test)]` so clippy treats its helpers as test code. No sleeps or timeouts in
 //! the tests: every wait is a blocking read, and nextest's slow-timeout ends a hung test. Two
 //! tests wait out the guard's own limits (10 s for the close reply, 5 s for the child's exit).
-//! `lifecycle.rs` and `races.rs` alone poll, for other processes to end and files to move (at
-//! most 10 s), and `real_chrome.rs` for the real Chrome.
+//! `lifecycle.rs`, `lazy.rs`, `races.rs` and `records.rs` alone poll, for other processes to end
+//! and files to move (at most 10 s), and `real_chrome.rs` (with `real_lazy.rs` inside it) for the
+//! real Chrome.
 
 #[cfg(test)]
 #[path = "guard/support.rs"]
@@ -25,6 +26,9 @@ mod env;
 #[path = "guard/filter.rs"]
 mod filter;
 #[cfg(test)]
+#[path = "guard/lazy.rs"]
+mod lazy;
+#[cfg(test)]
 #[path = "guard/lifecycle.rs"]
 mod lifecycle;
 #[cfg(test)]
@@ -36,7 +40,11 @@ mod races;
 #[cfg(test)]
 #[path = "guard/real_chrome.rs"]
 mod real_chrome;
-#[cfg(all(test, windows))]
+#[cfg(test)]
+#[path = "guard/records.rs"]
+mod records;
+#[cfg(test)]
+#[cfg(windows)]
 #[path = "guard/tree.rs"]
 mod tree;
 #[cfg(test)]

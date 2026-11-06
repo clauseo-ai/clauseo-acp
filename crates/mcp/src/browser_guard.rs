@@ -6,18 +6,24 @@
 //! command line (exit 2 on anything else), build the child's environment from the host's
 //! variables (`env.rs`; exit 2 naming a missing or invalid one), on Unix check the socket folder
 //! the host made under `/tmp` (`socket.rs`; exit 2 if it is unsafe or too long), claim the run's
-//! own names after sweeping the stale runs under `--cwd` (`runs.rs`: its profile, its lock file
-//! and on Unix its agent-browser session name), make the folders under `--cwd` the variables
-//! point at; on Unix start the reaper (`reaper.rs`), on Windows make the Job Object (`job.rs`);
-//! start Chrome on the claimed debugging port
-//! (`chrome.rs`; the reaper learns its pid, or the job holds it, before the guard waits for it;
-//! exit 1 if it does not listen there within 15 s, or the parent goes meanwhile) with its
-//! download mover (`downloads.rs`); then start agent-browser, connected to that Chrome, and
-//! relay (`relay.rs`), checking each agent line (`filter.rs`) and, after each child line, that
-//! the stream server and on Windows the daemon are on their claimed ports (`port_file.rs`),
-//! until agent-browser exits, Chrome exits or the guard's parent goes (`parent.rs`). On the way
-//! out, whatever the reason, the guard ends agent-browser's daemon and Chrome and deletes
-//! the run's profile and lock file. `docs/decisions/0029-browser.md` gives every rule its reason.
+//! own names after sweeping the stale runs under `--cwd` (`runs.rs`: its profile, its lock file,
+//! its Chrome record (`record.rs`) and its agent-browser session name), make the folders under
+//! `--cwd` the variables point at; on Unix start the reaper (`reaper.rs`), on Windows make the
+//! Job Object (`job.rs`); then relay (`relay.rs`), checking each agent line (`filter.rs`).
+//!
+//! Chrome starts lazily (`session.rs`): while it is stopped, a request that is no tool call
+//! goes to a one-shot agent-browser with no Chrome (`relay/oneshot.rs`). The first tool call
+//! starts Chrome on the claimed debugging port (`chrome.rs`; the reaper learns its pid, or the
+//! job holds it, before the guard waits for it) with its download mover (`downloads.rs`), then
+//! agent-browser connected to it; after each child line the guard checks that the stream server
+//! and on Windows the daemon are on their claimed ports (`port_file.rs`). Ten minutes without a
+//! tool call stop Chrome, agent-browser and its daemon, keeping the profile; Chrome's first
+//! unexpected exit stops them too, and its second ends the guard. The guard ends when the
+//! agent's stdin ends, agent-browser exits, a start fails or the guard's parent goes
+//! (`parent.rs`). On the way out, whatever the reason, it ends agent-browser's daemon and Chrome
+//! and deletes the run's profile, its Chrome record and its lock file. [`runs_settled`] and
+//! [`chrome_groups`] let the host read the runs under a `--cwd`.
+//! `docs/decisions/0029-browser.md` gives every rule its reason.
 
 mod chrome;
 mod downloads;
@@ -30,18 +36,22 @@ mod port_file;
 mod quiet;
 #[cfg(unix)]
 pub mod reaper;
+mod record;
 mod relay;
 mod runs;
+mod session;
 #[cfg(any(unix, test))]
 mod socket;
 
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{Failure, write};
+pub use record::{ChromeProcess, ChromeState};
 
 /// The mode's command line on this OS.
 pub const USAGE: &str = if cfg!(windows) {
@@ -99,6 +109,7 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     }
     let run = runs::Run::claim(&command.cwd)
         .map_err(|error| failed(&format!("cannot claim a run under --cwd: {error}")))?;
+    record::write_state(&command.cwd, run.id(), &record::ChromeState::None);
     // Unix: the run's own session name, so its daemon's socket is the run's own too.
     #[cfg(unix)]
     let (env, session) = {
@@ -107,13 +118,25 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         env.insert(env::SESSION.to_owned(), OsString::from(&session));
         (env, session)
     };
-    // Windows: the host's, from which agent-browser derives the daemon port the host claimed.
+    // Windows: the run's own too, one whose derived daemon port is the one the host claimed.
     #[cfg(windows)]
-    let session = env
-        .get(env::SESSION)
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_owned();
+    let (env, session) = {
+        let mut env = env;
+        let host = env
+            .get(env::SESSION)
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let own = command
+            .daemon_port
+            .and_then(|port| runs::windows_session(run.id(), port));
+        let session = own.unwrap_or_else(|| {
+            note("no run name fits the claimed daemon port; using the host's session name");
+            host
+        });
+        env.insert(env::SESSION.to_owned(), OsString::from(&session));
+        (env, session)
+    };
     for folder in env::folders(env::Os::CURRENT, &command.cwd) {
         make_folder(&folder).map_err(|error| {
             failed(&format!(
@@ -125,120 +148,59 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     serve(&command, env, &session, &parent, &run)
 }
 
-/// Starts Chrome and agent-browser and relays; ends both, whatever happens, before returning.
+/// Relays, starting Chrome and agent-browser at the first tool call (`session.rs`); ends both,
+/// whatever happens, and deletes the run's profile before returning.
 fn serve(
     command: &Command,
-    mut env: BTreeMap<String, OsString>,
+    env: BTreeMap<String, OsString>,
     session: &str,
     parent: &parent::Parent,
     run: &runs::Run,
 ) -> Result<i32, Failure> {
+    #[cfg(unix)]
     let socket_dir = env
         .get(env::SOCKET_DIR)
-        .map_or_else(|| env::windows_socket_dir(&command.cwd), PathBuf::from);
+        .map_or_else(PathBuf::new, PathBuf::from);
     #[cfg(unix)]
     let reaper = reaper::Reaper::start(&socket_dir, session, &command.cwd, run.id())
         .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
-    #[cfg(windows)]
-    let job = job::Job::new().map_err(|error| failed(&error.to_string()))?;
-    let chrome_env = env::chrome_env(&env);
-    let spec = chrome::Spec {
+    let launcher = session::Launcher {
         executable: env
             .get(env::EXECUTABLE_PATH)
-            .map_or(Path::new(""), Path::new),
-        cwd: &command.cwd,
-        profile: run.profile(),
+            .map_or_else(PathBuf::new, PathBuf::from),
+        cwd: command.cwd.clone(),
+        run: run.id().to_owned(),
+        profile: run.profile().to_owned(),
         cdp_port: command.cdp_port,
-        proxy: env
-            .get(env::PROXY)
-            .map_or(OsStr::new(""), OsString::as_os_str),
-        env: &chrome_env,
-    };
-    let launched = chrome::launch(
-        &spec,
-        #[cfg(windows)]
-        &job,
-    );
-    let mut chrome = match launched {
-        Ok(chrome) => chrome,
-        Err(reason) => {
-            #[cfg(unix)]
-            reaper.done();
-            return Err(failed(&reason));
-        }
-    };
-    // Before the wait for Chrome's endpoint: a guard killed during it leaves the reaper to end
-    // Chrome's group. Once the guard reaps Chrome, the reaper leaves its pid alone.
-    #[cfg(unix)]
-    {
-        reaper.chrome(chrome.pid());
-        let teller = reaper.teller();
-        chrome.on_reap(move || teller.say("reaped chrome"));
-    }
-    note(&format!(
-        "Chrome started; waiting for it to listen on the claimed debugging port {}",
-        command.cdp_port
-    ));
-    let endpoint = match chrome.endpoint(command.cdp_port, parent) {
-        Ok(endpoint) => endpoint,
-        Err(reason) => {
-            drop(chrome);
-            #[cfg(unix)]
-            reaper.done();
-            return Err(failed(&reason));
-        }
-    };
-    note(&format!(
-        "Chrome is listening on the claimed debugging port {}",
-        command.cdp_port
-    ));
-    env::set_cdp(&mut env, &endpoint);
-    let agent = relay::Agent {
-        program: &command.agent_browser,
-        args: &command.child_args,
-        cwd: &command.cwd,
-        env: &env,
+        proxy: env.get(env::PROXY).cloned().unwrap_or_default(),
+        chrome_env: env::chrome_env(&env),
+        program: command.agent_browser.clone(),
+        args: command.child_args.clone(),
         port_checks: port_checks(&env, command, session),
+        env,
         #[cfg(unix)]
-        on_spawn: &mut |pid| reaper.agent(pid),
-        #[cfg(windows)]
-        on_spawn: &mut |_| {},
+        socket_dir,
         #[cfg(unix)]
-        on_reap: &mut || reaper.reaped_agent(),
+        session: session.to_owned(),
+        idle: session::idle_stop(),
+        #[cfg(unix)]
+        reaper: reaper.teller(),
         #[cfg(windows)]
-        on_reap: &mut || {},
+        job: job::Job::new().map_err(|error| failed(&error.to_string()))?,
     };
-    let outcome = relay::run(
-        agent,
-        &mut chrome,
-        parent,
-        #[cfg(windows)]
-        &job,
-    );
-    #[cfg(unix)]
-    reaper::kill_daemon(&socket_dir, session);
-    // Windows: the job first, so Chrome's helpers are gone before its profile is deleted.
-    #[cfg(windows)]
-    if !job.kill() {
-        note("Windows refused to end the guard's job; Chrome's drop kills Chrome alone");
-    }
-    // Kills Chrome's tree, moves the last downloads and deletes the profile.
-    drop(chrome);
-    #[cfg(windows)]
-    drop((job, socket_dir));
+    let shared = Arc::new(session::Shared::new(launcher));
+    // Stops whatever runs (Chrome's tree, agent-browser's, the daemon) before it returns.
+    let outcome = relay::run(&shared, parent);
+    chrome::remove_profile(run.profile());
+    // Chrome is reaped: the record goes, before the run's lock (`runs::Run`'s drop).
+    record::clear(&command.cwd, run.id());
     #[cfg(unix)]
     reaper.done();
-    let outcome = outcome.map_err(|error| {
-        failed(&format!(
-            "cannot run {}: {error}",
-            command.agent_browser.display()
-        ))
-    })?;
-    outcome_code(outcome)
+    outcome_code(outcome, &command.agent_browser)
 }
 
 /// agent-browser's exit code, or the failure for a relay the guard ended.
-fn outcome_code(outcome: relay::Outcome) -> Result<i32, Failure> {
+fn outcome_code(outcome: relay::Outcome, agent_browser: &Path) -> Result<i32, Failure> {
     match outcome {
         relay::Outcome::Exited(code) => Ok(code),
         relay::Outcome::ChildLineTooLong => Err(failed(&format!(
@@ -250,7 +212,30 @@ fn outcome_code(outcome: relay::Outcome) -> Result<i32, Failure> {
         }
         relay::Outcome::ChromeExited => Err(failed("Chrome exited; the guard ended agent-browser")),
         relay::Outcome::ParentGone => Err(failed(PARENT_GONE)),
+        relay::Outcome::StartFailed(reason) => Err(failed(&reason)),
+        relay::Outcome::AgentFailed(error) => Err(failed(&format!(
+            "cannot run {}: {error}",
+            agent_browser.display()
+        ))),
     }
+}
+
+/// Whether every guard run under `cwd` (the guard's `--cwd`) has finished its cleanup: no run's
+/// profile folder is left and no run's lock file is held by its guard or reaper. It means
+/// "cleanup finished", not "Chrome dead": Chrome can outlive a SIGKILL of both the guard and
+/// the reaper, and a run whose browser idled out stays unsettled until its guard exits.
+/// It takes no lock a live run would notice (`runs.rs`; decision record 0029, "Settled runs").
+pub fn runs_settled(cwd: &Path) -> bool {
+    runs::settled(cwd)
+}
+
+/// The Chrome of each guard run under `cwd` that is not settled ([`runs_settled`]), and of
+/// each run whose Chrome record was left naming one: `None` (no Chrome now), `Starting` (about
+/// to spawn, or spawned and not yet recorded, or not to be told: count it as alive) or
+/// `Running` with the process to probe ([`ChromeProcess::gone`]). Read-only; never "gone" while
+/// Chrome may live (decision record 0029, "Chrome records").
+pub fn chrome_groups(cwd: &Path) -> Vec<ChromeState> {
+    record::chrome_groups(cwd)
 }
 
 /// The failure when the guard's parent has gone (`parent.rs`).
@@ -269,6 +254,16 @@ fn failed(reason: &str) -> Failure {
 pub(crate) fn note(text: &str) {
     let mut stderr = io::stderr().lock();
     if writeln!(stderr, "clauseo-mcp browser-guard: {text}").is_err() {}
+}
+
+/// The time now, for the guard's idle stop: the guard runs on plain threads, with no clock to
+/// inject.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the guard's own idle timer; no core logic depends on the time"
+)]
+pub(crate) fn now() -> std::time::Instant {
+    std::time::Instant::now()
 }
 
 /// Blocks the calling thread for `time`: the guard's polls (Chrome's exit, the parent, the

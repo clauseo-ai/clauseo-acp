@@ -1,7 +1,8 @@
-//! The guard ended while Chrome is still starting, and Chrome dying just as the agent goes. The
-//! Chrome stand-in's `silent` mode never prints its endpoint, so the guard stays in its wait for
-//! it (up to 15 s) for as long as a test needs; the test acts once the guard says on stderr that
-//! Chrome has started (after it told the reaper). Waits poll as `lifecycle.rs`'s do.
+//! The guard ended while Chrome is still starting (the first call's lazy start), and Chrome dying
+//! just as the agent goes. The Chrome stand-in's `silent` mode never prints its endpoint, so the
+//! guard stays in its wait for it (up to 15 s) for as long as a test needs; the test acts once the
+//! guard says on stderr that Chrome has started (after it told the reaper). Waits poll as
+//! `lifecycle.rs`'s do.
 
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -9,9 +10,7 @@ use std::time::Duration;
 
 #[cfg(unix)]
 use crate::lifecycle::{alive, no_args, pid_in, sigkill, throughout, within};
-#[cfg(unix)]
-use crate::support::Guard;
-use crate::support::{Scratch, example, guard_command, run};
+use crate::support::{Guard, Scratch, example, guard_command};
 
 /// What the guard prints once Chrome runs and the reaper knows it.
 #[cfg(unix)]
@@ -42,6 +41,7 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     let scratch = Scratch::new("race_kill_start");
     scratch.chrome_mode("silent");
     let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &no_args()));
+    guard.send_call("open");
     guard.stderr_until(STARTED);
     let chrome = pid_in(&scratch.path().join("chrome.pid"));
     sigkill(i32::try_from(guard.pid()).unwrap());
@@ -66,6 +66,7 @@ fn a_parent_killed_while_chrome_starts_ends_the_guard() {
         .envs(host_env(&scratch))
         .env("PARENT_STUB_CHILD_PID", &guard_pid_file);
     let mut parent = Guard::start(command);
+    parent.send_call("open");
     parent.stderr_until(STARTED);
     let guard = pid_in(&guard_pid_file);
     let chrome = pid_in(&scratch.path().join("chrome.pid"));
@@ -84,17 +85,19 @@ fn a_parent_killed_while_chrome_starts_ends_the_guard() {
 }
 
 /// Chrome dies just as the agent goes: the stand-in exits right after it prints its endpoint,
-/// and the agent's stdin is closed from the start, so agent-browser has answered the close and
-/// exited long before Chrome's watcher first looks (250 ms). The guard still exits 1.
+/// and the agent's stdin closes right after its one call, so agent-browser has answered the
+/// close and exited before Chrome's watcher first looks (250 ms). No restart for an agent that
+/// has gone: the guard still exits 1.
 #[test]
 fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     let scratch = Scratch::new("race_chrome_eof");
     scratch.chrome_mode("listen-exit");
     let log = scratch.log();
     let args = [log.as_os_str()];
-    let output = run(guard_command(&scratch, &example("echo_stub"), &args));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    let mut guard = Guard::start(guard_command(&scratch, &example("echo_stub"), &args));
+    guard.send_call("open");
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(
         stderr.contains("clauseo-mcp browser-guard: Chrome exited; the guard ended agent-browser"),
         "{stderr}"
@@ -117,9 +120,11 @@ fn a_killed_guards_reaper_leaves_the_next_run_alone() {
     let scratch = Scratch::new("race_rerun");
     let stub = example("daemon_stub");
     let mut first = Guard::start(guard_command(&scratch, &stub, &no_args()));
+    first.send_call("open");
     first.stderr_until(LISTENING);
     sigkill(i32::try_from(first.pid()).unwrap());
     let mut next = Guard::start(guard_command(&scratch, &stub, &no_args()));
+    next.send_call("open");
     next.stderr_until(LISTENING);
     let pid = next.pid();
     let profile = std::fs::read_to_string(scratch.path().join(format!("profile-of-{pid}")));
@@ -161,6 +166,7 @@ fn a_daemon_that_binds_after_a_killed_guards_cleanup_is_ended() {
     let scratch = Scratch::new("race_late_kill");
     let late = [std::ffi::OsStr::new("late")];
     let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &late));
+    guard.send_call("open");
     guard.stderr_until(LISTENING);
     let daemon = pid_in(&scratch.socket_dir().join("late.pid"));
     let chrome = pid_in(&scratch.path().join("chrome.pid"));
@@ -183,6 +189,7 @@ fn a_daemon_that_binds_after_the_guards_cleanup_is_ended() {
     let scratch = Scratch::new("race_late_done");
     let late = [std::ffi::OsStr::new("late")];
     let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &late));
+    guard.send_call("open");
     guard.stderr_until(LISTENING);
     let daemon = pid_in(&scratch.socket_dir().join("late.pid"));
     let (status, _) = guard.finish();

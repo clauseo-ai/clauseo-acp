@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use super::{Run, SWEEP_LOCK, is_id, profile_of, session_of};
+use super::{
+    Run, SWEEP_LOCK, daemon_port_of, is_id, profile_of, session_of, settled, windows_session,
+};
 use crate::write;
 
 /// A fresh folder under the temp folder for one test.
@@ -118,4 +120,50 @@ fn only_a_pid_and_8_hex_digits_are_an_id() {
         assert!(!is_id(id), "{id}");
     }
     assert_eq!(session_of("1-0000abcd"), "run-1-0000abcd");
+}
+
+/// A live run is unsettled, with its profile or before it makes one; a finished run (its drop
+/// deleted the lock file) is settled. A free lock with the profile still there is not: that
+/// run's cleanup has not finished. The sweep lock and other names do not count.
+#[test]
+fn runs_settle_once_their_cleanup_has_finished() {
+    let cwd = scratch("settled");
+    assert!(settled(&cwd), "an empty folder");
+    let run = Run::claim(&cwd).unwrap();
+    assert!(!settled(&cwd), "a live run before its profile");
+    write::create_dir_all(run.profile()).unwrap();
+    assert!(!settled(&cwd), "a live run with its profile");
+    write::remove_dir_all(run.profile()).unwrap();
+    drop(run);
+    write::create_dir_all(&cwd.join("chrome-profile")).unwrap();
+    assert!(
+        settled(&cwd),
+        "a finished run, the sweep lock and a foreign name"
+    );
+    stale_run(&cwd, "4194304-0000abcd");
+    assert!(!settled(&cwd), "a free lock with its profile still there");
+    write::remove_dir_all(&profile_of(&cwd, "4194304-0000abcd")).unwrap();
+    assert!(settled(&cwd), "a free lock file left alone");
+    write::remove_dir_all(&cwd).unwrap();
+}
+
+/// agent-browser's own vectors (`connection.rs:1884-1891`), and a Windows run name per run
+/// whose derived daemon port is the claimed one.
+#[test]
+fn a_windows_run_name_derives_the_claimed_daemon_port() {
+    assert_eq!(daemon_port_of("default"), 50838);
+    assert_eq!(daemon_port_of("my-session"), 63105);
+    assert_eq!(daemon_port_of("work"), 51184);
+    assert_eq!(daemon_port_of(""), 49152);
+    for port in [49_152, 50_838, 61_102, 65_534] {
+        let one = windows_session("1-0000abcd", port).unwrap();
+        let two = windows_session("2-0000abcd", port).unwrap();
+        assert!(one.starts_with("run-1-0000abcd-"), "{one}");
+        assert_ne!(one, two);
+        assert_eq!(daemon_port_of(&one), port);
+        assert_eq!(daemon_port_of(&two), port);
+        assert!(
+            one.len() <= 64 && crate::browser_guard::env::is_session(std::ffi::OsStr::new(&one))
+        );
+    }
 }

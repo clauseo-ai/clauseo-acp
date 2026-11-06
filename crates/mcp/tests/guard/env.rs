@@ -129,49 +129,25 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
         command.env("LANG", "en_IN.UTF-8").env("lang", "xx");
     }
     let mut guard = Guard::start(command);
+    // A request while the browser is stopped: a one-shot agent-browser, with no Chrome yet, so
+    // no endpoint; its report is the answer the guard relays.
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
+    let oneshot = guard.read();
+    let mut without_cdp = expected(&scratch);
+    without_cdp.remove("AGENT_BROWSER_CDP");
+    assert_eq!(child_env(&oneshot, scratch.session()), without_cdp);
+    // The first call starts Chrome, then agent-browser with Chrome's endpoint. The stub exits
+    // without answering, so the guard answers the call with an error and exits with its 0.
+    guard.send_call("open");
     let report = guard.read();
     let (status, rest) = guard.finish();
     assert_eq!(status.code(), Some(0));
-    assert_eq!(rest, "");
-
-    let env: BTreeMap<String, String> = report["env"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
-        .collect();
-    let mut env = env;
-    if cfg!(windows) {
-        for name in OS_SET {
-            if let Some(value) = env.remove(*name) {
-                assert_ne!(
-                    value, OS_SET_HOSTILE,
-                    "{name} came through from the guard's env"
-                );
-            }
-        }
-    }
-    // Unix: the run's own session name, `run-<guard pid>-<8 hex>` (src/browser_guard/runs.rs), in
-    // place of the host's.
-    if cfg!(unix) {
-        let session = env.remove("AGENT_BROWSER_SESSION").unwrap_or_default();
-        let (pid, nonce) = session
-            .strip_prefix("run-")
-            .and_then(|rest| rest.split_once('-'))
-            .unwrap_or_default();
-        assert!(
-            !pid.is_empty()
-                && pid.bytes().all(|b| b.is_ascii_digit())
-                && nonce.len() == 8
-                && nonce.bytes().all(|b| b.is_ascii_hexdigit()),
-            "{session}"
-        );
-        env.insert(
-            "AGENT_BROWSER_SESSION".to_owned(),
-            scratch.session().to_owned(),
-        );
-    }
-    assert_eq!(env, expected(&scratch));
+    assert!(
+        rest.contains(r#""id":"open""#) && rest.contains("-32603"),
+        "{rest}"
+    );
+    assert_eq!(child_env(&report, scratch.session()), expected(&scratch));
+    assert_eq!(report["env"].get("AI_GATEWAY_API_KEY"), None::<&Value>);
     let args: Vec<&str> = report["args"]
         .as_array()
         .unwrap()
@@ -203,7 +179,51 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
         assert!(metadata.is_dir());
         assert_eq!(metadata.mode() & 0o7777, 0o700);
     }
-    assert_eq!(report["env"].get("AI_GATEWAY_API_KEY"), None::<&Value>);
+}
+
+/// The environment in an `env_stub` report, with the run's own session name
+/// (`run-<guard pid>-<8 hex>`, and on Windows `-<n>` after it, `src/browser_guard/runs.rs`)
+/// checked and put back to the host's, and the variables Windows sets itself checked and dropped.
+fn child_env(report: &Value, host_session: &str) -> BTreeMap<String, String> {
+    let env: BTreeMap<String, String> = report["env"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_owned()))
+        .collect();
+    let mut env = env;
+    if cfg!(windows) {
+        for name in OS_SET {
+            if let Some(value) = env.remove(*name) {
+                assert_ne!(
+                    value, OS_SET_HOSTILE,
+                    "{name} came through from the guard's env"
+                );
+            }
+        }
+    }
+    let session = env.remove("AGENT_BROWSER_SESSION").unwrap_or_default();
+    let parts: Vec<&str> = session
+        .strip_prefix("run-")
+        .unwrap_or_default()
+        .split('-')
+        .collect();
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let suffix_ok = if cfg!(windows) {
+        parts.get(2).is_some_and(|n| digits(n)) && parts.len() == 3
+    } else {
+        parts.len() == 2
+    };
+    assert!(
+        parts.first().is_some_and(|pid| digits(pid))
+            && parts.get(1).is_some_and(
+                |nonce| nonce.len() == 8 && nonce.bytes().all(|b| b.is_ascii_hexdigit())
+            )
+            && suffix_ok,
+        "{session}"
+    );
+    env.insert("AGENT_BROWSER_SESSION".to_owned(), host_session.to_owned());
+    env
 }
 
 #[test]
@@ -213,6 +233,7 @@ fn folders_that_exist_are_kept() {
     write::write(scratch.cwd().join("downloads").join("kept.pdf"), "x").unwrap();
     let args: [&OsStr; 0] = [];
     let mut guard = Guard::start(guard_command(&scratch, &example("env_stub"), &args));
+    guard.send(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}));
     guard.read();
     assert_eq!(guard.finish().0.code(), Some(0));
     assert!(scratch.cwd().join("downloads").join("kept.pdf").is_file());

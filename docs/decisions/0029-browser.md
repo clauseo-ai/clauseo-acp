@@ -258,8 +258,9 @@ connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-443
   container, `--no-sandbox --disable-dev-shm-usage` (agent-browser's rule less its `CI` test,
   which its child never saw). Its environment is agent-browser's less the `AGENT_BROWSER_*`
   names.
-- The profile is the run's own, made fresh and deleted on the guard's exit ("Each run's own
-  names", below). Its
+- The profile is the run's own, made fresh at the run's first Chrome start, kept across the
+  run's later starts ("Lazy start and the idle stop", below) and deleted on the guard's exit
+  ("Each run's own names", below). Its
   `Default/Preferences` sends downloads to a staging folder in it (below) and allows "insecure
   content" (`mixed_script`) for `http://` pages only (`http://*:*`): Chrome otherwise holds an
   `http://` download of a "high-risk" type (`.md`, `.pdf`) until someone clicks Keep, which
@@ -296,24 +297,21 @@ Behaviour that changes with it:
 - **`agent_browser_close` only disconnects** (`browser.rs:1648-1652`: `Browser.close` only for a
   Chrome it launched). Tabs, cookies, storage and history live until the session ends, then go
   with the profile. Before, each close deleted agent-browser's temp profile.
-- **The idle timeout** (10 minutes) ends the daemon, not Chrome: Chrome lives as long as the
-  guard, and the next call starts a daemon that reconnects to it.
-- **Chrome starts at the session's start**, before agent-browser, not at the first browser call:
-  the endpoint holds Chrome's id, so it must exist before agent-browser's environment is built.
-  Every session that loads the browser server pays a Chrome start (0.3 s on iris) and its memory,
-  used or not: an idle Chrome on `about:blank` with these flags is 12 processes and about 310 MB
-  PSS on iris (Chrome for Testing 147, one sample; `browser_session_memory_p95` stays
-  unmeasured). **Lazy start is the
-  very next pull request and a release blocker:** Chrome and agent-browser start at the first
-  browser call and stop after about 10 minutes idle, the profile kept until the session ends, and
-  start again lazily on the next call.
-- **Crash: the guard exits 1.** agent-browser does not watch a Chrome it did not launch
+- **agent-browser's own idle timeout** (10 minutes) ends its daemon, not Chrome; the guard's
+  idle stop, at the same 10 minutes, ends both ("Lazy start and the idle stop", below).
+- **Chrome starts at the first browser call**, not at the session's start ("Lazy start and the
+  idle stop", below): the endpoint holds Chrome's id, so agent-browser starts only after Chrome,
+  and the guard answers the handshake without either.
+- **Crash: restart once, then exit 1.** agent-browser does not watch a Chrome it did not launch
   (`browser.rs:1703-1709`), and a restarted Chrome has a new id, so the endpoint agent-browser
-  holds would be stale. The guard polls its Chrome child every 250 ms; when Chrome exits it ends
-  agent-browser and exits 1 (fail closed, like a refused port). It also looks at Chrome once the
+  holds would be stale. The guard polls its Chrome child every 250 ms. When Chrome exits the
+  first time in a session, the guard ends agent-browser and its daemon, answers every call in
+  flight with a JSON-RPC error (-32603, "Chrome exited ..."), keeps the profile and starts both
+  again at the next tool call. The second time it ends agent-browser and exits 1 (fail closed,
+  like a refused port), again answering the calls in flight. It also looks at Chrome once the
   relay ends, so a Chrome that died between two polls while agent-browser ended (the agent
-  closing its stdin at the same moment) still makes the guard exit 1. Restarting Chrome once comes with
-  the lazy-start machinery in the next pull request.
+  closing its stdin at the same moment) still makes the guard exit 1: an agent that has gone gets
+  no restart.
 - **Downloads** land in `<cwd>/downloads` as before, now moved there by the guard
   (`browser_guard/downloads.rs`): Chrome downloads into `<profile>/downloads-staging`, and every
   200 ms the guard moves each finished file (Chrome renames `*.crdownload` only when done) into
@@ -386,14 +384,17 @@ finished downloads and deletes the profile. On Windows the job does all of it.
   - its profile `<cwd>/chrome-profile-<id>`, with Chrome's downloads staging folder inside it;
   - on Unix the agent-browser session name `run-<id>` (at most 23 bytes, which the socket
     folder's length check assumes), so the daemon's socket `<socket dir>/run-<id>.sock` is the
-    run's own. Windows keeps the host's name: the daemon's port derives from it and the host
-    claimed that port; there no reaper runs, and the job ends the daemon with its guard;
+    run's own. On Windows `run-<id>-<n>`, whose derived daemon port is the claimed one ("Lazy
+    start and the idle stop", below); there no reaper runs, and the job ends the daemon with its
+    guard;
+  - its Chrome record `<cwd>/chrome-profile-<id>.chrome` ("Chrome records", below);
   - a lock file `<cwd>/chrome-profile-<id>.lock`, which the guard and its reaper hold shared
     (`File::lock_shared`) for as long as either runs.
   The reaper gets the id (`--run`) and the session name, and deletes and kills only its run's.
   At its start each guard sweeps stale runs: one whose lock file it can lock exclusively (no
   guard and no reaper left; the OS drops a lock with its holder, so a reused pid cannot fool it)
-  loses its profile and then its lock file, and so does a profile with no lock file; a run whose
+  loses its profile, its Chrome record and then its lock file, and so does a profile with no
+  lock file; a run whose
   lock is held stays, whatever its pid. The sweep and the making and locking of the new run's
   lock file happen under an exclusive lock on `<cwd>/chrome-profiles.lock`, so no sweep finds a
   lock file its run does not hold yet.
@@ -416,8 +417,19 @@ repro: guard A is SIGKILLed once Chrome listens and guard B starts at once on th
 and ports; B's profile, staging folder and daemon must stay for 3 s, past A's reaper (on the
 guard before per-run names it failed 5 of 5 runs, B's profile gone). And a daemon that binds its
 socket only after the cleanup (`daemon_stub late`, in a group of its own) must be ended, after
-the guard's SIGKILL and after its `done` (both failed without the reaper's second kill). Unit
-tests cover the sweep (`runs.rs`) and the reaper dropping a pid the guard reaped. A unit test
+the guard's SIGKILL and after its `done` (both failed without the reaper's second kill). Since
+lazy start every one of these tests starts the browser with a first tool call.
+`crates/mcp/tests/guard/lazy.rs` covers lazy start itself: the handshake and `tools/list` start
+no Chrome, profile or daemon (on Linux only the guard and its reaper run); the idle stop ends
+Chrome and the daemon, keeps the profile, and the next call starts both again with it; Chrome's
+first death answers the call in flight with an error and the next call restarts it, its second
+answers the call in flight and ends the guard; a SIGKILL of the guard while stopped, and during a
+lazy restart before the new Chrome listens, leaves nothing; the first call waits for a busy
+debugging port; and the Chrome record through the host's API (none, running, none at the idle
+stop, the new Chrome after the restart, gone at the exit with the run settled; and a killed
+guard's reaper deleting it). Unit tests cover the sweep, `runs_settled` and the Windows run name
+(`runs.rs`), the record's parsing, `gone()` before and after a group's kill and the reaper's and
+sweep's forget rule (`record.rs`), and the reaper dropping a pid the guard reaped. A unit test
 puts a file under
 the download's chosen name between the look and the move; it must not be replaced. `crates/mcp/tests/guard/real_chrome.rs` is the
 regression test with the real agent-browser v0.41.1 and a real Chrome, through a test proxy that
@@ -429,7 +441,11 @@ folder (Chrome's crashpad handlers lead process groups of their own) is left; a 
 guard's parent after an `open`, after which the guard, Chrome and the daemon are all gone; and a
 SIGKILL of the guard while it waits for Chrome's endpoint (Chrome's stderr hidden from it), once
 Chrome and its helpers run, after which nothing of Chrome is left; and the code owner's repro
-above with the real binaries, after which B's daemon is the same process and still serves B.
+above with the real binaries, after which B's daemon is the same process and still serves B; and
+lazy start with the real binaries: no Chrome after the handshake, the page opened by the first
+call, Chrome's group and the daemon gone after the idle stop (3 s there) with the profile kept
+and the record `none`, the page opened and read again after the next call, and nothing left at
+the exit.
 CI's Linux job runs
 it with the pinned agent-browser and the runner's Google Chrome on merge groups and main
 (`ci.yml`, "Fetch agent-browser for the guard's real-Chrome test"; not yet run there); without `CLAUSEO_TEST_AGENT_BROWSER` it skips with a note on
@@ -522,6 +538,152 @@ Google Chrome 157 (branded, the CI runner's kind): before, `clients2.google.com`
 300 s runs without the change on iris, and on CI (above); the url-source switch stops it.
 `real_chrome::idle` holds it: past the page it opens, every request the test proxy sees in
 10 s is for `page.test`.
+
+Under lazy start (below) every start of the run's Chrome, the first call's and each restart
+after the idle stop or a crash, gets the same switches, and the preferences are merged into
+the kept profile's `Default/Preferences` again before each start, over whatever Chrome wrote
+back. `real_chrome::idle::a_chrome_restarted_on_the_kept_profile_contacts_no_host_but_the_page`
+holds it for a restart: after the idle stop (15 s there) the next call starts Chrome on the kept
+profile, and in its 10 s idle the proxy sees only `page.test`.
+
+### Lazy start and the idle stop (`browser_guard/session.rs`, the S27 release blocker)
+
+As first fixed, Chrome started with the guard: every session that loaded the browser server paid
+a Chrome start and about 310 MB PSS, used or not. Now nothing of the browser runs until the
+agent's first tool call, and an idle browser stops.
+
+- **At the guard's start** only the guard runs, with its reaper on Unix. The run's names are
+  claimed as before, and the run's Chrome record says `none` (below).
+- **The handshake without a browser** (`relay/oneshot.rs`). agent-browser's MCP server keeps no
+  state between messages: `initialize`, `ping`, `tools/list` and `shutdown` are answered from
+  the tool table and the request alone, and only `tools/call` runs its CLI, daemon or browser
+  (v0.41.1 `mcp.rs:661-725`). So while the browser is stopped the guard answers every request
+  but a tool call with a one-shot agent-browser: the same program, arguments and environment
+  less `AGENT_BROWSER_CDP`, the request written and stdin closed, its whole lines relayed until
+  it exits (at most 10 s, then killed). It runs in its own process group told to the reaper
+  (Unix) or in the job (Windows), and the guard kills that group once it exits. A one-shot that
+  exits non-zero, or after `shutdown`, ends the guard with that code, as the running one's exit
+  does. Notifications while stopped are dropped, as agent-browser drops them. The answers are
+  agent-browser's own, so no copy of its tool list can drift; each costs a process start (about
+  20 ms on iris). A pinned tool list in the guard was rejected for that drift.
+- **The first tool call** starts the browser, under the relay's state lock so a second call
+  waits: the guard waits up to 15 s for the claimed debugging port to be free (a bind probe on
+  127.0.0.1, every 100 ms; the run an MCP reconnect replaced may still be ending its Chrome
+  there), starts Chrome on it with the run's profile, waits for it to listen as before, then
+  starts agent-browser with its endpoint and forwards the call. A call the filter refuses starts
+  nothing. If any step fails (the port stays taken, Chrome is refused or does not listen,
+  agent-browser does not start), the call gets a JSON-RPC error (-32603), whatever started is
+  ended and the guard exits 1, as a failed start did before.
+- **The idle stop.** After 10 minutes (`IDLE_STOP`, the same as agent-browser's daemon idle
+  timeout) with no tool call in flight and none answered or started, the guard stops the
+  browser: agent-browser's process group and the daemon, then Chrome's group (Unix; the job's
+  processes on Windows), each reaped and told to the reaper, with the last downloads moved. The
+  profile stays, so tabs' cookies and storage survive to the next start; tabs themselves do not.
+  Requests that are no tool call (a `tools/list` from the agent) do not keep the browser alive.
+  The next tool call starts both again as the first did. The guard looks at the idle time at
+  least once a second. A test-only variable, `CLAUSEO_TEST_GUARD_IDLE_MS`, shortens the stop; it
+  exists only in builds with the crate's `test-support` feature, which only its own tests enable.
+- **Generations.** Each start and stop moves a counter on, and every report of a child's
+  threads carries it, so a line or an exit from a browser the guard has already stopped is
+  dropped and never answers a later call or ends the guard. Calls in flight are tracked by id;
+  when the browser stops under them (Chrome's death, the guard's end) each gets a JSON-RPC error
+  (-32603) rather than no answer.
+- **The guard's end.** Whatever ends the relay (Chrome's second death, agent-browser's exit or
+  oversize line, a refused port, the parent gone, the agent's EOF), the guard marks the state
+  ended under its lock and stops the browser in the same hold of it. The agent pump keeps
+  reading stdin while the guard cleans up and exits, so from then on it answers every request
+  with that JSON-RPC error itself ("the browser server ended before this call was answered") and
+  starts neither the browser nor a one-shot; a one-shot starts, and is stored where the end
+  kills it, only under the same lock. Before this, a tool call arriving after the final stop
+  started a Chrome that nothing killed (Chrome has no parent-death signal), on the claimed port,
+  which the next session's first call then waited out and failed on (found in review: 9 of 14
+  stub rounds and 4 of 4 real-Chrome rounds of a call flood after the second crash).
+- **Windows: a session name per run.** The daemon's port derives from the session name (a Java
+  string hash folded into 49152 to 65534, v0.41.1 `connection.rs:423-431`), and the host claims
+  the port of its own name. The guard now names the run `run-<id>-<n>` with the smallest `n`
+  whose derived port is the claimed one (`runs::windows_session`; about 16 000 hashes of short
+  strings on average, a million at most), so a restarted run's CLI never reaches a dying run's
+  daemon on the same name, and the port checks still hold. If no `n` fits within the limit the
+  guard keeps the host's name, with a note.
+
+**Measured on iris** (Chrome for Testing 147, the real agent-browser v0.41.1, debug builds of
+the guard, a scratch script: the PSS of every process of the session, summed from
+`/proc/<pid>/smaps_rollup`, 5 s after the step, one sample each):
+
+| Step | Before (eager start, f75dec36) | After (lazy start) |
+| --- | --- | --- |
+| 2 sessions, after `initialize` and `tools/list` | 32 processes, 476.9 MiB | 4 processes, 2.7 MiB |
+| 1 session, after its first call (`open about:blank`) | 17 processes, 321.8 MiB | 17 processes, 316.4 MiB |
+| 1 session, after the idle stop (15 s here; before: the same wait, no stop) | 16 processes, 313.8 MiB | 2 processes, 2.2 MiB |
+
+Two Chromes share library pages, so the two-session row is less than twice one session.
+Another Chrome of the same build ran on iris throughout, which lowers every Chrome row alike.
+`browser_session_memory_p95` stays unmeasured.
+
+**Settled runs** (`browser_guard::runs_settled(cwd)`, for the host before it deletes
+`run.browser`). It is `true` when every guard run under `cwd` has finished its cleanup: no
+`chrome-profile-<id>` folder is left and no `chrome-profile-<id>.lock` is held. It probes each
+lock file with an exclusive `try_lock` and releases it at once: a live run holds its share, so
+the probe fails and takes nothing from it; a guard or reaper taking its share at that instant
+waits the probe out (`lock_shared` blocks). A run in the microseconds between making its lock
+file and taking its share (under the sweep lock, which the probe does not take) reads as
+settled: it has started nothing yet, so there is nothing to clean up. A free lock file with its
+profile still there is not settled (the cleanup has not finished; the next sweep finishes it);
+a free lock file alone is. `chrome-profiles.lock` and other names do not count. It means
+**cleanup finished, not Chrome dead**: Chrome has no parent-death signal, so it can outlive a SIGKILL of both the guard
+and the reaper, and a run whose browser idled out stays unsettled until its guard exits, though
+no Chrome runs. The host's Chrome-dead signal for #532 stays "the agent's tree is gone and the
+CDP port refuses a connect", with the records below.
+
+**Chrome records** (`browser_guard::chrome_groups(cwd)`, for stage C's "Chrome is gone" check:
+the CDP port alone cannot tell "dead" from "still starting, not listening yet"). Each run keeps
+`<cwd>/chrome-profile-<id>.chrome`, always written to `<record>.tmp` and renamed over it:
+- `none` after the run is claimed, and again once the guard has killed and reaped Chrome at a
+  stop (idle, crash, a failed start);
+- `starting` just before Chrome is spawned;
+- `running <pgid>` on Unix (Chrome leads its own group) or `running <pid> <creation time>` on
+  Windows, right after the spawn, before the reaper is told; again at every lazy restart;
+- deleted by the guard at its exit, after Chrome is reaped and the profile deleted, before the
+  run's lock is released. A reaper cleaning up for a killed guard, and the next run's sweep (for
+  a run whose lock is free, or whose lock file is gone), delete it before the profile and the
+  lock go, but only when it names no Chrome that may live: `none`; a `running` process that is
+  gone (the reaper first kills the group it was told and waits up to 5 s); or `starting`, once
+  nothing runs with the run's profile. A live `running` group stays.
+
+**A `starting` record is closed, not expired.** A guard SIGKILLed between the `starting` and
+`running` writes may have spawned Chrome without telling anyone its pid, and that record used
+to stay forever, so `chrome_groups` read `Starting` for the run until the host's cap, even
+with nothing alive. Expiring it after a set time was rejected: it would say "gone" about a
+Chrome that may run. Instead the window is closed where it opens:
+- **Unix** (`record/scan.rs`): the reaper and the sweep list the processes and pick those whose
+  command line holds the exact argument `--user-data-dir=<the run's profile>` (Chrome and its
+  helpers carry it, and the profile's name is the run's own, so nothing else matches); each is
+  killed with SIGKILL (its whole group when it leads one, as Chrome does), and the listing is
+  read again every 100 ms, up to 5 s, until none is left. Then the record goes. Linux reads
+  `/proc/<pid>/cmdline`; macOS lists with `proc_listallpids` and reads `sysctl KERN_PROCARGS2`.
+  A listing that fails, or cannot read the scanning process's own arguments (a jail, `hidepid`),
+  is not trusted: the record stays `Starting`, the one case left. A pid is signalled only while
+  its fresh command line names the profile, so no pid read from a file is acted on. The
+  process crate's listing (`crates/process`, `os`, `name_match`) matches executables and
+  parents, not command lines, so the guard has its own small one.
+- **Windows**: no reaper; the guard's Job Object (kill on close) ended Chrome with the guard,
+  so once the run's lock is free the next sweep deletes a `starting` record at once.
+
+`chrome_groups` returns one `ChromeState` per run that is not settled, and per other run whose
+record was left naming something but `none`: `None`, `Starting` or `Running(ChromeProcess)`.
+A live run with no record yet reads `None`; a free run with a profile and no record, a record
+that cannot be read or parsed, and a `starting` whose scan failed (above) read `Starting`,
+which the host treats as alive until its cap. `ChromeProcess::gone()` is true only
+when Chrome is surely gone: on Unix `kill(-pgid, 0)` fails with `ESRCH` (a group's id is not
+reused while any member lives, so a reused id only reads as alive); on Windows no process has the
+pid, or the one that has it was created at another time, or it has exited, opened with
+`PROCESS_QUERY_LIMITED_INFORMATION`; access denied, or any other failure, reads as alive. So it
+never says "gone" while Chrome may live; a false "alive" only makes the host wait until its cap.
+AGENTS.md warns against acting on a pid read from a file, which can name a reused process: the
+record is read-only, probed and never signalled or killed, and every doubt fails safe, so the
+rule's danger does not arise. The guard and the reaper kill only the pids they spawned or were
+told over the pipe, as before, and, for a `starting` record, the processes a fresh listing
+shows running with the run's own profile.
 
 ### Requirements on stage C's proxy and jail
 
@@ -644,8 +806,8 @@ logged), and any jailed process that calls `setsid`, which `killpg` does not rea
 agent-browser's Unix daemon, which the guard or its reaper ends ("Chrome on the claimed port").
 
 **Residual risk: a claimed port taken by another host.** A claim holds within this host process
-only (stage C's `ports`). Chrome binds at the guard's start (until lazy start), the stream
-server and agent-browser's daemon only at the agent's first browser tool call, and the stream
+only (stage C's `ports`). Chrome, the stream server and agent-browser's daemon bind only at the
+agent's first browser tool call (and again after an idle stop), and the stream
 server and the daemon fall back to another port
 when theirs is taken. So a second host on the same machine (two OS users, or two Windows users
 sharing 61080 to 61179) can be handed a port this host claimed but has not bound yet. This
@@ -1092,11 +1254,16 @@ The download (part 3):
   number formatting reaching agent-browser (an integer beyond `u64` becomes a float).
 - A child line over 64 MiB ends the session: a page large enough to produce one fails rather
   than exhausting the guard's memory.
-- Chrome runs from the session's start to its end, used or not, until lazy start (the next pull
-  request, a release blocker). Browser state survives `agent_browser_close` until the session
-  ends.
-- A Chrome crash ends the browser server for the session (the guard exits 1); restart-once
-  comes with lazy start.
+- Chrome runs only from the first browser call until 10 minutes without one; a session that
+  never browses pays a one-shot agent-browser per handshake request and no Chrome. Cookies and
+  storage survive `agent_browser_close` and the idle stop until the session ends; open tabs do
+  not survive the idle stop.
+- The first call of a session, and the first after an idle stop, waits for Chrome's start
+  (about 1 s on iris) and up to 15 s more while a dying run still holds the debugging port.
+- A Chrome crash costs the calls in flight and a restart; a second crash ends the browser server
+  for the session (the guard exits 1).
+- The host has two read-only probes for a run folder: `runs_settled` (cleanup finished) and
+  `chrome_groups` (whose Chrome may live). Neither proves Chrome dead by itself.
 
 ## Not verified
 
@@ -1136,6 +1303,23 @@ The download (part 3):
   --target x86_64-pc-windows-gnu` only; CI's Windows job runs those tests. `LOCAL_PEERPID` on
   macOS is from nix's documentation and `cargo check`, not a run. The per-run lock files
   (`File::lock`: `flock` on macOS, `LockFileEx` on Windows) and the sweep ran on Linux only.
+- Lazy start on macOS and Windows: not run. The Windows parts (the per-run session name, the
+  creation-time read and `gone()` with `OpenProcess`/`GetExitCodeProcess`, the one-shot in the
+  job) pass `cargo clippy --target x86_64-pc-windows-gnu` only; the run-name search runs as a
+  Linux unit test against agent-browser's own hash vectors. The `chrome_groups` and
+  `runs_settled` probes ran on Linux only (`flock` on macOS, `LockFileEx` on Windows).
+- A dead guard and reaper leave a `running` record whose group is still alive, or a `starting`
+  one whose process scan failed, until a later run's sweep finds it forgettable or the host
+  deletes the run folder; the host reads it as alive until its cap. A run whose Chrome outlived
+  both keeps its record that way too, which is the intent.
+- The `starting` scan ran on Linux only (unit and stub tests); the macOS listing
+  (`proc_listallpids`, `KERN_PROCARGS2`) passes clippy for `aarch64-apple-darwin` only, and
+  whether a macOS jail lets the reaper read other processes' arguments is unknown (if not, the
+  self-check fails and the record stays `Starting`). On Windows a guard killed between Chrome's
+  suspended spawn and its adoption into the job leaves that Chrome suspended (never run) outside
+  the job, and the sweep deletes the `starting` record anyway; not tested.
+- The one-shot handshake assumes agent-browser's MCP server stays stateless between messages; an
+  agent-browser bump re-reads `mcp.rs` for that.
 - The Unix parent check counts only pid 1 as a parent gone at the start; under a subreaper a
   parent that died first goes unnoticed until stdin's end ("The parent's end"). Not fixed.
 - The reaped-pid lines close the window only from the guard's side: a guard killed between

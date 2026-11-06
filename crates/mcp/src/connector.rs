@@ -18,7 +18,8 @@
 
 mod answer;
 mod handshake;
-mod head;
+/// Also read by the browser guard, for the ids of agent-browser's replies.
+pub(crate) mod head;
 #[cfg(test)]
 mod in_flight;
 mod line;
