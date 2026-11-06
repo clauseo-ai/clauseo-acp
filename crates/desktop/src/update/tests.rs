@@ -424,3 +424,42 @@ fn the_fake_offers_its_version_at_once_and_its_download_installs_nothing() {
     assert!(progress.try_recv().is_ok());
     assert!(downloaded.handle.downcast_ref::<Pending>().is_none());
 }
+
+/// The stop is marked ended right before the restart (tauri lets a restart past `prevent_exit`,
+/// so `RunEvent::Exit` would otherwise wait out its 13 s), after the install: `before_restart`
+/// runs once, after "install" and before "restart". With nothing to install (a plain stop, a
+/// download no plugin made), neither runs.
+#[test]
+fn the_stop_is_marked_ended_right_before_the_restart_and_only_then() {
+    let mut steps = Recorded::new(true, Ok(()));
+    let after = after_host(HostExit::Install(downloaded()), &mut steps);
+    let order = std::cell::RefCell::new(steps.steps.clone());
+    super::restart_after(
+        after,
+        || order.borrow_mut().push("before restart"),
+        || order.borrow_mut().push("restart"),
+    );
+    assert_eq!(
+        order.into_inner(),
+        [
+            "crash clean exit",
+            "flush",
+            "install",
+            "flush",
+            "before restart",
+            "restart"
+        ]
+    );
+    for (installable, ended) in [
+        (true, HostExit::Stopped),
+        (false, HostExit::Install(downloaded())),
+    ] {
+        let mut steps = Recorded::new(installable, Ok(()));
+        let after = after_host(ended, &mut steps);
+        super::restart_after(
+            after,
+            || panic!("nothing to install: no mark before a restart"),
+            || panic!("nothing to install: no restart"),
+        );
+    }
+}

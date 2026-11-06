@@ -259,7 +259,9 @@ fn the_stopper_and_the_update_path_save_no_window_state() {
             HostExit::Install(downloaded()),
             agents_stopped,
             |install, stopped| {
-                crate::update::after_host(app.handle(), install, stopped);
+                crate::update::after_host(app.handle(), install, stopped, || {
+                    panic!("nothing to install: no restart")
+                });
                 ended = Some(stopped);
             },
         );
