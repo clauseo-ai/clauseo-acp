@@ -4,13 +4,18 @@
 //! - `signin.policy_unreadable` while an unreadable policy blocks it;
 //! - else `agent.key_unreadable` while its stored key is marked unreadable (the read failed,
 //!   or did not answer within the first load's bound: `setup/keys/reads.rs`);
+//! - else, while it launches on its plan login (no key stored, no endpoint or provider), its
+//!   identity check's (R17, `setup/identity.rs`): `signin.account_changed`,
+//!   `agent.identity_checking` or `agent.identity_unknown`;
 //! - else none: no key is stored (it launches without one), or its key is in memory.
 //!
 //! `agent.keys_loading` is the host's from its start until the first load is over; [`sync`]
 //! replaces it, once the keys have loaded or the bound has passed, with the refusal in force.
 //! [`follow_keys`] keeps it in step later: each [`KeyNote::Read`] sets the agent's refusal
 //! again (a slow read that answered, a read again that succeeded, a key set or cleared), and
-//! each [`KeyNote::Retry`] (a launch met `agent.key_unreadable`) reads the key again.
+//! each [`KeyNote::Retry`] dispatches by the code the launch met (the host's launch retry):
+//! `agent.key_unreadable` reads the key again, `agent.identity_checking` asks the identity
+//! follower for its check, and any other code does nothing.
 
 use std::collections::BTreeSet;
 
@@ -23,21 +28,37 @@ use super::host_calls::SetupHost;
 use super::keys::{KeyCache, KeyNote};
 use crate::bridge::lock;
 
-/// The refusal in force for `agent`, given whether a policy `blocked` it and its `keys`.
-pub(crate) fn in_force(blocked: bool, keys: &KeyCache, agent: &AgentId) -> Option<ErrorCode> {
+/// The refusal in force for `agent`, given whether a policy `blocked` it, its `keys`, and
+/// its identity check's refusal, which holds only while no key is stored.
+pub(crate) fn in_force(
+    blocked: bool,
+    keys: &KeyCache,
+    identity: Option<ErrorCode>,
+    agent: &AgentId,
+) -> Option<ErrorCode> {
     if blocked {
         Some(ErrorCode::SigninPolicyUnreadable)
     } else if keys.unreadable(agent) {
         Some(ErrorCode::AgentKeyUnreadable)
-    } else {
+    } else if keys.has(agent) {
         None
+    } else {
+        identity
     }
 }
 
-/// The refusal in force for `agent` as `backend` holds the settings and keys.
+/// The refusal in force for `agent` as `backend` holds the settings, the keys and the
+/// identity check; an endpoint or a provider (`firm`) takes the plan login out of it.
 pub(crate) fn wanted(backend: &AgentsBackend, agent: &AgentId) -> Option<ErrorCode> {
-    let blocked = lock(&backend.wiring.applied).blocked.contains(agent);
-    in_force(blocked, &backend.keys, agent)
+    let (blocked, firm) = {
+        let applied = lock(&backend.wiring.applied);
+        (
+            applied.blocked.contains(agent),
+            applied.firm.contains(agent),
+        )
+    };
+    let identity = backend.wiring.identity.refusal(agent).filter(|_| !firm);
+    in_force(blocked, &backend.keys, identity, agent)
 }
 
 /// Tells the host `agent`'s refusal in force when it is not what the host was last told. A
@@ -87,7 +108,7 @@ pub(crate) async fn settle_after_load<'a>(
     blocked: &BTreeSet<AgentId>,
 ) {
     for agent in known.into_iter().filter(|agent| !blocked.contains(*agent)) {
-        let code = in_force(false, keys, agent);
+        let code = in_force(false, keys, None, agent);
         if let Err(error) = host.set_launch_refused(agent.clone(), code).await {
             let code = error.code().as_str();
             tracing::warn!(%agent, code, "the keys' launch refusal was not set");
@@ -95,16 +116,21 @@ pub(crate) async fn settle_after_load<'a>(
     }
 }
 
-/// Each note about a stored key, until the channel closes: a [`KeyNote::Read`] sets that
-/// agent's refusal again (and what the windows show of its key); a [`KeyNote::Retry`] reads
-/// its key again when it is marked unreadable.
+/// Each note, until the channel closes: a [`KeyNote::Read`] sets that agent's refusal again
+/// (and what the windows show of its key); a [`KeyNote::Retry`] goes by the code the launch
+/// met, as the module docs say.
 pub(crate) async fn follow_keys(backend: &AgentsBackend, mut notes: UnboundedReceiver<KeyNote>) {
     while let Some(note) = notes.next().await {
         match note {
-            KeyNote::Retry(agent) => {
+            KeyNote::Retry(agent, ErrorCode::AgentKeyUnreadable) => {
                 // Its answer comes back as a `KeyNote::Read` when the mark changes.
                 drop(backend.keys.read_again(&agent));
             }
+            // The follower runs it when it is due, and the refusal follows its verdict.
+            KeyNote::Retry(agent, ErrorCode::AgentIdentityChecking) => {
+                backend.wiring.identity.ask(&agent);
+            }
+            KeyNote::Retry(..) => {}
             KeyNote::Read(agent) => {
                 if !backend.known.contains_key(&agent) {
                     continue;

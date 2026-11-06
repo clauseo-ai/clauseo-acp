@@ -463,7 +463,8 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     unreadable key as stored.
   - *The retry.* A read that had not answered goes on, and when it answers it is taken in: a key
     or no item lifts the refusal. A launch meeting `agent.key_unreadable` also asks desktop to
-    read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
+    read that key again (`HostConfig::with_launch_retry`, with the code; called on the actor,
+    never blocking)
     before its 2 s wait, unless a read of it is still running. A read again that succeeds lifts
     the refusal, so that launch, or the lawyer's next try, goes on. A read that fails again
     leaves it. A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
@@ -574,6 +575,59 @@ reads' hold dropped and `limits_login_changed`.
   questions waiting until the app restarts.** The app gives the card its words later.
 - *Clauseo's own login signed out* calls `restart_agents` as well as `limits_login_changed`
   (ruling 3), so no idle agent stays on the old login.
+
+**Identity check (R17; the orchestrator's ruling, agreed with the host code owner,
+2026-11-06).** Every matter's agents use the one login, which stays writable for token refresh,
+so an agent in one matter could swap another account into it and another matter's work would
+go there. Desktop records which account each agent's login belongs to and acts when that
+changes (`setup/identity.rs`).
+
+- *Where the identity comes from.* Only the agents' own status output: S18's `SignedIn {
+  email }`, and `Agents::read_account` (Claude's `auth status --json`, Codex's `login status`
+  then `account/read`, under the environment a session of that login sees; it changes no
+  sign-in state). Never a token or a credential file's contents. The email is kept only as its
+  SHA-256 (trimmed, lower-cased), in `<data_dir>/agents/identity.json` (agent id to hash,
+  written atomically, not at all when unchanged), so a swap while Clauseo is closed shows at the
+  next start.
+- *When it is recorded.* At a sign-in or reuse made through Clauseo (`StartSignIn`,
+  `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
+  anything compares it, so a new account chosen in Clauseo never reads as a swap. And at the
+  first `SignedIn` when nothing is recorded (first run). **Any other `SignedIn` is compared:**
+  one from S18's status check (at start, or when a window shows Plans) naming another account is
+  a change. Before R17 the pump took such a state as a new sign-in and restarted the agents on
+  it.
+- *The cache.* The verdict holds while the login files' file id and last write are unchanged:
+  a stat every 2 s (metadata only), sessions running or not. Codex: `auth.json` in Clauseo's
+  agent home, and the lawyer's `~/.codex/auth.json` while reused. Claude: the store file
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` points a session at, `<home>/.credentials.json` for
+  Clauseo's own login and the lawyer's `~/.claude/.credentials.json` for a reused one (Linux and
+  Windows keep the login there). On macOS Claude keeps it in the Keychain: with no file, a
+  launch whose last check is 10 minutes old checks again first. **Open point:** a Keychain-only
+  Claude login fails inside the macOS sandbox, so the host will hand Claude its login through
+  `CLAUDE_CODE_OAUTH_TOKEN` or a Clauseo-owned file store, not yet decided. The check already
+  runs Claude's status with the store the launch entry names and watches whichever store file
+  exists there, so a file store makes macOS watchable too; until the host decides, macOS
+  Claude uses the 10-minute fallback, which stays for any login with no file (a token in the
+  environment only, say). A fresh, same verdict refuses
+  nothing, so a launch costs nothing.
+- *The flow, through the existing `set_launch_refused` and `stop_agents`.* A stamp changes:
+  `agent.identity_checking` at once (waited out like `agent.keys_loading`; a launch meeting it
+  asks desktop through the host's launch retry, `HostConfig::with_launch_retry`, which now
+  passes the code: `agent.key_unreadable` reads the key again, `agent.identity_checking` runs
+  the check), then the status, bounded by 20 s. The same account lifts the identity's refusal
+  and no other (a policy's or an unreadable key's stays in force over it); a status that failed,
+  timed out or named no account sets `agent.identity_unknown` (checked again every 30 s, or at
+  the next status); another account sets `signin.account_changed`, then calls `stop_agents`,
+  then shows `SignIn::Failed { code: signin.account_changed }`, until a sign-in through Clauseo
+  records an account again and `restart_agents` runs as for any new sign-in. A reused login
+  also gets S18's status check, which ends the reuse as `ReusedChanged`. The stop goes through
+  one desktop function, `stop_for_account_change`, which takes the host's
+  `stop_agents_for(agent, StopFor::SignInAgain)` once it lands. With an API key stored, or an
+  endpoint or a provider, the launches do not use the login, so the identity refuses nothing.
+- *At start.* An agent with an account recorded waits (`agent.identity_checking`) until the
+  first status answers; a record that cannot be read counts as unknown for every agent with a
+  login (refused, retryable), never as the same, until a sign-in through Clauseo writes it
+  again. Logs name the agent and a fixed kind, never an email, a hash or a path.
 
 ## Consequences
 

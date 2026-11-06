@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use super::hook::Plans;
+use super::identity::Identities;
 use clauseo_process::AsyncIoTimer;
 
 use super::leave::{LeaveTimer, Leaves, Waiters};
@@ -32,6 +33,8 @@ pub(crate) struct Wiring {
     pub(crate) refused: Mutex<BTreeMap<AgentId, ErrorCode>>,
     /// Held across each change of a refusal, so the host's and [`Self::refused`] keep step.
     pub(crate) refusal_gate: futures::lock::Mutex<()>,
+    /// Each agent's login's account and its check (R17, `setup/identity.rs`).
+    pub(crate) identity: Identities,
 }
 
 impl Wiring {
@@ -55,7 +58,14 @@ impl Wiring {
             refused: Mutex::new(refused.into_iter().collect()),
             refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
+            identity: Identities::in_memory(),
         }
+    }
+
+    /// The identity check over `identity` (its record read from the data folder).
+    pub(crate) fn with_identity(mut self, identity: Identities) -> Self {
+        self.identity = identity;
+        self
     }
 
     /// The leave's waits on `timer` (the tests' hand-driven one).

@@ -107,6 +107,10 @@ impl crate::setup::backend::SetupAgents for Real {
     fn shutdown(&self, _: Duration) -> bool {
         true
     }
+    fn read_account(&self, _: &AgentId) -> clauseo_agents::AccountFuture {
+        self.call("read_account");
+        Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
+    }
 }
 
 fn fake(hold: Duration) -> (FakeSignin, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {
