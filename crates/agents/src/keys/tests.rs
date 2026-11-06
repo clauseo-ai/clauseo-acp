@@ -98,7 +98,7 @@ fn printable_ascii_keys_pass_including_dash_and_underscore() {
 
 /// Plants `bytes` as `agent`'s item, as another app or Keychain Access would.
 fn plant(keychain: &Keychain, agent: &AgentId, bytes: &[u8]) {
-    let super::Backend::Memory(items, _) = &keychain.backend else {
+    let super::Backend::Memory(items, ..) = &keychain.backend else {
         panic!("plant needs the memory keychain");
     };
     super::lock(items).insert(account(agent), super::Zeroizing::new(bytes.to_vec()));

@@ -161,9 +161,10 @@ enum Backend {
     None,
     #[cfg(any(target_os = "macos", windows))]
     Os,
-    /// The items, and whether every read fails (a locked keychain, a denied prompt).
+    /// The items, whether every read fails (a locked keychain, a denied prompt), and whether
+    /// every read waits (a prompt nobody answers).
     #[cfg(any(test, feature = "test-support"))]
-    Memory(Arc<Mutex<Items>>, Arc<AtomicBool>),
+    Memory(Arc<Mutex<Items>>, Arc<AtomicBool>, Arc<Hang>),
 }
 
 impl fmt::Debug for Keychain {
@@ -173,7 +174,7 @@ impl fmt::Debug for Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => f.write_str("Keychain(os)"),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items, _) => f
+            Backend::Memory(items, ..) => f
                 .debug_tuple("Keychain::memory")
                 .field(&lock(items).keys().collect::<Vec<_>>())
                 .finish(),
@@ -202,7 +203,7 @@ impl Keychain {
     #[cfg(any(test, feature = "test-support"))]
     pub fn memory() -> Keychain {
         Keychain {
-            backend: Backend::Memory(Arc::default(), Arc::default()),
+            backend: Backend::Memory(Arc::default(), Arc::default(), Arc::default()),
         }
     }
 
@@ -211,8 +212,19 @@ impl Keychain {
     /// with `false`; writes still work. No effect on another keychain.
     #[cfg(any(test, feature = "test-support"))]
     pub fn fail_reads(&self, fail: bool) {
-        if let Backend::Memory(_, failing) = &self.backend {
+        if let Backend::Memory(_, failing, _) = &self.backend {
             failing.store(fail, Ordering::SeqCst);
+        }
+    }
+
+    /// Tests only: with `hang`, every read of a memory keychain (and its clones) waits, as a
+    /// keychain prompt nobody answers does, until called again with `false`, when the waiting
+    /// reads go on. No effect on another keychain.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hang_reads(&self, hang: bool) {
+        if let Backend::Memory(_, _, hanging) = &self.backend {
+            *hanging.on.lock().unwrap_or_else(PoisonError::into_inner) = hang;
+            hanging.changed.notify_all();
         }
     }
 
@@ -261,7 +273,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::set(agent, key.as_bytes()),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items, _) => {
+            Backend::Memory(items, ..) => {
                 let bytes = Zeroizing::new(key.as_bytes().to_vec());
                 lock(items).insert(account(agent), bytes);
                 Ok(())
@@ -277,7 +289,8 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::get(agent)?,
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items, failing) => {
+            Backend::Memory(items, failing, hanging) => {
+                hanging.wait();
                 if failing.load(Ordering::SeqCst) {
                     return Err(KeyError::NoAccess {
                         agent: agent.clone(),
@@ -308,7 +321,7 @@ impl Keychain {
             #[cfg(any(target_os = "macos", windows))]
             Backend::Os => os::delete(agent),
             #[cfg(any(test, feature = "test-support"))]
-            Backend::Memory(items, _) => {
+            Backend::Memory(items, ..) => {
                 lock(items).remove(&account(agent));
                 Ok(())
             }
@@ -320,6 +333,28 @@ impl Keychain {
 fn writes() -> MutexGuard<'static, ()> {
     static WRITES: Mutex<()> = Mutex::new(());
     WRITES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether a memory keychain's reads wait, and the wake for those waiting.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Default)]
+struct Hang {
+    on: Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Hang {
+    /// Waits while reads hang.
+    fn wait(&self) {
+        let mut on = self.on.lock().unwrap_or_else(PoisonError::into_inner);
+        while *on {
+            on = self
+                .changed
+                .wait(on)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
 }
 
 /// The memory keychain's items: account to bytes.

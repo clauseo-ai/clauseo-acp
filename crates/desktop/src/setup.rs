@@ -48,6 +48,7 @@ mod leave;
 mod login_check;
 mod readers;
 mod refresh;
+mod refusal;
 mod start;
 #[cfg(test)]
 mod stub;
@@ -67,7 +68,7 @@ pub(crate) use confirm::NativeSetupConfirm;
 pub(crate) use events::SetupEvents;
 pub(crate) use hook::{SetupHook, plans_of};
 pub(crate) use host_calls::CellHost;
-pub(crate) use keys::KeySlot;
+pub(crate) use keys::{KeyNotes, KeySlot};
 pub(crate) use login_check::{DesktopLoginCheck, ReusedLogins};
 pub(crate) use readers::{LeaveReaders, SwappableReaders};
 pub(crate) use start::{BackendCell, HostSide, SetupParts, SetupStart, spawn};

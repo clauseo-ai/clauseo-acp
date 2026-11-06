@@ -399,9 +399,9 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   the queue's held flag, as any held queue does, which a head sent now passes; otherwise a queued
   prompt stays held while any hold applies. With the sign-in's among them it queues as above.
 - *`set_launch_refused(agent, Option<ErrorCode>) -> Result<(), HostError>`* refuses the id's
-  **new launches only**. The codes come from a list: `signin.policy_unreadable` and
-  `agent.keys_loading`. Any other code is a bug: debug builds assert, and release builds refuse
-  it with `command.invalid` and change nothing. A turn that would launch fails as any refused
+  **new launches only**. The codes come from a list: `signin.policy_unreadable`,
+  `agent.keys_loading` and `agent.key_unreadable`. Any other code is a bug: debug builds
+  assert, and release builds refuse it with `command.invalid` and change nothing. A turn that would launch fails as any refused
   launch does, an ordinary `TurnFailed` with that code. **Sessions already running go on until
   they exit,** unless desktop calls `stop_agents`. A refusal applies to new launches; a running
   session ends normally. `None` lifts the refusal. It is in memory only.
@@ -412,6 +412,33 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
   policy's stays until the settings lift it. A launch meeting `agent.keys_loading` waits at most
   2 s on the host clock for it to be lifted, then checks the refusals again: still refused, it
   fails with that code and no process starts (ruling 4: never launch without the key).
+- *`agent.keys_loading` and `agent.key_unreadable` are two different facts* (R20 P5b A4, the
+  orchestrator's ruling). `agent.keys_loading` means desktop has not finished loading the stored
+  keys at all: start-up. `agent.key_unreadable` means this agent's stored key was tried and the
+  read failed (the keychain's error, such as a refused prompt) or did not answer in time. Both
+  are retryable, and a launch waits out either for 2 s.
+  - *The first load is bounded.* Desktop reads each agent's key on a thread of its own and its
+    setup thread waits for them at most 10 s on its timer (`setup/keys/reads.rs`). Then, per
+    agent: no item stored lifts the refusal, and it launches without a key; a key read fine lifts
+    it, and it launches with the key; a read that failed, or has not answered, sets
+    `agent.key_unreadable`. Such a key never reads as "no key" and the agent never launches
+    without it. Desktop cannot tell "no key stored" without a read that answers, so a read that
+    does not answer counts as a stored key. The log line names the agent, "key unreadable" and
+    the error's kind; never the key, the item's name or a path.
+  - *The retry.* A read that had not answered goes on, and when it answers it is taken in: a key
+    or no item lifts the refusal. A launch meeting `agent.key_unreadable` also asks desktop to
+    read that key again (`HostConfig::with_key_retry`, called on the actor, never blocking)
+    before its 2 s wait, unless a read of it is still running. A read again that succeeds lifts
+    the refusal, so that launch, or the lawyer's next try, goes on. A read that fails again
+    leaves it. A key the lawyer sets or clears also ends the mark. Desktop keeps one refusal in
+    force per agent (`setup/refusal.rs`): the policy's, else the unreadable key's, else none.
+  - *A setup thread that never loads the keys.* The host bounds `agent.keys_loading` itself: from
+    12 s after its start (desktop's 10 s and a margin), one still in place counts as
+    `agent.key_unreadable`, for every agent it covers, since only desktop knows which have a
+    stored key. So launches never stay "still starting" for good.
+  - *Limits reads wait for the keys.* Before the keys load, a limits read waits (at most 12 s,
+    then fails) and launches nothing, so it never reads another login's numbers for an agent
+    whose key is stored. An agent whose key is unreadable fails its reads.
 - *`LoginCheck::shared(&AgentId, agent_home: &Path) -> Shared`*, a second hook call, where
   `Shared` is `Yes`, `No` or `Unknown`. It asks whether the home's `auth.json` is the lawyer's
   file, whatever the link check says. A symlinked `auth.json` is `Split` to `check` (it is no

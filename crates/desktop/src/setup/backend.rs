@@ -54,7 +54,8 @@ use crate::open::{Opener, open_url_unconfirmed};
 pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
-use self::parts::{FirstRun, checked_endpoint, plan_method};
+pub(crate) use self::parts::signin_error;
+use self::parts::{FirstRun, checked_endpoint, invalid, plan_method};
 pub(crate) use self::seam::SetupAgents;
 
 /// One agent as the backend knows it from the snapshot and the locations.
@@ -251,8 +252,9 @@ impl AgentsBackend {
         self.refuse_blocked(agent)?;
         KeyCache::check(agent, &key)?;
         self.keys.refuse_unavailable(agent)?;
-        // `main`'s first key leaves no login for a key that is there already.
-        if key_write == KeyWrite::OnlyIfAbsent && self.keys.has(agent) {
+        // `main`'s first key leaves no login for a key that is there already. One marked
+        // unreadable goes on to the keychain's check, which reads it again.
+        if key_write == KeyWrite::OnlyIfAbsent && self.keys.in_memory(agent) {
             return Err(key_stored(agent));
         }
         let left = self.reused(agent);
@@ -575,21 +577,6 @@ impl AgentsBackend {
             }
         }
     }
-}
-
-/// The answer to a refused S18 call: `command.invalid`, except a missing home (`internal`).
-/// The text names the agent, never a code or an email.
-pub(crate) fn signin_error(error: &SigninError) -> HostError {
-    let code = match error {
-        SigninError::NoHome(_) => ErrorCode::Internal,
-        _ => ErrorCode::CommandInvalid,
-    };
-    HostError::new(code, error.to_string())
-}
-
-/// A `command.invalid` failure with `message`.
-fn invalid(message: impl Into<String>) -> HostError {
-    HostError::new(ErrorCode::CommandInvalid, message)
 }
 
 mod count;

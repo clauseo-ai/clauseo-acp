@@ -1,12 +1,10 @@
 //! Small parts of the backend: first run's decision, the plan login a `StartSignIn` asks for,
-//! and the endpoint check before `SetFirmEndpoint`'s confirm.
+//! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers.
 
 use std::collections::BTreeSet;
 
-use clauseo_agents::{InstallState, Method};
-use clauseo_protocol::{AgentId, AgentKind, HostError};
-
-use super::invalid;
+use clauseo_agents::{InstallState, Method, SigninError};
+use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
 
 /// Which first install states have come in: first run is decided once every agent has one.
 pub(super) struct FirstRun {
@@ -72,4 +70,19 @@ pub(super) fn checked_endpoint(url: &str) -> Result<String, HostError> {
         ));
     }
     Ok(url.to_owned())
+}
+
+/// The answer to a refused S18 call: `command.invalid`, except a missing home (`internal`).
+/// The text names the agent, never a code or an email.
+pub(crate) fn signin_error(error: &SigninError) -> HostError {
+    let code = match error {
+        SigninError::NoHome(_) => ErrorCode::Internal,
+        _ => ErrorCode::CommandInvalid,
+    };
+    HostError::new(code, error.to_string())
+}
+
+/// A `command.invalid` failure with `message`.
+pub(super) fn invalid(message: impl Into<String>) -> HostError {
+    HostError::new(ErrorCode::CommandInvalid, message)
 }

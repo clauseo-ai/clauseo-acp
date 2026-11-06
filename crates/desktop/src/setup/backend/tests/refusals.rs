@@ -11,7 +11,8 @@ use clauseo_protocol::ErrorCode;
 use super::fakes::{HostCall, rig};
 use super::{claude, codex};
 use crate::bridge::lock;
-use crate::setup::start::{follow_settings, lift_keys_loading, refusals_at_start};
+use crate::setup::refusal::settle_after_load;
+use crate::setup::start::{follow_settings, refusals_at_start};
 use crate::test_support::{Scratch, block_on};
 
 #[test]
@@ -37,8 +38,9 @@ fn the_host_starts_refusing_a_blocked_agent_for_the_policy_and_the_rest_for_the_
 fn the_keys_lift_clears_only_the_agents_the_policy_does_not_block() {
     let rig = rig(true);
     let blocked = BTreeSet::from([codex()]);
-    block_on(lift_keys_loading(
+    block_on(settle_after_load(
         &*rig.host,
+        &rig.backend.keys,
         [&claude(), &codex()],
         &blocked,
     ));
@@ -52,21 +54,26 @@ fn the_keys_lift_clears_only_the_agents_the_policy_does_not_block() {
 #[test]
 fn the_backend_starts_knowing_the_host_refuses_the_blocked_agents() {
     let rig = rig(true);
-    // The rig's start settings block nothing, so the host was told nothing to lift later.
+    // The rig's host was told nothing, so there is nothing to lift later.
     assert!(crate::bridge::lock(&rig.backend.wiring.refused).is_empty());
     let read = crate::setup::refresh::SettingsRead {
         blocked: BTreeSet::from([codex()]),
         ..Default::default()
     };
+    let refused = refusals_at_start([&claude(), &codex()], &read.blocked);
     let wiring = crate::setup::wiring::Wiring::new(
         std::sync::Arc::clone(&rig.backend.wiring.readers),
         rig.backend.wiring.reused.clone(),
         std::sync::Arc::clone(&rig.backend.wiring.plans),
         read,
+        refused,
     );
     assert_eq!(
         *crate::bridge::lock(&wiring.refused),
-        BTreeSet::from([codex()])
+        std::collections::BTreeMap::from([
+            (claude(), ErrorCode::AgentKeysLoading),
+            (codex(), ErrorCode::SigninPolicyUnreadable),
+        ])
     );
 }
 
