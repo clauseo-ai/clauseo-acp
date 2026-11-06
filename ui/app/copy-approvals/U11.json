@@ -199,5 +199,15 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (U11 release date)"
+  },
+  "U11-51": {
+    "en": "Test build",
+    "hi": "टेस्ट बिल्ड",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

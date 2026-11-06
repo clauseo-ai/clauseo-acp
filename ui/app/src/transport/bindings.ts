@@ -67,7 +67,7 @@ export const commands = {
 	 */
 	display: string,
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
-	/**  The OS the host runs on, and this build's release date. */
+	/**  The OS the host runs on, this build's release date, and whether it is a test build. */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 	/**
 	 *  Opens an https, http or mailto `url` in the default browser or mail app, after a native
@@ -1139,6 +1139,11 @@ export type DisplayInfo = {
 	platform: Platform,
 	/**  The date of this release (`YYYY-MM-DD`, UTC), from its tag; `None` in dev and CI builds. */
 	release_date: string | null,
+	/**
+	 *  Whether this is a test build: an `e2e` build, which `test-v*` pre-releases ship with
+	 *  and anyone can install.
+	 */
+	test_build: boolean,
 };
 
 /**

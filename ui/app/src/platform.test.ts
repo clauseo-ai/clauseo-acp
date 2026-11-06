@@ -10,13 +10,20 @@ test("the host's report decides the platform; only a transport with no host gues
   expect(await hostDisplayInfo(new NullTransport())).toEqual({
     platform: guessPlatform(),
     release_date: null,
+    test_build: false,
   });
 });
 
 test("the host's release date comes with its report; a transport with no host has none", async () => {
   expect(
     await hostDisplayInfo(new FakeTransport({ platform: "mac", releaseDate: "2026-11-03" })),
-  ).toEqual({ platform: "mac", release_date: "2026-11-03" });
+  ).toEqual({ platform: "mac", release_date: "2026-11-03", test_build: false });
+});
+
+test("the host's test-build word comes with its report", async () => {
+  expect(await hostDisplayInfo(new FakeTransport({ testBuild: true }))).toMatchObject({
+    test_build: true,
+  });
 });
 
 test("a desktop transport whose display_info fails rejects instead of guessing", async () => {

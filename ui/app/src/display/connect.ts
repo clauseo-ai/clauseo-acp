@@ -44,9 +44,10 @@ export function connectDisplay(
   // The window's chrome follows the OS the host reports, and About shows its release date; nothing on the page waits
   // for either.
   hostDisplayInfo(transport).then(
-    ({ platform, release_date }) => {
+    ({ platform, release_date, test_build }) => {
       store.setPlatform(platform);
       store.setReleaseDate(release_date);
+      store.setTestBuild(test_build);
     },
     (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
   );

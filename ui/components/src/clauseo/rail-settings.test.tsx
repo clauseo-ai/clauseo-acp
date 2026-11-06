@@ -69,3 +69,37 @@ describe("Settings at the rail's foot", () => {
     expect(document.querySelector(".room-rail-foot")).toBeNull();
   });
 });
+
+describe("the Test build label at the rail's foot", () => {
+  test("a test build shows it beside Settings, as a tag that is no control", async () => {
+    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, motion: "reduced" });
+    await mount(
+      <Rail open groups={[]} onSettings={() => {}} testIds={{ settings: "open-settings" }} />,
+    );
+    const tag = document.querySelector<HTMLElement>(".room-rail-foot [data-testid='test-build']");
+    expect(txt(tag)).toBe("Test build");
+    expect(tag?.closest("button")).toBeNull();
+    expect(tag?.getAttribute("role")).toBeNull();
+    expect(document.querySelector(".room-settings")?.previousElementSibling).toBe(tag);
+  });
+
+  test("a test build with no Settings still shows it, at the foot", async () => {
+    showDisplay({ ...DEFAULT_DISPLAY, testBuild: true, motion: "reduced" });
+    await mount(<Rail open groups={[]} scratch={{}} />);
+    expect(txt(document.querySelector(".room-rail-foot [data-testid='test-build']"))).toBe(
+      "Test build",
+    );
+  });
+
+  test("a build that is not a test build shows no label, with or without Settings", async () => {
+    await mount(<Rail open groups={[]} onSettings={() => {}} />);
+    expect(document.querySelector("[data-testid='test-build']")).toBeNull();
+    expect(document.querySelector(".room-settings")).not.toBeNull();
+  });
+
+  test("the label reads in Hindi in a Hindi display", async () => {
+    showDisplay({ ...DEFAULT_DISPLAY, lang: "hi", testBuild: true, motion: "reduced" });
+    await mount(<Rail open groups={[]} onSettings={() => {}} />);
+    expect(txt(document.querySelector("[data-testid='test-build']"))).toBe("टेस्ट बिल्ड");
+  });
+});

@@ -17,6 +17,7 @@ import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
 import { findMatters, type FoundBy } from "./rail-find.ts";
 import { MatterRow, type MatterRowProps } from "./rail-matter.tsx";
+import { TestBuildTag } from "./test-build.tsx";
 
 export type { MatterRowProps, MatterState } from "./rail-matter.tsx";
 export { MatterRow };
@@ -239,7 +240,7 @@ export function Rail({
 }) {
   const w = useWords();
   const room = useRoom();
-  const { platform } = useDisplay();
+  const { platform, testBuild } = useDisplay();
   const [query, setQuery] = useState(find?.query ?? "");
   const [finding, setFinding] = useState(find?.open === true || (find?.query ?? "") !== "");
   // a press inside the rail keeps the list as it is until the press lands, so a found matter can be opened
@@ -494,12 +495,14 @@ export function Rail({
         </div>
       )}
       {/* with Settings, the scratch matter and Settings stand on the rail's foot, always in view as the list scrolls */}
-      {settings === undefined && onSettings === undefined && notice === undefined ? (
+      {settings === undefined && onSettings === undefined && notice === undefined && !testBuild ? (
         scratchRow
       ) : (
         <div className="room-rail-foot">
           {notice}
           {scratchRow}
+          {/* a test build says so, in a muted tag beside Settings: it is not a control and not an alert */}
+          {testBuild && <TestBuildTag />}
           {/* key caps stand on inline prompts only: the shortcut is named to assistive technology and under the pointer */}
           {onSettings !== undefined ? (
             <button

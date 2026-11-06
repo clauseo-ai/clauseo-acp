@@ -20,6 +20,7 @@ export function guessPlatform(): Platform {
  * (`"null"`) falls back, to `guessPlatform` and no date; a desktop transport whose call fails rejects, so a wrong guess
  * never stands in for the host's answer. */
 export async function hostDisplayInfo(transport: HostTransport): Promise<DisplayInfo> {
-  if (transport.kind === "null") return { platform: guessPlatform(), release_date: null };
+  if (transport.kind === "null")
+    return { platform: guessPlatform(), release_date: null, test_build: false };
   return transport.displayInfo();
 }

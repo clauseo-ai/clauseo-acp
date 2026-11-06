@@ -33,6 +33,8 @@ export type Display = {
   lang: Lang;
   textSize: TextSize;
   platform: Platform;
+  /** A test build (the desktop's `e2e` feature), which the rail's foot and Settings label; the host reports it. */
+  testBuild: boolean;
 };
 
 /** What the page shows before the app says otherwise. */
@@ -43,6 +45,7 @@ export const DEFAULT_DISPLAY: Display = {
   lang: "en",
   textSize: 16,
   platform: "mac",
+  testBuild: false,
 };
 
 let current: Display = DEFAULT_DISPLAY;
@@ -75,7 +78,8 @@ const same = (a: Display, b: Display) =>
   a.motion === b.motion &&
   a.lang === b.lang &&
   a.textSize === b.textSize &&
-  a.platform === b.platform;
+  a.platform === b.platform &&
+  a.testBuild === b.testBuild;
 
 /** The Hindi display waiting for its words (words-core.ts's loadHindi), or null. Only the latest call's waits. */
 let waiting: Display | null = null;

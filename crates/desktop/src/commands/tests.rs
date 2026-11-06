@@ -148,7 +148,10 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         "linux"
     };
     // Tests are never a release build, so no release date (release.yml sets one on tags only).
-    assert_eq!(info, json!({ "platform": platform, "release_date": null }));
+    assert_eq!(
+        info,
+        json!({ "platform": platform, "release_date": null, "test_build": cfg!(feature = "e2e") })
+    );
 
     // The same command from a page that is not the app's is refused.
     let foreign = invoke_from(&window, "https://example.com", "display_info", json!({}));
@@ -158,6 +161,28 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         .and_then(Value::as_str)
         .is_some_and(|text| text.contains("not allowed"));
     assert!(denied, "{foreign:?}");
+}
+
+/// A build without the `e2e` feature is not a test build: the rail and Settings say nothing.
+#[cfg(not(feature = "e2e"))]
+#[test]
+fn a_build_without_e2e_is_not_a_test_build() {
+    let scratch = Scratch::new("display-info-release", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let info = invoke(&window, "display_info", json!({})).unwrap();
+    assert_eq!(info["test_build"], json!(false), "{info}");
+}
+
+/// The mirror of the test above: an `e2e` build says it is a test build.
+#[cfg(feature = "e2e")]
+#[test]
+fn an_e2e_build_is_a_test_build() {
+    let scratch = Scratch::new("display-info-e2e", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let info = invoke(&window, "display_info", json!({})).unwrap();
+    assert_eq!(info["test_build"], json!(true), "{info}");
 }
 
 /// The e2e and marks commands answer only in their builds; the default build's capabilities do
