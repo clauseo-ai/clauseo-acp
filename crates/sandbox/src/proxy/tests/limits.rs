@@ -12,7 +12,7 @@ use crate::Denial;
 use crate::Reachability::{Reachable, Unreachable};
 use crate::proxy::head::HEAD_CAP;
 use crate::proxy::relay::LINGER_CAP;
-use crate::proxy::{Limits, Verdict};
+use crate::proxy::{Limits, ProxyHandle, Verdict};
 
 #[test]
 fn the_sixty_fifth_open_tunnel_gets_503_and_no_denial() {
@@ -379,5 +379,80 @@ fn a_route_lookup_past_the_connect_timeout_goes_direct() {
     assert_eq!(round_trip(&mut tunnel, b"direct"), b"direct");
     let direct: SocketAddr = "192.0.2.10:443".parse().unwrap();
     assert_eq!(rig.net.dialled(), vec![direct]);
+    drop(release);
+}
+
+/// Whether dropping `handle` on another thread returns within a second: the quit path joins the
+/// proxy thread, so nothing in flight may hold it.
+fn drops_within_a_second(handle: ProxyHandle) -> bool {
+    let (dropped, done) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(handle);
+        // The test may have stopped waiting.
+        match dropped.send(()) {
+            Ok(()) | Err(std::sync::mpsc::SendError(())) => {}
+        }
+    });
+    done.recv_timeout(Duration::from_secs(1)).is_ok()
+}
+
+#[test]
+fn dropping_the_handle_during_an_origin_connect_that_never_answers_returns_at_once() {
+    let rig = echo_rig_with(Limits::default());
+    // Never released: an origin that never answers, as a blackholed address would.
+    let held = rig.net.hold_next_connect();
+    let mut stream = rig.agent();
+    let request = format!(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n{}\r\n",
+        rig.auth()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    held.arrived.recv().unwrap();
+    assert!(
+        drops_within_a_second(rig.handle),
+        "the drop waited on the connect"
+    );
+    assert_eq!(read_all(&mut stream), b"", "closed with no 200");
+    drop(held.release);
+}
+
+#[test]
+fn dropping_the_handle_during_a_route_lookup_that_never_answers_returns_at_once() {
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let (arrived, lookup) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new((arrived, wait));
+    // An OS lookup (a PAC fetch, say) that never answers while the test runs; it runs on the
+    // blocking pool, which the drop must not wait for.
+    let hung = move |_: crate::proxy::upstream::Scheme, _: &str, _: u16| {
+        let held = held.lock().unwrap();
+        // The test may have stopped waiting.
+        match held.0.send(()) {
+            Ok(()) | Err(std::sync::mpsc::SendError(())) => {}
+        }
+        if held.1.recv().is_err() {
+            // Released by the test dropping its end.
+        }
+        crate::Route::Direct
+    };
+    let rig = rig(Setup {
+        allow: vec!["api.anthropic.com"],
+        upstream: crate::Upstream::System,
+        os: Some(Box::new(hung)),
+        ..Setup::default()
+    });
+    rig.net.name("api.anthropic.com", &["192.0.2.10"]);
+    rig.net.route("192.0.2.10:443", echo());
+    let mut stream = rig.agent();
+    let request = format!(
+        "CONNECT api.anthropic.com:443 HTTP/1.1\r\n{}\r\n",
+        rig.auth()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    lookup.recv().unwrap();
+    assert!(
+        drops_within_a_second(rig.handle),
+        "the drop waited on the lookup"
+    );
+    assert_eq!(read_all(&mut stream), b"", "closed with no 200");
     drop(release);
 }
