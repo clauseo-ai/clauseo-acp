@@ -91,18 +91,19 @@
 //!   https, becomes `OpenUrl`, once; an address in a run's output never does. No status
 //!   process runs once a sign-in is confirmed, cancelled, expired or failed.
 //! - A sign-in, status or detection child gets exactly the environment `signin/env.rs` builds
-//!   (`SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `NODE_OPTIONS` and `NODE_PATH` removed). **The caller's sign-in launcher
-//!   must be made with `SpawnOptions::clear_env`** (R20's desktop wiring): a launcher that
-//!   inherits the app's environment would pass those names on, since a `LaunchSpec` can add
-//!   variables but never remove one (only `NODE_OPTIONS` and `NODE_PATH`, which every spawn
-//!   drops).
+//!   (`SSH_*`, `NO_BROWSER`, `CLAUDE_CODE_REMOTE`, `NODE_OPTIONS` and `NODE_PATH` removed).
+//!   **The caller's sign-in launcher must be made with `SpawnOptions::clear_env`** (R20's
+//!   desktop wiring): a launcher that inherits the app's environment would pass those names on,
+//!   since a `LaunchSpec` can add variables but never remove one (only `NODE_OPTIONS` and
+//!   `NODE_PATH`, which every spawn drops).
 //!
 //! # Depends on
 //!
 //! `protocol` (`AgentId`), `process`, `codex_appserver` (Codex's `account/read`), `serde`,
 //! `serde_json`, `futures`, `async-channel`, `tracing` (the Node line at each install and
-//! start), `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`, `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize`
-//! (the pasted code and the API keys); `keyring` on macOS and Windows only (the keychain; none
+//! start), `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`,
+//! `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the pasted code and the API
+//! keys); `keyring` on macOS and Windows only (the keychain; none
 //! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
 //! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
 //! only in tests and the example (the caller passes the data folder and the agent homes in).
