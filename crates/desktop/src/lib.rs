@@ -126,7 +126,7 @@ pub use jailed::{
 };
 pub use pre_write_guard::guard_requested;
 use profile::DesktopProfile;
-use quit::{AGENTS_STOP_WAIT, Exit, SetupStop, stop_in_order};
+use quit::{AGENTS_STOP_WAIT, Exit, SetupStop, stop_then_after_host};
 use rust_only::PluginRustOnly;
 use tauri::{
     App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -469,29 +469,26 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            // The agents' installs and sign-ins first, their children killed (#386), then the host,
-            // which says how it ended.
-            let mut ended = HostExit::Stopped;
-            stop_in_order(
+            // The agents' installs and sign-ins first, their children killed (#386), then the
+            // host; then the log, the counts and the install, in that order (quit.rs).
+            stop_then_after_host(
                 || {
                     app.try_state::<SetupStop>().is_none_or(|setup| {
                         setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT)
                     })
                 },
+                || cell.as_deref().map_or(HostExit::Stopped, host_start::stop),
+                // The log's queued lines go to the file before either exit below skips the drops.
+                || host_log::flush_app(&app),
+                // After the host, whose last counts go in too.
                 || {
-                    if let Some(cell) = &cell {
-                        ended = host_start::stop(cell);
+                    if let Some(counts) = app.try_state::<counts::CountsState>() {
+                        counts.save();
                     }
                 },
+                // The window state, then the install (0037); returns when there is none.
+                |ended| update::after_host(&app, ended),
             );
-            // The log's queued lines go to the file before either exit below skips the drops.
-            host_log::flush_app(&app);
-            // After the host, whose last counts go in too.
-            if let Some(counts) = app.try_state::<counts::CountsState>() {
-                counts.save();
-            }
-            // The window state, then the install (0037); returns when there is none.
-            update::after_host(&app, ended);
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows
             // session with no visible window (session 0, as in CI) `app.exit` never yields

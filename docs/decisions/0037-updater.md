@@ -287,7 +287,8 @@ install; what the brief left open was decided so:
   old bundle out needs both, so a root-owned `.app` from an MDM would ask for an
   administrator), or the executable is not in an `.app`. Found once at start.
 - **The install, as built.** A task watches `HostHandle::exit`; `HostExit::Install` asks the app
-  to exit, which runs the stopper thread: `host_start::stop`, the log's flush, the counts'
+  to exit, which runs the stopper thread (`quit::stop_then_after_host`, its order tested): the
+  quit's own order (the agents' jobs, then `host_start::stop`), the log's flush, the counts'
   save, then the window state's save (the install and the restart skip the exit event
   window-state saves on), the crash guard's no-op seam, a second flush, and the plugin's
   `install`. It rebuilds the update with `restore_update(raw_json)`, checks the version is the
