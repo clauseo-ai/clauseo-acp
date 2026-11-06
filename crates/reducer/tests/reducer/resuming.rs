@@ -219,6 +219,57 @@ fn a_stop_during_a_turn_then_a_prompt_sets_it_once_the_turn_ends() {
 }
 
 #[test]
+fn a_prompt_sent_during_the_stop_stays_starting_and_resumes_from_the_detach() {
+    // The prompt comes while the agent is stopping: the thread is `Starting` with no cue. The
+    // detach that follows keeps `Starting` and starts the cue at its own `ts`; the new
+    // session's attach ends the cue, and the turn's start shows `Running`.
+    let (mut log, mut state) = created(61);
+    let (turn, _, _) = send(&mut log, &mut state, "Go.");
+    assert_eq!(status(&state), ThreadStatus::Starting);
+    assert_eq!(since(&state), None);
+    let (detach, applied) = push(
+        &mut log,
+        &mut state,
+        AgentSessionDetached {
+            reason: DetachReason::IdleStopped,
+        },
+    );
+    assert_eq!(status(&state), ThreadStatus::Starting);
+    assert_eq!(since(&state), Some(detach.ts));
+    assert!(applied.anomalies.is_empty(), "{:?}", applied.anomalies);
+    let attach = clauseo_protocol::AgentSessionAttached {
+        session: "sess-2".parse().unwrap(),
+        agent_version: None,
+        capabilities: clauseo_protocol::AgentCapabilities::default(),
+    };
+    push(&mut log, &mut state, attach);
+    assert_eq!(status(&state), ThreadStatus::Starting);
+    assert_eq!(since(&state), None);
+    let checkpoint_before = log.fresh().unwrap();
+    push(
+        &mut log,
+        &mut state,
+        TurnStarted {
+            turn,
+            checkpoint_before,
+        },
+    );
+    assert_eq!(status(&state), ThreadStatus::Running);
+    assert_eq!(state, fold(log.events()));
+
+    // The replay property: a snapshot cut at every point, then the tail, gives the same state.
+    let events = log.events();
+    let folded = fold(events);
+    for cut in 1..events.len() {
+        let mut head = empty(events);
+        apply_all(&mut head, &events[..cut]);
+        let mut rebuilt = round_trip(&head);
+        apply_all(&mut rebuilt, &events[cut..]);
+        assert_eq!(rebuilt, folded, "cut after {cut} events");
+    }
+}
+
+#[test]
 fn a_schema_10_snapshot_is_refolded() {
     assert_eq!(REDUCER_SCHEMA_VERSION, 11);
     let (mut log, mut state) = created(59);

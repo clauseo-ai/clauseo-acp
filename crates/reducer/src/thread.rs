@@ -82,7 +82,9 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         DomainEvent::WebSearchRecorded(event) => web::search_recorded(state, event, out),
         DomainEvent::PageVisited(event) => web::page_visited(state, event, out),
         DomainEvent::Unknown { .. } => {}
-        DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
+        DomainEvent::AgentSessionDetached(event) => {
+            turn::detached(state, &event.reason, ts, out);
+        }
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(event) => queue::queued_prompt_edited(state, event, out),
