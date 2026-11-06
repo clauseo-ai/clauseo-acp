@@ -167,7 +167,7 @@ fn the_state_and_the_hint_read_back() {
                 account_label: None,
                 balance: Some(Balance {
                     credits: 180,
-                    paise: Some(18_000),
+                    paise: Some(2_124),
                 }),
                 low: true,
             },

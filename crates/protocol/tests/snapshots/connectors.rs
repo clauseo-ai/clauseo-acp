@@ -19,24 +19,26 @@ pub(super) fn connectors_state() -> ConnectorsState {
         connectors: vec![ConnectorView {
             id: "case-law".to_owned(),
             name: "Indian case law".to_owned(),
-            price_paise: Some(23_600),
+            price_paise: Some(2_360),
             packs: vec![PackView {
                 pack: "pack_200".to_owned(),
                 credits: 200,
-                paise: 23_600,
+                paise: 2_360,
             }],
             recent_spend: Some(RecentSpend {
                 today_credits: 40,
+                today_paise: Some(472),
                 days: vec![DaySpendView {
                     day: "2026-11-04".to_owned(),
                     credits: 120,
+                    paise: Some(1_416),
                 }],
             }),
             status: ConnectorStatus::SignedIn {
                 account_label: None,
                 balance: Some(Balance {
                     credits: 1_180,
-                    paise: Some(118_000),
+                    paise: Some(13_924),
                 }),
                 low: false,
             },
