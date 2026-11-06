@@ -25,7 +25,8 @@ export const HI = {
     "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
   "This version of Claude Code doesn't work with Clauseo.":
     "Claude Code का यह संस्करण Clauseo के साथ काम नहीं करता।",
-  "Clauseo can't start Claude safely here. Reinstall Clauseo.": null,
+  "Clauseo can't start Claude safely here. Reinstall Clauseo.":
+    "Clauseo यहाँ Claude को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
   // the agent.* sentences above for a thread on the ChatGPT plan (Codex), for an agent of no kind by its name, and
   // with no name at all (PLANNED). The lawyer signs in to Codex outside Clauseo until stage D's sign-in, so
   // auth_required says where, with no button.
@@ -45,9 +46,12 @@ export const HI = {
   "This version of {name} doesn't work with Clauseo.":
     "{name} का यह संस्करण Clauseo के साथ काम नहीं करता।",
   "This version of the AI doesn't work with Clauseo.": "AI का यह संस्करण Clauseo के साथ काम नहीं करता।",
-  "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.": null,
-  "Clauseo can't start {name} safely here. Reinstall Clauseo.": null,
-  "Clauseo can't start the AI safely here. Reinstall Clauseo.": null,
+  "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.":
+    "Clauseo यहाँ ChatGPT को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+  "Clauseo can't start {name} safely here. Reinstall Clauseo.":
+    "Clauseo यहाँ {name} को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
+  "Clauseo can't start the AI safely here. Reinstall Clauseo.":
+    "Clauseo यहाँ AI को सुरक्षित रूप से शुरू नहीं कर सकता। Clauseo फिर से इंस्टॉल करें।",
   "The computer's disk is full. Free some space, then try again.":
     "कंप्यूटर की डिस्क भर गई है। कुछ जगह खाली करें, फिर दोबारा प्रयास करें।",
   "Clauseo couldn't read back its saved data.": "Clauseo अपना सहेजा गया डेटा वापस नहीं पढ़ सका।",
@@ -77,60 +81,60 @@ export const HI = {
   "That is too large to send.": "यह भेजने के लिए बहुत बड़ा है।",
   "Your organisation manages that setting, so it can't be changed.":
     "यह सेटिंग आपका संगठन संभालता है, इसलिए इसे बदला नहीं जा सकता।",
-  // hi: later
-  "Clauseo couldn't save that setting. Your settings are as they were.": null,
-  // hi: later
-  "A key is already kept on this computer. To change it, open Settings, then Plans.": null,
+  "Clauseo couldn't save that setting. Your settings are as they were.":
+    "Clauseo वह सेटिंग सहेज नहीं सका। आपकी सेटिंग्स पहले जैसी हैं।",
+  "A key is already kept on this computer. To change it, open Settings, then Plans.":
+    "इस कंप्यूटर पर पहले से एक key रखी है। उसे बदलने के लिए सेटिंग्स खोलें, फिर प्लान।",
   "Clauseo is using the ChatGPT login already on this computer. To change it, choose 'Stop using it here', then sign in.":
-    null,
-  // hi: later
-  "Questions go through your firm's own account, so there's nothing to sign in to here.": null,
-  // hi: later
+    "Clauseo इस कंप्यूटर पर पहले से मौजूद ChatGPT लॉगिन इस्तेमाल कर रहा है। इसे बदलने के लिए 'यहाँ इस्तेमाल बंद करें' चुनें, फिर साइन इन करें।",
+  "Questions go through your firm's own account, so there's nothing to sign in to here.":
+    "प्रश्न आपकी फ़र्म के अपने खाते से जाते हैं, इसलिए यहाँ साइन इन करने को कुछ नहीं है।",
   "Clauseo is using your API key. To sign in with your plan instead, open Settings, then Plans, and remove the key.":
-    null,
-  // hi: later
+    "Clauseo आपकी API key इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और key हटाएँ।",
   "Clauseo is using your firm's address. To sign in with your plan instead, open Settings, then Plans, and remove the address.":
-    null,
-  "You're offline. Setting up waits for the connection.": null,
-  "Your network is blocking the download.": null,
-  "There isn't enough free space on this computer for the download.": null,
-  "Setting up didn't finish. Try again.": null,
-  "Sign-in was cancelled in the browser.": null,
-  "The sign-in link expired. Try again.": null,
-  "This account has no plan that works with Clauseo.": null,
-  "Sign-in with a code is turned off for this ChatGPT account.": null,
-  "Another program on this computer is using ChatGPT's sign-in.": null,
-  "Sign-in didn't finish. Try again.": null,
+    "Clauseo आपकी फ़र्म का पता इस्तेमाल कर रहा है। इसके बजाय अपने प्लान से साइन इन करने के लिए सेटिंग्स खोलें, फिर प्लान, और पता हटाएँ।",
+  "You're offline. Setting up waits for the connection.":
+    "आप ऑफ़लाइन हैं। कनेक्शन मिलने तक सेटअप रुका रहेगा।",
+  "Your network is blocking the download.": "आपका नेटवर्क डाउनलोड रोक रहा है।",
+  "There isn't enough free space on this computer for the download.":
+    "इस कंप्यूटर पर डाउनलोड के लिए पर्याप्त खाली जगह नहीं है।",
+  "Setting up didn't finish. Try again.": "सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "Sign-in was cancelled in the browser.": "ब्राउज़र में साइन इन रद्द कर दिया गया।",
+  "The sign-in link expired. Try again.": "साइन इन का लिंक समाप्त हो गया। फिर से प्रयास करें।",
+  "This account has no plan that works with Clauseo.":
+    "इस खाते में ऐसा कोई प्लान नहीं है जो Clauseo के साथ काम करे।",
+  "Sign-in with a code is turned off for this ChatGPT account.":
+    "इस ChatGPT खाते के लिए कोड से साइन इन बंद है।",
+  "Another program on this computer is using ChatGPT's sign-in.":
+    "इस कंप्यूटर पर कोई दूसरा प्रोग्राम ChatGPT का साइन इन इस्तेमाल कर रहा है।",
+  "Sign-in didn't finish. Try again.": "साइन इन पूरा नहीं हुआ। फिर से प्रयास करें।",
   "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.":
-    null,
-  // hi: later
-  "Codex can't work on a network drive. Move the matter to this computer.": null,
-  "Codex can't work on a drive without file permissions. Move the matter to this computer.": null,
+    "Clauseo आपकी फ़र्म की साइन इन सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
+  "Codex can't work on a network drive. Move the matter to this computer.":
+    "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  "Codex can't work on a drive without file permissions. Move the matter to this computer.":
+    "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
   "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
-    null,
-  // hi: later
-  "The update didn't install. Try again.": null,
-  // hi: later
-  "Clauseo is still finishing. Try again in a moment.": null,
-  // hi: later
-  "Clauseo is still starting. Try again in a moment.": null,
-  // hi: later
+    "इस मामले का फ़ोल्डर दूसरे फ़ोल्डरों के बहुत भीतर है, इसलिए Windows पर Clauseo उसमें काम नहीं कर सकता। उसे ड्राइव के ऊपरी स्तर के पास ले जाएँ।",
+  "The update didn't install. Try again.": "अपडेट इंस्टॉल नहीं हुआ। फिर से प्रयास करें।",
+  "Clauseo is still finishing. Try again in a moment.":
+    "Clauseo अभी काम पूरा कर रहा है। थोड़ी देर में फिर से प्रयास करें।",
+  "Clauseo is still starting. Try again in a moment.":
+    "Clauseo अभी शुरू हो रहा है। थोड़ी देर में फिर से प्रयास करें।",
   "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.":
-    null,
-  // hi: later
+    "Clauseo समय पर सहेजी गई API key की जाँच नहीं कर सका। अगर यह कंप्यूटर अनुमति माँगे, तो अनुमति दें, फिर दोबारा प्रयास करें।",
   "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.":
-    null,
-  // hi: later
+    "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
-    null,
+    "इस मामले के फ़ोल्डर में एक फ़ाइल शॉर्टकट है। Clauseo शॉर्टकट को संरक्षित नहीं कर सकता, इसलिए उसके हटने तक इस मामले में उत्तर नहीं देगा। उसे कहीं और ले जाएँ या हटाएँ, फिर दोबारा पूछें।",
   "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.":
-    null,
+    "संरक्षण सेट अप नहीं हुआ, क्योंकि Windows को अनुमति नहीं मिली। फिर से प्रयास करें, और Windows के पूछने पर Yes चुनें।",
   "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
-    null,
+    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका। फिर से प्रयास करें। बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसे दिखवाएँ।",
   "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.":
-    null,
+    "यहाँ उत्तर देने से पहले Clauseo को इस कंप्यूटर पर एक बार संरक्षण सेट अप करना होगा। इसे सेट अप करें, फिर दोबारा पूछें। आपका प्रश्न रखा गया है।",
   "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
-    null,
+    "आपकी फ़र्म संरक्षण अनिवार्य करती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

@@ -398,12 +398,12 @@ test("the download's words leave the other browser states alone", () => {
   });
 });
 
-test("in Hindi, the hi: later words show their English", () => {
-  expect(toolRow("hi", { tool: "browser", state: "available" }, ROOM).name).toBe("Browser");
+test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand name's capital", () => {
+  expect(toolRow("hi", { tool: "browser", state: "available" }, ROOM).name).toBe("ब्राउज़र");
   expect(toolRow("hi", { tool: "browser", state: "locked_off" }, ROOM).reason).toBe(
-    "Managed by firm",
+    "फ़र्म द्वारा प्रबंधित",
   );
   expect(toolsLabel("hi", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
-    "Browser: off, needs Chrome.",
+    "ब्राउज़र: बंद, Chrome चाहिए।",
   );
 });

@@ -183,8 +183,10 @@
   },
   "U11-07": {
     "en": "Managed by firm",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "फ़र्म द्वारा प्रबंधित",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-04",
     "by": "Rohan",

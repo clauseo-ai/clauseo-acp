@@ -3,22 +3,21 @@
 import type { Hindi } from "./words-core.ts";
 
 export const HI = {
-  // hi: later: every string here ships in English, its Hindi null until the Hindi pass
   // each tool's name
-  "Web search": null,
-  Browser: null,
+  "Web search": "वेब खोज",
+  Browser: "ब्राउज़र",
   // the tool line's name and tooltip, one sentence per tool: "Web search: on. Browser: off, needs Chrome."
-  "{tool}: {state}.": null,
-  on: null,
+  "{tool}: {state}.": "{tool}: {state}।",
+  on: "चालू",
   // {reason} is one of the reasons below, its first letter in lower case
-  "off, {reason}": null,
+  "off, {reason}": "बंद, {reason}",
   // why a tool is off, a few words; In Settings sits beside the Off chip, so it says only where
-  "In Settings": null,
-  "Managed by firm": null,
-  "Can't search on this login": null,
-  "Not available yet": null,
-  "Too many browsers open": null,
-  "Needs Chrome": null,
+  "In Settings": "सेटिंग्स में",
+  "Managed by firm": "फ़र्म द्वारा प्रबंधित",
+  "Can't search on this login": "इस लॉगिन पर खोज नहीं हो सकती",
+  "Not available yet": "अभी उपलब्ध नहीं",
+  "Too many browsers open": "बहुत सारे ब्राउज़र खुले हैं",
+  "Needs Chrome": "Chrome चाहिए",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

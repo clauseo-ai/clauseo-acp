@@ -103,10 +103,10 @@ export const HI = {
     "ये बदलाव स्वीकार करने के लिए Word में '{file}' बंद करें।",
   "Close '{file}' in Word to reject these changes.":
     "ये बदलाव अस्वीकार करने के लिए Word में '{file}' बंद करें।",
-  "If it isn't open in Word, close Word and try again.": null, // hi: later
-  // hi: later
+  "If it isn't open in Word, close Word and try again.":
+    "अगर यह Word में खुली नहीं है, तो Word बंद करें और फिर से प्रयास करें।",
   "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.":
-    null,
+    "इस फ़ाइल का पाथ लंबा है, इसलिए Word इसे Protected View में खोलता है। बदलाव करने के लिए Enable Editing चुनें।",
   "Word holds the file while it is open. Nothing has changed yet.":
     "खुली रहने तक फ़ाइल Word के पास रहती है। अभी कुछ नहीं बदला है।",
   "Try again": "फिर से प्रयास करें",

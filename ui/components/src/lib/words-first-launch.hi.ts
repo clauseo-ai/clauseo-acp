@@ -33,7 +33,7 @@ export const HI = {
   "Try again": "फिर से प्रयास करें",
   Details: "विवरण",
   // the download done, while npm puts it together: no bytes to count and no time to promise (new)
-  "Setting up {name} on this computer.": null,
+  "Setting up {name} on this computer.": "इस कंप्यूटर पर {name} सेट अप हो रहा है।",
 
   // the fine print, up front (design)
   "Your papers stay on this computer. {name} sees what each question sends it.":
@@ -51,14 +51,15 @@ export const HI = {
     "Claude या ChatGPT की key, या आपकी फ़र्म की IT टीम से मिली key। शुल्क उसी key के खाते पर लगता है।",
   "Using an API key, billed to its own account": "API key से, उसी के खाते पर शुल्क",
   // Sign in pressed before the install is ready, in place of the design's "Sign in at {time}" (new)
-  "Your browser opens when {name} is ready.": null,
+  "Your browser opens when {name} is ready.": "{name} तैयार होते ही आपका ब्राउज़र खुलेगा।",
   // where the key is kept, by display_info's platform, and a computer with no keyring (new)
-  "Kept in this Mac's Keychain.": null,
-  "Kept in Windows Credential Manager.": null,
-  "Kept in this computer's keyring.": null,
-  "This computer has no keyring to keep an API key in.": null,
-  "Sign in with an Anthropic Console account": null,
-  "Using your firm's account": null,
+  "Kept in this Mac's Keychain.": "इस Mac के Keychain में रखी है।",
+  "Kept in Windows Credential Manager.": "Windows Credential Manager में रखी है।",
+  "Kept in this computer's keyring.": "इस कंप्यूटर के keyring में रखी है।",
+  "This computer has no keyring to keep an API key in.":
+    "इस कंप्यूटर में API key रखने के लिए कोई keyring नहीं है।",
+  "Sign in with an Anthropic Console account": "Anthropic Console खाते से साइन इन करें",
+  "Using your firm's account": "आपकी फ़र्म का खाता इस्तेमाल हो रहा है",
 
   // signing in, in the browser (design)
   "Finish signing in in your browser": "अपने ब्राउज़र में साइन इन पूरा करें",
@@ -77,51 +78,63 @@ export const HI = {
     "Clauseo, Claude Pro या Max प्लान के साथ काम करता है।",
   "Clauseo works with a paid ChatGPT plan.": "Clauseo, सशुल्क ChatGPT प्लान के साथ काम करता है।",
   // signed in with less than the event can say (new)
-  "Signed in as {email}": null,
-  "Signed in to {name}": null,
+  "Signed in as {email}": "{email} के रूप में साइन इन",
+  "Signed in to {name}": "{name} में साइन इन",
 
   // a login already on this computer, said before it is used (new; Rohan, 2026-11-02)
-  "Clauseo found your {name} account ({email}) from {app} and will use it here.": null,
-  "Clauseo found your {name} account from {app} and will use it here.": null,
-  "Use it": null,
-  "Sign in with a different account": null,
-  "A different account signs in to Clauseo only. {app} stays as it is.": null,
-  "Signed in through {app} as {email} · {plan}": null,
-  "Signed in through {app} as {email}": null,
-  "Signed in through {app}": null,
+  "Clauseo found your {name} account ({email}) from {app} and will use it here.":
+    "Clauseo को {app} से आपका {name} खाता ({email}) मिला है। वह इसे यहाँ इस्तेमाल करेगा।",
+  "Clauseo found your {name} account from {app} and will use it here.":
+    "Clauseo को {app} से आपका {name} खाता मिला है। वह इसे यहाँ इस्तेमाल करेगा।",
+  "Use it": "इसे इस्तेमाल करें",
+  "Sign in with a different account": "किसी दूसरे खाते से साइन इन करें",
+  "A different account signs in to Clauseo only. {app} stays as it is.":
+    "दूसरा खाता केवल Clauseo में साइन इन करता है। {app} जैसा है वैसा रहता है।",
+  "Signed in through {app} as {email} · {plan}": "{app} के ज़रिए {email} के रूप में साइन इन · {plan}",
+  "Signed in through {app} as {email}": "{app} के ज़रिए {email} के रूप में साइन इन",
+  "Signed in through {app}": "{app} के ज़रिए साइन इन",
 
   // a login seen that can't be shared, or reuse that stopped (new)
   "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.":
-    null,
-  "Codex on this computer keeps its sign-in where Clauseo can't share it.": null,
-  "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.": null,
-  "{app} on this computer is signed out, so Clauseo stopped using its sign-in.": null,
-  "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.": null,
-  "Codex's sign-in on this computer changed, so Clauseo stopped using it.": null,
-  "{app}'s sign-in stopped working here, so Clauseo stopped using it.": null,
+    "इस कंप्यूटर पर Claude Code आपकी अपनी Claude सेटिंग्स से साइन इन करता है, जिन्हें Clauseo आपके मामलों से दूर रखता है।",
+  "Codex on this computer keeps its sign-in where Clauseo can't share it.":
+    "इस कंप्यूटर पर Codex अपना साइन इन ऐसी जगह रखता है जहाँ से Clauseo उसे साझा नहीं कर सकता।",
+  "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.":
+    "Windows पर Clauseo का सुरक्षित कार्यक्षेत्र अभी Claude Code का साइन इन साझा नहीं कर सकता।",
+  "{app} on this computer is signed out, so Clauseo stopped using its sign-in.":
+    "इस कंप्यूटर पर {app} से साइन आउट हो गया है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
+  "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.":
+    "इस कंप्यूटर पर {app} अब दूसरा खाता इस्तेमाल करता है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
+  "Codex's sign-in on this computer changed, so Clauseo stopped using it.":
+    "इस कंप्यूटर पर Codex का साइन इन बदल गया, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
+  "{app}'s sign-in stopped working here, so Clauseo stopped using it.":
+    "{app} का साइन इन यहाँ काम नहीं कर रहा, इसलिए Clauseo ने उसे इस्तेमाल करना बंद कर दिया।",
 
   // ChatGPT's device code, offered only after the browser didn't work (new)
-  "Use a code instead": null,
-  "Sign in to ChatGPT on that page and enter this code.": null,
-  "The code works until {time}.": null,
-  Copy: null,
-  "Open page": null,
+  "Use a code instead": "इसके बजाय कोड इस्तेमाल करें",
+  "Sign in to ChatGPT on that page and enter this code.":
+    "उस पेज पर ChatGPT में साइन इन करें और यह कोड डालें।",
+  "The code works until {time}.": "यह कोड {time} बजे तक काम करेगा।",
+  Copy: "कॉपी करें",
+  "Open page": "पेज खोलें",
   "To turn it on, open ChatGPT, then Settings, then Security, and turn on Enable device code sign-in for Codex, Excel, PowerPoint, and Word. Then choose Try again.":
-    null,
-  "Sign in in the browser instead": null,
+    "इसे चालू करने के लिए ChatGPT खोलें, फिर Settings, फिर Security, और Enable device code sign-in for Codex, Excel, PowerPoint, and Word चालू करें। इसके बाद 'फिर से प्रयास करें' चुनें।",
+  "Sign in in the browser instead": "इसके बजाय ब्राउज़र में साइन इन करें",
 
   // the other ways a sign-in stops (new)
-  "Sign-in didn't finish.": null,
+  "Sign-in didn't finish.": "साइन इन पूरा नहीं हुआ।",
   "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.":
-    null,
-  "Ask your IT team.": null,
+    "Clauseo {name} के लिए आपकी फ़र्म की सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
+  "Ask your IT team.": "अपनी IT टीम से कहें।",
 
   // switching accounts: Clauseo still stopping a login it may no longer use (new, 0048)
-  "Switching accounts.": null,
+  "Switching accounts.": "खाता बदला जा रहा है।",
   "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.":
-    null,
-  "If this goes on, quit Clauseo and open it again.": null,
-  "Clauseo is still switching accounts. Try again in a moment.": null,
+    "Clauseo अभी पुराना लॉगिन बंद कर रहा है। यह अपने आप प्रयास करता रहता है, इसलिए आपको कुछ नहीं करना है।",
+  "If this goes on, quit Clauseo and open it again.":
+    "अगर ऐसा चलता रहे, तो Clauseo बंद करके फिर से खोलें।",
+  "Clauseo is still switching accounts. Try again in a moment.":
+    "Clauseo अभी खाता बदल रहा है। थोड़ी देर में फिर से प्रयास करें।",
 
   // UC: the Safe workspace step, the design's own words with its Hindi (UC-10, UC-13, UC-16)
   "Windows asks once for permission to set up the Safe workspace.":

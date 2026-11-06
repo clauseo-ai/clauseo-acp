@@ -1,8 +1,8 @@
 // The words of the tool line's popover: each tool's state chip, Open Settings, and the Chrome download the browser
 // row offers, in the fewest words (DESIGN.md §Icons). As in words-settings.ts the English is the key, the exact
 // string on screen, and a key with slots fills them in either language. The popover loads after the first paint, so
-// these words do too; the tools' names and reasons are words-tools-line.ts's. The Hindi comes later: each entry is
-// null (hi: later) and shows its English.
+// these words do too; the tools' names and reasons are words-tools-line.ts's. Its Hindi is in
+// words-tools.hi.ts.
 import { useDisplay } from "./display.ts";
 import { wordsOf, type Slots } from "./words-core.ts";
 import type { HI } from "./words-tools.hi.ts";

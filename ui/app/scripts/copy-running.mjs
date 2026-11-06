@@ -1,5 +1,6 @@
 // The running copy review page: `pnpm -C ui/app copy:running` writes copy-review/running/index.html (beside the repo:
-// ../copy-review/ from its root), listing every provisional entry in ui/app/copy-approvals/, grouped by file: its id,
+// ../copy-review/ from its root), listing every provisional entry in ui/app/copy-approvals/ (English provisional, or Hindi provisional under
+// "hi_status": "provisional"; running-lines.mjs chooses and words them), grouped by file: its id,
 // English, where it shows (from the review registry, if it has the id), when it was added and by whom, and, where the
 // review gallery can render the id, a shot of its cell by day and by night. A line the gallery has no cell for is
 // listed with "no shot". Rohan reviews these lines in batches, then marks them approved. Under the lines, a Docs section
@@ -32,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build, createServer } from "vite";
 import { docsSection, esc, nsisLines } from "./running-docs.mjs";
+import { lineStatus, onRunningPage } from "./running-lines.mjs";
 
 const app = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -79,7 +81,7 @@ const groups = names
   .map((file) => ({
     file,
     lines: Object.entries(parseApprovals(parsed[file], file))
-      .filter(([, a]) => a.status === "provisional")
+      .filter(([, a]) => onRunningPage(a))
       .map(([id, a]) => ({ id, ...a, entry: REGISTRY.find((e) => e.id === id) })),
   }))
   .filter((g) => g.lines.length > 0);
@@ -254,9 +256,10 @@ try {
         const src = shot.get(`${l.id}-${t}`);
         return `<figure class="running-shot"><figcaption>${t}</figcaption><div class="review-box"><a href="${src}"><img class="review-shot" src="${src}" alt="${esc(`${l.id}, ${l.en}, ${t}`)}" loading="lazy"></a></div></figure>`;
       });
-    return `<article class="review-item" id="${esc(l.id)}"><header class="review-item-head"><h2>${esc(l.id)}</h2><span class="review-status" data-status="provisional">Provisional</span>${words}</header>
+    const status = lineStatus(l);
+    return `<article class="review-item" id="${esc(l.id)}"><header class="review-item-head"><h2>${esc(l.id)}</h2><span class="review-status" data-status="provisional">${status.badge}</span>${words}</header>
 <p class="running-words" lang="en">${esc(l.en)}</p>
-<p class="running-status">Added ${esc(l.at)} by ${esc(l.by)}. <span class="running-hi">Hindi: ${l.hi === null ? "later" : `<span lang="hi">${esc(l.hi)}</span>`}.</span>${l.note === undefined ? "" : ` ${esc(l.note)}`}</p>
+<p class="running-status">${status.html}${l.note === undefined ? "" : ` ${esc(l.note)}`}</p>
 <p class="running-screen">Shown in: ${esc(where)}</p>
 ${live}
 ${shots.length === 0 ? `<p class="running-noshot">no shot</p>` : `<div class="running-shots">${shots.join("")}</div>`}

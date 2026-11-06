@@ -153,8 +153,10 @@
   },
   "U4-20": {
     "en": "Claude wants to save its plan as a note in its own folder, not in this matter.",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-05",
     "by": "Rohan",

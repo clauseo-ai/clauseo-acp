@@ -226,8 +226,10 @@
   },
   "U7-32": {
     "en": "The queue is held. You didn't allow a request at {time}, so nothing more is sent until you send.",
-    "hi": null,
-    "hi_status": "later",
+    "hi": "कतार रुकी है। आपने {time} बजे एक अनुरोध की अनुमति नहीं दी, इसलिए आपके भेजने तक और कुछ नहीं भेजा जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-06",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-05",
     "by": "Rohan",

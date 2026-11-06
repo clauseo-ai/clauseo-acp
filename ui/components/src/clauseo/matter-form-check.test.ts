@@ -72,9 +72,9 @@ test("a folder already a matter names that matter, with Open it beside the line;
   expect(createErrorLine("en", "matter.folder_is_matter", "", "a\u202Efdp.exe")).toBe(
     "This folder is already a matter: \u2068a\u202Efdp.exe\u2069.",
   );
-  // Hindi, English until the Hindi comes (hi: later)
+  // Hindi: the name isolated the same way, before the Hindi full stop
   expect(createErrorLine("hi", "matter.folder_is_matter", "", "Acme")).toBe(
-    "This folder is already a matter: \u2068Acme\u2069.",
+    "यह फ़ोल्डर पहले से एक मामला है: \u2068Acme\u2069।",
   );
 });
 

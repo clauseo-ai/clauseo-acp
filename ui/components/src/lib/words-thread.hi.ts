@@ -28,7 +28,8 @@ export const HI = {
   Stopped: "रोका गया",
   "You stopped the answer. The answer so far is kept.":
     "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
-  "You didn't allow a request, so the answer stopped. The answer so far is kept.": null, // hi: later
+  "You didn't allow a request, so the answer stopped. The answer so far is kept.":
+    "आपने एक अनुरोध की अनुमति नहीं दी, इसलिए उत्तर रुक गया। अब तक का उत्तर सुरक्षित है।",
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
   "This question was declined, so there is no answer.":
     "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",
@@ -67,7 +68,8 @@ export const HI = {
   "Not allowed. Clauseo left {paper} as it was.":
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
   // the prompt's line for Claude's own plan note, in place of the call's title: a provisional draft (stage C #418)
-  "Claude wants to save its plan as a note in its own folder, not in this matter.": null, // hi: later
+  "Claude wants to save its plan as a note in its own folder, not in this matter.":
+    "Claude अपनी योजना को एक नोट के रूप में अपने फ़ोल्डर में सहेजना चाहता है, इस मामले में नहीं।",
   // drafts for Rohan (U4b): the agent's question as a form, inline in the thread. "Other" leads a question's own
   // free-text answer; "Required" marks a question that must be answered; the line under the answers shows while
   // nothing is filled in, since an answer with nothing in it is the same as Don't answer. "Don't answer" matches the
@@ -106,22 +108,26 @@ export const HI = {
   // client put back, one or {n} (provisional, TN-02 and TN-03; {papers} as Versions' undo rows name them); a skill
   // pack the launch left out, one full line per reason (provisional, TN-04 to TN-09; {pack} is the pack's id)
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.":
-    null, // hi: later
-  "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.": null, // hi: later
-  "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.": null, // hi: later
+    "Clauseo को इस बातचीत के पहले के प्रश्न और उत्तर याद नहीं हैं। उनसे जो ज़रूरी हो, उसे अपने अगले प्रश्न में शामिल करें।",
+  "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.":
+    "पूर्ववत करने के बाद 1 दस्तावेज़ वापस आ गया: {papers}। Clauseo ने उसे फिर से नहीं हटाया।",
+  "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.":
+    "पूर्ववत करने के बाद {n} दस्तावेज़ वापस आ गए: {papers}। Clauseo ने उन्हें फिर से नहीं हटाया।",
   "Clauseo didn't load the skill pack '{pack}'. This matter is set to use it, but it isn't turned on.":
-    null, // hi: later
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। यह मामला इसे इस्तेमाल करने के लिए सेट है, पर यह चालू नहीं है।",
   "Clauseo didn't load the skill pack '{pack}'. The skill pack settings on this computer don't allow it.":
-    null, // hi: later
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इस कंप्यूटर की स्किल पैक सेटिंग्स इसकी अनुमति नहीं देतीं।",
   "Clauseo didn't load the skill pack '{pack}'. Its files changed after it was turned on. Turn it on again to use it.":
-    null, // hi: later
-  "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.": null, // hi: later
-  "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.": null, // hi: later
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। चालू किए जाने के बाद इसकी फ़ाइलें बदल गईं। इसे इस्तेमाल करने के लिए फिर से चालू करें।",
+  "Clauseo didn't load the skill pack '{pack}'. Clauseo couldn't find it on this computer.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo को यह इस कंप्यूटर पर नहीं मिला।",
+  "Clauseo didn't load the skill pack '{pack}'. Its files aren't a valid skill pack.":
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। इसकी फ़ाइलें मान्य स्किल पैक नहीं हैं।",
   "Clauseo didn't load the skill pack '{pack}'. Clauseo loads at most 16 skill packs at a time.":
-    null, // hi: later
+    "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
-  "Archived. Read only.": null,
+  "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
   // the composer's `/` menu, the agent's commands, named for assistive technology
