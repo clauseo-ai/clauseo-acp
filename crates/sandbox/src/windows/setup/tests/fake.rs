@@ -163,7 +163,13 @@ impl FakeMachine {
 
     /// `%ProgramData%\Microsoft\DeviceSync`.
     pub(super) fn device_sync(&self) -> PathBuf {
-        self.dir.path().join("ProgramData/Microsoft/DeviceSync")
+        // One component at a time: a joined "a/b" keeps its `/` on Windows, so the path would
+        // print with mixed separators and not match the cause text.
+        self.dir
+            .path()
+            .join("ProgramData")
+            .join("Microsoft")
+            .join("DeviceSync")
     }
 
     /// The profile folder of the account `name`.
