@@ -52,6 +52,18 @@ pub enum BrowserLaunch {
     },
 }
 
+impl BrowserLaunch {
+    /// Whether Chrome runs under the agent's process tree, so the tree's end is Chrome's
+    /// (the removal's wait, `launch_checks/straggler.rs`). A launch that starts Chrome
+    /// anywhere else answers false here.
+    pub(crate) fn chrome_in_tree(self) -> bool {
+        match self {
+            Self::InJail => true,
+            Self::OutsideJail { .. } => false,
+        }
+    }
+}
+
 /// A [`BrowserLaunch`] the host does not build yet.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(

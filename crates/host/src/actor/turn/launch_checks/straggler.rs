@@ -10,13 +10,20 @@
 //!   connect ([`chrome_alive`]). After #534 Chrome leads a process group of its own, so the
 //!   agent's tree kill can miss it, and it would go on using the proxy's port.
 //!
-//! On Windows a gone tree means a gone Chrome, and (b) is looked at only when there is no tree
-//! (the agent never started). The agent's Job Object forbids breakaway (`Tree::new` in
-//! clauseo-process, tested by `the_job_forbids_breakaway_and_an_empty_one_is_gone`), and
-//! Chrome is the browser guard's descendant, the guard the agent's, so Chrome counts in the
-//! job's `ActiveProcesses`, nested jobs included. That also spares a session whose agent
-//! started Windows' slow refusal ([`CONNECT_WAIT`]). On Unix Chrome leads a group of its own
-//! and (b) stays.
+//! On Windows, once the tree is gone and the session's Chrome was started under it
+//! (`BrowserSession::chrome_in_tree`), (b) is a short look ([`Probe::Accepting`]): only a
+//! connect accepted within [`ACCEPT_WAIT`] counts as there, and a refusal or a timeout as gone.
+//! The agent's Job Object forbids breakaway (`Tree::new` in clauseo-process, tested by
+//! `the_job_forbids_breakaway_and_an_empty_one_is_gone`), and Chrome descends from the agent
+//! through the browser guard, so an empty job normally means no Chrome. The look stays because
+//! a hostile agent can still start a process outside the job, through WMI
+//! (`Win32_Process.Create`), Task Scheduler (`schtasks`) or out-of-process COM; a Chrome so
+//! started and left on the debugging port would otherwise read as gone, and the next session's
+//! agent-browser could attach to the old matter's browser. A listening Chrome accepts on
+//! loopback at once, even on Windows; only the refusal is slow ([`CONNECT_WAIT`]), so the short
+//! look spares a session whose agent started that wait. With no tree (the agent never started),
+//! or a Chrome started elsewhere, (b) is the full probe. On Unix Chrome leads a group of its own
+//! and (b) is always the full probe.
 //!
 //! It polls every [`POLL`] up to the cap (`HostConfig::with_tree_wait`, 20 s by default). Past
 //! the cap nothing is freed: the run goes to [`HeldRuns`], which keeps its proxy, relay and
@@ -54,6 +61,10 @@ const CONNECT_WAIT: Duration = Duration::from_millis(200);
 /// still answers at once, so only a look at a gone one takes this long.
 #[cfg(windows)]
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
+
+/// How long the short look ([`Probe::Accepting`]) waits for an accept. A listener on loopback
+/// accepts at once.
+const ACCEPT_WAIT: Duration = Duration::from_millis(200);
 
 /// What was still there when the wait reached its cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,20 +167,36 @@ struct Check {
     slow: bool,
 }
 
-/// What is still there now, (a) first. On Windows a gone tree is a gone Chrome (module doc).
+/// What is still there now, (a) first. On Windows, after a gone tree that held the session's
+/// Chrome, (b) is the short look (module doc).
 fn still_there(tree: Option<&TreeWatch>, browser: Option<&BrowserSession>) -> Option<Check> {
-    if let Some(tree) = tree {
-        if !tree.gone() {
-            return Some(Check {
-                straggler: Straggler::AgentTree,
-                slow: false,
-            });
-        }
-        if cfg!(windows) {
-            return None;
-        }
+    if tree.is_some_and(|tree| !tree.gone()) {
+        return Some(Check {
+            straggler: Straggler::AgentTree,
+            slow: false,
+        });
     }
-    browser.and_then(chrome_alive)
+    let session = browser?;
+    chrome_alive(session, probe_for(tree.is_some(), session))
+}
+
+/// The look (b) takes once the tree, if `had_tree`, is gone: the short one only on Windows,
+/// after a tree that held the session's Chrome.
+fn probe_for(had_tree: bool, session: &BrowserSession) -> Probe {
+    if cfg!(windows) && had_tree && session.chrome_in_tree {
+        Probe::Accepting
+    } else {
+        Probe::Full
+    }
+}
+
+/// How (b) looks at the debugging port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    /// A connect of up to [`CONNECT_WAIT`]: only a refusal is gone.
+    Full,
+    /// A connect of up to [`ACCEPT_WAIT`]: only an accept is there.
+    Accepting,
 }
 
 /// (b): whether the session's Chrome may still run. Chrome's browser process is the only
@@ -179,8 +206,16 @@ fn still_there(tree: Option<&TreeWatch>, browser: Option<&BrowserSession>) -> Op
 /// Residual: until the guard exposes Chrome's process group (stage E follow-up), (b) can read
 /// "gone" while Chrome is still starting: a session that ends before Chrome has bound its
 /// debugging port finds the port refusing while Chrome lives.
-fn chrome_alive(session: &BrowserSession) -> Option<Check> {
+fn chrome_alive(session: &BrowserSession, probe: Probe) -> Option<Check> {
     let cdp = SocketAddr::from((Ipv4Addr::LOCALHOST, session.ports.cdp.port()));
+    if probe == Probe::Accepting {
+        return TcpStream::connect_timeout(&cdp, ACCEPT_WAIT)
+            .is_ok()
+            .then_some(Check {
+                straggler: Straggler::Chrome,
+                slow: false,
+            });
+    }
     match TcpStream::connect_timeout(&cdp, CONNECT_WAIT) {
         Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => None,
         Err(error) if error.kind() == std::io::ErrorKind::TimedOut => Some(Check {
