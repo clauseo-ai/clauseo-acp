@@ -28,8 +28,27 @@ fn no_policy_reports_absent() {
     assert_eq!(effective.data_dir(), Path::new("/data"));
     assert_eq!(effective.locations(), &locations());
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         Path::new("/data/Documents/Clauseo")
+    );
+}
+
+/// Issue #365: with no Documents folder there is no default matters folder, until
+/// `matters.default_location` gives one.
+#[test]
+fn no_documents_leaves_the_default_matters_dir_unset() {
+    let at = locations().without_default_matters_dir();
+    let effective = Effective::load(&at, &MemFiles::default(), &[&absent()]);
+    assert_eq!(effective.default_matters_dir(), None);
+    assert_eq!(effective.data_dir(), Path::new("/data"));
+    let files = user(&format!(
+        r#"{{"matters": {{"default_location": "{}"}}}}"#,
+        abs_json("cases")
+    ));
+    let effective = Effective::load(&at, &files, &[&absent()]);
+    assert_eq!(
+        effective.default_matters_dir(),
+        Some(abs("cases").as_path())
     );
 }
 
@@ -205,7 +224,7 @@ fn the_default_location_setting_moves_new_matters() {
         abs_json("cases")
     );
     let effective = Effective::load(&locations(), &user(&text), &[]);
-    assert_eq!(effective.default_matters_dir(), abs("cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("cases"));
 }
 
 #[test]
@@ -359,7 +378,7 @@ fn data_dir_override_without_a_default_location_uses_beside_the_data_folder() {
     let effective = Effective::load(&at, &MemFiles::default(), &[&absent()]);
     assert_eq!(effective.data_dir(), abs("tmp/clauseo-ci"));
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         abs("tmp/clauseo-ci-matters")
     );
 }
@@ -372,7 +391,7 @@ fn data_dir_override_with_a_user_default_location_uses_it() {
         abs_json("cases")
     );
     let effective = Effective::load(&at, &user_at(&at, &text), &[&absent()]);
-    assert_eq!(effective.default_matters_dir(), abs("cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("cases"));
 }
 
 #[test]
@@ -390,7 +409,7 @@ fn data_dir_override_with_a_policy_default_location_policy_wins() {
         ),
     );
     let effective = Effective::load(&at, &user_at(&at, &user_text), &[&firm]);
-    assert_eq!(effective.default_matters_dir(), abs("firm-cases"));
+    assert_eq!(effective.default_matters_dir().unwrap(), abs("firm-cases"));
     assert!(effective.is_locked("matters.default_location"));
 }
 
@@ -403,7 +422,7 @@ fn no_data_dir_override_keeps_documents_clauseo() {
     let locations = Locations::resolve_for(Os::Linux, &dirs, &FakeEnv::default()).unwrap();
     let effective = Effective::load(&locations, &MemFiles::default(), &[&absent()]);
     assert_eq!(
-        effective.default_matters_dir(),
+        effective.default_matters_dir().unwrap(),
         abs("home/ada/Documents/Clauseo")
     );
 }

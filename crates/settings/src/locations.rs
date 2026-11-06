@@ -51,7 +51,7 @@ pub const DATA_ENTRIES: [&str; 5] = [
 pub struct Locations {
     data_dir: PathBuf,
     settings_file: PathBuf,
-    default_matters_dir: PathBuf,
+    default_matters_dir: Option<PathBuf>,
 }
 
 /// The OS's folders. [`crate::SystemDirs`] asks the OS; tests pass their own. Off Windows only
@@ -75,6 +75,8 @@ pub enum KnownFolder {
     /// parent.
     LocalAppData,
     /// The user's Documents folder, wherever Known Folder Move put it: new matters go in it.
+    /// Windows may not give it (a redirect to a share it cannot reach, a deleted folder); then
+    /// there is no default matters folder, and nothing else needs it.
     Documents,
     /// `%SystemRoot%`.
     Windows,
@@ -126,14 +128,29 @@ impl Locations {
     /// The folders under `root`: the data folder is `root`, and new matters go in
     /// `root/Documents/Clauseo`. Reads nothing; for tests and `cli`.
     pub fn under_root(root: &Path) -> Locations {
-        Self::with_data_dir(root.to_owned(), root.join("Documents").join("Clauseo"))
+        Self::with_data_dir(
+            root.to_owned(),
+            Some(root.join("Documents").join("Clauseo")),
+        )
     }
 
     /// The folders of a home at `root`, as a real one lays them out: the data folder is
     /// `root/data` and new matters go in `root/Documents/Clauseo`, outside the data folder (a
     /// matter inside it is refused). Reads nothing; for tests and `cli`.
     pub fn under_home(root: &Path) -> Locations {
-        Self::with_data_dir(root.join("data"), root.join("Documents").join("Clauseo"))
+        Self::with_data_dir(
+            root.join("data"),
+            Some(root.join("Documents").join("Clauseo")),
+        )
+    }
+
+    /// These folders with no default matters folder, as on a machine with no Documents folder
+    /// (issue #365). Reads nothing; for tests.
+    pub fn without_default_matters_dir(self) -> Locations {
+        Locations {
+            default_matters_dir: None,
+            ..self
+        }
     }
 
     /// The data folder, which holds `settings.json` and the matters' history.
@@ -153,8 +170,12 @@ impl Locations {
     /// data folder, and the matters root is `<data dir>/matters`. A data folder with no name (a
     /// root such as `/`) has no sibling, so it keeps `Documents/Clauseo`. `host` adds each
     /// matter's name.
-    pub fn default_matters_dir(&self) -> &Path {
-        &self.default_matters_dir
+    ///
+    /// `None` when the Documents folder is needed and the OS gives none (issue #365): Windows
+    /// cannot resolve it (a redirect to a share it cannot reach, a deleted folder), or macOS or
+    /// Linux has no home. Then New matter asks for a folder. Only the data folder is essential.
+    pub fn default_matters_dir(&self) -> Option<&Path> {
+        self.default_matters_dir.as_deref()
     }
 
     /// The folder of the host's log file, `<data folder>/logs` (decision record 0047): it
@@ -234,33 +255,38 @@ impl Locations {
                 .join(IDENTIFIER),
             },
         };
-        let documents = match os {
-            Os::Windows => dirs
-                .known_folder(KnownFolder::Documents)
-                .ok_or(Error::NoFolder {
-                    folder: "Documents",
-                })?,
-            Os::Mac => home()?.join("Documents"),
-            Os::Linux => match absolute_var(env, "XDG_DOCUMENTS_DIR") {
-                Some(documents) => documents,
-                None => home()?.join("Documents"),
-            },
-        };
-        let documents_matters = documents.join("Clauseo");
         let default_matters_dir = match overridden.as_deref().and_then(matters_beside) {
-            Some(beside) => beside,
-            None => documents_matters,
+            Some(beside) => Some(beside),
+            None => documents(os, dirs, env).map(|documents| documents.join("Clauseo")),
         };
         Ok(Self::with_data_dir(data_dir, default_matters_dir))
     }
 
-    fn with_data_dir(data_dir: PathBuf, default_matters_dir: PathBuf) -> Locations {
+    fn with_data_dir(data_dir: PathBuf, default_matters_dir: Option<PathBuf>) -> Locations {
         Locations {
             settings_file: data_dir.join(SETTINGS_FILE),
             data_dir,
             default_matters_dir,
         }
     }
+}
+
+/// The user's Documents folder, or `None`, logged, when the OS gives none: never an error, since
+/// only the default matters folder needs it (issue #365).
+fn documents(os: Os, dirs: &dyn PlatformDirs, env: &dyn Env) -> Option<PathBuf> {
+    let documents = match os {
+        Os::Windows => dirs.known_folder(KnownFolder::Documents),
+        Os::Mac => dirs.home().map(|home| home.join("Documents")),
+        Os::Linux => absolute_var(env, "XDG_DOCUMENTS_DIR")
+            .or_else(|| dirs.home().map(|home| home.join("Documents"))),
+    };
+    if documents.is_none() {
+        tracing::warn!(
+            ?os,
+            "no Documents folder: there is no default matters folder, so New matter asks for one"
+        );
+    }
+    documents
 }
 
 /// The default matters folder beside a data folder that `CLAUSEO_DATA_DIR` named:

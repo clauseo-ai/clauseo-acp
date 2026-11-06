@@ -70,7 +70,7 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
             }))
         }
         MatterSource::DefaultLocation => {
-            let location = actor.effective.default_matters_dir().to_path_buf();
+            let location = super::default_location(actor)?;
             Ok(Box::new(move || Ok(nearest_existing(&location))))
         }
     }

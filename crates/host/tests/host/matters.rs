@@ -436,6 +436,47 @@ fn a_home_reached_through_a_link_still_shortens_the_folder() {
     host.shutdown();
 }
 
+#[test]
+fn without_a_documents_folder_new_matter_asks_for_a_folder() {
+    let dir = Dir::new("no_documents", &[]);
+    let host = dir.start_without_documents(0);
+    // The host starts; with no default location there is no Scratch matter.
+    assert!(
+        host.matters()
+            .iter()
+            .all(|matter| matter.kind != MatterKind::Scratch),
+        "{:?}",
+        host.matters()
+    );
+    // The form's folder line has nothing to show, so it asks for a folder.
+    let error = host.query(HostQuery::GetDefaultLocation).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    let create = |source| HostCommand::CreateMatter {
+        name: Title::new("Acme").unwrap(),
+        source,
+        client: None,
+        next_date: None,
+    };
+    let error = host.refused(
+        create(MatterSource::DefaultLocation),
+        ErrorCode::CommandInvalid,
+    );
+    assert!(error.message().contains("no default location"), "{error}");
+    assert_eq!(host.matters(), []);
+    // A folder the lawyer picks still makes the matter.
+    let parent = dir.folder("parent", &[]);
+    let folder = host.folder_ref(&parent);
+    created(host.dispatch(create(MatterSource::NewFolder { folder })));
+    assert!(
+        parent
+            .join("Acme")
+            .join(".clauseo")
+            .join("matter.json")
+            .is_file()
+    );
+    host.shutdown();
+}
+
 /// `GetDefaultLocation`'s display.
 fn default_display(host: &Running) -> String {
     match host.query(HostQuery::GetDefaultLocation).unwrap() {

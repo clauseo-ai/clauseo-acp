@@ -460,13 +460,14 @@ impl Effective {
 
     /// Where new matters go: `matters.default_location` (user or policy), or else
     /// [`Locations::default_matters_dir`]: `Documents/Clauseo`, or with `CLAUSEO_DATA_DIR` set the
-    /// sibling `<data dir>-matters`.
-    pub fn default_matters_dir(&self) -> &Path {
+    /// sibling `<data dir>-matters`. `None` when neither gives one (no Documents folder, issue
+    /// #365): New matter then asks for a folder.
+    pub fn default_matters_dir(&self) -> Option<&Path> {
         self.settings
             .matters
             .default_location
             .as_deref()
-            .unwrap_or_else(|| self.locations.default_matters_dir())
+            .or_else(|| self.locations.default_matters_dir())
     }
 
     /// The data folder.

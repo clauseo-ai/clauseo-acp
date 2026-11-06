@@ -222,9 +222,19 @@ impl Dir {
         clock: &ManualClock,
         launcher: Arc<dyn Launcher>,
     ) -> HostConfig {
-        let locations = Locations::under_home(&self.root);
+        self.config_at(&Locations::under_home(&self.root), run, clock, launcher)
+    }
+
+    /// As [`Dir::config_launching`], with the folders `locations`.
+    fn config_at(
+        &self,
+        locations: &Locations,
+        run: u16,
+        clock: &ManualClock,
+        launcher: Arc<dyn Launcher>,
+    ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
-        let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
+        let effective = Effective::load(locations, &SystemFiles, &[&policy]);
         HostConfig::new(effective, launcher)
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
@@ -274,6 +284,21 @@ impl Dir {
             }
         }
         panic!("Host::start (run {run}): the store stayed locked");
+    }
+
+    /// Starts run `run` as on a machine with no Documents folder (issue #365): the folders of
+    /// [`Locations::under_home`] with no default matters folder.
+    pub(crate) fn start_without_documents(&self, run: u16) -> Running {
+        let clock = Self::clock(run);
+        let locations = Locations::under_home(&self.root).without_default_matters_dir();
+        let config = self.config_at(&locations, run, &clock, Arc::new(self.launcher()));
+        let (handle, join) =
+            Host::start(config).unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
+        Running {
+            handle,
+            join: Some(join),
+            clock,
+        }
     }
 
     /// Starts run `run`, letting `adjust` change the config first.
