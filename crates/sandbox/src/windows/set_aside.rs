@@ -63,8 +63,19 @@
 //! lawyer `FILE_DELETE_CHILD` (`Io(PermissionDenied)`). The name must then be moved or removed
 //! by hand.
 //!
-//! Known limits: a `CLAUDE.local.md` or `AGENTS.override.md` below the root is not checked
-//! (D-B17: two more opens per folder cost over 5% of the scan). A lawyer's own link that was
+//! Known limits:
+//! - The check compares file IDs only. A nested protected item (a `CLAUDE.md`, `AGENTS.md`,
+//!   `.mcp.json`, a file in a `.claude` folder, a `.git\config`) is caught when it is
+//!   created, replaced, renamed in or swapped (a new file ID), not when one already there is
+//!   edited in place: Windows denies writes to protected names only at the matter's root
+//!   (`policy.rs`), so the agent can edit a nested one and the next launch loads or runs it.
+//!   This gap is open until the deny-write at any depth follow-up (S15 `PR4a2`).
+//! - A nested protected item one session's agent makes is visible to a second session of the
+//!   matter running at the same time until a set-aside pass runs.
+//! - A `CLAUDE.local.md` or `AGENTS.override.md` below the root is not checked (D-B17: two
+//!   more opens per folder cost over 5% of the scan).
+//!
+//! A lawyer's own link that was
 //! there at launch and is unchanged stays; a link made or swapped while a session ran is set
 //! aside even when the lawyer made it. An item moved aside keeps its own DACL, so an agent it
 //! grants could still open it by its full path; it no longer loads in the matter.

@@ -181,6 +181,7 @@ crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_er
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
 # The apply layer's NTFS tests (S15 PR3b): win-01's timing row.
 crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_costs clippy::disallowed_methods
+# The set-aside's scan timing (S15 PR4a): the clock that times the nested probe lists.
 crates/sandbox/src/windows/set_aside/tests/timing.rs timed clippy::disallowed_methods
 
 # clauseo-search: its write module (the private index file, and removing one to rebuild), its
