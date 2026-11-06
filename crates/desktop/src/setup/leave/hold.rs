@@ -23,6 +23,7 @@ use std::time::Duration;
 use clauseo_process::{AsyncIoTimer, Timer};
 use clauseo_protocol::AgentId;
 
+use super::super::backend::AgentsBackend;
 use super::super::host_calls::SetupHost;
 use super::super::readers::ReadHold;
 use crate::dialogs::BoxFuture;
@@ -141,16 +142,20 @@ impl HostHold {
         self.armed = false;
     }
 
-    /// The leave did not finish, or finished with a usable login (`after.rs`): `restart_agents`
-    /// lifts the hold.
-    pub(crate) async fn lift(mut self) {
+    /// The leave did not finish, or finished with a usable login (`after.rs`): the launch
+    /// refusal in force is told first (`refusal::sync`, as `leave::restart` does), then
+    /// `restart_agents` lifts the hold.
+    pub(crate) async fn lift(mut self, backend: &AgentsBackend) {
         self.armed = false;
+        super::super::refusal::sync(backend, &self.agent).await;
         lift(&*self.host, &self.agent).await;
     }
 }
 
 impl Drop for HostHold {
     fn drop(&mut self) {
+        // No backend is in reach here, so the refusal is not set again: it is the one last told,
+        // kept current by `refusal::sync` on each change.
         if !self.armed || (self.panic_only && !std::thread::panicking()) {
             return;
         }

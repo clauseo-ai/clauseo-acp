@@ -120,7 +120,7 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         if reuse_ended {
             finish(backend, agent, hold).await;
         } else {
-            hold.lift().await;
+            hold.lift(backend).await;
         }
         drop(reads);
         backend.wiring.leaves.end_late(agent, reuse_ended);

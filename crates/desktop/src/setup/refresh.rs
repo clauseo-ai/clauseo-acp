@@ -14,7 +14,9 @@
 //!
 //! An endpoint or a provider that arrives restarts the agent's agents (`restart_if_usable`), as
 //! one the lawyer sets does: a leave that finished with nothing usable kept them held for the
-//! next login, and this is one (review L3), with nothing else on screen to restart them.
+//! next login, and this is one (review L3), with nothing else on screen to restart them. A
+//! leave of the agent still running (or given up, waiting for S18's late end) keeps its hold:
+//! its end restarts them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::PoisonError;
@@ -101,6 +103,12 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
     }
     super::refusal::sync_all(backend).await;
     for agent in arrived {
+        // A leave of the agent holds its restart: the leave's end sees the endpoint and restarts
+        // by the rule (`after.rs`). Lifting the hold now would let agents launch mid-leave.
+        if backend.wiring.leaves.running_for(agent) {
+            tracing::info!(%agent, "an endpoint arrived during a leave: its end restarts");
+            continue;
+        }
         restart_if_usable(backend, agent).await;
     }
 }

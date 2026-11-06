@@ -1,23 +1,30 @@
 //! What follows a leave that finished (`leave/after.rs`), on the recording fakes: the agents
 //! restart once when a stored key, an endpoint or Clauseo's own login remains, after an
 //! automatic leave's first try or a try again and after a lawyer's leave; with nothing usable
-//! they stay held and the agent shows signed out. A key set on a reused login restarts once,
-//! after the key is stored. An endpoint that then arrives through the settings restarts a held
-//! agent once (the final security review's L3).
+//! after a lawyer's leave; with nothing usable they stay held and the agent shows signed out. A key
+//! set on a reused login restarts once, after the key is stored. An endpoint that then arrives
+//! through the settings restarts a held agent once (the final security review's L3), unless a
+//! leave of that agent runs: the leave's end restarts it.
+
+use std::collections::BTreeSet;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Found, SigninState};
 use clauseo_host::AgentsStopped;
-use clauseo_protocol::{AgentId, CommandOutcome, SignIn, SignInMethod};
+use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SignIn, SignInMethod};
 use futures::future::join;
 use serde_json::json;
 
-use super::fakes::{HostCall, Rig, command, rig_on};
+use super::fakes::{HostCall, Rig, command, rig_keys, rig_on};
 use super::leave::{reuse, stop_using_command};
 use super::switching::{count, retry, shown};
-use super::{SETTINGS, claude};
+use super::timing::until;
+use super::{SETTINGS, claude, codex};
 use crate::bridge::lock;
-use crate::setup::leave::auto_leave;
+use crate::setup::keys::KeyCache;
+use crate::setup::leave::{Wait, auto_leave};
+use crate::setup::refresh::{SettingsRead, apply_settings};
+use crate::test_support::block_on;
 
 const OLD_KEY: &str = "sk-ant-api03-STORED-KEY-0001";
 const NEW_KEY: &str = "sk-ant-api03-NEW-KEY-0002";
@@ -25,6 +32,8 @@ const NEW_KEY: &str = "sk-ant-api03-NEW-KEY-0002";
 const CHANGED: SigninState = SigninState::SignedOut {
     found: Some(Found::ReusedChanged),
 };
+
+const OUT: SigninState = SigninState::SignedOut { found: None };
 
 /// A rig with Claude reused, its key stored first when `key`.
 fn reused_claude(key: bool) -> Rig {
@@ -57,6 +66,14 @@ fn method(shown: Option<&SignIn>) -> Option<SignInMethod> {
 
 fn restarts(rig: &Rig, agent: &AgentId) -> usize {
     count(rig, &HostCall::RestartAgents(agent.clone()))
+}
+
+/// The settings read that brings Claude's endpoint in, as the lawyer's or a firm's does.
+fn endpoint_arrives() -> SettingsRead {
+    SettingsRead {
+        firm: BTreeSet::from([claude()]),
+        ..SettingsRead::default()
+    }
 }
 
 #[test]
@@ -189,16 +206,10 @@ fn a_key_set_on_a_reused_login_with_a_key_stored_restarts_once_after_the_new_key
 
 #[test]
 fn an_endpoint_arriving_through_the_settings_restarts_a_held_agent_once() {
-    use crate::setup::refresh::{SettingsRead, apply_settings};
-    use crate::test_support::block_on;
-
     let rig = reused_claude(false);
     leave_at_first_try(&rig);
     assert_eq!(restarts(&rig, &claude()), 0, "held for the next login");
-    let read = SettingsRead {
-        firm: std::collections::BTreeSet::from([claude()]),
-        ..SettingsRead::default()
-    };
+    let read = endpoint_arrives();
     block_on(apply_settings(&rig.backend, read.clone()));
     assert_eq!(restarts(&rig, &claude()), 1, "the endpoint is usable");
     assert_eq!(
@@ -207,4 +218,78 @@ fn an_endpoint_arriving_through_the_settings_restarts_a_held_agent_once() {
     );
     block_on(apply_settings(&rig.backend, read));
     assert_eq!(restarts(&rig, &claude()), 1, "no change, no restart");
+}
+
+#[test]
+fn an_endpoint_through_the_settings_during_an_automatic_leave_waits_for_its_end() {
+    let rig = reused_claude(false);
+    *lock(&rig.host.stopped) = AgentsStopped::TimedOut;
+    lock(&rig.agents.answers).insert("stop_using_login", CHANGED);
+    let mut script = rig.timer.script();
+    let agent = claude();
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::ReusedChanged));
+    let drive = async {
+        script.asked(retry(5)).await;
+        apply_settings(&rig.backend, endpoint_arrives()).await;
+        assert_eq!(restarts(&rig, &claude()), 0, "held while it tries again");
+        *lock(&rig.host.stopped) = AgentsStopped::Exited;
+        script.fire(retry(5)).await;
+    };
+    let (left, ()) = rig.pumped(join(leave, drive));
+    assert_eq!(left, Ok(()));
+    assert_eq!(
+        restarts(&rig, &claude()),
+        1,
+        "once, when the leave finished"
+    );
+    assert_eq!(
+        method(shown(&rig, &claude()).as_ref()),
+        Some(SignInMethod::Firm)
+    );
+}
+
+#[test]
+fn an_endpoint_through_the_settings_during_a_given_up_leave_waits_for_the_late_end() {
+    let rig = reused_claude(false);
+    let mut script = rig.timer.script();
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, stop_using_command(&claude()));
+    let answer = rig.pumped(async {
+        let (answer, ()) = join(send, script.fire(Wait::SignedOut)).await;
+        apply_settings(&rig.backend, endpoint_arrives()).await;
+        assert_eq!(
+            restarts(&rig, &claude()),
+            0,
+            "held while S18's stop job runs"
+        );
+        rig.s18_sends(&claude(), OUT);
+        let lifted = || restarts(&rig, &claude()) == 1;
+        until("the hold lifted", lifted).await;
+        answer
+    });
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert_eq!(restarts(&rig, &claude()), 1, "once, at the late end");
+    assert_eq!(
+        method(shown(&rig, &claude()).as_ref()),
+        Some(SignInMethod::Firm)
+    );
+}
+
+#[test]
+fn a_hold_lifted_while_the_key_is_unreadable_is_refused_before_the_restart() {
+    let keychain = Keychain::memory();
+    keychain.store(&claude(), OLD_KEY).unwrap();
+    keychain.fail_reads(true);
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    let rig = rig_keys(keychain, keys);
+    rig.backend.compose.set_key(&claude(), true);
+    reuse(&rig, &claude());
+    leave_at_first_try(&rig);
+    let calls = rig.host.calls();
+    let at = |call: &HostCall| calls.iter().position(|seen| seen == call);
+    let refused = HostCall::SetLaunchRefused(claude(), Some(ErrorCode::AgentKeyUnreadable));
+    let refused = at(&refused).expect("the refusal is set");
+    let restart = at(&HostCall::RestartAgents(claude())).expect("restarted");
+    assert!(refused < restart, "refused first: {calls:?}");
+    assert_eq!(restarts(&rig, &claude()), 1);
 }

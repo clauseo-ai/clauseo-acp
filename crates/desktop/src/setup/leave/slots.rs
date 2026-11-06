@@ -131,6 +131,13 @@ impl Leaves {
         }
     }
 
+    /// Whether a leave of `agent` is in progress: one running, or a lawyer's given up that waits
+    /// for S18's late end ([`Slot::linger`], [`Leaves::end_late`]). Its hold is then the
+    /// leave's to lift.
+    pub(crate) fn running_for(&self, agent: &AgentId) -> bool {
+        lock(&self.running).contains_key(agent)
+    }
+
     /// Whether a new sign-in arrived for `agent` since its running leave began: the pump has
     /// handled it, `restart_agents` included.
     pub(crate) fn told_signed_in(&self, agent: &AgentId) -> bool {
