@@ -64,6 +64,11 @@ impl<V: Volume> Volume for Stopping<V> {
     }
 
     fn pool(&self) -> io::Result<Vec<String>> {
+        // A recorded pool, so the hand-over reaches `own` and its crash: on a Windows machine
+        // without the set-up's record, NTFS's pool is empty and nothing would be handed over.
+        if matches!(self.stop, Stop::CrashAtOwn) {
+            return Ok(vec!["S-1-5-21-1-2-3-1001".to_owned()]);
+        }
         self.inner.pool()
     }
 
