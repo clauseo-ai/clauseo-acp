@@ -1,6 +1,7 @@
 //! [`PolicyBuilder::build`]: canonicalising the inputs and the refusals.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -261,6 +262,12 @@ fn tmp_folder(
     };
     let what = "temp folder";
     absolute(p, what)?;
+    if ends_in_dots(p) {
+        return refuse(format!(
+            "the {what} may not end in `.` or `..`: {}",
+            p.display()
+        ));
+    }
     if fs::symlink_metadata(p).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return refuse(format!(
             "the {what} may not be a symbolic link: {}",
@@ -295,7 +302,39 @@ fn tmp_folder(
             h.display()
         ));
     }
+    if !run_shaped(&tmpdir) {
+        return refuse(format!(
+            "the {what} must be `<data_dir>/{RUN_DIR}/<session>/{TEMP_DIR}`: {shown}"
+        ));
+    }
     Ok(Some(tmpdir))
+}
+
+/// The run folder in the data folder, holding one folder per session.
+const RUN_DIR: &str = "run";
+
+/// The session's temp folder's name in its session folder.
+const TEMP_DIR: &str = "tmp";
+
+/// Whether `p`'s last name, as written, is `.` or `..`: `Path` drops a trailing `.` (and
+/// `file_name` skips `..`), so `run/s1/.` would name `s1`, the folder that holds the token.
+fn ends_in_dots(p: &Path) -> bool {
+    let bytes = p.as_os_str().as_encoded_bytes();
+    let sep = |b: &u8| *b == b'/' || (cfg!(windows) && *b == b'\\');
+    let last = bytes.rsplit(sep).find(|name| !name.is_empty());
+    last.is_some_and(|name| name == b"." || name == b"..")
+}
+
+/// Whether the canonical `tmpdir` is `.../run/<session>/tmp`: named `tmp`, two levels below a
+/// folder named `run`. The policy doesn't know the data folder, so the shape is the rule; tier
+/// B's plan checks that the run folder is the data folder's own (`acl_plan::targets`).
+fn run_shaped(tmpdir: &Path) -> bool {
+    let named =
+        |p: Option<&Path>, name: &str| p.and_then(Path::file_name) == Some(OsStr::new(name));
+    let session = tmpdir.parent();
+    named(Some(tmpdir), TEMP_DIR)
+        && session.and_then(Path::file_name).is_some()
+        && named(session.and_then(Path::parent), RUN_DIR)
 }
 
 /// The rules of a runtime or read path (`what`, with its article), on canonical paths. Both

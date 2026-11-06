@@ -239,14 +239,16 @@ fn a_matter_named_with_a_tilde_and_digit_is_planned() {
     assert!(odd_spelling(Path::new("/d/agents/claude-acp/home.")));
 }
 
-/// The temp folder's one place in the data folder is `<data>/run/<session>/tmp`: the run folder
-/// itself, another name there, or a `tmp` elsewhere in the data folder is refused.
+/// The temp folder's one place in the data folder is `<data>/run/<session>/tmp`: a folder of
+/// that shape elsewhere in the data folder (the policy checks only the shape) is refused.
 #[test]
 fn a_temp_folder_elsewhere_in_the_data_folder_is_refused() {
     let w = World::new("plan-tmpdir-elsewhere");
     w.dir.dir("data/run/s1");
+    w.dir.dir("data/updates/run/s1");
+    w.dir.dir("data/agents/x/run/s1");
     let want = Some((PathKind::TempFolder, FolderRefusal::OverlapsDataFolder));
-    for rel in ["data/run/tmp", "data/run/s1/scratch", "data/updates/tmp"] {
+    for rel in ["data/updates/run/s1/tmp", "data/agents/x/run/s1/tmp"] {
         let policy = w.builder().tmpdir(w.at(rel)).build().unwrap();
         assert_eq!(refusal(&w, &policy), want, "{rel}");
     }

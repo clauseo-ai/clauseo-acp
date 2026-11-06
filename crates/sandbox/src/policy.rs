@@ -402,8 +402,10 @@ impl Policy {
 impl PolicyBuilder {
     /// The session's temp folder, the agent's `TMPDIR`, read-write: the host passes
     /// `<data_dir>/run/<session>/tmp`. Only this folder is granted, never the run folder that
-    /// holds it. Its folder must exist; the launcher makes the folder itself. Unset, `TMPDIR`
-    /// is `<state>/tmp` (deprecated): R17 PR-D passes `run/<s>/tmp`.
+    /// holds it. Its folder must exist; the macOS launcher makes the folder itself and sets
+    /// `TMPDIR`. On Windows nothing sets or makes it yet: PR5's runner sets `TEMP`/`TMP` to it
+    /// and makes it. Unset, `TMPDIR` is `<state>/tmp` (deprecated): R17 PR-D passes
+    /// `run/<s>/tmp`.
     pub fn tmpdir(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
         self.tmpdir = Some(p.into());
         self
@@ -542,8 +544,9 @@ impl PolicyBuilder {
     ///   link must be inside the state folder. Runtime and read paths may not be `/` or equal
     ///   or hold the home folder, the matter or a hidden path (inside one is fine: that is why
     ///   they are allowed again). Read-only paths in the state folder must be inside it;
-    ///   over-cap files inside the matter. The temp folder may not be `/`, equal or hold the
-    ///   home folder, the state folder or a hidden path, nor be inside the matter or hold it.
+    ///   over-cap files inside the matter. The temp folder may not end in `.` or `..` as
+    ///   written, be `/`, equal or hold the home folder, the state folder or a hidden path, nor
+    ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`.
     /// - Each allowed folder passes [`Policy::check_allowed_folder`].
     /// - Without [`PolicyBuilder::scan`], the matter is walked here
     ///   ([`scan_matter`](crate::scan_matter)). Every finding (the walk's and
