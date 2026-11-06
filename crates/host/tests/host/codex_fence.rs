@@ -1,8 +1,8 @@
-//! The data-folder fence in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`, decision
-//! record 0030), checked from `codex.rs`'s launch test: denies scoped under the data folder,
-//! `run` and `agent-state` whole (the own folders reopen as `write` entries, checked in
-//! `profile.rs`), the login home whole, never the session's state folder (its `CODEX_HOME`,
-//! R17 PR-C) but the login link and the config surfaces in it. Windows gets none.
+//! The data-folder fence in a Codex launch's `CODEX_CONFIG` (`agent::codex_fence`, decision record
+//! 0030), checked from `codex.rs`'s launch test: denies scoped under the data folder, `run` whole
+//! and `agent-state` entry by entry (the own folders reopen as `write` entries, checked in
+//! `profile.rs`), the login home whole, never the session's state folder (its `CODEX_HOME`, R17
+//! PR-C) but the login link and the config surfaces in it. Windows gets none.
 
 use std::path::Path;
 
@@ -35,7 +35,6 @@ pub(crate) fn checked_keys(
         "skill-packs",
         "run.old-*",
         "run",
-        "agent-state",
         "agents/claude-acp",
         "agents/codex-acp/home",
     ] {

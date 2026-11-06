@@ -33,6 +33,9 @@ use crate::log_file::Cause;
 
 mod claude_json;
 mod file_id;
+#[cfg(unix)]
+mod handle;
+#[cfg(not(unix))]
 mod projects;
 pub(crate) mod safe_read;
 
@@ -166,6 +169,7 @@ pub(crate) fn make(data: &Path, state: &Path, who: &str) -> Result<(), Error> {
 /// Removes `path`, of `kind` as `symlink_metadata` or `DirEntry::file_type` read it, through no
 /// link: a real folder with all it holds (`remove_dir_all`, which removes a link inside and never
 /// follows it), anything else (a file, a link, a junction) as itself. A missing name is fine.
+#[cfg(not(unix))]
 fn remove_entry(path: &Path, kind: std::fs::FileType) -> io::Result<()> {
     let removed = if kind.is_dir() {
         crate::write::remove_tree(path)
@@ -179,16 +183,16 @@ fn remove_entry(path: &Path, kind: std::fs::FileType) -> io::Result<()> {
 }
 
 /// Whether Codex keeps the entry `name` of `kind` ([`CODEX_KEPT_FILES`]).
-fn codex_keeps(name: &str, kind: std::fs::FileType) -> bool {
+fn codex_keeps(name: &str, folder: bool, file: bool) -> bool {
     let database = CODEX_DATABASES.iter().any(|base| {
         SQLITE_SUFFIXES
             .iter()
             .any(|suffix| name.strip_prefix(base) == Some(suffix))
     });
-    if kind.is_file() {
+    if file {
         CODEX_KEPT_FILES.contains(&name) || database
     } else {
-        kind.is_dir() && CODEX_KEPT_FOLDERS.contains(&name)
+        folder && CODEX_KEPT_FOLDERS.contains(&name)
     }
 }
 
@@ -200,17 +204,14 @@ pub(crate) const CLAUDE_LIVE_FOLDERS: [&str; 4] =
     ["plans", "file-history", "todos", "shell-snapshots"];
 
 /// Whether the file `path` has another name: a hard link (to a credential, say) is never kept.
+/// Off Unix (Unix reads the link count on the folder's handle, `handle.rs`).
+#[cfg(not(unix))]
 pub(crate) fn has_second_name(path: &Path) -> io::Result<bool> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        Ok(std::fs::symlink_metadata(path)?.nlink() > 1)
-    }
     #[cfg(windows)]
     {
         Ok(file_id::link_count(path)?.is_some_and(|links| links > 1))
     }
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(windows))]
     {
         let _ = path;
         Ok(true)
@@ -225,14 +226,29 @@ pub(crate) fn has_second_name(path: &Path) -> io::Result<bool> {
 /// a live session reads back as well ([`CLAUDE_LIVE_FOLDERS`], session folders in `projects`);
 /// every instruction surface is removed either way. A name that is not UTF-8 is removed. The
 /// first failure fails the clean, and so the launch. File system calls: off the actor.
+/// On Unix by handle (`handle.rs`); elsewhere by path, refusing reparse points (`projects.rs`).
 pub(crate) fn clean(state: &Path, kind: AgentKind, live: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        handle::clean(state, kind, live)
+    }
+    #[cfg(not(unix))]
+    {
+        clean_by_path(state, kind, live)
+    }
+}
+
+/// [`clean`] by path, off Unix: each entry's kind from the folder listing (a link or junction
+/// is removed as itself), Claude's projects through `projects.rs`.
+#[cfg(not(unix))]
+fn clean_by_path(state: &Path, kind: AgentKind, live: bool) -> io::Result<()> {
     for entry in std::fs::read_dir(state)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let name = entry.file_name();
         let name = name.to_str().unwrap_or_default();
         let kept = match kind {
-            AgentKind::Codex => codex_keeps(name, file_type),
+            AgentKind::Codex => codex_keeps(name, file_type.is_dir(), file_type.is_file()),
             AgentKind::Claude if name == "projects" && file_type.is_dir() => {
                 projects::clean(&entry.path(), live)?;
                 true
@@ -247,6 +263,24 @@ pub(crate) fn clean(state: &Path, kind: AgentKind, live: bool) -> io::Result<()>
         }
         if !kept || second {
             remove_entry(&entry.path(), file_type)?;
+        } else if kind == AgentKind::Codex && file_type.is_dir() {
+            sweep_links_by_path(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Off Unix: in one of Codex's kept folders, removes at any depth every file with a second name
+/// and every link or junction (removed as itself, never descended into).
+#[cfg(not(unix))]
+fn sweep_links_by_path(folder: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            sweep_links_by_path(&entry.path())?;
+        } else if !kind.is_file() || has_second_name(&entry.path())? {
+            remove_entry(&entry.path(), kind)?;
         }
     }
     Ok(())
@@ -277,8 +311,12 @@ pub(crate) fn prepare_in_use(data: &Path, state: &Path, kind: AgentKind) -> Resu
 }
 
 /// One lock per state folder, so two launches' cleans of one matter's folder never run at once
-/// (each on its own launch-prep thread). Held for the make, the clean and the config rewrite.
-fn folder_lock(state: &Path) -> std::sync::Arc<std::sync::Mutex<()>> {
+/// (each on its own launch-prep thread), nor a launch's link with a login change's removal of
+/// it. Held for the make, the clean and the config rewrite, and, apart, for the stale link's
+/// removal and the launch's link (`launch_checks/state_prep.rs`) and for each removal by
+/// `login_link::remove_links_but`. The map keeps one small entry per state folder a host run has
+/// prepared and never shrinks (the named residual).
+pub(crate) fn folder_lock(state: &Path) -> std::sync::Arc<std::sync::Mutex<()>> {
     use std::collections::BTreeMap;
     use std::sync::{Arc, LazyLock, Mutex, PoisonError};
     static LOCKS: LazyLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> =

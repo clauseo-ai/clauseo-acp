@@ -10,20 +10,19 @@ use super::{CLAUDE_JSON, remove_name, safe_read};
 /// (an allow-list: a session could plant `mcpServers`, `enabledMcpjsonServers`,
 /// `allowedTools`, an `env` or any key a later Claude Code reads). Kept, each Claude Code's own
 /// state: the install's identity and counters (`userID`, `anonymousId`, `firstStartTime`,
-/// `numStartups`, `installMethod`, `autoUpdates`), onboarding and notices seen
-/// (`hasCompletedOnboarding`, `lastOnboardingVersion`, `lastReleaseNotesSeen`, `tipsHistory`,
-/// `subscriptionNoticeCount`, `hasAvailableSubscription`), the account's profile it refetches
-/// (`oauthAccount`), its feature-flag caches (`cachedStatsigGates`, `cachedDynamicConfigs`,
-/// `cachedGrowthBookFeatures`) and `projects`, itself cut to [`CLAUDE_JSON_PROJECT_KEPT`]. The
-/// names are from research 42 §2 and a Claude Code `.claude.json`; not checked one by one
-/// against the pinned bundle, and a dropped one is state Claude Code makes again.
-pub(crate) const CLAUDE_JSON_KEPT: [&str; 17] = [
+/// `numStartups`), onboarding and notices seen (`hasCompletedOnboarding`,
+/// `lastOnboardingVersion`, `lastReleaseNotesSeen`, `tipsHistory`, `subscriptionNoticeCount`,
+/// `hasAvailableSubscription`), the account's profile it refetches (`oauthAccount`) and
+/// `projects`, itself cut to [`CLAUDE_JSON_PROJECT_KEPT`]. Feature-flag caches and install
+/// settings (`cached*`, `autoUpdates`, `installMethod`) go: a session could plant them, and
+/// Claude Code fetches or sets them again. The names are from research 42 §2 and a Claude Code
+/// `.claude.json`; not checked one by one against the pinned bundle, and a dropped one is state
+/// Claude Code makes again.
+pub(crate) const CLAUDE_JSON_KEPT: [&str; 12] = [
     "userID",
     "anonymousId",
     "firstStartTime",
     "numStartups",
-    "installMethod",
-    "autoUpdates",
     "hasCompletedOnboarding",
     "lastOnboardingVersion",
     "lastReleaseNotesSeen",
@@ -31,9 +30,6 @@ pub(crate) const CLAUDE_JSON_KEPT: [&str; 17] = [
     "subscriptionNoticeCount",
     "hasAvailableSubscription",
     "oauthAccount",
-    "cachedStatsigGates",
-    "cachedDynamicConfigs",
-    "cachedGrowthBookFeatures",
     "projects",
 ];
 

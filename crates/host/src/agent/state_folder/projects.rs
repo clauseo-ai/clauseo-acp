@@ -1,15 +1,9 @@
-//! The clean of Claude's `projects` folder in a matter's state folder (`super::clean`), walked
-//! by handle: the session may swap a project folder for a link to elsewhere between the clean's
-//! look and its removal, so no path below `projects` is resolved again by name.
-//!
-//! - Unix: `projects` and each project folder are opened `O_DIRECTORY | O_NOFOLLOW` (a link
-//!   there fails the open and is removed as itself), each entry's kind is read with `fstatat`
-//!   and `AT_SYMLINK_NOFOLLOW` on the folder's handle, a file or link is removed with
-//!   `unlinkat` on that handle, and a folder to go is removed with `remove_dir_all` (which never
-//!   follows a link inside it) on its name under the handle's folder.
-//! - Windows: each folder is opened with `FILE_FLAG_OPEN_REPARSE_POINT` and refused (removed as
-//!   itself) when it is a reparse point, then listed by name; the swap between that check and
-//!   the listing is the named residual.
+//! The clean of Claude's `projects` folder in a matter's state folder off Unix
+//! (`super::clean_by_path`; Unix walks by handle, `handle.rs`). Each folder is opened with
+//! `FILE_FLAG_OPEN_REPARSE_POINT` and, when it is a reparse point (a link or junction), removed
+//! as itself and never descended into; a folder to go is removed with `remove_dir_all`, which
+//! removes a reparse point inside as itself and never follows it. The swap of a folder between
+//! that check and its listing is the named residual.
 //!
 //! What stays in each project: its `*.jsonl` transcripts with one name each; with `live` (a
 //! session of the agent runs in the matter) also its session folders (tool results,
@@ -28,70 +22,6 @@ fn file_stays(name: &[u8]) -> bool {
     name.ends_with(b".jsonl")
 }
 
-#[cfg(unix)]
-pub(super) fn clean(projects: &Path, live: bool) -> io::Result<()> {
-    use nix::dir::Dir;
-    use nix::errno::Errno;
-    use nix::fcntl::{AtFlags, OFlag};
-    use nix::sys::stat::{Mode, SFlag, fstatat};
-    use nix::unistd::{UnlinkatFlags, unlinkat};
-    use std::ffi::{CString, OsStr};
-    use std::os::unix::ffi::OsStrExt as _;
-
-    let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
-    let names = |dir: &mut Dir| -> Vec<CString> {
-        dir.iter()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_owned())
-            .filter(|name| name.as_bytes() != b"." && name.as_bytes() != b"..")
-            .collect()
-    };
-    let kind = |dir: &Dir, name: &CString| -> io::Result<SFlag> {
-        let stat = fstatat(dir, name.as_c_str(), AtFlags::AT_SYMLINK_NOFOLLOW)?;
-        Ok(SFlag::from_bits_truncate(stat.st_mode) & SFlag::S_IFMT)
-    };
-    let mut root = match Dir::open(projects, flags, Mode::empty()) {
-        Ok(root) => root,
-        // Swapped for a link or a file since the look: removed as itself.
-        Err(Errno::ELOOP | Errno::ENOTDIR) => return crate::write::remove_link(projects),
-        Err(error) => return Err(error.into()),
-    };
-    for project in names(&mut root) {
-        if kind(&root, &project)? != SFlag::S_IFDIR {
-            unlinkat(&root, project.as_c_str(), UnlinkatFlags::NoRemoveDir)?;
-            continue;
-        }
-        let mut folder = match Dir::openat(&root, project.as_c_str(), flags, Mode::empty()) {
-            Ok(folder) => folder,
-            Err(Errno::ELOOP | Errno::ENOTDIR) => {
-                unlinkat(&root, project.as_c_str(), UnlinkatFlags::NoRemoveDir)?;
-                continue;
-            }
-            Err(error) => return Err(error.into()),
-        };
-        for item in names(&mut folder) {
-            let bytes = item.as_bytes();
-            let item_kind = kind(&folder, &item)?;
-            if item_kind == SFlag::S_IFDIR {
-                if !folder_stays(bytes, live) {
-                    let path = projects
-                        .join(OsStr::from_bytes(project.as_bytes()))
-                        .join(OsStr::from_bytes(bytes));
-                    crate::write::remove_tree(&path)?;
-                }
-                continue;
-            }
-            let one_name = item_kind == SFlag::S_IFREG
-                && fstatat(&folder, item.as_c_str(), AtFlags::AT_SYMLINK_NOFOLLOW)?.st_nlink == 1;
-            if !(file_stays(bytes) && one_name) {
-                unlinkat(&folder, item.as_c_str(), UnlinkatFlags::NoRemoveDir)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
 pub(super) fn clean(projects: &Path, live: bool) -> io::Result<()> {
     if !real_folder(projects)? {
         return crate::write::remove_link(projects);
@@ -123,7 +53,6 @@ pub(super) fn clean(projects: &Path, live: bool) -> io::Result<()> {
 
 /// Whether `path` opens as a folder that is no reparse point (`FILE_FLAG_OPEN_REPARSE_POINT`,
 /// so a link or junction is opened as itself).
-#[cfg(not(unix))]
 fn real_folder(path: &Path) -> io::Result<bool> {
     let file = crate::write::open_read_no_follow(path)?;
     let meta = file.metadata()?;

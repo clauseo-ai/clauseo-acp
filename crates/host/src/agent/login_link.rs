@@ -328,6 +328,11 @@ pub(crate) async fn remove_links_but(
 fn remove_in(folders: &[PathBuf], source: Option<&Path>) -> Result<(), Error> {
     for folder in folders {
         let link = folder.join(super::state_folder::LOGIN_FILE);
+        // Under the folder's lock: never between a launch's look and its link.
+        let lock = super::state_folder::folder_lock(folder);
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if source
             .is_some_and(|source| super::state_folder::same_file(source, &link).unwrap_or(false))
         {

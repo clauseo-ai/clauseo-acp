@@ -66,6 +66,7 @@ pub(super) fn launch_keys(
             run_root: &prepared.run.root,
             notes: &prepared.run.notes,
             state: &codex.state,
+            state_denies: &codex.state_denies,
         };
         let fence =
             crate::agent::codex_fence::keys(actor.effective.locations(), session, cfg!(windows));
