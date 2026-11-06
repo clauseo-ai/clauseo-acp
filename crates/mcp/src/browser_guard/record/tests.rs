@@ -16,21 +16,33 @@ fn scratch(test: &str) -> PathBuf {
     dir
 }
 
-/// A process in a group of its own that waits to be killed: a shell running `sleep`, with
-/// `args` on its command line.
+/// A process in a group of its own that waits to be killed, with `args` on its command line: a
+/// shell that stops itself with its builtin `kill`. It forks nothing, so the group is that one
+/// process, and once the test reaps it the group is surely gone. (A forked `sleep` would be
+/// killed with it but reaped by init whenever init gets to it, and until then its zombie keeps
+/// the group alive.) Left behind by a failed test, it ends with the test process: its group is
+/// then orphaned with a stopped member, which the kernel sends `SIGHUP`.
+///
+/// It returns once the shell has written a line, so its command line is the shell's: `spawn`
+/// can return before a scan of `/proc` sees the new program's arguments.
 #[cfg(unix)]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test needs a live process group to probe"
 )]
 fn group(args: &[&std::ffi::OsStr]) -> std::process::Child {
+    use std::io::Read as _;
     use std::os::unix::process::CommandExt;
-    std::process::Command::new("sh")
-        .args(["-c", "sleep 30; :", "sh"])
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", "echo; kill -STOP $$", "sh"])
         .args(args)
+        .stdout(std::process::Stdio::piped())
         .process_group(0)
         .spawn()
-        .unwrap()
+        .unwrap();
+    let mut line = [0_u8];
+    child.stdout.take().unwrap().read_exact(&mut line).unwrap();
+    child
 }
 
 #[test]
