@@ -15,6 +15,7 @@ import { quietly } from "./open.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
   FolderRefId,
+  FolderScanned,
   FolderSupportKind,
   MatterId,
   MatterSummary,
@@ -353,6 +354,31 @@ export class Matters {
     return this.#transport.pickFolder();
   }
 
+  /** R20a: the scan of a folder the picker gave, before it becomes a matter; its progress comes as `folder_scanned`
+   * (onScan). Rejects with the host's error: a `matter.folder_*` refusal is create's own. */
+  async scan(folder: FolderRefId): Promise<void> {
+    await this.#transport.dispatch({
+      command_id: crypto.randomUUID(),
+      command: { scan_folder: { folder } },
+    });
+  }
+
+  /** Stops the scan of `folder`; its last `folder_scanned` says `cancelled`. A refusal only goes to the console. */
+  cancelScan(folder: FolderRefId): void {
+    this.#transport
+      .dispatch({ command_id: crypto.randomUUID(), command: { cancel_scan: { folder } } })
+      .catch((error: unknown) => console.warn(`cancel_scan failed: ${JSON.stringify(error)}`));
+  }
+
+  /** Hears each `folder_scanned` (an app event); returns the stop. Nothing without the app feed. */
+  onScan(listener: (scanned: FolderScanned) => void): () => void {
+    const app = this.next.app;
+    if (app === null) return () => {};
+    return app.subscribeApp((event) => {
+      if ("folder_scanned" in event) listener(event.folder_scanned);
+    });
+  }
+
   async #command(command: MattersCommand, name: string): Promise<void> {
     if (this.#rows === null) return;
     try {
@@ -365,7 +391,8 @@ export class Matters {
 
   /** An app event (H4): held until the frame, so a burst is one apply and one render. */
   #hear(event: AppEvent): void {
-    if (!this.#live) return;
+    // a scan's progress, up to four a second, is the form's alone (onScan): no ticket, no frame's apply
+    if (!this.#live || "folder_scanned" in event) return;
     // before the first list there is no list to change a row of or take a matter off: keep the rows and the ids for
     // the list to come, and take no ticket, so the read on its way still applies
     if (this.#view.phase !== "ready" && "matters_changed" in event && !event.matters_changed.all) {

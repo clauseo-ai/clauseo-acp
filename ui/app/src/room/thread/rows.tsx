@@ -3,12 +3,13 @@
 // shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
 // show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
 // answer shows as its mark (steer.ts, steer-rows.tsx).
-import { memo, useState, type ReactNode } from "react";
+import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { langOfText } from "@clauseo/components/lib/script.ts";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
+import { frd } from "@clauseo/components/lib/words-first-read.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
 import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../../store/hooks.ts";
@@ -24,6 +25,7 @@ import type {
   ViewEntry,
 } from "../../transport/protocol.ts";
 import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
+import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { stamp } from "./clock.ts";
 import { isolated, shownOf } from "./content.ts";
 import { noticeLine } from "./notice-words.ts";
@@ -61,7 +63,7 @@ function ContentLine({ block }: { block: ContentBlock }) {
 function Question({
   id,
   entry,
-  text,
+  text: asked,
   slots,
 }: {
   id: EntryId;
@@ -73,6 +75,9 @@ function Question({
   // "today" as the row first showed: no clock runs to move it
   const [now] = useState(Date.now);
   const at = stamp(w.lang, entry.ts, now);
+  // UD2: the first read's prompt never shows, by its turn (first-read/marks.ts), never by its words
+  useSyncExternalStore(subscribeMarks, firstReadMarks, firstReadMarks);
+  const text = isFirstReadTurn(entry.turn) ? frd(w.lang, "Clauseo's first read") : asked;
   return (
     <div data-testid="message-user" data-entry-id={id}>
       {slots ? (

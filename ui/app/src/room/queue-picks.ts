@@ -48,8 +48,11 @@ const failedStops: readonly StopReason[] = ["failed", "max_tokens", "max_turn_re
 export function heldPick(): (v: StreamView | undefined) => Held | null {
   let last: Held | null = null;
   return (v) => {
-    if (v?.header?.header?.queue_held !== true) return (last = null);
-    let next: Held = { kind: "held" };
+    const head = v?.header?.header;
+    if (v === undefined || head?.queue_held !== true) return (last = null);
+    // why the host holds it (#537), absent from an older host; a reason this version doesn't know passes as said
+    const reason: string | undefined = head.queue_held_reason;
+    let next: Held = reason === undefined ? { kind: "held" } : { kind: "held", reason };
     for (let i = v.ids.length - 1; i >= 0; i--) {
       const id = v.ids[i]!;
       // the newest turn's end: a stop at a limit names no stop of the lawyer's, nor an older step's
@@ -57,19 +60,22 @@ export function heldPick(): (v: StreamView | undefined) => Held | null {
       if (!id.startsWith(STEP)) continue;
       const step = v.entries.get(id)?.step;
       if (step === undefined) continue;
-      if (step.stop === "cancelled") next = { kind: "stopped", at: step.ts };
-      else if (step.stop === "not_allowed") next = { kind: "not_allowed", at: step.ts };
+      const why = reason === undefined ? {} : { reason };
+      if (step.stop === "cancelled") next = { kind: "stopped", at: step.ts, ...why };
+      else if (step.stop === "not_allowed") next = { kind: "not_allowed", at: step.ts, ...why };
       else if (failedStops.includes(step.stop))
         next = {
           kind: "failed",
           at: step.ts,
           ...(step.failure === undefined ? {} : { code: step.failure }),
+          ...why,
         };
       break;
     }
     const same =
       last !== null &&
       last.kind === next.kind &&
+      last.reason === next.reason &&
       (next.kind === "held" ||
         (last.kind !== "held" && last.at === next.at && last.code === next.code));
     return same ? last : (last = next);

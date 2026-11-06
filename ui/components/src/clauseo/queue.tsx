@@ -237,9 +237,17 @@ export function QueueStrip({
       if (going.current?.id === id) going.current = null;
     });
   };
+  // UD2: a hold with a reason the lawyer can't lift here (sign-in, switching, an update, the limit, one to come): the
+  // count alone and no Send next; an update's hold says why beneath it
+  const reason = held?.reason;
+  const nextable = reason === undefined || reason === "paused";
+  const why =
+    reason === "update"
+      ? w.m("Clauseo is installing an update. Your queued questions go once it's done.")
+      : null;
   // held with no stop to name, nothing goes until the lawyer sends: the count alone
   const count = [
-    held?.kind === "held"
+    held !== null && (held.kind === "held" || !nextable)
       ? n === 1
         ? w.m("1 queued.")
         : w.m("{n} queued.", { n })
@@ -251,7 +259,7 @@ export function QueueStrip({
     .filter((x) => x !== null)
     .join(" ");
   const head =
-    held === null || held.kind === "held"
+    held === null || held.kind === "held" || !nextable
       ? count
       : w.m(
           held.kind === "stopped"
@@ -262,7 +270,8 @@ export function QueueStrip({
           { time: w.clock(held.at) },
         );
   // what the host's region says: the head, then a refused press's words; nothing once the queue is empty
-  const said = n === 0 ? "" : note === null ? head : `${head} ${note.words}`;
+  const said =
+    n === 0 ? "" : [head, why, note?.words].filter((x) => x != null && x !== "").join(" ");
   useLayoutEffect(() => {
     sayTo.current?.(said);
   }, [said]);
@@ -284,13 +293,19 @@ export function QueueStrip({
           data-testid={testIds?.say}
         >
           <Say>{head}</Say>
+          {why !== null && " "}
+          {why !== null && (
+            <span className="queue-note queue-why" data-testid={testIds?.why}>
+              <Say>{why}</Say>
+            </span>
+          )}
           {note !== null && (
             <span className="queue-note" data-code={note.code} data-testid={testIds?.note}>
               <Say>{note.words}</Say>
             </span>
           )}
         </p>
-        {held !== null && (
+        {held !== null && nextable && (
           <Button
             kind="tone"
             size="small"

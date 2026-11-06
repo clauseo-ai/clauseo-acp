@@ -24,13 +24,17 @@ export type Queued = {
 /** Why the queue is held: the lawyer stopped the answer, or the lawyer didn't allow a request, or it failed, at the
  * step's time; or held with no stop to name (after a restart, or at a limit, U12's), when the strip offers Send next
  * alone. */
-export type Held =
+export type Held = (
   | {
       readonly kind: "stopped" | "not_allowed" | "failed";
       readonly at: Timestamp;
       readonly code?: ErrorCode;
     }
-  | { readonly kind: "held" };
+  | { readonly kind: "held" }
+) & {
+  /** Why the host holds the queue (`queue_held_reason`), when it says. */
+  readonly reason?: string;
+};
 
 const USER = "user_message:";
 

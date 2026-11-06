@@ -13,6 +13,7 @@ import type {
   AgentSummary,
   ErrorCode,
   FolderRefId,
+  FolderScanned,
   HostError,
   MatterId,
   MatterSource,
@@ -208,13 +209,15 @@ export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterI
 
 /** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
  * the Chrome download's state (browser-install.ts); and the connectors' state (R24, store/connectors.ts), the latest in
- * every catch-up; and the case-law hint for a turn (R24), never in a catch-up. */
+ * every catch-up; the case-law hint for a turn (R24), never in a catch-up; and how far the scan of a folder picked
+ * in New matter has got (R20a, room/scan/), never logged. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
   | { browser_install: { state: BrowserInstallState } }
   | { connectors_changed: ConnectorsState }
-  | { case_law_hint: CaseLawHint };
+  | { case_law_hint: CaseLawHint }
+  | { folder_scanned: FolderScanned };
 
 /** R24: the host's offer of the case-law connector under a turn's answer (store/connectors.ts); never logged. */
 export type CaseLawHint = { matter: MatterId; thread: ThreadId; turn: TurnId };

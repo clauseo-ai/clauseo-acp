@@ -542,3 +542,53 @@ test("a strip change renders no other transcript row, and each patch is one comm
     0,
   );
 });
+
+/** Held for a reason, as #537's queue_held_reason says it; assigned untyped, so a reason no host sends today (paused, one from later) goes too. */
+const heldFor = (reason: string): ViewEntry => {
+  const entry = held();
+  Object.assign(entry.header!, { queue_held_reason: reason });
+  return entry;
+};
+
+test("Send next only for an older host's hold or the lawyer's own pause; any other reason, the count line alone", async () => {
+  const cases: [string, boolean][] = [
+    ["paused", true],
+    ["sign_in", false],
+    ["switching", false],
+    ["update", false],
+    ["limit", false],
+    ["a_reason_from_later", false],
+  ];
+  await mount();
+  for (const [reason, next] of cases) {
+    h!.deliver([
+      reset(
+        [userMessage(1, 1, "Q1"), step(2, { stop: "failed" }), queued(5, 2, "A.")],
+        heldFor(reason),
+      ),
+    ]);
+    await h!.settle();
+    expect(one("send-next") !== null, reason).toBe(next);
+    if (!next) expect(say().startsWith("1 queued."), reason).toBe(true);
+  }
+});
+
+test("held for an update: the count, then the line that says why; none for another reason", async () => {
+  await mount();
+  h!.deliver([
+    reset(
+      [userMessage(1, 1, "Q1"), step(2), queued(5, 2, "A."), queued(6, 3, "B.")],
+      heldFor("update"),
+    ),
+  ]);
+  await h!.settle();
+  expect(txt(one("queue-why"))).toBe(
+    "Clauseo is installing an update. Your queued questions go once it's done.",
+  );
+  expect(say()).toBe(
+    "2 queued. Clauseo is installing an update. Your queued questions go once it's done.",
+  );
+  h!.deliver([reset([userMessage(1, 1, "Q1"), step(2), queued(5, 2, "A.")], heldFor("switching"))]);
+  await h!.settle();
+  expect(one("queue-why")).toBeNull();
+});

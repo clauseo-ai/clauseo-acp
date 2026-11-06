@@ -4,15 +4,17 @@
 // an answer folded into a step group (step-groups.tsx), so while an answer streams one frame commits once and renders
 // only the row whose text grew.
 // Nothing here is needed for the room's first paint: Work, the session and the composer are in the room's own chunk.
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
+import { frd } from "@clauseo/components/lib/words-first-read.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamPart, useViewStore } from "../../store/hooks.ts";
 import type { StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { EntryId, StreamId, Timestamp, TurnId, ViewEntry } from "../../transport/protocol.ts";
+import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { AnswerMeta } from "./answer-meta.tsx";
 import { CaseLawHintSlot } from "./case-law-hint.tsx";
 import { stamp } from "./clock.ts";
@@ -32,6 +34,8 @@ import { pickQueued, useTimeOf } from "./time-of.ts";
 export { WarningNote } from "./limit-warning-note.tsx";
 /** U15's out-of-credit note, carried here as U12's warning is (room/connectors/out-of-credit.tsx loads it). */
 export { OutOfCreditNote } from "./out-of-credit-note.tsx";
+/** UD2's notes in the composer's notice line: the expired sign-in card and the first read's line (work.tsx loads it). */
+export { AfterSignInNote } from "./after-signin-note.tsx";
 
 const STEP = "step:";
 
@@ -278,7 +282,19 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
   const pickShape = useMemo(() => exchangesPick(older.entries), [older.entries]);
   const { exchanges, paged } = useStreamPart(store, stream, pickShape);
   const asked = latestAsked(exchanges);
-  const question = useQuestionWords(stream, asked, asked === null ? undefined : paged.get(asked));
+  const words = useQuestionWords(stream, asked, asked === null ? undefined : paged.get(asked));
+  // UD2: the first read's prompt never shows, pinned either, by its turn (first-read/marks.ts)
+  const pickTurn = useCallback(
+    (v: StreamView | undefined) =>
+      asked === null
+        ? null
+        : ((paged.get(asked) ?? v?.entries.get(asked))?.user_message?.turn ?? null),
+    [asked, paged],
+  );
+  const askedTurn = useStreamPart(store, stream, pickTurn);
+  useSyncExternalStore(subscribeMarks, firstReadMarks, firstReadMarks);
+  const question =
+    askedTurn !== null && isFirstReadTurn(askedTurn) ? frd(w.lang, "Clauseo's first read") : words;
   const landed = useStreamPart(store, stream, pickLanded);
   return (
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread

@@ -34,6 +34,8 @@ import type {
   SettingsSection,
   FileRefId,
   OpenedFile,
+  FolderRefId,
+  FolderScanned,
   HostError,
   HostQuery,
   PermissionRequestId,
@@ -117,10 +119,25 @@ export type FakeHost = {
   releaseDate?: DisplayInfo["release_date"];
   /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
+  /** UD2: the `folder_scanned` events a `scan_folder` the host took plays, in order, to every app listener. Left out,
+   * one last event that says the scan was cancelled with nothing counted, so the form shows no scan lines and Create
+   * doesn't wait. */
+  scan?: (folder: FolderRefId) => readonly FolderScanned[];
   /** With it, the fake carries the setup wire (`onSetup`, `setup`, `countUi`), and the room loads the first run.
    * Without it the fake has none of the three, like a host before R20. Read when the fake is made. */
   setup?: FakeSetupHost;
 };
+
+/** A scan the fake host says nothing of: cancelled, nothing counted. */
+const quietScan = (folder: FolderRefId): FolderScanned => ({
+  folder,
+  files: 0,
+  bytes: 0,
+  place: "local",
+  cloud_only: 0,
+  done: true,
+  cancelled: true,
+});
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
@@ -401,12 +418,18 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   async dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
-    if (this.host.dispatch === undefined) return "done";
-    try {
-      return await this.host.dispatch(command);
-    } catch (error) {
-      throw toHostError(error);
-    }
+    let outcome: CommandOutcome = "done";
+    if (this.host.dispatch !== undefined)
+      try {
+        outcome = await this.host.dispatch(command);
+      } catch (error) {
+        throw toHostError(error);
+      }
+    const scanned = command.command.scan_folder?.folder;
+    if (scanned !== undefined)
+      for (const event of this.host.scan?.(scanned) ?? [quietScan(scanned)])
+        this.appEvent({ folder_scanned: event });
+    return outcome;
   }
 
   async query(query: HostQuery): Promise<QueryResult> {

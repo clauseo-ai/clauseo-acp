@@ -29,6 +29,7 @@ const TEST_IDS = {
   remove: "queued-remove",
   sendNow: "queued-send-now",
   sendNext: "send-next",
+  why: "queue-why",
   say: "queue-say",
   note: "queue-error",
 } as const;
@@ -89,7 +90,7 @@ export function LiveQueueStrip({
         : held.kind === "held"
           ? held
           : // the step's time, with its day when not today ("Monday 4:31 pm"), in the language
-            { kind: held.kind, at: stamp(lang, held.at, now) },
+            { kind: held.kind, at: stamp(lang, held.at, now), reason: held.reason },
     [held, lang, now],
   );
   const turnOf = (id: string): TurnId | undefined => queue.find((q) => q.id === id)?.turn;
