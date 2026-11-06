@@ -13,9 +13,9 @@
 //!   is ready waits for it, and after a failed start gets that start's error. That thread adds
 //!   Documents to the folders (`Locations::with_documents`, never on the main thread: a share may
 //!   be down), then the host runs with the effective settings (`Effective::load`, system policy
-//!   sources), the `PassthroughLauncher`, the refused folders of `refused_folders`, and the launch
-//!   profile (`profile.rs`, built on that thread; none when it cannot be built). Exit waits for the
-//!   start, then for `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
+//!   sources), the `PassthroughLauncher`, the refused folders of `refused_folders`, the launch
+//!   profile (`profile.rs`; none when it cannot be built) and egress proxies (`egress.rs`). Exit
+//!   waits for the start, then `HostHandle::shutdown`, `HostJoin::join` and the proxies' stop.
 //! - Every quit runs the agents' stop before the process ends (`quit.rs`): a closed window or
 //!   `AppHandle::exit` through `RunEvent::ExitRequested`; on Unix the first SIGTERM, SIGINT or
 //!   SIGHUP through `AppHandle::exit(0)` (`quit_signals.rs`: caught by handlers on Tauri's
@@ -104,6 +104,7 @@ mod delete_app_data;
 mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
+mod egress;
 mod frame;
 mod host_log;
 mod host_start;
@@ -309,7 +310,7 @@ pub fn run() -> tauri::Result<()> {
             app.manage(dialogs::LastPick::default());
             app.manage(chooser::Chooser::started());
             open_main_window(app)?;
-            start_host(app.handle().clone(), start, locations, parts)?;
+            start_host(app.handle().clone(), start, locations, parts, egress::manage(app))?;
             Ok(())
         })
         .build(context)?;
@@ -345,12 +346,13 @@ pub fn run() -> tauri::Result<()> {
 /// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here. So
 /// does the agents' setup, from the same effective settings, on a `clauseo-setup` thread of its
 /// own (`setup/start.rs`), and the data connectors with their case-law relays
-/// (`connectors.rs`, R24).
+/// (`connectors.rs`, R24). `proxies` are its egress proxies, on every OS (`egress.rs`).
 fn start_host<R: Runtime>(
     app: AppHandle<R>,
     start: HostStart,
     locations: Locations,
     setup_parts: setup::SetupParts,
+    proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
         let locations = locations.with_documents(&SystemDirs, &SystemEnv);
@@ -421,6 +423,7 @@ fn start_host<R: Runtime>(
         let hook = setup::SetupHook::new(keys, plans, network);
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = update::with_updater(&app, config, &locations);
+        let config = egress::with_proxies(config, &proxies);
         update::start_host(&app, with_profile(config, profile, hook))
     })
 }

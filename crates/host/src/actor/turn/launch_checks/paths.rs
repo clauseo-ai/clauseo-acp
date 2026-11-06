@@ -1,6 +1,7 @@
 //! What a launch reads on the actor before its checks go to the launch-prep thread
 //! ([`super::prepare`]): the matter folder, the agent's home, the session's folders, its skill
-//! writes, its skill packs and its browser and case-law claims. Reads only; nothing is made here.
+//! writes, its skill packs, its egress proxy and its browser and case-law claims. Reads only;
+//! nothing is made here.
 
 use std::path::PathBuf;
 
@@ -9,6 +10,7 @@ use clauseo_protocol::{AgentKind, ThreadId};
 
 use super::RunFolders;
 use super::browser::{BrowserPrep, browser_prep};
+use super::egress::{EgressPrep, egress_prep};
 use super::packs::{PackPrep, pack_prep};
 use super::relay::{self, CaseLawPrep};
 use crate::actor::Actor;
@@ -31,8 +33,19 @@ pub(super) struct LaunchPaths {
     pub(super) skills: Vec<SkillWrite>,
     /// The launch's skill packs (`packs.rs`).
     pub(super) packs: PackPrep,
-    /// The browser claims and the case-law relay, claimed on the launch-prep thread.
-    pub(super) claims: (BrowserPrep, CaseLawPrep),
+    /// The egress proxy, the browser claims and the case-law relay, made on the launch-prep
+    /// thread.
+    pub(super) claims: Claims,
+}
+
+/// What the launch-prep thread opens and claims for the session.
+pub(super) struct Claims {
+    /// The browser's sidecar check, Chrome search and claims.
+    pub(super) browser: BrowserPrep,
+    /// The case-law relay.
+    pub(super) case_law: CaseLawPrep,
+    /// The egress proxy.
+    pub(super) egress: EgressPrep,
 }
 
 /// Reads [`LaunchPaths`] for `thread`'s launch `id`, or the error of the thread or its matter.
@@ -53,10 +66,12 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         Some(_) => actor.profile.launch_writes(&row.agent),
         None => Vec::new(),
     };
-    let claims = (
-        browser_prep(actor, &row.agent, key),
-        relay::case_law_prep(actor, &row.agent),
-    );
+    let browser = browser_prep(actor, &row.agent, key);
+    let claims = Claims {
+        egress: egress_prep(actor, &row.agent, &browser),
+        browser,
+        case_law: relay::case_law_prep(actor, &row.agent),
+    };
     let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
     let packs = pack_prep(actor, &row.agent, matter);
     Ok(LaunchPaths {

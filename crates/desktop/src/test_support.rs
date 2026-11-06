@@ -294,6 +294,12 @@ impl Scratch {
         Self::start_config(self.config(Vec::new()).with_updater(updater))
     }
 
+    /// Starts a host on the folder with its config changed by `adjust`.
+    #[track_caller]
+    pub(crate) fn start_with(&self, adjust: impl FnOnce(HostConfig) -> HostConfig) -> Running {
+        Self::start_config(adjust(self.config(Vec::new())))
+    }
+
     /// Starts a host with `config`.
     #[track_caller]
     fn start_config(config: HostConfig) -> Running {

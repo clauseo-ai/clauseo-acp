@@ -11,7 +11,7 @@ use clauseo_host::HostExit;
 use tauri::{AppHandle, Manager as _, Runtime};
 
 use crate::bridge::Bridge;
-use crate::{counts, host_log, host_start, setup};
+use crate::{counts, host_log, setup};
 
 /// Where exit stands: a stopper started, and the host stopped (so the next request exits).
 /// `stopped` is set through [`Exit::mark_stopped`] only, which also wakes
@@ -134,7 +134,8 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
             app.try_state::<SetupStop>()
                 .is_none_or(|setup| setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT))
         },
-        || cell.as_deref().map_or(HostExit::Stopped, host_start::stop),
+        // The host, then any egress proxy still open (`egress.rs`).
+        || crate::egress::stop_host(app, cell.as_deref()),
         // The log's queued lines go to the file before the exit skips the drops.
         || host_log::flush_app(app),
         // After the host, whose last counts go in too.

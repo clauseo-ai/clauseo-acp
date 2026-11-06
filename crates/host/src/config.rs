@@ -194,7 +194,9 @@ impl HostConfig {
     }
 
     /// The egress proxy that gives each session's browser its port (default: none, so no session
-    /// gets the `browser` server and the header shows it unavailable with `NoProxy`).
+    /// gets the `browser` server and the header shows it unavailable with `NoProxy`). The host
+    /// opens one per launch that can get the browser and closes it when the session ends (see
+    /// [`EgressProxy`]). The agent's own environment never points at it (tier C).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
         self

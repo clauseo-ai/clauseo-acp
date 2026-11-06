@@ -65,6 +65,13 @@ pub(super) struct BrowserPrep {
 }
 
 impl BrowserPrep {
+    /// Whether the launch prep looks for the session's browser at all: `tools.browser` on, a
+    /// proxy set, a slot free and a `browser` entry from the hook. The session's egress proxy
+    /// opens only then.
+    pub(super) fn wanted(&self) -> bool {
+        !matches!(self.chrome, ChromeSearch::Skip)
+    }
+
     /// The Chrome found and the session's claims. A missing sidecar leaves both out, with a
     /// warning (a development build has no agent-browser); a failed claim leaves the claims
     /// out. Either way the entry drops with `BrowserNotInstalled`. File system and socket
