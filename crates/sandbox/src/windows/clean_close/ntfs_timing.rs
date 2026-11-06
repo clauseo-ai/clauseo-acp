@@ -54,6 +54,10 @@ impl Surroundings for Around {
 /// How many nested protected items the nested row's matter holds.
 const NESTED: usize = 50;
 
+/// How many objects the nested row's one realistic `.git` holds, in git's 256 object folders:
+/// the owner pass reads every item's owner in a protected tree (S15 `PR4a2`).
+const GIT_OBJECTS: usize = 3_000;
+
 /// Leaf folder `leaf` of a deep-shaped matter of `files` files, relative to the temp folder.
 fn leaf_folder(files: usize, leaf: usize) -> String {
     let leaves = files.div_ceil(10);
@@ -266,7 +270,9 @@ fn timing_later_launch_after_one_edit() {
 }
 
 /// [`deep_world`] with [`NESTED`] nested protected items spread over its leaf folders, in turn
-/// a `CLAUDE.md`, a `.git` holding a `config`, and a `.claude` holding a `settings.json`.
+/// a `CLAUDE.md`, a `.git` holding a `config`, and a `.claude` holding a `settings.json`; and
+/// one `.git` of [`GIT_OBJECTS`] objects. The full and the targeted launch time the owner pass
+/// over every protected tree, and over the touched folders in one, inside `apply`.
 fn nested_world(test: &str, files: usize) -> World {
     let (w, _) = deep_world(test, files);
     let leaves = files.div_ceil(10);
@@ -278,6 +284,14 @@ fn nested_world(test: &str, files: usize) -> World {
             _ => ".claude/settings.json",
         };
         w.dir.file(&format!("{folder}/{item}"), "x");
+    }
+    let repo = leaf_folder(files, leaves / 2);
+    for i in 0..GIT_OBJECTS {
+        let (dir, name) = (i % 256, i / 256);
+        w.dir.file(
+            &format!("{repo}/repo/.git/objects/{dir:02x}/{name:038x}"),
+            "blob",
+        );
     }
     w
 }

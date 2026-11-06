@@ -78,6 +78,8 @@ pub(super) struct FakeAcl {
     /// Each file's owner, by SID; [`LAWYER`] once handed back. A file not listed is the
     /// lawyer's.
     pub(super) owners: BTreeMap<PathBuf, String>,
+    /// The protected trees the owner pass went over, in order.
+    pub(super) handed_trees: Vec<PathBuf>,
 }
 
 /// The owner the fake's hand-back gives: the desktop user.
@@ -250,6 +252,22 @@ impl AclWriter for FakeAcl {
         self.reclaimed.push((root.to_owned(), pool.to_vec()));
         for (path, owner) in &mut self.owners {
             if path != root && path.starts_with(root) && pool.iter().any(|p| p.as_str() == owner) {
+                LAWYER.clone_into(owner);
+            }
+        }
+        Ok(Walked::default())
+    }
+
+    fn hand_back_tree(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        assert!(
+            self.panic_walk.as_deref() != Some(root),
+            "a crash during the owner pass"
+        );
+        self.handed_trees.push(root.to_owned());
+        for (path, owner) in &mut self.owners {
+            let handed =
+                pool.iter().any(|p| p.as_str() == owner) || (pool.is_empty() && owner != LAWYER);
+            if path != root && path.starts_with(root) && handed {
                 LAWYER.clone_into(owner);
             }
         }

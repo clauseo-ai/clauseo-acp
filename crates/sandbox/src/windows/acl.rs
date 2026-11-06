@@ -200,6 +200,17 @@ impl AclWriter for NtfsAcl {
         )
     }
 
+    fn hand_back_tree(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure> {
+        let me = current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?;
+        let me = sid_bytes(&me);
+        let pool: Vec<Vec<u8>> = pool.iter().map(sid_bytes).collect();
+        let mode = Mode::HandBack {
+            pool: &pool,
+            me: &me,
+        };
+        self.run(root, Reach::Tree, mode)
+    }
+
     fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure> {
         let me = current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?;
         let me = sid_bytes(&me);
@@ -365,20 +376,22 @@ fn open_planned(path: &Path) -> Result<Option<Object>, ApplyFailure> {
     Ok(Some(target))
 }
 
-/// `path` handed to this process's user, as forget hands back a pool user's items, when any
-/// other user owns it: the item itself ([`AclWriter::hand_back`]), then what that same user
-/// owns below it ([`AclWriter::reclaim`]). Each is worked out again from its new folder, so the
-/// entries it inherited where it was go. For the set-aside's moves and `restore_set_aside`, so
-/// an item the agent made is the lawyer's wherever it goes (S15 `PR4a2`).
+/// `path`'s whole tree handed to this process's user, as forget hands back a pool user's
+/// items: the item itself when any other user owns it ([`AclWriter::hand_back`]), then every
+/// item below it any other user owns, whoever owns the top (the owner pass,
+/// [`AclWriter::hand_back_tree`] with no pool named: through each folder's handle, never
+/// following a link). Each one handed back is worked out again from its folder. For the
+/// set-aside's moves and `restore_set_aside`, so what the agent made is the lawyer's wherever it
+/// goes, even inside a lawyer's folder it renamed to `.git` (S15 `PR4a2`).
 pub(crate) fn own(path: &Path) -> io::Result<()> {
     let owner = owner(path)?;
-    if owner == current_user_sid()? {
-        return Ok(());
-    }
-    let pool = [owner];
     let mut acl = NtfsAcl::new()?;
-    acl.hand_back(path, &pool).map_err(io::Error::from)?;
-    acl.reclaim(path, &pool).map(drop).map_err(io::Error::from)
+    if owner != current_user_sid()? {
+        acl.hand_back(path, &[owner]).map_err(io::Error::from)?;
+    }
+    acl.hand_back_tree(path, &[])
+        .map(drop)
+        .map_err(io::Error::from)
 }
 
 /// The owner of `path`, read without following a link: for the set-aside.

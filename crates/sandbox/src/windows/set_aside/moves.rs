@@ -86,12 +86,13 @@ pub(super) fn set_aside(
     Err(refuse(SetAsideFailure::NameTaken))
 }
 
-/// The item moved to `to` handed to the desktop user when another user owns it (S15 `PR4a2`):
-/// an item the agent made would otherwise stay its pool user's, and once that user serves
-/// another matter its agent would keep the owner's `WRITE_DAC` on it, and could open it by its
-/// full path. The entry keeps the owner it had, for the lawyer to see who made it. It runs once
-/// the move is done and its entry finished: a change of owner moves nothing, so a crash here
-/// leaves the item set aside and listed. One that fails is logged; the item stays set aside.
+/// The item moved to `to` handed to the desktop user, its whole tree, wherever another user owns
+/// a part of it ([`Volume::own`], S15 `PR4a2`): what the agent made would otherwise stay its
+/// pool user's, even inside a lawyer's folder it renamed to `.git`, and once that user serves
+/// another matter its agent would keep the owner's `WRITE_DAC` there and could open it by its
+/// full path. The entry keeps the owner the top had, for the lawyer to see who made it. It runs
+/// once the move is done and its entry finished: a change of owner moves nothing, so a crash
+/// here leaves the item set aside and listed. One that fails is logged; the item stays listed.
 fn hand_back(volume: &impl Volume, to: &Path) {
     if let Err(error) = volume.own(to) {
         let error = error.kind();

@@ -70,14 +70,23 @@ pub(super) enum Mode<'a> {
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned.
     Reclaim { pool: &'a [Vec<u8>], me: &'a [u8] },
+    /// The owner pass over a protected tree (S15 `PR4a2`): what one of `pool` owns, or with
+    /// `pool` empty what anyone but `me` owns, is settled as [`Mode::Reclaim`] settles it;
+    /// every other child is only read, never written.
+    HandBack { pool: &'a [Vec<u8>], me: &'a [u8] },
 }
 
 impl Mode<'_> {
     /// Whether `descriptor`'s owner is one of the pool users this mode repairs or hands back.
     fn owned(self, descriptor: &[u8]) -> bool {
+        if let Mode::HandBack { pool: [], me } = self {
+            return owner_bytes(descriptor).is_some_and(|owner| owner != me);
+        }
         let pool = match self {
             Mode::Plain => return false,
-            Mode::Strict { pool, .. } | Mode::Reclaim { pool, .. } => pool,
+            Mode::Strict { pool, .. }
+            | Mode::Reclaim { pool, .. }
+            | Mode::HandBack { pool, .. } => pool,
         };
         owner_bytes(descriptor).is_some_and(|owner| pool.iter().any(|p| p == owner))
     }
@@ -109,7 +118,7 @@ pub(super) fn walk(
     let strict = matches!(mode, Mode::Strict { .. });
     // A child the lawyer can't open refuses a strict walk and forget's reclaim walk alike, as
     // `ChildShut` naming it, so the caller sets it aside (S15 `PR3b` round 4).
-    let shut_refuses = strict || matches!(mode, Mode::Reclaim { .. });
+    let shut_refuses = strict || matches!(mode, Mode::Reclaim { .. } | Mode::HandBack { .. });
     let mut stack = vec![Folder {
         path: top.normalized().map_err(io)?,
         descriptor: top.security(READ_ALL).map_err(io)?,
@@ -170,8 +179,31 @@ pub(super) fn walk(
                 return Err(refuse(ApplyFailure::Changed));
             }
             let current = object.security(READ_ALL).map_err(io)?;
-            let settled =
-                settle(token, &object, &folder.descriptor, &current, mode).map_err(refuse)?;
+            let settled = match mode {
+                // The owner pass reads every child's owner and settles only a pool user's.
+                Mode::HandBack { pool, me } if mode.owned(&current) => {
+                    // With no pool named, the child's own owner is the one handed back.
+                    let owner: Vec<Vec<u8>> = owner_bytes(&current)
+                        .map(<[u8]>::to_vec)
+                        .into_iter()
+                        .collect();
+                    let pool = if pool.is_empty() {
+                        owner.as_slice()
+                    } else {
+                        pool
+                    };
+                    let reclaim = Mode::Reclaim { pool, me };
+                    settle(token, &object, &folder.descriptor, &current, reclaim)
+                }
+                Mode::HandBack { .. } => Ok(Settled {
+                    written: None,
+                    repaired: false,
+                }),
+                Mode::Plain | Mode::Strict { .. } | Mode::Reclaim { .. } => {
+                    settle(token, &object, &folder.descriptor, &current, mode)
+                }
+            }
+            .map_err(refuse)?;
             seen.visited += 1;
             if settled.repaired {
                 seen.repaired += 1;
@@ -267,7 +299,7 @@ fn settle(
     // The hand-back's new owner.
     let mut new_owner = None;
     match mode {
-        Mode::Plain => {}
+        Mode::Plain | Mode::HandBack { .. } => {}
         Mode::Strict { watched, .. } => {
             let broad = dacl.as_ref().is_some_and(|d| broad_allow(d, watched));
             if now.dacl_protected() || broad {

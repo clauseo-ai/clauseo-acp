@@ -242,6 +242,12 @@ pub trait AclWriter {
     /// that follows refuses. An owner gets `WRITE_DAC` before any deny is read, so a pool
     /// user's protected item goes to the lawyer before its deny is written (S15 `PR4a2`).
     fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure>;
+    /// The owner pass below `root`, a protected tree or a set-aside item (S15 `PR4a2`): each
+    /// child's owner read through its folder's handle, never following a link; one that one of
+    /// `pool` owns (with `pool` empty, anyone but the desktop user) is handed to the desktop
+    /// user and cleaned as [`AclWriter::reclaim`] does; nothing else is written. A child the
+    /// lawyer can't open is refused as [`ApplyFailure::ChildShut`], to be set aside.
+    fn hand_back_tree(&mut self, root: &Path, pool: &[Sid]) -> Result<Walked, ApplyFailure>;
     /// The explicit mandatory label on `path` now, if any (ours included); `None` when the
     /// path is missing. Read before a label grant is written over it.
     fn label(&mut self, path: &Path) -> io::Result<Option<Label>>;

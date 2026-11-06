@@ -236,17 +236,43 @@ fn a_crash_during_the_hand_back_leaves_the_item_set_aside_and_listed() {
 fn each_item_set_aside_is_handed_to_the_desktop_user() {
     let (w, root, data) = world("aside-owned");
     before(&root, &data, launch()).unwrap();
-    w.dir.file("matter/sub/AGENTS.md", "# the agent's\n");
+    let agents = w.dir.file("matter/sub/AGENTS.md", "# the agent's\n");
     let volume = super::posix::Posix::new(true);
+    volume.foreign(&agents);
 
     let moved = exit_as(&volume, &root, &data, "s1", exit()).unwrap();
     assert_eq!(moved.len(), 1, "{moved:?}");
     assert_eq!(*volume.owned.borrow(), [moved[0].to.clone()]);
-    assert!(
-        moved[0]
-            .owner
-            .as_deref()
-            .is_some_and(|o| o.starts_with("uid "))
-    );
+    assert_eq!(moved[0].owner.as_deref(), Some("uid other"));
     assert_eq!(list(&data), moved);
+}
+
+/// S15 `PR4a2`: the hand-back goes over the moved item's whole tree. A lawyer's folder the
+/// agent filled and renamed to `.git` is set aside under the lawyer's name, and the hook the
+/// agent wrote inside it is handed to the desktop user too.
+#[cfg(unix)]
+#[test]
+fn a_set_aside_folder_is_handed_back_throughout_whoever_owns_its_top() {
+    let (w, root, data) = world("aside-owned-tree");
+    w.dir.file("matter/Precedents/memo.md", "# the lawyer's\n");
+    w.dir.dir("matter/sub");
+    before(&root, &data, launch()).unwrap();
+    let hook = w
+        .dir
+        .file("matter/Precedents/hooks/post-checkout", "#!/bin/sh\n");
+    let volume = super::posix::Posix::new(true);
+    volume.foreign(&hook);
+    let git = root.join("sub/.git");
+    crate::windows::write::rename_new(&root.join("Precedents"), &git).unwrap();
+
+    let moved = exit_as(&volume, &root, &data, "s1", exit()).unwrap();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].from, git);
+    assert_ne!(
+        moved[0].owner.as_deref(),
+        Some("uid other"),
+        "the top is the lawyer's"
+    );
+    let inside = moved[0].to.join("hooks/post-checkout");
+    assert_eq!(*volume.owned.borrow(), [inside]);
 }
