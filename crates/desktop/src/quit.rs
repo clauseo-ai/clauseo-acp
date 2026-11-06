@@ -20,6 +20,10 @@ use crate::{counts, host_log, host_start, setup};
 pub(crate) struct Exit {
     pub(crate) stopping: AtomicBool,
     pub(crate) stopped: AtomicBool,
+    /// Set by [`stop_on_exit`] before it waits: the main thread is held in `RunEvent::Exit`, so
+    /// the stopper calls nothing that needs it (the window-state save, the update's install:
+    /// tauri-runtime-wry's getters send to the main thread and wait with no bound).
+    pub(crate) exiting_on_main: AtomicBool,
     /// `stopped`, under the lock the waiters sleep on.
     done: Mutex<bool>,
     ended: Condvar,
@@ -114,50 +118,185 @@ pub(crate) fn stop_steps<R: Runtime>(app: &AppHandle<R>, after_host: impl FnOnce
     );
 }
 
-/// `RunEvent::Exit` with the host not stopped. On macOS the app menu's Quit (Cmd-Q, muda's
-/// `terminate:`), the Dock's Quit, logout and shutdown all reach only this: tao 0.37 gives its
-/// app delegate no `applicationShouldTerminate:`, and its `applicationWillTerminate:` sends
-/// `LoopDestroyed`, which tauri-runtime-wry turns into `RunEvent::Exit` and never into
-/// `ExitRequested`. The process ends when this returns, so the stop sequence runs here, on its
-/// own thread, waited for at most [`EXIT_STOP_WAIT`]; with no install after it (the OS is
-/// ending the app, and a restart would fight it). When a stopper already runs (a quit signal or
-/// a closed window came first), this waits for it the same way.
-pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) {
+/// What [`stop_on_exit_with`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExitWait {
+    /// The host had already stopped: nothing to do.
+    AlreadyStopped,
+    /// Nothing ran (no process handle held, no setup job): no stop, no wait.
+    Idle,
+    /// The stop ended within the bound (this call's stopper, or one already running).
+    Stopped,
+    /// The bound passed first: what was not stopped is left to the OS.
+    TimedOut,
+    /// No thread for the stopper.
+    NoThread,
+}
+
+/// [`stop_on_exit`]'s order, apart from the app: `hide` hides every window first (the
+/// window-state plugin has already saved, before this callback: tauri 2.12.4 `app.rs:2815`),
+/// then [`Exit::exiting_on_main`] is set, then the first caller asks `idle` and, when something
+/// runs, `start` starts the stopper (false: no thread for it); a later caller only waits. The
+/// wait is at most `bound`. `flush` runs when no stopper will flush the log (idle, no thread,
+/// timed out).
+pub(crate) fn stop_on_exit_with(
+    exit: &Arc<Exit>,
+    bound: Duration,
+    hide: impl FnOnce(),
+    idle: impl FnOnce() -> bool,
+    start: impl FnOnce(Arc<Exit>) -> bool,
+    flush: impl FnOnce(),
+) -> ExitWait {
     if exit.stopped.load(Ordering::Acquire) {
-        return;
+        return ExitWait::AlreadyStopped;
     }
-    if let Some(counts) = app.try_state::<counts::CountsState>() {
-        drop(counts.stop_ticker());
-    }
+    hide();
+    exit.exiting_on_main.store(true, Ordering::Release);
     let first = exit
         .stopping
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_ok();
     if first {
-        let stopper_app = app.clone();
-        let stopper_exit = Arc::clone(exit);
-        let stopper = std::thread::Builder::new()
-            .name("clauseo-host-stop".to_owned())
-            .spawn(move || {
-                stop_steps(&stopper_app, |_ended, _agents_stopped| {});
-                stopper_exit.mark_stopped();
-            });
-        if stopper.is_err() {
+        if idle() {
+            flush();
+            return ExitWait::Idle;
+        }
+        if !start(Arc::clone(exit)) {
             // No thread for it: the host's next start repairs what it left open.
-            host_log::flush_app(app);
-            return;
+            flush();
+            return ExitWait::NoThread;
         }
     }
-    if !exit.wait_stopped(EXIT_STOP_WAIT) {
+    if exit.wait_stopped(bound) {
+        ExitWait::Stopped
+    } else {
         tracing::warn!(
             "the stop at exit did not end in time: what it had not stopped is left running"
         );
-        host_log::flush_app(app);
+        flush();
+        ExitWait::TimedOut
     }
+}
+
+/// Hides every webview window, `main` and the settings window, so a quit looks done at once.
+/// On the main thread tauri-runtime-wry runs the hide inline (2.12.2 `lib.rs:263-280`);
+/// elsewhere it goes to the loop. A window that does not hide stays as it is.
+pub(crate) fn hide_windows<R: Runtime>(app: &AppHandle<R>) {
+    for window in app.webview_windows().values() {
+        if window.hide().is_err() {
+            tracing::debug!("a window did not hide at quit");
+        }
+    }
+}
+
+/// Whether the quit has nothing to wait for: this process holds no process handle (no agent,
+/// sign-in, install or plan reader runs: `clauseo_process::live_handles`) and `Agents` has no
+/// job (its shutdown with no wait answers that every job ended). The shutdown closes `Agents`
+/// to new jobs, which the stop does first anyway; the handles are read again after it, for a
+/// job that ended its process meanwhile.
+fn nothing_runs<R: Runtime>(app: &AppHandle<R>) -> bool {
+    clauseo_process::live_handles() == 0
+        && app
+            .try_state::<SetupStop>()
+            .is_none_or(|setup| setup::SetupBackend::shutdown(&*setup.0, Duration::ZERO))
+        && clauseo_process::live_handles() == 0
+}
+
+/// `RunEvent::Exit` with the host not stopped. On macOS the app menu's Quit (Cmd-Q, muda's
+/// `terminate:`), the Dock's Quit, logout and shutdown all reach only this: tao 0.37 gives its
+/// app delegate no `applicationShouldTerminate:`, and its `applicationWillTerminate:` sends
+/// `LoopDestroyed`, which tauri-runtime-wry turns into `RunEvent::Exit` and never into
+/// `ExitRequested`. A Windows logoff or shutdown reaches it as well (tao 0.37.1's
+/// `WM_ENDSESSION`, `event_loop.rs:2332-2342`, which then calls `process::exit`). The process
+/// ends when this returns. The windows hide first; then, when nothing runs ([`nothing_runs`]),
+/// it returns at once (the counts saved and the log flushed), so an idle app never holds a
+/// logoff. Else the stop sequence runs on its own thread, waited for at most
+/// [`EXIT_STOP_WAIT`], with no window-state save and no install after it
+/// ([`Exit::exiting_on_main`]: the plugin saved before this callback, and the OS is ending the
+/// app, which a restart would fight). When a stopper already runs (a quit signal or a closed
+/// window came first), this waits for it the same way.
+pub(crate) fn stop_on_exit<R: Runtime>(app: &AppHandle<R>, exit: &Arc<Exit>) -> ExitWait {
+    if exit.stopped.load(Ordering::Acquire) {
+        return ExitWait::AlreadyStopped;
+    }
+    if let Some(counts) = app.try_state::<counts::CountsState>() {
+        drop(counts.stop_ticker());
+    }
+    stop_on_exit_with(
+        exit,
+        EXIT_STOP_WAIT,
+        || hide_windows(app),
+        || {
+            let idle = nothing_runs(app);
+            if idle && let Some(counts) = app.try_state::<counts::CountsState>() {
+                counts.save();
+            }
+            idle
+        },
+        |stopper_exit| {
+            let stopper_app = app.clone();
+            std::thread::Builder::new()
+                .name("clauseo-host-stop".to_owned())
+                .spawn(move || {
+                    stop_steps(&stopper_app, |_ended, _agents_stopped| {});
+                    stopper_exit.mark_stopped();
+                })
+                .is_ok()
+        },
+        || host_log::flush_app(app),
+    )
+}
+
+/// The `ExitRequested` stopper's `after_host` (`update::after_host`: the window state, then the
+/// install), unless [`stop_on_exit`] holds the main thread: then neither runs, and a downloaded
+/// update installs at the next start.
+pub(crate) fn after_host_unless_exiting(
+    exit: &Exit,
+    ended: HostExit,
+    agents_stopped: bool,
+    after_host: impl FnOnce(HostExit, bool),
+) {
+    if exit.exiting_on_main.load(Ordering::Acquire) {
+        if let HostExit::Install(downloaded) = &ended {
+            tracing::info!(
+                target: "clauseo_desktop::lifecycle",
+                version = downloaded.version.as_str(),
+                "the app is exiting: the update installs at the next start"
+            );
+        }
+        return;
+    }
+    after_host(ended, agents_stopped);
+}
+
+/// The `ExitRequested` stopper's last step before the exit, once the stop and `after_host`
+/// returned (an install or a restart never returns): `save` saves the window state (the
+/// plugin's save with `window_size::state_flags`, off the main thread, which this path never
+/// holds), unless [`stop_on_exit`] holds the main thread (the plugin saved before it); then
+/// the stop is marked ended.
+pub(crate) fn save_then_mark_stopped(exit: &Exit, save: impl FnOnce()) {
+    if !exit.exiting_on_main.load(Ordering::Acquire) {
+        save();
+    }
+    exit.mark_stopped();
+}
+
+/// The single-instance callback: a second start raises the main window, unless a quit is
+/// stopping the app (its windows are hidden and it is about to end), when it is only logged;
+/// the new instance has already handed over and exits either way. Returns whether it raised.
+pub(crate) fn on_second_start<R: Runtime>(app: &AppHandle<R>, exit: &Exit) -> bool {
+    if exit.stopping.load(Ordering::Acquire) {
+        tracing::info!("a second start during the quit; start Clauseo again once it has closed");
+        return false;
+    }
+    crate::raise_main_window(app);
+    true
 }
 
 #[cfg(test)]
 mod tests {
+    mod exit;
+
     use std::path::PathBuf;
     use std::sync::Mutex;
 

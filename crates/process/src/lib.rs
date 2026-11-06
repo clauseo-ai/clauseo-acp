@@ -41,6 +41,8 @@
 //!   (with what those start meanwhile), but executables the caller keeps (SIGTERM, 2 s, SIGKILL
 //!   on Unix; `TerminateProcess`, 2 s, again on Windows), and says what it did ([`Swept`]).
 //!   [`Handle::shutdown`] takes the snapshot the caller listed (where it chose) for its kill.
+//! - [`live_handles`]: how many handles this process still holds (an atomic counted in
+//!   [`spawn_in_tree`] and `Drop`), so desktop's exit skips its wait when nothing runs.
 //!   With `test-support`, [`running`] says whether a pid still runs, [`started_before_now`]
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
 //!   process they did not start; on Windows, `image_and_parent` reads one's executable and
@@ -98,7 +100,7 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
-pub use handle::{ExitReport, Handle, ShutdownOutcome};
+pub use handle::{ExitReport, Handle, ShutdownOutcome, live_handles};
 pub use launch::{Launched, Launcher, PassthroughLauncher, SpawnOptions, spawn_in_tree};
 pub use spec::LaunchSpec;
 pub use stderr::StderrPump;

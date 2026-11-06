@@ -73,11 +73,26 @@ pub(crate) const fn state_denylist() -> &'static [&'static str] {
 }
 
 /// What window-state saves and restores: everything but the decorations, since the frame is the
-/// room's (`window_frame.rs`), never a saved one. The updater saves with it too before an install
-/// (`update/install.rs`), which ends the app without the exit event the plugin saves on.
+/// room's (`window_frame.rs`), never a saved one, and the visibility: a quit hides the windows
+/// before their state is saved (`quit.rs`), and the window is built visible. The updater saves
+/// with it too before an install (`update/install.rs`), which ends the app without the exit event
+/// the plugin saves on, and so does the quit's stopper ([`save_state`]).
 pub(crate) fn state_flags() -> tauri_plugin_window_state::StateFlags {
     tauri_plugin_window_state::StateFlags::all()
         - tauri_plugin_window_state::StateFlags::DECORATIONS
+        - tauri_plugin_window_state::StateFlags::VISIBLE
+}
+
+/// Saves the windows' state with [`state_flags`] (the plugin's save, which reads each window
+/// through the main thread: never call it while the main thread waits). A failure is logged
+/// without the plugin's text, which can name the config folder.
+#[cfg(not(feature = "e2e"))]
+pub(crate) fn save_state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri_plugin_window_state::AppHandleExt as _;
+    if let Err(error) = app.save_window_state(state_flags()) {
+        drop(error);
+        tracing::warn!("the window state was not saved at quit");
+    }
 }
 
 /// The night ground, `--ground` in `ui/components/src/styles/tokens-colour.css`.
