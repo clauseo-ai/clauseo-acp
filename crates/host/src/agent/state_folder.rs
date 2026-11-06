@@ -56,13 +56,17 @@ const RELINK_NAME: &str = "auth.json.clauseo-link";
 /// - `config.toml`: Clauseo's, written whole after the clean;
 /// - `sessions`, `archived_sessions`: the rollouts `session/load` resumes;
 /// - `history.jsonl`: the prompt history;
+/// - `cap_sid`: Codex's Windows sandbox keeps its capability SIDs there
+///   (`codex-rs/windows-sandbox-rs/src/cap.rs`); a new one at each launch could add new
+///   permission entries to the matter folder every time. Codex's own state, no instruction;
 /// - `log`: Codex's own log folder;
 /// - `tmp`: the folder Codex's `arg0` links live in for its shell (`codex-rs/arg0`), the one
 ///   folder of the state folder Codex's shell may write (`agent/codex_fence.rs`);
 ///
 /// and Codex's databases, [`CODEX_DATABASES`] with [`SQLITE_SUFFIXES`].
 /// A kept name of the wrong kind (a link, or a folder where a file belongs) is removed too.
-pub(crate) const CODEX_KEPT_FILES: [&str; 3] = ["auth.json", "config.toml", "history.jsonl"];
+pub(crate) const CODEX_KEPT_FILES: [&str; 4] =
+    ["auth.json", "config.toml", "history.jsonl", "cap_sid"];
 
 /// The folders of [`CODEX_KEPT_FILES`]' list.
 pub(crate) const CODEX_KEPT_FOLDERS: [&str; 4] = ["sessions", "archived_sessions", "log", "tmp"];
@@ -300,12 +304,26 @@ fn remove_name(path: &Path) -> io::Result<()> {
 /// Codex its `tmp` made, for Claude its `.claude.json` stripped ([`strip_claude_json`]). The
 /// caller writes Clauseo's own file there next.
 pub(crate) fn prepare(data: &Path, state: &Path, kind: AgentKind) -> Result<(), Error> {
+    prepare_with(data, state, kind, true)
+}
+
+/// [`prepare`] for a launch while another session of the agent runs in the matter: no
+/// [`clean`], which would remove that session's files (its tool results, plan note, transcripts
+/// being written); the folder is made, Codex's `tmp` made and Claude's `.claude.json` stripped
+/// all the same. The next launch with no other session running there cleans as usual.
+pub(crate) fn prepare_in_use(data: &Path, state: &Path, kind: AgentKind) -> Result<(), Error> {
+    prepare_with(data, state, kind, false)
+}
+
+/// [`prepare`], cleaning only when `cleaned`.
+fn prepare_with(data: &Path, state: &Path, kind: AgentKind, cleaned: bool) -> Result<(), Error> {
     let who = match kind {
         AgentKind::Claude => "Claude Code",
         AgentKind::Codex => "Codex",
     };
     make(data, state, who)?;
-    let cleaned = clean(state, kind).and_then(|()| match kind {
+    let first = if cleaned { clean(state, kind) } else { Ok(()) };
+    let cleaned = first.and_then(|()| match kind {
         AgentKind::Codex => {
             crate::write::create_private_dirs_under(data, &state.join(CODEX_SHELL_FOLDER))
         }

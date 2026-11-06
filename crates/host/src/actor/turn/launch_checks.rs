@@ -257,7 +257,13 @@ pub(super) fn prepare(
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
     let reused = reused_login(actor, thread);
-    let drop_stale = stale_link(actor, thread);
+    let state_use = match state_use(actor, thread) {
+        Ok(state_use) => state_use,
+        Err(error) => {
+            agents::fail_all(actor, thread, waiting, &error);
+            return;
+        }
+    };
     let LaunchPaths {
         stored,
         data,
@@ -302,7 +308,7 @@ pub(super) fn prepare(
                 let codex = match (codex_home, run.state.clone()) {
                     (Some(home), Some(state)) => {
                         let (prepared, support) =
-                            prepare_codex(&check, &stored, &data, home, state, reused, drop_stale)?;
+                            prepare_codex(&check, &stored, &data, home, state, reused, state_use)?;
                         answer = Some(support);
                         Some(prepared)
                     }
@@ -311,7 +317,7 @@ pub(super) fn prepare(
                 // Claude is never refused for its folder: the answer decides its forced ask.
                 if let Some(home) = &claude_home {
                     answer = Some(check.run(&crate::agent::session_folder(&stored)));
-                    prepare_claude(&data, home, run.state.as_deref())?;
+                    prepare_claude(&data, home, run.state.as_deref(), state_use.in_use)?;
                 }
                 run.make(&data, &sweep)?;
                 let claude_state = run.state.clone().filter(|_| claude);
@@ -557,7 +563,7 @@ use folders::{launch_deny, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod state_prep;
-use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login, stale_link};
+use state_prep::{link_reused_after, prepare_claude, prepare_codex, reused_login, state_use};
 
 #[cfg(test)]
 mod tests;
