@@ -161,6 +161,41 @@ fn a_git_link_to_a_folder_in_the_matter_names_that_folder() {
     assert_eq!(scan.git_dirs(), [matter.join(".realgit")]);
 }
 
+/// S15 `PR4a2`: the other names write-denied at any depth, matched by name in any letter case:
+/// folders, files and links to something in the matter, the root's too; none inside a `.git`.
+/// A link out is a finding instead; a longer name doesn't count.
+#[cfg(unix)]
+#[test]
+fn every_protected_name_at_any_depth_is_listed() {
+    let dir = TempDir::new("links-nested");
+    dir.file("matter/AGENTS.md", "a");
+    dir.file("matter/a/claude.md", "c");
+    dir.file("matter/b/.Claude/CLAUDE.md", "c");
+    dir.file("matter/c/d/.mcp.json", "{}");
+    dir.file("matter/e/notes.md", "n");
+    dir.symlink("matter/e/AGENTS.md", Path::new("notes.md"));
+    let outside = dir.file("outside/CLAUDE.md", "o");
+    dir.dir("matter/f");
+    dir.symlink("matter/f/CLAUDE.md", &outside);
+    dir.file("matter/.git/CLAUDE.md", "g");
+    dir.file("matter/g/CLAUDE.md.bak", "b");
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(
+        scan.nested(),
+        [
+            matter.join("AGENTS.md"),
+            matter.join("a/claude.md"),
+            matter.join("b/.Claude"),
+            matter.join("b/.Claude/CLAUDE.md"),
+            matter.join("c/d/.mcp.json"),
+            matter.join("e/AGENTS.md"),
+        ]
+    );
+    let found: Vec<&Path> = scan.links().iter().map(|f| f.path.as_path()).collect();
+    assert_eq!(found, [matter.join("f/CLAUDE.md")]);
+}
+
 /// The walk on a generated 50,000-file matter: 50 folders of 1,000 files, some nested. Run by
 /// hand with `cargo nextest run -p clauseo-sandbox --run-ignored only walk_of` and read the
 /// time it prints. Not in CI: it writes 50,000 files.

@@ -6,11 +6,12 @@
 //! - The policy ([`Policy`], built by [`Policy::builder`]): the matter and state folders, the
 //!   runtime, read-only and allowed paths, the notes folder, the credential link, Claude's login
 //!   store, hidden paths, loopback ports, the Keychain switch, and what is write-denied in the
-//!   matter ([`PROTECTED_NAMES`], every `.git`, over-cap files). Every path in it is canonical
-//!   and every refusal of [`PolicyBuilder::build`] holds. R17 decides which paths go in.
+//!   matter ([`PROTECTED_NAMES`], every [`PROTECTED_AT_ANY_DEPTH`] name, over-cap files).
+//!   Every path in it is canonical and every refusal of [`PolicyBuilder::build`] holds. R17
+//!   decides which paths go in.
 //! - The walk of the matter ([`scan_matter`], [`scan_links`]): links that lead outside it and
-//!   every `.git`, one walk per launch, and the link rule budget ([`LINK_RULES_MAX`],
-//!   [`Policy::link_folders`]).
+//!   every [`PROTECTED_AT_ANY_DEPTH`] name, one walk per launch, and the link rule budget
+//!   ([`LINK_RULES_MAX`], [`Policy::link_folders`]).
 //! - Tier detection ([`detect`], the OS's part cached; [`probe`], uncached): [`Tier`] and
 //!   [`NoSandbox`].
 //! - The set-up seam ([`SandboxSetup`], [`SetupState`], [`SetupError`]) and [`SetAside`].
@@ -54,7 +55,8 @@
 //! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
 //!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
-//!   which also lists every `.git` and the folders `.git` files name.
+//!   which also lists every `.git`, the folders `.git` files name, and the other
+//!   [`PROTECTED_AT_ANY_DEPTH`] names.
 //! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
 //!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
 //!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
@@ -176,8 +178,8 @@ pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_NAMES, PathRule, Policy,
-    PolicyBuilder,
+    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,
+    PathRule, Policy, PolicyBuilder,
 };
 pub use proxy::{
     Allowlist, Exchange, Listener, LoginKind, ProxyConfig, ProxyHandle, Record, Route, Upstream,

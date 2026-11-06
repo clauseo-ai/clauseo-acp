@@ -27,6 +27,15 @@ pub const PROTECTED_NAMES: [&str; 8] = [
     "AGENTS.md",
 ];
 
+/// The names write-denied at any depth of the matter, in any letter case, wherever one exists
+/// at launch (S15 `PR4a2`): git finds a `.git` at any depth, Claude loads `.claude`,
+/// `.mcp.json` and `CLAUDE.md` from the folder it works in, and Codex `AGENTS.md`. The walk
+/// ([`scan_matter`](crate::scan_matter)) finds them by name in the listings it reads, and
+/// [`Policy::read_only_in_matter`] lists each. On Windows the set-aside probes the same names in
+/// every folder below the root, for the ones made or replaced while a session runs.
+pub const PROTECTED_AT_ANY_DEPTH: [&str; 5] =
+    [".git", ".claude", ".mcp.json", "CLAUDE.md", "AGENTS.md"];
+
 /// The instruction file write-denied at any depth of the matter, in any letter case: Claude
 /// loads a nested `CLAUDE.md` when it works in that folder. Stricter than the brief's "at the
 /// matter root" (decision 0038, for Rohan to confirm).
@@ -354,8 +363,10 @@ impl Policy {
     /// Everything write-denied in the matter, sorted: each of [`PROTECTED_NAMES`] at the root
     /// (a subpath rule, so a protected folder that already exists is read-only inside too),
     /// each `.git` found at any depth (subpath), each folder a `.git` file names inside the
-    /// matter (subpath), and each over-cap file (literal). A [`INSTRUCTIONS_AT_ANY_DEPTH`] file
-    /// at any depth is write-denied too, by one pattern rule in the profile, not listed here.
+    /// matter (subpath), each other [`PROTECTED_AT_ANY_DEPTH`] name found at any depth, in any
+    /// letter case, unless a folder listed here holds it (subpath), and each over-cap file
+    /// (literal). A [`INSTRUCTIONS_AT_ANY_DEPTH`] file at any depth is write-denied on macOS
+    /// by one pattern rule in the profile too, so one made after the walk is covered there.
     pub fn read_only_in_matter(&self) -> &[PathRule] {
         &self.read_only_in_matter
     }
