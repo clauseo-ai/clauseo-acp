@@ -279,6 +279,29 @@ fn a_link_named_as_a_temp_file_is_left_and_not_followed() {
     assert_eq!(std::fs::read(&other).unwrap(), b"linked");
 }
 
+/// A `sandbox` folder that is a link is refused before the sweep lists it, so a temp-named
+/// file behind it stays (the POSIX stand-in for a junction, which Windows refuses the same way).
+#[cfg(unix)]
+#[test]
+fn a_sandbox_folder_that_is_a_link_is_refused_before_the_sweep() {
+    let temp = TempDir::new("secrets-sandbox-link");
+    let behind = temp.dir("behind");
+    let stale = temp.file("behind/.secrets.bin.0123456789abcdef.tmp", "not yours");
+    temp.symlink("sandbox", &behind);
+    let refused = store(
+        temp.path(),
+        &[(sid(1001), password("x"))],
+        &[sid(1001)],
+        seal,
+    );
+    assert!(matches!(refused, Err(SecretError::Io(_))), "{refused:?}");
+    assert_eq!(std::fs::read(&stale).unwrap(), b"not yours");
+    assert!(
+        !behind.join(SECRETS_FILE).exists(),
+        "nothing is written behind the link"
+    );
+}
+
 #[test]
 fn a_reset_of_every_user_replaces_an_unreadable_file_and_a_keep_does_not() {
     let temp = TempDir::new("secrets-unreadable");
