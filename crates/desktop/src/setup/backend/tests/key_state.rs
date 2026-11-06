@@ -19,7 +19,7 @@ use super::key_reads::{KEY, Never, stored};
 use super::switching::shown;
 use super::{MAIN, SETTINGS, claude, codex};
 use crate::setup::KeyWrite;
-use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyNotes};
+use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes};
 use crate::setup::leave::restart_if_usable;
 use crate::setup::refusal::{follow_keys, sync};
 use crate::test_support::{block_on, within};
@@ -186,6 +186,7 @@ fn follow_keys_sets_the_refusal_from_each_note_and_a_retry_reads_the_key_again()
     let keys = KeyCache::load_bounded(
         keychain.clone(),
         agents,
+        KeyMarker::unkept(),
         notes.sender(),
         &Never,
         KEYS_LOAD_BOUND,

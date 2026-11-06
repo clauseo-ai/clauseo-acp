@@ -7,6 +7,7 @@ mod after;
 mod counts;
 mod endpoint;
 mod fakes;
+mod key_marker;
 mod key_reads;
 mod key_state;
 mod keys;

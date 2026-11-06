@@ -25,8 +25,9 @@
 //! blocks, `agent.keys_loading` for every other known agent. The first load is bounded
 //! ([`KEYS_LOAD_BOUND`], on the setup thread's timer); once it is over, each agent gets its
 //! refusal in force (`setup/refusal.rs`: none, or `agent.key_unreadable` for a stored key
-//! that did not read) on the thread that then follows the settings and the keys' notes, so
-//! they never cross; a policy refusal stays until the settings lift it.
+//! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
+//! the thread that then follows the settings and the keys' notes, so they never cross; a
+//! policy refusal stays until the settings lift it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -46,7 +47,7 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyNotes, KeySlot};
+use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot};
 use super::login_check::ReusedLogins;
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
@@ -294,9 +295,11 @@ pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std:
 
 /// The setup thread's work.
 fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
+    let marker = KeyMarker::new(&read.data_dir, read.known.keys());
     let keys = Arc::new(KeyCache::load_bounded(
         Keychain::os(),
         read.known.keys(),
+        marker,
         side.notes.sender(),
         &AsyncIoTimer,
         KEYS_LOAD_BOUND,

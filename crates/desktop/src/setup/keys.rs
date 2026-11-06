@@ -8,12 +8,17 @@
 //!
 //! The first load is bounded (decision record 0048, R20 P5b A4; `keys/reads.rs`): each agent's
 //! key is read on a thread of its own, and the setup thread waits for them at most
-//! [`KEYS_LOAD_BOUND`]. A read that fails (the keychain's error) or has not answered by then
-//! marks the agent's key **unreadable**: a key is stored, or may be, and it never reads as "no
+//! [`KEYS_LOAD_BOUND`]. A read that fails (the keychain's error), or has not answered by then
+//! for an agent the "key stored" marker marks (`keys/marker.rs`), marks the agent's key
+//! **unreadable**: a key is stored, or may be, and it never reads as "no
 //! key" ([`KeyCache::unreadable`]; [`KeyCache::has`] counts it). Desktop then refuses that
 //! agent's launches with `agent.key_unreadable` (`setup/refusal.rs`) until a later read
 //! succeeds: the slow read answering, or a read again ([`KeyCache::read_again`]) when a
 //! launch meets the refusal. Each change of the mark goes out as a [`KeyNote::Read`].
+//!
+//! An agent the marker does not mark has no key Clauseo stored: one whose read has not
+//! answered by the bound launches without a key. A save sets the marker before the keychain
+//! write, a clear unsets it after, and each read that answers brings it in step.
 //!
 //! A write goes to the keychain first, on a thread of its own (a keychain call may block on a
 //! prompt), and to memory only once it is stored, under one write order (see [`KeyCache`]). A
@@ -38,9 +43,11 @@ use super::KeyWrite;
 use super::admit::key_stored;
 use crate::bridge::lock;
 
+pub(super) mod marker;
 mod notes;
 mod reads;
 
+pub(crate) use marker::KeyMarker;
 pub(crate) use notes::{KeyNote, KeyNotes, NoteSender};
 use reads::Marks;
 
@@ -68,6 +75,8 @@ pub(crate) struct KeyCache {
     order: Arc<Mutex<()>>,
     /// The agents whose stored key is unreadable or being read, and the notes of each change.
     marks: Marks,
+    /// Which agents Clauseo stored a key for, outside the keychain (`keys/marker.rs`).
+    marker: Arc<KeyMarker>,
 }
 
 impl fmt::Debug for KeyCache {
@@ -85,15 +94,16 @@ impl fmt::Debug for KeyCache {
 }
 
 impl KeyCache {
-    /// No key in memory and none marked yet, over `keychain`; each change of a mark goes to
-    /// `notes`.
-    fn empty(keychain: Keychain, notes: Option<NoteSender>) -> Self {
+    /// No key in memory and none marked yet, over `keychain` and `marker`; each change of a
+    /// mark goes to `notes`.
+    fn empty(keychain: Keychain, notes: Option<NoteSender>, marker: KeyMarker) -> Self {
         Self {
             available: keychain.available(),
             keychain,
             keys: Arc::default(),
             order: Arc::default(),
             marks: Marks::new(notes),
+            marker: Arc::new(marker),
         }
     }
 
@@ -107,15 +117,17 @@ impl KeyCache {
     }
 
     /// The first load, on the setup thread, waited for at most `bound` on `timer`
-    /// (`keys/reads.rs`); each change of a mark, then and later, goes to `notes`.
+    /// (`keys/reads.rs`); a read that has not answered by then marks the key unreadable only
+    /// when `marker` marks the agent. Each change of a mark, then and later, goes to `notes`.
     pub(crate) fn load_bounded<'a>(
         keychain: Keychain,
         agents: impl IntoIterator<Item = &'a AgentId>,
+        marker: KeyMarker,
         notes: NoteSender,
         timer: &impl clauseo_process::Timer,
         bound: Duration,
     ) -> Self {
-        reads::load_bounded(keychain, agents, notes, timer, bound)
+        reads::load_bounded(keychain, agents, marker, notes, timer, bound)
     }
 
     /// Reads `agent`'s key again when it is marked unreadable and no read of it runs
@@ -173,15 +185,18 @@ impl KeyCache {
     ) -> Result<bool, HostError> {
         let (keychain, keys, order) = self.parts();
         let marks = self.marks.clone();
+        let marker = Arc::clone(&self.marker);
         let agent = agent.clone();
         off_thread(move || -> Result<bool, KeyError> {
             let _order = lock(&order);
             let Some(key) = keychain.load(&agent)? else {
                 marks.known(&agent);
+                marker.reconcile(&agent, false);
                 return Ok(false);
             };
             lock(&keys).insert(agent.clone(), key);
             marks.known(&agent);
+            marker.reconcile(&agent, true);
             then(true);
             Ok(true)
         })
@@ -194,7 +209,9 @@ impl KeyCache {
         lock(&self.keys).get(agent).cloned()
     }
 
-    /// Stores `key` as `agent`'s: in the keychain, then in memory, then `then(true)`. With
+    /// Stores `key` as `agent`'s: the marker first (`keys/marker.rs`; one that cannot be
+    /// written refuses the save with `internal`, nothing stored), then the keychain (a write
+    /// that fails leaves the marker on, which fails closed), then memory, then `then(true)`. With
     /// [`KeyWrite::OnlyIfAbsent`] only when no key is stored, else `settings.key_stored` with
     /// nothing written; memory then takes the keychain's entry again (a read that failed at start
     /// left it out), and `then` gets whether it holds one. A key the keychain refuses is
@@ -213,25 +230,29 @@ impl KeyCache {
         let key = key.into_zeroizing();
         let (keychain, keys, order) = self.parts();
         let marks = self.marks.clone();
+        let marker = Arc::clone(&self.marker);
         let for_thread = agent.clone();
-        let stored = off_thread(move || -> Result<bool, KeyError> {
+        let stored = off_thread(move || -> Result<bool, HostError> {
             let agent = for_thread;
             let _order = lock(&order);
+            marker
+                .set(&agent)
+                .map_err(|error| marker_error(&agent, &error))?;
             let stored = match write {
                 KeyWrite::Replace => keychain.store(&agent, &key).map(|()| true),
                 KeyWrite::OnlyIfAbsent => keychain.store_if_absent(&agent, &key),
-            }?;
+            }
+            .map_err(|error| key_error(&error))?;
             if stored {
                 lock(&keys).insert(agent.clone(), key);
                 marks.known(&agent);
                 then(true);
             } else {
-                then(reload(&keychain, &keys, &marks, &agent));
+                then(reload(&keychain, &keys, &marks, &marker, &agent));
             }
             Ok(stored)
         })
-        .await?
-        .map_err(|error| key_error(&error))?;
+        .await??;
         if stored {
             Ok(())
         } else {
@@ -239,7 +260,8 @@ impl KeyCache {
         }
     }
 
-    /// Removes `agent`'s key: from the keychain, then from memory, then `then(false)`; on a
+    /// Removes `agent`'s key: from the keychain, then from memory, then the marker (best effort:
+    /// one that cannot be cleared stays on, which fails closed), then `then(false)`; on a
     /// thread of its own under the write order, as [`KeyCache::set`] runs.
     pub(crate) async fn clear(
         &self,
@@ -248,12 +270,14 @@ impl KeyCache {
     ) -> Result<(), HostError> {
         let (keychain, keys, order) = self.parts();
         let marks = self.marks.clone();
+        let marker = Arc::clone(&self.marker);
         let agent = agent.clone();
         off_thread(move || -> Result<(), KeyError> {
             let _order = lock(&order);
             keychain.clear(&agent)?;
             lock(&keys).remove(&agent);
             marks.known(&agent);
+            marker.clear(&agent);
             then(false);
             Ok(())
         })
@@ -273,17 +297,25 @@ impl KeyCache {
 
 /// Takes `agent`'s entry from `keychain` into `keys` again, under the write order, and answers
 /// whether a key is stored: a read that fails marks it unreadable (a key is there, the store
-/// said so) and answers `true`, never "no key".
-fn reload(keychain: &Keychain, keys: &Keys, marks: &Marks, agent: &AgentId) -> bool {
+/// said so) and answers `true`, never "no key". A read that answers brings the marker in step.
+fn reload(
+    keychain: &Keychain,
+    keys: &Keys,
+    marks: &Marks,
+    marker: &KeyMarker,
+    agent: &AgentId,
+) -> bool {
     match keychain.load(agent) {
         Ok(Some(key)) => {
             lock(keys).insert(agent.clone(), key);
             marks.known(agent);
+            marker.reconcile(agent, true);
             true
         }
         Ok(None) => {
             lock(keys).remove(agent);
             marks.known(agent);
+            marker.reconcile(agent, false);
             false
         }
         Err(error) => {
@@ -317,6 +349,17 @@ fn key_error(error: &KeyError) -> HostError {
         _ => ErrorCode::Internal,
     };
     HostError::new(code, error.to_string())
+}
+
+/// The answer to a save whose marker could not be written: `internal`, naming the agent and
+/// the error's kind, never a path.
+fn marker_error(agent: &AgentId, error: &std::io::Error) -> HostError {
+    let kind = error.kind();
+    tracing::warn!(%agent, ?kind, "the key-stored marker was not written: the key is not stored");
+    HostError::new(
+        ErrorCode::Internal,
+        format!("{agent}'s key was not stored: its marker could not be written ({kind})"),
+    )
 }
 
 /// A fixed word for the kind of a keychain error, for the log.
