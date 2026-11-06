@@ -14,6 +14,7 @@ mod answers;
 mod asks;
 mod came_back;
 mod cancel;
+pub(super) mod case_law;
 mod close;
 mod end;
 mod failure;
@@ -179,6 +180,9 @@ struct Current {
     limit: Option<LimitMark>,
     /// The places the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: crate::sent::TurnPaths,
+    /// A web search of the turn looked like case law (`connectors/hint.rs`): its end asks
+    /// whether to offer the connector.
+    case_law_hint: crate::connectors::hint::TurnLooks,
     /// The before-turn checkpoint, once step 4 has it.
     checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).

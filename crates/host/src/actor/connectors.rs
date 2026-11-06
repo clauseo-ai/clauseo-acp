@@ -17,11 +17,16 @@
 //!   app catch-up carries it ([`current`]).
 //! - Sign-out, remove and the switch going off bump the credential generation: a key or a
 //!   sign-in still in flight stores nothing, and a read that started before is not applied.
-//! - `DismissCaseLawHint` is accepted and does nothing yet: the hint and its once-per-matter
-//!   memory are R24's PR6 (`hint.rs`, `hints.json`).
+//! - The case-law hint (`hint.rs`): offered once per matter at a turn's end, and
+//!   `DismissCaseLawHint` keeps it away from a matter (`hints.json`).
+//! - `OpenPayLink` opens only `AddCredits`' checked https pay link through the native confirm
+//!   (`ConnectorOpener::open_confirmed`); no link comes from the window, the relay, a tool
+//!   result or the agent (`CaseLaw::pay_link`).
 
+pub(super) mod hint;
 mod jobs;
 mod limits;
+mod pay_link;
 mod watch;
 
 use std::sync::Arc;
@@ -73,6 +78,11 @@ pub(crate) enum ConnectorInput {
     /// A recharge watch's thread ended, however it ended (a panic too): the watch numbered
     /// `watch`, if still the current one, goes with its pay link.
     WatchEnded { watch: u64 },
+    /// `OpenPayLink`'s confirm and open ended: answers it.
+    PayLinkOpened {
+        command: CommandId,
+        reply: Result<(), clauseo_protocol::HostError>,
+    },
 }
 
 /// The connectors on the actor.
@@ -99,6 +109,8 @@ pub(crate) struct ConnectorsOnActor {
     /// still holds (asked under the connectors crate's credential lock), and what an older
     /// job read about the credential or the account is not applied.
     credentials: Arc<AtomicU64>,
+    /// The case-law hint's marks and the matters waiting on liveness.
+    hint: hint::HintState,
 }
 
 struct Wired {
@@ -131,6 +143,7 @@ impl ConnectorsOnActor {
             opening: None,
             used: UsedIds::default(),
             credentials: Arc::new(AtomicU64::new(0)),
+            hint: hint::HintState::default(),
         }
     }
 }
@@ -193,8 +206,7 @@ fn begin(actor: &mut Actor, id: CommandId, command: ConnectorCommand) -> Result<
     actor.connectors.state.error = None;
     let job = match command {
         ConnectorCommand::DismissCaseLawHint { matter } => {
-            actor.check_matter(matter)?;
-            tracing::debug!(%matter, "the case-law hint was dismissed; PR6 keeps it");
+            hint::dismiss(actor, matter)?;
             return Ok(true);
         }
         // The job reads the account only if it finds the connector signed in.
@@ -239,6 +251,18 @@ fn begin(actor: &mut Actor, id: CommandId, command: ConnectorCommand) -> Result<
         }
         ConnectorCommand::SignOut { id: connector } => tidy_up(actor, &connector, Job::SignOut)?,
         ConnectorCommand::Remove { id: connector } => tidy_up(actor, &connector, Job::Remove)?,
+        ConnectorCommand::OpenPayLink { id: connector } => {
+            known(&connector)?;
+            let url = actor
+                .connectors
+                .state
+                .pay_link()
+                .ok_or_else(|| refused("there is no checked pay link to open"))?
+                .clone();
+            let opener = Arc::clone(&wired(actor)?.opener);
+            pay_link::open(actor, id, opener, url)?;
+            return Ok(false);
+        }
         ConnectorCommand::RefreshBalance { id: connector } => {
             known(&connector)?;
             if !actor.connectors.state.signed_in() || !actor.connectors.reads.take(actor.now().mono)
@@ -347,6 +371,12 @@ pub(super) fn on_input(actor: &mut Actor, input: ConnectorInput) {
             pay_url,
         } => watch::on_pay_link(actor, command, watch, (recharge, pay_url)),
         ConnectorInput::Finished(finished) => on_finished(actor, *finished),
+        ConnectorInput::PayLinkOpened { command, reply } => {
+            actor.finish_command(
+                command,
+                reply.map(|()| CommandOutcome::Done).map_err(Error::from),
+            );
+        }
         ConnectorInput::WatchEnded { watch } => watch::on_watch_ended(actor, watch),
     }
 }
@@ -381,6 +411,7 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
         connectors.reads.last = Some(now);
     }
     let state = &mut connectors.state;
+    let liveness = finished.liveness.is_some();
     if let Some(liveness) = finished.liveness {
         state.liveness = Some(liveness);
     }
@@ -395,6 +426,7 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     }
     match finished.change {
         Change::Nothing => {}
+        Change::NoLiveness => connectors.hint.no_liveness(),
         Change::SignInEnded { generation, error } => {
             if generation == connectors.sign_in.0 {
                 connectors.sign_in.1 = None;
@@ -425,6 +457,9 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     if let Some(payment) = finished.out_of_credit {
         out_of_credit(actor, payment);
     }
+    if liveness {
+        hint::liveness_known(actor);
+    }
     answer(actor, finished.command, finished.reply);
 }
 
@@ -443,6 +478,10 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
             end_recharges(actor);
         }
         RelayEvent::OutOfCredit { payment, .. } => out_of_credit(actor, payment),
+        RelayEvent::CaseLawFound { session, found } => {
+            super::turn::case_law::found(actor, session.thread, found);
+            return;
+        }
         RelayEvent::PaidResult { .. } => {
             // A paid call went through: there is credit.
             actor.connectors.state.out_of_credit = None;

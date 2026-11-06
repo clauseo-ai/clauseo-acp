@@ -61,28 +61,30 @@ struct InitializeResult<'a> {
 
 /// A `tools/call` result: what says it is an error, and why.
 #[derive(Deserialize)]
-struct ToolResult<'a> {
+pub(super) struct ToolResult<'a> {
     #[serde(rename = "isError", borrow, default, deserialize_with = "present")]
-    is_error: Option<&'a RawValue>,
+    pub(super) is_error: Option<&'a RawValue>,
     #[serde(
         rename = "structuredContent",
         borrow,
         default,
         deserialize_with = "present"
     )]
-    structured: Option<&'a RawValue>,
+    pub(super) structured: Option<&'a RawValue>,
 }
 
 /// A member that is present, whatever its value (`null` included); a missing one is the
 /// field's default, `None`. Plain `Option` would read `null` as missing.
-fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<&'de RawValue>, D::Error> {
+pub(super) fn present<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<&'de RawValue>, D::Error> {
     <&RawValue>::deserialize(deserializer).map(Some)
 }
 
 /// `raw` read as the object `T`; `None` when it is not an object or does not read (a
 /// duplicate key among `T`'s fields, say). The object check comes first: serde's derived
 /// structs would also read an array, by position.
-fn object<'a, T: Deserialize<'a>>(raw: &'a RawValue) -> Option<T> {
+pub(super) fn object<'a, T: Deserialize<'a>>(raw: &'a RawValue) -> Option<T> {
     if !raw.get().starts_with('{') {
         return None;
     }
@@ -140,6 +142,14 @@ pub(super) fn lines(conn: &Conn, call: &Call, reply: McpReply) -> Vec<Vec<u8>> {
             call.tools_call(),
             texts::REPLY_TOO_LARGE,
         )];
+    }
+    if let (Some(join), Some(result)) = (&call.join, envelope.result)
+        && let Some(found) = super::found::found(join, result)
+    {
+        session.hub.events.event(RelayEvent::CaseLawFound {
+            session: session.key,
+            found,
+        });
     }
     vec![one_line(raw)]
 }

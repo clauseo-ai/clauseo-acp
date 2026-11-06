@@ -29,9 +29,13 @@ fn the_answer_passes_as_sent_on_one_line() {
     assert_eq!(line, sent.replace(['\r', '\n'], " ").into_bytes());
     let reply: Value = serde_json::from_slice(&line).unwrap();
     assert_eq!(reply["result"]["content"][0]["text"], "a\nb");
-    assert_eq!(
-        rig.events.take(),
-        vec![RelayEvent::PaidResult { session: rig.key }]
+    // A search_law answer also feeds the sources join (R24, PR6).
+    let events = rig.events.take();
+    assert_eq!(events[0], RelayEvent::PaidResult { session: rig.key });
+    assert!(
+        matches!(&events[1..], [RelayEvent::CaseLawFound { session, found }]
+            if *session == rig.key && found.links.is_empty()),
+        "{events:?}"
     );
     // An event stream's value of several `data:` lines comes back as one line too.
     let stream = "data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":2,\"result\":{}}\n\n";

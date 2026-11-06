@@ -15,12 +15,21 @@ use clauseo_connectors::Connectors;
 
 use super::{RelayEvent, RelayEvents};
 
-/// Opens an https link in the lawyer's browser with no confirm: the host's own sign-in page, never
-/// a link from a window or an agent. Desktop passes `open_url_unconfirmed`; tests a stand-in that
-/// drives the fake connector's page.
+/// Opens the host's own links in the lawyer's browser. Desktop passes `open_url_unconfirmed` and
+/// H11's `open_external`; tests a stand-in that drives the fake connector's pages.
 pub trait ConnectorOpener: Send + Sync {
-    /// Opens `url`; an error is a short line with no URL in it.
+    /// Opens `url` with no confirm: the host's own sign-in page, never a link from a window or an
+    /// agent. An error is a short line with no URL in it.
     fn open(&self, url: &str) -> Result<(), String>;
+
+    /// Opens `url` after the native confirm that names where it goes (H11's `open_external`):
+    /// the connector's checked pay link (`OpenPayLink`). Blocks until the lawyer answers;
+    /// declined, nothing opens and the error is `transport.unauthorized`. Called off the actor.
+    ///
+    /// # Errors
+    ///
+    /// The confirm's or the opener's refusal, with no URL in its message.
+    fn open_confirmed(&self, url: &str) -> Result<(), clauseo_protocol::HostError>;
 }
 
 /// The connector commands' wiring (`HostConfig::with_connectors`).

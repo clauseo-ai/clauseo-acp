@@ -89,9 +89,13 @@ fn the_fake_gets_the_re_serialised_value_and_the_count_follows_it() {
         std::fs::read_to_string(rig.day_file()).unwrap(),
         r#"{"day":"2026-11-02","paid":1}"#
     );
-    assert_eq!(
-        rig.events.take(),
-        vec![RelayEvent::PaidResult { session: rig.key }]
+    // A search_law answer also feeds the sources join (R24, PR6).
+    let events = rig.events.take();
+    assert_eq!(events[0], RelayEvent::PaidResult { session: rig.key });
+    assert!(
+        matches!(&events[1..], [RelayEvent::CaseLawFound { session, found }]
+            if *session == rig.key && found.links.len() == 2),
+        "{events:?}"
     );
 }
 

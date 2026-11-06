@@ -79,11 +79,20 @@ mod commands;
 #[path = "host/case_law.rs"]
 mod case_law;
 #[cfg(test)]
+#[path = "host/case_law_hint.rs"]
+mod case_law_hint;
+#[cfg(test)]
+#[path = "host/case_law_sources.rs"]
+mod case_law_sources;
+#[cfg(test)]
 #[path = "host/connector_money.rs"]
 mod connector_money;
 #[cfg(test)]
 #[path = "host/connector_no_key.rs"]
 mod connector_no_key;
+#[cfg(test)]
+#[path = "host/connector_pay_link.rs"]
+mod connector_pay_link;
 #[cfg(test)]
 #[path = "host/connector_races.rs"]
 mod connector_races;

@@ -278,9 +278,10 @@ fn the_rendered_frontmatter_is_name_and_description_alone() {
         assert!(front.clauseo.is_empty());
         assert!(text.starts_with(&frontmatter::render(skill.name(), &front.description)));
         assert!(!text.contains("metadata:"));
-        // R24 gave the research skill's case-law line conditional wording: version 2.
+        // R24 gave the research skill's case-law line conditional wording (version 2), then
+        // the brief's "and citations" (version 3).
         let version = if skill.name() == "legal-research" {
-            "2"
+            "3"
         } else {
             "1"
         };

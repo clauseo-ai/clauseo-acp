@@ -300,9 +300,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   async reveal(target: RevealTarget): Promise<void> {
     await call(commands.reveal(target));
   }
-  /** Opens the settings window or focuses it: the host's open_or_focus, so a second call makes no second window. */
-  async openSettings(): Promise<void> {
-    await call(commands.openSettings());
+  /** Opens the settings window or focuses it: the host's open_or_focus, so a second call makes no second window; at `section` when named (R24: the case-law hint and banner open "connectors"). */
+  async openSettings(section: "connectors" | null = null): Promise<void> {
+    await call(commands.openSettings(section));
   }
   subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
     return this.#subs.add(stream, after, subscriber);

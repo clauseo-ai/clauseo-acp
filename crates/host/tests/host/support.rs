@@ -285,19 +285,20 @@ impl Dir {
         self.start_launching(run, Arc::new(self.launcher()), adjust)
     }
 
-    /// As [`Dir::start_with`], `adjust` also given the run's clock, for a seam that shares it.
-    pub(crate) fn start_clocked(
+    /// As [`Dir::start_launching`], `adjust` also given the run's clock (a seam that shares it).
+    pub(crate) fn start_clocked_launching(
         &self,
         run: u16,
+        launcher: Arc<dyn Launcher>,
         adjust: impl FnOnce(HostConfig, &ManualClock) -> HostConfig,
     ) -> Running {
         let clock = Self::clock(run);
-        let (handle, join) = Host::start(adjust(self.config(run, &clock), &clock))
-            .unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
-        let join = Some(join);
+        let (handle, join) =
+            Host::start(adjust(self.config_launching(run, &clock, launcher), &clock))
+                .unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
         Running {
             handle,
-            join,
+            join: Some(join),
             clock,
         }
     }

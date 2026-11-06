@@ -9,8 +9,9 @@
 //! window `SetUpdateMode` and `CheckForUpdate`: settings never installs, main never changes the
 //! mode. Of the connector commands (R24, `connector_main` and `connector_settings`), `main`
 //! sends only `DismissCaseLawHint` and `RefreshBalance`: it shows agent output, so it never adds
-//! a connector or a key, spends credits, signs out or removes; its hint and banner open Settings
-//! at the connector, whose window sends the rest.
+//! a connector or a key, spends credits, opens a pay link, signs out or removes; its hint and
+//! banner open Settings at the connector (`open_settings` with `section: "connectors"`), whose
+//! window sends the rest.
 
 use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
@@ -147,7 +148,8 @@ fn connector_main(command: &ConnectorCommand) -> Result<(), HostError> {
         | ConnectorCommand::AddApiKey { .. }
         | ConnectorCommand::AddCredits { .. }
         | ConnectorCommand::SignOut { .. }
-        | ConnectorCommand::Remove { .. } => Err(invalid(
+        | ConnectorCommand::Remove { .. }
+        | ConnectorCommand::OpenPayLink { .. } => Err(invalid(
             "the main window sends only dismiss_case_law_hint and refresh_balance of the \
              connector commands; the rest are sent from Settings",
         )),
@@ -164,7 +166,10 @@ fn connector_settings(command: &ConnectorCommand) -> Result<(), HostError> {
         | ConnectorCommand::AddCredits { .. }
         | ConnectorCommand::SignOut { .. }
         | ConnectorCommand::Remove { .. }
-        | ConnectorCommand::RefreshBalance { .. } => Ok(()),
+        | ConnectorCommand::RefreshBalance { .. }
+        // The pay link the host holds, behind the native confirm; the room's banner opens
+        // Settings at the connector, which sends it.
+        | ConnectorCommand::OpenPayLink { .. } => Ok(()),
         ConnectorCommand::DismissCaseLawHint { .. } => Err(invalid(
             "the case-law hint is dismissed from the main window",
         )),

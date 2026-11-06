@@ -13,7 +13,8 @@ export const commands = {
 	 *  `SetSkillPack`, `RefreshLimits`, `SetUpdateMode`, `CheckForUpdate` and the connector
 	 *  commands but `DismissCaseLawHint`; from `main`, `SetMode`, `SetConfigOption`,
 	 *  `SetToolSettings`, `SetPrivacySettings`, `SetUpdateMode`, `SetSkillPack` and every
-	 *  connector command but `DismissCaseLawHint` and `RefreshBalance` (`src/bridge/admit.rs`).
+	 *  connector command but `DismissCaseLawHint` and `RefreshBalance` (`OpenPayLink` among them;
+	 *  `src/bridge/admit.rs`).
 	 */
 	dispatch: (command: CommandEnvelope) => typedError<CommandOutcome, HostError>(__TAURI_INVOKE("dispatch", { command })),
 	/**  Answers a query; from the settings window, `GetSettings` only. */
@@ -85,10 +86,13 @@ export const commands = {
 	/**  Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
 	reveal: (target: RevealTarget) => typedError<null, HostError>(__TAURI_INVOKE("reveal", { target })),
 	/**
-	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`).
-	 *  Granted to `main` only.
+	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
+	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner). An
+	 *  unknown section is refused as the arguments decode. Granted to `main` only.
 	 */
-	openSettings: () => typedError<null, HostError>(__TAURI_INVOKE("open_settings")),
+	openSettings: (section: 
+/**  The Connectors section. */
+"connectors" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
 	/**
 	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
 	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
@@ -722,7 +726,7 @@ export type ConnectorCommand =
  *  liveness cache if stale, reads the account if a connector is added (at most once a
  *  minute) and publishes the state. JSON: `{"connector": {"check": {}}}`.
  */
-({ check: Record<string, never> }) & { add?: never; add_api_key?: never; add_credits?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
+({ check: Record<string, never> }) & { add?: never; add_api_key?: never; add_credits?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
 /**
  *  Add a connector by signing in through the system browser. Refused when the switch is
  *  off, the connector unknown, or known not live. A second one while signing in starts over.
@@ -730,14 +734,14 @@ export type ConnectorCommand =
 ({ add: {
 	/**  The connector, such as `case-law`. */
 	id: string,
-} }) & { add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
+} }) & { add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
 /**  Add a connector with an API key the lawyer pasted, instead of signing in. */
 ({ add_api_key: {
 	/**  The connector. */
 	id: string,
 	/**  The key, as pasted. It encodes and prints as `[redacted]`. */
 	key: RedactedString,
-} }) & { add?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
+} }) & { add?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
 /**
  *  Buy a pack of credits: the host makes the recharge and publishes its checked pay link in
  *  `ConnectorView::pay_url`; on payment it reads the account and publishes the balance.
@@ -747,27 +751,37 @@ export type ConnectorCommand =
 	id: string,
 	/**  One of the connector's packs, by its id in the price list. */
 	pack: string,
-} }) & { add?: never; add_api_key?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
+} }) & { add?: never; add_api_key?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
 /**  Sign out of a connector: the host revokes the sign-in and forgets it. Allowed when off. */
 ({ sign_out: {
 	/**  The connector. */
 	id: string,
-} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never } | 
+} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; remove?: never } | 
 /**  Remove a connector: signed out and no longer listed as added. Allowed when off. */
 ({ remove: {
 	/**  The connector. */
 	id: string,
-} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; sign_out?: never } | 
+} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; refresh_balance?: never; sign_out?: never } | 
 /**  Read the account's balance again (at most once a minute) and publish it. */
 ({ refresh_balance: {
 	/**  The connector. */
 	id: string,
-} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; remove?: never; sign_out?: never } | 
+} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; open_pay_link?: never; remove?: never; sign_out?: never } | 
+/**
+ *  Open the connector's pay link in the browser, after the native confirm: only the checked
+ *  https link the host holds from `AddCredits` (`ConnectorView::pay_url`). No URL comes from
+ *  the window, and none from the relay, a tool result or the agent (not even
+ *  `OutOfCredit`'s); with no such link the host refuses it.
+ */
+({ open_pay_link: {
+	/**  The connector. */
+	id: string,
+} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; dismiss_case_law_hint?: never; refresh_balance?: never; remove?: never; sign_out?: never } | 
 /**  The lawyer dismissed the case-law hint in a matter: it does not show there again. */
 ({ dismiss_case_law_hint: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; refresh_balance?: never; remove?: never; sign_out?: never };
+} }) & { add?: never; add_api_key?: never; add_credits?: never; check?: never; open_pay_link?: never; refresh_balance?: never; remove?: never; sign_out?: never };
 
 /**  Where a connector stands. Closed: the host and the app are one version. */
 export type ConnectorStatus = 
@@ -4070,6 +4084,16 @@ export type SessionCapabilities = {
 	/**  `session/close`. */
 	close: boolean,
 };
+
+/**
+ *  A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
+ *  and banner open Connectors). Closed, as the app asked: a value the build does not know is
+ *  refused when the command's arguments decode, never ignored, and a new section is added here
+ *  together with the page that shows it (ADR 0002's rule for commands, which a webview sends).
+ */
+export type SettingsSection = 
+/**  The Connectors section. */
+"connectors";
 
 /**  What `GetSettings` answers and `SettingsChanged` carries. */
 export type SettingsView = {

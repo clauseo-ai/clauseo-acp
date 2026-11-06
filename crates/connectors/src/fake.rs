@@ -479,6 +479,12 @@ impl FakeHandle {
         self.lock().api.pay_url = url.map(str::to_owned);
     }
 
+    /// An out-of-credit answer opens a new recharge even when one awaits payment (off at start:
+    /// it names the open one), as when that one was opened elsewhere and has lapsed.
+    pub fn open_new_recharge_on_out_of_credit(&self, fresh: bool) {
+        self.lock().api.fresh_recharge = fresh;
+    }
+
     /// MCP answers come as `text/event-stream` (one `message` event) instead of JSON.
     pub fn respond_as_sse(&self, sse: bool) {
         self.lock().api.sse = sse;

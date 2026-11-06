@@ -64,6 +64,14 @@ pub enum ConnectorCommand {
         /// The connector.
         id: String,
     },
+    /// Open the connector's pay link in the browser, after the native confirm: only the checked
+    /// https link the host holds from `AddCredits` (`ConnectorView::pay_url`). No URL comes from
+    /// the window, and none from the relay, a tool result or the agent (not even
+    /// `OutOfCredit`'s); with no such link the host refuses it.
+    OpenPayLink {
+        /// The connector.
+        id: String,
+    },
     /// The lawyer dismissed the case-law hint in a matter: it does not show there again.
     DismissCaseLawHint {
         /// The matter.
@@ -85,6 +93,7 @@ enum Wire {
     SignOut { id: String },
     Remove { id: String },
     RefreshBalance { id: String },
+    OpenPayLink { id: String },
     DismissCaseLawHint { matter: MatterId },
 }
 
@@ -102,6 +111,7 @@ impl<'de> Deserialize<'de> for ConnectorCommand {
             Wire::SignOut { id } => Self::SignOut { id },
             Wire::Remove { id } => Self::Remove { id },
             Wire::RefreshBalance { id } => Self::RefreshBalance { id },
+            Wire::OpenPayLink { id } => Self::OpenPayLink { id },
             Wire::DismissCaseLawHint { matter } => Self::DismissCaseLawHint { matter },
         })
     }
@@ -118,7 +128,8 @@ impl ConnectorCommand {
             Self::Add { id }
             | Self::SignOut { id }
             | Self::Remove { id }
-            | Self::RefreshBalance { id } => check_id(id),
+            | Self::RefreshBalance { id }
+            | Self::OpenPayLink { id } => check_id(id),
             Self::AddApiKey { id, key } => {
                 check_id(id)?;
                 if key.is_placeholder() {

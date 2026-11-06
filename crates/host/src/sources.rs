@@ -3,6 +3,8 @@
 //! in the answer's sources list.
 //!
 //! - [`browser`]: the browser's own opens, `PageVisited { via: Browser }` (S27).
+//! - [`case_law`]: the case-law connector's searches and reads (R24), joined to what the relay
+//!   saw of the same call: `WebSearchRecorded { source: CaseLaw }`, `PageVisited { via: CaseLaw }`.
 //! - [`claude`]: Claude Code's own `WebSearch` and `WebFetch` (S26): a search is
 //!   `WebSearchRecorded`, a fetch is `PageVisited { via: WebFetch }`.
 //! - [`codex`]: Codex's own `web_search` (S26): a search is `WebSearchRecorded` with no results,
@@ -14,6 +16,7 @@
 
 pub(crate) mod browser;
 mod calls;
+pub(crate) mod case_law;
 pub(crate) mod claude;
 pub(crate) mod codex;
 
@@ -40,6 +43,9 @@ pub(crate) const MAX_RESULT_URL_CHARS: usize = 2_000;
 pub(crate) struct Sources {
     browser: browser::Opens,
     calls: calls::Calls,
+    /// The case-law calls and the relay's results waiting for them. The host asks it first
+    /// (`actor/turn/updates.rs`); a call it claims is not offered to the others.
+    pub(crate) case_law: case_law::CaseLaw,
 }
 
 impl Sources {

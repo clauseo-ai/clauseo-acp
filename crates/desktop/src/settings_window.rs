@@ -44,14 +44,59 @@ const TITLE: &str = "Settings";
 #[cfg(target_os = "macos")]
 const MENU_ID: &str = "settings";
 
-/// Brings the settings window forward, building it when there is none.
-pub(crate) fn open_or_focus<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
-    if let Some(window) = manager.get_webview_window(SETTINGS_WINDOW) {
-        return raise(&window);
+/// A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
+/// and banner open Connectors). Closed, as the app asked: a value the build does not know is
+/// refused when the command's arguments decode, never ignored, and a new section is added here
+/// together with the page that shows it (ADR 0002's rule for commands, which a webview sends).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum SettingsSection {
+    /// The Connectors section.
+    Connectors,
+}
+
+impl SettingsSection {
+    /// The page's fragment for it: `settings.html#connectors`.
+    fn fragment(self) -> &'static str {
+        match self {
+            Self::Connectors => "connectors",
+        }
     }
-    build(manager).or_else(|error| match manager.get_webview_window(SETTINGS_WINDOW) {
+}
+
+/// In tests, the fragments [`open_or_focus`] set on an open window, when the app manages one:
+/// the mock runtime runs no script, so this is how a test sees the hash change.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct HashesSet(pub(crate) std::sync::Mutex<Vec<&'static str>>);
+
+/// Brings the settings window forward, building it when there is none; at `section` when one
+/// is named. A new window opens at `settings.html#<section>`; an open one has its
+/// `location.hash` set to it (a fixed string from [`SettingsSection`], never the caller's
+/// text), which the page will follow on `hashchange` (U15's page; no listener exists yet).
+pub(crate) fn open_or_focus<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: Option<SettingsSection>,
+) -> tauri::Result<()> {
+    let open_at = |window: &WebviewWindow<R>| {
+        if let Some(section) = section {
+            #[cfg(test)]
+            if let Some(set) = manager.try_state::<HashesSet>()
+                && let Ok(mut set) = set.0.lock()
+            {
+                set.push(section.fragment());
+            }
+            window.eval(format!("location.hash = {:?};", section.fragment()))?;
+        }
+        raise(window)
+    };
+    if let Some(window) = manager.get_webview_window(SETTINGS_WINDOW) {
+        return open_at(&window);
+    }
+    build(manager, section).or_else(|error| match manager.get_webview_window(SETTINGS_WINDOW) {
         // Two opens at once: the other built it.
-        Some(window) => raise(&window),
+        Some(window) => open_at(&window),
         None => Err(error),
     })
 }
@@ -65,7 +110,10 @@ fn raise<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
 }
 
 /// Builds the settings window (see the contract).
-fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
+fn build<R: Runtime, M: Manager<R>>(
+    manager: &M,
+    section: Option<SettingsSection>,
+) -> tauri::Result<()> {
     // The e2e and marks builds open at the size whatever the work area, like `main`; so do the
     // unit tests, whose mock runtime has no monitor to ask.
     let (width, height) = if cfg!(any(feature = "e2e", test)) {
@@ -76,7 +124,11 @@ fn build<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<()> {
             window_size::primary_work_area(manager.app_handle()),
         )
     };
-    let builder = WebviewWindowBuilder::new(manager, SETTINGS_WINDOW, WebviewUrl::App(PAGE.into()))
+    let page = match section {
+        Some(section) => format!("{PAGE}#{}", section.fragment()),
+        None => PAGE.to_owned(),
+    };
+    let builder = WebviewWindowBuilder::new(manager, SETTINGS_WINDOW, WebviewUrl::App(page.into()))
         .title(TITLE)
         .use_https_scheme(true)
         .inner_size(width, height)
@@ -158,7 +210,7 @@ pub(crate) fn app_menu<R: Runtime>(
 pub(crate) fn on_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     if id == MENU_ID {
         // Best effort: a window that cannot open leaves the app as it was.
-        let _opened = open_or_focus(app);
+        let _opened = open_or_focus(app, None);
     }
 }
 

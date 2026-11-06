@@ -174,6 +174,8 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         end.detach = current.detach.take();
     }
     let (turn, before) = (current.turn, current.checkpoint_before);
+    let hint =
+        std::mem::take(&mut current.case_law_hint) == crate::connectors::hint::TurnLooks::CaseLaw;
     let expiry = end.expiry;
     let paths = std::mem::take(&mut current.tool_paths);
     current.end = Some(end);
@@ -185,10 +187,17 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     if let Err(error) = expired {
         tracing::warn!(%thread, error = %Cause(&error), "a turn's expiries were not logged");
     }
+    if let Some(state) = state(actor, thread) {
+        // The relay's case-law results no call of this turn took (`sources/case_law.rs`).
+        state.sources.case_law.turn_ended();
+    }
     if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
         agent.permissions.clear();
         agent.elicitations.clear();
         agent.url_elicitations.clear();
+    }
+    if hint && let Some(matter) = actor.threads.get(&thread).map(|entry| entry.row.matter) {
+        super::super::connectors::hint::turn_ended(actor, matter, thread, turn);
     }
     limits::asking_changed(actor);
     let reads = state(actor, thread)
