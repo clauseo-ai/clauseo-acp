@@ -126,6 +126,10 @@ impl Volume for Ntfs {
         crate::windows::acl::owner(path).map(|sid| sid.to_string())
     }
 
+    fn own(&self, path: &Path) -> io::Result<()> {
+        crate::windows::acl::own(path)
+    }
+
     fn move_into(
         &self,
         from: &Path,

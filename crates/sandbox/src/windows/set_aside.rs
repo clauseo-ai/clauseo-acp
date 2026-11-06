@@ -78,7 +78,9 @@
 //! A lawyer's own link that was
 //! there at launch and is unchanged stays; a link made or swapped while a session ran is set
 //! aside even when the lawyer made it. An item moved aside keeps its own DACL, so an agent it
-//! grants could still open it by its full path; it no longer loads in the matter.
+//! grants could still open it by its full path; it no longer loads in the matter. One another
+//! user owns (the agent's) is then handed to the desktop user and worked out again from the
+//! set-aside folder (S15 `PR4a2`, `moves.rs`); its entry keeps the owner it had.
 
 use std::ffi::OsString;
 use std::io;
@@ -304,7 +306,10 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 /// manifest. Never overwrites: a taken name is [`SetAsideFailure::NameTaken`], an item no
 /// longer there (or no longer listed) is [`SetAsideFailure::Gone`]. PR6 passes back the
 /// manifest's own `Entry`, as [`list_set_aside`] gave it, never one simplified for display: its
-/// paths may be verbatim (`\\?\C:\…`), and the item is found by them.
+/// paths may be verbatim (`\\?\C:\…`), and the item is found by them. The item restored is
+/// then handed to the desktop user when another user owns it, as forget hands back a pool
+/// user's item, so a restored agent's `CLAUDE.md` comes back the lawyer's (S15 `PR4a2`); a
+/// hand-back that fails is logged, and the next launch hands it back before its deny.
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)

@@ -1,6 +1,7 @@
 //! One item moved into a pass's folder, written to the manifest as an intent before the move
 //! and finished after it, and each load of the manifest settling an intent a crash left (N10),
 //! so every item in a pass's folder has a finished entry. The matter's lock is held throughout.
+//! Each item moved is then handed to the desktop user (S15 `PR4a2`).
 
 use std::ffi::OsString;
 use std::io;
@@ -75,6 +76,7 @@ pub(super) fn set_aside(
         match result {
             Ok(()) => {
                 tracing::info!(?reason, "a protected name was set aside");
+                hand_back(volume, &entry.to);
                 return Ok(entry);
             }
             Err(SetAsideFailure::NameTaken) => {}
@@ -82,6 +84,19 @@ pub(super) fn set_aside(
         }
     }
     Err(refuse(SetAsideFailure::NameTaken))
+}
+
+/// The item moved to `to` handed to the desktop user when another user owns it (S15 `PR4a2`):
+/// an item the agent made would otherwise stay its pool user's, and once that user serves
+/// another matter its agent would keep the owner's `WRITE_DAC` on it, and could open it by its
+/// full path. The entry keeps the owner it had, for the lawyer to see who made it. It runs once
+/// the move is done and its entry finished: a change of owner moves nothing, so a crash here
+/// leaves the item set aside and listed. One that fails is logged; the item stays set aside.
+fn hand_back(volume: &impl Volume, to: &Path) {
+    if let Err(error) = volume.own(to) {
+        let error = error.kind();
+        tracing::warn!(%error, "a set-aside item wasn't handed to the desktop user");
+    }
 }
 
 /// The manifest, each intent a crash left settled against the pass's folder and the result

@@ -197,6 +197,39 @@ pub(super) fn walk(
     Ok(seen)
 }
 
+/// [`AclWriter::hand_back`](crate::windows::writer::AclWriter::hand_back) with `token`:
+/// `path` itself, when one of `pool` owns it, settled as a child of its folder in
+/// [`Mode::Reclaim`], forget's hand-back, so it goes to `me`.
+pub(super) fn hand_back(
+    token: &Handle,
+    path: &Path,
+    pool: &[Vec<u8>],
+    me: &[u8],
+) -> Result<bool, ApplyFailure> {
+    let io = |e: io::Error| ApplyFailure::Io(e.kind());
+    let Some(folder) = path.parent() else {
+        return Ok(false);
+    };
+    let object = match Object::open(path) {
+        Ok(object) => object,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(io(e)),
+    };
+    if object.name_surrogate() || !same_path(&object, path).map_err(io)? {
+        return Ok(false);
+    }
+    let mode = Mode::Reclaim { pool, me };
+    let current = object.security(READ_ALL).map_err(io)?;
+    if !mode.owned(&current) {
+        return Ok(false);
+    }
+    let parent = Object::open_folder(folder)
+        .and_then(|folder| folder.security(READ_ALL))
+        .map_err(io)?;
+    settle(token, &object, &parent, &current, mode)?;
+    Ok(true)
+}
+
 /// What [`settle`] did to one child.
 struct Settled {
     /// Its descriptor as written, or `None` when nothing changed.
