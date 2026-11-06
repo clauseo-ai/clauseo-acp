@@ -10,7 +10,8 @@
 #
 # Per event:
 # - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted): the
-#   job `decide` picks one of four modes, and `build` acts on it:
+#   job `decide` picks one of five modes, and `build` acts on it:
+#   - nochange: the run is not relevant (below): `windows tests (PR), no change` passes.
 #   - norust: the pull request changes no Rust (.github/scripts/changes.sh's `rust`, the output
 #     ci.yml's build jobs read): the check passes in seconds on ubuntu.
 #   - run: the label `ready`, the review that started the run is an approval, or an approval of
@@ -36,9 +37,11 @@
 # label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
 # start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
 # is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
-# its jobs are skipped under another name (`..., no change`), because the newest check run of a
-# name decides it and a skipped one counts as passed. The expression is repeated in the concurrency
-# group and each job's `name` and `if` (a workflow env reaches neither); keep the copies equal.
+# `decide` gives it the mode nochange: `build` then passes in seconds on ubuntu under another name,
+# `windows tests (PR), no change`. It is not skipped: the newest check run of a name decides the
+# required check and a skipped one counts as passed, and a skipped job's name shows unevaluated.
+# The expression is repeated in the concurrency group and in decide's RELEVANT (a workflow env
+# reaches neither); keep the two copies equal.
 
 name: windows-pr-tests
 
@@ -62,8 +65,7 @@ concurrency:
 
 jobs:
   decide:
-    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'decide' || 'decide, no change' }}
-    if: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
+    name: decide
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -89,10 +91,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           READY: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
           REVIEW_STATE: ${{ github.event.review.state }}
+          RELEVANT: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
         run: |
           set -euo pipefail
           mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
           if [ "$EVENT" = merge_group ]; then mode merge_group; fi
+          # A label or review that cannot change the result (the note at the top).
+          if [ "$RELEVANT" != true ]; then mode nochange; fi
 
           # The files API lists a rename's new path; previous_filename adds the old one, as
           # `git diff --no-renames` would. A path with a newline in it splits into paths no rule
@@ -135,10 +140,10 @@ jobs:
 
   # The job id must stay `build`: see the note at the top.
   build:
-    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && 'windows tests (PR)' || 'windows tests (PR), no change' }}
+    name: ${{ needs.decide.outputs.mode == 'nochange' && 'windows tests (PR), no change' || 'windows tests (PR)' }}
     needs: decide
-    # Never skipped as a whole in a relevant run, a failed `decide` included (its mode is then run).
-    if: ${{ !cancelled() && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) }}
+    # Never skipped as a whole, a failed `decide` included (its mode is then run).
+    if: ${{ !cancelled() }}
     runs-on: ${{ (needs.decide.result != 'success' || needs.decide.outputs.mode == 'run') && 'windows-2025' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     # None of these names starts with CARGO or RUST, so none enters rust-cache's key.
@@ -154,6 +159,10 @@ jobs:
       - name: Covered by the merge group's Windows x64 build
         if: env.MODE == 'merge_group'
         run: echo "covered by build (x86_64-pc-windows-msvc) in this merge group"
+
+      - name: No change, this event cannot change the result
+        if: env.MODE == 'nochange'
+        run: echo "a label or review that cannot change the result; windows tests (PR) keeps this pull request's last result"
 
       - name: Skip, no Rust change
         if: env.MODE == 'norust'
