@@ -184,6 +184,8 @@ impl SetupCounts for FakeCounts {
 pub(super) struct FakeReaders {
     pub(super) journal: Journal,
     pub(super) entries: Mutex<Vec<(AgentKind, Option<AgentLaunch>)>>,
+    /// The agents last told blocked, not journaled.
+    pub(super) blocked: Mutex<Option<BTreeSet<AgentId>>>,
 }
 
 /// A fake hold: journals its release.
@@ -204,6 +206,9 @@ impl LeaveReaders for FakeReaders {
     fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
         lock(&self.journal).push("readers.set_entry".to_owned());
         lock(&self.entries).push((agent, launch));
+    }
+    fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
+        *lock(&self.blocked) = Some(blocked);
     }
 }
 
@@ -424,15 +429,23 @@ pub(super) fn rig(accept: bool) -> Rig {
 
 /// [`rig`] whose `KeyCache` loads from `keychain` (a memory one) at start.
 pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
-    rig_with(accept, keychain, false)
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    rig_with(accept, keychain, keys, false)
+}
+
+/// [`rig`] over `keys`, loaded from `keychain` (a memory one) with notes, say.
+pub(super) fn rig_keys(keychain: Keychain, keys: KeyCache) -> Rig {
+    rig_with(true, keychain, keys, false)
 }
 
 /// [`rig`] with Claude's `plans.<id>` set by policy when `plan_locked`.
 pub(super) fn rig_locked(plan_locked: bool) -> Rig {
-    rig_with(true, Keychain::memory(), plan_locked)
+    let keychain = Keychain::memory();
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    rig_with(true, keychain, keys, plan_locked)
 }
 
-fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
+fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
         journal: Arc::clone(&journal),
@@ -442,6 +455,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
     let readers = Arc::new(FakeReaders {
         journal: Arc::clone(&journal),
         entries: Mutex::default(),
+        blocked: Mutex::default(),
     });
     let confirm = Arc::new(FakeConfirm {
         answer: accept,
@@ -467,7 +481,7 @@ fn rig_with(accept: bool, keychain: Keychain, plan_locked: bool) -> Rig {
         .collect();
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
-        keys: Arc::new(KeyCache::load_all(keychain.clone(), [&claude(), &codex()])),
+        keys: Arc::new(keys),
         compose: Arc::new(Compose::new(Arc::clone(&events), clock)),
         host: Arc::clone(&host) as Arc<dyn SetupHost>,
         confirm: Arc::clone(&confirm) as Arc<dyn SetupConfirm>,

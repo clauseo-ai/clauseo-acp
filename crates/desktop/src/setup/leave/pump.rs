@@ -8,8 +8,13 @@
 //!   (review A2). The host's hold lifts (`restart_agents`) when the stop failed or left the
 //!   reuse in place; when the reuse ended, the leave finished, and the rule of `after.rs`
 //!   decides, as for any leave that finished; a new sign-in's own `restart_agents` lifted it.
+//! - Whether the login is reused is desktop's word, as the host was told (`wiring.reused`), so a
+//!   running state between (a job of S18's that replaced a stop) never hides it (review M1).
 //! - A `Failed` while the login is reused (a stop job of S18's that failed) is not the reuse's
-//!   end: no steps after the stop run, and nothing else changes.
+//!   end: no steps after the stop run, and nothing else changes. One that follows a running
+//!   state (the failed job replaced another, a stop maybe) leaves the reuse unknown: S18's
+//!   status check tells ([`check_reuse`]), and its answer is handled as below, a leave's holds
+//!   waiting for it.
 //! - A reuse that ends with no leave waiting (a `SignedIn { Reused }` followed by any other
 //!   resting state: a leave's late `SignedOut`, or S18 ending the reuse by itself) runs the
 //!   steps after the stop at once (`after_stop`, review H1). When S18 ended it by itself
@@ -30,7 +35,9 @@ use super::super::backend::AgentsBackend;
 use super::super::compose::is_running;
 use super::after::finish;
 use super::hold::Late;
-use super::{Ended, Waiter, after_stop, login_changed, restart_for_login, set_reused};
+use super::{
+    Ended, Waiter, after_stop, login_changed, restart_for_login, set_reused, signin_error, wait_on,
+};
 
 /// See the module docs.
 pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state: SigninState) {
@@ -54,16 +61,12 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         Some(Waiter::Late(given_up)) => late = Some(given_up),
         None => {}
     }
-    let was_reused = matches!(
-        &before,
-        Some(SigninState::SignedIn {
-            source: Source::Reused,
-            ..
-        })
-    );
+    let was_reused = backend.wiring.reused.get(agent);
     let resting = !is_running(&state);
-    // A `Failed` while reused is a job of S18's that failed, such as a stop: the reuse holds.
+    // A `Failed` while reused is a job of S18's that failed, such as a stop: the reuse holds,
+    // unless the job replaced another (a running state between), when S18's check tells.
     let stop_failed = was_reused && matches!(state, SigninState::Failed { .. });
+    let unsure = stop_failed && before.as_ref().is_some_and(is_running);
     let reuse_ended = was_reused
         && resting
         && !stop_failed
@@ -105,6 +108,12 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         && !stop_failed
         && !matches!(state, SigninState::SignedIn { .. });
     backend.compose.signin(agent, state);
+    if unsure {
+        late = check_reuse(backend, agent, late);
+        if late.is_none() {
+            return;
+        }
+    }
     if let Some(Late { hold, reads, .. }) = late {
         tracing::info!(%agent, "the stop a leave gave up on ended: lifting its hold");
         backend.compose.end_switching(agent);
@@ -120,6 +129,36 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
         login_changed(backend, agent).await;
     } else if signed_out {
         restart_for_login(backend, agent).await;
+    }
+}
+
+/// A `Failed` after a running state while `agent`'s login is reused (review M1): the job that
+/// failed replaced another, a stop maybe, so whether the reuse ended is not known. S18's status
+/// check tells; its answer comes to [`signin_event`] as any state does, with a leave's holds
+/// (`late`) put back to wait for it, `Switching` still shown. `late` comes back when the check
+/// did not start, for its holds to lift now as for any failed stop.
+fn check_reuse(backend: &AgentsBackend, agent: &AgentId, late: Option<Late>) -> Option<Late> {
+    tracing::info!(%agent, "a job that replaced another failed on a reused login: checking");
+    let token = match late {
+        Some(given) => {
+            let token = wait_on(backend, agent, Waiter::Late(given));
+            if token.is_none() {
+                // Refused only while another leave waits, which its slot rules out; its holds
+                // lift from their `Drop`.
+                tracing::warn!(%agent, "a leave's holds had nowhere to wait");
+            }
+            token
+        }
+        None => None,
+    };
+    let Err(error) = backend.agents.check_status(agent) else {
+        return None;
+    };
+    let code = signin_error(&error).code();
+    tracing::warn!(%agent, code = code.as_str(), "no status check after a failed job");
+    match token.and_then(|token| backend.wiring.waiters.take(agent, token)) {
+        Some(Waiter::Late(given)) => Some(given),
+        _ => None,
     }
 }
 

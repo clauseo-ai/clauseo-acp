@@ -17,15 +17,22 @@
 //!   agent whose key is stored. A read waits for the key slot, at most [`KEYS_HOLD`], checked
 //!   every [`KEYS_POLL`] on the readers' timer, and fails if it stays empty; an agent whose
 //!   stored key is unreadable fails its read too. A failed read shows no account's numbers.
+//! - No read goes out for an agent an unreadable policy blocks (`signin.policy_unreadable`,
+//!   review M2): with no plan to read, its read would take a stored key, perhaps the firm
+//!   gateway's, to the vendor's own host while its launches are refused. The blocked agents
+//!   come from the settings read at start, then from each `SettingsChanged`
+//!   ([`LeaveReaders::set_blocked`]).
 
 use std::any::Any;
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use clauseo_limits::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_process::{AsyncIoTimer, Launcher, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{AgentLaunch, Effective};
+use zeroize::Zeroizing;
 
 use super::hook::{Plans, setup_vars};
 use super::keys::KeySlot;
@@ -51,6 +58,8 @@ pub(crate) trait LeaveReaders: Send + Sync {
     fn hold(&self, agent: AgentKind) -> BoxFuture<'static, ReadHold>;
     /// Reads `agent` from `launch` from now on (`None`: no entry).
     fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>);
+    /// The agents an unreadable policy blocks from now on: none of their reads goes out.
+    fn set_blocked(&self, blocked: BTreeSet<AgentId>);
 }
 
 /// How long a limits read waits for the keys to load before it fails: the host's own bound on
@@ -61,10 +70,11 @@ pub(crate) const KEYS_HOLD: Duration = Duration::from_secs(12);
 pub(crate) const KEYS_POLL: Duration = Duration::from_millis(100);
 
 /// The host's limits reader: one `ProcessReaders`, whose entry is set on each entry written,
-/// and the key slot its reads wait for.
+/// the key slot its reads wait for, and the agents an unreadable policy blocks.
 pub(crate) struct SwappableReaders {
     readers: Arc<ProcessReaders<AsyncIoTimer>>,
     keys: KeySlot,
+    blocked: Arc<RwLock<BTreeSet<AgentId>>>,
 }
 
 impl SwappableReaders {
@@ -90,8 +100,27 @@ impl SwappableReaders {
         Self {
             readers: Arc::new(readers),
             keys,
+            blocked: Arc::default(),
         }
     }
+
+    /// These readers with `blocked` the agents an unreadable policy blocks, as read at start.
+    #[must_use]
+    pub(crate) fn with_blocked(self, blocked: BTreeSet<AgentId>) -> Self {
+        self.set_blocked(blocked);
+        self
+    }
+}
+
+/// The failure a read of `kind` ends with while an unreadable policy blocks it.
+fn refuse_blocked(blocked: &RwLock<BTreeSet<AgentId>>, kind: AgentKind) -> Result<(), ReadFailure> {
+    let blocked = blocked.read().unwrap_or_else(PoisonError::into_inner);
+    if AgentId::new(kind.id()).is_ok_and(|agent| blocked.contains(&agent)) {
+        return Err(ReadFailure::LaunchFailed(
+            "the firm's policy could not be read".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 /// Waits until `keys` has loaded, at most [`KEYS_HOLD`]: the failure a read of `kind` ends
@@ -125,8 +154,11 @@ impl ReadLimits for SwappableReaders {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ReadOutcome> + Send>> {
         let readers = Arc::clone(&self.readers);
         let keys = Arc::clone(&self.keys);
+        let blocked = Arc::clone(&self.blocked);
         Box::pin(async move {
-            if let Err(failure) = keys_ready(&keys, agent).await {
+            let ready = keys_ready(&keys, agent).await;
+            // After the wait, so a block that came meanwhile holds.
+            if let Err(failure) = ready.and_then(|()| refuse_blocked(&blocked, agent)) {
                 return ReadOutcome::Failed(failure);
             }
             readers.read(agent).await
@@ -143,18 +175,23 @@ impl LeaveReaders for SwappableReaders {
     fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
         self.readers.set_entry(agent, launch);
     }
+
+    fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
+        *self.blocked.write().unwrap_or_else(PoisonError::into_inner) = blocked;
+    }
 }
 
-/// The variables a limits read of `kind` adds: [`setup_vars`], copied into the plain strings
-/// `limits` takes, which it drops once the read's process is spawned.
-pub(crate) fn read_vars(keys: &KeySlot, plans: &Plans, kind: AgentKind) -> Vec<(String, String)> {
+/// The variables a limits read of `kind` adds: [`setup_vars`], moved, never copied, so each
+/// value is zeroed when `limits` drops it (review L6).
+pub(crate) fn read_vars(
+    keys: &KeySlot,
+    plans: &Plans,
+    kind: AgentKind,
+) -> Vec<(String, Zeroizing<String>)> {
     let Ok(agent) = AgentId::new(kind.id()) else {
         return Vec::new();
     };
-    setup_vars(keys, plans, &agent, kind)
-        .iter()
-        .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
-        .collect()
+    setup_vars(keys, plans, &agent, kind).into_iter().collect()
 }
 
 #[cfg(test)]

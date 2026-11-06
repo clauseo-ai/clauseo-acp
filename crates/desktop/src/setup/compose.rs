@@ -13,10 +13,13 @@
 //!    still shows, and a failure of the leave's own S18 call never does.
 //! 2. Otherwise, with policy unreadable and the `firm-policy` marker there (`firm_policy.rs`),
 //!    `Failed { code: signin.policy_unreadable }`: the agent is never sent to the plan login.
-//! 3. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
+//! 3. Otherwise, while the agent's stored key could not be read (`setup/keys.rs`), `Failed {
+//!    code: agent.key_unreadable }`: its launches are refused until a read succeeds. It bars no
+//!    sign-in: a key that may be there is no key in use (the desktop review's item 1).
+//! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
-//! 4. else `SignedIn { method: ApiKey }` while a key is stored;
-//! 5. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
+//! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored);
+//! 6. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
 //! Rule 1 is pending the orchestrator's confirmation (the plan's "Disagreements" 7); it is here
@@ -39,6 +42,7 @@ use clauseo_protocol::{
 
 use super::SetupEvents;
 use super::admit::{SignInBar, sign_in_bar};
+use super::keys::KeyCache;
 use crate::bridge::lock;
 
 /// What desktop knows of one agent's sign-in besides S18's state.
@@ -46,8 +50,10 @@ use crate::bridge::lock;
 pub(crate) struct Facts {
     /// Since when the agent has an endpoint or a provider, if it has one.
     pub(crate) firm: Option<SystemTime>,
-    /// Since when a key is stored, if one is.
+    /// Since when a key is in memory, if one is.
     pub(crate) key: Option<SystemTime>,
+    /// Since when the agent's stored key could not be read, if it cannot.
+    pub(crate) unreadable: Option<SystemTime>,
     /// Since when policy is unreadable with the `firm-policy` marker there, if it is.
     pub(crate) blocked: Option<SystemTime>,
     /// Since when a firm policy sets the agent's endpoint or provider, if it does.
@@ -80,6 +86,12 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     if let Some(since) = facts.blocked {
         return Some(SignIn::Failed {
             code: ErrorCode::SigninPolicyUnreadable,
+            at: timestamp(since),
+        });
+    }
+    if let Some(since) = facts.unreadable {
+        return Some(SignIn::Failed {
+            code: ErrorCode::AgentKeyUnreadable,
             at: timestamp(since),
         });
     }
@@ -365,11 +377,25 @@ impl Compose {
             .and_then(|known| known.s18.clone())
     }
 
-    /// Whether a key is stored for `agent`.
-    pub(crate) fn set_key(&self, agent: &AgentId, stored: bool) {
+    /// Whether memory holds a key for `agent`, and whether its stored key could not be read:
+    /// one change, so the windows never see one without the other.
+    pub(crate) fn set_key_read(&self, agent: &AgentId, in_memory: bool, unreadable: bool) {
         self.change(agent, |known, now| {
-            known.facts.key = stored.then(|| known.facts.key.unwrap_or(now));
+            known.facts.key = in_memory.then(|| known.facts.key.unwrap_or(now));
+            known.facts.unreadable = unreadable.then(|| known.facts.unreadable.unwrap_or(now));
         });
+    }
+
+    /// [`Compose::set_key_read`] as `keys` holds `agent`'s key now: in memory, or unreadable.
+    /// Never [`KeyCache::has`], which counts an unreadable key as stored for the launches.
+    pub(crate) fn show_key(&self, agent: &AgentId, keys: &KeyCache) {
+        self.set_key_read(agent, keys.in_memory(agent), keys.unreadable(agent));
+    }
+
+    /// Whether a key is in memory for `agent`, none unreadable: the tests' shorthand.
+    #[cfg(test)]
+    pub(crate) fn set_key(&self, agent: &AgentId, stored: bool) {
+        self.set_key_read(agent, stored, false);
     }
 
     /// Whether `agent` has an endpoint or a provider.

@@ -146,6 +146,7 @@ impl AgentsBackend {
             } => self.retry(&agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
                 let _gate = lock(&self.signin_gate);
+                self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
                 agents
@@ -167,6 +168,7 @@ impl AgentsBackend {
             }
             SetupCommand::UseDeviceCode { .. } => {
                 let _gate = lock(&self.signin_gate);
+                self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 agents
                     .sign_in(&agent, Method::DeviceCode)
@@ -179,11 +181,7 @@ impl AgentsBackend {
                 }
             }
             SetupCommand::SignOut { .. } => {
-                if self.reused(&agent) {
-                    return Err(invalid(format!(
-                        "{agent}'s login is the lawyer's own; Clauseo never signs it out"
-                    )));
-                }
+                self.refuse_reused(&agent)?;
                 agents
                     .sign_out(&agent)
                     .map_err(|error| signin_error(&error))?;
@@ -346,11 +344,11 @@ impl AgentsBackend {
     }
 
     /// What a key write runs once memory has changed, still in the keychain's order: tells
-    /// [`Compose`] whether `agent` has a key.
+    /// [`Compose`] whether memory holds `agent`'s key, or it is unreadable (`Compose::show_key`).
     fn key_trigger(&self, agent: &AgentId) -> impl FnOnce(bool) + Send + 'static {
-        let compose = Arc::clone(&self.compose);
+        let (compose, keys) = (Arc::clone(&self.compose), Arc::clone(&self.keys));
         let agent = agent.clone();
-        move |stored| compose.set_key(&agent, stored)
+        move |_stored| compose.show_key(&agent, &keys)
     }
 
     /// Asks the lawyer `ask`; a decline is `transport.unauthorized`.
@@ -452,6 +450,19 @@ impl AgentsBackend {
                 ErrorCode::SigninPolicyUnreadable,
                 format!("the firm's policy for {agent} cannot be read"),
             ));
+        }
+        Ok(())
+    }
+
+    /// `command.invalid`, as S18 refuses its sign-out (`SigninError::Reused`), while `agent`'s
+    /// login is the lawyer's own, reused: Clauseo never signs it out, and a sign-in starts only
+    /// once it is left (`StopUsingLogin`, `UseDifferentAccount`), so a sign-in that fails never
+    /// leaves the host on a reuse the window no longer shows (review M1).
+    fn refuse_reused(&self, agent: &AgentId) -> Result<(), HostError> {
+        if self.reused(agent) {
+            return Err(invalid(format!(
+                "{agent}'s login is the lawyer's own; Clauseo starts no sign-in over it"
+            )));
         }
         Ok(())
     }

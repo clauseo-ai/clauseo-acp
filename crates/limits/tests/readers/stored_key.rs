@@ -12,6 +12,7 @@ use clauseo_protocol::{AgentKind, Billing};
 use futures::FutureExt as _;
 use futures::executor::block_on;
 use futures::future::join;
+use zeroize::Zeroizing;
 
 use crate::harness::{
     CODEX_JS, FAKE_KEY, FAKE_OPENAI_KEY, Play, Setup, SharedTimer, TestLauncher, under,
@@ -64,7 +65,7 @@ fn keyed(
 ) -> ProcessReaders<SharedTimer> {
     setup
         .readers(launcher, timer)
-        .with_launch_env(|agent| vec![(key_var(agent).to_owned(), stored(agent))])
+        .with_launch_env(|agent| vec![(key_var(agent).to_owned(), Zeroizing::new(stored(agent)))])
 }
 
 /// The one spec's env names, and its value of `var`. Never prints a value but `var`'s.
@@ -334,12 +335,15 @@ fn the_plan_s_variables_go_in_beside_the_key() {
         .readers(&launcher, &SharedTimer::default())
         .with_launch_env(|agent| {
             vec![
-                (key_var(agent).to_owned(), stored(agent)),
+                (key_var(agent).to_owned(), Zeroizing::new(stored(agent))),
                 (
                     "ANTHROPIC_BASE_URL".to_owned(),
-                    "https://gw.firm.example".to_owned(),
+                    Zeroizing::new("https://gw.firm.example".to_owned()),
                 ),
-                ("CLAUDE_CODE_USE_BEDROCK".to_owned(), "1".to_owned()),
+                (
+                    "CLAUDE_CODE_USE_BEDROCK".to_owned(),
+                    Zeroizing::new("1".to_owned()),
+                ),
             ]
         });
     block_on(reader.read(AgentKind::Claude));

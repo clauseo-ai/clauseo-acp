@@ -17,7 +17,7 @@ use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyNote, KeyNotes};
 use crate::setup::refusal::{settle_after_load, sync, sync_all};
 use crate::test_support::block_on;
 
-const KEY: &str = "fakeAnthropicKey0123";
+pub(super) const KEY: &str = "fakeAnthropicKey0123";
 
 /// A timer whose waits end at once: the bound has passed.
 #[derive(Clone)]
@@ -31,7 +31,7 @@ impl clauseo_process::Timer for Passed {
 
 /// A timer whose waits never end: the load waits for every read.
 #[derive(Clone)]
-struct Never;
+pub(super) struct Never;
 
 impl clauseo_process::Timer for Never {
     fn after(&self, _duration: Duration) -> impl Future<Output = ()> + Send {
@@ -40,7 +40,7 @@ impl clauseo_process::Timer for Never {
 }
 
 /// A memory keychain with Claude's key stored.
-fn stored() -> Keychain {
+pub(super) fn stored() -> Keychain {
     let keychain = Keychain::memory();
     keychain.store(&claude(), KEY).unwrap();
     keychain

@@ -315,12 +315,15 @@ fn start_host<R: Runtime>(
         let launcher: Arc<dyn clauseo_process::Launcher> =
             Arc::new(host_launcher(SystemDirs.home()));
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
-        let readers = Arc::new(setup::SwappableReaders::new(
-            &effective,
-            launcher,
-            Arc::clone(&keys),
-            Arc::clone(&plans),
-        ));
+        let readers = Arc::new(
+            setup::SwappableReaders::new(
+                &effective,
+                launcher,
+                Arc::clone(&keys),
+                Arc::clone(&plans),
+            )
+            .with_blocked(setup_read.blocked()),
+        );
         let reused = setup::ReusedLogins::default();
         let reread_at = locations.clone();
         let side = setup::HostSide {

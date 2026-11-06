@@ -1,7 +1,8 @@
 //! The swappable readers over a launcher that records each spec and starts nothing: Claude's
 //! read gets Clauseo's own home as `CLAUDE_CONFIG_DIR` over an inherited one and the stored key
 //! from the key slot, an entry set after a hold reads only once the hold drops, and with no
-//! entry there is no launch. A refused entry's warning names no path (review L2).
+//! entry there is no launch. A refused entry's warning names no path (review L2). An agent an
+//! unreadable policy blocks never reads, its stored key going nowhere (the final review's M2).
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -142,7 +143,11 @@ fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
         .into_iter()
         .map(|(name, value)| (name.into_string().unwrap(), value.into_string().unwrap()))
         .collect();
-    assert_eq!(read_vars(&slot, &plans, AgentKind::Claude), hooked);
+    let read: Vec<(String, String)> = read_vars(&slot, &plans, AgentKind::Claude)
+        .into_iter()
+        .map(|(name, value)| (name, String::clone(&value)))
+        .collect();
+    assert_eq!(read, hooked);
     let names: Vec<&str> = hooked.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
         names,
@@ -296,4 +301,62 @@ fn before_the_keys_load_a_stored_key_agent_s_read_shows_no_account_s_numbers() {
         ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
     ));
     assert!(lock(&launcher.0).is_empty(), "no read with another login");
+}
+
+/// The final security review's M2: an agent an unreadable policy blocks
+/// (`signin.policy_unreadable`) with a stored key never reads, so its key goes nowhere; its
+/// reads go out once the block lifts.
+#[test]
+fn a_blocked_agent_with_a_stored_key_never_reads() {
+    let scratch = Scratch::folder("setup-readers-blocked", &["data"]);
+    let script = fake_file(scratch.path(), SCRIPT, "");
+    fake_file(
+        scratch.path(),
+        SDK,
+        r#"{"name":"@anthropic-ai/claude-agent-sdk"}"#,
+    );
+    let locations = Locations::under_root(&scratch.path().join("data"));
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    let claude = AgentId::new("claude-acp").unwrap();
+    let keychain = Keychain::memory();
+    keychain.store(&claude, KEY).unwrap();
+    let slot = Arc::new(OnceLock::new());
+    let _set = slot.set(Arc::new(KeyCache::load_all(keychain, [&claude])));
+    let launcher = Arc::new(Recording::default());
+    let blocked = std::collections::BTreeSet::from([claude]);
+    let readers = SwappableReaders::new(
+        &effective,
+        Arc::clone(&launcher) as Arc<dyn Launcher>,
+        slot,
+        Arc::default(),
+    )
+    .with_blocked(blocked.clone());
+    let entry = AgentLaunch {
+        command: if cfg!(windows) {
+            r"C:\node\node.exe".to_owned()
+        } else {
+            "/usr/local/bin/node".to_owned()
+        },
+        args: vec![script],
+        env: std::collections::BTreeMap::new(),
+    };
+    readers.set_entry(AgentKind::Claude, Some(entry));
+    let ReadOutcome::Failed(ReadFailure::LaunchFailed(why)) =
+        block_on(readers.read(AgentKind::Claude))
+    else {
+        panic!("a blocked read must fail without a launch");
+    };
+    assert!(!why.contains(KEY), "{why}");
+    assert!(lock(&launcher.0).is_empty(), "the key went nowhere");
+    // The block lifts: the read goes out, with the key.
+    readers.set_blocked(std::collections::BTreeSet::new());
+    block_on(readers.read(AgentKind::Claude));
+    assert_eq!(lock(&launcher.0).len(), 1, "read once the block lifted");
+    // Blocked again (a `SettingsChanged`): no further read.
+    readers.set_blocked(blocked);
+    assert!(matches!(
+        block_on(readers.read(AgentKind::Claude)),
+        ReadOutcome::Failed(ReadFailure::LaunchFailed(_))
+    ));
+    assert_eq!(lock(&launcher.0).len(), 1, "nothing read while blocked");
 }
