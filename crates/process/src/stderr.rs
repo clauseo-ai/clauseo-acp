@@ -201,20 +201,20 @@ fn emit(line: &[u8], on_line: &mut impl FnMut(&str)) {
 
 /// The end of the ring as text, at most [`TAIL`] bytes, redacted, opening on a whole line.
 ///
-/// It redacts the last 16 KiB, opened on a whole line (after its first `\n`, unless the byte
-/// before the window is a `\n` or the window holds stderr's start), then keeps the last [`TAIL`]
-/// bytes the same way, cut at a char boundary. Unless the window holds stderr's start, it first
-/// leaves out what may be the end of a secret cut off at the window's start ([`open_window`]),
-/// even when the secret is longer than the window: a cut char's last bytes, the end of a secret
-/// value (at a line start, one that follows a `\n` of the value), and mid-line the end of a key
-/// or a bearer token. So ordinary text at a mid-line window start loses its leading run of
-/// bearer-token chars (letters, digits, `-._~+/=`); after a run that could end the word
-/// `Bearer`, or none, a space and the word after it too; and text that matches the end of a
-/// secret value (mid-line any end of it, at a line start an end after one of its `\n`s).
-/// Redacting before cutting means no part of a secret survives at the start. When the
-/// redacted text is shorter than [`TAIL`] while the ring holds more, the
-/// window doubles. When opening on a whole line would leave nothing (one line longer than the
-/// cut), the text starts mid-line instead of coming out empty.
+/// It redacts the last 16 KiB, opened on a whole line (after its first `\n`, unless the byte before
+/// the window is a `\n` or the window holds stderr's start), then keeps the last [`TAIL`] bytes the
+/// same way, cut at a char boundary. Unless the window holds stderr's start, it first leaves out
+/// what may be the end of a secret cut off at the window's start ([`open_window`]), even when the
+/// secret is longer than the window: a cut char's last bytes, the end of a secret value (at a line
+/// start, one that follows a `\n` of the value), and mid-line the end of a key or a bearer token,
+/// or a URL's user name and password up to its `@`. So ordinary text at a mid-line window start
+/// loses its leading run of bearer-token chars (letters, digits, `-._~+/=`); after a run that could
+/// end the word `Bearer`, or none, a space and the word after it too; and text that matches the end
+/// of a secret value (mid-line any end of it, at a line start an end after one of its `\n`s).
+/// Redacting before cutting means no part of a secret survives at the start. When the redacted text
+/// is shorter than [`TAIL`] while the ring holds more, the window doubles. When opening on a whole
+/// line would leave nothing (one line longer than the cut), the text starts mid-line instead of
+/// coming out empty.
 pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
     let mut window = WINDOW;
     let mut bytes = Vec::new();

@@ -1,6 +1,7 @@
 //! What the stderr tail hides: the home folder, the values of the spec's secret variables and the
-//! secrets it names outright (`LaunchSpec::with_redacted`), words starting `sk-` and the word after
-//! `Bearer ` (in any case).
+//! secrets it names outright (`LaunchSpec::with_redacted`), words starting `sk-`, the word after
+//! `Bearer ` (in any case) and any URL's user name and password (`scheme://user:pass@host`
+//! becomes `scheme://***@host`: a proxy URL in the environment may carry them).
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -12,6 +13,8 @@ use std::path::Path;
 const REDACTED: &str = "[redacted]";
 /// A variable whose name holds one of these, in any case, holds a secret.
 const SECRET_NAMES: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
+/// What a URL's user name and password become.
+const USERINFO: &str = "***";
 /// The marker of a bearer token, matched in any case.
 const BEARER: &str = "bearer ";
 /// A shorter value is not redacted: it would hide common words, and guessing it is easy anyway.
@@ -64,7 +67,8 @@ impl Redactor {
     }
 
     /// `text` with every rule applied: secret values first, then the home folder, then `sk-`
-    /// words and the word after `Bearer ` (in any case: `authorization: bearer ..` too).
+    /// words, the word after `Bearer ` (in any case: `authorization: bearer ..` too) and each
+    /// URL's user name and password.
     pub(crate) fn redact(&self, text: &str) -> String {
         let mut text = text.to_owned();
         for secret in &self.secrets {
@@ -78,7 +82,8 @@ impl Redactor {
             text = text.replace(home.as_str(), "~");
         }
         let text = replace_runs(&text, "sk-", Marker::Starts, is_key_char);
-        replace_runs(&text, BEARER, Marker::Precedes, is_token68_char)
+        let text = replace_runs(&text, BEARER, Marker::Precedes, is_token68_char);
+        without_userinfo(&text)
     }
 
     /// `text`, the start of a window that does not hold stderr's start, without what may be the
@@ -86,19 +91,25 @@ impl Redactor {
     ///
     /// At a line start (`mid_line` false) that is the longest end of a secret value that
     /// follows one of its `\n`s, as in a PEM key. Mid-line it is whichever leaves out more of the
-    /// longest end of a secret value and [`without_token_end`] (the end of an `sk-` key or a
-    /// bearer token), and then again the longest end of a value, for a value that began inside
-    /// what that left out. A value may hold any char, so only its own end is left out for it.
+    /// longest end of a secret value, [`without_token_end`] (the end of an `sk-` key or a
+    /// bearer token) and [`without_userinfo_end`] (a URL's user name and password whose
+    /// `scheme://` was cut off), and then again the longest end of a value, for a value that
+    /// began inside what that left out. A value may hold any char, so only its own end is left
+    /// out for it.
     ///
     /// [`redact`]: Redactor::redact
     pub(crate) fn without_cut_secret<'t>(&self, text: &'t str, mid_line: bool) -> &'t str {
         if !mid_line {
             return self.without_value_end(text, true);
         }
-        let rest = [self.without_value_end(text, false), without_token_end(text)]
-            .into_iter()
-            .min_by_key(|rest| rest.len())
-            .unwrap_or(text);
+        let rest = [
+            self.without_value_end(text, false),
+            without_token_end(text),
+            without_userinfo_end(text),
+        ]
+        .into_iter()
+        .min_by_key(|rest| rest.len())
+        .unwrap_or(text);
         self.without_value_end(rest, false)
     }
 
@@ -135,6 +146,46 @@ fn without_token_end(text: &str) -> &str {
             token.trim_start_matches(is_token68_char)
         }
         _ => rest,
+    }
+}
+
+/// Whether `c` ends a URL's authority (its `user:pass@host:port`) in text.
+fn ends_authority(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '/' | '?' | '#' | '"' | '\'' | '<' | '>' | '`')
+}
+
+/// `text` with each URL's user name and password (all between `://` and the authority's last
+/// `@`) as [`USERINFO`]: `http://u:p@proxy:3128` becomes `http://***@proxy:3128`.
+fn without_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut from = 0;
+    while let Some(found) = text.get(from..).and_then(|rest| rest.find("://")) {
+        let start = from + found + "://".len();
+        let rest = text.get(start..).unwrap_or_default();
+        let authority = rest.find(ends_authority).unwrap_or(rest.len());
+        if let Some(at) = rest.get(..authority).and_then(|auth| auth.rfind('@'))
+            && at > 0
+        {
+            out.push_str(text.get(copied..start).unwrap_or_default());
+            out.push_str(USERINFO);
+            copied = start + at;
+        }
+        from = start + authority;
+    }
+    out.push_str(text.get(copied..).unwrap_or_default());
+    out
+}
+
+/// `text` through the last `@` of the authority-like run it starts with, after any `:` and `/`:
+/// what may be a URL's user name and password whose `scheme://` (or part of it) was cut off.
+/// Text whose first run holds no `@` is all kept.
+fn without_userinfo_end(text: &str) -> &str {
+    let body = text.trim_start_matches([':', '/']);
+    let run = body.find(ends_authority).unwrap_or(body.len());
+    match body.get(..run).and_then(|run| run.rfind('@')) {
+        Some(at) => body.get(at + 1..).unwrap_or_default(),
+        None => text,
     }
 }
 
