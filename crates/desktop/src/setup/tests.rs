@@ -283,7 +283,19 @@ fn no_secret_reaches_a_log_line_or_a_debug() {
                 let _answer = block_on(setup.run(label, sent));
             }
         }
-        events::note(&claude(), "claude_reuse_fallback");
+        events::note(&claude(), clauseo_agents::SigninNote::ClaudeReuseFallback);
+        // The sign-in's steps, confirmed or not: a code and a fixed word, never the account.
+        events::note(&claude(), clauseo_agents::SigninNote::StatusConfirmed);
+        events::note(
+            &claude(),
+            clauseo_agents::SigninNote::StatusNotConfirmed {
+                reason: clauseo_agents::Unconfirmed::NoAccount,
+            },
+        );
+        events::note(
+            &claude(),
+            clauseo_agents::SigninNote::CliResolved { file: "codex.js" },
+        );
     });
     let text = lines.text();
     assert!(
@@ -295,6 +307,13 @@ fn no_secret_reaches_a_log_line_or_a_debug() {
         "the second key's code: {text}"
     );
     assert!(text.contains("claude_reuse_fallback"), "{text}");
+    assert!(text.contains("status_confirmed"), "{text}");
+    assert!(
+        text.contains("status_not_confirmed") && text.contains("no_account"),
+        "{text}"
+    );
+    assert!(text.contains("codex.js"), "{text}");
+    assert!(!text.contains("example.com"), "no email in the log: {text}");
     assert!(!text.contains(SECRET), "{text}");
     assert!(!format!("{:?}", stub.calls()).contains(SECRET));
 }

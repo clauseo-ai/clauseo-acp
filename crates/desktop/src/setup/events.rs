@@ -142,10 +142,13 @@ impl SetupEvents {
     }
 }
 
-/// Logs a sign-in note (S18's `SigninNote`: `claude_reuse_fallback`, `codex_link_failed`) for
-/// `agent` by its code alone, never an email or a path (0048, ruling 5).
-pub(crate) fn note(agent: &AgentId, code: &'static str) {
-    tracing::info!(%agent, note = code, "sign-in note");
+/// Logs a sign-in note (S18's `SigninNote`: `claude_reuse_fallback`, `codex_link_failed`, and
+/// each sign-in step: `cli_resolved`, `cli_missing`, `login_exited`, `status_confirmed`,
+/// `status_not_confirmed`) for `agent` by its code and its detail (the CLI's file name, the exit
+/// code, or the reason's fixed word), never an email or a path (0048, ruling 5).
+pub(crate) fn note(agent: &AgentId, note: clauseo_agents::SigninNote) {
+    let detail = note.detail().unwrap_or_default();
+    tracing::info!(%agent, note = note.code(), %detail, "sign-in note");
 }
 
 /// Which latest state an event replaces.
