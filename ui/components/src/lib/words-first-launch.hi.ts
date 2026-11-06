@@ -115,6 +115,13 @@ export const HI = {
   "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.":
     null,
   "Ask your IT team.": null,
+
+  // switching accounts: Clauseo still stopping a login it may no longer use (new, 0048)
+  "Switching accounts.": null,
+  "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.":
+    null,
+  "If this goes on, quit Clauseo and open it again.": null,
+  "Clauseo is still switching accounts. Try again in a moment.": null,
 } satisfies Hindi<string>;
 
 /** Every string, English and Hindi (null: hi: later), for the tests that hold the voice and the copy review. */

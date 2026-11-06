@@ -1,6 +1,6 @@
 // The setup store's state as the first run's parts show it: the install as the working line says it, and the sign-in
 // as the gate says it. Pure, so each state's screen is tested from the host's words alone.
-import type { GateView } from "@clauseo/components/clauseo/first-launch/gate.tsx";
+import type { GateRefusal, GateView } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import type { InstallView } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { isSignedIn, type AgentSetup, type SetupState } from "../../store/setup.ts";
 
@@ -54,10 +54,21 @@ export function gateView(
     };
   if ("login_found" in signIn && signIn.login_found !== undefined)
     return { kind: "login-found", email: signIn.login_found.email };
+  if ("switching" in signIn && signIn.switching !== undefined)
+    return { kind: "switching", stuck: signIn.switching.stuck };
   if ("failed" in signIn && signIn.failed !== undefined) {
     // the agent's own refusal for no sign-in is the plan screen again
     if (signIn.failed.code === "agent.auth_required") return { kind: "signed-out" };
     return { kind: "failed", code: signIn.failed.code, at: clock(signIn.failed.at) };
   }
   return { kind: "signed-out" };
+}
+
+/** The last setup command desktop refused for the plan, as the gate's line says it; null with none. A
+ * `command.conflict` while the plan is switching accounts says only that the switch isn't done. */
+export function refusalView(setup: AgentSetup | undefined): GateRefusal | null {
+  if (setup?.refused === undefined) return null;
+  const signIn = setup.signIn;
+  const switching = typeof signIn === "object" && signIn.switching !== undefined;
+  return { code: setup.refused, switching };
 }

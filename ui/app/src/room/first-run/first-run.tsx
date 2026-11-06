@@ -35,7 +35,7 @@ import { clockOf } from "../when.ts";
 import { holderOf, type Hold } from "./hold.ts";
 import { CaseLawSlot } from "./case-law.tsx";
 import { workspaceStep } from "./workspace.ts";
-import { gateView, installView } from "./views.ts";
+import { gateView, installView, refusalView } from "./views.ts";
 
 /** The test ids the brief decides (UD1, "Decided here"). */
 const IDS = {
@@ -77,7 +77,7 @@ function actsFor(
   transport: HostTransport,
   agent: AgentId,
   device: string | null,
-): (a: GateAct) => void {
+): (a: GateAct) => void | Promise<boolean> {
   return (a) => {
     switch (a.act) {
       case "sign-in":
@@ -92,10 +92,12 @@ function actsFor(
         store.set({ pasting: true });
         return;
       case "code":
-        // straight into the command, and nowhere else: the field cleared itself as it handed the code on
-        store.set({ pasting: false });
-        store.command({ paste_sign_in_code: { agent, code: a.code } });
-        return;
+        // straight into the command, and nowhere else: the field keeps it until desktop takes it, then clears; after a
+        // refusal it stays for a retry
+        return store.send({ paste_sign_in_code: { agent, code: a.code } }).then((ok) => {
+          if (ok) store.set({ pasting: false });
+          return ok;
+        });
       case "device":
         store.command({ use_device_code: { agent } });
         return;
@@ -123,8 +125,7 @@ function actsFor(
         store.set({ keyOpen: a.open });
         return;
       case "key":
-        store.command({ set_agent_key: { agent, key: a.key } });
-        return;
+        return store.send({ set_agent_key: { agent, key: a.key } });
       case "plans":
         transport
           .openExternal(PLANS[planOf(agent)])
@@ -188,6 +189,7 @@ function holdOf(
           view={view}
           keys={keys}
           onAct={actsFor(store, transport, agent, device)}
+          refused={refusalView(setup)}
           testIds={IDS.gate}
         />
       ),
