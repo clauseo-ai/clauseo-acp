@@ -11,6 +11,7 @@ use clauseo_process::Launcher;
 use clauseo_protocol::{AgentId, ErrorCode, MatterId, ThreadId};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
+use crate::agent::launch_gate::LaunchGate;
 use crate::agent::launch_refusals::LaunchRetry;
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
@@ -517,6 +518,22 @@ impl HostConfig {
     #[must_use]
     pub fn with_launch_retry(mut self, retry: LaunchRetry) -> Self {
         self.wiring.sign_in.refused.set_retry(retry);
+        self
+    }
+
+    /// Desktop's launch gate (R17 M3, [`LaunchGate`]): asked with the agent's id before each
+    /// launch, of every agent kind, on the launch-prep thread and never on the actor. It must
+    /// be cheap and non-blocking, a stat of the shared login file, never an open of its
+    /// contents, never a status run, no lock held across I/O; one that hangs is bounded by the
+    /// prepare job's wait, and the launch fails. `None` lets the launch go on. A refusal code
+    /// is one desktop has already set through `HostHandle::set_launch_refused`, and awaited,
+    /// before the gate returns (the host never writes it): a waited-out one
+    /// (`agent.identity_checking`) waits for the refusal to lift, once per launch, then
+    /// prepares again; another fails the launch with it. A code that is no launch refusal, or
+    /// a panic, fails the launch closed with `agent.launch_failed`. Unset: no gate.
+    #[must_use]
+    pub fn with_launch_gate(mut self, gate: LaunchGate) -> Self {
+        self.wiring.launch_gate = Some(gate);
         self
     }
 

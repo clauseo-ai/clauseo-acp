@@ -156,6 +156,18 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 /// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
 /// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+    start_with(actor, thread, waiting, false);
+}
+
+/// [`start`] again for a launch the launch gate refused with a waited-out code
+/// (`launch_checks/gate.rs`): the same wait for the refusal to lift, then phase one again,
+/// marked so a second such answer fails it.
+pub(super) fn start_after_gate(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+    start_with(actor, thread, waiting, true);
+}
+
+/// [`start`]; `gate_waited` once the launch gate's refusal was waited for.
+fn start_with(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, gate_waited: bool) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
         return;
@@ -172,7 +184,7 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
-    launch_checks::prepare(actor, thread, waiting, keys_wait);
+    launch_checks::prepare(actor, thread, waiting, keys_wait, gate_waited);
 }
 
 /// The launch on the actor, with what its checks found (`prepared`), and `initialize`.

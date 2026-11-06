@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::launch_gate::LaunchGate;
 use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
@@ -52,6 +53,9 @@ pub(crate) struct LaunchWiring {
     /// Run off the actor with a run folder's path just before the folder is removed, for tests
     /// (`launch_checks::discard`).
     pub(crate) run_removal_hook: Option<RunRemovalHook>,
+    /// Desktop's launch gate, asked on the launch-prep thread before each launch
+    /// (`HostConfig::with_launch_gate`); `None`: no gate.
+    pub(crate) launch_gate: Option<LaunchGate>,
 }
 
 impl Default for LaunchWiring {
@@ -71,6 +75,7 @@ impl Default for LaunchWiring {
             relays: None,
             connectors: None,
             run_removal_hook: None,
+            launch_gate: None,
         }
     }
 }
@@ -89,6 +94,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("sign_in", &self.sign_in)
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
+            .field("launch_gate", &self.launch_gate.is_some())
             .finish_non_exhaustive()
     }
 }
