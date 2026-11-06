@@ -197,7 +197,10 @@ fn the_owner_sid_never_ends_up_in_pool_sids() {
     let before = machine.state.clone();
     let req = request(&machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
-    assert_eq!(failure.step, Step::Owner);
+    assert_eq!(
+        (failure.step, failure.exit),
+        (Step::Owner, SetupExit::Failed)
+    );
     assert_eq!(machine.calls, ["lock", "read_record", "unlock"]);
     assert_eq!(machine.state, before);
 }

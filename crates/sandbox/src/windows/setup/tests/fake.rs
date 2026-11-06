@@ -97,6 +97,8 @@ pub(super) struct FakeMachine {
     pub(super) calls: Vec<String>,
     /// Each fails the first call whose line it is, once, with its error.
     pub(super) fails: Vec<(String, MachineError)>,
+    /// The call whose line this is panics.
+    pub(super) panic_on: Option<String>,
     pub(super) state: State,
     /// Every record written, in order.
     pub(super) written: Vec<MachineRecord>,
@@ -131,6 +133,7 @@ impl FakeMachine {
             dir,
             calls: Vec::new(),
             fails: Vec::new(),
+            panic_on: None,
             state: State {
                 accounts: BTreeMap::from([(OWNER_NAME.to_owned(), owner)]),
                 group: None,
@@ -185,6 +188,7 @@ impl FakeMachine {
     fn call(&mut self, line: impl Into<String>) -> Result<(), MachineError> {
         let line = line.into();
         self.calls.push(line.clone());
+        assert!(self.panic_on.as_ref() != Some(&line), "a crash in {line}");
         match self.fails.iter().position(|(text, _)| *text == line) {
             Some(at) => Err(self.fails.remove(at).1),
             None => Ok(()),

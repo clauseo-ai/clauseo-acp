@@ -78,7 +78,9 @@ pub struct ProfileDir {
 /// methods take its SID, as `DeleteProfileW` does.
 pub trait Machine {
     /// Takes the machine-wide set-up lock (a named mutex in `Global\`). Another set-up holding
-    /// it is [`MachineError::LockHeld`].
+    /// it is [`MachineError::LockHeld`]. For `PR4e`: `WAIT_ABANDONED` (a set-up that died
+    /// holding it) counts as acquired: the set-up that died stopped between two of its steps,
+    /// and the next run starts from what the record says.
     fn lock(&mut self) -> Result<(), MachineError>;
     /// Gives the lock back. Called once for every `lock` that succeeded.
     fn unlock(&mut self);
