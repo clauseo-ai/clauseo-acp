@@ -94,12 +94,16 @@ code departs from the brief.
   no proxy password. Discovery is `proxy/upstream.rs`: per scheme, `HTTPS_PROXY` for CONNECT and
   `HTTP_PROXY` for plain `http://` (each with its lower-case form and `NO_PROXY`), then the OS
   asked about an `https://` or `http://` URL to match (macOS's separate HTTP proxy setting and
-  PAC scripts that branch on the scheme apply). OS answers are cached 5 minutes, at most 1024 of
-  them, the oldest dropped first. A miss runs one OS lookup per scheme, host and port (other
-  callers for the same key wait for its answer), and at most 4 at once per proxy; a miss past
-  that goes direct for that request and is not cached. On Windows the whole WinHTTP lookup, WPAD
-  included, is bounded to 10 s on its own thread, and at most 4 such threads live at once in the
-  process (a lookup left running past its bound keeps its slot), so hung lookups cannot pile up
+  PAC scripts that branch on the scheme apply). OS answers are cached 60 s (proxy, `DIRECT` and
+  failed lookups alike, so a WPAD timeout stalls a connection at most once a minute per host, and
+  a laptop on a new network gets the new answer within a minute), at most 1024 of them, the
+  oldest dropped first. A miss runs one OS lookup per scheme, host and port (other callers for
+  the same key wait for its answer), and at most 8 at once per proxy (desktop's S17 resolver asks
+  about 5 hosts at once); a miss past that waits up to 2 s for a slot, then goes direct for that
+  request, uncached, with one warning per process that names no host. On Windows the whole
+  WinHTTP lookup, WPAD included, is bounded to 10 s on its own thread, and at most 8 such threads
+  live at once in the process (a lookup left running past its bound keeps its slot), so hung
+  lookups cannot pile up
   threads; past that the lookup fails and goes direct. `upstream_for` (stage E's connector relay) returns `Result<Route, Error>` and refuses
   a firm URL that `start_proxy` refuses, so the relay fails visibly rather than going around the
   firm's proxy. `Upstream`'s `Debug` shows only a fixed URL's scheme, host and port.

@@ -7,10 +7,12 @@
 //! is made), with `NO_PROXY` or `no_proxy`; then the OS, asked about an `https://` or
 //! `http://` URL to match (so a PAC script that branches on the scheme, and macOS's separate
 //! HTTP proxy setting, apply): `CFNetwork` on macOS (it runs PAC), `WinHTTP` on Windows (PAC
-//! and WPAD, the whole call bounded to 10 s), nothing on Linux. An OS answer is kept 5 minutes
-//! per scheme, host and port, at most 1024 of them (the oldest goes first). A failed OS lookup
-//! (an API error, a PAC script that throws or takes over 5 s) goes direct and is logged with the
-//! host only: the firm's network refuses a direct connection it does not allow, and the agent
+//! and WPAD, the whole call bounded to 10 s), nothing on Linux. An OS answer is kept 60 s per
+//! scheme, host and port, at most 1024 of them (the oldest goes first); at most 8 lookups run at
+//! once, and a miss past them waits up to 2 s for a slot, then goes direct, uncached, with one
+//! warning per process that names no host. A failed OS lookup (an API error, a PAC script that
+//! throws or takes over 5 s) goes direct, is cached as direct like any answer, and is logged with
+//! the host only: the firm's network refuses a direct connection it does not allow, and the agent
 //! sees that refusal rather than a hang.
 //!
 //! No credentials, ever: a [`Route`] carries none, and a user name or password in `HTTPS_PROXY`
@@ -28,6 +30,7 @@ mod windows;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -36,15 +39,31 @@ use url::Url;
 use crate::{Clock, Error, SystemClock};
 use parse::{NoProxy, normal_host};
 
-/// How long an OS answer is kept for one host and port.
-const CACHE_FOR: Duration = Duration::from_mins(5);
+/// How long an OS answer is kept for one host and port: a proxy answer, a `DIRECT` and a failed
+/// lookup (which goes direct) alike, so a WPAD or PAC timeout stalls a connection at most once a
+/// minute per host. Short enough that a laptop moved to another network (office, home, VPN)
+/// gets the new answer within a minute.
+const CACHE_FOR: Duration = Duration::from_secs(60);
 
 /// The most OS answers kept. At the cap a new answer first drops the expired ones, then the
 /// oldest, so random names under a firm wildcard cannot grow the cache.
 const CACHE_MAX: usize = 1024;
 
-/// The most OS lookups running at once per [`Lookup`]; a miss past it goes direct, uncached.
-const OS_LOOKUPS_MOST: usize = 4;
+/// The most OS lookups running at once per [`Lookup`]. Desktop's proxy resolver (S17) asks
+/// about 5 hosts at once (the npm registry or its mirror, each agent's sign-in host and API
+/// host), which 8 holds with room for the egress proxy's own misses beside them. A miss past it
+/// waits up to [`OS_SLOT_WAIT`] for a slot, then goes direct, uncached.
+const OS_LOOKUPS_MOST: usize = 8;
+
+/// How long a miss waits for a free lookup slot before it goes direct.
+const OS_SLOT_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(2)
+};
+
+/// Whether the "lookups all busy" warning was logged: once per process.
+static BUSY_LOGGED: AtomicBool = AtomicBool::new(false);
 
 /// Where the firm's upstream proxy comes from.
 #[derive(Clone)]
@@ -324,27 +343,42 @@ fn env_route(name: &str, raw: Option<&str>) -> Option<Route> {
 impl OsLookup {
     /// A fresh cached answer, else the OS's, with no lock held while the OS answers. One lookup
     /// runs per key: a second caller waits for the first's answer. At most [`OS_LOOKUPS_MOST`]
-    /// run at once; a miss past that goes direct for this request and is not cached.
+    /// run at once; a miss past that waits up to [`OS_SLOT_WAIT`] for a slot, then goes direct
+    /// for this request, uncached, and the first time in the process says so in the log.
     fn route(&self, scheme: Scheme, host: &str, port: u16) -> Route {
         let key = (scheme, host.to_owned(), port);
         let mut flights = self.flights();
+        let mut slot_waited = false;
         loop {
             if let Some(route) = self.fresh(&key) {
                 return route;
             }
-            if !flights.running.contains(&key) {
+            if flights.running.contains(&key) {
+                flights.waiting += 1;
+                flights = self
+                    .landed
+                    .wait_while(flights, |f| f.running.contains(&key))
+                    .unwrap_or_else(PoisonError::into_inner);
+                flights.waiting -= 1;
+                continue;
+            }
+            if flights.running.len() < OS_LOOKUPS_MOST {
                 break;
             }
-            flights.waiting += 1;
+            if slot_waited {
+                if !BUSY_LOGGED.swap(true, Ordering::Relaxed) {
+                    tracing::warn!("the OS proxy lookups were all busy; a connection went direct");
+                }
+                return Route::Direct;
+            }
+            slot_waited = true;
+            let busy =
+                |f: &mut Flights| f.running.len() >= OS_LOOKUPS_MOST && !f.running.contains(&key);
             flights = self
                 .landed
-                .wait_while(flights, |f| f.running.contains(&key))
-                .unwrap_or_else(PoisonError::into_inner);
-            flights.waiting -= 1;
-        }
-        if flights.running.len() >= OS_LOOKUPS_MOST {
-            tracing::debug!(host, port, "OS proxy lookups all busy; going direct");
-            return Route::Direct;
+                .wait_timeout_while(flights, OS_SLOT_WAIT, busy)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
         flights.running.insert(key.clone());
         drop(flights);
@@ -361,7 +395,7 @@ impl OsLookup {
         self.flights.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The cached answer for `key` if it is under 5 minutes old.
+    /// The cached answer for `key` if it is under [`CACHE_FOR`] old.
     fn fresh(&self, key: &Key) -> Option<Route> {
         let now = self.clock.now();
         let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
@@ -495,9 +529,11 @@ const WINDOWS_LOOKUP_LIMIT: Duration = Duration::from_secs(10);
 static WINDOWS_LOOKUP_THREADS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-/// The most Windows lookup threads alive at once, across the process.
+/// The most Windows lookup threads alive at once, across the process: as many as
+/// [`OS_LOOKUPS_MOST`], so a lookup that got a slot there is not failed (and cached as direct)
+/// here for want of a thread.
 #[cfg(windows)]
-const WINDOWS_LOOKUP_THREADS_MOST: usize = 4;
+const WINDOWS_LOOKUP_THREADS_MOST: usize = OS_LOOKUPS_MOST;
 
 /// Runs `lookup` on its own thread and waits at most `limit` for it. A lookup still running
 /// then is left to finish on its thread, and its answer is dropped. `threads` counts the
