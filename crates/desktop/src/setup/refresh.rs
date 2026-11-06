@@ -41,6 +41,11 @@ pub(crate) struct SettingsRead {
     pub(crate) blocked: BTreeSet<AgentId>,
     /// Every plan, for the launch hook.
     pub(crate) plans: BTreeMap<AgentId, Plan>,
+    /// The firm-managed agents: a policy locks `agents.<id>` (or the e2e build's
+    /// `E2E_AGENTS_MANAGED` names it). There is no Clauseo install, so no status read can run:
+    /// R17's identity check does not apply to them (a documented gap: they still launch on
+    /// Clauseo's login home). The lawyer's own `agents.<id>` never counts.
+    pub(crate) managed: BTreeSet<AgentId>,
 }
 
 impl SettingsRead {
@@ -64,12 +69,21 @@ impl SettingsRead {
             .filter(|agent| effective.is_locked(&format!("plans.{agent}")))
             .cloned()
             .collect();
+        let managed = known
+            .clone()
+            .into_iter()
+            .filter(|agent| {
+                effective.is_locked(&format!("agents.{agent}")) || super::start::e2e_managed(agent)
+            })
+            .cloned()
+            .collect();
         let blocked = firm_policy(effective, &SystemFiles, known);
         Self {
             firm,
             firm_policy: policy_set,
             blocked,
             plans: plans_of(effective),
+            managed,
         }
     }
 }

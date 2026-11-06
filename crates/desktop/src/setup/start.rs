@@ -227,12 +227,9 @@ impl SetupStart {
                 (entry.id.clone(), info)
             })
             .collect();
-        let managed = known
-            .keys()
-            .filter(|agent| effective.is_locked(&format!("agents.{agent}")) || e2e_managed(agent))
-            .cloned()
-            .collect();
         let settings = SettingsRead::read(effective, known.keys());
+        // The firm-managed agents, as setup reads them (`SettingsRead::managed`).
+        let managed = settings.managed.clone();
         Self {
             data_dir: effective.data_dir().to_path_buf(),
             known,
