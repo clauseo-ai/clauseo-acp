@@ -37,7 +37,11 @@ const PI_NOUI: u32 = 1;
 /// doesn't include the account, 1326 for a wrong password.
 pub fn log_on_once(name: &str, password: &Password) -> Result<ProfileDir, MachineError> {
     let mut user = wide(name);
-    let secret: Zeroizing<Vec<u16>> = Zeroizing::new(wide(password.as_str()));
+    // Sized once, so no reallocation leaves an unwiped copy of the password behind.
+    let units = password.encode_utf16().count();
+    let mut secret: Zeroizing<Vec<u16>> = Zeroizing::new(Vec::with_capacity(units + 1));
+    secret.extend(password.encode_utf16());
+    secret.push(0);
     let mut token = HANDLE::default();
     // SAFETY: the name, the domain (`.`, this computer) and the password are NUL-terminated and
     // outlive the call; `token` is a live out-pointer, owned by `Handle` once written.

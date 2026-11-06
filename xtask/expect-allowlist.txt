@@ -413,8 +413,10 @@ crates/sandbox/src/windows/setup/windows_machine.rs WindowsMachine::now clippy::
 crates/sandbox/src/windows/setup/ffi.rs - unsafe_code
 crates/sandbox/src/windows/setup/journal.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon.rs - unsafe_code
-crates/sandbox/src/windows/setup/logon/tests.rs - unsafe_code
-crates/sandbox/src/windows/setup/logon/tests.rs - clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests.rs elevated unsafe_code
+crates/sandbox/src/windows/setup/logon/tests.rs powershell clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests.rs delete_account clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests.rs TestUser::new clippy::disallowed_methods
 crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code

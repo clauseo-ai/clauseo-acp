@@ -86,9 +86,18 @@ pub fn journal_size(volume: &Path) -> Result<Option<u64>, MachineError> {
 }
 
 /// Creates or enlarges the change journal of the volume whose root is `volume` to `max` bytes,
-/// growing by `delta`. Asks the journal's size first and does nothing when it is `max` or
-/// larger ([`grows`]): a journal is never shrunk.
+/// growing by `delta`. Refuses a volume that isn't fixed and NTFS. Asks the journal's size
+/// first and does nothing when it is `max` or larger ([`grows`]): a journal is never shrunk.
 pub fn grow_journal(volume: &Path, max: u64, delta: u64) -> Result<(), MachineError> {
+    // Checked again here, so no caller can grow a journal on a removable or non-NTFS volume.
+    let facts = NtfsJournal
+        .root(volume)
+        .map_err(|error| MachineError::Other(format!("the volume can't be read: {error}")))?;
+    if !facts.ntfs || facts.removable {
+        return Err(MachineError::Other(
+            "the volume isn't a fixed NTFS volume".to_owned(),
+        ));
+    }
     if !grows(journal_size(volume)?, max) {
         return Ok(());
     }
