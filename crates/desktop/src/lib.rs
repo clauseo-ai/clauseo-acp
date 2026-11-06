@@ -96,6 +96,7 @@ mod open;
 mod picked;
 mod pre_write_guard;
 mod profile;
+mod quit;
 mod rust_only;
 mod settings_window;
 mod setup;
@@ -108,7 +109,7 @@ mod window_frame;
 mod window_size;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use bridge::Bridge;
 use clauseo_host::{Host, HostConfig};
@@ -122,6 +123,7 @@ pub use jailed::{
 };
 pub use pre_write_guard::guard_requested;
 use profile::DesktopProfile;
+use quit::{AGENTS_STOP_WAIT, Exit, SetupStop, stop_in_order};
 use rust_only::PluginRustOnly;
 use tauri::{
     App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
@@ -150,13 +152,6 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 )]
 fn context<R: Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
-}
-
-/// Where exit stands: a stopper started, and the host stopped (so the next request exits).
-#[derive(Default)]
-struct Exit {
-    stopping: AtomicBool,
-    stopped: AtomicBool,
 }
 
 /// Builds the app and runs it until it exits.
@@ -453,12 +448,6 @@ pub(crate) fn host_spawn_options(home: Option<std::path::PathBuf>) -> SpawnOptio
     }
 }
 
-/// The setup backend the quit shuts down: `Agents`' installs and sign-ins.
-struct SetupStop(Arc<setup::BackendCell>);
-
-/// How long the quit waits for the agents' jobs to end and their children to be killed.
-const AGENTS_STOP_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
-
 /// Stops the usage counts' task, then, off the UI thread, the agents' jobs (`Agents::shutdown`,
 /// at most [`AGENTS_STOP_WAIT`]) and the host (waits for its start, shuts it down, joins it),
 /// saves the counts, then exits with `code`.
@@ -474,15 +463,19 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
     let stopper = std::thread::Builder::new()
         .name("clauseo-host-stop".to_owned())
         .spawn(move || {
-            // The agents' installs and sign-ins first, their children killed (#386).
-            if let Some(setup) = app.try_state::<SetupStop>()
-                && !setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT)
-            {
-                tracing::warn!("an agents job was still running at quit");
-            }
-            if let Some(cell) = cell {
-                host_start::stop(&cell);
-            }
+            // The agents' installs and sign-ins first, their children killed (#386), then the host.
+            stop_in_order(
+                || {
+                    app.try_state::<SetupStop>().is_none_or(|setup| {
+                        setup::SetupBackend::shutdown(&*setup.0, AGENTS_STOP_WAIT)
+                    })
+                },
+                || {
+                    if let Some(cell) = &cell {
+                        host_start::stop(cell);
+                    }
+                },
+            );
             // After the host, whose last counts go in too.
             if let Some(counts) = app.try_state::<counts::CountsState>() {
                 counts.save();

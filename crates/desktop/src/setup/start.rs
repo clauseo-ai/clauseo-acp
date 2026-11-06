@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
@@ -50,17 +50,27 @@ use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents};
+use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 
-/// Where the app's setup backend lands; every command waits for it.
+/// Where the app's setup backend lands; every command waits for it. The quit closes it
+/// ([`BackendCell::shutdown`]): a start that comes after does not start `Agents`.
 pub(crate) struct BackendCell {
-    backend: OnceLock<Arc<dyn SetupBackend>>,
+    state: Mutex<CellState>,
     done: Shared<oneshot::Receiver<()>>,
 }
 
-/// The one way to fill a [`BackendCell`]. Dropped unfilled (no thread, no platform), every
-/// command gets `internal`.
+/// What the cell's lock guards: the quit's mark, and the backend once `Agents` have started.
+#[derive(Default)]
+struct CellState {
+    /// The quit has begun: no start after this one starts `Agents`.
+    closing: bool,
+    backend: Option<Arc<dyn SetupBackend>>,
+}
+
+/// The one way to fill a [`BackendCell`]. Dropped unfilled (no thread, no platform, or the
+/// quit came first), every command gets `internal`.
 pub(crate) struct BackendStart {
     cell: Arc<BackendCell>,
     done: oneshot::Sender<()>,
@@ -71,7 +81,7 @@ impl BackendCell {
     pub(crate) fn new() -> (Arc<Self>, BackendStart) {
         let (done, wait) = oneshot::channel();
         let cell = Arc::new(Self {
-            backend: OnceLock::new(),
+            state: Mutex::default(),
             done: wait.shared(),
         });
         let start = BackendStart {
@@ -80,15 +90,33 @@ impl BackendCell {
         };
         (cell, start)
     }
+
+    /// The backend, once the cell is filled.
+    fn filled(&self) -> Option<Arc<dyn SetupBackend>> {
+        lock(&self.state).backend.clone()
+    }
 }
 
 impl BackendStart {
-    /// Puts `backend` in the cell and wakes every waiting command.
-    pub(crate) fn finish(self, backend: Arc<dyn SetupBackend>) {
-        // The only setter, and `self` is consumed: the cell is empty here.
-        let _set = self.cell.backend.set(backend);
+    /// The setup thread's start step: unless the quit has closed the cell, `start` starts
+    /// `Agents` and makes the backend over them, which fills the cell and wakes every command.
+    /// All of it runs under the cell's lock, which [`BackendCell::shutdown`] takes too: a quit
+    /// either finds the backend and shuts it down, or closes the cell first, and then `start`
+    /// does not run and no backend comes (`None`).
+    pub(crate) fn start_with<B, T>(self, start: impl FnOnce() -> (Arc<B>, T)) -> Option<(Arc<B>, T)>
+    where
+        B: SetupBackend + 'static,
+    {
+        let mut state = lock(&self.cell.state);
+        if state.closing {
+            return None;
+        }
+        let (backend, out) = start();
+        state.backend = Some(Arc::clone(&backend) as Arc<dyn SetupBackend>);
+        drop(state);
         // No receiver left only when the cell itself is gone.
         let _woken = self.done.send(());
+        Some((backend, out))
     }
 }
 
@@ -102,7 +130,7 @@ impl SetupBackend for BackendCell {
         Box::pin(async move {
             // Canceled (the start was dropped) leaves the cell empty: `internal` below.
             let _finished = self.done.clone().await;
-            match self.backend.get() {
+            match self.filled() {
                 Some(backend) => backend.run(command, key_write, events).await,
                 None => Err(HostError::new(
                     ErrorCode::Internal,
@@ -113,14 +141,18 @@ impl SetupBackend for BackendCell {
     }
 
     fn sign_in_refused(&self, agent: &AgentId) -> Option<HostError> {
-        self.backend.get()?.sign_in_refused(agent)
+        self.filled()?.sign_in_refused(agent)
     }
 
-    /// The backend's, once the cell is filled; before that `Agents` has not started.
+    /// The quit: the cell closes first, so no start after it starts `Agents`; then the
+    /// backend's, if one started (`true` when none did).
     fn shutdown(&self, wait: std::time::Duration) -> bool {
-        self.backend
-            .get()
-            .is_none_or(|backend| backend.shutdown(wait))
+        let backend = {
+            let mut state = lock(&self.state);
+            state.closing = true;
+            state.backend.clone()
+        };
+        backend.is_none_or(|backend| backend.shutdown(wait))
     }
 }
 
@@ -128,7 +160,8 @@ impl SetupBackend for BackendCell {
 /// launcher's (the environment inherited) and the sign-in launcher's (the host's: the
 /// environment cleared, `home` shown as `~`).
 /// Both end with the app (`SpawnOptions::end_with_parent`, #386): every child of theirs
-/// starts on a job thread that outlives it.
+/// starts on a job thread that outlives it. Never the host's (`host_spawn_options`): its agents
+/// start on short-lived prep threads, which would kill them at once.
 pub(crate) fn launchers<L>(home: Option<PathBuf>, make: impl Fn(SpawnOptions) -> L) -> (L, L) {
     (
         make(SpawnOptions::new().end_with_parent()),
@@ -257,41 +290,46 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     config.install.bundle = read.bundle;
     config.install.proxy = env_proxy();
     config.clock = Arc::clone(&clock);
-    let (install, signin) = launchers(parts.home, |options| {
-        Arc::new(PassthroughLauncher::new(options)) as Arc<dyn Launcher>
+    // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
+    let started = parts.start.start_with(|| {
+        let (install, signin) = launchers(parts.home, |options| {
+            Arc::new(PassthroughLauncher::new(options)) as Arc<dyn Launcher>
+        });
+        let (agents, source) = Agents::start_with_launchers(config, install, signin, AsyncIoTimer);
+        parts.events.publish(SetupEvent::SetupInfo {
+            keys_available: keys.available(),
+        });
+        let compose = Arc::new(Compose::new(Arc::clone(&parts.events), clock));
+        let facts = &read.settings;
+        for agent in read.known.keys() {
+            compose.set_blocked(agent, facts.blocked.contains(agent));
+            compose.set_firm(agent, facts.firm.contains(agent));
+            compose.set_key(agent, keys.has(agent));
+        }
+        let firm_policy = facts.firm_policy.clone();
+        let wiring = Wiring::new(side.readers, side.reused, side.plans, read.settings);
+        let backend = Arc::new(AgentsBackend {
+            agents: Arc::new(agents),
+            keys,
+            compose,
+            host: parts.host,
+            confirm: parts.confirm,
+            opener: parts.opener,
+            events: parts.events,
+            known: read.known,
+            signin_gate: Mutex::new(()),
+            wiring,
+            counts: parts.counts,
+        });
+        for agent in backend.known.keys() {
+            backend.set_firm_policy(agent, firm_policy.contains(agent));
+        }
+        (backend, source)
     });
-    let (agents, source) = Agents::start_with_launchers(config, install, signin, AsyncIoTimer);
-    parts.events.publish(SetupEvent::SetupInfo {
-        keys_available: keys.available(),
-    });
-    let compose = Arc::new(Compose::new(Arc::clone(&parts.events), clock));
-    let facts = &read.settings;
-    for agent in read.known.keys() {
-        compose.set_blocked(agent, facts.blocked.contains(agent));
-        compose.set_firm(agent, facts.firm.contains(agent));
-        compose.set_key(agent, keys.has(agent));
-    }
-    let firm_policy = facts.firm_policy.clone();
-    let wiring = Wiring::new(side.readers, side.reused, side.plans, read.settings);
-    let backend = Arc::new(AgentsBackend {
-        agents: Arc::new(agents),
-        keys,
-        compose,
-        host: parts.host,
-        confirm: parts.confirm,
-        opener: parts.opener,
-        events: parts.events,
-        known: read.known,
-        signin_gate: Mutex::new(()),
-        wiring,
-        counts: parts.counts,
-    });
-    for agent in backend.known.keys() {
-        backend.set_firm_policy(agent, firm_policy.contains(agent));
-    }
-    parts
-        .start
-        .finish(Arc::clone(&backend) as Arc<dyn SetupBackend>);
+    let Some((backend, source)) = started else {
+        tracing::info!("the quit came first: no agents start");
+        return;
+    };
     let follower = Arc::clone(&backend);
     let reread = side.reread;
     let host_thread = std::thread::Builder::new()

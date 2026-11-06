@@ -9,6 +9,7 @@ mod fakes;
 mod keys;
 mod leave;
 mod once;
+mod quit;
 mod races;
 mod refusals;
 mod retry;
@@ -441,6 +442,19 @@ fn the_sign_in_launcher_clears_the_environment_and_the_install_launcher_does_not
     for shown in [&install, &signin] {
         assert!(shown.contains("end_with_parent: true"), "{shown}");
     }
+}
+
+/// It proves something only on Linux, where `end_with_parent` is a field of the options;
+/// elsewhere the option does nothing and the check passes trivially.
+#[test]
+fn the_host_s_launch_options_never_end_with_the_app() {
+    // Its agents start on short-lived prep threads (`start.rs`): the option would kill them.
+    let host = format!(
+        "{:?}",
+        crate::host_spawn_options(Some(PathBuf::from("/Users/lawyer")))
+    );
+    assert!(!host.contains("end_with_parent: true"), "{host}");
+    assert!(host.contains("clear_env: true"), "{host}");
 }
 
 #[test]

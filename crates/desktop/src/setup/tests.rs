@@ -475,7 +475,7 @@ fn a_command_waits_for_the_backend_start_then_runs_on_it() {
         let setup = Arc::clone(&setup);
         std::thread::spawn(move || block_on(setup.run(SETTINGS, command(SetupAction::FindLogin))))
     };
-    start.finish(Arc::clone(&stub) as Arc<dyn SetupBackend>);
+    start.start_with(|| (Arc::clone(&stub), ()));
     assert_eq!(waiting.join().unwrap(), Ok(CommandOutcome::Done));
     assert_eq!(stub.calls(), [(SetupAction::FindLogin, claude())]);
 }

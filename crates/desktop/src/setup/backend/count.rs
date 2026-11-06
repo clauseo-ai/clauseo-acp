@@ -10,7 +10,9 @@
 //!   `Agents::install_tries`, kept to 1 to 3.
 //! - **`sign_in`**: `SignedIn` or `Failed` after `Queued`, `Waiting` or `DeviceCode`, billed as
 //!   `plan` (every S18 sign-in run is the vendor's plan login). A cancel is `cancelled`. A
-//!   status check's `SignedIn`, or a reuse's, follows no running state and is not counted.
+//!   status check's `SignedIn`, or a reuse's, follows no running state and is not counted. An
+//!   end the backend asks for, a key or an endpoint taking the sign-in's place
+//!   (`Compose::is_expected_end`), is not the lawyer's cancel and is not counted.
 //!
 //! Every field is a closed value: no key, email, path, account or agent id goes into a count.
 
@@ -23,7 +25,7 @@ use clauseo_counts::schema::{
 };
 use clauseo_protocol::{AgentId, AgentKind};
 
-use crate::setup::compose::is_running;
+use crate::setup::compose::{Compose, is_running};
 
 /// Where the pump's counts go.
 pub(crate) trait SetupCounts: Send + Sync {
@@ -58,14 +60,16 @@ impl Tally {
     }
 
     /// Takes in `agent`'s sign-in `state`, and sends the `sign_in` count to `counts` when it
-    /// ends a run.
+    /// ends a run. Read before `compose` takes `state` in, which decides an expected end.
     pub(crate) fn signin(
         &mut self,
         counts: &dyn SetupCounts,
+        compose: &Compose,
         agent: &AgentId,
         state: &SigninState,
     ) {
-        if let Some(event) = self.signin_event(agent, state) {
+        let expected = compose.is_expected_end(agent, state);
+        if let Some(event) = self.signin_event(agent, state, expected) {
             counts.bump(event);
         }
     }
@@ -108,7 +112,12 @@ impl Tally {
     }
 
     /// [`Tally::signin`]'s count, if one is due.
-    fn signin_event(&mut self, agent: &AgentId, state: &SigninState) -> Option<Event> {
+    fn signin_event(
+        &mut self,
+        agent: &AgentId,
+        state: &SigninState,
+        expected: bool,
+    ) -> Option<Event> {
         if is_running(state) {
             self.signing_in.insert(agent.clone());
             return None;
@@ -123,7 +132,7 @@ impl Tally {
             SigninState::Failed { .. } => SignInResult::Failed,
             _ => return None,
         };
-        if !was_running {
+        if !was_running || expected {
             return None;
         }
         Some(Event::SignIn(SignIn {
