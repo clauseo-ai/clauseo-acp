@@ -269,7 +269,7 @@ fn no_proxy_applies_only_to_env() {
 }
 
 #[test]
-fn cache_hits_then_expires_after_five_minutes() {
+fn cache_hits_then_expires_after_60_seconds() {
     let (lookup, calls, clock) = lookup(Upstream::System, Env::default(), http("os-proxy", 1));
     assert_eq!(
         lookup.route(Https, "example.test", 443),
@@ -290,15 +290,30 @@ fn cache_hits_then_expires_after_five_minutes() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2, "another port: a miss");
 
-    clock.advance(CACHE_FOR.checked_sub(Duration::from_secs(1)).unwrap());
+    assert_eq!(CACHE_FOR, Duration::from_secs(60));
+    clock.advance(Duration::from_secs(59));
     lookup.route(Https, "example.test", 443);
-    assert_eq!(calls.load(Ordering::SeqCst), 2, "under 5 minutes: a hit");
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "under 60 s: a hit");
 
     clock.advance(Duration::from_secs(1));
     lookup.route(Https, "example.test", 443);
-    assert_eq!(calls.load(Ordering::SeqCst), 3, "at 5 minutes: expired");
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "at 60 s: expired");
     lookup.route(Https, "example.test", 443);
     assert_eq!(calls.load(Ordering::SeqCst), 3, "refreshed");
+}
+
+/// A `DIRECT` answer, which a failed lookup (a WPAD or PAC timeout) also becomes, is cached for
+/// the same 60 s: a timeout stalls a connection at most once a minute per host.
+#[test]
+fn a_direct_or_failed_answer_is_cached_for_60_seconds_too() {
+    let (lookup, calls, clock) = lookup(Upstream::System, Env::default(), Route::Direct);
+    assert_eq!(lookup.route(Https, "example.test", 443), Route::Direct);
+    clock.advance(Duration::from_secs(59));
+    assert_eq!(lookup.route(Https, "example.test", 443), Route::Direct);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "under 60 s: a hit");
+    clock.advance(Duration::from_secs(1));
+    lookup.route(Https, "example.test", 443);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "at 60 s: asked again");
 }
 
 #[test]
