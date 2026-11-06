@@ -15,8 +15,9 @@
 //!
 //! - The marker is `fake-signin-marker` in the CLI's home folder. It holds
 //!   `{"authMethod": ..., "email": "test@example.com"}` and nothing else, never a credential.
-//!   Claude's status prints the marker's email. For Codex a test's dummy file with the name of
-//!   Codex's login file counts as the marker too (reuse's hard link, S18).
+//!   Claude's status and Codex's `account/read` print the marker's email. For Codex a test's
+//!   dummy file with the name of Codex's login file counts as the marker too (reuse's hard
+//!   link, S18).
 //! - The Claude home is `CLAUDE_SECURESTORAGE_CONFIG_DIR` when set (`""` is `$HOME/.claude`), else
 //!   `CLAUDE_CONFIG_DIR` when set and not empty, else `$HOME/.claude`. Codex's home is `CODEX_HOME`
 //!   when set and not empty, else `$HOME/.codex`.
