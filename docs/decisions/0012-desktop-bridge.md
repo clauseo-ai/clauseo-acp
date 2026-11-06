@@ -140,7 +140,10 @@ readable by everyone). The app reads it in the 64-bit view (`KEY_WOW64_64KEY`), 
 (`RRF_NOEXPAND`, so a `REG_EXPAND_SZ` is refused as another type), and compares with `EqualSid`
 after `ConvertStringSidToSidW`, never by account name; an alias such as `BA` is not a SID here. A
 missing key or value means no sandbox user on this machine. One function, `sandbox_user_sid()`,
-names the record; when S15 lands it moves into `clauseo-sandbox` beside the writer.
+names the record; when S15 lands it moves into `clauseo-sandbox` beside the writer. (S15 PR4b,
+design B: the record is now `PoolSids`, a `REG_MULTI_SZ` of every pool user's SID, read by
+`clauseo_sandbox::windows::sandbox_pool_sids`; the check refuses when the token user is any of
+them, and a malformed list counts as sandboxed. ADR 0049 has the layout.)
 `ERROR_ACCESS_DENIED` on opening or reading the token, or on
 reading the record, also refuses: an unjailed process can always read both, and a hostile agent
 could deny them (its own default DACL) to slip past. So does a record that is not a `REG_SZ` or

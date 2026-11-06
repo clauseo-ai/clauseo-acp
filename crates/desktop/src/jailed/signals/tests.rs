@@ -6,6 +6,8 @@ use super::{Failure, Token, decide};
 const USER: &str = "S-1-5-21-1-2-3-1001";
 /// Another account's SID.
 const OTHER: &str = "S-1-5-21-1-2-3-1002";
+/// A third account's SID.
+const THIRD: &str = "S-1-5-21-1-2-3-1003";
 
 /// One read's answer, made fresh for each call (`Failure` holds an `io::Error`, which is not
 /// `Clone`).
@@ -63,18 +65,23 @@ impl Token for Fake {
     }
 }
 
-/// A sandbox user record that names `sid`.
-fn record(sid: &'static str) -> impl FnOnce() -> Result<Option<String>, Failure> {
-    move || Ok(Some(sid.to_owned()))
+/// A pool record that names the one SID `sid`.
+fn record(sid: &'static str) -> impl FnOnce() -> Result<Vec<String>, Failure> {
+    move || Ok(vec![sid.to_owned()])
 }
 
-/// No sandbox user record.
-fn no_record() -> impl FnOnce() -> Result<Option<String>, Failure> {
-    || Ok(None)
+/// A pool record that names `sids`.
+fn pool(sids: &'static [&'static str]) -> impl FnOnce() -> Result<Vec<String>, Failure> {
+    move || Ok(sids.iter().map(|sid| (*sid).to_owned()).collect())
+}
+
+/// No pool record.
+fn no_record() -> impl FnOnce() -> Result<Vec<String>, Failure> {
+    || Ok(Vec::new())
 }
 
 /// `decide` with `Ok(token)`, as a short string: "jailed", "free" or "error: <message>".
-fn verdict(token: Fake, record: impl FnOnce() -> Result<Option<String>, Failure>) -> String {
+fn verdict(token: Fake, record: impl FnOnce() -> Result<Vec<String>, Failure>) -> String {
     show(decide(Ok(token), record))
 }
 
@@ -87,14 +94,30 @@ fn show(answer: io::Result<bool>) -> String {
 }
 
 #[test]
-fn no_signal_and_no_sandbox_user_record_is_not_sandboxed() {
+fn no_signal_and_no_pool_record_is_not_sandboxed() {
     assert_eq!(verdict(PLAIN, no_record()), "free");
 }
 
 #[test]
-fn the_sandbox_user_is_sandboxed_and_any_other_user_is_not() {
+fn a_pool_user_is_sandboxed_and_any_other_user_is_not() {
     assert_eq!(verdict(PLAIN, record(USER)), "jailed");
     assert_eq!(verdict(PLAIN, record(OTHER)), "free");
+}
+
+#[test]
+fn the_user_is_compared_with_every_pool_sid() {
+    assert_eq!(verdict(PLAIN, pool(&[OTHER, THIRD, USER])), "jailed");
+    assert_eq!(verdict(PLAIN, pool(&[USER, OTHER])), "jailed");
+    assert_eq!(verdict(PLAIN, pool(&[OTHER, THIRD])), "free");
+    // A SID in the list that does not parse counts as sandboxed, wherever it is.
+    assert_eq!(verdict(PLAIN, pool(&[OTHER, "BA"])), "jailed");
+}
+
+#[test]
+fn a_malformed_pool_record_is_sandboxed() {
+    // `windows::sandbox_pool_sids` maps a malformed `PoolSids` (an empty string inside, a
+    // non-SID, a repeat) and one that is not UTF-16 to `NotASid`.
+    assert_eq!(verdict(PLAIN, || Err(Failure::NotASid)), "jailed");
 }
 
 #[test]
@@ -116,7 +139,7 @@ fn an_app_container_or_restricting_sids_are_sandboxed_without_the_record() {
     let read = std::cell::Cell::new(false);
     let watched = || {
         read.set(true);
-        Ok(None)
+        Ok(Vec::new())
     };
     let container = Fake {
         app_container: Answer::Yes,

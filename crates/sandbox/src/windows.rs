@@ -13,8 +13,9 @@
 //!   written, so set-up can remove them (D4).
 //! - Tier B's records, in `<data_dir>\sandbox\` under a protected DACL: each matter's SID in
 //!   `matters.json` ([`matters`], [`sids`]) and the set-up marker `setup.json` ([`marker`]);
-//!   on Windows, the machine's sandbox user and owner records (`sandbox_user_sid`,
-//!   `sandbox_owner_sid`) and the set-up state they give (`setup_state`).
+//!   on Windows, the machine's record of the pool (`sandbox_pool_sids`, `sandbox_group_sid`,
+//!   `sandbox_owner_sid`, `sandbox_data_dir`) and the set-up state they give (`setup_state`).
+//! - [`pool`]: the pool users' names (`ClauseoSbNN`) and the machine record's shape.
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
 //!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
@@ -59,6 +60,7 @@ mod folder;
 pub mod ledger;
 pub mod marker;
 pub mod matters;
+pub mod pool;
 #[cfg(windows)]
 mod private_dir;
 #[cfg(windows)]
@@ -105,7 +107,9 @@ pub use folder::folder_support;
 #[cfg(windows)]
 pub use marker::setup_state;
 #[cfg(windows)]
-pub use record::{RecordError, sandbox_owner_sid, sandbox_user_sid};
+pub use record::{
+    RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
+};
 pub use set_aside::{
     Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason, SET_ASIDE_DIR,
     SetAsideFailure,

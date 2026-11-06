@@ -1,10 +1,13 @@
 //! The sandbox's one-time set-up, as every OS sees it: the [`SandboxSetup`] seam R17 holds, what
 //! a set-up is in ([`SetupState`]), and why a set-up step failed ([`SetupError`]).
 //!
-//! Windows' tier B is the one set-up today (S15): an elevated step makes the `ClauseoSandbox`
-//! user once per machine. `windows::UserSetup` (S15 PR4) implements the trait; until then
-//! `windows::setup_state` reads the same markers and record its `state` will. macOS and Linux
-//! need no set-up and have no implementation.
+//! Windows' tier B is the one set-up today (S15, design B): an elevated step makes a pool of local
+//! users, `ClauseoSb01` and on (4 at first, 4 more at a time, at most 32), in the group
+//! `ClauseoSandboxUsers`, and records them in `HKLM\SOFTWARE\Clauseo\Sandbox` with the user who
+//! owns them (`windows::pool`). Each matter runs as its own pool user, at Low integrity.
+//! `windows::UserSetup` (S15 PR4) implements the trait; until then `windows::setup_state` reads
+//! the same marker and record its `state` will. macOS and Linux need no set-up and have no
+//! implementation.
 
 use std::path::PathBuf;
 
@@ -29,15 +32,15 @@ pub trait SandboxSetup: Send + Sync {
 /// the [`NoSandbox`](crate::NoSandbox) reason [`detect`](crate::detect) maps it to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetupState {
-    /// Set up for this user, at the current version, and the machine's record names the same
-    /// sandbox user: tier B.
+    /// Set up for this user, at the current version, and the machine's record names this user as
+    /// owner and every pool user the marker does: tier B.
     Ready,
-    /// Never set up for this user, or the sandbox user is gone: `NeedsSetUp`.
+    /// Never set up for this user, or the record no longer names the pool: `NeedsSetUp`.
     Needed,
     /// The last set-up's prompt was declined: `SetUpRefused`.
     Refused,
-    /// A marker or record can't be read or makes no sense, or the last set-up failed; what
-    /// happened. `SetUpFailed`.
+    /// A marker or record can't be read or makes no sense, a removal stopped part way, or the
+    /// last set-up failed; what happened. `SetUpFailed`.
     Failed(String),
     /// Set up by an older Clauseo, whose set-up must run again: `NeedsSetUp`.
     Outdated {
@@ -46,8 +49,8 @@ pub enum SetupState {
         /// The version this build sets up.
         current: u32,
     },
-    /// Another Windows user owns the machine's sandbox user (D5: the first user owns it), so this
-    /// user stays on tier C: `SetUpFailed`.
+    /// Another Windows user owns the machine's pool (D5: the first user owns it), so this user
+    /// stays on tier C: `SetUpFailed`.
     SetUpByOtherUser,
 }
 
