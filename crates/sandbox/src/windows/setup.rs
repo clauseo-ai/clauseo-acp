@@ -63,6 +63,8 @@ pub mod record_values;
 #[cfg(windows)]
 mod record_write;
 mod rollback;
+#[cfg(any(windows, test))]
+mod shared;
 #[cfg(windows)]
 mod windows_machine;
 

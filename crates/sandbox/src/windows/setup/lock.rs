@@ -15,6 +15,14 @@
 //! that owned it ends. The set-up that died stopped between two of its steps, and the next run
 //! starts from what the record says, so taking the abandoned mutex is safe.
 //!
+//! **One namespace handle per process, shared.** A process may have a given private namespace
+//! open only once: while one handle lives, `CreatePrivateNamespaceW` finds it and
+//! `OpenPrivateNamespaceW` fails with `ERROR_DUP_NAME`. So every [`SetupMutex`] in this process
+//! claims the one handle in [`NAMESPACE_HANDLE`] (`shared.rs`): the first claim opens it, the last
+//! one dropped closes it, and both happen under the same lock, so no taker opens while a handle
+//! that is about to close still lives. A 52 that comes anyway means some other code in this
+//! process opened the namespace itself: [`MachineError::Other`], with that said.
+//!
 //! A mutex is owned by a thread: [`Held`] is released on the thread that acquired it, so it is
 //! not `Send`. The same thread acquiring twice succeeds (Windows mutexes are recursive); the
 //! set-up takes the lock once per run.
@@ -27,8 +35,8 @@ use std::marker::PhantomData;
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_NOT_FOUND, HANDLE, HLOCAL, LocalFree, WAIT_ABANDONED,
-    WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_DUP_NAME, ERROR_NOT_FOUND, HANDLE, HLOCAL, LocalFree,
+    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -43,6 +51,7 @@ use windows::core::{HRESULT, HSTRING, PCWSTR};
 
 use super::MachineError;
 use super::accounts::LocalSid;
+use super::shared::{Claim, Shared};
 use crate::windows::sids::Sid;
 
 /// The set-up lock's name inside [`NAMESPACE`].
@@ -65,6 +74,9 @@ pub(super) const OBJECT_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)";
 /// it and the open (its last holder closed it in between).
 const NAMESPACE_TRIES: usize = 3;
 
+/// This process's one handle to [`NAMESPACE`] (module doc).
+static NAMESPACE_HANDLE: Shared<Namespace> = Shared::new();
+
 /// How a wait for the lock ended when it got it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Acquired {
@@ -75,11 +87,12 @@ pub(super) enum Acquired {
 }
 
 /// The set-up lock, opened (made if no process has it open) but not yet held. Dropping it closes
-/// the mutex, then the namespace (fields drop in order).
+/// the mutex, then gives back its claim on the namespace (fields drop in order), which closes
+/// it when no other `SetupMutex` in this process holds it.
 #[derive(Debug)]
 pub(super) struct SetupMutex {
     mutex: Handle,
-    _namespace: Namespace,
+    _namespace: Claim<Namespace>,
 }
 
 impl SetupMutex {
@@ -87,7 +100,9 @@ impl SetupMutex {
     /// [`OBJECT_SDDL`] when they don't exist. An existing mutex keeps its own descriptor (Windows
     /// ignores the one passed). A token without Administrators enabled is refused the namespace.
     pub(super) fn open(name: &str) -> Result<SetupMutex, MachineError> {
-        let namespace = Namespace::open()?;
+        let namespace = NAMESPACE_HANDLE.claim(Namespace::open, || {
+            MachineError::Other("too many holders of the set-up lock's namespace".to_owned())
+        })?;
         let descriptor = Descriptor::from_sddl(OBJECT_SDDL)?;
         let attributes = attributes(&descriptor);
         let name = HSTRING::from(format!("{NAMESPACE}\\{name}"));
@@ -176,6 +191,14 @@ fn attributes(descriptor: &Descriptor) -> SECURITY_ATTRIBUTES {
 #[derive(Debug)]
 struct Namespace(HANDLE);
 
+// SAFETY: a private-namespace handle is a process-wide kernel handle that any thread may use or
+// close. It is only closed in `Drop`, and `NAMESPACE_HANDLE` drops it once, under its lock,
+// when its last claim goes.
+unsafe impl Send for Namespace {}
+// SAFETY: as for `Send`: no method takes `&Namespace` to change it, and the close takes it by
+// value under the lock.
+unsafe impl Sync for Namespace {}
+
 impl Namespace {
     /// Creates [`NAMESPACE`] bounded by Administrators, or opens it when it exists.
     fn open() -> Result<Namespace, MachineError> {
@@ -203,6 +226,11 @@ impl Namespace {
                 return Ok(Namespace(opened));
             }
             let error = windows::core::Error::from_thread();
+            if error.code() == HRESULT::from_win32(ERROR_DUP_NAME.0) {
+                return Err(MachineError::Other(
+                    "other code in this process holds the set-up lock's namespace open".to_owned(),
+                ));
+            }
             if error.code() != HRESULT::from_win32(ERROR_NOT_FOUND.0) {
                 return Err(os("OpenPrivateNamespaceW", &error));
             }

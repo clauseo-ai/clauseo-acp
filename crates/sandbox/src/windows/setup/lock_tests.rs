@@ -125,6 +125,51 @@ fn the_machines_lock_refuses_a_second_set_up_until_unlocked() {
 }
 
 #[test]
+fn two_openers_in_one_process_share_the_namespace() {
+    let Some(name) = unique_mutex() else {
+        return;
+    };
+    let (first, acquired) = SetupMutex::open(&name).unwrap().acquire(0).unwrap();
+    assert_eq!(acquired, Acquired::Free);
+    // A second opener in this process, on another thread while the first holds the namespace
+    // and the lock, opens without ERROR_DUP_NAME and is refused the lock. (On the same thread
+    // it would get it: Windows mutexes are recursive.)
+    let refused =
+        thread::spawn(move || SetupMutex::open(&name).and_then(|mutex| mutex.acquire(0).map(drop)))
+            .join()
+            .unwrap();
+    assert!(
+        matches!(refused, Err(MachineError::LockHeld)),
+        "{refused:?}"
+    );
+    drop(first);
+}
+
+#[test]
+fn open_and_drop_in_a_loop_never_dup_names() {
+    let Some(name) = unique_mutex() else {
+        return;
+    };
+    let takers: Vec<_> = (0..2)
+        .map(|_| {
+            let name = name.clone();
+            thread::spawn(move || {
+                for _round in 0..200 {
+                    match SetupMutex::open(&name).and_then(|mutex| mutex.acquire(0)) {
+                        Ok((held, _)) => drop(held),
+                        Err(MachineError::LockHeld) => {}
+                        Err(error) => panic!("{error:?}"),
+                    }
+                }
+            })
+        })
+        .collect();
+    for taker in takers {
+        taker.join().unwrap();
+    }
+}
+
+#[test]
 fn the_real_lock_is_named_inside_the_private_namespace() {
     assert_eq!(Names::production().mutex, "SetupLock");
     assert!(!Names::production().mutex.contains('\\'));
