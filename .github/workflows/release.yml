@@ -937,6 +937,9 @@ jobs:
     name: measure-builds (${{ matrix.target }})
     needs: [check, ui]
     runs-on: ${{ matrix.runner }}
+    # A release without macOS ships nothing from macOS, so a macOS leg GitHub can't run does not
+    # fail it (macOS arm64 runners are sometimes not acquired at all).
+    continue-on-error: ${{ matrix.runner == 'macos-15' && needs.check.outputs.macos == 'false' }}
     timeout-minutes: 90
     permissions:
       contents: read
