@@ -64,8 +64,8 @@ pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
 }
 
 /// Makes the folder `path` (its parent must exist) with [`sddl`]'s protected DACL for this
-/// process's user in place from the start (`CreateDirectoryW` with the descriptor). `Ok(false)`
-/// when something is there already, which this leaves to [`protect`].
+/// thread's user (`current_user_sid`) in place from the start (`CreateDirectoryW` with the
+/// descriptor). `Ok(false)` when something is there already, which this leaves to [`protect`].
 pub(crate) fn create(path: &Path) -> io::Result<bool> {
     let user = current_user_sid()?;
     let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;

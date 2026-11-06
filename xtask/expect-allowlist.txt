@@ -162,6 +162,9 @@ crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
+# secrets.bin (S15 PR4g): user-scope DPAPI, and the set-up owner's parent token and impersonation.
+crates/sandbox/src/windows/secrets/dpapi.rs - unsafe_code
+crates/sandbox/src/windows/setup/owner/token.rs - unsafe_code
 # The set-aside's folders opened and items renamed by handle (src/windows/set_aside/ntfs.rs).
 crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
