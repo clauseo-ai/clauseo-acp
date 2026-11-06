@@ -10,8 +10,13 @@
 #
 # Per event:
 # - pull_request (opened, synchronize, reopened, labeled) and pull_request_review (submitted): the
-#   job `decide` picks one of five modes, and `build` acts on it:
-#   - nochange: the run is not relevant (below): `windows tests (PR), no change` passes.
+#   job `decide` picks one of six modes, and `build` acts on it:
+#   - covered: another run already passed `windows tests (PR)` for this head commit (the label
+#     `ready` added after a push, an approval after the label, any other label or review): the
+#     check passes in seconds on ubuntu and names that run. Nothing is tested twice.
+#   - failed: a label or review that cannot change the result (any label but `ready`, a review that
+#     does not approve, an approval while `ready` is on), and the commit's last result failed: the
+#     check fails again in seconds, naming that run.
 #   - norust: the pull request changes no Rust (.github/scripts/changes.sh's `rust`, the output
 #     ci.yml's build jobs read): the check passes in seconds on ubuntu.
 #   - run: the label `ready`, the review that started the run is an approval, or an approval of
@@ -31,17 +36,15 @@
 #   change, as in ci.yml.
 # - Every action is pinned by commit SHA, with its tag in a comment, copied from ci.yml.
 #
-# Relevant runs. Only some events can change the outcome: a merge group, a push to the
-# pull request (opened, synchronize, reopened), the label `ready` being added, or an approval while
-# the label is off (with it on, the labeled or synchronize run already tested the head). Any other
-# label or review, or an approval after `ready`, would otherwise cancel the pull request's run or
-# start a new one, turning a passed check back to pending while auto-merge waits on it. Such a run
-# is not relevant: it gets a concurrency group of its own (`-<run id>`), so it cancels nothing, and
-# `decide` gives it the mode nochange: `build` then passes in seconds on ubuntu under another name,
-# `windows tests (PR), no change`. It is not skipped: the newest check run of a name decides the
-# required check and a skipped one counts as passed, and a skipped job's name shows unevaluated.
-# The expression is repeated in the concurrency group and in decide's RELEVANT (a workflow env
-# reaches neither); keep the two copies equal.
+# No run is cancelled for an event on the same head commit. GitHub reads a required check from
+# the newest run of the workflow, and cancel-in-progress does not cancel in the order the runs were
+# made: on #508 (2026-11-06) the opened and labeled runs of a pull request opened with `ready`
+# started together, the newer one was cancelled before its jobs began, and the check stayed
+# "expected" though the older one had passed (GitHub's answer to the same report:
+# github.com/orgs/community/discussions/77942). So the concurrency group is the pull request and
+# its head commit, with cancel-in-progress off: a second run for the same commit waits for the
+# first, then finds its result and is `covered` (or `failed`). Runs for an older head of the same
+# pull request are cancelled by `decide` (actions: write), as cancel-in-progress did before.
 
 name: windows-pr-tests
 
@@ -57,19 +60,25 @@ permissions:
   contents: read
   pull-requests: read
 
-# A pull request keeps only its newest relevant run; each merge group, and each run that is not
-# relevant, has a group of its own.
+# One group per pull request and head commit, nothing cancelled in it (the note at the top); each
+# merge group has a group of its own.
 concurrency:
-  group: windows-pr-tests-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}${{ !(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready'))) && format('-{0}', github.run_id) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_review' }}
+  group: windows-pr-tests-${{ github.event.pull_request.number && format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('{0}-{1}', github.event_name, github.sha) }}
+  cancel-in-progress: false
 
 jobs:
   decide:
     name: decide
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # actions: write, to cancel this pull request's runs for an older head.
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
+      prior: ${{ steps.mode.outputs.prior }}
     steps:
       # changes.sh as the base branch has it, not as the pull request changes it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,6 +98,8 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_ID: ${{ github.run_id }}
           READY: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
           REVIEW_STATE: ${{ github.event.review.state }}
           RELEVANT: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
@@ -96,8 +107,43 @@ jobs:
           set -euo pipefail
           mode() { echo "mode=$1" | tee -a "$GITHUB_OUTPUT"; exit 0; }
           if [ "$EVENT" = merge_group ]; then mode merge_group; fi
-          # A label or review that cannot change the result (the note at the top).
-          if [ "$RELEVANT" != true ]; then mode nochange; fi
+
+          # This pull request's unfinished runs for an older head are obsolete (the note at the
+          # top). A failure here only leaves them running.
+          if older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
+              -f branch="$HEAD_REF" -f per_page=50 \
+              -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
+            for id in $older; do
+              if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
+                echo "Cancelled run $id, for an older head."
+              else
+                echo "::warning::Could not cancel run $id, for an older head"
+              fi
+            done
+          else
+            echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+          fi
+
+          # The newest finished `windows tests (PR)` of another run for this head commit. A rerun
+          # of this run does not count, so it tests again.
+          if ! prior=$(gh api -X GET "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+              -f check_name="windows tests (PR)" -f filter=all -f per_page=100 \
+              -q "[.check_runs[] | select(.status == \"completed\" and (.details_url | contains(\"/runs/$RUN_ID/\") | not))]
+                  | sort_by(.completed_at) | last // empty | \"\(.conclusion) \(.details_url)\""); then
+            echo "::warning::The check runs API failed; deciding without this commit's earlier result"
+            prior=""
+          fi
+          if [ -n "$prior" ]; then
+            echo "This commit's last result: $prior"
+            echo "prior=${prior#* }" >> "$GITHUB_OUTPUT"
+          fi
+          case "$prior" in
+            "success "*) mode covered ;;
+            "failure "* | "timed_out "*)
+              # A label or review that cannot change the result keeps the failure.
+              if [ "$RELEVANT" != true ]; then mode failed; fi
+              ;;
+          esac
 
           # The files API lists a rename's new path; previous_filename adds the old one, as
           # `git diff --no-renames` would. A path with a newline in it splits into paths no rule
@@ -140,7 +186,7 @@ jobs:
 
   # The job id must stay `build`: see the note at the top.
   build:
-    name: ${{ needs.decide.outputs.mode == 'nochange' && 'windows tests (PR), no change' || 'windows tests (PR)' }}
+    name: windows tests (PR)
     needs: decide
     # Never skipped as a whole, a failed `decide` included (its mode is then run).
     if: ${{ !cancelled() }}
@@ -160,9 +206,19 @@ jobs:
         if: env.MODE == 'merge_group'
         run: echo "covered by build (x86_64-pc-windows-msvc) in this merge group"
 
-      - name: No change, this event cannot change the result
-        if: env.MODE == 'nochange'
-        run: echo "a label or review that cannot change the result; windows tests (PR) keeps this pull request's last result"
+      - name: Covered by an earlier run of this commit
+        if: env.MODE == 'covered'
+        env:
+          PRIOR: ${{ needs.decide.outputs.prior }}
+        run: echo "windows tests (PR) already passed for this commit in $PRIOR"
+
+      - name: The last result for this commit failed
+        if: env.MODE == 'failed'
+        env:
+          PRIOR: ${{ needs.decide.outputs.prior }}
+        run: |
+          echo "::error title=windows tests (PR) failed for this commit::Its last result failed: $PRIOR. A label other than ready, or a review that does not approve, does not run the tests: add the label ready, push a fix, or re-run that job."
+          exit 1
 
       - name: Skip, no Rust change
         if: env.MODE == 'norust'
