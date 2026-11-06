@@ -195,9 +195,6 @@ struct Namespace(HANDLE);
 // close. It is only closed in `Drop`, and `NAMESPACE_HANDLE` drops it once, under its lock,
 // when its last claim goes.
 unsafe impl Send for Namespace {}
-// SAFETY: as for `Send`: no method takes `&Namespace` to change it, and the close takes it by
-// value under the lock.
-unsafe impl Sync for Namespace {}
 
 impl Namespace {
     /// Creates [`NAMESPACE`] bounded by Administrators, or opens it when it exists.
