@@ -92,8 +92,8 @@ pub(crate) struct SigninJob<T> {
     pub(crate) task: Task,
     pub(crate) vendor: Vendor,
     pub(crate) config: AgentsConfig,
-    /// The agent's install: `node` runs `script`. `None` only for a queued task until its
-    /// install is `Ready` ([`run`] fills it in before any run).
+    /// The agent's install: `node` runs [`SigninJob::script`]. `None` only for a queued task
+    /// until its install is `Ready` ([`run`] fills it in before any run).
     pub(crate) installed: Option<Installed>,
     /// The agent's home, `SigninConfig::homes`' text.
     pub(crate) home: PathBuf,
@@ -159,6 +159,16 @@ pub(crate) fn run<T: Timer + Send + Sync>(
     }
 }
 
+/// A script's file name for the log (`codex.js`, `index.js`): one of the two known names, so
+/// no part of a path ever reaches the log.
+fn cli_file_name(script: &std::path::Path) -> &'static str {
+    match script.file_name().and_then(|name| name.to_str()) {
+        Some("codex.js") => "codex.js",
+        Some("index.js") => "index.js",
+        _ => "other",
+    }
+}
+
 impl<T: Timer + Send + Sync> SigninJob<T> {
     async fn work(&self, paste: Option<async_channel::Receiver<PasteCode>>) -> Option<SigninState> {
         if !self.shared.signin.is_job(&self.ticket) {
@@ -170,6 +180,19 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             &self.config.data_dir,
             &self.home,
         ));
+        let Some(script) = self.script() else {
+            // Codex's CLI is not in the install: nothing runs, so the adapter is never asked. A
+            // sign-in the lawyer started fails; any other task reads as not signed in.
+            self.note(SigninNote::CliMissing);
+            return Some(if self.task.signs_in() {
+                self.failed(SigninCode::Failed)
+            } else {
+                SigninState::SignedOut { found: None }
+            });
+        };
+        self.note(SigninNote::CliResolved {
+            file: cli_file_name(&script),
+        });
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
                 Some(claude::sign_in(self, method == Method::Console, paste).await)
@@ -247,19 +270,34 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         })
     }
 
-    /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`.
+    /// The script every run of this job gives Node: for Claude the adapter's (its `--cli` runs
+    /// Claude Code), for Codex the Codex CLI's `codex.js` ([`Installed::codex_cli`]), never the
+    /// adapter's, which ignores the CLI's commands and exits 0. `None` with no install, or
+    /// when Codex's CLI is not in it.
+    pub(crate) fn script(&self) -> Option<PathBuf> {
+        let installed = self.installed.as_ref()?;
+        match self.vendor {
+            Vendor::Claude => Some(installed.script.clone()),
+            Vendor::Codex => installed.codex_cli(),
+        }
+    }
+
+    /// `<node> <script> args…` in the agent's home, with `env`, killed past `limit`;
+    /// `script` is [`SigninJob::script`].
     pub(crate) fn spec<A: Into<OsString>>(
         &self,
         args: impl IntoIterator<Item = A>,
         env: BTreeMap<OsString, OsString>,
         limit: Duration,
     ) -> RunSpec {
-        // Always set by now: a task without an install is refused or waits in `run`.
-        let (node, script) = self
+        // Always set by now: a task without an install is refused or waits in `run`, and `work`
+        // ends a job whose script is missing before any run. An empty path never starts.
+        let node = self
             .installed
             .as_ref()
-            .map(|installed| (installed.node.clone(), installed.script.clone()))
+            .map(|installed| installed.node.clone())
             .unwrap_or_default();
+        let script = self.script().unwrap_or_default();
         RunSpec {
             node,
             script,

@@ -38,21 +38,14 @@ const APP_SERVER_OVERRIDES: [&str; 6] = [
     "skills.include_instructions=false",
 ];
 
-/// The account and plan `account/read` gives, or none of either when the app-server does not
-/// answer, answers with an error, or names no `ChatGPT` account. Login status already said
-/// signed in; the identity only fills in who.
-pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) -> Identity {
-    read_as(job, cancel, RunKind::Own { home: &job.home }, &job.home)
-        .await
-        .unwrap_or_default()
-}
-
-/// `account/read` with `kind`'s environment and store argument, in `cwd`: detection's (no
-/// store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a reused session's.
-/// `None` when there was no answer: the app-server did not start, answered with an error, or
-/// was cut short by its 10 s limit or by Cancel. An answer with no `ChatGPT` account (an API
-/// key, say) is `Some` with neither email nor plan: "no email" is told apart from "the read
-/// failed", and detection never takes a failed read for a login with no email.
+/// `account/read` with `kind`'s environment and store argument, in `cwd`: Clauseo's own,
+/// detection's (no store argument, the lawyer's own `~/.codex`, an empty Clauseo folder) or a
+/// reused session's. `Some` only for an answer that names an account: a `ChatGPT` one gives
+/// its email and plan, any other (an API key, say) neither, so "no email" is told apart from
+/// "the read failed". `None` when the app-server did not start, answered either call with a
+/// JSON-RPC error (codex-acp's adapter answers `initialize` with -32602), answered with
+/// `account: null` (signed out), or was cut short by its 10 s limit or by Cancel: never a
+/// login, and detection never takes it for one with no email.
 pub(crate) async fn read_as<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
@@ -60,6 +53,7 @@ pub(crate) async fn read_as<T: Timer + Send + Sync>(
     cwd: &Path,
 ) -> Option<Identity> {
     let answered = account(job, cancel, kind, cwd).await?;
+    answered.account.as_ref()?;
     Some(codex_identity(&answered).unwrap_or_default())
 }
 

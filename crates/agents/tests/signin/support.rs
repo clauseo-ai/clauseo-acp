@@ -1,6 +1,8 @@
 //! The fixture every sign-in test starts from: `Agents` on the embedded snapshot, with Claude's
 //! and Codex's installs taken as ready (`ready_for_tests`) and their CLIs played by `fake_agent`
-//! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode),
+//! (a script named `claude-cli` picks its Claude CLI mode, one named `codex.js` its Codex mode;
+//! Codex's install is laid out as npm does it, the adapter's `codex-acp/dist/index.js`, which the
+//! fake plays as the adapter, beside the CLI's `@openai/codex/bin/codex.js`),
 //! Codex's callback port moved to one that is always free (port 0); a clearing launcher that
 //! records each run's arguments and pid; a timer whose waits the test ends one by one, by
 //! duration; a fixed clock; and a test resolver, online until the test says otherwise, which
@@ -18,11 +20,26 @@ use std::time::{Duration, SystemTime};
 use clauseo_agents::testing::{TempDir, installed, write_file};
 use clauseo_agents::{
     Agents, AgentsConfig, AgentsEvent, Clock, InstallState, Installed, NodeSearch, Platform,
-    SigninNote, SigninState, TestResolver,
+    TestResolver,
 };
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, Timer};
 use clauseo_protocol::AgentId;
 use futures::channel::oneshot;
+
+pub(crate) use crate::events::{Events, Seen};
+
+/// codex-acp's adapter script and the Codex CLI's `codex.js` in an install folder, as npm lays
+/// them out.
+pub(crate) const CODEX_ADAPTER: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
+pub(crate) const CODEX_CLI: &str = "node_modules/@openai/codex/bin/codex.js";
+
+/// `root` joined with the `/`-separated `parts`, one at a time, so it is spelled with the OS's
+/// separator.
+pub(crate) fn under(root: &Path, parts: &str) -> PathBuf {
+    parts
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
 
 /// The waits of a Claude sign-in.
 pub(crate) const POLL: Duration = Duration::from_millis(1500);
@@ -113,7 +130,7 @@ impl Timer for KeyedTimer {
     }
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -262,8 +279,13 @@ impl Fixture {
             .expect("build fake_agent first: cargo build -p clauseo-fake_agent");
         let cli = root.join("adapter").join("claude-cli");
         write_file(&cli, b"").unwrap();
-        let codex_js = root.join("codex").join("codex.js");
-        write_file(&codex_js, b"").unwrap();
+        // Codex's install as npm lays it out: the adapter's script, which `Installed::script`
+        // names and the fake plays as codex-acp's adapter, and the Codex CLI beside it, the only
+        // file named `codex.js`, which the engine must find and run for every Codex command.
+        let codex_folder = root.join("codex");
+        let adapter = under(&codex_folder, CODEX_ADAPTER);
+        write_file(&adapter, b"").unwrap();
+        write_file(&under(&codex_folder, CODEX_CLI), b"").unwrap();
         let mut config = AgentsConfig::new(root.to_path_buf(), Platform::current().unwrap());
         config.node_search = NodeSearch::none();
         config.clock = Arc::new(FixedClock);
@@ -271,10 +293,9 @@ impl Fixture {
             claude(),
             installed(bin.clone(), cli, root.join("adapter"), "0.0.0-test"),
         );
-        config.ready_for_tests.insert(
-            codex(),
-            installed(bin, codex_js, root.join("codex"), "0.0.0-test"),
-        );
+        config
+            .ready_for_tests
+            .insert(codex(), installed(bin, adapter, codex_folder, "0.0.0-test"));
         config
             .signin
             .homes
@@ -393,11 +414,7 @@ impl Fixture {
     }
 
     fn events(agent: AgentId, events: async_channel::Receiver<AgentsEvent>) -> Events {
-        Events {
-            rx: events,
-            agent,
-            notes: Mutex::default(),
-        }
+        Events::new(agent, events)
     }
 
     /// From now on, runs whose arguments hold `word` (`app-server`, `status`) never answer
@@ -464,107 +481,6 @@ impl Fixture {
             .map(|entry| entry.unwrap().path())
             .filter(|path| path.file_name().is_some_and(|name| name != "browser"))
             .collect()
-    }
-}
-
-/// A sign-in event.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Seen {
-    State(SigninState),
-    Open(String),
-}
-
-/// One agent's events, read by blocking. Install events and other agents' are skipped; the
-/// agent's sign-in notes are kept aside ([`Events::notes`]).
-pub(crate) struct Events {
-    rx: async_channel::Receiver<AgentsEvent>,
-    agent: AgentId,
-    notes: Mutex<Vec<SigninNote>>,
-}
-
-impl Events {
-    fn until_install_ready(&self) {
-        let state = self.install_state();
-        assert!(matches!(state, InstallState::Ready { .. }), "{state:?}");
-    }
-
-    /// The agent's next install state; sign-in events before it are dropped.
-    pub(crate) fn install_state(&self) -> InstallState {
-        loop {
-            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
-            if let AgentsEvent::Install { agent, state } = event
-                && agent == self.agent
-            {
-                return state;
-            }
-        }
-    }
-
-    /// The next sign-in event for the agent.
-    pub(crate) fn next(&self) -> Seen {
-        loop {
-            let event = futures::executor::block_on(self.rx.recv()).expect("the events closed");
-            match event {
-                AgentsEvent::Signin { agent, state } if agent == self.agent => {
-                    return Seen::State(state);
-                }
-                AgentsEvent::OpenUrl { agent, url } if agent == self.agent => {
-                    return Seen::Open(url);
-                }
-                AgentsEvent::SigninNote { agent, note } if agent == self.agent => {
-                    lock(&self.notes).push(note);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Events up to and including the first state for which `done` holds.
-    pub(crate) fn until(&self, done: impl Fn(&SigninState) -> bool) -> Vec<Seen> {
-        let mut seen = Vec::new();
-        loop {
-            let next = self.next();
-            let last = matches!(&next, Seen::State(state) if done(state));
-            seen.push(next);
-            if last {
-                return seen;
-            }
-        }
-    }
-
-    /// Events up to the run's last state (`SignedIn`, `SignedOut` or `Failed`), and that state.
-    pub(crate) fn until_end(&self) -> (Vec<Seen>, SigninState) {
-        let seen = self.until(|state| {
-            matches!(
-                state,
-                SigninState::SignedIn { .. }
-                    | SigninState::SignedOut { .. }
-                    | SigninState::Failed { .. }
-            )
-        });
-        let Some(Seen::State(last)) = seen.last().cloned() else {
-            unreachable!()
-        };
-        (seen, last)
-    }
-
-    /// The next sign-in state for the agent, `OpenUrl` skipped.
-    pub(crate) fn state(&self) -> SigninState {
-        loop {
-            if let Seen::State(state) = self.next() {
-                return state;
-            }
-        }
-    }
-
-    /// The agent's sign-in notes read so far.
-    pub(crate) fn notes(&self) -> Vec<SigninNote> {
-        lock(&self.notes).clone()
-    }
-
-    /// Every event already sent, without waiting, Install events included.
-    pub(crate) fn drain(&self) -> Vec<AgentsEvent> {
-        std::iter::from_fn(|| self.rx.try_recv().ok()).collect()
     }
 }
 

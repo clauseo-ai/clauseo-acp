@@ -1,8 +1,16 @@
 //! Codex's flow: a hidden `node <codex.js> -c cli_auth_credentials_store="file" login` (or
-//! `login --device-auth`) in Clauseo's own `CODEX_HOME`, confirmed by `login status`, with the
-//! account read from `app-server`'s `account/read`; signed out by `logout` (the brief, "Codex's
-//! commands"). Every run here has the Own environment: `CODEX_HOME` and, on macOS and Linux,
-//! `HOME` set to the agent's home, `CODEX_API_KEY=""`, and `SSL_CERT_FILE` for the agent's CA.
+//! `login --device-auth`) in Clauseo's own `CODEX_HOME`, confirmed by `login status` and then
+//! `app-server`'s `account/read`; signed out by `logout` (the brief, "Codex's commands").
+//! `codex.js` is the Codex CLI in the install (`Installed::codex_cli`), never the install's
+//! `script`, which is codex-acp's ACP adapter: it ignores these commands and exits 0.
+//!
+//! **Confirmed** ([`confirm`]) means both: `login status` exited 0 with its `Logged in using …`
+//! line, and `account/read` then named an account. Exit 0 alone, a run that timed out, a
+//! JSON-RPC error and `account: null` all confirm nothing, and nothing unconfirmed is ever
+//! `SignedIn` (or writes `login-source`).
+//!
+//! Every run here has the Own environment: `CODEX_HOME` and, on macOS and Linux, `HOME` set to
+//! the agent's home, `CODEX_API_KEY=""`, and `SSL_CERT_FILE` for the agent's CA.
 //!
 //! **Browser** (`Method::Browser`): before the run, `127.0.0.1:1455` (the callback port) is bound
 //! and let go at once. Taken: no run, `Failed { code: PortBusy }`. "Try again" ([`try_again`])
@@ -16,12 +24,13 @@
 //!
 //! While a login runs the state is `Waiting { since, nudge: false }` (no nudge: the screen offers
 //! "Use a code instead" from the start), and `login status` is polled every 1.5 s with a 5 s
-//! limit, as for Claude; exit 0 is signed in. The first poll that says so kills the login; then
-//! one `account/read` gives `SignedIn { email, plan, source: Own, at }`. It ends otherwise:
+//! limit, as for Claude. The first poll that says signed in kills the login; then [`confirm`]
+//! gives `SignedIn { email, plan, source: Own, at }`, or `signin.failed` when it does not
+//! confirm. It ends otherwise:
 //! - on Cancel or a newer job, killed: `signin.cancelled`;
 //! - at the run's limit (10 minutes, 20 for device code, whose code expires first), killed:
 //!   `signin.link_expired`;
-//! - by exiting 0: one more status run decides between `SignedIn` and `signin.failed`;
+//! - by exiting 0: [`confirm`] decides between `SignedIn` and `signin.failed`;
 //! - by exiting otherwise: `signin.device_code_off`, `signin.port_busy` or `signin.cancelled`
 //!   when a line said so, else `signin.failed`.
 //!
@@ -48,8 +57,8 @@ use crate::signin::claude::{LOGIN_LIMIT, LOGOUT_LIMIT, POLL, STATUS_LIMIT, is_ca
 use crate::signin::env::{RunKind, codex_store_args};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
-use crate::signin::{Method, SigninCode, SigninState, Source};
-use crate::status::{Identity, codex_logged_in};
+use crate::signin::{Method, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
+use crate::status::{Identity, codex_logged_in, codex_says_logged_in};
 
 /// How often "Try again" probes the callback port.
 pub(crate) const PORT_POLL: Duration = Duration::from_secs(2);
@@ -210,19 +219,104 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
         }
     };
     match first {
-        First::Confirmed => signed_in(job, identity::read(job, cancel).await),
+        First::Confirmed => confirmed_or_failed(job, cancel, true).await,
         First::Expired => job.failed(SigninCode::LinkExpired),
-        First::Ran(Err(_)) => job.failed(SigninCode::Failed),
-        First::Ran(Ok(ran)) => match ran.ended {
-            Ended::Cancelled => job.failed(SigninCode::Cancelled),
-            Ended::TimedOut => job.failed(SigninCode::LinkExpired),
-            Ended::Exited(Some(0)) => match status(job, cancel).await {
-                Some(true) => signed_in(job, identity::read(job, cancel).await),
-                _ if cancel.is_cancelled() => job.failed(SigninCode::Cancelled),
-                _ => job.failed(SigninCode::Failed),
-            },
-            Ended::Exited(_) => job.failed(refusal(&said)),
-        },
+        First::Ran(Err(_)) => {
+            job.note(SigninNote::LoginExited { code: None });
+            job.failed(SigninCode::Failed)
+        }
+        First::Ran(Ok(ran)) => {
+            if let Ended::Exited(code) = ran.ended {
+                job.note(SigninNote::LoginExited { code });
+            }
+            match ran.ended {
+                Ended::Cancelled => job.failed(SigninCode::Cancelled),
+                Ended::TimedOut => job.failed(SigninCode::LinkExpired),
+                Ended::Exited(Some(0)) => confirmed_or_failed(job, cancel, false).await,
+                Ended::Exited(_) => job.failed(refusal(&said)),
+            }
+        }
+    }
+}
+
+/// The end of a login the lawyer started: [`confirm`]'s `SignedIn`, else `signin.cancelled`
+/// when it was cancelled meanwhile, else `signin.failed`. Only such a sign-in may fail; a
+/// status check that confirms nothing is never `Failed`. `polled`: a poll's `login status`
+/// just said signed in, so only `account/read` is left to confirm.
+async fn confirmed_or_failed<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    polled: bool,
+) -> SigninState {
+    let own = RunKind::Own { home: &job.home };
+    let confirmation = if polled {
+        confirm_account(job, cancel, own, &job.home).await
+    } else {
+        confirm(job, cancel, own, &job.home).await
+    };
+    match confirmation {
+        Confirmation::Confirmed(identity) => signed_in(job, identity),
+        _ if cancel.is_cancelled() => job.failed(SigninCode::Cancelled),
+        Confirmation::SignedOut | Confirmation::Unknown => job.failed(SigninCode::Failed),
+    }
+}
+
+/// What [`confirm`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Confirmation {
+    /// `login status` said signed in and `account/read` named this account.
+    Confirmed(Identity),
+    /// `login status` said signed out: it exited non-zero (`Not logged in`, exit 1).
+    SignedOut,
+    /// Nothing either way: no answer, exit 0 with no signed-in line, or no account read.
+    Unknown,
+}
+
+/// Codex's own confirmation of a login under `kind`'s environment in `cwd`: `login status`
+/// exits 0 with its signed-in line, then `account/read` names an account. Logs the outcome as
+/// a note, by a fixed word and never the account.
+pub(crate) async fn confirm<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+) -> Confirmation {
+    let not = |reason| {
+        job.note(SigninNote::StatusNotConfirmed { reason });
+    };
+    match status_run(job, cancel, kind, cwd).await {
+        StatusSaid::LoggedIn => confirm_account(job, cancel, kind, cwd).await,
+        StatusSaid::SignedOut => {
+            not(Unconfirmed::SignedOut);
+            Confirmation::SignedOut
+        }
+        StatusSaid::NoMarker => {
+            not(Unconfirmed::NoMarker);
+            Confirmation::Unknown
+        }
+        StatusSaid::NoAnswer => {
+            not(Unconfirmed::NoAnswer);
+            Confirmation::Unknown
+        }
+    }
+}
+
+/// [`confirm`]'s second half, once `login status` said signed in: `account/read` must name
+/// an account.
+async fn confirm_account<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+) -> Confirmation {
+    if let Some(identity) = identity::read_as(job, cancel, kind, cwd).await {
+        job.note(SigninNote::StatusConfirmed);
+        Confirmation::Confirmed(identity)
+    } else {
+        job.note(SigninNote::StatusNotConfirmed {
+            reason: Unconfirmed::NoAccount,
+        });
+        Confirmation::Unknown
     }
 }
 
@@ -262,42 +356,68 @@ pub(crate) fn signed_in<T>(job: &SigninJob<T>, identity: Identity) -> SigninStat
     }
 }
 
-/// One `login status` in Clauseo's home: `Some(true)` signed in (exit 0), `Some(false)` not,
-/// `None` when it could not tell (no start, killed past 5 s, cancelled). Its output is never read.
+/// One `login status` in Clauseo's home, for the login's polls: `Some(true)` signed in (exit 0
+/// with the signed-in line), `Some(false)` not, `None` when it could not tell (no start,
+/// killed past 5 s, cancelled).
 pub(crate) async fn status<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
 ) -> Option<bool> {
-    let code = status_run(job, cancel, RunKind::Own { home: &job.home }, &job.home).await?;
-    Some(codex_logged_in(code))
+    match status_run(job, cancel, RunKind::Own { home: &job.home }, &job.home).await {
+        StatusSaid::LoggedIn => Some(true),
+        StatusSaid::SignedOut | StatusSaid::NoMarker => Some(false),
+        StatusSaid::NoAnswer => None,
+    }
 }
 
-/// One `login status` with `kind`'s environment and store argument, in `cwd`: its exit code,
-/// or `None` when it could not tell. Its output (stderr prints a masked key prefix) is never
-/// read.
+/// What one `login status` said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatusSaid {
+    /// Exit 0 with the `Logged in using …` line.
+    LoggedIn,
+    /// A non-zero exit (`Not logged in`, exit 1).
+    SignedOut,
+    /// Exit 0 with no signed-in line: not Codex's CLI answering (codex-acp's adapter exits 0 for
+    /// any arguments), so not a login.
+    NoMarker,
+    /// No answer: it did not start, was killed past its limit, or was cancelled.
+    NoAnswer,
+}
+
+/// One `login status` with `kind`'s environment and store argument, in `cwd`. Its lines are
+/// only checked for the signed-in start ([`codex_says_logged_in`]) and never kept: stderr
+/// prints a masked key prefix.
 pub(crate) async fn status_run<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
-) -> Option<Option<i32>> {
+) -> StatusSaid {
     let mut args = codex_store_args(kind);
     args.extend([OsString::from("login"), OsString::from("status")]);
     let mut spec = job.spec(args, job.env(kind, None), STATUS_LIMIT);
     spec.cwd = cwd.to_path_buf();
+    let said_in = AtomicBool::new(false);
     let ran = run(
         &*job.launcher,
         &*job.timer,
         spec,
         cancel,
         None,
-        |_: &str| {},
+        |line: &str| {
+            if codex_says_logged_in(line) {
+                said_in.store(true, Ordering::SeqCst);
+            }
+        },
     )
-    .await
-    .ok()?;
-    match ran.ended {
-        Ended::Exited(code) => Some(code),
-        Ended::TimedOut | Ended::Cancelled => None,
+    .await;
+    match ran.map(|ran| ran.ended) {
+        Ok(Ended::Exited(code)) if codex_logged_in(code, said_in.load(Ordering::SeqCst)) => {
+            StatusSaid::LoggedIn
+        }
+        Ok(Ended::Exited(Some(0))) => StatusSaid::NoMarker,
+        Ok(Ended::Exited(_)) => StatusSaid::SignedOut,
+        Ok(Ended::TimedOut | Ended::Cancelled) | Err(_) => StatusSaid::NoAnswer,
     }
 }
 
@@ -337,14 +457,16 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
     if cancel.is_cancelled() {
         return None;
     }
-    match status(job, cancel).await {
-        Some(true) => Some(signed_in(job, identity::read(job, cancel).await)),
-        Some(false) => Some(SigninState::SignedOut { found: None }),
-        // Status could not tell: a logout that exited 0 is taken at its word.
-        None => ran
+    match confirm(job, cancel, kind, &job.home).await {
+        Confirmation::Confirmed(identity) => Some(signed_in(job, identity)),
+        Confirmation::SignedOut => Some(SigninState::SignedOut { found: None }),
+        // Nothing confirmed: a logout that exited 0 is taken at its word; else the state is
+        // left as it is, unless that is `SignedIn`, which nothing confirms now.
+        Confirmation::Unknown => ran
             .ok()
             .filter(|ran| ran.ended == Ended::Exited(Some(0)))
-            .map(|_| SigninState::SignedOut { found: None }),
+            .map(|_| SigninState::SignedOut { found: None })
+            .or_else(|| super::found::unconfirmed(job)),
     }
 }
 

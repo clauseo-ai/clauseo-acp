@@ -97,7 +97,7 @@ pub enum SigninError {
 }
 
 /// Something the sign-in did that R20 writes to its log: `AgentsEvent::SigninNote`. No email,
-/// path or secret.
+/// path or secret: every field is a fixed word or a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SigninNote {
@@ -108,14 +108,81 @@ pub enum SigninNote {
     /// Codex's hard link could not be made (another volume, or any link error), so Clauseo's own
     /// sign-in runs instead.
     CodexLinkFailed,
+    /// A job found the CLI it runs: `file` is its file name only (`codex.js` for Codex).
+    CliResolved {
+        /// The script's file name.
+        file: &'static str,
+    },
+    /// Codex's CLI (`@openai/codex/bin/codex.js`) is not in the install, so nothing runs: a
+    /// sign-in fails, and a status check reads as not signed in.
+    CliMissing,
+    /// A login run ended: its exit code, `None` when it was killed or gave none.
+    LoginExited {
+        /// The exit code.
+        code: Option<i32>,
+    },
+    /// The vendor's own status confirmed a login.
+    StatusConfirmed,
+    /// The vendor's own status did not confirm a login.
+    StatusNotConfirmed {
+        /// Why.
+        reason: Unconfirmed,
+    },
+}
+
+/// Why a status did not confirm a login: a fixed word for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Unconfirmed {
+    /// The status said signed out.
+    SignedOut,
+    /// It exited 0 without its signed-in line.
+    NoMarker,
+    /// It gave no answer: no start, killed past its limit, or cancelled.
+    NoAnswer,
+    /// `account/read` named no account: an error, `account: null`, or no answer.
+    NoAccount,
+}
+
+impl Unconfirmed {
+    /// The log's word: `signed_out`, `no_marker`, `no_answer` or `no_account`.
+    pub fn word(self) -> &'static str {
+        match self {
+            Unconfirmed::SignedOut => "signed_out",
+            Unconfirmed::NoMarker => "no_marker",
+            Unconfirmed::NoAnswer => "no_answer",
+            Unconfirmed::NoAccount => "no_account",
+        }
+    }
 }
 
 impl SigninNote {
-    /// The log's name for it: `claude_reuse_fallback` or `codex_link_failed`.
+    /// The log's name for it: `claude_reuse_fallback`, `codex_link_failed`, `cli_resolved`,
+    /// `cli_missing`, `login_exited`, `status_confirmed` or `status_not_confirmed`.
     pub fn code(self) -> &'static str {
         match self {
             SigninNote::ClaudeReuseFallback => "claude_reuse_fallback",
             SigninNote::CodexLinkFailed => "codex_link_failed",
+            SigninNote::CliResolved { .. } => "cli_resolved",
+            SigninNote::CliMissing => "cli_missing",
+            SigninNote::LoginExited { .. } => "login_exited",
+            SigninNote::StatusConfirmed => "status_confirmed",
+            SigninNote::StatusNotConfirmed { .. } => "status_not_confirmed",
+        }
+    }
+
+    /// What the log adds after the code, when anything: the CLI's file name, `exit <code>`
+    /// (`exit none`), or the reason's word. Never an email, a path or a secret.
+    pub fn detail(self) -> Option<String> {
+        match self {
+            SigninNote::CliResolved { file } => Some(file.to_owned()),
+            SigninNote::LoginExited { code: Some(code) } => Some(format!("exit {code}")),
+            SigninNote::LoginExited { code: None } => Some("exit none".to_owned()),
+            SigninNote::StatusNotConfirmed { reason } => Some(reason.word().to_owned()),
+            SigninNote::ClaudeReuseFallback
+            | SigninNote::CodexLinkFailed
+            | SigninNote::CliMissing
+            | SigninNote::StatusConfirmed => None,
         }
     }
 }

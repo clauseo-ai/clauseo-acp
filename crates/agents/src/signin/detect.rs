@@ -68,21 +68,24 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
 }
 
 /// Codex's detection; `None` when it could not tell: a status run that could not, or, for a
-/// reusable login, an `account/read` that got no answer (cut short by Cancel or its limit, or
-/// an error). Such a read is never "no email": `LoginFound { email: None }` comes only from an
-/// answer that names no `ChatGPT` account.
+/// reusable login, an `account/read` that named no account (cut short by Cancel or its limit, a
+/// JSON-RPC error, or `account: null`). Such a read is never "no email": `LoginFound { email:
+/// None }` comes only from an answer that names an account other than a `ChatGPT` one.
 pub(crate) async fn codex<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
 ) -> Option<Detected> {
     let folder = folder(job)?;
-    let code = codex::status_run(job, cancel, RunKind::Detect, &folder).await?;
+    let said = codex::status_run(job, cancel, RunKind::Detect, &folder).await;
+    if said == codex::StatusSaid::NoAnswer {
+        return None;
+    }
     let present = job
         .config
         .signin
         .lawyer_home()
         .is_some_and(|lawyer| reuse::lawyer_login_present(&lawyer));
-    let verdict = CodexDetect::classify(code, present);
+    let verdict = CodexDetect::classify(said == codex::StatusSaid::LoggedIn, present);
     let identity = if verdict == CodexDetect::Reusable {
         identity::read_as(job, cancel, RunKind::Detect, &folder).await?
     } else {
