@@ -194,9 +194,18 @@ jobs:
           key: ubuntu-22.04
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Every pinned tool, as prebuilt binaries; nothing is built from source.
+      # Every pinned tool but cargo-mutants, whose prebuilt Linux binary needs glibc 2.39 (22.04 has
+      # 2.35); fast-lane's check never runs it: `cargo xtask mutants` does, in the mutants job on
+      # 24.04. The names come from xtask/src/setup.rs, so a new pin is installed here too.
+      - name: The pinned tools fast-lane uses
+        id: tools
+        run: echo "names=$(cargo xtask setup --list=json | jq -r '[.tools[].name, .binaries[].name] | unique | map(select(. != "cargo-mutants")) | join(" ")')" >> "$GITHUB_OUTPUT"
+
+      # As prebuilt binaries; nothing is built from source.
       - name: Install the pinned tools
         uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: ${{ steps.tools.outputs.names }}
 
       # The pre-push hook's script, alone and through the pinned lefthook with a local remote: a
       # push of deletes only passes without the check, every other push runs it.
