@@ -152,9 +152,16 @@ fn elevated_accounts_group_hidden_user_and_record() {
     machine.lock().unwrap();
 
     // A key already there, owned by this user with an open DACL: the first write takes it back.
+    // The SDDL text may name this user by an alias rather than its SID string (`LA` for the
+    // built-in Administrator, which the hosted runner's account is), so the check is that the
+    // owner is not Administrators and the open entry is there.
     let me = current_user_sid().unwrap();
     create_key_with(TEST_KEY, &format!("O:{me}D:(A;;KA;;;WD)")).unwrap();
-    assert!(key_sddl(TEST_KEY).unwrap().starts_with(&format!("O:{me}")));
+    let planted = key_sddl(TEST_KEY).unwrap();
+    assert!(
+        !planted.starts_with("O:BA") && planted.contains(";;;WD)"),
+        "{planted}"
+    );
 
     // The group.
     assert_eq!(machine.group(), Ok(None));
