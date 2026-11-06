@@ -253,6 +253,12 @@ build 26100):
     write keeps that right, and Windows can't revoke it, so it can still add an allow after.
     The next strict walk refuses that child as `BroadAllowChild`; PR4i and the per-session
     processes bound how long such a handle lives.
+  - Residual: a launch that hands back another registered matter's root (its fence) while that
+    matter's agent runs strips that matter's own `Modify` until the entries are written again, a
+    moment later. A write that fails is tried once more; failing again, its ledger entry is left
+    `pending`, logged once without a path, and the matter's next launch writes it. That matter's
+    agent may so lose write access to its own matter for the rest of its session: fail closed,
+    never open.
     `restore_set_aside` and the set-aside's moves hand the item's whole tree to the desktop user
     as well, whoever owns its top (a lawyer's folder the agent filled and renamed to `.git`). An
     `OWNER RIGHTS` deny was ruled out: it binds the lawyer too when the lawyer owns the item.

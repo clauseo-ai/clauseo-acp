@@ -479,6 +479,11 @@ impl Ledger {
         self.update(false, |state| Ok((held::mark_walked(state, ids), ())))
     }
 
+    /// Marks each of `ids` that is `applied` `pending` again (S15 `PR4h`, `held::mark_pending`).
+    pub(crate) fn mark_pending(&mut self, ids: &[EntryId]) -> io::Result<()> {
+        self.update(false, |state| Ok((held::mark_pending(state, ids), ())))
+    }
+
     /// Takes permission entries back, under one hold of the lock (the review's M3 and M4): each
     /// entry `pick` takes, read from the file now, is marked `removing` and the file
     /// written, before any removal. Then each one `pick` marks [`Take::Remove`] is handed to

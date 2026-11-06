@@ -1,6 +1,11 @@
 //! What the walk decides about one child before it touches it (S15 `PR3b` round 2): which writes
-//! it needs and in what order (N13), and which of them its handle has no right for (N3). Pure, so
+//! it needs and in what order, and which of them its handle has no right for (N3); and, after a
+//! hand-back, whether what it reads back is handed back ([`handed_back`], S15 `PR4h`). Pure, so
 //! it is tested on every OS.
+
+use std::io;
+
+use super::{Acl, Descriptor, broad_allow, owner_bytes};
 
 /// One write on a child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,4 +53,20 @@ pub(crate) fn lacking(writes: &[Write], write_dac: bool, write_owner: bool) -> O
             !write_dac
         }
     })
+}
+
+/// Whether a hand-back's descriptor, read back through its handle (`after`), is handed back:
+/// its owner is `me` (the desktop user), and its DACL holds no explicit allow for a pool SID of
+/// `pool` but `own` (the matter's own subjects), nor for a broad group ([`broad_allow`]).
+/// Inherited entries don't count. `false` refuses the item (S15 `PR4h`).
+pub(crate) fn handed_back(
+    after: &[u8],
+    pool: &[Vec<u8>],
+    own: &[Vec<u8>],
+    me: &[u8],
+) -> io::Result<bool> {
+    let others: Vec<Vec<u8>> = pool.iter().filter(|p| !own.contains(p)).cloned().collect();
+    let dacl = Descriptor::parse(after)?.dacl.map(Acl::parse).transpose()?;
+    let allowed = dacl.as_ref().is_some_and(|d| broad_allow(d, &others));
+    Ok(owner_bytes(after) == Some(me) && !allowed)
 }

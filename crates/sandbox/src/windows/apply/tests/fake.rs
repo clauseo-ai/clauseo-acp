@@ -83,6 +83,8 @@ pub(super) struct FakeAcl {
     /// Paths a pool user owns whose hand-back fails, as `NtfsAcl`'s does on a handle with no
     /// `WRITE_OWNER` ([`ApplyFailure::ChildShut`]); they keep their owner (S15 `PR4h`).
     pub(super) keeps_owner: BTreeSet<PathBuf>,
+    /// The next this many adds of an allow on this path fail (S15 `PR4h`).
+    pub(super) fail_allow: Option<(PathBuf, u32)>,
 }
 
 /// The owner the fake's hand-back gives: the desktop user.
@@ -195,6 +197,14 @@ impl AclWriter for FakeAcl {
             if self.fail_add_once {
                 self.fail_add = None;
             }
+            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
+        if let Some((path, left)) = self.fail_allow.as_mut()
+            && *left > 0
+            && path == grant.path()
+            && grant.rights().is_allow()
+        {
+            *left -= 1;
             return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
         }
         if let Some((_, failure)) = self

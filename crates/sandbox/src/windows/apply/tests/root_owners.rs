@@ -212,18 +212,15 @@ fn growing_the_pool_hands_back_a_registered_root_its_own_user_owns() {
     }
 }
 
-/// The root hand-back strips the pool's explicit allows, the matter's own `Modify` included,
-/// which the ledger lists as applied. An extend's fence-only plan doesn't plan that grant, so
-/// the hand-back writes the root's listed entries again at once.
-#[test]
-fn an_extends_root_hand_back_puts_the_matters_own_grants_back() {
-    let w = world("root-owners-extend-own", &[]);
-    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+/// Matter one's launch applied, then its root owned by its own pool user, and matter one and
+/// two registered for an extend's fence over the whole pool.
+fn launched_then_owned(w: &World) -> (Ledger, FakeAcl, [RegisteredMatter; 2], PathBuf) {
+    let (mut ledger, mut acl) = (ledger(w), FakeAcl::default());
     apply(
         &mut ledger,
-        &mut launch_plan(&w, &[]),
+        &mut launch_plan(w, &[]),
         &mut acl,
-        &mut around(&w),
+        &mut around(w),
     )
     .unwrap();
     let matter = w.canonical("matter");
@@ -239,12 +236,27 @@ fn an_extends_root_hand_back_puts_the_matters_own_grants_back() {
         pool_user: sid(USER_SID),
         fenced: true,
     };
-    let registered = [one, matter_two_at(&w)];
-    let pool = [
+    (ledger, acl, [one, matter_two_at(w)], matter)
+}
+
+/// Every pool SID of the test world.
+fn whole_pool() -> [Sid; 3] {
+    [
         sid(USER_SID),
         sid(OTHER_POOL_SIDS[0]),
         sid(OTHER_POOL_SIDS[1]),
-    ];
+    ]
+}
+
+/// The root hand-back strips the pool's explicit allows, the matter's own `Modify` included,
+/// which the ledger lists as applied. An extend's fence-only plan doesn't plan that grant, so
+/// the hand-back writes the root's listed entries again at once, trying a failed one twice.
+#[test]
+fn an_extends_root_hand_back_puts_the_matters_own_grants_back() {
+    let w = world("root-owners-extend-own", &[]);
+    let (mut ledger, mut acl, registered, matter) = launched_then_owned(&w);
+    acl.fail_allow = Some((matter.clone(), 1));
+    let pool = whole_pool();
 
     let fenced = fence_each(&mut ledger, &registered, &pool, &mut acl, &mut around(&w)).unwrap();
 
@@ -252,6 +264,38 @@ fn an_extends_root_hand_back_puts_the_matters_own_grants_back() {
     assert_eq!(acl.owners[&matter], LAWYER);
     assert!(
         has(&acl, &matter, USER_SID, Rights::Modify),
-        "the matter's own grant is back"
+        "the matter's own grant is back, at the second try"
     );
+}
+
+/// When the write back fails twice, the fence goes on, the entry is left pending, and the
+/// matter's next launch writes it again (fail closed until then).
+#[test]
+fn a_root_whose_entries_cant_be_written_back_leaves_them_pending_for_the_next_launch() {
+    let w = world("root-owners-extend-pending", &[]);
+    let (mut ledger, mut acl, registered, matter) = launched_then_owned(&w);
+    acl.fail_allow = Some((matter.clone(), 2));
+    let pool = whole_pool();
+
+    fence_each(&mut ledger, &registered, &pool, &mut acl, &mut around(&w)).unwrap();
+
+    assert!(!has(&acl, &matter, USER_SID, Rights::Modify));
+    let own = |ledger: &Ledger| {
+        let entry = ledger
+            .entries()
+            .find(|e| e.path == matter && e.rights == Rights::Modify && e.sid.as_str() == USER_SID);
+        entry.map(|e| e.state)
+    };
+    assert_eq!(own(&ledger), Some(EntryState::Pending));
+
+    apply(
+        &mut ledger,
+        &mut launch_plan(&w, &[]),
+        &mut acl,
+        &mut around(&w),
+    )
+    .unwrap();
+
+    assert!(has(&acl, &matter, USER_SID, Rights::Modify));
+    assert_eq!(own(&ledger), Some(EntryState::Applied));
 }
