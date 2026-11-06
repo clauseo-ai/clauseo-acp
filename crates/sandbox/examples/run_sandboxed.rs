@@ -3,15 +3,23 @@
 //!
 //! ```text
 //! cargo run -p clauseo-sandbox --example run_sandboxed -- --matter <dir> --state <dir>
-//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>] [--print-spec]
+//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>]
+//!     [--loopback <port>]... [--browser-sockets] [--stdin] [--print-spec]
 //!     -- <cmd> [args]
 //! ```
 //!
 //! `cmd` is an absolute path and runs in the matter with stdin closed; its stdout and stderr
-//! come through. Each denial prints as one JSON line on stderr, for a second after the command
-//! ends (the watcher's lines arrive within a few tens of milliseconds). `--print-spec` first
-//! prints the profile and its `-D` arguments as one JSON object on stdout. The exit code is
-//! the command's (128 plus the signal when a signal ended it); 2 for a usage error or a
+//! come through. `--stdin` feeds this process's stdin to `cmd` instead, for a process that
+//! speaks JSON-RPC over stdio (agent-browser's MCP server, `clauseo-mcp browser-guard`); the
+//! child's stdin closes when ours does. `--loopback <port>` (repeatable) lets the command reach
+//! those loopback ports, for Chrome's and agent-browser's CDP ports; none means no loopback
+//! beyond the proxy ports. `--browser-sockets` (Unix) makes the browser's socket folder,
+//! `/tmp/clauseo-ab-<id>`, allows it in the jail, and sets `AGENT_BROWSER_SOCKET_DIR` to it
+//! for `cmd`; the folder's path is printed on stderr and the folder is removed when the
+//! command has exited. Each denial prints as one JSON line on stderr, for a second after the
+//! command ends (the watcher's lines arrive within a few tens of milliseconds). `--print-spec`
+//! first prints the profile and its `-D` arguments as one JSON object on stdout. The exit code
+//! is the command's (128 plus the signal when a signal ended it); 2 for a usage error or a
 //! refused policy. macOS only until S15 adds Windows.
 
 use std::process::ExitCode;
@@ -37,14 +45,16 @@ mod jail {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::io::Write as _;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::ExitCode;
     use std::sync::Arc;
     use std::time::Duration;
 
-    use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions};
-    use clauseo_sandbox::{Denial, DenialSink, Policy, SeatbeltLauncher};
-    use futures::io::AllowStdIo;
+    use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher, SpawnOptions};
+    use clauseo_sandbox::{
+        BrowserSocketDir, Denial, DenialSink, Loopback, Policy, SeatbeltLauncher,
+    };
+    use futures::io::{AllowStdIo, AsyncWriteExt as _};
 
     /// How long denials keep printing after the command ends.
     const DENIAL_GRACE: Duration = Duration::from_secs(1);
@@ -58,13 +68,29 @@ mod jail {
         read: Vec<PathBuf>,
         hidden: Vec<PathBuf>,
         proxy_port: Option<u16>,
+        loopback: Vec<u16>,
+        browser_sockets: bool,
+        stdin: bool,
         print_spec: bool,
         command: Vec<OsString>,
     }
 
     const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> [--runtime <p>]... \
-                         [--read <p>]... [--hidden <p>]... [--proxy-port <n>] [--print-spec] \
+                         [--read <p>]... [--hidden <p>]... [--proxy-port <n>] \
+                         [--loopback <port>]... [--browser-sockets] [--stdin] [--print-spec] \
                          -- <cmd> [args]";
+
+    /// A loopback port: a number from 1 to 65535.
+    fn parse_port(name: &str, value: &Path) -> Result<u16, String> {
+        let text = value.to_string_lossy();
+        match text.parse::<u16>() {
+            Ok(0) => Err(format!(
+                "bad port {text:?} for {name}: port 0 is not a port"
+            )),
+            Ok(port) => Ok(port),
+            Err(e) => Err(format!("bad port {text:?} for {name}: {e}")),
+        }
+    }
 
     fn parse(mut raw: impl Iterator<Item = OsString>) -> Result<Args, String> {
         let mut args = Args::default();
@@ -89,6 +115,11 @@ mod jail {
                             .map_err(|e| format!("bad port {port:?}: {e}"))?,
                     );
                 }
+                "--loopback" => args
+                    .loopback
+                    .push(parse_port("--loopback", &value("--loopback")?)?),
+                "--browser-sockets" => args.browser_sockets = true,
+                "--stdin" => args.stdin = true,
                 "--print-spec" => args.print_spec = true,
                 "--" => {
                     args.command = raw.collect();
@@ -155,21 +186,44 @@ mod jail {
         if let Some(port) = args.proxy_port {
             builder = builder.proxy_port(port);
         }
+        if !args.loopback.is_empty() {
+            builder = builder.loopback(Loopback::Ports(args.loopback));
+        }
+        // The folder lives until the command has exited: it is dropped after `drive`.
+        let socket_dir = if args.browser_sockets {
+            let dir = BrowserSocketDir::create().map_err(|e| format!("--browser-sockets: {e}"))?;
+            builder = builder.browser_socket_dir(&dir);
+            say(&format!(
+                "run_sandboxed: browser socket folder {}\n",
+                dir.path().display()
+            ));
+            Some(dir)
+        } else {
+            None
+        };
         let policy = builder.build().map_err(|e| e.to_string())?;
         let cwd = policy.matter().to_owned();
         let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), Arc::new(PrintSink));
         let mut command = args.command.into_iter();
         let program = PathBuf::from(command.next().unwrap_or_default());
-        let spec = LaunchSpec::new(program, command.collect(), BTreeMap::new(), cwd)
-            .map_err(|e| e.to_string())?;
+        let mut env = BTreeMap::new();
+        if let Some(dir) = &socket_dir {
+            env.insert(
+                OsString::from("AGENT_BROWSER_SOCKET_DIR"),
+                dir.path().as_os_str().to_owned(),
+            );
+        }
+        let spec =
+            LaunchSpec::new(program, command.collect(), env, cwd).map_err(|e| e.to_string())?;
         if args.print_spec {
             print_spec(&launcher)?;
         }
         let launched = launcher.launch(&spec).map_err(|e| e.to_string())?;
-        let code = async_io::block_on(drive(launched));
+        let code = async_io::block_on(drive(launched, args.stdin));
         // The watcher's lines come a little after the denial itself.
         async_io::block_on(async_io::Timer::after(DENIAL_GRACE));
         drop(launcher);
+        drop(socket_dir);
         Ok(code)
     }
 
@@ -192,8 +246,22 @@ mod jail {
             .map_err(|e| e.to_string())
     }
 
-    /// Passes the command's output through and waits for its exit.
-    async fn drive(launched: Launched) -> ExitCode {
+    /// Copies this process's stdin into the command's stdin, then closes the command's stdin at
+    /// the end. Runs on its own thread: it may wait on a read after the command has exited.
+    fn feed(mut to: AgentStdin) {
+        let mut from = AllowStdIo::new(std::io::stdin());
+        let copied = async_io::block_on(async {
+            futures::io::copy(&mut from, &mut to).await?;
+            to.close().await
+        });
+        if let Err(error) = copied {
+            say(&format!("run_sandboxed: stdin: {error}\n"));
+        }
+    }
+
+    /// Passes the command's output through and waits for its exit. Its stdin is closed at once,
+    /// or fed from this process's stdin with `pass_stdin`.
+    async fn drive(launched: Launched, pass_stdin: bool) -> ExitCode {
         let Launched {
             stdin,
             stdout,
@@ -201,7 +269,12 @@ mod jail {
             mut handle,
             ..
         } = launched;
-        drop(stdin);
+        if pass_stdin {
+            // Detached: a read still waiting when the command exits ends with the process.
+            drop(std::thread::spawn(move || feed(stdin)));
+        } else {
+            drop(stdin);
+        }
         let mut sink = AllowStdIo::new(std::io::stdout());
         let out = futures::io::copy(stdout, &mut sink);
         let err = stderr.lines(|line| say(&format!("{line}\n")));
