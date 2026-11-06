@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::actor::turn::HeldRuns;
+use crate::agent::launch_gate::LaunchGate;
 use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
@@ -78,6 +79,9 @@ pub(crate) struct LaunchWiring {
     /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
     /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
+    /// Desktop's launch gate, asked on the launch-prep thread before each launch
+    /// (`HostConfig::with_launch_gate`); `None`: no gate.
+    pub(crate) launch_gate: Option<LaunchGate>,
 }
 
 impl Default for LaunchWiring {
@@ -103,6 +107,7 @@ impl Default for LaunchWiring {
             removal_thread_fails: false,
             held: HeldRuns::default(),
             blocklist: None,
+            launch_gate: None,
         }
     }
 }
@@ -123,6 +128,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .field("tree_wait", &self.tree_wait)
+            .field("launch_gate", &self.launch_gate.is_some())
             .finish_non_exhaustive()
     }
 }

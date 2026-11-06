@@ -199,6 +199,9 @@ mod keys_loading;
 #[path = "host/launch_folder.rs"]
 mod launch_folder;
 #[cfg(test)]
+#[path = "host/launch_gate.rs"]
+mod launch_gate;
+#[cfg(test)]
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
 #[cfg(test)]
