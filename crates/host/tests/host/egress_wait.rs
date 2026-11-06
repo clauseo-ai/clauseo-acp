@@ -299,8 +299,8 @@ fn two_sessions_of_one_matter_close_their_proxies_independently() {
     );
 }
 
-/// A panic in the removal, after the session's claims were made, still closes its proxy: the
-/// run's guard closes it as the run drops.
+/// A panic in the removal after its wait completed (here in the removal hook) still frees the
+/// session: the run's lease was marked done, so the proxy closes as the run drops.
 #[test]
 fn a_panic_in_the_removal_still_closes_the_proxy() {
     let dir = Dir::new("egress_panic", &[]);
@@ -319,5 +319,116 @@ fn a_panic_in_the_removal_still_closes_the_proxy() {
         .recv_timeout(Duration::from_secs(30))
         .expect("the proxy closed after the panic");
     assert_eq!(calls(&log), ["open 1", "close 1"]);
+    host.shutdown();
+}
+
+/// A panic before the wait completed (here in the wait's own hook) frees nothing: the run's
+/// lease holds the proxy until the host stops.
+#[test]
+fn a_panic_in_the_wait_holds_the_proxy_until_the_host_stops() {
+    let dir = Dir::new("egress_wait_panic", &[]);
+    claude_then(&dir, &json!([{"name": "browser"}]), &[exit()]);
+    let (proxy, log, closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        wired(config, proxy, removals).with_tree_wait_hook(Arc::new(|_cdp| {
+            panic!("a wait that fails (the test's)");
+        }))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    no_close_within(&closes, Duration::from_secs(1));
+    assert_eq!(calls(&log), ["open 1"]);
+    host.shutdown();
+    assert_eq!(
+        calls(&log),
+        ["open 1", "close 1"],
+        "freed at stop, never removed"
+    );
+}
+
+/// A removal whose thread does not start drops its run on the host thread: the lease holds the
+/// proxy (a push, no join), the host goes on answering, and the stop frees it.
+#[test]
+fn a_removal_thread_that_does_not_start_holds_the_proxy() {
+    let dir = Dir::new("egress_no_thread", &[]);
+    claude_then(&dir, &json!([{"name": "browser"}]), &[exit()]);
+    let (proxy, log, closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        wired(config, proxy, removals).with_removal_thread_failing()
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    no_close_within(&closes, Duration::from_secs(1));
+    // The host thread was not held up: it still answers.
+    let other = host.create_thread(matter, CLAUDE);
+    assert_ne!(other, thread);
+    assert_eq!(calls(&log), ["open 1"]);
+    host.shutdown();
+    assert_eq!(calls(&log), ["open 1", "close 1"]);
+}
+
+/// A session's browser slot stays taken while its removal waits for Chrome: with the machine's
+/// two slots, one waiting and one running, a third session gets `TooManyBrowsers`; once the
+/// waiting one is freed, a fourth gets the browser.
+#[test]
+fn the_browser_slot_stays_taken_during_the_wait() {
+    use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolsUnavailableReason};
+
+    let browser = |host: &crate::support::Running, thread| {
+        crate::profile_rig::first_frame_tools(host, thread)
+            .into_iter()
+            .find(|state| state.tool == ClauseoTool::Browser)
+            .expect("the header shows the browser")
+            .availability
+    };
+    let dir = Dir::new("egress_slot", &[]);
+    // Each session takes whatever servers it gets; the first exits after its turn.
+    claude_then(&dir, &json!("{{any}}"), &[exit()]);
+    let (proxy, log, closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let (bound, listener) = channel::<TcpListener>();
+    let bound = Mutex::new(bound);
+    let host = dir.start_launching(0, Wired::new(&dir), move |config| {
+        wired(config, proxy, removals).with_tree_wait_hook(Arc::new(move |cdp| {
+            if let Some(port) = cdp {
+                let chrome = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap();
+                let _sent = bound.lock().unwrap().send(chrome);
+            }
+        }))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let waiting = host.create_thread(matter, CLAUDE);
+    turn(&host, waiting);
+    let chrome = listener
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the first session's removal began its wait");
+    claude_then(&dir, &json!("{{any}}"), &[]);
+    let running = host.create_thread(matter, CLAUDE);
+    turn(&host, running);
+    assert_eq!(browser(&host, running), ToolAvailability::Available);
+    let third = host.create_thread(matter, CLAUDE);
+    turn(&host, third);
+    assert_eq!(
+        browser(&host, third),
+        ToolAvailability::Unavailable {
+            reason: ToolsUnavailableReason::TooManyBrowsers
+        },
+        "the waiting session still holds its slot"
+    );
+    drop(chrome);
+    closes
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the first session was freed");
+    // The freed run's slot goes back on the host thread just after the close.
+    let (_keep, never) = channel::<()>();
+    let _timed_out = never.recv_timeout(Duration::from_millis(500));
+    host.settle();
+    let fourth = host.create_thread(matter, CLAUDE);
+    turn(&host, fourth);
+    assert_eq!(browser(&host, fourth), ToolAvailability::Available);
     host.shutdown();
 }

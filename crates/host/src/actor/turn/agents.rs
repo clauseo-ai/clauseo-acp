@@ -13,6 +13,8 @@ use clauseo_protocol::{
     MessageId, PermissionRequestId, ThreadId, TurnId,
 };
 
+use clauseo_process::TreeWatch;
+
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
@@ -178,13 +180,15 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     launch_checks::prepare(actor, thread, waiting, keys_wait);
 }
 
-/// The launch on the actor, with what its checks found (`prepared`), and `initialize`.
+/// The launch on the actor, with what its checks found (`prepared`), and `initialize`. When
+/// the launch failed after the agent's process was started, answers its tree, for the run
+/// folder's removal to wait for.
 pub(super) fn launch_now(
     actor: &mut Actor,
     thread: ThreadId,
     waiting: Vec<Waiting>,
     prepared: Prepared,
-) {
+) -> Option<TreeWatch> {
     // Only a Claude launch has a folder answer without a Codex preparation.
     let forced_ask =
         prepared.codex.is_none() && prepared.folder.is_some_and(agent::forced_ask::applies);
@@ -192,11 +196,12 @@ pub(super) fn launch_now(
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
-    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared) {
+    let mut tree = None;
+    let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared, &mut tree) {
         Ok(launched) => launched,
         Err(error) => {
             fail_all(actor, thread, waiting, &error);
-            return;
+            return tree;
         }
     };
     let id = next_agent_id();
@@ -247,6 +252,7 @@ pub(super) fn launch_now(
         state.agent = Some(Box::new(agent));
     }
     super::idle::launched(actor, thread);
+    None
 }
 
 /// A new agent id (a Codex launch's preparation takes one too).
@@ -263,7 +269,12 @@ type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
 /// variables, then the profile hook's with the host's switches over them, then what the host
 /// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
 /// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
-fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launched, Error> {
+fn launch(
+    actor: &Actor,
+    thread: ThreadId,
+    prepared: Prepared,
+    tree: &mut Option<TreeWatch>,
+) -> Result<Launched, Error> {
     let row = &actor.check_thread(thread)?.row;
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
@@ -335,6 +346,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         &spec,
         Arc::clone(&actor.clock),
         post,
+        tree,
     )?;
     Ok((link, folder, codex, plan_notes))
 }

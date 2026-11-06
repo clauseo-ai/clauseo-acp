@@ -15,6 +15,10 @@ use windows::Win32::System::JobObjects::{
 use super::{Tree, raw};
 
 /// Asks whether the agent's job is empty. Holds the job open (see `TreeWatch`).
+///
+/// So if the handle's `TerminateJobObject` failed, the job's kill-on-close cannot fire while a
+/// watch lives: the host's wait then runs its whole cap and holds the session, and the job
+/// closes, ending what is left, only once the last watch drops.
 #[derive(Debug, Clone)]
 pub(crate) struct Watch {
     job: Arc<OwnedHandle>,

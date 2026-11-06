@@ -46,6 +46,8 @@ pub(super) struct Claims {
     pub(super) case_law: CaseLawPrep,
     /// The egress proxy.
     pub(super) egress: EgressPrep,
+    /// Where the run's parts go when it drops without a completed wait.
+    pub(super) held: super::straggler::HeldRuns,
 }
 
 /// Reads [`LaunchPaths`] for `thread`'s launch `id`, or the error of the thread or its matter.
@@ -71,6 +73,7 @@ pub(super) fn launch_paths(actor: &Actor, thread: ThreadId, id: u64) -> Result<L
         egress: egress_prep(actor, &row.agent, &browser),
         browser,
         case_law: relay::case_law_prep(actor, &row.agent),
+        held: actor.wiring.held.clone(),
     };
     let matter = actor.check_matter(row.matter)?.row.skill_packs.as_ref();
     let packs = pack_prep(actor, &row.agent, matter);

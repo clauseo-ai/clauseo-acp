@@ -351,3 +351,43 @@ fn a_codex_launch_in_a_missing_folder_is_folder_missing() {
     assert!(!home.exists(), "nothing is made for a missing folder");
     write::remove_dir_all(&data).unwrap();
 }
+
+/// A prep nobody waits for any more frees what it claimed: no agent was started, so there is
+/// nothing to wait for, and its parts are not held.
+#[test]
+fn a_late_prep_frees_its_claims() {
+    let data = scratch("undo-late");
+    let run = folders(&data, 9);
+    run.make(&data, &RunSweep::default()).unwrap();
+    let session = Arc::new(
+        crate::browser::session::BrowserSession::claim(
+            "undo-late",
+            #[cfg(unix)]
+            None,
+        )
+        .unwrap(),
+    );
+    let alive = Arc::downgrade(&session);
+    let held = super::HeldRuns::default();
+    run.lease.keep(
+        held.clone(),
+        super::straggler::Parts {
+            browser: Some(session),
+            ..super::straggler::Parts::default()
+        },
+    );
+    let root = run.root.clone();
+    super::undo_late(super::Prepared {
+        stored: data.clone(),
+        codex: None,
+        claude_home: None,
+        folder: None,
+        run,
+        skills_written: None,
+        packs_skipped: Vec::new(),
+    });
+    assert!(alive.upgrade().is_none(), "its claims were freed");
+    assert_eq!(held.count(), 0, "nothing is held");
+    assert!(!root.exists(), "its run folder is gone");
+    write::remove_dir_all(&data).unwrap();
+}

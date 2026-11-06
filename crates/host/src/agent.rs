@@ -228,13 +228,16 @@ impl AgentLink {
 
 /// Launches the agent, connects ACP over its pipes and spawns its tasks on `spawner`. Every event
 /// and the final [`Ended`] go to `post`. Nothing is sent to the agent until the actor calls the
-/// client (`initialize` first).
+/// client (`initialize` first). `tree` gets the agent's [`TreeWatch`] as soon as its process
+/// exists, so a launch that fails after that (a task that cannot be spawned, which drops and
+/// kills the process) still has its tree waited for before the session's run is freed.
 pub(crate) fn start(
     spawner: &LocalSpawner,
     launcher: &dyn Launcher,
     spec: &LaunchSpec,
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
+    tree: &mut Option<TreeWatch>,
 ) -> Result<AgentLink, Error> {
     let Launched {
         stdin,
@@ -245,7 +248,8 @@ pub(crate) fn start(
     } = launcher.launch(spec)?;
     let pid = handle.pid();
     let descendants = handle.descendants();
-    let tree = handle.tree_watch();
+    let handle_tree = handle.tree_watch();
+    *tree = Some(handle_tree.clone());
     #[cfg(not(test))]
     let (client, events, driver) =
         clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
@@ -293,7 +297,7 @@ pub(crate) fn start(
     Ok(AgentLink {
         client,
         pid,
-        tree,
+        tree: handle_tree,
         descendants,
         stop: Some(stop),
         events: fence_events,

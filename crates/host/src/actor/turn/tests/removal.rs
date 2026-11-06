@@ -14,7 +14,7 @@ const ANSWER: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":
 "#;
 
 fn run_removed(_: &crate::actor::Actor, input: &Input) -> bool {
-    matches!(input, Input::Turn(TurnInput::RunRemoved))
+    matches!(input, Input::Turn(TurnInput::RunRemoved { .. }))
 }
 
 /// Whether shutdown's work other than run folder removals is done.

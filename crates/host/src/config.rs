@@ -222,6 +222,14 @@ impl HostConfig {
         self
     }
 
+    /// Makes every run folder removal's thread fail to start, as when the OS refuses a thread:
+    /// a test checks the session's proxy and relay are held, not freed on the host thread.
+    #[cfg(feature = "test-support")]
+    pub fn with_removal_thread_failing(mut self) -> Self {
+        self.wiring.removal_thread_fails = true;
+        self
+    }
+
     /// A folder to put first on every agent's `PATH` (default: none): stetdoc's own folder,
     /// `clauseo_profile::ClauseoProfile::path_prepend`, which holds no other program. It goes
     /// before the `PATH` the agent would otherwise get (the hook's, else a settings env `PATH`,
