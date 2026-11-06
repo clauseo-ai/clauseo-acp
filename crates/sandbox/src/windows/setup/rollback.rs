@@ -33,8 +33,7 @@ pub(super) struct Made {
     pub(super) profile: Option<PathBuf>,
 }
 
-/// What a run has changed so far: what its rollback reads.
-#[derive(Debug)]
+/// What a run has changed so far: what its rollback reads. No `Debug`: it holds passwords.
 pub(super) struct Run {
     /// The record before the run; `None` when there was none.
     pub(super) before: Option<MachineRecord>,
