@@ -302,6 +302,9 @@ impl SetupAgents for FakeInstall {
     fn set_network(&self, network: clauseo_agents::Network) {
         self.real.set_network(network);
     }
+    fn read_account(&self, agent: &AgentId) -> clauseo_agents::AccountFuture {
+        self.real.read_account(agent)
+    }
 }
 
 #[cfg(test)]

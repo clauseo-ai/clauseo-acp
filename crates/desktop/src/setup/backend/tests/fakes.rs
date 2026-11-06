@@ -2,15 +2,15 @@
 //! opener, each recording what it was asked, and the backend over them.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    AccountFuture, AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError,
+    SigninState,
 };
-use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
 use clauseo_protocol::{AgentId, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
@@ -27,6 +27,7 @@ use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
 use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
+use crate::setup::identity::Identities;
 use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
@@ -42,6 +43,10 @@ mod ui;
 pub(super) use self::readers::FakeReaders;
 pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
+
+mod small;
+
+pub(super) use self::small::{FakeAccounts, FakeCounts};
 
 /// What the fake `Agents` was asked, by name and agent.
 pub(super) type Calls = Arc<Mutex<Vec<(&'static str, AgentId)>>>;
@@ -74,6 +79,8 @@ pub(super) struct FakeAgents {
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
     /// Each `set_network`, in order.
     pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
+    /// What `read_account` answers (R17).
+    pub(super) accounts: FakeAccounts,
 }
 
 impl FakeAgents {
@@ -178,22 +185,16 @@ impl SetupAgents for FakeAgents {
     fn install_tries(&self, agent: &AgentId) -> Option<u32> {
         lock(&self.tries).get(agent).copied()
     }
+    fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        self.call("read_account", agent);
+        self.accounts.read(agent)
+    }
     fn shutdown(&self, _wait: Duration) -> bool {
         lock(&self.journal).push("agents.shutdown".to_owned());
         true
     }
     fn set_network(&self, network: clauseo_agents::Network) {
         lock(&self.networks).push(network);
-    }
-}
-
-/// The usage counts, recording each event.
-#[derive(Default)]
-pub(super) struct FakeCounts(pub(super) Mutex<Vec<Event>>);
-
-impl SetupCounts for FakeCounts {
-    fn bump(&self, event: Event) {
-        lock(&self.0).push(event);
     }
 }
 
@@ -429,6 +430,44 @@ pub(super) fn rig_with(
     routed: bool,
     loaded: KeysLoaded,
 ) -> Rig {
+    rig_full(
+        accept,
+        keychain,
+        keys,
+        plan_locked,
+        routed,
+        loaded,
+        None,
+        Identities::in_memory(),
+    )
+}
+
+/// [`rig`] with each agent's home `<homes>/<id>` and `identity` as its identity check (R17).
+pub(super) fn rig_identity(homes: &Path, identity: Identities) -> Rig {
+    let keychain = Keychain::memory();
+    let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
+    rig_full(
+        true,
+        keychain,
+        keys,
+        false,
+        true,
+        KeysLoaded::over(),
+        Some(homes),
+        identity,
+    )
+}
+
+fn rig_full(
+    accept: bool,
+    keychain: Keychain,
+    keys: KeyCache,
+    plan_locked: bool,
+    routed: bool,
+    loaded: KeysLoaded,
+    homes: Option<&Path>,
+    identity: Identities,
+) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
         journal: Arc::clone(&journal),
@@ -455,7 +494,7 @@ pub(super) fn rig_with(
             let info = AgentInfo {
                 name: name.to_owned(),
                 hosts: vec!["registry.npmjs.org".to_owned()],
-                home: home(&agent),
+                home: homes.map_or_else(|| home(&agent), |homes| homes.join(agent.as_str())),
                 plan_locked: plan_locked && agent == claude(),
                 provider: false,
             };
@@ -483,7 +522,8 @@ pub(super) fn rig_with(
             Vec::new(),
         )
         .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
-        .with_network(follow),
+        .with_network(follow)
+        .with_identity(identity),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
         keys_loaded: loaded,
     });

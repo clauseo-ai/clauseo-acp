@@ -34,6 +34,10 @@
 //! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
 //! the thread that then follows the settings and the keys' notes, so they never cross; a
 //! policy refusal stays until the settings lift it.
+//!
+//! R17's identity check (`setup/identity.rs`) reads its record from the data folder before
+//! `Agents` start, and its follower (the login files' stats and the checks launches ask for)
+//! runs on the `clauseo-setup-host` thread with the others.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -44,7 +48,7 @@ use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use clauseo_settings::{Effective, Locations};
+use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::StreamExt as _;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
@@ -54,6 +58,7 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
+use super::identity::Identities;
 use super::keys::{FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot, KeysLoaded};
 use super::login_check::ReusedLogins;
 use super::network::FIRST_ROUTE_WAIT;
@@ -352,6 +357,12 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The settings' and the environment's route; the OS's follows from the network thread.
     let at_start = read.network_at_start().agents_network();
+    let identity = Identities::load(
+        &read.data_dir,
+        Arc::new(SystemFiles),
+        parts.home.clone(),
+        read.known.keys(),
+    );
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
         .known
@@ -397,7 +408,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             read.settings,
             refused_at_start,
         )
-        .with_network(network);
+        .with_network(network)
+        .with_identity(identity);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys: Arc::clone(&keys),
@@ -443,8 +455,9 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
                     follow_keys(&follower, notes).await;
                 }
             };
+            let identity = super::identity::follow_identity(&follower);
             let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
-            let follows = join(join(settings, keys), join(splits, leaves));
+            let follows = join(join(settings, keys), join(join(splits, leaves), identity));
             futures::executor::block_on(follows);
         });
     if let Err(err) = host_thread {

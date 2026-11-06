@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use super::hook::Plans;
+use super::identity::Identities;
 use clauseo_process::AsyncIoTimer;
 
 use super::leave::{LeaveTimer, Leaves, Waiters};
@@ -37,6 +38,8 @@ pub(crate) struct Wiring {
     /// Where each settings read's network facts go (`setup/network.rs`): none until the setup
     /// thread sets it.
     pub(crate) network: NetworkFollow,
+    /// Each agent's login's account and its check (R17, `setup/identity.rs`).
+    pub(crate) identity: Identities,
 }
 
 impl Wiring {
@@ -61,6 +64,7 @@ impl Wiring {
             refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
             network: NetworkFollow::default(),
+            identity: Identities::in_memory(),
         }
     }
 
@@ -68,6 +72,12 @@ impl Wiring {
     #[must_use]
     pub(crate) fn with_network(mut self, network: NetworkFollow) -> Self {
         self.network = network;
+        self
+    }
+
+    /// The identity check over `identity` (its record read from the data folder).
+    pub(crate) fn with_identity(mut self, identity: Identities) -> Self {
+        self.identity = identity;
         self
     }
 

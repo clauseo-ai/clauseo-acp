@@ -1,6 +1,7 @@
-//! Small parts of the backend: the plan login a `StartSignIn` asks for, the endpoint check
-//! before `SetFirmEndpoint`'s confirm, and its two error answers; a retry's check, and the wait
-//! for the first network route before a command that reaches the network.
+//! Small parts of the backend: the plan login a `StartSignIn` asks for, a sign-in call the
+//! identity check expects, the endpoint check before `SetFirmEndpoint`'s confirm, and its two
+//! error answers; a retry's check, and the wait for the first network route before a command
+//! that reaches the network.
 
 use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand};
@@ -44,6 +45,8 @@ pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupComman
     }
 }
 
+use crate::setup::identity::Identities;
+
 /// The plan login `StartSignIn` asks for: Claude's Claude.ai plan or, with `console`, its
 /// Console account; Codex's browser sign-in (`console` is Claude's alone).
 pub(super) fn plan_method(agent: &AgentId, console: bool) -> Result<Method, HostError> {
@@ -53,6 +56,21 @@ pub(super) fn plan_method(agent: &AgentId, console: bool) -> Result<Method, Host
         (Some(AgentKind::Codex), false) => Ok(Method::Browser),
         _ => Err(invalid(format!("{agent} has no such sign-in"))),
     }
+}
+
+/// `call`, an S18 call that signs `agent` in through Clauseo (a sign-in, a reuse): the identity
+/// check expects it first, so its `SignedIn` records the account before anything compares it
+/// (R17), and stops expecting it when S18 refuses it.
+pub(super) fn signs_in(
+    identity: &Identities,
+    agent: &AgentId,
+    call: impl FnOnce() -> Result<(), SigninError>,
+) -> Result<(), HostError> {
+    identity.expect(agent);
+    call().map_err(|error| {
+        identity.expect_none(agent);
+        signin_error(&error)
+    })
 }
 
 /// The endpoint `url` as the confirm shows it and the plan stores it: an address the settings
