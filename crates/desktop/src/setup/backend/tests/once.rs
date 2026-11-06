@@ -1,27 +1,29 @@
 //! A lawyer's leave on the recording fakes: one leave per agent (a double `StopUsingLogin`, a
-//! split arriving during one), the 30 s wait running out (the holds kept until S18's stop job
-//! ends: a late `SignedOut` runs the steps after the stop, then lifts the hold; a job that ends
-//! still reused only lifts it), a stale state queued before the leave waited, Clauseo's own login
-//! signed out, and the hold lifted when the leave is dropped mid-way or `restart_agents` fails
-//! once.
+//! split arriving during one), the 30 s wait running out (`StopUsingLogin` answers done, the
+//! agent shows `Switching`, then `stuck`, and the holds stay until S18's stop job ends: a late
+//! `SignedOut` runs the steps after the stop, then lifts the hold; a job that ends still reused
+//! or `Failed` only lifts it; a key whose leave gives up answers `command.conflict`), a stale
+//! state queued before the leave waited, Clauseo's own login signed out, and the hold lifted when
+//! the leave is dropped mid-way or `restart_agents` fails once.
 
 use std::future::{Future as _, poll_fn};
 use std::task::Poll;
 use std::time::{Duration, UNIX_EPOCH};
 
-use clauseo_agents::{Found, SigninState, Source};
+use clauseo_agents::{Found, SigninCode, SigninState, Source};
 use clauseo_host::AgentsStopped;
-use clauseo_protocol::{CommandOutcome, ErrorCode};
+use clauseo_protocol::{CommandOutcome, ErrorCode, SetupEvent, SignIn};
+use futures::StreamExt as _;
 use futures::future::join;
 
 use super::SETTINGS;
-use super::codex;
-use super::fakes::{HostCall, Rig, rig};
+use super::fakes::{HostCall, Rig, command, rig};
 use super::leave::{LEAVE, install, reused_codex, signed_in, stop_using_command};
 use super::timing::until;
+use super::{claude, codex};
 use crate::bridge::lock;
 use crate::setup::leave::{Wait, auto_leave};
-use crate::test_support::{STEP_WAIT, block_on};
+use crate::test_support::{STEP_WAIT, block_on, within};
 
 const OUT: SigninState = SigninState::SignedOut { found: None };
 
@@ -97,16 +99,20 @@ fn a_stale_state_queued_before_the_leave_waited_never_ends_it() {
 }
 
 #[test]
-fn the_lawyer_s_leave_with_no_signed_out_in_30_s_answers_failed_and_keeps_the_holds() {
+fn the_lawyer_s_leave_with_no_signed_out_in_30_s_answers_done_shows_switching_and_keeps_the_holds()
+{
     let rig = reused_codex();
     let mut script = rig.timer.script();
     let setup = rig.setup();
     let send = setup.run(SETTINGS, stop_using_command(&codex()));
     let (answer, ()) = rig.pumped(join(send, script.fire(Wait::SignedOut)));
-    let error = answer.unwrap_err();
-    assert_eq!(error.code(), ErrorCode::SigninFailed);
-    assert!(error.code().is_retryable());
+    assert_eq!(
+        answer,
+        Ok(CommandOutcome::Done),
+        "accepted; S18's stop job runs on"
+    );
     assert_eq!(script.elapsed(), Duration::from_secs(30));
+    assert_eq!(shown(&rig), Some(switching_since(30, false)));
     // S18's stop job may still end the reuse, and S18 cannot cancel it: no agent relaunches
     // until it ends, so nothing changes under running agents.
     assert_eq!(
@@ -129,6 +135,27 @@ fn the_lawyer_s_leave_with_no_signed_out_in_30_s_answers_failed_and_keeps_the_ho
         "the slot stays taken until the job ends"
     );
     assert_eq!(rig.host.calls(), [HostCall::StopAgents(codex())]);
+    let mut feed = rig.events.follow();
+    block_on(script.fire(Wait::Stuck));
+    let stuck = Some(switching_since(30, true));
+    within("stuck at 2 minutes", async {
+        while let Some(text) = feed.next().await {
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let event = serde_json::from_value(value["setup"].clone());
+            if let Ok(SetupEvent::SignInChanged { agent, state }) = event
+                && agent == codex()
+                && Some(state) == stuck
+            {
+                return;
+            }
+        }
+        panic!("the events ended before stuck");
+    });
+    assert_eq!(
+        script.elapsed(),
+        Duration::from_secs(150),
+        "2 minutes after the give-up"
+    );
 }
 
 #[test]
@@ -145,8 +172,12 @@ fn a_give_up_whose_job_ends_still_reused_only_lifts_the_hold() {
         until("the hold lifted", lifted).await;
         answer
     });
-    assert_eq!(answer.unwrap_err().code(), ErrorCode::SigninFailed);
+    assert_eq!(answer, Ok(CommandOutcome::Done));
     assert_eq!(rig.journal(), ["host.restart_agents", "readers.release"]);
+    assert!(
+        !matches!(shown(&rig), Some(SignIn::Switching { .. })),
+        "Switching ended"
+    );
     assert!(rig.backend.wiring.reused.get(&codex()), "nothing changed");
     assert!(
         rig.backend.wiring.leaves.begin(&codex()).is_ok(),
@@ -168,7 +199,12 @@ fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_lifts_th
         until("the steps after the stop", told).await;
         answer
     });
-    assert_eq!(answer.unwrap_err().code(), ErrorCode::SigninFailed);
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert_eq!(
+        shown(&rig),
+        Some(SignIn::SignedOut { found: None }),
+        "Switching ended"
+    );
     assert_eq!(
         rig.journal(),
         [
@@ -189,6 +225,96 @@ fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_lifts_th
         rig.backend.wiring.leaves.begin(&codex()).is_ok(),
         "the slot is free"
     );
+}
+
+#[test]
+fn a_late_failed_after_a_give_up_only_lifts_the_hold_and_ends_switching() {
+    let rig = reused_codex();
+    let mut script = rig.timer.script();
+    let setup = rig.setup();
+    let send = setup.run(SETTINGS, stop_using_command(&codex()));
+    rig.pumped(async {
+        let (answer, ()) = join(send, script.fire(Wait::SignedOut)).await;
+        assert_eq!(answer, Ok(CommandOutcome::Done));
+        rig.journal();
+        let failed = SigninState::Failed {
+            code: SigninCode::Failed,
+            at: UNIX_EPOCH,
+        };
+        rig.s18_sends(&codex(), failed);
+        let lifted = || rig.host.calls().contains(&HostCall::RestartAgents(codex()));
+        until("the hold lifted", lifted).await;
+        for _ in 0..50 {
+            super::timing::yield_now().await;
+        }
+    });
+    assert_eq!(
+        rig.journal(),
+        ["host.restart_agents", "readers.release"],
+        "the stop failed: no steps after it, nothing else"
+    );
+    assert!(rig.backend.wiring.reused.get(&codex()), "still reused");
+    assert!(lock(&rig.readers.entries).is_empty(), "no entry rewritten");
+    assert!(
+        !matches!(shown(&rig), Some(SignIn::Switching { .. })),
+        "Switching ended"
+    );
+}
+
+#[test]
+fn a_key_whose_leave_gives_up_answers_conflict_and_stores_nothing() {
+    let rig = rig(true);
+    super::leave::reuse(&rig, &claude());
+    let mut script = rig.timer.script();
+    let setup = rig.setup();
+    let key = command(
+        "set_agent_key",
+        &claude(),
+        &serde_json::json!({ "key": "sk-ant-api03-SETTINGS-KEY-0002" }),
+    );
+    let send = setup.run(SETTINGS, key);
+    let (answer, ()) = rig.pumped(join(send, script.fire(Wait::SignedOut)));
+    assert_eq!(answer.unwrap_err().code(), ErrorCode::CommandConflict);
+    assert!(
+        rig.keychain.load(&claude()).unwrap().is_none(),
+        "no key stored"
+    );
+    assert!(rig.backend.keys.get(&claude()).is_none());
+    assert_eq!(
+        rig.host.calls(),
+        [HostCall::StopAgents(claude())],
+        "held, nothing more"
+    );
+    let feed = &mut rig.events.follow();
+    let shows = super::fakes::setup_events(feed)
+        .into_iter()
+        .rev()
+        .find_map(|event| match event {
+            SetupEvent::SignInChanged { agent, state } if agent == claude() => Some(state),
+            _ => None,
+        });
+    assert!(matches!(shows, Some(SignIn::Switching { .. })), "{shows:?}");
+}
+
+/// Codex's latest `SignInChanged`, as a new follower gets it.
+fn shown(rig: &Rig) -> Option<SignIn> {
+    let feed = &mut rig.events.follow();
+    super::fakes::setup_events(feed)
+        .into_iter()
+        .rev()
+        .find_map(|event| match event {
+            SetupEvent::SignInChanged { agent, state } if agent == codex() => Some(state),
+            _ => None,
+        })
+}
+
+/// `Switching` since `seconds` after the rig's start.
+fn switching_since(seconds: u64, stuck: bool) -> SignIn {
+    let since = super::timing::start() + Duration::from_secs(seconds);
+    SignIn::Switching {
+        since: crate::setup::compose::timestamp(since),
+        stuck,
+    }
 }
 
 #[test]

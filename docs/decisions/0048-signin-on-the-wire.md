@@ -434,13 +434,18 @@ reads' hold dropped and `limits_login_changed`.
   `SetFirmEndpoint` on a reused login) whose `stop_agents` times out, or whose call fails,
   changes nothing: `restart_agents` lifts the hold, the reads' guard drops, and the command
   answers `signin.agents_still_running` or the call's error. The queues then go on as
-  `restart_agents` resumes them. With no `SignedOut` within 30 s the command answers
-  `signin.failed`, **but the hold stays** (review A2): S18's stop job may still end the reuse,
-  and S18 has no cancel for it (`cancel_sign_in` ends only a sign-in job). When the job ends,
-  the pump runs the last three steps if the reuse stopped, then `restart_agents` lifts the hold
-  and the reads' guard drops; meanwhile another leave of the agent answers `command.conflict`.
-  Nothing changes under running agents. **A stop job that never reports keeps the agent held
-  until the app restarts.** A leave dropped before it ends (a panic, or its command
+  `restart_agents` resumes them. With no `SignedOut` within 30 s **the hold stays** (review
+  A2): S18's stop job may still end the reuse, and S18 has no cancel for it (`cancel_sign_in`
+  ends only a sign-in job). The agent shows `Switching { since, stuck }` from then (`stuck`
+  after 2 minutes). `StopUsingLogin` answers done; `UseDifferentAccount`, `SetAgentKey` and
+  `SetFirmEndpoint` answer `command.conflict` ("still leaving the old login; try again in a
+  moment") with nothing stored or started, since the late end could rewrite the entry under
+  their change, or fail. When the job ends, the pump runs the last three steps if the reuse
+  stopped (never on a `Failed`: the stop failed, and nothing else changes), `Switching` ends,
+  then `restart_agents` lifts the hold and the reads' guard drops; meanwhile another leave of
+  the agent answers `command.conflict`. Nothing changes under running agents. **A stop job
+  that never reports keeps the agent held until the app restarts.** A `Failed` while the login
+  is reused never counts as the reuse's end. A leave dropped before it ends (a panic, or its command
   dropped) lifts the hold from a drop guard. A failed `restart_agents` is tried once more, then
   logged as a warning. A leave that finishes keeps the hold until the new login, key or endpoint
   is in place.
@@ -454,14 +459,16 @@ reads' hold dropped and `limits_login_changed`.
   30 s, then every 5 minutes, until a try finishes or a new `SignedIn` arrives. It never gives
   up. A try again that finishes calls `restart_agents`, so the held questions run once. An
   automatic leave refused because another leave runs is run again when that one ends without
-  leaving. **A new login ends it, never the other way round** (review A1): before its first try,
-  before each try again, and right before `stop_using_login` (under the sign-in gate), it asks
-  S18 whether a sign-in runs or is reserved (`Agents::sign_in_going`) or Clauseo's own login is
-  signed in; then it asks S18 nothing more and ends, and `Switching` with it. So a try never
-  cancels a running sign-in, and never runs against Clauseo's own login. The hold is then the new
-  login's to lift: its `SignedIn`'s `restart_agents`, or the leave's own when the pump had shown
-  that login already. A running sign-in that fails leaves the agent held until a login, a key or
-  an endpoint is in place. A panic in an automatic leave lifts its hold and ends `Switching`,
+  leaving. **A new login ends it, never the other way round** (reviews A1, H1′): before its
+  first try, before each try again, and right before `stop_using_login` (under the sign-in
+  gate), it checks for Clauseo's own login signed in, or a new `SignedIn` since it began (the
+  pump has handled it, or S18 has sent it and the pump has not taken it yet, such as a "Use it"
+  that finished as `SignedIn { Reused }`); then it asks S18 nothing more and ends, and
+  `Switching` with it. The hold is then the new login's to lift: its `SignedIn`'s
+  `restart_agents`, or the leave's own once more when the pump had handled it. A sign-in S18
+  runs or has reserved (`Agents::sign_in_going`) only skips the try, so a try never cancels it:
+  the agent stays held and the sign-in shows over `Switching`; should it fail, `Switching`
+  shows again and the next try runs, so no hold is silent. A panic in an automatic leave lifts its hold and ends `Switching`,
   and the setup thread's other followers go on (review A3; release builds abort on a panic).
 - *`SignIn::Switching { since, stuck }`* is a new variant of the closed `SignIn`, shown from the
   first try's end. `since` is that moment, and a try again never moves it. `stuck` turns true 2

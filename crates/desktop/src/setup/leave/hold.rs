@@ -85,6 +85,24 @@ impl LeaveTimer for AsyncIoTimer {
 pub(crate) struct Late {
     pub(crate) hold: HostHold,
     pub(crate) reads: ReadHold,
+    /// Alive as long as this is: the `stuck` watch sets `stuck` only while it is.
+    alive: Arc<()>,
+}
+
+impl Late {
+    /// The holds of a lawyer's leave.
+    pub(crate) fn new(hold: HostHold, reads: ReadHold) -> Self {
+        Self {
+            hold,
+            reads,
+            alive: Arc::new(()),
+        }
+    }
+
+    /// Tells whether this is still alive.
+    pub(crate) fn alive(&self) -> std::sync::Weak<()> {
+        Arc::downgrade(&self.alive)
+    }
 }
 
 /// The host's hold on one agent from `stop_agents` on, lifted on drop unless kept.

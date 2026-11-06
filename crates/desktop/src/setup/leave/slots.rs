@@ -45,6 +45,8 @@ struct Running {
     deferred: Option<Deferred>,
     /// Told when a new sign-in arrives for the agent.
     signed_in: Option<oneshot::Sender<()>>,
+    /// Whether a new sign-in arrived since the leave began.
+    told: bool,
 }
 
 impl Default for Leaves {
@@ -120,12 +122,21 @@ impl Leaves {
 
     /// A new sign-in arrived for `agent`: its running automatic leave, if any, stops trying.
     pub(crate) fn signed_in(&self, agent: &AgentId) {
-        let tell = lock(&self.running)
-            .get_mut(agent)
-            .and_then(|leave| leave.signed_in.take());
+        let tell = lock(&self.running).get_mut(agent).and_then(|leave| {
+            leave.told = true;
+            leave.signed_in.take()
+        });
         if let Some(tell) = tell {
             let _gone = tell.send(());
         }
+    }
+
+    /// Whether a new sign-in arrived for `agent` since its running leave began: the pump has
+    /// handled it, `restart_agents` included.
+    pub(crate) fn told_signed_in(&self, agent: &AgentId) -> bool {
+        lock(&self.running)
+            .get(agent)
+            .is_some_and(|leave| leave.told)
     }
 
     /// The queue of automatic leaves, once: its one follower takes it.
