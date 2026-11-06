@@ -130,7 +130,7 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 /// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
 /// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
 /// firm's (decision record 0051), so without a policy it is empty and adds no domain.
-pub(crate) const POLICY_ONLY_KEYS: [&str; 2] = ["skills.curated", "network.allowed_domains"];
+pub const POLICY_ONLY_KEYS: [&str; 2] = ["skills.curated", "network.allowed_domains"];
 
 /// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
 /// (S27) and `case-law`, the case-law connector's relay (R24). An `mcp.servers` entry of one of

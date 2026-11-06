@@ -139,7 +139,7 @@ pub use dirs::refused_folders;
 pub use effective::{Effective, EntryWrite};
 pub use error::Error;
 pub use files::{Files, SystemFiles};
-pub use leaf::{RESERVED_MCP_SERVERS, reserved_mcp_server};
+pub use leaf::{POLICY_ONLY_KEYS, RESERVED_MCP_SERVERS, reserved_mcp_server};
 pub use locations::{
     DATA_DIR_VAR, DATA_ENTRIES, Env, IDENTIFIER, KnownFolder, Locations, PlatformDirs,
     SETTINGS_FILE,
