@@ -33,4 +33,6 @@ export type QueueTestIds = {
   note?: string;
   /** The line under the head that says why the host holds the queue (an update). */
   why?: string;
+  /** The resume cue's line, alone when nothing is queued (R20b). */
+  resume?: string;
 };
