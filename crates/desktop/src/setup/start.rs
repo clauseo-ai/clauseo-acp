@@ -26,7 +26,8 @@
 //! starts with them ([`SetupStart::launch_refusals`], `HostConfig::with_launch_refused`), so no
 //! launch comes before them: `signin.policy_unreadable` for each agent an unreadable policy
 //! blocks, `agent.keys_loading` for every other known agent. The first load is bounded
-//! ([`KEYS_LOAD_BOUND`], on the setup thread's timer); once it is over, each agent gets its
+//! ([`KEYS_LOAD_BOUND`], on the setup thread's timer); once it is over and the first network
+//! route is known (at most `FIRST_ROUTE_WAIT`, `network/follow.rs`), each agent gets its
 //! refusal in force (`setup/refusal.rs`: none, or `agent.key_unreadable` for a stored key
 //! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
 //! the thread that then follows the settings and the keys' notes, so they never cross; a
@@ -52,12 +53,13 @@ use super::hook::Plans;
 use super::host_calls::SetupHost;
 use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot};
 use super::login_check::ReusedLogins;
+use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
     Follower, NetworkRoute, NetworkSlot, OS_FALLBACK, ProxyEnv, follow, os_lookup, resolve,
 };
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
-use super::refusal::{follow_keys, settle_after_load, sync_all};
+use super::refusal::{follow_keys, lift_at_start, settle_after_load};
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents};
 use crate::bridge::lock;
@@ -418,7 +420,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
-            futures::executor::block_on(sync_all(&follower));
+            futures::executor::block_on(lift_at_start(&follower, FIRST_ROUTE_WAIT));
             let settings = follow_settings(&follower, &*reread);
             let leaves = super::leave::follow_auto_leaves(&follower);
             let keys = async {
@@ -432,7 +434,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
-        futures::executor::block_on(sync_all(&backend));
+        futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
     }
     futures::executor::block_on(backend.pump(source));
 }

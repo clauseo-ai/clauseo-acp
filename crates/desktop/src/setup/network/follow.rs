@@ -5,7 +5,9 @@
 //! The first route is awaited ([`NetworkFollow::ready`], at most [`FIRST_ROUTE_WAIT`]) before
 //! a command that reaches the network (an install, a retry, a sign-in) goes to `Agents`: behind
 //! a proxy set only in the OS, a first try that went direct would be refused by the firm's
-//! firewall and counted as a failed try.
+//! firewall and counted as a failed try. The start's `agent.keys_loading` launch refusal is
+//! lifted only after it too (`refusal::lift_at_start`), so no agent launched at start goes
+//! direct for its whole life.
 
 use std::pin::pin;
 use std::sync::{Arc, PoisonError, mpsc};
@@ -55,8 +57,14 @@ impl NetworkFollow {
 
     /// Waits until the first route has reached `Agents`, at most [`FIRST_ROUTE_WAIT`].
     pub(crate) async fn ready(&self) {
+        self.ready_within(FIRST_ROUTE_WAIT).await;
+    }
+
+    /// Waits until the first route has reached `Agents` and the launch hook, at most `bound`:
+    /// past it, what goes on takes the route resolved so far.
+    pub(crate) async fn ready_within(&self, bound: Duration) {
         let first = self.first.clone();
-        let bound = AsyncIoTimer.after(FIRST_ROUTE_WAIT);
+        let bound = AsyncIoTimer.after(bound);
         if let Either::Right(_) = select(pin!(first), pin!(bound)).await {
             tracing::warn!("the OS proxy lookup is still running; the command goes on without it");
         }
