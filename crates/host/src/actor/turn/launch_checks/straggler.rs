@@ -34,9 +34,18 @@ use crate::browser::session::BrowserSession;
 /// How often the wait looks again.
 const POLL: Duration = Duration::from_millis(50);
 
-/// How long one connect to Chrome's debugging port may take. Loopback answers at once; a
-/// connect that neither succeeds nor is refused counts as Chrome still there.
+/// How long one connect to Chrome's debugging port may take. A connect that neither succeeds
+/// nor is refused counts as Chrome still there. On Unix, loopback answers at once.
+#[cfg(not(windows))]
 const CONNECT_WAIT: Duration = Duration::from_millis(200);
+
+/// Windows does not fail a connect on the first RST: it sends the SYN again (three extra
+/// times by default), so a refusal on loopback arrives after roughly 2 s (curl's "slow TCP
+/// connect on Windows", Chromium issue 542261173; not measured here). A shorter wait would read
+/// every gone Chrome as there and hold each browser session to its cap. A listening Chrome
+/// still answers at once, so only a look at a gone one takes this long.
+#[cfg(windows)]
+const CONNECT_WAIT: Duration = Duration::from_secs(3);
 
 /// What was still there when the wait reached its cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
