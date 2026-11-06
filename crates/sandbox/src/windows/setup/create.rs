@@ -3,17 +3,16 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use super::journal_plan::{JournalAction, journal_plan};
+use super::late_steps::{fence, journals, registered};
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
-    JournalOutcome, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step,
-    cause_of,
+    LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, cause_of,
 };
 use super::rollback::{Made, Run, roll_back};
 use super::{POOL_START, SetupRequest};
-use crate::windows::apply::{Applied, fence_registered};
+use crate::windows::fence::RegisteredMatter;
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
 use crate::windows::pool::{MachineRecord, POOL_CAP, PoolUser, pool_name, pool_number};
 use crate::windows::shared_writes::{
@@ -23,7 +22,7 @@ use crate::windows::sids::Sid;
 use crate::windows::writer::{AclWriter, ApplyFailure};
 
 /// A step's failure inside the run: where, and why.
-type Failed = (Step, String);
+pub(super) type Failed = (Step, String);
 
 /// Who the pool is before the changes, and what the run will make.
 #[derive(Debug, Default)]
@@ -41,6 +40,8 @@ struct Plan {
     make: usize,
     /// A re-run: the kept users' passwords are reset (D-B6).
     reset: bool,
+    /// The owner's registered matters, read after the lock (`Machine::registered_matters`).
+    matters: Vec<RegisteredMatter>,
 }
 
 /// What the users' steps hand on: each live user's profile and the passwords set this run.
@@ -66,8 +67,10 @@ pub(super) fn run(
         .read_record()
         .map_err(|error| SetupFailure::early(Step::ReadRecord, cause_of(&error)))?;
     check_owner(before.as_ref(), &req.owner)?;
+    let matters = registered(machine, before.as_ref())?;
     preflight(machine)?;
-    let plan = plan_pool(machine, before.as_ref(), req)?;
+    let mut plan = plan_pool(machine, before.as_ref(), req)?;
+    plan.matters = matters;
     let mut run = Run::new(before);
     match change(machine, acl, req, &plan, &mut run) {
         Ok(report) => Ok(report),
@@ -268,8 +271,8 @@ fn change(
     }
     let shared = shared_writes(machine, acl, &group, &users.profiles, run)?;
     let live: Vec<Sid> = users.profiles.iter().map(|(u, _)| u.sid.clone()).collect();
-    let fenced = fence(machine, acl, req, run, &group, &live)?;
-    let journals = journals(machine, req);
+    let fenced = fence(machine, acl, &plan.matters, run, &group, &live)?;
+    let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
     })
@@ -527,73 +530,4 @@ fn failed_targets(failed: &[(PathBuf, ApplyFailure)]) -> String {
         .map(|(path, failure)| format!("{}: {failure}", path.display()))
         .collect();
     format!("a shared folder couldn't be closed ({})", each.join("; "))
-}
-
-/// Step 8: when this run made users and matters are registered (an extend, or a re-run that made
-/// a user again), every registered matter is fenced against the grown pool through the owner's
-/// ledger, which the rollback reads after. The whole step runs as the owner: the ledger is the
-/// owner's file, and the matters' folders are the owner's, so the elevated process writes there
-/// only what the owner could (K1).
-fn fence(
-    machine: &mut impl Machine,
-    acl: &mut impl AclWriter,
-    req: &SetupRequest,
-    run: &mut Run,
-    group: &Sid,
-    live: &[Sid],
-) -> Result<Option<Applied>, Failed> {
-    if run.made.is_empty() || req.matters.is_empty() {
-        return Ok(None);
-    }
-    let mut trusted: Vec<Sid> = run.recorded().map(|r| r.pool.clone()).unwrap_or_default();
-    trusted.push(group.clone());
-    let failed = |cause: String| (Step::Fence, cause);
-    let (ledger, fenced) = machine
-        .as_owner(|machine| {
-            let mut ledger = machine.ledger(&trusted)?;
-            let around = machine.surroundings();
-            let fenced = fence_registered(&mut ledger, &req.matters, live, acl, around);
-            Ok::<_, io::Error>((ledger, fenced))
-        })
-        .map_err(|error| failed(cause_of(&error)))?
-        .map_err(|error| failed(format!("the permission ledger: {error}")))?;
-    run.ledger = Some(ledger);
-    fenced.map(Some).map_err(|error| failed(error.to_string()))
-}
-
-/// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller
-/// ([`journal_plan`], D-B12).
-/// Failures are listed, never fatal: they cost only full walks later.
-fn journals(
-    machine: &mut impl Machine,
-    req: &SetupRequest,
-) -> Result<Vec<(PathBuf, JournalOutcome)>, String> {
-    let roots: Vec<&Path> = req
-        .matters
-        .iter()
-        .map(|matter| matter.folders.root.as_path())
-        .collect();
-    let volumes = machine
-        .journal_volumes(&roots)
-        .map_err(|error| cause_of(&error))?;
-    let mut done = Vec::new();
-    for volume in volumes {
-        let outcome = match machine.journal_size(&volume) {
-            Ok(size) => match journal_plan(size) {
-                JournalAction::Leave => JournalOutcome::Left(size.unwrap_or_default()),
-                JournalAction::Grow { max, delta } => {
-                    match machine.grow_journal(&volume, max, delta) {
-                        Ok(()) => JournalOutcome::Grown,
-                        Err(error) => JournalOutcome::Failed(cause_of(&error)),
-                    }
-                }
-            },
-            Err(error) => JournalOutcome::Failed(cause_of(&error)),
-        };
-        if let JournalOutcome::Failed(why) = &outcome {
-            tracing::warn!(volume = %volume.display(), %why, "the change journal wasn't enlarged");
-        }
-        done.push((volume, outcome));
-    }
-    Ok(done)
 }

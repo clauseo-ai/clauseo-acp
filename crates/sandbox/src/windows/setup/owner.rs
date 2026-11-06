@@ -20,6 +20,9 @@ use super::machine::MachineError;
 #[cfg(windows)]
 mod token;
 
+#[cfg(all(windows, test))]
+pub(crate) use token::thread_has_token;
+
 /// The process to take the owner from: `recorded`, the parent Windows recorded for this process.
 /// `claimed` (the app's `--parent`) must be that process; with none, `recorded` is used. 0 (no
 /// parent recorded) is refused.

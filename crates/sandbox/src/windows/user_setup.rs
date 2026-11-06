@@ -6,8 +6,10 @@
 //! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). It runs
 //! hidden, with no error box from the shell (`SEE_MASK_FLAG_NO_UI`), and the wait has no limit:
 //! R17 calls `run` off the actor thread. A prompt declined (1223) is [`SetupError::Refused`];
-//! 1260 (a policy) and 1385 are failures with a named cause (`launch_error`). Once the exe ends,
-//! its exit code and `setup-result.json` say how ([`result_file::outcome`]).
+//! 1260 (a policy) and 1385 (a logon right) are [`SetupError::Blocked`], named for IT
+//! (`launch_error`), and `state` reports a block as [`SetupState::Blocked`] until a set-up
+//! succeeds. Once the exe ends, its exit code and `setup-result.json` say how
+//! ([`result_file::outcome`]).
 #![expect(
     unsafe_code,
     reason = "FFI to ShellExecuteExW and the started process's handle"
@@ -31,10 +33,11 @@ use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
 use super::record::{sandbox_group_sid, sandbox_pool_sids};
+use super::setup::SetupExit;
 use super::setup::args::quote;
 use super::setup::around::Around;
 use super::setup::launch_error;
-use super::setup::result_file;
+use super::setup::result_file::{self, SetupResult};
 use super::sids::{Reserved, Sid};
 use crate::{SandboxSetup, SetupError, SetupState};
 
@@ -50,9 +53,17 @@ pub struct UserSetup {
 }
 
 impl UserSetup {
-    /// The set-up for the data folder `data_dir`, run through the setup exe at `exe`.
-    pub fn new(data_dir: PathBuf, exe: PathBuf) -> UserSetup {
-        UserSetup { data_dir, exe }
+    /// The set-up for the data folder `data_dir`, run through the setup exe at `exe`. A
+    /// relative `exe` is refused: `ShellExecuteExW` would look for it in the current folder
+    /// and on the search path, where another program could stand in for it.
+    pub fn new(data_dir: PathBuf, exe: PathBuf) -> Result<UserSetup, SetupError> {
+        if !exe.is_absolute() {
+            return Err(SetupError::Failed(format!(
+                "the set-up program's path {} isn't a full path",
+                exe.display()
+            )));
+        }
+        Ok(UserSetup { data_dir, exe })
     }
 
     /// Adds `n` pool users to a pool this user set up (D-B5): one prompt, as [`SandboxSetup::run`]
@@ -91,14 +102,38 @@ impl UserSetup {
                 "the last set-up's result can't be cleared: {error}"
             ))
         })?;
-        let code = launch(&self.exe, params)?;
+        let code = match launch(&self.exe, params) {
+            Ok(code) => code,
+            Err(SetupError::Blocked(blocked)) => {
+                // Nothing ran to say so: the app records it, so `state` reports it until a
+                // later set-up succeeds.
+                let result = SetupResult {
+                    blocked: Some(blocked),
+                    ..SetupResult::failed(
+                        SetupExit::Failed,
+                        "starting the set-up program",
+                        blocked.to_string(),
+                    )
+                };
+                if let Err(error) = result_file::write(&self.data_dir, &result) {
+                    tracing::warn!(%error, "the blocked set-up couldn't be recorded");
+                }
+                return Err(SetupError::Blocked(blocked));
+            }
+            Err(error) => return Err(error),
+        };
         result_file::outcome(code, Some(&result_file::read(&self.data_dir)))
     }
 }
 
 impl SandboxSetup for UserSetup {
+    /// The marker and record's state, or [`SetupState::Blocked`] while the last set-up was
+    /// blocked and nothing is set up since (`result_file::state_with`).
     fn state(&self) -> SetupState {
-        setup_state(&self.data_dir)
+        result_file::state_with(
+            setup_state(&self.data_dir),
+            &result_file::read(&self.data_dir),
+        )
     }
 
     fn run(&self) -> Result<(), SetupError> {

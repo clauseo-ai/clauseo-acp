@@ -52,18 +52,55 @@ pub enum SetupState {
     /// Another Windows user owns the machine's pool (D5: the first user owns it), so this user
     /// stays on tier C: `SetUpFailed`.
     SetUpByOtherUser,
+    /// The last set-up was blocked by a setting only whoever looks after the computer can
+    /// change (D-B4), and nothing has been set up since: `SetUpBlocked`. Trying again asks for
+    /// an administrator again, and fails again until the setting changes.
+    Blocked(Blocked),
 }
 
 /// Why a set-up step failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SetupError {
     /// The lawyer declined the prompt (`ERROR_CANCELLED`, 1223). A logon type not granted (1385)
-    /// is a [`SetupError::Failed`] naming the right (D-B4).
+    /// is [`SetupError::Blocked`], naming the right (D-B4).
     #[error("sandbox set-up was refused")]
     Refused,
     /// Anything else; what failed.
     #[error("sandbox set-up failed: {0}")]
     Failed(String),
+    /// A Windows setting blocks the set-up, which only whoever looks after the computer can
+    /// change (D-B4): a policy blocking the set-up program (1260), or a logon right the sandbox
+    /// users lack (1385).
+    #[error("sandbox set-up is blocked: {0}")]
+    Blocked(Blocked),
+}
+
+/// What blocks the set-up, named so firm IT can act on it (D-B4). Its words name the setting
+/// to change, never a path or a SID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Blocked {
+    /// `ERROR_LOGON_TYPE_NOT_GRANTED` (1385) when set-up logs a sandbox user on: Windows'
+    /// "Allow log on locally" right doesn't include them (the interactive logon set-up uses).
+    LogonRight,
+    /// `ERROR_ACCESS_DISABLED_BY_POLICY` (1260) when the app starts the set-up program: a
+    /// Windows policy (`AppLocker`, Software Restriction Policies) blocks it.
+    Policy,
+}
+
+impl std::fmt::Display for Blocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Blocked::LogonRight => {
+                "Windows' \"Allow log on locally\" right doesn't include the group \
+                 ClauseoSandboxUsers; whoever looks after this computer can add it"
+            }
+            Blocked::Policy => {
+                "a Windows policy blocks clauseo-sandbox-setup.exe, Clauseo's set-up program; \
+                 whoever looks after this computer can allow it"
+            }
+        })
+    }
 }
 
 /// One protected name moved aside from the matter (S15 PR3's set-aside: `windows::after_session`

@@ -97,7 +97,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # secrets.bin (src/windows/secrets/dpapi.rs, setup/owner): CryptProtectData (Security_Cryptography);
 # the set-up's recorded parent from NtQueryInformationProcess (Wdk_System_Threading).
 # The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
-# known folder's string freed with CoTaskMemFree (System_Com).
+# known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
+# System32 (SetDefaultDllDirectories, System_LibraryLoader).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
 windows = { workspace = true, features = [
@@ -117,6 +118,7 @@ windows = { workspace = true, features = [
   "Win32_System_IO",
   "Win32_System_Ioctl",
   "Win32_System_Com",
+  "Win32_System_LibraryLoader",
   "Win32_System_ProcessStatus",
   "Win32_System_Registry",
   "Win32_System_Services",

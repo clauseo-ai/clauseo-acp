@@ -82,7 +82,7 @@ fn secondary_logon_disabled_makes_no_account() {
     let mut machine = FakeMachine::new("setup-seclogon");
     machine.seclogon = ServiceStart::Disabled;
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::SecondaryLogon);
     assert_eq!(failure.cause, SECLOGON_DISABLED);
@@ -90,7 +90,16 @@ fn secondary_logon_disabled_makes_no_account() {
         (failure.exit, failure.rolled_back),
         (SetupExit::Failed, true)
     );
-    assert_eq!(machine.calls, ["lock", "read_record", "seclogon", "unlock"]);
+    assert_eq!(
+        machine.calls,
+        [
+            "lock",
+            "read_record",
+            "registered_matters",
+            "seclogon",
+            "unlock"
+        ]
+    );
     assert_eq!(machine.state, before);
 }
 
@@ -99,7 +108,7 @@ fn a_refused_logon_right_makes_no_account() {
     let mut machine = FakeMachine::new("setup-logon-right");
     machine.logon_right = LogonRight::Refused;
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(
         (failure.step, failure.cause.as_str()),
@@ -107,7 +116,14 @@ fn a_refused_logon_right_makes_no_account() {
     );
     assert_eq!(
         machine.calls,
-        ["lock", "read_record", "seclogon", "logon_right", "unlock"]
+        [
+            "lock",
+            "read_record",
+            "registered_matters",
+            "seclogon",
+            "logon_right",
+            "unlock"
+        ]
     );
     assert_eq!(machine.state, before);
 }
@@ -123,7 +139,7 @@ fn a_logon_type_not_granted_names_the_right_and_rolls_back() {
         },
     ));
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(
         (failure.step, failure.cause.as_str()),
@@ -144,7 +160,7 @@ fn another_owner_refuses_with_the_owners_sid() {
         removing: false,
     });
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(
         (failure.step, failure.exit),
@@ -159,7 +175,7 @@ fn another_owner_refuses_with_the_owners_sid() {
 fn a_held_lock_exits_lock_held_and_touches_nothing() {
     let mut machine = FakeMachine::new("setup-lock");
     machine.lock_held = true;
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(
         (failure.step, failure.exit),
@@ -173,7 +189,7 @@ fn the_owner_sid_never_ends_up_in_pool_sids() {
     // Account creation answering the owner's SID: the record write refuses it.
     let mut machine = FakeMachine::new("setup-owner-sid");
     machine.owner_sid_for = Some("ClauseoSb02".to_owned());
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::WriteRecord);
     assert!(failure.cause.contains(OWNER), "{}", failure.cause);
@@ -195,7 +211,7 @@ fn the_owner_sid_never_ends_up_in_pool_sids() {
         removing: false,
     });
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(
         (failure.step, failure.exit),
@@ -225,7 +241,7 @@ fn a_recorded_sid_that_is_no_pool_account_refuses() {
         data_dir: machine.data_dir(),
         removing: false,
     });
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Pool);
     assert!(failure.cause.contains("Administrator"), "{}", failure.cause);
@@ -270,7 +286,7 @@ fn a_temporary_profile_fails_the_set_up() {
     let mut machine = FakeMachine::new("setup-temp-profile");
     machine.temporary.insert("ClauseoSb03".to_owned());
     let before = machine.state.clone();
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::Profile);
     assert!(failure.cause.contains("ClauseoSb03"), "{}", failure.cause);
@@ -300,12 +316,9 @@ fn exit_codes_round_trip() {
         assert_eq!(SetupExit::from_code(other), None, "{other}");
     }
     assert_eq!(launch_error(ERROR_CANCELLED), SetupError::Refused);
-    let SetupError::Failed(policy) = launch_error(ERROR_ACCESS_DISABLED_BY_POLICY) else {
-        panic!("1260 is a failure");
-    };
-    assert!(
-        policy.contains("policy") && policy.contains("1260"),
-        "{policy}"
+    assert_eq!(
+        launch_error(ERROR_ACCESS_DISABLED_BY_POLICY),
+        SetupError::Blocked(crate::Blocked::Policy)
     );
     let SetupError::Failed(other) = launch_error(2) else {
         panic!("any other code is a failure");

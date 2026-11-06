@@ -45,13 +45,13 @@ fn each_mode_parses_in_full() {
             "--parent",
             "7",
             "--data-dir",
-            r"\\?\C:\data",
+            r"C:\Users\Rohan Shiralkar\AppData\Roaming\chat.clauseo\",
             "--add",
             "32"
         ]),
         Ok(Mode::SetUp {
             parent: 7,
-            data_dir: PathBuf::from(r"\\?\C:\data"),
+            data_dir: PathBuf::from(r"C:\Users\Rohan Shiralkar\AppData\Roaming\chat.clauseo\"),
             add: 32,
         })
     );
@@ -157,13 +157,31 @@ fn a_parent_that_isnt_a_process_id_is_refused() {
 #[test]
 fn a_data_dir_that_isnt_a_full_drive_path_is_refused() {
     for dir in [
+        // Relative, rooted without a drive, a bare drive, or empty.
         "data",
         r"..\data",
         r"\data",
         "C:",
         "C:data",
-        r"\\server\share\data",
         "",
+        // Shares, \\?\ and \\.\ forms, devices.
+        r"\\server\share\data",
+        "//server/share/data",
+        r"\\?\UNC\server\share\data",
+        r"\\?\C:\data",
+        r"\\.\C:\data",
+        r"\\.\PhysicalDrive0",
+        r"\??\C:\data",
+        r"\\?\GLOBALROOT\Device\HarddiskVolume1\data",
+        // . and .. parts, empty parts, streams, trailing dots or spaces.
+        r"C:\Users\..\Windows",
+        r"C:\Users\Rohan\..",
+        r"C:\Users\.\Rohan",
+        r"C:\Users\\Rohan",
+        r"C:\data:stream",
+        r"C:\data.",
+        r"C:\data \x",
+        "1:/data",
     ] {
         let line = ["--set-up", "--parent", "1", "--data-dir", dir];
         let error = parsed(&line).unwrap_err();

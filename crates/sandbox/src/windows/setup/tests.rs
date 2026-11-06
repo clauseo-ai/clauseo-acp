@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::windows::acl_plan::Rights;
-use crate::windows::fence::MatterFolders;
+use crate::windows::fence::{MatterFolders, RegisteredMatter};
 
 mod create;
 mod extend;
@@ -24,13 +24,14 @@ fn owner() -> Sid {
     Sid::parse(OWNER).unwrap()
 }
 
-/// A set-up (or with `add`, an extend) for the owner over `machine`'s data folder.
-fn request(machine: &FakeMachine, add: u8, matters: Vec<RegisteredMatter>) -> SetupRequest {
+/// A set-up (or with `add`, an extend) for the owner over `machine`'s data folder, whose
+/// owner's files list `matters` as registered.
+fn request(machine: &mut FakeMachine, add: u8, matters: Vec<RegisteredMatter>) -> SetupRequest {
+    machine.matters = matters;
     SetupRequest {
         owner: owner(),
         data_dir: machine.data_dir(),
         add,
-        matters,
     }
 }
 
@@ -47,11 +48,18 @@ fn local_low(machine: &FakeMachine, name: &str) -> PathBuf {
 
 /// The calls a fresh set-up of four users makes, in order.
 fn fresh_calls() -> Vec<String> {
-    let mut calls: Vec<String> = ["lock", "read_record", "seclogon", "logon_right", "group"]
-        .into_iter()
-        .chain(["create_group"])
-        .map(str::to_owned)
-        .collect();
+    let mut calls: Vec<String> = [
+        "lock",
+        "read_record",
+        "registered_matters",
+        "seclogon",
+        "logon_right",
+        "group",
+    ]
+    .into_iter()
+    .chain(["create_group"])
+    .map(str::to_owned)
+    .collect();
     let mut recorded = Vec::new();
     for n in 1..=4u32 {
         let name = format!("ClauseoSb0{n}");

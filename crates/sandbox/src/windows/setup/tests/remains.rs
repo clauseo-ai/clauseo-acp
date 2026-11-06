@@ -44,7 +44,7 @@ fn a_failed_fence_rolls_back_the_new_users_with_matters_registered() {
     let (mut machine, mut acl, matters) = pool_with_matters("setup-fence-fails");
     acl.fail_add = Some(dunce::canonicalize(&matters[1].folders.root).unwrap());
     let before = machine.state.clone();
-    let req = request(&machine, 4, matters);
+    let req = request(&mut machine, 4, matters);
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Fence);
     assert!(failure.rolled_back, "{}", failure.cause);
@@ -57,7 +57,7 @@ fn a_failed_fence_rolls_back_the_new_users_with_matters_registered() {
 fn made_users_the_ledger_names_stay_in_the_record_after_a_rollback() {
     let (mut machine, mut acl, matters) = pool_with_matters("setup-ledger-keeps");
     machine.fail("write_marker");
-    let req = request(&machine, 4, matters);
+    let req = request(&mut machine, 4, matters);
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Marker);
     assert!(failure.rolled_back, "{}", failure.cause);
@@ -80,7 +80,7 @@ fn a_group_that_wont_go_stays_recorded() {
         let mut machine = FakeMachine::new("setup-group-stays");
         machine.fail("write_marker");
         machine.fail(call);
-        let req = request(&machine, 0, Vec::new());
+        let req = request(&mut machine, 0, Vec::new());
         let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
         assert!(!failure.rolled_back, "{call}");
         assert!(
@@ -104,7 +104,7 @@ fn a_user_that_wont_go_before_any_record_write_is_recorded() {
     let mut machine = FakeMachine::new("setup-unrecorded-user");
     machine.fail("hide ClauseoSb01");
     machine.fail("delete_user ClauseoSb01");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!((failure.step, failure.rolled_back), (Step::Hide, false));
     assert!(machine.state.accounts.contains_key("ClauseoSb01"));
@@ -130,7 +130,7 @@ fn without_group(test: &str) -> FakeMachine {
 fn a_group_an_extend_remade_stays_recorded_after_a_failure() {
     let mut machine = without_group("setup-extend-regroup");
     machine.fail("create_user ClauseoSb05");
-    let req = request(&machine, 4, Vec::new());
+    let req = request(&mut machine, 4, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::CreateUser);
     assert!(failure.rolled_back, "{}", failure.cause);
@@ -145,7 +145,7 @@ fn a_group_an_extend_remade_stays_recorded_after_a_failure() {
 fn a_group_a_re_run_remade_stays_recorded_and_the_new_passwords_are_saved() {
     let mut machine = without_group("setup-rerun-regroup");
     machine.fail("log_on_once ClauseoSb02");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
     assert_eq!(failure.step, Step::LogOn);
     assert!(failure.rolled_back, "{}", failure.cause);
@@ -171,7 +171,7 @@ fn the_run_after_a_failed_re_run_saves_every_users_password() {
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     machine.fail("log_on_once ClauseoSb03");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     set_up(&mut machine, &mut acl, &req).unwrap_err();
     secrets_match(&machine.state);
     let from = machine.calls.len();
@@ -188,15 +188,15 @@ fn the_run_after_a_failed_re_run_saves_every_users_password() {
 #[test]
 fn dead_sids_the_record_keeps_count_toward_the_cap() {
     let (mut machine, mut acl, matters) = pool_with_matters("setup-cap-dead");
-    let req = request(&machine, 28, matters.clone());
+    let req = request(&mut machine, 28, matters.clone());
     set_up(&mut machine, &mut acl, &req).unwrap();
     machine.state.accounts.remove("ClauseoSb10");
-    let req = request(&machine, 0, matters.clone());
+    let req = request(&mut machine, 0, matters.clone());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.kept_dead, [sid(1010)]);
     assert_eq!(report.made, [], "the record has no room for one more");
     assert_eq!(machine.state.record.clone().unwrap().pool.len(), 32);
-    let req = request(&machine, 4, matters);
+    let req = request(&mut machine, 4, matters);
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Pool);
     assert_eq!(machine.state.record.clone().unwrap().pool.len(), 32);
@@ -206,7 +206,7 @@ fn dead_sids_the_record_keeps_count_toward_the_cap() {
 fn a_crash_inside_the_run_still_gives_the_lock_back() {
     let mut machine = FakeMachine::new("setup-crash-lock");
     machine.panic_on = Some("create_user ClauseoSb02".to_owned());
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         set_up(&mut machine, &mut FakeAcl::default(), &req)
     }));
@@ -223,7 +223,7 @@ fn secrets_bin_that_cant_be_written_in_a_rollback_stays_as_it_was() {
     // Step 10 fails, then the rollback's own write of the new passwords fails too.
     machine.fail("protect_for_owner 1001,1002,1003,1004");
     machine.fail("protect_for_owner 1001,1002,1003,1004");
-    let req = request(&machine, 0, Vec::new());
+    let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!(failure.step, Step::Secrets);
     assert!(!failure.rolled_back);

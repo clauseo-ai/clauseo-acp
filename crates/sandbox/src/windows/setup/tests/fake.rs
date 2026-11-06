@@ -14,6 +14,7 @@ use crate::windows::FolderSupport;
 use crate::windows::acl_plan::Sid;
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
+use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
@@ -121,6 +122,8 @@ pub(super) struct FakeMachine {
     pub(super) outside_owner: Vec<String>,
     /// `as_owner` fails, as an impersonation Windows refuses would.
     pub(super) refuse_owner: bool,
+    /// The owner's registered matters, as `registered_matters` reads them.
+    pub(super) matters: Vec<RegisteredMatter>,
     next_rid: u32,
     passwords: u32,
     around: Around,
@@ -164,6 +167,7 @@ impl FakeMachine {
             acting: Rc::new(Cell::new(false)),
             outside_owner: Vec::new(),
             refuse_owner: false,
+            matters: Vec::new(),
             next_rid: 1000,
             passwords: 0,
             around: Around,
@@ -454,6 +458,14 @@ impl Machine for FakeMachine {
     fn sessions_open(&mut self) -> Result<bool, MachineError> {
         self.owner_call("sessions_open")?;
         Ok(self.sessions_open)
+    }
+
+    fn registered_matters(
+        &mut self,
+        _trusted: &[Sid],
+    ) -> Result<Vec<RegisteredMatter>, MachineError> {
+        self.owner_call("registered_matters")?;
+        Ok(self.matters.clone())
     }
 
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {

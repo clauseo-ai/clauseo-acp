@@ -40,6 +40,9 @@ pub enum NoSandbox {
     /// Windows: the set-up failed, its records can't be read, or another Windows user owns it
     /// (D5); what happened.
     SetUpFailed(String),
+    /// Windows: a setting only whoever looks after the computer can change blocks the set-up
+    /// (D-B4); which one.
+    SetUpBlocked(crate::Blocked),
 }
 
 /// What [`detect`] found.
@@ -144,6 +147,7 @@ fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
         SetupState::Needed | SetupState::Outdated { .. } => Detection::none(NoSandbox::NeedsSetUp),
         SetupState::Refused => Detection::none(NoSandbox::SetUpRefused),
         SetupState::Failed(why) => Detection::none(NoSandbox::SetUpFailed(why)),
+        SetupState::Blocked(cause) => Detection::none(NoSandbox::SetUpBlocked(cause)),
         SetupState::SetUpByOtherUser => {
             Detection::none(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned()))
         }
