@@ -3,10 +3,12 @@
 //! then [`after_host`], which with `HostExit::Install`:
 //!
 //! 0. installs nothing when an agents job outlived its bound at quit (`agents_stopped` false: a
-//!    child may still hold the app's files open); it saves the window state and restarts as the
-//!    old version, so the next start shows `failed`;
-//! 1. saves the window state (an install or a restart ends the app without the exit event
-//!    window-state saves on);
+//!    child may still hold the app's files open); it restarts as the old version, so the next
+//!    start shows `failed`;
+//! 1. saves no window state: `quit::on_exit_requested` saved it on the main thread before this
+//!    thread started (every install begins with `ExitRequested`). The plugin's save holds its
+//!    cache lock while it reads each window through the main thread, so a save from here could
+//!    deadlock with the plugin's own save at `RunEvent::Exit`;
 //! 2. calls the crash guard's clean exit, a no-op until S22 ([`crash_clean_exit`]);
 //! 3. flushes the log again, for the lines since;
 //! 4. installs, on a thread of its own, watched ([`watch_install`]): the plugin's `install`
@@ -40,8 +42,6 @@ pub(crate) enum After {
 pub(crate) trait Steps {
     /// Whether `downloaded` is one this app can install (the plugin's).
     fn installable(&self, downloaded: &Downloaded) -> bool;
-    /// Saves the window state.
-    fn save_window_state(&mut self);
     /// S22's crash guard's clean exit.
     fn crash_clean_exit(&mut self);
     /// Flushes the host log.
@@ -151,7 +151,6 @@ pub(crate) fn after_host(
         );
         return After::Exit;
     }
-    steps.save_window_state();
     if !agents_stopped {
         tracing::warn!(
             target: LIFECYCLE,
@@ -247,15 +246,6 @@ impl<R: Runtime> Steps for AppSteps<'_, R> {
             .handle
             .downcast_ref::<super::plugin::Pending>()
             .is_some()
-    }
-
-    fn save_window_state(&mut self) {
-        use tauri_plugin_window_state::AppHandleExt as _;
-        if let Err(error) = self.0.save_window_state(crate::window_size::state_flags()) {
-            // The plugin's error can name the config folder: only that it failed.
-            drop(error);
-            tracing::warn!("the window state was not saved before the update");
-        }
     }
 
     fn crash_clean_exit(&mut self) {
