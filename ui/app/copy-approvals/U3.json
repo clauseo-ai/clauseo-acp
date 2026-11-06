@@ -791,5 +791,29 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-agent.identity_checking": {
+    "en": "Clauseo is still checking which account your sign-in belongs to. Try again in a moment.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-agent.identity_unknown": {
+    "en": "Clauseo couldn't confirm which account your sign-in belongs to. Try again.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-signin.account_changed": {
+    "en": "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped answering so no matter's work goes to the wrong account. Sign in again. Your questions are kept and run once you do.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

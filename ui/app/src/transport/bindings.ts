@@ -1568,6 +1568,12 @@ export type ErrorCode =
 "sandbox.setup_required" | 
 /** The firm requires the sandbox (sandbox.required) and this computer cannot give it for a reason the set-up does not fix (no sandbox here, a failed set-up, a full pool, protection switched off, or a newer cause), so no agent was started. */
 "sandbox.required" | 
+/** Clauseo is confirming which account this agent's login belongs to; no agent was started. */
+"agent.identity_checking" | 
+/** Clauseo could not confirm which account this agent's login belongs to (its status check failed or gave no account); no agent was started. Trying again can succeed. */
+"agent.identity_unknown" | 
+/** The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. */
+"signin.account_changed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

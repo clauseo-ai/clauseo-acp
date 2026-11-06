@@ -443,4 +443,25 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (372, 0x0628_bffb_8100_b51f),
         (274, 0x1ed4_7c46_29a5_cdfd),
     ),
+    (
+        "added/turn_failed-AgentIdentityChecking",
+        include_bytes!("added/turn_failed-AgentIdentityChecking.jsonl"),
+        include_bytes!("added/turn_failed-AgentIdentityChecking.msgpack"),
+        (360, 0xcb02_c012_8932_2f51),
+        (262, 0xd11e_513a_b046_026b),
+    ),
+    (
+        "added/turn_failed-AgentIdentityUnknown",
+        include_bytes!("added/turn_failed-AgentIdentityUnknown.jsonl"),
+        include_bytes!("added/turn_failed-AgentIdentityUnknown.msgpack"),
+        (363, 0x503d_3086_6104_b499),
+        (265, 0x082e_d815_0f18_b922),
+    ),
+    (
+        "added/turn_failed-SigninAccountChanged",
+        include_bytes!("added/turn_failed-SigninAccountChanged.jsonl"),
+        include_bytes!("added/turn_failed-SigninAccountChanged.msgpack"),
+        (371, 0xb6fe_c2b5_ff6d_2d0f),
+        (273, 0x9101_b25f_5473_6148),
+    ),
 ];
