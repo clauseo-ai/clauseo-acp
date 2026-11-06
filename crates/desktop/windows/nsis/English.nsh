@@ -22,8 +22,8 @@ LangString deleteAppDataKept ${LANG_ENGLISH} "Clauseo kept this folder because i
 LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It kept one folder because it may hold files you still need. Look through that folder before you delete anything.$\n$\nThe folder it kept:$\n$R8$\n$\nThe rest of its data:$\n$R9"
 ; deleteAppDataFailedUnnamed: as deleteAppDataFailed, but the data folder is itself a link (or
 ; could not be read), so no path is shown: one would lead through the link. The folder is named
-; by its name instead. Provisional (S20 follow-up, 2026-11-06; for the app thread's copy page).
-LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. Its data is in the ai.clauseo.desktop folder in your local AppData folder."
+; by its name instead. Provisional (app thread, 2026-11-06).
+LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It's in the ai.clauseo.desktop folder in your local AppData folder. Ask whoever looks after this computer to remove it."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
