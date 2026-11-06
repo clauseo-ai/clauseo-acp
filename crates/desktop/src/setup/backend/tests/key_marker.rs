@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use clauseo_agents::keys::Keychain;
 use clauseo_protocol::{ErrorCode, Secret};
 use clauseo_settings::{Files, SystemFiles};
+use futures::StreamExt as _;
 use zeroize::Zeroizing;
 
 use super::fakes::{HostCall, rig};
@@ -21,7 +22,7 @@ use super::{claude, codex};
 use crate::bridge::lock;
 use crate::setup::KeyWrite;
 use crate::setup::keys::marker::{self, Marked};
-use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes};
+use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes};
 use crate::setup::refusal::settle_after_load;
 use crate::test_support::{Scratch, block_on};
 
@@ -267,4 +268,64 @@ fn a_read_that_answers_sets_a_missing_marker_and_clears_a_stale_one() {
         &Never,
     );
     assert_eq!(marked(&scratch), Marked::Only([claude()].into()));
+}
+
+#[test]
+fn a_late_read_that_answers_a_key_marks_an_unmarked_agent() {
+    let scratch = Scratch::folder("key-marker-late-key", &[]);
+    // Codex's key is stored, but no marker marks Codex: its read is silent at the bound.
+    let keychain = Keychain::memory();
+    keychain.store(&codex(), KEY).unwrap();
+    keychain.hang_reads(true);
+    let notes = KeyNotes::new();
+    let keys = KeyCache::load_bounded(
+        keychain.clone(),
+        [&claude(), &codex()],
+        KeyMarker::new(scratch.path(), [&claude(), &codex()]),
+        notes.sender(),
+        &Passed,
+        KEYS_LOAD_BOUND,
+    );
+    assert!(!keys.unreadable(&codex()) && !keys.has(&codex()));
+    assert_eq!(marked(&scratch), Marked::Only(BTreeSet::new()));
+    // The late read answers with the key: it is taken in, and the marker is set before the
+    // change is noted.
+    let mut receiver = notes.take().unwrap();
+    keychain.hang_reads(false);
+    assert_eq!(block_on(receiver.next()), Some(KeyNote::Read(codex())));
+    assert_eq!(keys.get(&codex()).as_deref().map(String::as_str), Some(KEY));
+    assert_eq!(marked(&scratch), Marked::Only([codex()].into()));
+    assert_eq!(
+        settled(&keys),
+        [
+            HostCall::SetLaunchRefused(claude(), None),
+            HostCall::SetLaunchRefused(codex(), None),
+        ]
+    );
+}
+
+#[test]
+fn a_keychain_error_refuses_an_unmarked_agent_with_key_unreadable() {
+    let scratch = Scratch::folder("key-marker-error", &[]);
+    // Codex's key is stored and no marker marks it; the keychain refuses the read (an error,
+    // not a timeout). Claude's read is refused too, though it holds no key.
+    let keychain = Keychain::memory();
+    keychain.store(&codex(), KEY).unwrap();
+    keychain.fail_reads(true);
+    let keys = load(
+        keychain.clone(),
+        KeyMarker::new(scratch.path(), [&claude(), &codex()]),
+        &Never,
+    );
+    assert!(keys.unreadable(&codex()) && keys.has(&codex()));
+    let refused = Some(ErrorCode::AgentKeyUnreadable);
+    assert_eq!(
+        settled(&keys),
+        [
+            HostCall::SetLaunchRefused(claude(), refused),
+            HostCall::SetLaunchRefused(codex(), refused),
+        ]
+    );
+    assert_eq!(marked(&scratch), Marked::Only(BTreeSet::new()));
+    keychain.fail_reads(false);
 }
