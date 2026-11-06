@@ -355,6 +355,7 @@ crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
 crates/mcp/src/write/windows.rs - unsafe_code
+crates/mcp/src/write/mac.rs - unsafe_code
 crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods
 crates/mcp/examples/daemon_stub.rs daemon clippy::disallowed_methods
 crates/mcp/examples/parent_stub.rs main clippy::disallowed_methods

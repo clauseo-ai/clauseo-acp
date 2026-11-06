@@ -100,6 +100,21 @@ pub(crate) fn move_new(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(windows)]
 mod windows;
 
+/// `setxattr`: a download's `com.apple.quarantine` mark (`browser_guard/downloads/marks.rs`),
+/// on the file itself, never through a symlink.
+#[cfg(target_os = "macos")]
+pub(crate) use mac::set_xattr;
+
+/// `getxattr`, a read beside the write above: whether the download has its quarantine mark.
+#[cfg(target_os = "macos")]
+pub(crate) use mac::has_xattr;
+
+#[cfg(all(target_os = "macos", test))]
+pub(crate) use mac::read_xattr;
+
+#[cfg(target_os = "macos")]
+mod mac;
+
 /// A file opened with no sharing at all, as a program that holds it open would, for the unit
 /// tests' fixtures: Windows then refuses to move or delete it.
 #[cfg(all(test, windows))]

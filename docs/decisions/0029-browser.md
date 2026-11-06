@@ -316,7 +316,8 @@ Behaviour that changes with it:
   (`browser_guard/downloads.rs`): Chrome downloads into `<profile>/downloads-staging`, and every
   200 ms the guard moves each finished file (Chrome renames `*.crdownload`, or on Windows its
   first name `<guid>.tmp`, only when done: "Windows fixes from G17", below) into the downloads
-  folder. A name in the sandbox's `PROTECTED_NAMES` (`.codex`, `.claude`,
+  folder, with its OS download mark ("Downloads keep their OS marks", below). A name in the
+  sandbox's `PROTECTED_NAMES` (`.codex`, `.claude`,
   `.agents`, `.clauseo`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`) becomes
   `<stem> (download)<ext>`, compared without ASCII case, trailing dots and spaces, and with `ſ`
   read as `s`; a taken name gets ` (2)`. The move never replaces a file (`write::move_new`: a hard
@@ -326,7 +327,8 @@ Behaviour that changes with it:
   `AlreadyExists`; its paths are made absolute and normalised before the `\\?\` prefix); a file that appears under the chosen name between the
   look and the move makes the mover take the next free name, 16 tries at most. A web page
   therefore cannot plant agent instructions or config in the downloads folder. The page's name can exist on disk in the staging folder for
-  up to one 200 ms poll; that folder is inside the session's browser state folder
+  up to one 200 ms poll (up to 30 s on Windows and macOS while the mover waits for Chrome's
+  mark, "Downloads keep their OS marks"); that folder is inside the session's browser state folder
   (`<data>/run/<session>/browser`), outside the matter and the work folder, where no agent loads
   instructions from. `Browser.setDownloadBehavior` `allowAndName` (files saved by GUID, so the
   page's name never touches the disk) was rejected: the behaviour is one per browser context, the
@@ -686,11 +688,12 @@ rule's danger does not arise. The guard and the reaper kill only the pids they s
 told over the pipe, as before, and, for a `starting` record, the processes a fresh listing
 shows running with the run's own profile.
 
-### Windows fixes from G17 (`downloads.rs`, `logon.rs`)
+### Windows fixes from G17 (`downloads.rs`, `downloads/marks.rs`, `logon.rs`)
 
 G17's Windows run (clauseo-acp-private #436, `measurements/g17-browser/results/windows/NOTES.md`,
 Chrome for Testing 157.0.8103.38, Google Chrome 157.0.8103.39, Edge 156.0.4314.58) found two
-bugs in the guard. Chromium source below is `main` as of 2026-11-06.
+bugs in the guard; a third change, the condition for Safe Browsing off, makes downloads keep the
+OS's marks. Chromium source below is `main` as of 2026-11-06.
 
 #### Downloads on Windows: Chrome's `<guid>.tmp`
 
@@ -714,6 +717,77 @@ next sweep, as before; a unit test now holds it.
 **Accepted:** a page can name its download `<guid>.tmp` (`Content-Disposition` or
 `<a download>`). That file never moves and is deleted with the profile: the download is lost,
 but nothing gets past the guard.
+
+#### Downloads keep their OS marks (`downloads/marks.rs`)
+
+Files the guard moves into `<cwd>/downloads` carry the OS's mark for a file from the internet,
+so SmartScreen, Defender, Office's Protected View and Gatekeeper check them when the lawyer opens
+them: on Windows the Mark of the Web, the `Zone.Identifier` stream; on macOS the
+`com.apple.quarantine` attribute. This is the condition for Safe Browsing off: the guard does not
+rely on Safe Browsing, but on the OS checking each file. Where no mark can be kept, downloads are
+held back (fail closed).
+- **Chrome marks every download, Safe Browsing on or off.** `DownloadItemImpl` always asks for
+  the rename with annotation (`download_item_impl.cc`: "even if it already has the right name,
+  we need the annotation"); `ChromeDownloadManagerDelegate::ConnectToQuarantineService` binds
+  the quarantine service with no pref, policy or Safe Browsing check
+  (`chrome_download_manager_delegate.cc`). On Windows `QuarantineFile` runs Attachment Services
+  (`IAttachmentExecute::Save`, which also starts the antivirus scan) or writes
+  `[ZoneTransfer] ZoneId=3` itself for an empty file or when Attachment Services is unavailable
+  (`components/services/quarantine/quarantine_win.cc`); on macOS it sets the quarantine
+  properties (`quarantine_mac.mm`). A failed mark does not fail the download
+  (`base_file.cc`, `ANNOTATION_FAILED`). Windows' own "do not preserve zone information"
+  policy makes Attachment Services write none.
+- **The wait: up to 30 s for Chrome's own mark.** Chrome marks after the rename to the final
+  name (`download_file_impl.cc`, `RenameWithRetryInternal`), and Attachment Services' `Save`
+  "has been known to take longer than 10 seconds" (`quarantine_win.cc`). A move during the scan
+  would make Chrome fail the download and let out a file the antivirus would have deleted in
+  staging. So on Windows and macOS a finished file without a mark stays in staging until Chrome's
+  mark appears, at most 150 polls (30 s, `MARK_WAIT`). Each file waits on its own: a slow one
+  holds back no other, and a file Chrome has marked moves on the next poll. Only setups where
+  Chrome never marks (the Windows policy above) pay the 30 s. The sweep after Chrome has stopped
+  does not wait.
+- **The mark is made sure of in staging, then the file moves.** Once the wait ends, the guard
+  checks the mark in the staging folder, which Chrome made and the agent cannot reach, and writes
+  one where needed; the move then keeps it: `MoveFileExW` within one volume renames the file with
+  its streams, the Unix hard link is the same inode with its attributes. Staging and the
+  downloads folder are both under the guard's `--cwd`, and `write::move_new` has no copy
+  fallback: a move across volumes fails and is retried, never made without the mark. Nothing is
+  written after the move, so no write lands in the agent-writable downloads folder, follows a
+  link planted there, or leaves a moment where the file is there unmarked.
+- **The zone rules (Windows).** A `Zone.Identifier` whose `ZoneId` is 1 (intranet), 2 (trusted),
+  3 (internet) or 4 (restricted) is kept as it is, Chrome's `HostUrl` included, as Edge keeps it.
+  A page cannot pick its zone: Chrome strips `:` from download names, so a page cannot plant a
+  stream, and Attachment Services maps the zone from the source URL (`data:` falls back to
+  `about:internet`, `blob:` uses the page's origin), so 1 and 2 come only from the firm's own
+  zone settings. No stream, `ZoneId=0` (this computer), or a stream whose `ZoneId` does not read
+  is replaced with `[ZoneTransfer]\r\nZoneId=3\r\n` (no `HostUrl`: the guard does not know the
+  source). The guard's mark goes on even where Windows' policy said not to preserve zone
+  information: the browser is the agent's, and the lawyer opens what it fetched.
+- **macOS.** A `com.apple.quarantine` already there is kept as it is. A file without one gets
+  `0081;<hex seconds>;Clauseo;`, the time being the file's last change (when Chrome finished it).
+- **Fail closed where no mark can be kept.** At the first finished file the guard probes the
+  staging folder: it writes a scratch file there (`.clauseo-mark-probe`), marks it, reads the
+  mark back and removes it. If that fails (a FAT or exFAT drive, a share without streams or
+  extended attributes), no download goes into `<cwd>/downloads`: files stay in staging and are
+  deleted with the profile, the downloads folder gets one plain note, `DOWNLOADS-BLOCKED.txt`
+  (made new, never replacing a file), saying downloads are held back because the folder's drive
+  cannot record the "downloaded from the internet" mark that Windows and macOS use to check
+  files, and the guard says so once on stderr. A single file whose mark cannot be written after
+  a good probe also stays in staging, noted once, and is tried again each poll.
+- **Lazy start.** Each Chrome start has its own mover, so the probe runs again at the first
+  finished file after each start, and each file's wait starts over. Chrome's idle stop, like the
+  guard's exit, runs the sweep that waits for no mark: what finished is marked in staging and
+  delivered, and staging keeps only unfinished files (and, where downloads are held back, the
+  held files, which go with the profile when the session ends).
+- **Linux** has no such mark: the probe passes without writing, the mover does not wait, and
+  downloads are delivered as before.
+
+**Tests** (`downloads/tests.rs`): a file without a mark waits, then moves marked (on Linux at
+once); a marked file moves while an unmarked one waits; an injected probe failure holds every
+download in staging with one `DOWNLOADS-BLOCKED.txt`; the real probe passes on the test machine's
+drive and leaves nothing; the `ZoneId` parser and rules; on Windows, moved files keep zones 2 and
+3 (with `HostUrl`) and get `ZoneId=3` for zone 0, a garbled stream and none; on macOS, an
+existing quarantine value is kept and a missing one written.
 
 #### No failed logon at start (`logon.rs`)
 
@@ -1435,6 +1509,14 @@ The download (part 3):
   unchanged. The restart path ran as unit tests only. The `<guid>.tmp` fix ran as unit tests on
   Linux; its Windows test passes `cargo clippy --target x86_64-pc-windows-gnu` and runs on CI's
   Windows job; the VM's item 7 re-run is its proof.
+- Downloads keep their OS marks: the logic runs as unit tests on Linux (the probe failure
+  injected); the Windows and macOS code passes `cargo clippy` for `x86_64-pc-windows-gnu` and
+  `aarch64-apple-darwin` and was never run. CI's Windows job runs the `Zone.Identifier` tests,
+  CI on main and merge groups the macOS one; the Windows VM's marks and SmartScreen check is the
+  proof. Not known: whether Attachment Services writes the zone before or after the antivirus
+  scan (if before, a mark does not mean the scan is done), whether a scanner holds the file
+  without delete sharing (then the move waits for the next poll), and what Gatekeeper makes of
+  the flags `0081` with no event id.
 
 ## Status
 
