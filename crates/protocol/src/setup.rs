@@ -95,10 +95,11 @@ pub enum SetupCommand {
         /// The agent.
         agent: AgentId,
     },
-    /// Look again for a login the lawyer already has, turning reuse back on. Its end is one
-    /// `SignInChanged`, sent even when the state is unchanged: `LoginFound`, `SignedOut` with
-    /// `found` (`none_found` for nothing), `SignedIn`, or `Failed` (`signin.failed`) when
-    /// the search could not tell.
+    /// Look again for a login the lawyer already has, turning reuse back on. An **accepted**
+    /// `FindLogin` ends in exactly one `SignInChanged`, sent even when the state is unchanged:
+    /// `LoginFound`, `SignedOut` with `found` (`none_found` for nothing), `SignedIn`, or `Failed`
+    /// (`signin.failed`) when the search could not tell. A refused one (the agent is not
+    /// installed) gets an error reply and no `SignInChanged`.
     FindLogin {
         /// The agent.
         agent: AgentId,

@@ -4280,10 +4280,11 @@ export type SetupCommand =
 	agent: AgentId,
 } }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
- *  Look again for a login the lawyer already has, turning reuse back on. Its end is one
- *  `SignInChanged`, sent even when the state is unchanged: `LoginFound`, `SignedOut` with
- *  `found` (`none_found` for nothing), `SignedIn`, or `Failed` (`signin.failed`) when
- *  the search could not tell.
+ *  Look again for a login the lawyer already has, turning reuse back on. An **accepted**
+ *  `FindLogin` ends in exactly one `SignInChanged`, sent even when the state is unchanged:
+ *  `LoginFound`, `SignedOut` with `found` (`none_found` for nothing), `SignedIn`, or `Failed`
+ *  (`signin.failed`) when the search could not tell. A refused one (the agent is not
+ *  installed) gets an error reply and no `SignInChanged`.
  */
 ({ find_login: {
 	/**  The agent. */
