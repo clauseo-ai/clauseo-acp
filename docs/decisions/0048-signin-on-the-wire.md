@@ -428,10 +428,25 @@ sign-in and launch for that agent are refused with `signin.policy_unreadable`.
     without it. Desktop cannot tell "no key stored" without a read that answers, so a read that
     does not answer counts as a stored key. The log line names the agent, "key unreadable" and
     the error's kind; never the key, the item's name or a path.
-  - *Nothing outside the keychain records whether an agent has a stored key.* Desktop keeps no
-    list, marker or setting of it, so only a keychain read that answers can say "no key". When
-    the keychain never answers, every agent is refused with `agent.key_unreadable` (fail
-    closed), agents that never stored a key included.
+  - *The "key stored" marker* (the orchestrator's ruling, a follow-up to #506). Desktop keeps,
+    outside the keychain, a list of the agents Clauseo stored a key for:
+    `<data_dir>/agents/key-stored.json`, `{"agents": ["claude-acp"]}`, beside the `firm-policy`
+    markers and written as they are, whole and atomic (`setup/keys/marker.rs`). It holds agent
+    ids only: no key, no keychain item name. A save sets the marker before the keychain write,
+    and a marker that cannot be written refuses the save (`internal`, nothing stored); a
+    keychain write that then fails leaves it on. A clear removes the key first, then the
+    marker; a marker that cannot be cleared stays on. Each keychain read that answers (the
+    first load, a late read, a read again) brings it in step, best effort: a key sets it, no
+    item clears it.
+  - *When the keychain never answers by the bound,* an agent the marker marks is refused with
+    `agent.key_unreadable`, and one it does not mark launches without a key: Clauseo never
+    stored one for it. No marker file (a fresh install) marks no agent; a file that cannot be
+    read or does not parse marks every agent (fail closed), logged by the error's kind only.
+    A read that fails with the keychain's error still refuses the agent, marked or not.
+  - *The residual.* A key stored by a build without the marker, or removed outside Clauseo,
+    leaves the marker stale until a read answers. A stale "on" only refuses the agent, so it
+    fails closed; "off" with a key stored can only happen for a key Clauseo never stored. No
+    released install predates the marker.
   - *What the window shows.* An agent whose key is unreadable shows `Failed { code:
     agent.key_unreadable }`, never "signed in with an API key", and its sign-in is not barred
     with `signin.key_in_use`: a sign-in may run, and launches stay refused until a read

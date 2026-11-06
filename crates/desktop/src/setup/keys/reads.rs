@@ -23,6 +23,7 @@ use futures::channel::oneshot;
 use futures::future::{join_all, select};
 use zeroize::Zeroizing;
 
+use super::marker::{KeyMarker, Marked};
 use super::notes::{KeyNote, NoteSender, send};
 use super::{KeyCache, Keys, error_kind};
 use crate::bridge::lock;
@@ -99,15 +100,17 @@ impl Marks {
         Some(state.writes.get(agent).copied().unwrap_or_default())
     }
 
-    /// Takes in a read of `agent` begun at write count `began` that answered `read`.
+    /// Takes in a read of `agent` begun at write count `began` that answered `read`; an answer
+    /// brings `marker` in step. A change of the mark, or of the key in memory, is noted.
     fn finish(
         &self,
         keys: &Keys,
+        marker: &KeyMarker,
         agent: &AgentId,
         began: u64,
         read: Result<Option<Zeroizing<String>>, KeyError>,
     ) {
-        let changed = {
+        let (changed, stored) = {
             let mut state = lock(&self.state);
             state.reading.remove(agent);
             if state.writes.get(agent).copied().unwrap_or_default() != began {
@@ -116,30 +119,35 @@ impl Marks {
             }
             match read {
                 Ok(Some(key)) => {
-                    lock(keys).insert(agent.clone(), key);
-                    state.unreadable.remove(agent)
+                    let new = lock(keys).insert(agent.clone(), key).is_none();
+                    (state.unreadable.remove(agent) || new, Some(true))
                 }
                 Ok(None) => {
-                    lock(keys).remove(agent);
-                    state.unreadable.remove(agent)
+                    let gone = lock(keys).remove(agent).is_some();
+                    (state.unreadable.remove(agent) || gone, Some(false))
                 }
                 Err(error) => {
                     tracing::warn!(%agent, kind = error_kind(&error), "key unreadable");
-                    state.unreadable.insert(agent.clone())
+                    (state.unreadable.insert(agent.clone()), None)
                 }
             }
         };
+        if let Some(stored) = stored {
+            marker.reconcile(agent, stored);
+        }
         self.noted(changed, agent);
     }
 
-    /// Marks each read still running unreadable: the first load's bound has passed.
-    fn time_out(&self) {
+    /// Marks each read still running unreadable when `marked` marks its agent: the first
+    /// load's bound has passed. One the marker does not mark has no key Clauseo stored, so it
+    /// launches without one; its read goes on and is taken in when it answers.
+    fn time_out(&self, marked: &Marked) {
         let late: Vec<AgentId> = {
             let mut state = lock(&self.state);
             let late: Vec<AgentId> = state
                 .reading
                 .iter()
-                .filter(|agent| !state.unreadable.contains(*agent))
+                .filter(|agent| !state.unreadable.contains(*agent) && marked.contains(agent))
                 .cloned()
                 .collect();
             state.unreadable.extend(late.iter().cloned());
@@ -159,7 +167,7 @@ pub(super) fn load_all<'a>(
     keychain: Keychain,
     agents: impl IntoIterator<Item = &'a AgentId>,
 ) -> KeyCache {
-    let cache = KeyCache::empty(keychain, None);
+    let cache = KeyCache::empty(keychain, None, KeyMarker::unkept());
     if cache.available {
         let reads: Vec<_> = agents.into_iter().map(|a| start_read(&cache, a)).collect();
         futures::executor::block_on(join_all(reads));
@@ -169,22 +177,25 @@ pub(super) fn load_all<'a>(
 
 /// The first load, on the setup thread: each of `agents`' keys read on a thread of its
 /// own, waited for at most `bound` on `timer`; a read that has not answered by then is
-/// marked unreadable and goes on. Each change of a mark, then and later, goes to `notes`.
+/// marked unreadable, when `marker` marks its agent, and goes on. Each change of a mark, then
+/// and later, goes to `notes`.
 pub(super) fn load_bounded<'a>(
     keychain: Keychain,
     agents: impl IntoIterator<Item = &'a AgentId>,
+    marker: KeyMarker,
     notes: NoteSender,
     timer: &impl Timer,
     bound: Duration,
 ) -> KeyCache {
-    let cache = KeyCache::empty(keychain, Some(notes));
+    let cache = KeyCache::empty(keychain, Some(notes), marker);
     if !cache.available {
         return cache;
     }
     let reads: Vec<_> = agents.into_iter().map(|a| start_read(&cache, a)).collect();
     let all = Box::pin(join_all(reads));
     futures::executor::block_on(select(all, Box::pin(timer.after(bound))));
-    cache.marks.time_out();
+    // Read once the bound has passed: the reads that answered have brought it in step.
+    cache.marks.time_out(&cache.marker.marked());
     cache
 }
 
@@ -211,6 +222,7 @@ fn start_read(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
     };
     let (keychain, keys, order) = cache.parts();
     let marks = cache.marks.clone();
+    let marker = Arc::clone(&cache.marker);
     let for_thread = agent.clone();
     let spawned = std::thread::Builder::new()
         .name("clauseo-keychain".to_owned())
@@ -218,7 +230,7 @@ fn start_read(cache: &KeyCache, agent: &AgentId) -> oneshot::Receiver<()> {
             let read = keychain.load(&for_thread);
             {
                 let _order = lock(&order);
-                marks.finish(&keys, &for_thread, began, read);
+                marks.finish(&keys, &marker, &for_thread, began, read);
             }
             // The load may have stopped waiting.
             let _gone = done.send(());

@@ -13,7 +13,7 @@ use futures::StreamExt as _;
 
 use super::fakes::{HostCall, rig, rig_on};
 use super::{claude, codex};
-use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyNote, KeyNotes};
+use crate::setup::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes};
 use crate::setup::refusal::{settle_after_load, sync, sync_all};
 use crate::test_support::block_on;
 
@@ -21,7 +21,7 @@ pub(super) const KEY: &str = "fakeAnthropicKey0123";
 
 /// A timer whose waits end at once: the bound has passed.
 #[derive(Clone)]
-struct Passed;
+pub(super) struct Passed;
 
 impl clauseo_process::Timer for Passed {
     fn after(&self, _duration: Duration) -> impl Future<Output = ()> + Send {
@@ -52,6 +52,7 @@ fn load(keychain: Keychain, timer: &impl clauseo_process::Timer) -> (KeyCache, K
     let keys = KeyCache::load_bounded(
         keychain,
         [&claude(), &codex()],
+        KeyMarker::unkept(),
         notes.sender(),
         timer,
         KEYS_LOAD_BOUND,
