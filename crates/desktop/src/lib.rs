@@ -487,7 +487,7 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
                     }
                 },
                 // The window state, then the install (0037); returns when there is none.
-                |ended| update::after_host(&app, ended),
+                |ended, agents_stopped| update::after_host(&app, ended, agents_stopped),
             );
             exit.stopped.store(true, Ordering::Release);
             // The e2e build ends the process itself once the host has joined. On a Windows

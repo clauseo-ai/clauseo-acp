@@ -15,6 +15,7 @@
 //! check made goes to a closed port on 127.0.0.1.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 
 #[cfg(feature = "e2e")]
 use clauseo_host::Updater as _;
@@ -24,7 +25,7 @@ use serde_json::Value;
 use tauri::test::MockRuntime;
 
 use super::choice::{self, Build, Choice, E2eEnv, Flavour, TEST_KEY, TRUSTS_TEST_KEY};
-use super::install::{self, After, Steps};
+use super::install::{self, After, Steps, Watch};
 use super::install_kind::{bundle_folder, mac_kind, windows_kind};
 #[cfg(feature = "e2e")]
 use super::plugin::Pending;
@@ -34,6 +35,7 @@ use crate::test_support::block_on;
 
 mod plugin;
 mod test_key;
+mod watchdog;
 
 /// The crate's folder.
 pub(super) fn crate_dir() -> PathBuf {
@@ -273,14 +275,14 @@ fn linux_is_always_a_package() {
 }
 
 /// The install's steps, recorded.
-struct Recorded {
+pub(super) struct Recorded {
     installable: bool,
     install: Result<(), UpdaterError>,
-    steps: Vec<&'static str>,
+    pub(super) steps: Vec<&'static str>,
 }
 
 impl Recorded {
-    fn new(installable: bool, install: Result<(), UpdaterError>) -> Self {
+    pub(super) fn new(installable: bool, install: Result<(), UpdaterError>) -> Self {
         Self {
             installable,
             install,
@@ -303,15 +305,25 @@ impl Steps for Recorded {
     fn flush_log(&mut self) {
         self.steps.push("flush");
     }
-    fn install(&mut self, downloaded: &Downloaded) -> Result<(), UpdaterError> {
+    fn start_install(&mut self, downloaded: Downloaded) -> Receiver<Result<(), UpdaterError>> {
         assert_eq!(downloaded.version, "0.4.1");
         self.steps.push("install");
-        self.install.clone()
+        let (answer, answered) = std::sync::mpsc::channel();
+        answer.send(self.install.clone()).unwrap();
+        answered
+    }
+    fn app_in_place(&self) -> bool {
+        true
     }
 }
 
+/// `after_host` with the agents stopped and the real watch.
+fn after_host(ended: HostExit, steps: &mut Recorded) -> After {
+    install::after_host(ended, true, steps, Watch::INSTALL)
+}
+
 /// A download, as the host hands it back.
-fn downloaded() -> Downloaded {
+pub(super) fn downloaded() -> Downloaded {
     Downloaded {
         version: "0.4.1".to_owned(),
         path: PathBuf::from("updates/0.4.1/Clauseo-setup.exe"),
@@ -322,7 +334,7 @@ fn downloaded() -> Downloaded {
 #[test]
 fn an_install_saves_the_window_state_first_and_restarts_after() {
     let mut steps = Recorded::new(true, Ok(()));
-    let after = install::after_host(HostExit::Install(downloaded()), &mut steps);
+    let after = after_host(HostExit::Install(downloaded()), &mut steps);
     assert_eq!(after, After::Restart);
     assert_eq!(
         steps.steps,
@@ -340,7 +352,7 @@ fn an_install_saves_the_window_state_first_and_restarts_after() {
 fn a_failed_install_restarts_as_the_old_version() {
     let failed = Err(UpdaterError::Signature("refused".to_owned()));
     let mut steps = Recorded::new(true, failed);
-    let after = install::after_host(HostExit::Install(downloaded()), &mut steps);
+    let after = after_host(HostExit::Install(downloaded()), &mut steps);
     assert_eq!(after, After::Restart);
     assert_eq!(
         steps.steps,
@@ -363,12 +375,12 @@ fn the_host_log_keeps_that_an_install_ran_and_how_it_went() {
     let locations = Locations::under_home(scratch.path());
     let log = clauseo_host::log_file::install(&locations);
     let mut steps = Recorded::new(true, Ok(()));
-    install::after_host(HostExit::Install(downloaded()), &mut steps);
+    after_host(HostExit::Install(downloaded()), &mut steps);
     let failed = Err(UpdaterError::Io(
         "the update failed and the old app was not put back".to_owned(),
     ));
     let mut steps = Recorded::new(true, failed);
-    install::after_host(HostExit::Install(downloaded()), &mut steps);
+    after_host(HostExit::Install(downloaded()), &mut steps);
     log.flush();
     let text = std::fs::read_to_string(locations.log_dir().join("host.log")).unwrap();
     let lines: Vec<&str> = text.lines().collect();
@@ -403,13 +415,10 @@ fn the_host_log_keeps_that_an_install_ran_and_how_it_went() {
 #[test]
 fn a_plain_stop_or_a_download_no_plugin_made_installs_nothing() {
     let mut steps = Recorded::new(true, Ok(()));
-    assert_eq!(
-        install::after_host(HostExit::Stopped, &mut steps),
-        After::Exit
-    );
+    assert_eq!(after_host(HostExit::Stopped, &mut steps), After::Exit);
     let mut fake = Recorded::new(false, Ok(()));
     assert_eq!(
-        install::after_host(HostExit::Install(downloaded()), &mut fake),
+        after_host(HostExit::Install(downloaded()), &mut fake),
         After::Exit
     );
     assert!(steps.steps.is_empty() && fake.steps.is_empty());

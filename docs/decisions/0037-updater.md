@@ -195,9 +195,12 @@ The install takes the quit path:
    finds the download again and reports no failed install.
 4. Desktop's stopper thread flushes the host log (0047) right after `host_start::stop`.
 5. Desktop saves the counts and the window state.
-6. Desktop calls the plugin's `install`. Windows exits inside it; macOS swaps the `.app` and
-   restarts.
-7. If `install` returns an error after the shutdown, desktop relaunches normally. The marker and
+6. Desktop calls the plugin's `install`, unless an agents job outlived its bound at quit (then it
+   relaunches as the old version, as in 7). Windows exits inside it; macOS swaps the `.app` and
+   restarts. One that has not returned in 5 minutes is given up on (the install's watchdog,
+   below).
+7. If `install` returns an error after the shutdown, or was skipped or given up on, desktop
+   relaunches normally. The marker and
    the unchanged version make `read_update_marker` report `failed` (stage `install`) and count it
    at the next start; if NSIS dies after Windows exited, the next launch of the old exe does the
    same. With `to` equal to the running version it reports `updated_from` instead.
@@ -272,14 +275,21 @@ install; what the brief left open was decided so:
   uploaded (0035, "No test key in a shipped binary"), which fails a release or dry run that
   holds the key.
 - **The plugin** is reached through `UpdaterBuilder`, with a 30 s connect and a 60 s read
-  timeout (the host sets no deadline on a check or a download). A release that has no installer
+  timeout (the host sets no deadline on a check or a download), and HTTPS only
+  (`configure_client` sets reqwest's `https_only`, in every build, `e2e` included, whose test
+  release is on GitHub over HTTPS): the check and the download refuse an `http://` URL and a
+  redirect from HTTPS to HTTP before connecting. The plugin alone refuses an `http://` endpoint
+  only in a release build, only warns for an `http://` download URL, and checks no redirect. A release that has no installer
   for this platform (`TargetNotFound`) is no update, not a failure. An error reaches the host
   as a fixed line by its kind, never the plugin's text, which can name the URL or a path.
-- **The download** is written to `updates/.<version>.part`, synced, then moved into an emptied
+- **The download** is written to a temporary file of its own, `updates/.<version>.<uuid>.part`
+  (a new UUID v7 each time, so two downloads of one version never write the same file), synced, then moved into an emptied
   `updates/<version>/` as its one file, so that folder never holds a half-written download.
   A version that is not plain dotted numbers is refused. A download the host cancels after its
   bytes arrived can still be saved (the write runs off the cancelled task); that is harmless,
-  since the plugin verified those bytes and the install verifies them again.
+  since the plugin verified those bytes and the install verifies them again. A temporary file
+  a crash left is removed at the next start, which keeps nothing in `updates/` but the folder it
+  offers.
 - **Install kind.** Windows: per machine when `Clauseo.exe` is under Program Files or the
   machine's uninstall key `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`
   (64-bit view) exists; a key that cannot be read counts as there. macOS: a read-only location
@@ -291,13 +301,36 @@ install; what the brief left open was decided so:
   quit's own order (the agents' jobs, then `host_start::stop`), the log's flush, the counts'
   save, then the window state's save (the install and the restart skip the exit event
   window-state saves on), the crash guard's no-op seam, a second flush, and the plugin's
-  `install`. It rebuilds the update with `restore_update(raw_json)`, checks the version is the
+  `install`. When an agents job outlived its 3 s bound at quit (`Agents::shutdown` answered
+  false), nothing is installed: a child of it may still hold the app's files open. The window
+  state is saved and the app restarts as the old version, so the next start's marker reads
+  `failed`; the log says why at warn, with `kind = "agents"`. It rebuilds the update with `restore_update(raw_json)`, checks the version is the
   downloaded one, and hands it the file's bytes, which it verifies again. Windows exits inside
   it (`installMode: passive`); after it returns, whether it worked (macOS) or failed, the app
   restarts. A plain exit saves the window state on the exit event, as before. The host log
   keeps the install on the `clauseo_desktop::lifecycle` target ("installing the update" and
   "the update is installed", with the version), and a failure at warn with its kind and fixed
   line (an old app the plugin could not put back is its own I/O line).
+- **The install's watchdog.** The plugin's `install` runs on a thread of its own; the stopper
+  waits 5 minutes for it to return (macOS) or the process to exit inside it (Windows), then
+  gives up, logs `kind = "hung"` and restarts, so the next start's marker reads `failed` (or
+  `updated_from`, if the new app was in place by then). The bound covers only the work inside
+  this process. On Windows that is verifying the bytes, writing the installer to a temporary
+  file and starting it: the NSIS installer, however slow in passive mode on a slow disk, runs
+  after the exit in its own process, which no bound here can cut short. On macOS it is
+  verifying, unpacking the `.app` on the app's volume (seconds for a few hundred MB, under a
+  minute on a slow disk), the swap, and the administrator's password prompt when the folder
+  needs one; 5 minutes is several times the slowest unpack and leaves a person time to answer
+  the prompt. The swap cannot be cut mid-move: on APFS the plugin swaps the bundles with one
+  `renamex_np(RENAME_SWAP)`, a single system call a process exit cannot split. Only on a file
+  system that cannot swap (HFS+) does it make two renames, the old app out and then the new one
+  in, microseconds apart; past the bound the watchdog first checks the app's executable is at
+  its path, and while it is not, it waits up to 60 s more (a look each second) for the install
+  instead of restarting. Giving up anywhere else leaves the old app or the new one in place,
+  and the plugin's temporary folders as litter macOS clears. The one gap left is the instant
+  between that check and the restart: were the second rename lost there, the old app stays in
+  the temporary folder and the person reinstalls from the download page. The decision is
+  `install::watch_install`, tested with an injected slow install.
 
 ### The key's custody
 
