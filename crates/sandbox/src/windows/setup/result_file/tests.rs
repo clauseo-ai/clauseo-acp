@@ -4,8 +4,8 @@
 use super::*;
 use crate::test_support::TempDir;
 use crate::windows::setup::{
-    ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_LOGON_TYPE_NOT_GRANTED,
-    LOGON_NOT_GRANTED, Step, launch_error,
+    APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
+    ERROR_LOGON_TYPE_NOT_GRANTED, LOGON_NOT_GRANTED, Step, launch_error,
 };
 use crate::{Blocked, SetupState};
 
@@ -182,10 +182,13 @@ fn the_launch_errors_map_as_d_b4_says() {
         launch_error(ERROR_ACCESS_DISABLED_BY_POLICY),
         SetupError::Blocked(Blocked::Policy)
     );
+    // From the launch, 1385 is the approving account's sign-in, not the sandbox users' right.
     assert_eq!(
         launch_error(ERROR_LOGON_TYPE_NOT_GRANTED),
-        SetupError::Blocked(Blocked::LogonRight)
+        SetupError::Failed(APPROVER_LOGON_REFUSED.to_owned())
     );
+    assert!(!APPROVER_LOGON_REFUSED.contains("ClauseoSandboxUsers"));
+    assert!(APPROVER_LOGON_REFUSED.contains("whoever looks after this computer"));
     let SetupError::Failed(other) = launch_error(2) else {
         panic!("2 is a failure");
     };
@@ -257,8 +260,12 @@ fn state_is_blocked_after_a_blocked_run_until_a_later_set_up_is_ready() {
         state_with(SetupState::Needed, &last),
         SetupState::Blocked(Blocked::Policy)
     );
+    let outdated = SetupState::Outdated {
+        found: 1,
+        current: 2,
+    };
     assert_eq!(
-        state_with(SetupState::Failed("x".to_owned()), &last),
+        state_with(outdated, &last),
         SetupState::Blocked(Blocked::Policy)
     );
     // A Ready marker always wins.
@@ -285,4 +292,94 @@ fn state_is_blocked_after_a_blocked_run_until_a_later_set_up_is_ready() {
         state_with(SetupState::Refused, &Err("bad".to_owned())),
         SetupState::Refused
     );
+}
+
+#[test]
+fn a_stale_block_never_hides_another_owner_an_unfinished_removal_or_a_failure() {
+    let blocked = Ok(Some(SetupResult {
+        blocked: Some(Blocked::LogonRight),
+        ..SetupResult::failed(SetupExit::Failed, "logging a sandbox user on", "1385")
+    }));
+    assert_eq!(
+        state_with(SetupState::SetUpByOtherUser, &blocked),
+        SetupState::SetUpByOtherUser
+    );
+    let removing = SetupState::Failed(
+        "removal unfinished: reinstall and uninstall, or run set-up again".to_owned(),
+    );
+    assert_eq!(state_with(removing.clone(), &blocked), removing);
+    let unreadable = SetupState::Failed("setup.json: bad".to_owned());
+    assert_eq!(state_with(unreadable.clone(), &blocked), unreadable);
+    assert_eq!(
+        state_with(SetupState::Refused, &blocked),
+        SetupState::Refused
+    );
+}
+
+#[test]
+fn a_data_folder_not_owned_by_the_user_has_its_own_exit_and_words() {
+    assert_eq!(SetupExit::from_code(6), Some(SetupExit::DataDirNotOwned));
+    for file in [None, Some(Ok(None)), Some(Err("missing".to_owned()))] {
+        assert_eq!(
+            outcome(6, file.as_ref()),
+            Err(SetupError::Failed(DATA_DIR_NOT_OWNED.to_owned()))
+        );
+    }
+    assert!(
+        DATA_DIR_NOT_OWNED.contains("isn't owned by you"),
+        "{DATA_DIR_NOT_OWNED}"
+    );
+    assert!(DATA_DIR_NOT_OWNED.contains("whoever looks after this computer"));
+    // Exit 1 stays usage.
+    let why = failed_with(outcome(1, Some(&Ok(None))));
+    assert!(why.contains("started wrongly"), "{why}");
+}
+
+/// The read `state` uses never writes: a file that isn't this user's alone (on the tests'
+/// stand-in, a mode open to the group or others) is read as missing and left exactly as it was;
+/// once it is the user's alone, it reads.
+#[cfg(unix)]
+#[test]
+fn the_state_read_writes_nothing_and_ignores_a_file_not_the_users_alone() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = TempDir::new("setup-result-unchanged");
+    let data = dir.path().join("data");
+    let blocked = SetupResult {
+        blocked: Some(Blocked::Policy),
+        ..SetupResult::failed(SetupExit::Failed, "starting the set-up program", "policy")
+    };
+    write(&data, &blocked).unwrap();
+    let file = path(&data);
+    crate::test_support::set_mode(&file, 0o644);
+    let before = (
+        std::fs::read(&file).unwrap(),
+        std::fs::metadata(&file).unwrap().modified().unwrap(),
+    );
+    assert_eq!(read_unchanged(&data), Ok(None));
+    assert_eq!(
+        state_with(SetupState::Needed, &read_unchanged(&data)),
+        SetupState::Needed
+    );
+    let after = (
+        std::fs::read(&file).unwrap(),
+        std::fs::metadata(&file).unwrap().modified().unwrap(),
+    );
+    assert_eq!(before, after);
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644, "nothing repaired");
+    crate::test_support::set_mode(&file, 0o600);
+    assert_eq!(read_unchanged(&data), Ok(Some(blocked)));
+    assert_eq!(read_unchanged(&dir.path().join("none")), Ok(None));
+}
+
+/// Windows CI: the file `write` leaves is this user's alone, so the state's read takes it.
+#[cfg(windows)]
+#[test]
+fn the_state_read_takes_the_file_write_left() {
+    let dir = TempDir::new("setup-result-unchanged-windows");
+    let data = dir.path().join("data");
+    let told = SetupResult::failed(SetupExit::Failed, "x", "y");
+    write(&data, &told).unwrap();
+    assert_eq!(read_unchanged(&data), Ok(Some(told)));
 }

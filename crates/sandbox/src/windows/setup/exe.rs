@@ -2,8 +2,10 @@
 //! the command line (`args.rs`), then the mode.
 //!
 //! `--set-up` takes the owner from the verified parent (`Owner::of_parent`, D-B2), and resolves
-//! `--data-dir` as the owner: no junction or link on the way, a folder the owner owns, used in
-//! its canonical form from then on; anything else exits `Usage` with nothing touched. It builds
+//! `--data-dir` as the owner: no junction or link below the drive's root, a folder the owner
+//! owns, recorded and used as its final path from then on (a `subst` drive resolves to the real
+//! folder). One owned by anyone else exits `DataDirNotOwned`, anything else `Usage`, with
+//! nothing touched. It builds
 //! the request for that owner and checks it names that owner ([`owner_failure`]), then runs
 //! [`set_up`] over a [`WindowsMachine`], which reads the registered matters from the owner's
 //! files once it holds the lock, and writes `setup-result.json` as the owner. Every read and
@@ -75,9 +77,9 @@ pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> S
     // the owner's, or refused before anything is touched or written, the result file included.
     let data_dir = match owners_data_dir(&owner, given) {
         Ok(data_dir) => data_dir,
-        Err(error) => {
+        Err((exit, error)) => {
             tracing::error!(%error, "the data folder isn't the owner's own local folder");
-            return SetupExit::Usage;
+            return exit;
         }
     };
     let data_dir = data_dir.as_path();
@@ -125,18 +127,23 @@ fn request_and_run(
 }
 
 /// The data folder `given`, resolved as `owner` (`private_dir::resolve_folder`: no junction or
-/// link on the way, a folder at the end) and owned by `owner`: its canonical form, used from
-/// then on. Why not, otherwise.
-fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, String> {
+/// link below the drive's root, a folder at the end) and owned by `owner`: its final path, which
+/// is what is recorded and used from then on. Otherwise the exit and why: one owned by anyone
+/// else is [`SetupExit::DataDirNotOwned`]; one that can't be resolved so is `Usage`.
+fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, (SetupExit, String)> {
+    let usage = |error: String| (SetupExit::Usage, error);
     let (canonical, folder_owner) = owner
         .run_as(|| resolve_folder(given))
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| usage(error.to_string()))?
+        .map_err(|error| usage(error.to_string()))?;
     if folder_owner != *owner.sid() {
-        return Err(format!(
-            "{} belongs to {folder_owner}, not to {}, the user who asked",
-            canonical.display(),
-            owner.sid()
+        return Err((
+            SetupExit::DataDirNotOwned,
+            format!(
+                "{} belongs to {folder_owner}, not to {}, the user who asked",
+                canonical.display(),
+                owner.sid()
+            ),
         ));
     }
     Ok(canonical)

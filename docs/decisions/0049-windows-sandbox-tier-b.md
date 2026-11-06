@@ -407,11 +407,22 @@ The setup exe (`clauseo-sandbox-setup.exe`, S15 PR4h) runs elevated from the ins
 per-user install that folder is the lawyer's own, so a standard user's process can write it.
 Malware running as that user can swap the exe, and when an administrator then types their
 password at the prompt (over-the-shoulder elevation) the malware runs as administrator. Its
-publisher shows as unknown either way, since Windows ships unsigned for now. A DLL planted beside
-the exe is closed: static imports load from System32 only (`/DEPENDENTLOADFLAG:0x800`) and the exe
-calls `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first. Swapping the exe itself
-stays open in a per-user install. The mitigation is the per-machine install, whose folder under
-Program Files only administrators can write (PR4j's `--per-machine`, with stage F).
+publisher shows as unknown either way, since Windows ships unsigned for now.
+
+A DLL planted beside the exe is mitigated (`DependentLoadFlags` plus `SetDefaultDllDirectories`),
+pending VM proof. The link flag `/DEPENDENTLOADFLAG:0x800` asks the loader to take the exe's
+static imports from System32 only, and the exe calls
+`SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first for every later load. A CI test
+shows the flag is in the PE's load configuration; nothing yet shows Windows honours it for the
+exe's own imports that aren't KnownDLLs (`netapi32.dll` and `userenv.dll` among them). The VM
+row plants a DLL named after each such import beside the exe, runs `--set-up`, and checks with
+Process Monitor that only the System32 copies load. If it fails, those calls move to
+`LoadLibraryExW(..., LOAD_LIBRARY_SEARCH_SYSTEM32)` and `GetProcAddress`: the `windows` crate
+links its imports with `raw-dylib`, which can't be delay-loaded.
+
+Swapping the exe itself stays open in a per-user install. The mitigation is the per-machine
+install, whose folder under Program Files only administrators can write (PR4j's
+`--per-machine`, with stage F).
 
 ### Shared writable places
 

@@ -22,16 +22,17 @@ use std::path::{Component, Path, PathBuf};
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, WIN32_ERROR,
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HANDLE, HLOCAL,
+    LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
     ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, OBJECT_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES,
+    ACL, DACL_SECURITY_INFORMATION, GetKernelObjectSecurity, GetSecurityDescriptorDacl,
+    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
@@ -166,11 +167,84 @@ pub(crate) fn read_checked_file(path: &Path, cap: u64) -> io::Result<Option<Vec<
     Ok(Some(bytes))
 }
 
-/// The folder `path` (a full local path, `args.rs`'s form) resolved one component at a time,
-/// each opened without following a link and refused if it is one (a junction, a symbolic link
-/// or any other reparse point), the last refused unless a folder: its canonical form
-/// (`GetFinalPathNameByHandleW`, `\\?\` dropped) and its owner. The caller acts as the
-/// user who asked, so a folder that user can't open is refused too.
+/// [`read_checked_file`] for a caller that must never write (`UserSetup::state`): one handle
+/// opened for reading only (`FILE_READ_ATTRIBUTES | READ_CONTROL | FILE_READ_DATA`), nothing
+/// taken back or set. A link, a folder or a second hard link is refused; a file whose owner
+/// isn't this user, or whose DACL isn't [`owner_only`], is `None`, as if missing.
+pub(crate) fn read_unchanged(path: &Path, cap: u64) -> io::Result<Option<Vec<u8>>> {
+    let user = current_user_sid()?;
+    let access = FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | FILE_READ_DATA.0 | SYNCHRONIZE.0;
+    let handle = match Handle::open_for(path, access) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(named(path, "can't be opened to read", &error)),
+    };
+    let info = handle
+        .information()
+        .map_err(|error| named(path, "can't be read", &error))?;
+    let found = Found {
+        reparse: info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0,
+        right_kind: info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0,
+        links: info.nNumberOfLinks,
+        owner_allowed: true,
+    };
+    repair_plan(found).map_err(|why| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} {why}", path.display()),
+        )
+    })?;
+    let security = handle.security((OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0)?;
+    if !owner_only(&security, &user) {
+        tracing::debug!("a record file isn't this user's alone; read as missing");
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    handle
+        .into_file()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > cap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is larger than {cap} bytes", path.display()),
+        ));
+    }
+    Ok(Some(bytes))
+}
+
+/// Whether the self-relative descriptor `security` is a record file's own: owned by `user`,
+/// its DACL protected, and every entry an allow for `user`, `SYSTEM` or `Administrators`
+/// ([`file_sddl`]'s, as [`check_file`] sets it).
+fn owner_only(security: &[u8], user: &Sid) -> bool {
+    use super::acl_bytes::{Acl, Descriptor, kind, owner_sid, sid, sid_text};
+
+    let Ok(read) = Descriptor::parse(security) else {
+        return false;
+    };
+    let Some(dacl) = read.dacl.and_then(|dacl| Acl::parse(dacl).ok()) else {
+        return false;
+    };
+    let allowed = [user.as_str(), SYSTEM, ADMINISTRATORS];
+    owner_sid(security).as_ref() == Some(user)
+        && read.dacl_protected()
+        && dacl.aces().iter().all(|ace| {
+            kind(ace) == 0
+                && sid(ace)
+                    .and_then(sid_text)
+                    .is_some_and(|sid| allowed.contains(&sid.as_str()))
+        })
+}
+
+/// The folder `path` (a full local path, `args.rs`'s form) resolved one component at a time.
+/// What is checked, exactly: the drive's root and every component below it, each opened
+/// without following a link and refused if it is one (a junction, a symbolic link or any other
+/// reparse point), the last refused unless a folder. The drive letter itself is not checked: it
+/// resolves through the calling user's own DOS device mappings, a `subst` drive included. So
+/// what the caller records and uses is never `path` but the final path Windows gives for the
+/// last component's handle (`GetFinalPathNameByHandleW`, `FILE_NAME_NORMALIZED`, with
+/// `\\?\` dropped), on the real volume; and that folder's owner. The caller acts as the user
+/// who asked, so a folder that user can't open is refused too.
 pub(crate) fn resolve_folder(path: &Path) -> io::Result<(PathBuf, Sid)> {
     let mut walked = PathBuf::new();
     let mut last = None;
@@ -364,6 +438,38 @@ impl Handle {
                 n => buffer.resize(n + 1, 0),
             }
         }
+    }
+
+    /// Its security descriptor's `info` parts, self-relative (`GetKernelObjectSecurity`).
+    fn security(&self, info: u32) -> io::Result<Vec<u8>> {
+        let mut size = 256_u32;
+        for _ in 0..4 {
+            let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+            let mut needed = 0_u32;
+            // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+            // `needed` is a live out-pointer.
+            let read = unsafe {
+                GetKernelObjectSecurity(
+                    self.0,
+                    info,
+                    Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                    size,
+                    &raw mut needed,
+                )
+            };
+            match read {
+                Ok(()) => {
+                    let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                    bytes.truncate(usize::try_from(size).unwrap_or(0));
+                    return Ok(bytes);
+                }
+                Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+                Err(e) => return Err(os_error(&e)),
+            }
+        }
+        Err(io::Error::other(
+            "a security descriptor kept growing while it was read",
+        ))
     }
 
     /// Its attributes and link count.
