@@ -11,8 +11,8 @@
 //! - **Sign-in.** Each `AgentsEvent::Signin` goes to [`Compose`], which sends every
 //!   `SignInChanged`. `OpenUrl` (an address S18's shim captured and checked against the
 //!   snapshot's sign-in hosts) opens with `open::open_url_unconfirmed`, https only. A
-//!   `SigninNote` is logged by its code (`events::note`). The status check runs once an agent's
-//!   install is `Ready`; an agent not installed shows `SignedOut`.
+//!   `SigninNote` is logged by its code and detail (`events::note`). The status check runs once
+//!   an agent's install is `Ready`; an agent not installed shows `SignedOut`.
 //! - **Confirms.** `InstallAgent` and `SetFirmEndpoint` ask the lawyer first; a decline runs
 //!   nothing and answers `transport.unauthorized`. `RetryAgentInstall` asks nothing, so it is
 //!   `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
@@ -511,7 +511,7 @@ impl AgentsBackend {
                         tracing::warn!(%agent, code = error.code().as_str(), "a sign-in page did not open");
                     }
                 }
-                AgentsEvent::SigninNote { agent, note } => events::note(&agent, note.code()),
+                AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
                 _ => {}
             }
         }
