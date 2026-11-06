@@ -22,6 +22,8 @@ import { heldPick, queuedPick } from "./queue-picks.ts";
 import type { QueueStripProps } from "./queue-slot.tsx";
 import { useAgentPlan } from "./thread/agent-plan.ts";
 import { stamp } from "./thread/clock.ts";
+import { planNameOf } from "./thread/limit-words.ts";
+import { useResumeCue } from "./resume-cue.ts";
 
 const TEST_IDS = {
   row: "queued",
@@ -32,6 +34,7 @@ const TEST_IDS = {
   why: "queue-why",
   say: "queue-say",
   note: "queue-error",
+  resume: "resume-cue",
 } as const;
 
 const GONE = "thread.turn_not_queued";
@@ -58,6 +61,9 @@ export function LiveQueueStrip({
   const store = useViewStore();
   const { lang } = useWords();
   const plan = useAgentPlan();
+  // R20b: the resume cue after an idle stop, once it has run past its threshold; it takes the strip's head line
+  const cue = useResumeCue(store, stream);
+  const resume = cue ? mt(lang, "Getting {plan} ready.", { plan: planNameOf(plan) }) : null;
   const [pickQueued] = useState(queuedPick);
   const [pickHeld] = useState(heldPick);
   const queue = useStreamPart(store, stream, pickQueued);
@@ -161,6 +167,7 @@ export function LiveQueueStrip({
     <QueueStrip
       items={queue}
       held={hold}
+      resume={resume}
       note={note}
       onEdit={onEdit}
       onRemove={onRow((t, turn) => ({ remove_queued_prompt: { thread: t, turn } }))}

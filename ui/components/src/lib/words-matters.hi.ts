@@ -116,6 +116,8 @@ export const HI = {
   // UD2-57: under the count while the host holds the queue for an update install (#537's queue_held_reason)
   "Clauseo is installing an update. Your queued questions go once it's done.":
     "Clauseo एक अपडेट इंस्टॉल कर रहा है। इसके पूरा होते ही कतार में रखे आपके प्रश्न भेजे जाएँगे।",
+  // UD2-58: the resume cue, after an idle stop, while the agent restarts slowly (R20b; the plan's name fills {plan})
+  "Getting {plan} ready.": "{plan} तैयार हो रहा है।",
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   "Send now gives your words to Clauseo while it writes.":
     "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",
