@@ -153,9 +153,6 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
                     set(&mut env, "CLAUDE_SECURESTORAGE_CONFIG_DIR", OsStr::new(""));
                 }
             }
-            if let Some(ca) = inputs.ca_file {
-                set(&mut env, "NODE_EXTRA_CA_CERTS", ca.as_os_str());
-            }
             if let Some(shim) = inputs.shim {
                 set(&mut env, "BROWSER", shim.browser.as_os_str());
                 set(
@@ -173,15 +170,25 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
                     set(&mut env, "HOME", home.as_os_str());
                 }
             }
-            if let Some(ca) = inputs.ca_file {
-                set(&mut env, "SSL_CERT_FILE", ca.as_os_str());
-            }
         }
+    }
+    if let Some(ca) = inputs.ca_file {
+        set(&mut env, ca_var(inputs.vendor), ca.as_os_str());
     }
     if let Some(proxy) = inputs.proxy {
         set(&mut env, "HTTPS_PROXY", OsStr::new(proxy));
     }
     env
+}
+
+/// The variable `vendor`'s CLI reads an extra CA file from: `NODE_EXTRA_CA_CERTS` for Claude
+/// (Node), `SSL_CERT_FILE` for Codex (a native binary). Desktop's launch env takes the same
+/// mapping (`crate::ca_cert_var`).
+pub(crate) fn ca_var(vendor: Vendor) -> &'static str {
+    match vendor {
+        Vendor::Claude => "NODE_EXTRA_CA_CERTS",
+        Vendor::Codex => "SSL_CERT_FILE",
+    }
 }
 
 /// The arguments every Codex run but detection adds after its command:

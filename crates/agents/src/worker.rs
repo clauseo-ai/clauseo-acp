@@ -26,7 +26,7 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
 use crate::cancel::Cancel;
-use crate::config::AgentsConfig;
+use crate::config::{AgentsConfig, Network};
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
@@ -52,6 +52,8 @@ enum Command {
     Install(AgentId),
     Pause(AgentId),
     Retry(AgentId, bool),
+    /// Replace the proxies and CA files the next jobs take.
+    SetNetwork(Box<Network>),
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
 }
@@ -158,6 +160,12 @@ impl Agents {
     /// installs (a proxy set in the install settings still wins).
     pub fn retry(&self, agent: &AgentId, use_system_proxy: bool) {
         self.send(Command::Retry(agent.clone(), use_system_proxy));
+    }
+
+    /// Replaces the proxies and CA files (`network.*`, resolved by the caller): every install
+    /// and sign-in job started after this takes them; a running job keeps its own.
+    pub fn set_network(&self, network: Network) {
+        self.send(Command::SetNetwork(Box::new(network)));
     }
 
     /// `agent`'s last state, or `None` for an unknown agent or before the worker set it.
@@ -392,6 +400,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Install(agent) => self.install(&agent),
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
+                Command::SetNetwork(network) => self.config.install.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
         }

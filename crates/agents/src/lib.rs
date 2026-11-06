@@ -51,7 +51,9 @@
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
 //!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
-//! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
+//! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`];
+//!   [`Agents::set_network`] with a [`Network`] (the proxies and CA files, for the next job), and
+//!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
@@ -139,7 +141,9 @@ mod write;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
-pub use config::{AgentsConfig, Clock, InstallConfig, NodeSearch, SigninConfig, SystemClock};
+pub use config::{
+    AgentsConfig, Clock, InstallConfig, Network, NodeSearch, SigninConfig, SystemClock,
+};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
@@ -156,6 +160,13 @@ pub use snapshot::{
 pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 pub use status::is_sign_in_again;
 pub use worker::Agents;
+
+/// The variable `agent`'s CLI reads an extra CA file (`network.ca_certs`) from:
+/// `NODE_EXTRA_CA_CERTS` for Claude, `SSL_CERT_FILE` for Codex; `None` for an agent with no
+/// vendor here. The one mapping: sign-in's runs take it too.
+pub fn ca_cert_var(agent: &clauseo_protocol::AgentId) -> Option<&'static str> {
+    signin::vendor_of(agent).map(signin::env::ca_var)
+}
 
 /// Tests only: a host-name resolver standing in for the OS's. `Err` reads as a failed name
 /// lookup (offline).
