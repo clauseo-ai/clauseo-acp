@@ -153,18 +153,17 @@ fn decide(
         entry.again = false;
         return Look::Lapsed;
     }
-    // A sign-in with no email whose record never landed within its bound: unknown, and checked
-    // (which, launched, records nothing).
-    if entry.awaiting_record.is_some_and(|until| now >= until) {
-        entry.awaiting_record = None;
-        if !matches!(
+    // A sign-in with no email whose files moved, or whose record never landed within its
+    // bound: unknown, and checked, which records nothing.
+    if entry.break_window(&stamps, now)
+        && !matches!(
             entry.verdict,
             Verdict::Same | Verdict::Checking | Verdict::Changed | Verdict::KeyLogin
-        ) {
-            entry.verdict = Verdict::Unknown;
-            entry.again = false;
-            return Look::Lapsed;
-        }
+        )
+    {
+        entry.verdict = Verdict::Unknown;
+        entry.again = false;
+        return Look::Lapsed;
     }
     if matches!(entry.verdict, Verdict::Checking | Verdict::Changed) {
         return Look::Nothing;
