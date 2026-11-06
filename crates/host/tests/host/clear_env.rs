@@ -18,7 +18,9 @@ use crate::codex::{CODEX, run_turn};
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
 
 /// Inherited variables no agent gets.
-const DROPPED: [(&str, &str); 7] = [
+const DROPPED: [(&str, &str); 9] = [
+    ("NODE_OPTIONS", "--require=/elsewhere/preload.js"),
+    ("NODE_PATH", "/elsewhere/node_modules"),
     ("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22"),
     ("SSH_TTY", "/dev/pts/7"),
     ("SSH_AUTH_SOCK", "/tmp/ssh-agent.sock"),

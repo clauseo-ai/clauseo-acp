@@ -74,6 +74,7 @@
 //! - However the agent ends (stdin closed, signal, crash, or the handle dropped), what is left of
 //!   its tree is killed: its group or job, and after a shutdown the listing it was given. An empty
 //!   group is fine.
+//! - No child gets `NODE_OPTIONS` or `NODE_PATH` ([`NODE_ENV`]), inherited or from its spec.
 //! - Only the redacted tail leaves the crate; the ring is never logged or returned whole. The tail
 //!   reads no variable: the home folder comes in [`SpawnOptions`], the secrets from the spec.
 //! - A running agent never makes an [`Error`]: how it ended is an [`ExitReport`]. The crate
@@ -108,7 +109,9 @@ mod timer;
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
 pub use handle::{ExitReport, Handle, ShutdownOutcome};
-pub use launch::{Launched, Launcher, PassthroughLauncher, SpawnOptions, spawn_in_tree};
+pub use launch::{
+    Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
+};
 pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;
 pub use stderr::StderrPump;

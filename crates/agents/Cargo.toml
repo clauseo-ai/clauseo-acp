@@ -29,6 +29,8 @@ serde_json = { workspace = true }
 sha2 = { workspace = true, features = ["std"] }
 tar = { version = "0.4.46", default-features = false }
 thiserror = { workspace = true }
+# One info line per install and start naming the Node it uses (`node::node_line`).
+tracing = { workspace = true }
 ureq = { version = "3.5.0", default-features = false, features = [
   "rustls",
   "platform-verifier",

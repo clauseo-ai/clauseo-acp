@@ -19,7 +19,9 @@ use crate::error::Error;
 /// mode, home and config, `agent/codex.rs`; a Claude agent's home, `agent/home.rs`), which
 /// nothing in the settings can override, so no inherited `CLAUDE_CONFIG_DIR` reaches it. Every
 /// name in `dropped` (a Codex agent's `codex::DROPPED_VARS`) is left out wherever it comes
-/// from (inherited, the agent's variables or the hook's), ignoring ASCII case. No
+/// from (inherited, the agent's variables or the hook's), ignoring ASCII case, and so is
+/// `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`, which the spawn drops
+/// anyway), so the lawyer's own Node set-up never loads code into an agent. No
 /// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started
 /// with would point the agent's git at another repository (agents never see a git repository
 /// through the environment). No inherited `NO_BROWSER` or `CLAUDE_CODE_REMOTE` reaches one
@@ -52,7 +54,10 @@ pub(crate) fn launch_spec(
     cwd: PathBuf,
     path_prepend: Option<&Path>,
 ) -> Result<LaunchSpec, Error> {
-    let drops = |name: &OsStr| dropped.iter().any(|drop| same(OsStr::new(drop), name));
+    let drops = |name: &OsStr| {
+        clauseo_process::is_node_env(name)
+            || dropped.iter().any(|drop| same(OsStr::new(drop), name))
+    };
     hook_env.retain(|name, _| !names(&forced, name) && !drops(name));
     let own: Vec<(OsString, OsString)> = agent
         .env

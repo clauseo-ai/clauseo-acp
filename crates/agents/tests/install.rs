@@ -38,3 +38,7 @@ mod npm_file;
 #[cfg(test)]
 #[path = "install/quit.rs"]
 mod quit;
+
+#[cfg(test)]
+#[path = "install/node_env.rs"]
+mod node_env;

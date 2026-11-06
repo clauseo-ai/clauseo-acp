@@ -948,6 +948,7 @@ dependencies = [
  "sha2 0.10.9",
  "tar",
  "thiserror 2.0.21",
+ "tracing",
  "ureq",
  "windows",
  "zeroize",

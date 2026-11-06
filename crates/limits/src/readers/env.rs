@@ -6,7 +6,8 @@ use std::ffi::{OsStr, OsString};
 /// The spec's env map: the `inherited` environment (read at each read) minus every `GIT_*` and
 /// `SSH_*` variable, the names in [`DROPPED_INHERITED`] and every name the agent's settings
 /// variables (`own`) also name, then `own`, all ignoring ASCII case. Every name in `dropped`
-/// (the Codex reader's [`CODEX_DROPPED`]) is left out of both.
+/// (the Codex reader's [`CODEX_DROPPED`]) is left out of both, and so are `NODE_OPTIONS` and
+/// `NODE_PATH` (`clauseo_process::NODE_ENV`).
 ///
 /// The map is the child's whole environment: the host's launcher clears the environment. The
 /// inherited variables are also in the map because `process`'s redactor takes its secrets only from
@@ -24,7 +25,10 @@ pub(crate) fn spec_env(
     forced: Option<(&OsStr, &OsStr)>,
     dropped: &[&str],
 ) -> BTreeMap<OsString, OsString> {
-    let drops = |name: &OsStr| dropped.iter().any(|drop| same(OsStr::new(drop), name));
+    let drops = |name: &OsStr| {
+        clauseo_process::is_node_env(name)
+            || dropped.iter().any(|drop| same(OsStr::new(drop), name))
+    };
     let mut env: BTreeMap<OsString, OsString> = inherited
         .filter(|(name, _)| {
             !is_dropped_inherited(name)
@@ -116,8 +120,14 @@ mod tests {
     #[test]
     fn inherited_markers_and_dropped_names_stay_out_in_any_case() {
         let env = spec_env(
-            &own(&[("model_provider", "other"), ("KEEP", "1")]),
+            &own(&[
+                ("model_provider", "other"),
+                ("KEEP", "1"),
+                ("NODE_OPTIONS", "--require=/x.js"),
+            ]),
             os(&[
+                ("node_path", "/elsewhere/node_modules"),
+                ("NODE_OPTIONS", "--inspect"),
                 ("GIT_DIR", "/elsewhere/.git"),
                 ("ssh_auth_sock", "/tmp/agent.sock"),
                 ("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22"),
