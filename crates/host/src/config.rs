@@ -529,8 +529,10 @@ impl HostConfig {
     /// is one desktop has already set through `HostHandle::set_launch_refused`, and awaited,
     /// before the gate returns (the host never writes it): a waited-out one
     /// (`agent.identity_checking`) waits for the refusal to lift, once per launch, then
-    /// prepares again; another fails the launch with it. A code that is no launch refusal, or
-    /// a panic, fails the launch closed with `agent.launch_failed`. Unset: no gate.
+    /// prepares again; another fails the launch with it. A code that is no launch refusal
+    /// fails the launch closed with `agent.launch_failed`. In release builds a panic aborts the
+    /// process; the gate must not panic (debug and test builds catch it as
+    /// `agent.launch_failed`). Unset: no gate.
     #[must_use]
     pub fn with_launch_gate(mut self, gate: LaunchGate) -> Self {
         self.wiring.launch_gate = Some(gate);

@@ -31,7 +31,7 @@ pub(super) fn of(actor: &Actor, thread: ThreadId) -> Option<(LaunchGate, AgentId
 }
 
 /// Asks the gate, on the prep thread: its refusal code, or none (no gate, or `None`); a panic
-/// is `agent.launch_failed`.
+/// is `agent.launch_failed` in debug and test builds, and aborts the process in release.
 pub(super) fn ask(gate: Option<(LaunchGate, AgentId)>) -> Result<Option<ErrorCode>, Error> {
     match gate {
         Some((gate, agent)) => launch_gate::ask(Some(&gate), &agent),

@@ -33,11 +33,14 @@ use crate::error::Error;
 ///   force after the wait. Any other refusal fails the launch with its code.
 /// - `Some(code)` with a code that is not a launch refusal: the launch fails closed with
 ///   `agent.launch_failed`, and a warning names the agent and the code.
-/// - A panic fails closed the same way, with a warning that the launch gate panicked.
+/// - A panic: in release builds a panic aborts the process (the workspace's `[profile.release]`
+///   sets `panic = "abort"`); the gate must not panic. Only where panics unwind (debug and test
+///   builds) is it caught, and the launch fails closed as above, with a warning that the launch
+///   gate panicked.
 pub type LaunchGate = Arc<dyn Fn(&AgentId) -> Option<ErrorCode> + Send + Sync>;
 
 /// Asks `gate` about `agent`, on the prepare thread: its answer, or `agent.launch_failed`
-/// when it panicked. No gate answers `None`.
+/// when it panicked (debug and test builds; a release build aborts). No gate answers `None`.
 pub(crate) fn ask(gate: Option<&LaunchGate>, agent: &AgentId) -> Result<Option<ErrorCode>, Error> {
     let Some(gate) = gate else {
         return Ok(None);
