@@ -186,7 +186,7 @@ expression: w.render(&policy)
 (allow file-read*
   (literal (param "CF_USER_TEXT_ENCODING")))
 
-; Notes, the credential link and the Claude store's names: read and write.
+; Notes and the Claude store's names: read and write.
 (allow file-read* file-write*
   (literal (param "CLAUDE_FILE_0"))
   (literal (param "CLAUDE_FILE_1"))

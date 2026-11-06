@@ -188,6 +188,7 @@ impl Writer {
         self.denies(policy, &p);
         self.allow_again(&p);
         self.fixed_folders(&p);
+        self.credential_link_metadata(&p);
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
@@ -225,9 +226,10 @@ impl Writer {
         read.extend(self.subpaths(&p.allowed));
         self.rule("allow", "file-read*", &read);
 
-        self.note("\n; Notes, the credential link and the Claude store's names: read and write.");
+        self.note("\n; Notes and the Claude store's names: read and write.");
         let shared = self.shared(p);
         self.rule("allow", "file-read* file-write*", &shared);
+        self.credential_link(p);
 
         self.note("\n; The folders above every allowed path: metadata only, so paths resolve.");
         let mut above: Vec<String> = vec![ancestors(&matter), ancestors(&state)];
@@ -240,18 +242,27 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &above);
     }
 
-    /// Notes, the credential link and the Claude store's names, as filters.
+    /// Notes and the Claude store's names, as filters.
     fn shared(&mut self, p: &Params) -> Vec<String> {
         let mut filters = Vec::new();
         if let Some(notes) = &p.notes {
             filters.push(subpath(&self.param("NOTES", notes)));
         }
-        if let Some(link) = &p.credential_link {
-            filters.push(literal(&self.param("CREDENTIAL_LINK", link)));
-        }
         filters.extend(self.literals(&p.claude_files));
         filters.extend(self.subpaths(&p.claude_locks));
         filters
+    }
+
+    /// The credential link: read, and its data written in place (Codex's token refresh). Its
+    /// metadata is refused after every allow that covers it, in
+    /// [`Writer::credential_link_metadata`].
+    fn credential_link(&mut self, p: &Params) {
+        let Some(link) = &p.credential_link else {
+            return;
+        };
+        self.note("; The credential link: read, and its data written in place (a token refresh).");
+        let link = literal(&self.param("CREDENTIAL_LINK", link));
+        self.rule("allow", "file-read* file-write-data", &[link]);
     }
 
     /// The ancestors of the paths allowed again after the hidden paths.
@@ -325,6 +336,7 @@ impl Writer {
         let mut shared = vec![state];
         shared.extend(self.shared(p));
         self.rule("allow", "file-read* file-write*", &shared);
+        self.credential_link(p);
         let runtime = self.subpaths(&p.runtime);
         self.rule(
             "allow",
@@ -347,6 +359,28 @@ impl Writer {
             filters.push(literal("(param \"NOTES\")"));
         }
         self.rule("deny", "file-write-unlink file-write-create", &filters);
+    }
+
+    /// The credential link's metadata, refused after every allow that covers it (the state
+    /// folder's among them) and before the state folder's read-only denies, which still win:
+    /// the link is a hard link to the lawyer's login file.
+    fn credential_link_metadata(&mut self, p: &Params) {
+        let Some(link) = &p.credential_link else {
+            return;
+        };
+        self.note("\n; The credential link, a hard link to the lawyer's login file: no chmod,");
+        self.note("; chflags, xattr, chown, setugid, times or ACL. After every allow that covers");
+        self.note("; it, so it wins over the state folder's (Seatbelt applies the last match).");
+        self.note("; Seatbelt checks utimes as file-write* itself, not file-write-times, so all");
+        self.note("; writes are denied and data, unlink and create allowed back. Unlink and");
+        self.note("; create stay: the host finds a split link and re-links or refuses the launch.");
+        let link = literal(&self.param("CREDENTIAL_LINK", link));
+        self.rule("deny", "file-write*", std::slice::from_ref(&link));
+        self.rule(
+            "allow",
+            "file-write-data file-write-unlink file-write-create",
+            &[link],
+        );
     }
 
     /// Read-only paths in the state folder, last of the file rules.

@@ -2,7 +2,7 @@
 //! and protected name read-only (in any case), what must not be read, links, and the rule
 //! order (Seatbelt's later matching rule wins).
 
-use crate::support::{World, launcher, run, sh, tree};
+use crate::support::{World, launcher, run, run_outside, sh, tree};
 
 /// A shell loop that appends to each path given and prints `WROTE <path>` when it could.
 const APPEND_EACH: &str = r#"for f in "$@"; do printf x >> "$f" && echo "WROTE $f"; done; exit 0"#;
@@ -43,6 +43,55 @@ fn the_credential_link_and_the_claude_store_take_appends() {
     let lock = w.at("claude/.oauth_refresh.lock");
     sh(&launcher, &m1, r#"mkdir "$1""#, &[lock.to_str().unwrap()]).assert_ok();
     assert!(lock.is_dir());
+}
+
+/// M4: the credential link takes data written in place, seen through the login file's name,
+/// but no chmod, xattr, chflags or times; unlinking it still works.
+#[test]
+fn the_credential_link_refuses_metadata_changes() {
+    let w = World::new();
+    let policy = w.builder().build().unwrap();
+    let link = policy.credential_link().unwrap().to_owned();
+    let link = link.to_str().unwrap();
+    let (launcher, _) = launcher(policy);
+    let m1 = w.at("m1");
+    let login = w.at("login/auth.json");
+    let mode = |p: &std::path::Path| {
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(p).unwrap().permissions())
+    };
+    // A login file's own mode, so the jail's `chmod 0644` is a change (chmod skips a no-op).
+    run_outside("/bin/chmod", &["0600", login.to_str().unwrap()], &m1).assert_ok();
+    let before = mode(&login);
+    assert_eq!(before & 0o777, 0o600);
+
+    sh(
+        &launcher,
+        &m1,
+        r#"printf '{"token":"fresh"}' 1<> "$1""#,
+        &[link],
+    )
+    .assert_ok();
+    assert!(
+        std::fs::read_to_string(&login)
+            .unwrap()
+            .starts_with(r#"{"token":"fresh"}"#)
+    );
+    sh(&launcher, &m1, r#"chmod 0644 "$1""#, &[link]).assert_refused();
+    assert_eq!(mode(&login), before);
+    let xattr = sh(
+        &launcher,
+        &m1,
+        r#"/usr/bin/xattr -w com.example.k v "$1""#,
+        &[link],
+    );
+    assert_ne!(xattr.code, Some(0), "{xattr:#?}");
+    let listed = run(&launcher, "/usr/bin/xattr", &[link], &m1, &[]);
+    assert!(!listed.stdout.contains("com.example.k"), "{listed:#?}");
+    sh(&launcher, &m1, r#"chflags uchg "$1""#, &[link]).assert_refused();
+    sh(&launcher, &m1, r#"touch -t 200001010000 "$1""#, &[link]).assert_refused();
+    // Unlink stays allowed: the host finds the split link before the next launch.
+    sh(&launcher, &m1, r#"rm "$1""#, &[link]).assert_ok();
+    assert!(login.exists());
 }
 
 #[test]
