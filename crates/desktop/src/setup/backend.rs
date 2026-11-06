@@ -154,7 +154,7 @@ impl AgentsBackend {
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
                 let start = || agents.sign_in(&agent, method);
-                signs_in(&self.wiring.identity, &agent, start)?;
+                signs_in(self, &agent, start)?;
                 tracing::info!(%agent, method = ?method, "sign-in started");
                 self.replaced(&agent);
             }
@@ -175,7 +175,7 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let device = || agents.sign_in(&agent, Method::DeviceCode);
-                signs_in(&self.wiring.identity, &agent, device)?;
+                signs_in(self, &agent, device)?;
                 tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
                 self.replaced(&agent);
             }
@@ -203,7 +203,7 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
                 let different = || agents.use_different_account(&agent);
-                signs_in(&self.wiring.identity, &agent, different)?;
+                signs_in(self, &agent, different)?;
                 self.replaced(&agent);
             }
             SetupCommand::StopUsingLogin { .. } => {
@@ -428,7 +428,7 @@ impl AgentsBackend {
             None => None,
         };
         let used = || self.agents.use_found_login(agent);
-        if let Err(error) = signs_in(&self.wiring.identity, agent, used) {
+        if let Err(error) = signs_in(self, agent, used) {
             if let Some(token) = token {
                 drop(self.wiring.waiters.take(agent, token));
             }

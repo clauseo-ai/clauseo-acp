@@ -2,11 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use clauseo_agents::{AccountFuture, AccountHash, AccountRead};
 use clauseo_counts::schema::Event;
 use clauseo_protocol::{AgentId, HostError};
+use futures::FutureExt as _;
+use futures::channel::oneshot;
+use futures::future::Shared;
 
 use super::super::super::SetupCounts;
 use crate::bridge::lock;
@@ -58,8 +61,10 @@ impl Opener for FakeOpener {
 /// that never answers while `stalled`.
 #[derive(Default)]
 pub(in crate::setup::backend) struct FakeAccounts {
-    reads: Mutex<BTreeMap<AgentId, AccountRead>>,
+    reads: Arc<Mutex<BTreeMap<AgentId, AccountRead>>>,
     stalled: Mutex<bool>,
+    /// The agents whose reads wait for a test to open them ([`FakeAccounts::hold`]).
+    held: Mutex<BTreeMap<AgentId, Shared<oneshot::Receiver<()>>>>,
 }
 
 impl FakeAccounts {
@@ -74,6 +79,20 @@ impl FakeAccounts {
         lock(&self.reads).insert(agent.clone(), read);
     }
 
+    /// `agent`'s reads from now on wait until the sender this gives is used (or dropped),
+    /// then answer what `agent`'s status names then.
+    pub(in crate::setup::backend) fn hold(&self, agent: &AgentId) -> oneshot::Sender<()> {
+        let (open, opened) = oneshot::channel();
+        lock(&self.held).insert(agent.clone(), opened.shared());
+        open
+    }
+
+    /// Every agent's status answers nothing set (a failed read), and none is held.
+    pub(in crate::setup::backend) fn clear(&self) {
+        lock(&self.reads).clear();
+        lock(&self.held).clear();
+    }
+
     /// Whether reads never answer.
     pub(in crate::setup::backend) fn stall(&self, stalled: bool) {
         *lock(&self.stalled) = stalled;
@@ -82,6 +101,15 @@ impl FakeAccounts {
     pub(in crate::setup::backend) fn read(&self, agent: &AgentId) -> AccountFuture {
         if *lock(&self.stalled) {
             return Box::pin(futures::future::pending());
+        }
+        if let Some(opened) = lock(&self.held).get(agent).cloned() {
+            let reads = Arc::clone(&self.reads);
+            let agent = agent.clone();
+            return Box::pin(async move {
+                let _open = opened.await;
+                let read = lock(&reads).get(&agent).cloned();
+                read.unwrap_or(AccountRead::Failed)
+            });
         }
         let read = lock(&self.reads).get(agent).cloned();
         Box::pin(std::future::ready(read.unwrap_or(AccountRead::Failed)))

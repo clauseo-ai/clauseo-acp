@@ -399,8 +399,12 @@ pub(crate) async fn login_changed(backend: &AgentsBackend, agent: &AgentId) {
     }
 }
 
-/// A key or an endpoint changed: the agents restart with it, and the limits read it.
+/// A key or an endpoint changed: the agents restart with it, and the limits read it. The
+/// identity check's exemption is worked out again from the launch env first (R17), so a launch
+/// env that no longer replaces the shared login puts `agent.identity_checking` on the agent
+/// before the restart relaunches it.
 pub(crate) async fn restart_for_login(backend: &AgentsBackend, agent: &AgentId) {
+    super::identity::exemption_changed(backend, agent).await;
     restart(backend, agent).await;
     login_changed(backend, agent).await;
 }

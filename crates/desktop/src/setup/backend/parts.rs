@@ -7,7 +7,8 @@ use std::collections::BTreeSet;
 use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
 
-use crate::setup::identity::Identities;
+use crate::setup::backend::AgentsBackend;
+use crate::setup::identity;
 
 /// Which first install states have come in: first run is decided once every agent has one.
 pub(super) struct FirstRun {
@@ -56,13 +57,13 @@ pub(super) fn plan_method(agent: &AgentId, console: bool) -> Result<Method, Host
 /// check expects it first, so its `SignedIn` records the account before anything compares it
 /// (R17), and stops expecting it when S18 refuses it.
 pub(super) fn signs_in(
-    identity: &Identities,
+    backend: &AgentsBackend,
     agent: &AgentId,
     call: impl FnOnce() -> Result<(), SigninError>,
 ) -> Result<(), HostError> {
-    identity.expect(agent);
+    identity::expect(backend, agent);
     call().map_err(|error| {
-        identity.expect_none(agent);
+        backend.wiring.identity.expect_none(agent);
         signin_error(&error)
     })
 }

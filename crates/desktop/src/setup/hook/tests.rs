@@ -6,10 +6,10 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use clauseo_agents::keys::Keychain;
 use clauseo_host::ProfileHook;
-use clauseo_protocol::AgentId;
+use clauseo_protocol::{AgentId, AgentKind};
 use clauseo_settings::{Plan, PlanProvider};
 
-use super::SetupHook;
+use super::{SetupHook, replaces_login, setup_vars_with};
 use crate::setup::keys::KeyCache;
 
 const CLAUDE_KEY: &str = "fakeAnthropicKey0123";
@@ -90,4 +90,54 @@ fn the_env_holds_only_the_key_variable_plus_the_plan_variables() {
     );
     // An agent of no kind gets nothing.
     same(&hook.launch_env(&id("gemini-acp")), &BTreeMap::new());
+}
+
+#[test]
+fn only_a_key_or_a_provider_in_the_launch_env_replaces_the_shared_login() {
+    let (claude, codex) = (id("claude-acp"), id("codex-acp"));
+    let plans = Arc::new(RwLock::new(BTreeMap::new()));
+    let exempt = |keys: Option<&KeyCache>, agent: &AgentId, kind| {
+        replaces_login(kind, &setup_vars_with(keys, &plans, agent, kind))
+    };
+    let endpoint = |provider| Plan {
+        endpoint: Some("https://gateway.firm.example".to_owned()),
+        provider,
+        env: BTreeMap::new(),
+    };
+    // An endpoint alone: Claude's ANTHROPIC_BASE_URL, Codex's nothing; both on the login.
+    plans.write().unwrap().extend([
+        (claude.clone(), endpoint(None)),
+        (codex.clone(), endpoint(None)),
+    ]);
+    assert!(!exempt(None, &claude, AgentKind::Claude));
+    assert!(!exempt(None, &codex, AgentKind::Codex));
+    plans
+        .write()
+        .unwrap()
+        .insert(claude.clone(), endpoint(Some(PlanProvider::Anthropic)));
+    assert!(
+        !exempt(None, &claude, AgentKind::Claude),
+        "anthropic sets no switch"
+    );
+    // A provider: Bedrock or Vertex read no OAuth file.
+    for provider in [PlanProvider::Bedrock, PlanProvider::Vertex] {
+        plans
+            .write()
+            .unwrap()
+            .insert(claude.clone(), endpoint(Some(provider)));
+        assert!(exempt(None, &claude, AgentKind::Claude), "{provider:?}");
+    }
+    // A stored key: the variable the hook sets.
+    plans
+        .write()
+        .unwrap()
+        .insert(claude.clone(), endpoint(None));
+    let keychain = Keychain::memory();
+    keychain.store(&codex, CODEX_KEY).unwrap();
+    let keys = KeyCache::load_all(keychain, [&claude, &codex]);
+    assert!(exempt(Some(&keys), &codex, AgentKind::Codex));
+    assert!(
+        !exempt(Some(&keys), &claude, AgentKind::Claude),
+        "no key stored for it"
+    );
 }
