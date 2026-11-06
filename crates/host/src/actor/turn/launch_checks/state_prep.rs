@@ -18,7 +18,8 @@ use crate::log_file::Cause;
 
 /// A Codex launch's preparation on the launch-prep thread: `codex::prepare_launch` for the
 /// login home `home`, then the matter's state folder `state` made, cleaned and given its
-/// `config.toml`, and on Clauseo's own login (not `reused`) its `auth.json` linked.
+/// `config.toml`, a stale link removed first when `drop_stale` (`stale_link`), and on Clauseo's
+/// own login (not `reused`) its `auth.json` linked.
 pub(super) fn prepare_codex(
     check: &FolderCheck,
     stored: &Path,
@@ -26,9 +27,19 @@ pub(super) fn prepare_codex(
     home: PathBuf,
     state: PathBuf,
     reused: bool,
+    drop_stale: bool,
 ) -> Result<(CodexPrepared, Answer), Error> {
     let (folder, support) = codex::prepare_launch(check, stored, data, &home)?;
     state_folder::prepare(data, &state, AgentKind::Codex)?;
+    if drop_stale {
+        state_folder::remove_stale_link(&state).map_err(|error| {
+            tracing::warn!(error_kind = ?error.kind(), "a stale login link was not removed");
+            Error::refused(
+                clauseo_protocol::ErrorCode::AgentLaunchFailed,
+                "Clauseo couldn't prepare Codex's folder.",
+            )
+        })?;
+    }
     codex::write_home_config(&state)?;
     // Clauseo's own login is linked now; a reused one once the hook has answered
     // (`link_reused_after`).
@@ -91,6 +102,22 @@ pub(super) async fn link_reused_after(
     })
     .await;
     codex.link = Some(linked);
+}
+
+/// Whether `thread`'s launch removes its matter's stale Codex login link first: the matter is
+/// marked stale (its link outlived a login or source change while a session ran there,
+/// `turn/sign_in.rs`) and no other session of the agent runs there now. The mark is taken.
+pub(super) fn stale_link(actor: &mut Actor, thread: ThreadId) -> bool {
+    let Some((agent, matter)) = actor
+        .threads
+        .get(&thread)
+        .map(|entry| (entry.row.agent.clone(), entry.row.matter))
+    else {
+        return false;
+    };
+    let alone =
+        !super::super::sign_in::running_matters(actor, &agent, Some(thread)).contains(&matter);
+    alone && actor.wiring.sign_in.stale_links.remove(&matter)
 }
 
 /// Whether desktop has said `thread`'s agent's login is reused (`HostHandle::set_reused_login`).

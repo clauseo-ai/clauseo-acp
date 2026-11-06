@@ -275,10 +275,12 @@ fn a_reused_login_whose_matter_link_split_is_refused_with_no_relink() {
     });
     let splits = host.handle.login_splits();
     let (matter, thread, _) = matter_with_thread(&dir, &host, "a", &[("brief.txt", "x\n")], CODEX);
+    // Reused first (which removes every matter's old link), then a matter file that is not
+    // the login's: a split made while reused.
+    wait("reused", host.handle.set_reused_login(codex(), true)).unwrap();
     let state = state_folder(&dir, matter, CODEX);
     crate::write::create_dir_all(&state);
     crate::write::write(&state.join("auth.json"), b"{\"tokens\":\"stale\"}");
-    wait("reused", host.handle.set_reused_login(codex(), true)).unwrap();
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Look at the matter.");
     assert_eq!(events.until_turn_ended(turn).stop, StopReason::Failed);
@@ -294,5 +296,91 @@ fn a_reused_login_whose_matter_link_split_is_refused_with_no_relink() {
         b"{\"tokens\":\"stale\"}"
     );
     assert!(!one_file(&home.join("auth.json"), &state.join("auth.json")));
+    host.shutdown();
+}
+
+/// The review's D3: an own login's matter link, left when that login signed out, never turns
+/// the later reused login into a split. Own login, one Codex turn (the matter's link made); the
+/// home's file replaced (a sign-out, then `UseFoundLogin` linking the lawyer's file); a new
+/// host: `set_reused_login(true)` removes every matter's old link first, so the next launch
+/// links the reused file and runs.
+#[cfg(unix)]
+#[test]
+fn review_an_own_login_link_left_by_sign_out_splits_the_next_reuse() {
+    use clauseo_host::LoginLink;
+
+    use crate::codex::codex_dir;
+    use crate::login_check::{Fake, codex};
+
+    let dir = codex_dir("state_folders_stale", "codex-handshake");
+    let home = login_home(&dir, CODEX);
+    crate::write::create_dir_all(&home);
+    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"own\"}");
+    let host = dir.start(0);
+    let matter = host.create_matter("a", &dir.folder("a", &[("brief.txt", "x\n")]));
+    turn_on(&host, matter, CODEX);
+    let link = state_folder(&dir, matter, CODEX).join("auth.json");
+    assert!(one_file(&home.join("auth.json"), &link));
+    host.shutdown();
+
+    crate::write::remove_file(&home.join("auth.json"));
+    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"lawyer\"}");
+    let hook = Fake::new(LoginLink::Shared);
+    let host = dir.start_with(1, |config| config.with_login_check(hook));
+    wait("reused", host.handle.set_reused_login(codex(), true)).unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link).is_err(),
+        "the old link is gone"
+    );
+    let splits = host.handle.login_splits();
+    turn_on(&host, matter, CODEX);
+    assert!(splits.try_recv().is_err(), "no split");
+    assert!(one_file(&home.join("auth.json"), &link));
+    host.shutdown();
+}
+
+/// A matter where a Codex session runs keeps its link when the login changes (never removed
+/// under a running Codex), and another matter's goes; once that session has stopped, the
+/// matter's next launch removes the stale link before it links the new login.
+#[cfg(unix)]
+#[test]
+fn a_running_matter_keeps_its_link_until_its_next_launch() {
+    use clauseo_host::LoginLink;
+
+    use crate::codex::codex_dir;
+    use crate::login_check::{Fake, codex};
+
+    let dir = codex_dir("state_folders_running", "codex-handshake");
+    let home = login_home(&dir, CODEX);
+    crate::write::create_dir_all(&home);
+    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"own\"}");
+    let hook = Fake::new(LoginLink::Shared);
+    let host = dir.start_with(0, |config| config.with_login_check(hook));
+    let busy = host.create_matter("a", &dir.folder("a", &[("brief.txt", "x\n")]));
+    let idle = host.create_matter("b", &dir.folder("b", &[("brief.txt", "y\n")]));
+    turn_on(&host, idle, CODEX);
+    wait("stop", host.handle.stop_agents(codex())).unwrap();
+    wait("restart", host.handle.restart_agents(codex())).unwrap();
+    // The busy matter's agent stays alive after its turn.
+    turn_on(&host, busy, CODEX);
+    let busy_link = state_folder(&dir, busy, CODEX).join("auth.json");
+    let idle_link = state_folder(&dir, idle, CODEX).join("auth.json");
+    assert!(busy_link.exists() && idle_link.exists());
+
+    crate::write::remove_file(&home.join("auth.json"));
+    crate::write::write(&home.join("auth.json"), b"{\"tokens\":\"lawyer\"}");
+    wait("reused", host.handle.set_reused_login(codex(), true)).unwrap();
+    assert!(busy_link.exists(), "a running matter keeps its link");
+    assert!(
+        std::fs::symlink_metadata(&idle_link).is_err(),
+        "an idle matter's goes"
+    );
+
+    wait("stop", host.handle.stop_agents(codex())).unwrap();
+    wait("restart", host.handle.restart_agents(codex())).unwrap();
+    let splits = host.handle.login_splits();
+    turn_on(&host, busy, CODEX);
+    assert!(splits.try_recv().is_err(), "no split");
+    assert!(one_file(&home.join("auth.json"), &busy_link));
     host.shutdown();
 }

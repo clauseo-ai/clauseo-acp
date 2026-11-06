@@ -39,10 +39,11 @@ pub(super) fn launch_deny(
 }
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, this
-/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and the agent's
-/// state folder for this matter (R17 PR-C), whose plans folder and tool results Claude needs;
-/// [`data_fence::DENIED`] still names the config surfaces and transcripts in it. Every other
-/// matter's state folder that exists is denied whole.
+/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and the plans folder
+/// in the agent's state folder for this matter (R17 PR-C), where Claude Code writes its plan
+/// note. The rest of that state folder that exists is denied entry by entry, but the session's
+/// own `tool-results` ([`launch_deny`]'s projects); [`data_fence::DENIED`] names the config
+/// surfaces made later. Every other matter's state folder that exists is denied whole.
 fn own_folders(run: &RunFolders, stored: &Path) -> Vec<PathBuf> {
     [
         run.root.clone(),
@@ -50,7 +51,7 @@ fn own_folders(run: &RunFolders, stored: &Path) -> Vec<PathBuf> {
         crate::agent::session_folder(stored),
     ]
     .into_iter()
-    .chain(run.state.clone())
+    .chain(run.state.as_ref().map(|state| state.join("plans")))
     .collect()
 }
 

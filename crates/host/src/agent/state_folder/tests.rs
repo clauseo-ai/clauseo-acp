@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use clauseo_protocol::{AgentKind, ErrorCode, MatterId};
 
 use super::{
-    CLAUDE_REMOVED, CODEX_REMOVED, LinkError, StateLink, clean, is_other_volume, link_own,
-    link_reused, linked_folders, prepare, same_file, state_dir,
+    LinkError, StateLink, is_other_volume, link_own, link_reused, linked_folders, prepare,
+    same_file, state_dir,
 };
 use crate::write;
 
@@ -44,9 +44,13 @@ fn the_state_folder_is_made_under_agent_state_through_no_link() {
     );
     prepare(&data, &state, AgentKind::Codex).unwrap();
     assert!(write::is_real_dir(&state));
-    write::write_file(&state.join("sessions-kept"), b"x").unwrap();
+    write::create_dir_all(&state.join("sessions")).unwrap();
+    write::write_file(&state.join("sessions/r.jsonl"), b"x").unwrap();
     prepare(&data, &state, AgentKind::Codex).unwrap();
-    assert!(state.join("sessions-kept").exists(), "the folder is kept");
+    assert!(
+        state.join("sessions/r.jsonl").exists(),
+        "the folder is kept"
+    );
 
     #[cfg(unix)]
     {
@@ -63,97 +67,221 @@ fn the_state_folder_is_made_under_agent_state_through_no_link() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// Every config surface on the list is removed, a folder with all it holds and a link as
-/// itself (its target untouched); transcripts and anything not on the list stay.
+/// Plants `files` (each made with its folders) under `state`.
+fn plant(state: &std::path::Path, files: &[&str]) {
+    for file in files {
+        let path = state.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, b"planted").unwrap();
+    }
+}
+
+/// The clean is an inverted list: everything in Codex's state folder that Codex does not keep is
+/// removed, whatever its name, among them what the review found surviving (`.env`, which Codex
+/// loads and exports at start, `.config/git/config`, which git reads under `HOME`, and `agents`
+/// role files); a link is removed as itself, its target untouched; Codex's own names stay.
 #[test]
-fn the_clean_removes_the_config_surfaces_and_keeps_the_transcripts() {
-    let (data, _home) = data("clean");
-    for (kind, agent, removed, kept) in [
-        (
-            AgentKind::Claude,
-            "claude-acp",
-            &CLAUDE_REMOVED[..],
-            ["projects/p/s.jsonl", "todos/t.json", ".claude.json"],
-        ),
-        (
-            AgentKind::Codex,
-            "codex-acp",
-            &CODEX_REMOVED[..],
-            ["sessions/r.jsonl", "state_5.sqlite", "session_index.jsonl"],
-        ),
-    ] {
-        let state = state_dir(&data, matter(2), agent);
-        prepare(&data, &state, kind).unwrap();
-        let target = data.join(format!("target-{agent}"));
-        write::create_dir_all(&target).unwrap();
-        write::write_file(&target.join("keep"), b"x").unwrap();
-        for (at, name) in removed.iter().enumerate() {
-            let path = state.join(name);
-            match at % 3 {
-                0 => write::write_file(&path, b"planted").unwrap(),
-                1 => {
-                    write::create_dir_all(&path.join("inner")).unwrap();
-                    write::write_file(&path.join("inner/f"), b"planted").unwrap();
-                }
-                _ => {
-                    #[cfg(unix)]
-                    write::symlink(&target, &path).unwrap();
-                    #[cfg(not(unix))]
-                    write::write_file(&path, b"planted").unwrap();
-                }
-            }
-        }
-        for name in kept {
-            let path = state.join(name);
-            write::create_dir_all(path.parent().unwrap()).unwrap();
-            write::write_file(&path, b"kept").unwrap();
-        }
-        prepare(&data, &state, kind).unwrap();
-        for name in removed {
-            assert!(
-                std::fs::symlink_metadata(state.join(name)).is_err(),
-                "{agent}: {name} stays"
-            );
-        }
-        for name in kept {
-            assert!(state.join(name).exists(), "{agent}: {name} was removed");
-        }
+fn the_codex_clean_keeps_only_what_codex_keeps() {
+    let (data, _home) = data("clean_codex");
+    let state = state_dir(&data, matter(2), "codex-acp");
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    let planted = [
+        ".env",
+        ".config/git/config",
+        "agents/role.toml",
+        "AGENTS.md",
+        "hooks.json",
+        "rules/default.rules",
+        "skills/x/SKILL.md",
+        ".gitconfig",
+        ".profile",
+        ".npmrc",
+        "anything-else",
+    ];
+    let kept = [
+        "sessions/2026/r.jsonl",
+        "archived_sessions/a.jsonl",
+        "history.jsonl",
+        "state_5.sqlite",
+        "state_5.sqlite-wal",
+        "log/codex.log",
+        "tmp/arg0/x",
+        "config.toml",
+    ];
+    plant(&state, &planted);
+    plant(&state, &kept);
+    let target = data.join("target");
+    write::create_dir_all(&target).unwrap();
+    write::write_file(&target.join("keep"), b"x").unwrap();
+    #[cfg(unix)]
+    write::symlink(&target, &state.join("linked")).unwrap();
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    let survived: Vec<&str> = planted
+        .iter()
+        .copied()
+        .filter(|name| std::fs::symlink_metadata(state.join(name)).is_ok())
+        .collect();
+    assert_eq!(survived, Vec::<&str>::new(), "survive the clean");
+    for name in [".config", "agents", "rules", "skills", "linked"] {
         assert!(
-            target.join("keep").exists(),
-            "a link's target is never touched"
+            std::fs::symlink_metadata(state.join(name)).is_err(),
+            "{name}"
         );
+    }
+    for name in kept {
+        assert!(state.join(name).exists(), "{name} was removed");
+    }
+    assert!(
+        target.join("keep").exists(),
+        "a link's target is never touched"
+    );
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// Claude's clean keeps `.claude.json`, `settings.json` and each project's transcripts only:
+/// the instruction surfaces, the auto-memory (`projects/*/memory`; R22's `notes/` is the
+/// matter's lasting memory), a session's tool results and subagents, todos, plans and the rest
+/// are removed.
+#[test]
+fn the_claude_clean_keeps_the_transcripts_and_removes_the_memory() {
+    let (data, _home) = data("clean_claude");
+    let state = state_dir(&data, matter(3), "claude-acp");
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    let planted = [
+        "CLAUDE.md",
+        "rules/r.md",
+        "skills/x/SKILL.md",
+        "plugins/p/plugin.json",
+        "agents/a.md",
+        "commands/c.md",
+        "output-styles/o.md",
+        "hooks/run.sh",
+        "settings.local.json",
+        "projects/p/memory/MEMORY.md",
+        "projects/p/s-1/tool-results/t.txt",
+        "projects/p/s-1/subagents/a.jsonl",
+        "projects/p/notes.txt",
+        "projects/stray.jsonl",
+        "todos/t.json",
+        "plans/plan.md",
+        ".credentials.json",
+        ".env",
+    ];
+    let kept = ["projects/p/s-1.jsonl", "settings.json"];
+    plant(&state, &planted);
+    plant(&state, &kept);
+    write::write_file(&state.join(".claude.json"), b"{\"userID\":\"u\"}").unwrap();
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    for name in planted {
+        assert!(
+            std::fs::symlink_metadata(state.join(name)).is_err(),
+            "{name} stays"
+        );
+    }
+    assert!(std::fs::symlink_metadata(state.join("projects/p/memory")).is_err());
+    for name in kept {
+        assert!(state.join(name).exists(), "{name} was removed");
+    }
+    assert!(state.join(".claude.json").exists());
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// `.claude.json`'s MCP and tool keys are taken out before each launch, at the top and in each
+/// project, and every other key stays; one that is not JSON is removed.
+#[test]
+fn a_planted_mcp_server_in_claude_json_is_stripped() {
+    let (data, _home) = data("claude_json");
+    let state = state_dir(&data, matter(4), "claude-acp");
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    let file = state.join(".claude.json");
+    let planted = serde_json::json!({
+        "userID": "u",
+        "mcpServers": {"evil": {"command": "/bin/sh"}},
+        "projects": {"/m": {
+            "mcpServers": {"evil": {"command": "/bin/sh"}},
+            "enabledMcpjsonServers": ["evil"],
+            "allowedTools": ["Bash(*)"],
+            "hasTrustDialogAccepted": true
+        }}
+    });
+    write::write_file(&file, &serde_json::to_vec(&planted).unwrap()).unwrap();
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    let left: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(
+        left,
+        serde_json::json!({"userID": "u", "projects": {"/m": {"hasTrustDialogAccepted": true}}})
+    );
+    write::write_file(&file, b"not json").unwrap();
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    assert!(std::fs::symlink_metadata(&file).is_err());
+    write::remove_dir_all(&data).unwrap();
+}
+
+/// A `.claude.json` with a second name (a hard link to a credential would be one) is removed
+/// unread, its other name and contents untouched; a symbolic link is removed as itself.
+#[test]
+fn a_hard_linked_claude_json_is_refused_and_not_read() {
+    let (data, home) = data("claude_json_link");
+    let state = state_dir(&data, matter(5), "claude-acp");
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    let secret = home.join("auth.json");
+    let file = state.join(".claude.json");
+    write::hard_link(&secret, &file).unwrap();
+    assert_eq!(
+        super::safe_read::read_plain(&file).unwrap(),
+        super::safe_read::Found::Refused
+    );
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    assert!(std::fs::symlink_metadata(&file).is_err());
+    assert_eq!(std::fs::read(&secret).unwrap(), b"{\"tokens\":1}");
+    #[cfg(unix)]
+    {
+        write::symlink(&secret, &file).unwrap();
+        assert_eq!(
+            super::safe_read::read_plain(&file).unwrap(),
+            super::safe_read::Found::Refused
+        );
+        prepare(&data, &state, AgentKind::Claude).unwrap();
+        assert!(std::fs::symlink_metadata(&file).is_err());
+        assert!(secret.exists());
     }
     write::remove_dir_all(&data).unwrap();
 }
 
-/// A clean of a missing name is no error; the lists hold no name twice and never Clauseo's own
-/// files (written whole after the clean) nor the login or the transcripts.
+/// Clauseo's own files are compared before a rewrite only as plain files with one name: a
+/// `settings.json` hard-linked to a credential is replaced, the credential untouched.
 #[test]
-fn the_lists_name_no_file_clauseo_keeps() {
-    for list in [&CLAUDE_REMOVED[..], &CODEX_REMOVED[..]] {
-        for keep in [
-            "settings.json",
-            "config.toml",
-            "auth.json",
-            "projects",
-            "sessions",
-            "todos",
-            "plans",
-            ".claude.json",
-        ] {
-            assert!(!list.contains(&keep), "{keep}");
-        }
-        let mut sorted = list.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), list.len());
-    }
-    let empty = std::env::temp_dir().join(format!("clauseo-state-empty-{}", std::process::id()));
-    write::create_dir_all(&empty).unwrap();
-    clean(&empty, &CODEX_REMOVED).unwrap();
-    write::remove_dir_all(&empty).unwrap();
+fn clauseos_own_files_are_never_read_through_a_second_name() {
+    let (data, home) = data("own_files_link");
+    let state = state_dir(&data, matter(6), "claude-acp");
+    prepare(&data, &state, AgentKind::Claude).unwrap();
+    let secret = home.join("auth.json");
+    write::hard_link(&secret, &state.join("settings.json")).unwrap();
+    crate::agent::home::write_state_settings(&state).unwrap();
+    assert!(!same_file(&secret, &state.join("settings.json")).unwrap());
+    assert_eq!(std::fs::read(&secret).unwrap(), b"{\"tokens\":1}");
+    write::remove_dir_all(&data).unwrap();
 }
 
+/// The auto-deny's own parts of a state folder, and what stays refused in them (D2).
+#[test]
+fn the_fence_own_parts_leave_out_the_login_link() {
+    let state = PathBuf::from("/d/agent-state/m/codex-acp");
+    assert_eq!(
+        super::fence_own(&state, AgentKind::Codex),
+        [state.join("tmp")]
+    );
+    let denied = super::fence_denied(&state, AgentKind::Codex);
+    for name in ["auth.json", "config.toml", ".env", "state_5.sqlite-wal"] {
+        assert!(denied.contains(&state.join(name)), "{name}");
+    }
+    let claude = PathBuf::from("/d/agent-state/m/claude-acp");
+    assert!(!super::fence_own(&claude, AgentKind::Claude).contains(&claude));
+    let denied = super::fence_denied(&claude, AgentKind::Claude);
+    for name in [".credentials.json", ".claude.json", "settings.json"] {
+        assert!(denied.contains(&claude.join(name)), "{name}");
+    }
+}
 /// On Clauseo's own login: a new matter's state folder gets a hard link to the login home's
 /// `auth.json` (one file, never a copy); a second launch finds it the same; a home whose file was
 /// replaced is linked again; a home with no `auth.json` (signed out) removes the matter's.
@@ -258,8 +386,16 @@ fn the_linked_folders_are_every_matters_codex_state_folder() {
     let claude = state_dir(&data, matter(9), "claude-acp");
     prepare(&data, &claude, AgentKind::Claude).unwrap();
     made.sort();
-    assert_eq!(linked_folders(&data, "codex-acp"), made);
-    assert_eq!(linked_folders(&data, "claude-acp"), Vec::<PathBuf>::new());
+    assert_eq!(linked_folders(&data, "codex-acp", &[]).unwrap(), made);
+    assert_eq!(
+        linked_folders(&data, "codex-acp", &[matter(7).to_string()]).unwrap(),
+        made[1..],
+        "a skipped matter keeps its link"
+    );
+    assert_eq!(
+        linked_folders(&data, "claude-acp", &[]).unwrap(),
+        Vec::<PathBuf>::new()
+    );
     #[cfg(unix)]
     {
         let elsewhere = data.join("elsewhere/codex-acp");
@@ -267,7 +403,7 @@ fn the_linked_folders_are_every_matters_codex_state_folder() {
         let link = data.join("agent-state").join(matter(10).to_string());
         write::symlink(&data.join("elsewhere"), &link).unwrap();
         assert_eq!(
-            linked_folders(&data, "codex-acp"),
+            linked_folders(&data, "codex-acp", &[]).unwrap(),
             made,
             "a link is not followed"
         );
@@ -275,15 +411,38 @@ fn the_linked_folders_are_every_matters_codex_state_folder() {
     write::remove_dir_all(&data).unwrap();
 }
 
+/// A folder that cannot be listed is an error, never an empty set, so `remove_login_links`
+/// never reports links removed that may remain.
+#[cfg(unix)]
+#[test]
+fn an_unlistable_agent_state_is_an_error() {
+    let (data, home) = data("unlistable");
+    let state = state_dir(&data, matter(11), "codex-acp");
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    link_own(&home, &state).unwrap();
+    let root = data.join("agent-state");
+    write::set_mode(&root, 0o000).unwrap();
+    let listed = linked_folders(&data, "codex-acp", &[]);
+    // Root ignores the mode, so the check would mean nothing then.
+    let root_user = std::fs::read_dir(&root).is_ok();
+    write::set_mode(&root, 0o700).unwrap();
+    if !root_user {
+        assert!(listed.is_err(), "{listed:?}");
+    }
+    write::remove_dir_all(&data).unwrap();
+}
+
 /// The first launch's folder setup for one matter, timed by hand (ignored):
 ///
 /// ```text
-/// cargo nextest run --release -p clauseo-host --run-ignored only \
+/// cargo nextest run -p clauseo-host --run-ignored only \
 ///     -E 'test(timing_first_launch_state_folder)' --no-capture
 /// ```
 ///
-/// Codex: the folder made below the data folder, cleaned, `config.toml` written and the login
-/// hard-linked; Claude: made, cleaned and `settings.json` written. Target: under 50 ms each.
+/// A debug build, as the PR's numbers are (`--release` runs faster). Codex: the folder made
+/// below the data folder, cleaned to its keep list, `tmp` made, `config.toml` written and the
+/// login hard-linked, then the same over planted names (a later launch's clean); Claude: made,
+/// cleaned, `.claude.json` checked and `settings.json` written. Target: under 50 ms each.
 #[test]
 #[ignore = "a timing run, by hand"]
 fn timing_first_launch_state_folder() {
@@ -308,6 +467,16 @@ fn timing_first_launch_state_folder() {
         prepare(&data, &state, AgentKind::Claude).unwrap();
         crate::agent::home::write_state_settings(&state).unwrap();
         claude.push(now().saturating_sub(start));
+        let state = state_dir(&data, matter(100 + n), "codex-acp");
+        plant(
+            &state,
+            &[".env", "AGENTS.md", "skills/a/SKILL.md", "sessions/r.jsonl"],
+        );
+        let start = now();
+        prepare(&data, &state, AgentKind::Codex).unwrap();
+        crate::agent::codex::write_home_config(&state).unwrap();
+        link_own(&home, &state).unwrap();
+        codex.push(now().saturating_sub(start));
     }
     for (who, times) in [("codex", &mut codex), ("claude", &mut claude)] {
         times.sort();
