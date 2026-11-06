@@ -293,3 +293,28 @@ fn the_set_aside_is_told_the_matter_folders_only_and_nothing_for_a_full_walk() {
     );
     assert_eq!(s.launch().touched_in_matter(), None);
 }
+
+/// S15 `PR4a`: a nested `CLAUDE.md` or `AGENTS.md` made, renamed in or removed while the app was
+/// closed is a name change in a folder the record holds, so the launch never skips: the
+/// set-aside re-probes that folder for every name in its nested list. The journal's records
+/// carry no names, so no name can be passed over here.
+#[test]
+fn a_nested_instruction_file_made_renamed_in_or_removed_while_closed_never_skips() {
+    // `USN_REASON_FILE_DELETE`.
+    const DELETE: u32 = 0x200;
+    // `a/CLAUDE.md` made (900), `a/AGENTS.md` renamed in from outside the trees (901), and
+    // the file in `a` (102) removed.
+    for (test, file, parent, reason) in [
+        ("clean-nested-create", 900, 101, CREATE),
+        ("clean-nested-rename", 901, 101, RENAME_NEW),
+        ("clean-nested-delete", 102, 101, DELETE),
+    ] {
+        let mut s = Scene::new(test);
+        assert_eq!(s.close(), Closed::Written);
+        s.journal.change(file, parent, reason, false);
+        let check = s.launch();
+        assert_eq!(check.path(), LaunchPath::Targeted(1), "{test}");
+        let touched = check.touched_in_matter().unwrap();
+        assert_eq!(touched, vec![(vec![std::ffi::OsString::from("a")], false)]);
+    }
+}

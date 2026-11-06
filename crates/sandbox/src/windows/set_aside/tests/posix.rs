@@ -1,6 +1,8 @@
 //! The tests' stand-in for NTFS on other OSes: inode numbers for file IDs, the owner's uid,
 //! renames that refuse a taken name and a symbolic link on the way, and a scan by path that
-//! never follows a symbolic link (names match exactly, the stand-in's rule).
+//! never follows a symbolic link. A name opened by path (a probe, an ID, an owner, a move's
+//! source) that isn't there exactly is matched ignoring ASCII case, as NTFS would open it, so
+//! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -13,7 +15,22 @@ use super::super::run::Volume;
 use super::super::scan::{Kind, Listed};
 use crate::windows::write::{make_sandbox_dir, rename_new};
 
-pub(super) struct Posix;
+pub(super) struct Posix {
+    /// Whether a name not there exactly is matched ignoring ASCII case; off only for the
+    /// timing test on a case-insensitive volume, where the extra listing would be measured.
+    pub(super) fold: bool,
+}
+
+impl Posix {
+    /// `path` as this volume opens it: through [`on_disk`] when folding.
+    fn at(&self, path: &Path) -> PathBuf {
+        if self.fold {
+            on_disk(path)
+        } else {
+            path.to_owned()
+        }
+    }
+}
 
 /// `path` as a folder to scan: one, not a link, and one this process may list, as NTFS's
 /// open to list it would check.
@@ -24,6 +41,28 @@ fn listable(path: PathBuf) -> io::Result<PathBuf> {
     }
     std::fs::read_dir(&path)?;
     Ok(path)
+}
+
+/// `path` as NTFS would open it: itself when something is there, else the one name in its
+/// folder that matches its last part ignoring ASCII case, else itself.
+fn on_disk(path: &Path) -> PathBuf {
+    if std::fs::symlink_metadata(path).is_ok() {
+        return path.to_owned();
+    }
+    let (Some(folder), Some(name)) = (path.parent(), path.file_name()) else {
+        return path.to_owned();
+    };
+    let Some(name) = name.to_str() else {
+        return path.to_owned();
+    };
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return path.to_owned();
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .find(|found| found.to_str().is_some_and(|f| f.eq_ignore_ascii_case(name)))
+        .map_or_else(|| path.to_owned(), |found| folder.join(found))
 }
 
 impl Volume for Posix {
@@ -65,7 +104,7 @@ impl Volume for Posix {
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
-        match std::fs::symlink_metadata(path) {
+        match std::fs::symlink_metadata(self.at(path)) {
             Ok(meta) => Ok(Some(FileId {
                 volume: meta.dev(),
                 id: u128::from(meta.ino()).to_le_bytes(),
@@ -76,7 +115,10 @@ impl Volume for Posix {
     }
 
     fn owner(&self, path: &Path) -> io::Result<String> {
-        Ok(format!("uid {}", std::fs::symlink_metadata(path)?.uid()))
+        Ok(format!(
+            "uid {}",
+            std::fs::symlink_metadata(self.at(path))?.uid()
+        ))
     }
 
     fn move_into(
@@ -94,7 +136,7 @@ impl Volume for Posix {
             }
             make_sandbox_dir(&folder).map_err(|e| SetAsideFailure::Io(e.kind()))?;
         }
-        moved(from, &folder.join(name))
+        moved(&self.at(from), &folder.join(name))
     }
 
     fn move_back(
@@ -107,7 +149,7 @@ impl Volume for Posix {
         let from = parts
             .iter()
             .fold(sandbox.to_owned(), |p, part| p.join(part));
-        moved(&from.join(name), to)
+        moved(&self.at(&from.join(name)), to)
     }
 }
 

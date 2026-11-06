@@ -25,11 +25,11 @@
 //!   `NtfsAcl` on Windows (`acl.rs`, after Codex's ACL code; `PROVENANCE.md`), whose
 //!   descriptors and entries are edited as bytes in `acl_bytes.rs`.
 //! - The set-aside (`set_aside.rs`): each protected name at the matter's root, every `.git`,
-//!   `.claude` and `.mcp.json` below it, and every link in the matter tree, found by its own
-//!   read-only scan and recorded by file ID at launch (`before_launch`, before `apply`), and
-//!   every one new or changed set aside when the agent exits (`after_session`, after
-//!   `repair_after_session` whatever it returned, or the next launch's check while any session
-//!   of the matter is open), whoever owns it, into
+//!   `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md` below it, and every link in the
+//!   matter tree, found by its own read-only scan and recorded by file ID at launch
+//!   (`before_launch`, before `apply`), and every one new or changed set aside when the agent
+//!   exits (`after_session`, after `repair_after_session` whatever it returned, or the next
+//!   launch's check while any session of the matter is open), whoever owns it, into
 //!   `<data_dir>\sandbox\set-aside\<matter>\<timestamp>\` at its own path below the matter,
 //!   each entry in a manifest ([`SetAsideEntry`]) that `list_set_aside` shows and
 //!   `restore_set_aside` undoes. A pass returns [`SetAsideChecked`]: what moved, and the

@@ -164,7 +164,8 @@ build 26100):
   - **Set-aside.** The set-aside scans the matter tree itself, through handles, never following a
     link; the scan writes nothing and has no cap, so nothing the agent does to the ACL walk or the
     repair switches it off. In each folder it probes each protected name (at the root
-    `PROTECTED_NAMES` and `.git`; at every depth `.git`, `.claude` and `.mcp.json`) by opening it
+    `PROTECTED_NAMES` and `.git`; at every depth `.git`, `.claude`, `.mcp.json`, `CLAUDE.md` and
+    `AGENTS.md`, one list for the full scan and the fast launch's re-probe) by opening it
     relative to the folder's handle, case-insensitively as the file system decides, so a name counts
     exactly when git or Claude would open it; it records what the probe opened by file ID. It also
     records every junction and symbolic link in the tree by the link's own file ID, whatever its
@@ -305,8 +306,10 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   the next launch walks those deny trees strictly and still refuses what it would have refused.
   No agent runs in between, and the allow names only the matter's own pool user on its own matter
   (accepted; no launch marker).
-- **A nested `CLAUDE.md` or `AGENTS.md`** the agent makes below the matter's root is not set
-  aside.
+- **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
+  root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
+  6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
+  them (accepted).
 - **The repair undoes a lawyer's own lock-down of an agent's file**: clearing the protection of a
   file a pool user owns puts the inherited entries back, the pool user's `Modify` among them,
   even where the lawyer protected it on purpose; the lawyer's own explicit entries are kept

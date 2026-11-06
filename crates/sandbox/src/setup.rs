@@ -67,7 +67,8 @@ pub enum SetupError {
 
 /// One protected name moved aside from the matter (S15 PR3's set-aside: `windows::after_session`
 /// and `windows::before_launch`; R17 shows one notice per launch that moved any): a protected
-/// name at the matter's root, or a `.git`, `.claude` or `.mcp.json` at any depth.
+/// name at the matter's root, or a `.git`, `.claude`, `.mcp.json`, `CLAUDE.md` or `AGENTS.md`
+/// (in any letter case) at any depth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetAside {
     /// Where the name was, in the matter.

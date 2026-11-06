@@ -5,9 +5,10 @@
 //! no deny, and the agent can make it; it can also rename or hard-link a lawyer's own file or
 //! folder to one, which keeps the lawyer as the owner, so git's ownership check passes and its
 //! hooks run as the lawyer. So the check goes by change, not by owner. It covers each protected
-//! name at the matter's root, every `.git`, `.claude` and `.mcp.json` at any depth, and every
-//! link (junction or symbolic link) anywhere in the matter tree, whatever its name: a link the
-//! agent makes could lead git to a `.git` outside the matter (R2).
+//! name at the matter's root, every `.git`, `.claude`, `.mcp.json`, `CLAUDE.md` and `AGENTS.md`
+//! at any depth (`scan::NESTED_NAMES`, case ignored on NTFS), and every link (junction or
+//! symbolic link) anywhere in the matter tree, whatever its name: a link the agent makes could
+//! lead git to a `.git` outside the matter (R2).
 //!
 //! Each pass finds them with its own scan of the matter tree (`scan.rs`): read-only, with no
 //! cap, never following a link, each protected name probed by opening it relative to its
@@ -62,11 +63,11 @@
 //! lawyer `FILE_DELETE_CHILD` (`Io(PermissionDenied)`). The name must then be moved or removed
 //! by hand.
 //!
-//! Known limits: a nested `CLAUDE.md` or `AGENTS.md` the agent makes below the root is not
-//! checked here. A lawyer's own link that was there at launch and is unchanged stays; a link
-//! made or swapped while a session ran is set aside even when the lawyer made it. An item moved
-//! aside keeps its own DACL, so an agent it grants could still open it by its full path; it no
-//! longer loads in the matter.
+//! Known limits: a `CLAUDE.local.md` or `AGENTS.override.md` below the root is not checked
+//! (D-B17: two more opens per folder cost over 5% of the scan). A lawyer's own link that was
+//! there at launch and is unchanged stays; a link made or swapped while a session ran is set
+//! aside even when the lawyer made it. An item moved aside keeps its own DACL, so an agent it
+//! grants could still open it by its full path; it no longer loads in the matter.
 
 use std::ffi::OsString;
 use std::io;
