@@ -135,3 +135,20 @@ fn a_reprobe_drops_what_was_under_a_folder_no_longer_there_so_a_move_back_is_cau
     assert_eq!(moved.len(), 1, "{moved:?}");
     assert_eq!(moved[0].from, root.join("sub/.git"));
 }
+
+/// S15 `PR4a`: a nested `CLAUDE.md` the lawyer adds while the app is closed is recorded by the
+/// re-probe of the folder the journal names, so the session's end keeps it; one the agent
+/// makes in another folder is still set aside.
+#[test]
+fn a_reprobe_records_a_nested_claude_md_added_between_sessions() {
+    let (w, root, data) = closed("fast-nested-claude");
+    w.dir.file("matter/other/CLAUDE.md", "# the lawyer's\n");
+    let touched: Vec<Touched> = vec![(key("other"), false)];
+    assert_eq!(fast(&root, &data, &touched), Some(Vec::new()));
+    assert!(record(&data).names.contains_key(&key("other/CLAUDE.md")));
+    w.dir.file("matter/sub/AGENTS.md", "# the agent's\n");
+    let moved = exit_as(&volume(), &root, &data, "s2", exit()).unwrap();
+    let from: Vec<_> = moved.iter().map(|e| e.from.clone()).collect();
+    assert_eq!(from, [root.join("sub/AGENTS.md")]);
+    assert!(root.join("other/CLAUDE.md").is_file());
+}

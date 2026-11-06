@@ -5,8 +5,8 @@
 //!
 //! In each folder it visits, it probes each protected name by opening it relative to that
 //! folder's handle, as git and Claude would open it: at the root each of
-//! [`PROTECTED_NAMES`](crate::PROTECTED_NAMES) and `.git`, at every depth below `.git`,
-//! `.claude` and `.mcp.json`. On NTFS the open ignores case as NTFS does, so whatever the volume
+//! [`PROTECTED_NAMES`](crate::PROTECTED_NAMES) and `.git`, at every depth below each of
+//! [`NESTED_NAMES`]. On NTFS the open ignores case as NTFS does, so whatever the volume
 //! opens for `.git` counts as `.git`; no name is folded here. Each link it lists (a junction or
 //! symbolic link, whatever its name) is recorded by its own file ID.
 //!
@@ -31,9 +31,15 @@ use crate::PROTECTED_NAMES;
 /// Also probed at the root: hooks in a `.git` the agent made would run in the lawyer's own git.
 const ALSO: [&str; 1] = [".git"];
 
-/// Probed in every folder below the root: git finds a `.git` at any depth, and Claude loads
-/// `.claude` and `.mcp.json` from the folder it works in.
-const NESTED: [&str; 3] = [".git", ".claude", ".mcp.json"];
+/// Probed in every folder below the root: git finds a `.git` at any depth, Claude loads
+/// `.claude`, `.mcp.json` and `CLAUDE.md` from the folder it works in, and Codex `AGENTS.md`.
+/// The one list below the root: the full scan and the fast pass's re-probe of each folder
+/// `clean_close` names ([`scan_part`]) both probe these. Each is one open per folder, matched as
+/// the volume matches names (on NTFS, case ignored). `CLAUDE.local.md` and `AGENTS.override.md`
+/// aren't probed below the root: the two opens cost 6.0% more on average (4.8% to 6.8%, three
+/// runs) on 50,000 files ten to a folder (`tests/timing.rs`), past the 5% D-B17 allows.
+pub(super) const NESTED_NAMES: [&str; 5] =
+    [".git", ".claude", ".mcp.json", "CLAUDE.md", "AGENTS.md"];
 
 /// Each protected name probed at the matter's root.
 fn root_names() -> impl Iterator<Item = &'static str> {
@@ -112,6 +118,11 @@ pub(super) struct Scan {
 
 /// Scans the matter tree below `root` through `volume`; see the module's docs.
 pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
+    scan_probing(volume, root, &NESTED_NAMES)
+}
+
+/// [`scan`], probing `nested` below the root: the timing test compares lists.
+pub(super) fn scan_probing<V: Volume>(volume: &V, root: &Path, nested: &[&str]) -> Scan {
     let mut scan = Scan::default();
     let top = match volume.open_root(root) {
         Ok(top) => top,
@@ -124,7 +135,7 @@ pub(super) fn scan<V: Volume>(volume: &V, root: &Path) -> Scan {
         volume,
         &mut scan,
         (top, root.to_owned(), Vec::new(), Vec::new()),
-        true,
+        (true, nested),
     );
     if !scan.unscanned.is_empty() {
         tracing::warn!(
@@ -164,7 +175,7 @@ pub(super) fn scan_part<V: Volume>(
         volume,
         &mut scan,
         (folder, path, parts.to_vec(), through),
-        below,
+        (below, &NESTED_NAMES),
     );
     Ok(Some(scan))
 }
@@ -173,15 +184,21 @@ pub(super) fn scan_part<V: Volume>(
 /// folders it was reached through.
 type Visit<F> = (F, PathBuf, Vec<OsString>, Vec<FileId>);
 
-/// Scans `start`, and with `below` every folder below it, into `scan`.
-fn scan_from<V: Volume>(volume: &V, scan: &mut Scan, start: Visit<V::Folder>, below: bool) {
+/// Scans `start`, and with `below` every folder below it, into `scan`, probing `nested` in
+/// each folder below the root.
+fn scan_from<V: Volume>(
+    volume: &V,
+    scan: &mut Scan,
+    start: Visit<V::Folder>,
+    (below, nested): (bool, &[&str]),
+) {
     let mut stack = vec![start];
     while let Some((folder, path, parts, through)) = stack.pop() {
         let at_root = parts.is_empty();
         let names: Vec<&str> = if at_root {
             root_names().collect()
         } else {
-            NESTED.to_vec()
+            nested.to_vec()
         };
         let at = Here {
             path: &path,

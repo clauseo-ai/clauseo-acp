@@ -224,3 +224,26 @@ fn a_lawyer_folder_renamed_to_a_nested_git_is_set_aside_by_its_file_id() {
     restore_set_aside(&data, &moved[0]).unwrap();
     assert!(root.join("sub/.git/hooks/pre-commit").is_file());
 }
+
+/// S15 `PR4a` on NTFS: a nested `claude.md` the agent makes is what the `CLAUDE.md` probe opens
+/// (case ignored), so it is set aside; a nested `AGENTS.md` there at launch stays.
+#[test]
+fn a_nested_claude_md_in_any_case_is_set_aside_and_one_there_at_launch_stays() {
+    let w = World::new("ntfs-aside-nested-claude");
+    w.dir.file("matter/sub/AGENTS.md", "# the lawyer's\r\n");
+    w.dir.dir("matter/a/b");
+    let policy = w.builder().build().unwrap();
+    let data = w.canonical("data");
+    before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
+
+    let root = policy.matter();
+    w.dir.file("matter/a/b/claude.md", "# the agent's\r\n");
+    let moved = after_session(&policy, &data, &matter_one(), "s1", exit())
+        .unwrap()
+        .moved;
+
+    let seen: Vec<_> = moved.iter().map(|e| (e.from.clone(), e.reason)).collect();
+    assert_eq!(seen, [(root.join("a/b/CLAUDE.md"), Reason::New)]);
+    assert!(is_empty(&root.join("a/b")));
+    assert!(root.join("sub/AGENTS.md").is_file());
+}

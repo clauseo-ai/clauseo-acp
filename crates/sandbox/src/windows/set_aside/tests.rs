@@ -23,6 +23,8 @@ mod round4;
 #[cfg(unix)]
 mod scans;
 mod sessions;
+#[cfg(unix)]
+mod timing;
 
 #[cfg(windows)]
 fn volume() -> super::ntfs::Ntfs {
@@ -31,7 +33,7 @@ fn volume() -> super::ntfs::Ntfs {
 
 #[cfg(unix)]
 fn volume() -> posix::Posix {
-    posix::Posix
+    posix::Posix { fold: true }
 }
 
 /// 2025-11-05 10:15:00.123 UTC.

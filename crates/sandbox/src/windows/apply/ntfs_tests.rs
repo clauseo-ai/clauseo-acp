@@ -110,7 +110,9 @@ fn a_launch_then_forget_leaves_nothing() {
 
 /// win-01's timing row (ignored on CI): the first propagation over `CLAUSEO_WALK_FILES` files
 /// (50,000 by default) in 100 folders, the next launch's re-propagation, and one sibling's
-/// deny (fix 2) over a tree as big. Run with `--run-ignored only -E 'test(timing)'`.
+/// deny (fix 2) over a tree as big, and the set-aside's launch scan of the matter (S15 `PR4a`).
+/// Run with `CLAUSEO_WALK_FILES=50000 cargo nextest run -p clauseo-sandbox --run-ignored only
+/// -E 'test(timing)' --no-capture`.
 #[test]
 #[ignore = "win-01 timing row; makes 50,000 files"]
 #[expect(
@@ -157,7 +159,15 @@ fn timing_first_propagation_and_fix_costs() {
     )
     .unwrap();
     let sibling = started.elapsed();
-    println!("files {count}: first {first:?}, next launch {again:?}, one sibling deny {sibling:?}");
+    let started = std::time::Instant::now();
+    let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    crate::windows::set_aside::tests::launch_on_test_volume(&matter, &place.at("data"), "t", at)
+        .unwrap();
+    let scan = started.elapsed();
+    println!(
+        "files {count}: first {first:?}, next launch {again:?}, one sibling deny {sibling:?}, \
+         set-aside scan {scan:?}"
+    );
 }
 
 /// Around a temp matter that sets aside for real: each item is renamed into `aside`, and its

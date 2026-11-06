@@ -1,5 +1,6 @@
 //! N1: the protected names below the matter's root that the scan finds, recorded at launch and
-//! set aside when new or changed, each at its own path in the pass's folder.
+//! set aside when new or changed, each at its own path in the pass's folder. S15 `PR4a` adds the
+//! instruction files Claude and Codex load from the folder they work in.
 
 use super::{aside, exit, exit_as, key, launch, launch_as, none, record, volume, world};
 use crate::windows::set_aside::Reason;
@@ -131,4 +132,107 @@ fn a_nested_name_inside_a_folder_set_aside_goes_with_it() {
     assert_eq!(moved_from, [root.join(".claude")]);
     assert!(moved[0].to.join("x/.git/HEAD").is_file());
     assert!(!record(&data).names.contains_key(&key(".claude/x/.git")));
+}
+
+/// `PR4a`: a nested `CLAUDE.md` the agent makes during a session is set aside, at its own path.
+#[test]
+fn a_nested_claude_md_made_during_a_session_is_set_aside() {
+    let (w, root, data) = world("aside-nested-claude-md");
+    w.dir.file("matter/a/b/brief.md", "# the lawyer's\n");
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
+    w.dir.file("matter/a/b/CLAUDE.md", "# the agent's\n");
+
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
+
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].from, root.join("a/b/CLAUDE.md"));
+    assert_eq!(moved[0].to, aside(&data, exit(), "a/b/CLAUDE.md"));
+    assert_eq!(moved[0].within, ["a", "b"]);
+    assert_eq!(moved[0].reason, Reason::New);
+    assert!(!root.join("a/b/CLAUDE.md").exists());
+    assert!(root.join("a/b/brief.md").is_file());
+}
+
+/// `PR4a`: nested instruction files there at launch and only edited in place keep their file
+/// IDs, so they stay where they are.
+#[test]
+fn nested_instruction_files_there_at_launch_and_unchanged_stay() {
+    let (w, root, data) = world("aside-nested-claude-kept");
+    w.dir.file("matter/sub/CLAUDE.md", "# the lawyer's\n");
+    w.dir.file("matter/sub/AGENTS.md", "# the lawyer's\n");
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
+    assert!(record(&data).names.contains_key(&key("sub/CLAUDE.md")));
+    w.dir.file("matter/sub/CLAUDE.md", "# edited in place\n");
+
+    assert_eq!(
+        exit_as(&volume(), &root, &data, "s1", exit()).unwrap(),
+        none()
+    );
+    assert!(root.join("sub/CLAUDE.md").is_file());
+    assert!(root.join("sub/AGENTS.md").is_file());
+}
+
+/// `PR4a`: a nested `AGENTS.md` swapped for another file (another file ID) is set aside as
+/// changed, and one renamed in where none was is set aside as new.
+#[test]
+fn a_nested_agents_md_replaced_or_renamed_in_is_set_aside() {
+    let (w, root, data) = world("aside-nested-agents-md");
+    w.dir.file("matter/sub/AGENTS.md", "# the lawyer's\n");
+    let swapped = w.dir.file("matter/drafts/swap.md", "# the agent's\n");
+    let renamed = w.dir.file("matter/drafts/rename.md", "# the agent's\n");
+    w.dir.dir("matter/other");
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
+
+    rename_new(&root.join("sub/AGENTS.md"), &root.join("sub/kept.md")).unwrap();
+    rename_new(&swapped, &root.join("sub/AGENTS.md")).unwrap();
+    rename_new(&renamed, &root.join("other/AGENTS.md")).unwrap();
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
+
+    let mut seen: Vec<_> = moved.iter().map(|e| (e.from.clone(), e.reason)).collect();
+    seen.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        seen,
+        [
+            (root.join("other/AGENTS.md"), Reason::New),
+            (root.join("sub/AGENTS.md"), Reason::Changed),
+        ]
+    );
+    assert!(root.join("sub/kept.md").is_file());
+}
+
+/// `PR4a`: names match as NTFS opens them, case ignored: `claude.md` and `Agents.MD` are the
+/// probes' `CLAUDE.md` and `AGENTS.md`, each set aside under the name probed.
+#[test]
+fn nested_instruction_files_match_in_any_case() {
+    let (w, root, data) = world("aside-nested-case");
+    w.dir.dir("matter/sub/deep");
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
+    w.dir.file("matter/sub/claude.md", "# the agent's\n");
+    w.dir.file("matter/sub/deep/Agents.MD", "# the agent's\n");
+
+    let moved = exit_as(&volume(), &root, &data, "s1", exit()).unwrap();
+
+    let mut from: Vec<_> = moved.iter().map(|e| e.from.clone()).collect();
+    from.sort();
+    let expect = [root.join("sub/CLAUDE.md"), root.join("sub/deep/AGENTS.md")];
+    assert_eq!(from, expect);
+    assert!(moved.iter().all(|e| e.reason == Reason::New));
+    let left = std::fs::read_dir(root.join("sub/deep")).unwrap().count();
+    assert_eq!(left, 0, "Agents.MD moved");
+    assert!(!root.join("sub/claude.md").exists());
+}
+
+/// `PR4a`: `CLAUDE.local.md` is checked only at the root (D-B17 left it out below, for the
+/// scan's cost); a nested one stays.
+#[test]
+fn a_nested_claude_local_md_is_not_probed() {
+    let (w, root, data) = world("aside-nested-local");
+    launch_as(&volume(), &root, &data, "s1", &[], launch()).unwrap();
+    w.dir.file("matter/sub/claude.local.md", "# the agent's\n");
+
+    assert_eq!(
+        exit_as(&volume(), &root, &data, "s1", exit()).unwrap(),
+        none()
+    );
+    assert!(root.join("sub/claude.local.md").is_file());
 }
