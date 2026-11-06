@@ -263,7 +263,12 @@ jobs:
     # everything on Windows. Never skipped as a whole: the check must report under its name.
     if: ${{ !cancelled() }}
     runs-on: ${{ needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.mode != 'run' && 'ubuntu-24.04' || matrix.runner }}
-    timeout-minutes: 45
+    # About 1.5 times a passing run (15 to 24 min with the build, 2026-11-04 to 11-06), so a hang
+    # fails within 35 minutes instead of 45. On 11-06 pull requests' smoke used 4,565 Windows minutes
+    # in 24 h, most of it runs that reached the limit while main was red (#494, #544). On a pull
+    # request the run also stops after 3 failed tests (--max-failures below), so a broken main fails
+    # in about 20 min with its report and traces, which a run cut off by the limit never uploads.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       # x64 always; ARM64 on every event but a pull request (or its review) or a merge group. One JSON list per
@@ -393,11 +398,15 @@ jobs:
         run: pnpm -C ui/e2e test smoke.spec.ts
 
       # Runs even when the warm-up failed, so a failure there still leaves the numbers.
+      # On a pull request it stops after 3 failed tests (each counted after its retry): enough to
+      # name the breakage, without running out the clock on every spec when main is red. The
+      # nightly run and a run on demand run every spec.
       - name: Tests and numbers
         if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
         env:
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-normal.json
-        run: pnpm -C ui/e2e test
+          MAX_FAILURES: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && '--max-failures=3' || '' }}
+        run: pnpm -C ui/e2e test ${MAX_FAILURES:+"$MAX_FAILURES"}
 
       # Runs even when the run before failed: GitHub's Windows runners have no GPU, and the two runs
       # tell apart a failure of the GPU path from a failure of the app. Not on a pull request: the
