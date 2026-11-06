@@ -8,7 +8,12 @@ use std::sync::Arc;
 
 use clauseo_protocol::{MatterId, ThreadId};
 
-use super::{Budget, CONNECT_WAIT, HeldRuns, POLL, Parts, STOP_GRACE, Straggler, wait_gone};
+#[cfg(windows)]
+use super::still_there;
+use super::{
+    Budget, CONNECT_WAIT, HeldRuns, POLL, Parts, Probe, STOP_GRACE, Straggler, chrome_alive,
+    probe_for, wait_gone,
+};
 use crate::actor::turn::launch_checks::RunFolders;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -169,15 +174,38 @@ fn the_lease_frees_only_after_a_completed_wait() {
     assert_eq!(held.release_all(), 1);
 }
 
-/// Windows: once the agent's job is empty, Chrome is gone too, since the job forbids breakaway
-/// and Chrome is the agent's descendant; a listener on the port does not hold the wait then.
-#[cfg(windows)]
+/// The short look sees a listener as there and an empty port as gone, on every platform.
 #[test]
-fn a_gone_tree_is_a_gone_chrome_on_windows() {
+fn the_short_look_counts_only_an_accept() {
+    let session = claims("short-look");
+    let listener = chrome(&session);
+    assert!(chrome_alive(&session, Probe::Accepting).is_some());
+    drop(listener);
+    assert!(chrome_alive(&session, Probe::Accepting).is_none());
+}
+
+/// The short look is Windows', after a gone tree that held the session's Chrome; with no tree,
+/// or a Chrome started elsewhere, and on Unix always, the full probe.
+#[test]
+fn the_short_look_follows_a_tree_that_held_chrome() {
+    let mut session = claims("probe-for");
+    assert!(session.chrome_in_tree);
+    let short = if cfg!(windows) {
+        Probe::Accepting
+    } else {
+        Probe::Full
+    };
+    assert_eq!(probe_for(true, &session), short);
+    assert_eq!(probe_for(false, &session), Probe::Full);
+    session.chrome_in_tree = false;
+    assert_eq!(probe_for(true, &session), Probe::Full);
+}
+
+/// Windows: an agent tree, run to its end and gone.
+#[cfg(windows)]
+fn gone_tree() -> clauseo_process::TreeWatch {
     use clauseo_process::{LaunchSpec, Launched, SpawnOptions, spawn_in_tree};
 
-    let session = claims("tree-gone");
-    let listener = chrome(&session);
     let cmd = std::env::var_os("ComSpec").unwrap();
     let spec = LaunchSpec::new(
         cmd.into(),
@@ -190,14 +218,54 @@ fn a_gone_tree_is_a_gone_chrome_on_windows() {
     let watch = handle.tree_watch();
     futures::executor::block_on(handle.exited());
     drop(handle);
+    watch
+}
+
+/// Windows: after a gone tree, a listener on the port (a Chrome started outside the job, by
+/// WMI or the Task Scheduler) still holds the wait, and an empty port is gone at the first
+/// look, with no wait for Windows' slow refusal (a zero cap allows one look).
+#[cfg(windows)]
+#[test]
+fn after_a_gone_tree_only_a_listener_holds_on_windows() {
+    let session = claims("tree-gone");
+    let tree = gone_tree();
+    let listener = chrome(&session);
+    let cap = Duration::from_millis(300);
     assert_eq!(
-        wait_gone(
-            Some(&watch),
-            Some(&session),
-            Duration::from_secs(10),
-            || false
-        ),
-        Ok(())
+        wait_gone(Some(&tree), Some(&session), cap, || false),
+        Err(Straggler::Chrome)
     );
     drop(listener);
+    assert_eq!(
+        wait_gone(Some(&tree), Some(&session), Duration::ZERO, || false),
+        Ok(())
+    );
+    assert!(still_there(Some(&tree), Some(&session)).is_none());
+}
+
+/// Windows: a Chrome started outside the agent's tree gets the full probe after the tree is
+/// gone: a listener holds, and an empty port reads gone once Windows refuses.
+#[cfg(windows)]
+#[test]
+fn a_chrome_outside_the_tree_gets_the_full_probe_on_windows() {
+    let mut session = claims("outside-tree");
+    session.chrome_in_tree = false;
+    let tree = gone_tree();
+    let listener = chrome(&session);
+    assert_eq!(
+        wait_gone(
+            Some(&tree),
+            Some(&session),
+            Duration::from_millis(300),
+            || false
+        ),
+        Err(Straggler::Chrome)
+    );
+    drop(listener);
+    assert_eq!(
+        wait_gone(Some(&tree), Some(&session), Duration::from_secs(10), || {
+            false
+        }),
+        Ok(())
+    );
 }
