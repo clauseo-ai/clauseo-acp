@@ -7,7 +7,7 @@ use clauseo_protocol::{
 };
 
 use super::queue::{mark_prompt, mark_put_back, settle_prompt};
-use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
+use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
 use crate::order::insert_entry;
@@ -95,9 +95,18 @@ pub(super) fn user_message(
     }
     insert_entry(state, seq, ViewEntry::UserMessage(entry), out);
     if state.running.is_none() {
+        // A prompt that moves an idle-stopped thread to `Starting` begins a resume, timed by
+        // this event. `after_turn` can hold a stop only while a turn runs, so it is not
+        // reachable here, but it counts the same.
+        let resumes = state.status() == ThreadStatus::IdleStopped
+            || state.after_turn == Some(ThreadStatus::IdleStopped);
         state.turn = Some(event.turn);
         state.after_turn = None;
-        set_status(state, "user_message", out, ThreadStatus::Starting);
+        update_header(state, "user_message", out, |h| {
+            let status = set(&mut h.status, ThreadStatus::Starting);
+            let since = resumes && set(&mut h.resuming_since, Some(ts));
+            status | since
+        });
     }
 }
 

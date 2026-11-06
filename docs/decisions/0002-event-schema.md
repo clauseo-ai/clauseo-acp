@@ -292,6 +292,14 @@ The rail's triage (0045) folds `thread_snoozed` into `HeaderEntry.snoozed_until`
 times' 5 to 6: old snapshots are passed over and each thread's log is folded once at its next
 reopen, as for the bumps above.
 
+Resuming after an idle stop (0052) folds into `HeaderEntry.resuming_since`, a `Timestamp`. A
+`user_message` that moves an `IdleStopped` thread to `Starting` sets it to that event's `ts`, so a
+replay gives the same time. It is cleared when the status leaves `Starting` (the turn starts, ends
+or fails, or the thread is archived or detached) and by the next `agent_session_attached`. It is
+never set for a first start or a start after `AgentExited`. The field is additive (missing reads as
+`None`, and `None` is left out), and `REDUCER_SCHEMA_VERSION` goes from 10 to 11: old snapshots are
+passed over and each thread's log is folded once at its next reopen, as for the bumps above.
+
 Tool calls carry their web (0041; no event changes, the fold does). `ToolCallEntry.web` (a boxed
 `ToolCallWeb`, left out when none) holds the call's `WebSearchRecorded` as `search` and its
 `PageVisited` events as `pages`, matched by `tool_call`; a record for a call the thread does not hold
