@@ -7,11 +7,12 @@
 //!
 //! - Every allow names the matter's pool user, and also the matter's SID when the launch asks
 //!   for it ([`Subjects::matter`], off by default; spike B found it adds nothing measured).
-//! - `Modify` on the matter, the state and notes folders and the credential link;
+//! - `Modify` on the matter, the state and notes folders, the session's temp folder
+//!   (`<data_dir>\run\<session>\tmp`, never the run folder above it) and the credential link;
 //!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
 //!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
-//! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state
-//!   and notes folders and the Claude store folder, and on the credential link file itself
+//! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state,
+//!   notes and temp folders and the Claude store folder, and on the credential link file itself
 //!   ([`Rights::LowLabel`]): the Low token writes nothing labelled higher. Side effect, accepted:
 //!   the lawyer's own Low-integrity processes can write those too. Whether the Claude store
 //!   takes writes at Low is PR6's VM row (the store and credential rows of done-when 2).
@@ -368,6 +369,9 @@ pub fn plan(
     ];
     if let Some(notes) = policy.notes() {
         own.push((notes, PathKind::Notes));
+    }
+    if let Some(tmpdir) = policy.session_tmpdir() {
+        own.push((tmpdir, PathKind::TempFolder));
     }
     for &(folder, kind) in &own {
         plan.allow(folder, Rights::Modify, Inherit::Tree, kind);

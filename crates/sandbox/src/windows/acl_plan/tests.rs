@@ -470,4 +470,31 @@ fn the_claude_store_and_the_credential_link_get_the_low_label() {
 }
 
 /// The profile, the sandbox records and the data folder's allow list.
+/// The session's temp folder, `data/run/s1/tmp`: `Modify` down the tree for the pool user and
+/// the Low label, as the state folder gets; nothing on the run folder above it or its parent.
+#[test]
+fn the_session_temp_folder_gets_modify_and_the_low_label_and_its_parents_nothing() {
+    let w = World::new("plan-tmpdir");
+    w.dir.dir("data/run/s1");
+    let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
+    let run = w.canonical("data/run/s1");
+    let tmp = run.join("tmp");
+    let grants = grants_for(&w, &policy, &sids());
+    let on_tmp: Vec<(Rights, Inherit, PathKind, &str)> = grants
+        .iter()
+        .filter(|g| g.path == tmp)
+        .map(|g| (g.rights, g.inherit, g.kind, who(&g.sid)))
+        .collect();
+    let kind = PathKind::TempFolder;
+    let want = [
+        (Rights::Modify, Inherit::Tree, kind, "pool"),
+        (Rights::LowLabel, Inherit::Tree, kind, "low"),
+    ];
+    assert_eq!(on_tmp, want);
+    for above in [&run, &w.canonical("data/run"), &w.canonical("data")] {
+        let on = grants.iter().find(|g| &g.path == above);
+        assert!(on.is_none(), "{on:?}");
+    }
+}
+
 mod data;

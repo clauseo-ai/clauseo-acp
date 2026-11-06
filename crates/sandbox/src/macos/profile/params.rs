@@ -10,6 +10,7 @@ pub(super) struct Params {
     pub(super) read: Vec<(String, PathBuf)>,
     pub(super) allowed: Vec<(String, PathBuf)>,
     pub(super) notes: Option<PathBuf>,
+    pub(super) tmpdir: Option<PathBuf>,
     pub(super) credential_link: Option<PathBuf>,
     pub(super) claude_files: Vec<(String, PathBuf)>,
     pub(super) claude_locks: Vec<(String, PathBuf)>,
@@ -28,6 +29,7 @@ impl Params {
             read: numbered("READ", policy.read()),
             allowed: numbered("ALLOWED", policy.allowed_folders()),
             notes: policy.notes().map(Path::to_owned),
+            tmpdir: policy.session_tmpdir().map(Path::to_owned),
             credential_link: policy.credential_link().map(Path::to_owned),
             claude_files: numbered(
                 "CLAUDE_FILE",

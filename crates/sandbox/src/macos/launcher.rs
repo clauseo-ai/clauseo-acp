@@ -88,7 +88,7 @@ impl SeatbeltLauncher {
 
     /// The spec `launch` starts for `spec`: `sandbox-exec` with the profile and its
     /// parameters, then the agent's program and arguments; the agent's variables plus `TMPDIR`
-    /// (the state folder's `tmp`), which `launch` starts with no inherited variables; the same
+    /// ([`Policy::tmpdir`]), which `launch` starts with no inherited variables; the same
     /// working folder and the same secrets for the stderr tail to hide.
     pub fn jailed_spec(&self, spec: &LaunchSpec) -> Result<LaunchSpec, clauseo_process::Error> {
         let mut args = self.profile.args();
@@ -128,7 +128,7 @@ impl Launcher for SeatbeltLauncher {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         let jailed = self.jailed_spec(spec)?;
         make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
-            what: "the agent's TMPDIR in its state folder could not be made",
+            what: "the agent's TMPDIR could not be made",
             source,
         })?;
         self.register();
@@ -136,12 +136,13 @@ impl Launcher for SeatbeltLauncher {
     }
 }
 
-/// Makes `<state>/tmp` if it is missing; the state folder exists (the policy checked it).
+/// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists
+/// (the policy checked it).
 /// Only the folder itself is made, never through a link: an agent of an earlier launch may
 /// have put a symbolic link there, and this process is outside the jail.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the launcher's one file change: the agent's TMPDIR inside its own state folder"
+    reason = "the launcher's one file change: the agent's TMPDIR, its session's temp folder"
 )]
 fn make_tmpdir(path: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(path) {

@@ -42,13 +42,16 @@
 //!
 //! # Interface
 //!
-//! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `runtime`, `read`,
+//! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `tmpdir`, `runtime`, `read`,
 //!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
 //!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
 //!   `browser_socket_dir` (Unix; without it no Unix socket anywhere), `keychain`,
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
-//!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`],
-//!   [`Policy::read_only_in_matter`] ([`PathRule`]s), [`Policy::link_folders`] and
+//!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
+//!   session's temp folder the host set, `<data_dir>/run/<session>/tmp`, read-write without
+//!   its run folder; else `<state>/tmp`, deprecated: R17 PR-D passes `run/<s>/tmp`),
+//!   [`Policy::session_tmpdir`], [`Policy::read_only_in_matter`] ([`PathRule`]s),
+//!   [`Policy::link_folders`] and
 //!   [`Policy::links_outside_link_folders`]; [`Policy::claude_store`] gives a
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
 //!   [`CLAUDE_STORE_LOCK_FOLDERS`], [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]).
@@ -73,9 +76,9 @@
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
 //! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials)` is a `process::Launcher`. Each
 //!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
-//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=<state>/tmp` (made if missing) and
-//!   nothing else: the launcher always adds `SpawnOptions::clear_env` to the options it is
-//!   given, so no variable of the host's environment reaches the jail.
+//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
+//!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
+//!   options it is given, so no variable of the host's environment reaches the jail.
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the

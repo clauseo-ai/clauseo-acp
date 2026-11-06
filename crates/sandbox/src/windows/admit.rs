@@ -62,6 +62,9 @@ pub enum PathKind {
     ParentFiles,
     /// A place every sandbox user can write (`shared_writes`): denied to the pool group.
     SharedWrite,
+    /// The session's temp folder, the agent's `TMPDIR` ([`Policy::session_tmpdir`]):
+    /// `<data_dir>\run\<session>\tmp`.
+    TempFolder,
 }
 
 impl fmt::Display for PathKind {
@@ -82,6 +85,7 @@ impl fmt::Display for PathKind {
             PathKind::Sibling => "a folder beside the matter",
             PathKind::ParentFiles => "the files beside the matter",
             PathKind::SharedWrite => "a place every sandbox user can write",
+            PathKind::TempFolder => "the session's temp folder",
         })
     }
 }

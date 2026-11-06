@@ -9,8 +9,12 @@ use crate::{Access, Error, PathClass};
 mod build;
 mod links;
 mod names;
+mod store;
 
 pub use links::LINK_RULES_MAX;
+pub use store::{
+    CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
+};
 
 /// Names write-denied at the matter root whether or not they exist, so the agent cannot plant
 /// config or instructions that load next session (shared ruling 12, private issue #184).
@@ -74,23 +78,6 @@ pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
             .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
 }
 
-/// The files of Claude's login store the jail lets the agent read, write and create, in the
-/// folder given to [`PolicyBuilder::claude_store`]: the store itself (the Keychain's fallback
-/// on macOS) and the secure-storage write lock's name.
-pub const CLAUDE_STORE_FILES: [&str; 2] = [".credentials.json", ".storage-write"];
-
-/// The lock folders Claude makes in that folder (proper-lockfile makes a lock as a folder):
-/// the write lock's (`.storage-write` plus `.lock`) and the OAuth refresh lock. Unverified:
-/// read from Claude Code 2.1.316's bundled code (`lockfilePath: <dir>/.oauth_refresh.lock`),
-/// not seen live; G7 row 17 records the names. See also [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`].
-pub const CLAUDE_STORE_LOCK_FOLDERS: [&str; 2] = [".storage-write.lock", ".oauth_refresh.lock"];
-
-/// The suffix of Claude's legacy OAuth refresh lock, a folder that sits beside the store
-/// folder, not in it: `<dir>.lock` (for `~/.claude`, `~/.claude.lock`). Without it a token
-/// refresh can fail mid-session. Unverified like the others: read from Claude Code 2.1.316's
-/// bundled code (`${realpath(dir)}.lock`), not seen live; G7 row 17 records it.
-pub const CLAUDE_STORE_BESIDE_LOCK_SUFFIX: &str = ".lock";
-
 /// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Loopback {
@@ -131,54 +118,13 @@ impl PathRule {
     }
 }
 
-/// The folder holding Claude's login store, and the names the jail allows in it and nothing
-/// else (the agent cannot list the folder).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClaudeStore {
-    dir: PathBuf,
-}
-
-impl ClaudeStore {
-    /// The folder, canonical.
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
-
-    /// [`CLAUDE_STORE_FILES`] in the folder: read-write literal rules.
-    pub fn files(&self) -> Vec<PathBuf> {
-        CLAUDE_STORE_FILES
-            .iter()
-            .map(|name| self.dir.join(name))
-            .collect()
-    }
-
-    /// The lock folders, read-write subpath rules, each creatable: [`CLAUDE_STORE_LOCK_FOLDERS`]
-    /// in the folder, then the legacy lock beside it (`<dir>.lock`,
-    /// [`CLAUDE_STORE_BESIDE_LOCK_SUFFIX`]), which sits next to the store folder, not in it.
-    pub fn lock_folders(&self) -> Vec<PathBuf> {
-        let mut locks: Vec<PathBuf> = CLAUDE_STORE_LOCK_FOLDERS
-            .iter()
-            .map(|name| self.dir.join(name))
-            .collect();
-        let mut beside = self.dir.clone().into_os_string();
-        beside.push(CLAUDE_STORE_BESIDE_LOCK_SUFFIX);
-        locks.push(PathBuf::from(beside));
-        locks
-    }
-
-    /// Whether `path` is one of the allowed names or under a lock folder.
-    fn covers(&self, path: &Path) -> bool {
-        self.files().iter().any(|file| same(path, file))
-            || self.lock_folders().iter().any(|lock| under(path, lock))
-    }
-}
-
 /// What one launch's jail allows. Built by [`Policy::builder`]; every path is canonical
 /// (`/var` is `/private/var` on macOS), and every rule of [`PolicyBuilder::build`] holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
     matter: PathBuf,
     state: PathBuf,
+    tmpdir: Option<PathBuf>,
     home: Option<PathBuf>,
     runtime: Vec<PathBuf>,
     read: Vec<PathBuf>,
@@ -204,6 +150,7 @@ pub struct Policy {
 pub struct PolicyBuilder {
     matter: PathBuf,
     state: PathBuf,
+    tmpdir: Option<PathBuf>,
     home: Option<PathBuf>,
     runtime: Vec<PathBuf>,
     read: Vec<PathBuf>,
@@ -224,7 +171,7 @@ pub struct PolicyBuilder {
 
 impl Policy {
     /// A builder for the jail of `matter` with the agent's `state` folder, both read-write.
-    /// `TMPDIR` is `<state>/tmp` ([`Policy::tmpdir`]).
+    /// `TMPDIR` is [`PolicyBuilder::tmpdir`]'s folder, else `<state>/tmp` ([`Policy::tmpdir`]).
     pub fn builder(matter: impl Into<PathBuf>, state: impl Into<PathBuf>) -> PolicyBuilder {
         PolicyBuilder {
             matter: matter.into(),
@@ -244,9 +191,18 @@ impl Policy {
         &self.state
     }
 
-    /// `<state>/tmp`, the agent's `TMPDIR`.
+    /// The agent's `TMPDIR`: the session's temp folder ([`PolicyBuilder::tmpdir`]), else
+    /// `<state>/tmp`. The fallback is deprecated: R17 PR-D passes `run/<s>/tmp`.
     pub fn tmpdir(&self) -> PathBuf {
-        self.state.join("tmp")
+        self.tmpdir
+            .clone()
+            .unwrap_or_else(|| self.state.join("tmp"))
+    }
+
+    /// The session's temp folder the host set ([`PolicyBuilder::tmpdir`]), read-write;
+    /// `None` when [`Policy::tmpdir`] falls back to the state folder's `tmp`.
+    pub fn session_tmpdir(&self) -> Option<&Path> {
+        self.tmpdir.as_deref()
     }
 
     /// The home folder the refusals compare with ([`PolicyBuilder::home`]); never allowed.
@@ -415,6 +371,7 @@ impl Policy {
     fn allowed_again(&self, path: &Path) -> bool {
         let inside = |p: &PathBuf| under(path, p);
         under(path, &self.state)
+            || self.tmpdir.as_ref().is_some_and(inside)
             || self.notes.as_ref().is_some_and(inside)
             || self
                 .credential_link
@@ -443,6 +400,15 @@ impl Policy {
 }
 
 impl PolicyBuilder {
+    /// The session's temp folder, the agent's `TMPDIR`, read-write: the host passes
+    /// `<data_dir>/run/<session>/tmp`. Only this folder is granted, never the run folder that
+    /// holds it. Its folder must exist; the launcher makes the folder itself. Unset, `TMPDIR`
+    /// is `<state>/tmp` (deprecated): R17 PR-D passes `run/<s>/tmp`.
+    pub fn tmpdir(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
+        self.tmpdir = Some(p.into());
+        self
+    }
+
     /// A path to read and run.
     pub fn runtime(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
         self.runtime.push(p.into());
@@ -562,12 +528,13 @@ impl PolicyBuilder {
     ///
     /// - Every path must be absolute. The matter, state folder, runtime and read paths,
     ///   allowed folders, notes folder and Claude store folder must exist and are
-    ///   canonicalised. The credential link, read-only paths in the state folder and over-cap
-    ///   files keep their own name: the folder they are in is canonicalised and the name
-    ///   appended, so a link's target never enters the policy. Hidden paths need not exist:
-    ///   the longest existing ancestor is canonicalised and the rest appended.
-    /// - The matter, state folder and notes folder may not themselves be symbolic links (an
-    ///   agent could have put one in place of its own folder last session).
+    ///   canonicalised. The session's temp folder, the credential link, read-only paths in the
+    ///   state folder and over-cap files keep their own name: the folder they are in is
+    ///   canonicalised and the name appended, so a link's target never enters the policy.
+    ///   Hidden paths need not exist: the longest existing ancestor is canonicalised and the
+    ///   rest appended.
+    /// - The matter, state folder, notes folder and temp folder may not themselves be symbolic
+    ///   links (an agent could have put one in place of its own folder last session).
     /// - The matter may not be `/` or equal or hold the home folder, nor equal, hold or sit
     ///   inside a hidden path. The state folder and the matter may not be one inside the other
     ///   (or the same); the state folder may not equal or hold a hidden path. The notes folder
@@ -575,7 +542,8 @@ impl PolicyBuilder {
     ///   link must be inside the state folder. Runtime and read paths may not be `/` or equal
     ///   or hold the home folder, the matter or a hidden path (inside one is fine: that is why
     ///   they are allowed again). Read-only paths in the state folder must be inside it;
-    ///   over-cap files inside the matter.
+    ///   over-cap files inside the matter. The temp folder may not be `/`, equal or hold the
+    ///   home folder, the state folder or a hidden path, nor be inside the matter or hold it.
     /// - Each allowed folder passes [`Policy::check_allowed_folder`].
     /// - Without [`PolicyBuilder::scan`], the matter is walked here
     ///   ([`scan_matter`](crate::scan_matter)). Every finding (the walk's and
