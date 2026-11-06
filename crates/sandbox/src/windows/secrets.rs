@@ -294,6 +294,7 @@ fn store_with(
     write_bytes: impl FnOnce(&mut File, &[u8]) -> io::Result<()>,
 ) -> Result<(), SecretError> {
     let file = path(data_dir);
+    remove_stale_temps(&file)?;
     let new = merge(|| read(data_dir), secrets, pool, protect)?;
     if let Some(folder) = file.parent() {
         write::make_sandbox_dir(folder).map_err(|error| io_error(&error))?;
@@ -303,6 +304,33 @@ fn store_with(
         .map_err(|error| SecretError::Io(format!("{}: {error}", file.display())))?;
     // The new file in place gets the same explicit DACL.
     write::check_owned_file(&file).map_err(|error| io_error(&error))
+}
+
+/// Removes the new files an earlier [`store`] left beside `file` when it stopped between
+/// writing and renaming one (a crash): each entry of the folder whose name is exactly
+/// `write::write_atomic`'s temp name for `file` (`write::is_atomic_temp`). Each goes through
+/// `write::remove_owned_file`, so a link or a file with a second hard link is never followed
+/// or removed: it stays, and does no harm, since every write makes a new name. Nothing else in
+/// the folder is touched. A missing folder has nothing to remove.
+#[cfg(any(windows, test))]
+fn remove_stale_temps(file: &Path) -> Result<(), SecretError> {
+    let (Some(folder), Some(name)) = (file.parent(), file.file_name()) else {
+        return Ok(());
+    };
+    let entries = match std::fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(SecretError::Io(format!("{}: {error}", folder.display()))),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| io_error(&error))?;
+        if !write::is_atomic_temp(name, &entry.file_name()) {
+            continue;
+        }
+        // A link or a hard-linked file is refused by the check and left where it is.
+        drop(write::remove_owned_file(&entry.path()));
+    }
+    Ok(())
 }
 
 /// The file [`store`] writes, from the old file (read through `old` only when needed).
@@ -376,8 +404,9 @@ pub fn secret_for(data_dir: &Path, sid: &Sid) -> Result<Zeroizing<String>, Secre
 }
 
 /// `Machine::protect_for_owner` for `WindowsMachine`: [`store`] under `data_dir` while this
-/// thread acts as `owner`, so the DPAPI blobs are the owner's (user scope, D-B3) and the file
-/// and its DACL are too. The thread stops acting as the owner on every return.
+/// thread acts as `owner` (`Owner::run_as`), so the DPAPI blobs are the owner's (user scope,
+/// D-B3) and the file and its DACL are too. The thread stops acting as the owner on every
+/// return.
 #[cfg(windows)]
 pub fn protect_for_owner(
     owner: &super::setup::owner::Owner,
@@ -387,9 +416,7 @@ pub fn protect_for_owner(
 ) -> Result<(), super::setup::MachineError> {
     use super::setup::MachineError;
 
-    let as_owner = owner.impersonate()?;
-    let stored = store(data_dir, secrets, pool, dpapi::protect);
-    drop(as_owner);
+    let stored = owner.run_as(|| store(data_dir, secrets, pool, dpapi::protect))?;
     stored.map_err(|error| {
         if let SecretError::Dpapi { call, code } = error {
             MachineError::Os { call, code }

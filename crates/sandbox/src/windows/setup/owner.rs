@@ -40,11 +40,12 @@ fn parent_to_open(claimed: Option<u32>, recorded: u32) -> Result<u32, MachineErr
     }
 }
 
-/// Refuses a parent created after this process (`parent_created` above `own_created`, both in
-/// `FILETIME` units): its ID was reused by another process once the real parent had gone. The
-/// same time is allowed, since a process's creation time has the system clock's resolution.
+/// Refuses a parent not created strictly before this process (`parent_created` at or above
+/// `own_created`, both in `FILETIME` units): its ID was reused by another process once the
+/// real parent had gone. The same time is refused too, so an ID reused within one tick of the
+/// clock is caught; a real parent started this process, so it was created earlier.
 fn check_created(parent_created: u64, own_created: u64) -> Result<(), MachineError> {
-    if parent_created > own_created {
+    if parent_created >= own_created {
         return Err(MachineError::Other(
             "the set-up's parent process has gone and its process ID was reused".to_owned(),
         ));
@@ -99,6 +100,15 @@ impl Owner {
             _thread: std::marker::PhantomData,
         })
     }
+
+    /// Runs `f` on the calling thread acting as the owner, then makes the thread itself again
+    /// ([`Owner::impersonate`]'s guard, which also reverts if `f` panics). Every write under
+    /// `<data_dir>\sandbox\` from the elevated process goes through this, so each file and its
+    /// DACL are the owner's. A failed impersonation is the `Err`, and `f` doesn't run.
+    pub fn run_as<T>(&self, f: impl FnOnce() -> T) -> Result<T, MachineError> {
+        let _as_owner = self.impersonate()?;
+        Ok(f())
+    }
 }
 
 #[cfg(windows)]
@@ -151,9 +161,12 @@ mod tests {
     #[test]
     fn a_parent_created_after_this_process_is_a_reused_id() {
         assert_eq!(check_created(100, 200), Ok(()));
-        assert_eq!(check_created(200, 200), Ok(()));
+        assert_eq!(check_created(199, 200), Ok(()));
         let reused = check_created(201, 200).unwrap_err();
         assert!(reused.to_string().contains("reused"), "{reused}");
+        // The same tick: an ID reused at once is refused, never taken for the parent.
+        let same = check_created(200, 200).unwrap_err();
+        assert!(same.to_string().contains("reused"), "{same}");
     }
 
     /// Windows CI, unelevated: the runner's parent (nextest) runs as the same user.
@@ -190,6 +203,21 @@ mod tests {
             }));
             assert!(unwound.is_err());
             assert!(!thread_has_token(), "the guard reverted during the unwind");
+        }
+
+        #[test]
+        fn run_as_runs_as_the_owner_then_reverts() {
+            let owner = Owner::of_this_process().unwrap();
+            let inside = owner
+                .run_as(|| (thread_has_token(), current_user_sid().unwrap()))
+                .unwrap();
+            assert_eq!(inside, (true, owner.sid().clone()));
+            assert!(!thread_has_token());
+            let unwound = catch_unwind(AssertUnwindSafe(|| {
+                owner.run_as(|| panic!("a write failed while acting as the owner"))
+            }));
+            assert!(unwound.is_err());
+            assert!(!thread_has_token(), "run_as reverted during the unwind");
         }
 
         #[test]

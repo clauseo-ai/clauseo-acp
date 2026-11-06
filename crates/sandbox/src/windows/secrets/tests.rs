@@ -224,6 +224,62 @@ fn a_failed_write_leaves_the_old_file_byte_for_byte() {
 }
 
 #[test]
+fn a_store_removes_the_temp_files_a_crash_left_and_nothing_else() {
+    let temp = TempDir::new("secrets-stale-temps");
+    let stale = temp.file("sandbox/.secrets.bin.0123456789abcdef.tmp", "half a file");
+    let kept: Vec<_> = [
+        // Not one differing only in case: APFS and NTFS take that for the same name.
+        "sandbox/.secrets.bin.0123456789abcdeg.tmp",
+        "sandbox/.secrets.bin.0123.tmp",
+        "sandbox/.matters.json.0123456789abcdef.tmp",
+        "sandbox/notes.txt",
+    ]
+    .into_iter()
+    .map(|rel| temp.file(rel, "keep"))
+    .collect();
+    store(
+        temp.path(),
+        &[(sid(1001), password("x"))],
+        &[sid(1001)],
+        seal,
+    )
+    .unwrap();
+    assert!(!stale.exists(), "the stale temp file is removed");
+    for path in &kept {
+        assert_eq!(std::fs::read(path).unwrap(), b"keep", "{}", path.display());
+    }
+    assert_eq!(secret(&temp, 1001).unwrap(), "x");
+}
+
+/// A link with a temp file's name is never followed or removed, and its target stays.
+#[cfg(unix)]
+#[test]
+fn a_link_named_as_a_temp_file_is_left_and_not_followed() {
+    let temp = TempDir::new("secrets-stale-link");
+    let target = temp.file("elsewhere.txt", "not yours");
+    temp.dir("sandbox");
+    let link = temp.symlink("sandbox/.secrets.bin.0123456789abcdef.tmp", &target);
+    let hard = temp.file("sandbox/.secrets.bin.fedcba9876543210.tmp", "linked");
+    let other = temp.hard_link("other.txt", &hard);
+    store(
+        temp.path(),
+        &[(sid(1001), password("x"))],
+        &[sid(1001)],
+        seal,
+    )
+    .unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"not yours");
+    assert!(hard.exists(), "a file with a second hard link is left");
+    assert_eq!(std::fs::read(&other).unwrap(), b"linked");
+}
+
+#[test]
 fn a_reset_of_every_user_replaces_an_unreadable_file_and_a_keep_does_not() {
     let temp = TempDir::new("secrets-unreadable");
     temp.file("sandbox/secrets.bin", "not json");

@@ -246,6 +246,8 @@ pub(crate) fn thread_has_token() -> bool {
 
 /// Whether the elevated tests run: `CLAUSEO_ELEVATED_TESTS=1` and this process's token
 /// elevated (`TokenElevation`). A token that can't be asked counts as not elevated.
+// TODO(S15 PR4e): PR4e moves the shared elevation helper into `test_acl.rs`; use it on the
+// rebase and drop this copy.
 #[cfg(test)]
 pub(crate) fn elevated_tests_on() -> bool {
     use windows::Win32::Security::{TOKEN_ELEVATION, TokenElevation};
