@@ -58,6 +58,11 @@ export type NewMatterFormProps = {
     | undefined;
   /** Optional: Create held back, for a folder the caller refused. */
   blocked?: boolean | undefined;
+  /** Optional: the scan of the folder picked, under the folder line and above any warning, from the caller. */
+  scan?: ReactNode;
+  /** Optional: a count the caller bumps to drop the folder Change picked (the scan's Stop), so the line goes back to
+   * what it showed before the pick. */
+  unpick?: number | undefined;
   /** Optional: test ids for the name field, Change, Create the matter and Open it, and the warning's buttons. */
   testIds?:
     | {
@@ -146,6 +151,8 @@ export function NewMatterForm({
   openMatter,
   warning,
   blocked = false,
+  scan,
+  unpick = 0,
   testIds,
   titled = true,
   inDialog = false,
@@ -156,6 +163,12 @@ export function NewMatterForm({
   const [client, setClient] = useState(client0);
   const [next, setNext] = useState(next0);
   const [picked, setPicked] = useState<string | null>(null);
+  // the caller dropped the pick: set while rendering, as React allows for state that follows a prop
+  const [unpicked, setUnpicked] = useState(unpick);
+  if (unpicked !== unpick) {
+    setUnpicked(unpick);
+    setPicked(null);
+  }
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState(false);
   // the next date's line waits until the lawyer leaves the field or tries Create, so a date half typed isn't wrong
@@ -296,6 +309,7 @@ export function NewMatterForm({
           <span className="deva-nudge">{w("Change")}</span>
         </Button>
       </div>
+      {scan}
       {warning?.note}
       {error !== undefined && error !== null && (
         <div className="matter-form-refusal">

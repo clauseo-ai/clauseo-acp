@@ -8,6 +8,7 @@ import { HI as connectorsRoom } from "./words-connectors-room.hi.ts";
 import { HI as errors } from "./words-errors.hi.ts";
 import { HI as find } from "./words-find.hi.ts";
 import { HI as firstLaunch } from "./words-first-launch.hi.ts";
+import { HI as firstRead } from "./words-first-read.hi.ts";
 import { HI as folderCard } from "./words-folder-card.hi.ts";
 import { HI as folder } from "./words-folder.hi.ts";
 import { HI as frame } from "./words-frame.hi.ts";
@@ -19,7 +20,9 @@ import { HI as matters } from "./words-matters.hi.ts";
 import { HI as planCard } from "./words-plan-card.hi.ts";
 import { HI as reader } from "./words-reader.hi.ts";
 import { HI as room } from "./words-room.hi.ts";
+import { HI as scan } from "./words-scan.hi.ts";
 import { HI as settings } from "./words-settings.hi.ts";
+import { HI as signinExpired } from "./words-signin-expired.hi.ts";
 import { HI as sources } from "./words-sources.hi.ts";
 import { HI as startup } from "./words-startup.hi.ts";
 import { HI as stepsLive } from "./words-steps-live.hi.ts";
@@ -42,6 +45,7 @@ export const HINDI = {
   errors,
   find,
   "first-launch": firstLaunch,
+  "first-read": firstRead,
   "folder-card": folderCard,
   folder,
   frame,
@@ -53,7 +57,9 @@ export const HINDI = {
   "plan-card": planCard,
   reader,
   room,
+  scan,
   settings,
+  "signin-expired": signinExpired,
   sources,
   startup,
   "steps-live": stepsLive,

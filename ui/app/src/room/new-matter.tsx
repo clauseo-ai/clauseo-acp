@@ -130,6 +130,8 @@ export function NewMatter({
       pickFolder={pick.pickExisting}
       error={error ?? checked?.line ?? null}
       warning={pick.warning}
+      scan={pick.scan}
+      unpick={pick.unpick}
       blocked={checked !== null}
       {...(opens === null
         ? {}
@@ -217,6 +219,8 @@ export function FirstMatter({
           : createErrorLine(w.lang, pick.refused.code, pick.existing?.display))
       }
       warning={pick.warning}
+      scan={pick.scan}
+      unpick={pick.unpick}
       blocked={pick.refused !== null}
       onCreate={(name, client, _next, nextDate) => create(name, client, nextDate)}
       onCancel={onBack}

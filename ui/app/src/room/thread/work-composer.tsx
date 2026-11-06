@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react";
 import {
@@ -74,6 +75,8 @@ export function WorkComposer({
   refused,
   failed,
   stopped = null,
+  noteFor,
+  gateYields = false,
   refill = null,
   onAsk,
   onStop,
@@ -114,6 +117,10 @@ export function WorkComposer({
   failed: BreakLine | null;
   /** The stopped answer's line, while nothing runs. */
   stopped?: BreakLine | null;
+  /** UD2: the notice line's note, given the one it would show otherwise (the expired card, the first read's line). */
+  noteFor?: ((fallback: ReactNode) => ReactNode) | undefined;
+  /** UD2: the expired card holds the question and offers the sign-in itself: the gate leaves the field's row. */
+  gateYields?: boolean;
   /** The stopped question, once per break, for an empty field. */
   refill?: { key: EntryId; text: string } | null;
   /** True once the question is accepted; `how` says whether it goes behind a running turn, or steers it (U7). */
@@ -143,7 +150,7 @@ export function WorkComposer({
   const agentPlan = useAgentPlan();
   // UD1: the first run's hold, while the plan isn't signed in: its gate stands in the field's row, and nothing sends
   const hold = useHold(transport);
-  const gated = hold?.gate !== undefined;
+  const gated = hold?.gate !== undefined && !gateYields;
   const field = useRef<ComposerHandle>(null);
   // the words an Ask sent while nothing ran, until the host answers; and the stopped question held for that answer,
   // its turn stopped before the answer cleared the field (the refill below)
@@ -357,7 +364,7 @@ export function WorkComposer({
       // the plan's warning under the field (U12), quiet while paused at the limit, when the status line says it:
       // "Stopped at 4:52 pm, at the plan's limit", or the toolbar's at-limit words without the stop's time. With no
       // warning, U15's out-of-credit note, hidden by this conversation's thread (or its draft's key before it has one)
-      notice={paused === null ? <LimitWarning fallback={credit} /> : credit}
+      notice={(noteFor ?? same)(paused === null ? <LimitWarning fallback={credit} /> : credit)}
       took={paused === null ? null : pausedLine(w.lang, paused, now)}
       // under the gate the plan is the gate's to name: the status line says nothing of it
       plan={gated ? "" : plan}
@@ -446,3 +453,6 @@ function markOf(v: StreamView | undefined): string | null {
   const said = status === undefined ? "" : typeof status === "string" ? status : "queued";
   return `${said} ${v.latestOutput ?? ""}`;
 }
+
+/** The notice line's note as it stands, with no UD2 note over it. */
+const same = (note: ReactNode): ReactNode => note;

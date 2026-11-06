@@ -111,6 +111,8 @@ export const HI = {
   // the lawyer sends
   "{n} queued.": "{n} कतार में।",
   "1 queued.": "1 कतार में।",
+  // UD2-57: under the count while the host holds the queue for an update install (#537's queue_held_reason)
+  "Clauseo is installing an update. Your queued questions go once it's done.": null, // hi: later
   /* ---------- steering the running answer: the words a host gives SteerHint, SteerMark and SteerNote ---------- */
   "Send now gives your words to Clauseo while it writes.":
     "अभी भेजें से Clauseo लिखते समय ही आपके शब्द ले लेता है।",

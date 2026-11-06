@@ -1,51 +1,291 @@
 {
-  "UD2-32": {
-    "en": "Plans",
+  "UD2-01": {
+    "en": "{n} files, {mb} MB",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-02": {
+    "en": "1 file, {mb} MB",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-03": {
+    "en": "Reading the folder. Now {title}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-04": {
+    "en": "Reading the folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-06": {
+    "en": "This folder syncs with {service}, so changes to its papers sync too, including Clauseo's. Versions are kept on this computer, outside the folder.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-07": {
+    "en": "Got it",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-08": {
+    "en": "{n} files are kept only in {service} and download as they're read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-09": {
+    "en": "1 file is kept only in {service} and downloads as it's read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-10": {
+    "en": "{n} files are kept only online and download as they're read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-11": {
+    "en": "1 file is kept only online and downloads as it's read.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-12": {
+    "en": "First read",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-13": {
+    "en": "Clauseo's first read",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-14": {
+    "en": "Reading {n} files.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-15": {
+    "en": "Reading {n} files. Now {title}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-16": {
+    "en": "Reading 1 file.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-17": {
+    "en": "Reading 1 file. Now {title}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-18": {
+    "en": "Read {n} files.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-19": {
+    "en": "Read 1 file.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-20": {
+    "en": "Clauseo stopped. The answer so far is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-21": {
+    "en": "Your {name} sign-in has expired. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-22": {
+    "en": "Sign in again opens {name}'s own sign-in in your browser. Only the sign-in repeats: this matter, its papers and your settings stay as they are.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-23": {
+    "en": "Sign in again",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-24": {
+    "en": "Finish signing in in your browser. Your question is asked once you're back.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-25": {
+    "en": "Signed in again at {time} as {email}, {plan}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
+  },
+  "UD2-26": {
+    "en": "Signed in again at {time} as {email}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-27": {
+    "en": "Signed in again at {time}.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-28": {
+    "en": "Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-29": {
+    "en": "{name} didn't accept the API key. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-30": {
+    "en": "To change it, open Settings, then Plans.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-31": {
+    "en": "Your firm's account didn't accept the question. Your question is kept.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-32": {
+    "en": "Plans",
+    "hi": null,
+    "hi_status": "later",
+    "status": "approved",
+    "at": "2026-11-06",
+    "by": "design"
   },
   "UD2-33": {
     "en": "The plans Clauseo works with. Each signs in through its own page in your browser.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-34": {
     "en": "Sign out",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-35": {
     "en": "Sign out of {name}?",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-36": {
     "en": "Your matters and conversations stay on this computer. Questions wait until you sign in again.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-37": {
     "en": "Signed out of {name}.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-38": {
     "en": "Stop using it here",
@@ -83,17 +323,17 @@
     "en": "Uses your ChatGPT plan.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-43": {
     "en": "Add ChatGPT",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-44": {
     "en": "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.",
@@ -107,9 +347,9 @@
     "en": "Other ways in",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-46": {
     "en": "Change key",
@@ -147,33 +387,33 @@
     "en": "Sign in again",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-51": {
     "en": "Your firm's address",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-52": {
     "en": "Your IT team gives you this. Questions go through your firm's own account, on its terms.",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-53": {
     "en": "Connect",
     "hi": null,
     "hi_status": "later",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "by": "design"
   },
   "UD2-54": {
     "en": "Remove address",
@@ -193,6 +433,14 @@
   },
   "UD2-56": {
     "en": "Clauseo isn't using {app}'s sign-in here.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD2-57": {
+    "en": "Clauseo is installing an update. Your queued questions go once it's done.",
     "hi": null,
     "hi_status": "later",
     "status": "provisional",

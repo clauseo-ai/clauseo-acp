@@ -23,6 +23,7 @@ import type { AgentId } from "../../transport/protocol.ts";
 import {
   CLAUDE,
   CODEX,
+  isSignedIn,
   setupStoreOf,
   type AgentSetup,
   type SetupSource,
@@ -32,10 +33,18 @@ import {
 import type { Conversations, ConversationsView } from "../conversations.ts";
 import type { Matters } from "../matters.ts";
 import { clockOf } from "../when.ts";
-import { holderOf, type Hold } from "./hold.ts";
+import { firstReadMarks, markAdded } from "../first-read/marks.ts";
+
+/** The first read's title, as start.ts names the thread (words-first-read.ts's UD2-12, in English as the host keeps it). */
+const FIRST_READ_TITLE_EN = "First read";
+import { holderOf, provideExpiredCard, type Hold } from "./hold.ts";
+import { ExpiredCard } from "../signin-expired/expired-card.tsx";
 import { CaseLawSlot } from "./case-law.tsx";
 import { workspaceStep } from "./workspace.ts";
 import { gateView, installView, refusalView } from "./views.ts";
+
+// UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
+provideExpiredCard((props) => <ExpiredCard {...props} />);
 
 /** The test ids the brief decides (UD1, "Decided here"). */
 const IDS = {
@@ -275,13 +284,47 @@ export function FirstRun({
       notify();
     };
   }, [transport, store, agent, zone, lang, platform]);
-  // a matter made from the rail while the first screen stood is the first act too
+  // a matter made from the rail while the first screen stood is the first act too; the matter it opens is the one
+  // added during the first run, whose first read starts once signed in (UD2)
   const wasWelcome = useRef(welcome);
   useEffect(() => {
-    if (wasWelcome.current && !welcome && matters.view().matters.some((m) => m.kind !== "scratch"))
+    if (
+      wasWelcome.current &&
+      !welcome &&
+      matters.view().matters.some((m) => m.kind !== "scratch")
+    ) {
       store.firstAct(null);
+      const open = matters.view().open;
+      if (open !== null && open.kind !== "scratch") markAdded(open.matter);
+    }
     wasWelcome.current = welcome;
   }, [welcome, matters, store]);
+  // UD2's first read: once the chosen plan is signed in (and, after UC, the workspace step has its outcome), for each
+  // matter added during the first run and not yet read; its chunk loads only then
+  const chosen = state.chosen;
+  const signedIn = isSignedIn(state.agents[chosen]?.signIn) && workspaceStep() === null;
+  useEffect(() => {
+    if (!signedIn || welcome) return;
+    const due = Object.entries(firstReadMarks()).filter(
+      ([, m]) => m.added === true && m.thread === undefined,
+    );
+    if (due.length === 0) return;
+    void late(import("../first-read/first-read-start.ts")).then(({ startFirstRead }) => {
+      for (const [matter] of due)
+        void startFirstRead(transport, matters, matter, chosen).then((thread) => {
+          // open at once, with its summary: the host's threads_changed lists its row as it comes
+          if (thread !== null)
+            conversations.openThread(matter, thread, {
+              thread,
+              matter,
+              agent: chosen,
+              status: "starting",
+              title: FIRST_READ_TITLE_EN,
+              queue_held: false,
+            });
+        });
+    });
+  }, [signedIn, welcome, chosen, transport, matters, conversations]);
   if (!welcome) return <CaseLawSlot />;
   return (
     <FirstScreen

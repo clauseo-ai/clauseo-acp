@@ -3,8 +3,9 @@
 // conversation, so each opens fresh, with its own words in the field. The thread's list, its rows and the Markdown renderer are one chunk of
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ComposerHandle, PlanChoice } from "@clauseo/components/clauseo/composer.tsx";
+import { late } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
@@ -38,11 +39,25 @@ import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
 import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+import { hasSetup } from "../first-run/hold.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
 const FolderNotice = lazy(() =>
   import("../folder-notice.tsx").then((m) => ({ default: m.FolderNotice })),
 );
+
+/** UD2's notes in the composer's notice line (the expired card, the first read's line), from the thread's chunk. */
+const AfterSignInNote = lazy(() =>
+  late(import("./list.tsx")).then((m) => ({ default: m.AfterSignInNote })),
+);
+
+/** A held queue: why, as the host says it (`queue_held_reason`; "" from an older host that doesn't), else null. */
+const heldPick = (v: StreamView | undefined): string | null => {
+  const h = v?.header?.header;
+  if (h?.queue_held !== true) return null;
+  return h.queue_held_reason ?? "";
+};
+const agentPick = (v: StreamView | undefined) => v?.header?.header?.agent ?? null;
 
 const NO_COMMANDS: readonly AvailableCommand[] = [];
 
@@ -148,6 +163,28 @@ export function Work({
     lines,
     plan: agentPlan,
   });
+  // UD2: the question held for the plan's sign-in (queue_held_reason "sign_in"; from an older host that says no why, a held queue
+  // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line
+  const held = useStreamPart(store, stream, heldPick);
+  const heldAgent = useStreamPart(store, stream, agentPick);
+  const expired =
+    hasSetup(transport) &&
+    held != null &&
+    heldAgent != null &&
+    (held === "sign_in" || (held === "" && brk?.code === "agent.auth_required"))
+      ? { agent: heldAgent, failedAt: brk?.step.ts ?? 0 }
+      : null;
+  const noteFor = (fallback: ReactNode) => (
+    <Suspense fallback={fallback}>
+      <AfterSignInNote
+        transport={transport}
+        stream={stream}
+        thread={session.thread}
+        expired={expired}
+        fallback={fallback}
+      />
+    </Suspense>
+  );
   const retry = () => {
     if (stream !== null) store.retry(stream);
   };
@@ -235,7 +272,9 @@ export function Work({
                     testId: "stream-failed",
                   }
           }
-          stopped={stopped}
+          stopped={expired === null ? stopped : null}
+          noteFor={noteFor}
+          gateYields={expired !== null}
           refill={refillOf(brk, live, restart)}
           onAsk={ask}
           onStop={session.stop}
