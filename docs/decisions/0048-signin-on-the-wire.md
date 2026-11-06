@@ -596,7 +596,9 @@ changes (`setup/identity.rs`).
   the login files' stamps are those the sign-in left (taken when its `SignedIn` came) and
   within the sign-in's bound. A check that fails or names no account with the files unchanged
   keeps the window, so a retry can record; any stamp change, or the bound passing, ends it at
-  once: unknown and checked, and nothing is recorded until the lawyer signs in again. **Neither an email nor an id is unknown** (refused, retryable).
+  once: unknown and checked, and nothing is recorded until the lawyer signs in again. On the
+  macOS Keychain path, which no stamp sees, the window lasts for the first check only, whatever
+  it reads. **Neither an email nor an id is unknown** (refused, retryable).
 - *When it is recorded.* At a sign-in or reuse made through Clauseo (`StartSignIn`,
   `UseDeviceCode`, `UseFoundLogin`, `UseDifferentAccount`): its `SignedIn` records first, before
   anything compares it, so a new account chosen in Clauseo never reads as a swap. The sign-in
@@ -686,6 +688,12 @@ changes (`setup/identity.rs`).
   ends, sets `agent.identity_checking` before `restart_for_login` relaunches. A Codex key login has
   no shared file to swap: R17 PR-C links no `auth.json` into a matter whose launch env carries
   `CODEX_API_KEY` (the host thread, 2026-11-06), so Codex can only use the env key.
+- *A firm-managed agent is not checked.* An agent whose `agents.<id>` a firm policy locks (or
+  that the e2e build's `E2E_AGENTS_MANAGED` names) has no Clauseo install, so no status read can
+  run for it (`Agents::read_account` answers failed): treated as a key login, never refused by
+  the identity check. The e2e build's agents are managed, so its smoke specs launch. The lawyer's
+  own `agents.<id>`, however its command is spelled, is never managed: a session that writes
+  one changes nothing for the check.
 - *The state table.* Watched: a change of a login file's stamps checks it. Timer: checked
   again by itself. A pending sign-in through Clauseo is the exception to every row below.
 
@@ -699,7 +707,7 @@ changes (`setup/identity.rs`).
   | Due | yes | no (a launch or the startup asks) | `agent.identity_checking` |
   | Checking | at the next look, against the stamps before its read | no | `agent.identity_checking` |
   | Changed | no | no | `signin.account_changed`, until a sign-in records |
-  | KeyLogin | no | no | no |
+  | KeyLogin (a key, a Claude provider, or a firm-managed agent) | no | no | no |
   | First run (start, nothing recorded) | as Due | no | `agent.identity_checking`, until its startup check |
   | Clauseo sign-in after a launch | as Due until its record; for a no-email one, any stamp change from what the sign-in left ends its window | no (a no-email one past its bound, or its files changed: unknown, a check, nothing recorded) | `agent.identity_checking` until the record lands: its email, or the first account its check reads (by id) while the files are as the sign-in left them, is recorded even after a launch; no other path records after one |
   | Pending sign-in through Clauseo | by stat: a change refuses until the record lands; no check | no (its bound passing: unknown, and a check) | as its state, or `agent.identity_checking` once its files moved |
@@ -727,6 +735,8 @@ changes (`setup/identity.rs`).
     account: a missing record reads as a first run, and a rewritten one as the record. No cheap
     marker shows an agent was signed in on the shared login before (`key-stored.json` marks
     stored keys, which are not checked), so nothing tells a deleted record from a first run.
+  - *A firm-managed agent isn't identity-checked:* it still uses Clauseo's shared login home,
+    so an in-place swap goes undetected for it.
   - *Windows `ChangeTime`.* It can be set through `SetFileInformationByHandle`, so a write
     with all its times restored, and the same length, can go unseen on Windows.
   - *The window of a sign-in.* The record trusts the account the sign-in's confirming status

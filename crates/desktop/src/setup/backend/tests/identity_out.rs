@@ -3,19 +3,23 @@
 //! first gives unknown and a check; a sign-out through Clauseo is watched with no timer and
 //! leaves launches to the agent's own sign-in refusal (M3); followers that panic past their
 //! restarts pin every shared login at `agent.identity_unknown` (L4); and a sign-in through
-//! Clauseo after a launch records its account, by id or by email, while no other path does.
+//! Clauseo after a launch records its account, by id or by email, while no other path does; and
+//! a firm-managed agent (the e2e build's) is outside the check, the lawyer's own entry never.
 
 use std::time::UNIX_EPOCH;
 
 use clauseo_agents::{AccountHash, AccountRead, SigninState, Source, sign_in_limit};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode};
+use clauseo_settings::{Effective, Locations, SystemFiles};
 use serde_json::json;
 
 use super::fakes::command;
 use super::identity::{IdRig, refused, signed_in};
 use super::identity_watch::files::remove;
 use super::{SETTINGS, claude, codex};
+use crate::bridge::lock;
 use crate::setup::identity::{Verdict, check, expect, gate, on_state, stamps};
+use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::setup::refusal::wanted;
 use crate::setup::supervise::{RESTARTS, supervise};
 use crate::test_support::block_on;
@@ -299,4 +303,122 @@ fn a_transient_failure_with_the_files_unchanged_keeps_the_window_and_a_retry_rec
     assert_eq!(verdict(&id, &agent), Verdict::Same);
     assert_eq!(backend.wiring.identity.recorded(&agent), Some(by_id));
     assert_eq!(wanted(backend, &agent), None);
+}
+
+/// The e2e build's smoke: its agents are firm-managed (`E2E_AGENTS_MANAGED`, as a policy lock on
+/// `agents.<id>` makes them), with no Clauseo install, so no status read can run. A managed
+/// agent is not checked and never refused by the identity check, at its first launch or at a
+/// relaunch after its agent exited mid-turn.
+#[test]
+fn a_managed_agent_is_never_checked_nor_refused_launch_after_launch() {
+    let id = IdRig::over(IdRig::scratch("identity-managed"), |identity| identity);
+    let (rig, backend) = (&id.rig, &id.rig.backend);
+    let agents = [claude(), codex()];
+    lock(&backend.wiring.applied).managed.extend(agents.clone());
+    for agent in &agents {
+        rig.agents.accounts.answers(agent, AccountRead::Failed);
+    }
+    for secs in [0, 2, 60] {
+        id.look(secs);
+        for agent in &agents {
+            assert_eq!(wanted(backend, agent), None, "{agent} at {secs}s");
+            // A launch, the agent exiting mid-turn, and the relaunch asking again.
+            for launch in 0..3 {
+                assert_eq!(gate(backend, agent), None, "{agent}, launch {launch}");
+            }
+        }
+    }
+    assert_eq!(id.reads(), 0, "no status read");
+    let identity = |call: &super::fakes::HostCall| {
+        matches!(
+            call,
+            super::fakes::HostCall::SetLaunchRefused(
+                _,
+                Some(
+                    ErrorCode::AgentIdentityChecking
+                        | ErrorCode::AgentIdentityUnknown
+                        | ErrorCode::SigninAccountChanged
+                )
+            )
+        )
+    };
+    let calls = rig.host.calls();
+    assert!(!calls.iter().any(identity), "{calls:?}");
+}
+
+/// The lawyer's own `agents.<id>`, however it is spelled (Clauseo's path through `.`, or a
+/// command of its own), a session could write: never firm-managed, so an agent's verdict stays
+/// what it was, Same or Unknown, and it stays checked.
+#[test]
+fn the_lawyer_s_own_entry_however_spelled_stays_checked() {
+    let id = IdRig::new("identity-own-entry");
+    let (rig, backend) = (&id.rig, &id.rig.backend);
+    id.scratch.file("homes/codex-acp/auth.json", b"{}");
+    id.signs_in(&codex(), ONE);
+    id.signs_in(&claude(), ONE);
+    rig.agents.accounts.answers(&claude(), AccountRead::Failed);
+    assert_eq!(block_on(check(backend, &claude())), Verdict::Unknown);
+    let data = id.scratch.path().join("data");
+    let odd = data
+        .join(".")
+        .join("agents")
+        .join("codex-acp")
+        .join("codex-acp");
+    let own = id.scratch.path().join("bin").join("claude-acp");
+    let text = json!({ "agents": {
+        "codex-acp": { "command": odd },
+        "claude-acp": { "command": own },
+    }});
+    id.scratch
+        .file("data/settings.json", text.to_string().as_bytes());
+    let locations = Locations::under_root(&data);
+    let effective = Effective::load(&locations, &SystemFiles, &[]);
+    assert!(effective.agent("codex-acp").is_some() && effective.agent("claude-acp").is_some());
+    let read = SettingsRead::read(&effective, backend.known.keys());
+    assert!(
+        read.managed.is_empty(),
+        "the lawyer's entries are not managed"
+    );
+    block_on(apply_settings(backend, read));
+    assert_eq!(verdict(&id, &codex()), Verdict::Same);
+    assert_eq!(verdict(&id, &claude()), Verdict::Unknown);
+    assert_eq!(
+        gate(backend, &claude()),
+        Some(ErrorCode::AgentIdentityUnknown),
+        "still refused"
+    );
+    id.replace_codex_login("swapped");
+    assert_eq!(
+        gate(backend, &codex()),
+        Some(ErrorCode::AgentIdentityChecking),
+        "still checked"
+    );
+}
+
+#[test]
+fn on_the_keychain_path_a_no_email_sign_in_s_window_closes_at_its_first_check() {
+    // macOS Claude may keep its login in the Keychain, which no stamp sees.
+    let id = IdRig::with("identity-nameless-keychain", |identity| {
+        identity.with_keychain_fallback(true)
+    });
+    let (rig, agent) = (&id.rig, claude());
+    let backend = &rig.backend;
+    id.signs_in(&agent, ONE);
+    assert_eq!(gate(backend, &agent), None, "launched");
+    expect(backend, &agent);
+    block_on(on_state(backend, &agent, &signed_in_nameless()));
+    rig.agents.accounts.answers(&agent, AccountRead::Failed);
+    assert_eq!(block_on(check(backend, &agent)), Verdict::Unknown);
+    let by_id = AccountHash::of(ACCOUNT_ID).unwrap();
+    rig.agents
+        .accounts
+        .answers(&agent, AccountRead::Account(by_id));
+    id.look(31);
+    assert_eq!(id.reads(), 2, "the retry ran");
+    assert_eq!(
+        verdict(&id, &agent),
+        Verdict::Unknown,
+        "and recorded nothing"
+    );
+    assert_eq!(backend.wiring.identity.recorded(&agent), None);
 }
