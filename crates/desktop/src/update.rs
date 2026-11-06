@@ -26,7 +26,7 @@ mod choice;
 #[cfg(all(feature = "e2e", any(test, not(target_os = "linux"))))]
 mod fake;
 #[cfg(any(test, not(target_os = "linux")))]
-mod install;
+pub(crate) mod install;
 #[cfg(any(test, not(target_os = "linux")))]
 mod install_kind;
 #[cfg(any(test, not(target_os = "linux")))]
@@ -81,16 +81,24 @@ fn watching<R: Runtime>(
 
 /// What the stopper thread does once the host has stopped, the log was flushed and the counts
 /// saved: with `HostExit::Install`, it saves the window state and installs (`install.rs`), and
-/// then restarts the app, whether the install worked (macOS) or failed. Windows exits inside the
-/// plugin's install. Returns only when there was nothing to install.
-pub(crate) fn after_host<R: Runtime>(app: &AppHandle<R>, ended: HostExit) {
+/// then restarts the app, whether the install worked (macOS), failed or hung past its bound.
+/// Windows exits inside the plugin's install. When an agents job outlived its bound at quit
+/// (`agents_stopped` false) nothing is installed and the app restarts as it is. Returns only
+/// when there was nothing to install.
+pub(crate) fn after_host<R: Runtime>(app: &AppHandle<R>, ended: HostExit, agents_stopped: bool) {
     #[cfg(not(target_os = "linux"))]
-    if install::after_host(ended, &mut install::AppSteps::new(app)) == install::After::Restart {
+    if install::after_host(
+        ended,
+        agents_stopped,
+        &mut install::AppSteps::new(app),
+        install::Watch::INSTALL,
+    ) == install::After::Restart
+    {
         app.restart();
     }
     // Linux never installs: its host has `NoUpdater`, which never offers one.
     #[cfg(target_os = "linux")]
-    drop((app, ended));
+    drop((app, ended, agents_stopped));
 }
 
 /// Starts the host with `config`, watched ([`watching`]).
