@@ -50,10 +50,13 @@ export async function createRoomMatter(
 /**
  * Opens the matter folder E2E_MATTER_DIR (the e2e build's pick_folder returns it) as the matter
  * `name`: New matter, the name, Change, Create the matter; the toolbar title then names the
- * matter, and the composer is enabled, so a spec can type at once.
+ * matter, and the composer is visible and enabled, so a spec can type at once; a hidden composer
+ * (the first-run sign-in gate replaces it) fails here at once, since a hidden textarea still reads
+ * as enabled.
  */
 export async function openMatter(w: Window, name = "Matter"): Promise<void> {
   await createRoomMatter(w, name, { existing: true });
+  await expect(w.composer).toBeVisible();
   await expect(w.composer).toBeEnabled();
 }
 
@@ -75,6 +78,7 @@ export async function newConversation(w: Window): Promise<void> {
   const draft = w.conversationRow("New conversation");
   await expect(draft).toHaveAttribute("aria-current", "true");
   await expect(w.userMessages).toHaveCount(0);
+  await expect(w.composer).toBeVisible();
   await expect(w.composer).toBeEnabled();
 }
 
