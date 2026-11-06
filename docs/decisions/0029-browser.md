@@ -252,8 +252,8 @@ No Chrome switch makes it write the file for a fixed port, on any OS.
 
 **The fix.** The guard starts Chrome itself (`browser_guard/chrome.rs`) and agent-browser only
 connects to it (`AGENT_BROWSER_CDP`; `flags.rs:689`, `native/actions.rs:4334-4436`):
-- Chrome gets agent-browser's own headless flags (`chrome.rs:466-597`, less port 0), the
-  session's proxy with the `<-loopback>` bypass, the WebRTC flag, `--user-data-dir=<cwd>/
+- Chrome gets agent-browser's own headless flags (`chrome.rs:466-597`, less port 0) with the
+  switches of "No background hosts" (below), the session's proxy with the `<-loopback>` bypass, the WebRTC flag, `--user-data-dir=<cwd>/
   chrome-profile-<run id>` (below) and `--remote-debugging-port=<--cdp-port>`; on Linux, as root or in a
   container, `--no-sandbox --disable-dev-shm-usage` (agent-browser's rule less its `CI` test,
   which its child never saw). Its environment is agent-browser's less the `AGENT_BROWSER_*`
@@ -434,6 +434,94 @@ CI's Linux job runs
 it with the pinned agent-browser and the runner's Google Chrome on merge groups and main
 (`ci.yml`, "Fetch agent-browser for the guard's real-Chrome test"; not yet run there); without `CLAUSEO_TEST_AGENT_BROWSER` it skips with a note on
 stderr. On the old guard it failed after 31 s with the `outcome_unknown` error above.
+
+### No background hosts (`browser_guard/quiet.rs`)
+
+Law firms will not want the browser talking to Google on its own, so an idle Chrome contacts no
+host at all through the session's proxy. agent-browser's flags (`--disable-background-networking`,
+`--disable-component-update`, `--disable-sync`) are not enough: G17 item 5 (300 s idle on
+`about:blank`, iris, Chrome for Testing 147) saw `mtalk.google.com:5228`,
+`clients2.google.com`, `accounts.google.com`, `www.google.com`, `android.clients.google.com`
+and `update.googleapis.com`, all but the last within 3 s of the start. Each was named from a
+netlog's URLs; Playwright's `chromiumSwitches` and its issue #42910 name the same ones.
+
+`quiet.rs` adds, beside agent-browser's flags:
+- **One `--disable-features` and one `--enable-features`** (Chrome reads only the last of
+  each), agent-browser's entries plus: `OptimizationHints` (hint and model downloads,
+  `optimizationguide-pa.googleapis.com`, seen from Google Chrome 157), `NetworkTimeServiceQuerying`
+  (`clients2.google.com/time`), `AimEnabled` (`www.google.com/async/folae`),
+  `PreconnectToSearch` (the preconnect to `www.google.com`), `MediaRouter` (Cast discovery on
+  the local network), `AutofillServerCommunication` (form predictions); and enabled
+  `SkipListAccountsWithoutGaiaCookies`, Chrome 155's own fix for `ListAccounts`, which earlier
+  Chrome ignores.
+- **Switches:** `--disable-field-trial-config` (Chromium's compiled-in variations config),
+  `--disable-breakpad` (crash reports), `--disable-extensions` and
+  `--disable-component-extensions-with-background-pages` (extensions and their update checks),
+  `--disable-domain-reliability` (error reports to Google), `--no-pings` (hyperlink auditing).
+- **The component updater:** `--disable-component-update` skips only Chrome's main component
+  list (`RegisterComponentsForUpdate`). Components registered elsewhere, such as the on-device
+  model manifest (`ceofaddefefcbblgcgnibnonglccbfja`, registered in `PostBrowserStart`), still
+  send on-demand update checks at start-up and start the update timer (Chromium's fix,
+  "Make the component updater honor --disable-component-update", main@{#1707606}, is not in
+  157). Google Chrome on CI's Linux runner sent `POST update.googleapis.com/service/update2/
+  json` within 1 s of the start, on both tries in two merge groups (run 42257907901); on iris
+  it came in one of three 300 s runs. `--component-updater=url-source=https://update.invalid:1/`
+  is the narrowest switch that stops it: the component updater sends every check and ping to
+  that one URL instead of its default and `http://` fallback
+  (`component_updater_command_line_config_policy.cc`, `configurator_impl.cc` `UpdateUrl`),
+  and port 1 fails with `ERR_UNSAFE_PORT` before any connection. Checked on Google Chrome 157
+  with `fast-update` added: without the URL, update checks to `update.googleapis.com` and
+  component downloads from `edgedl.me.gvt1.com`; with it, four checks to `update.invalid:1`,
+  each `ERR_UNSAFE_PORT`, and no update host. Installed components keep working; none updates.
+- **GCM:** the enterprise user-policy invalidation listeners are made for every desktop profile
+  with no switch or policy of their own; they check in to `android.clients.google.com`, register
+  there (FCM senders 245350905893 and 585406161706, `components/invalidation/
+  invalidation_constants.h`) and hold `mtalk.google.com:5228` open. `--gcm-checkin-url`,
+  `--gcm-registration-url` and `--gcm-mcs-endpoint` are `about:blank`, which Chrome cannot
+  fetch: the check-in fails on the spot with no connection (netlog:
+  `ERR_UNKNOWN_URL_SCHEME`), so nothing registers. Web push, which needs GCM, does not work
+  in the session.
+- **Sign-in:** Chrome fetches `accounts.google.com/ListAccounts` at the start (its sync metrics
+  recorder) whatever `--disable-sync` or `signin.allowed` say (on iris the profile's
+  `signin.allowed: false` was reset to true at the start). `--gaia-url=https://gaia.invalid:1` moves
+  Chrome's own Gaia origin to port 1, which is on Chrome's unsafe-port list, so the fetch fails
+  before any connection (netlog: `ERR_UNSAFE_PORT`, retried locally). Pages the agent opens on
+  `accounts.google.com` would load as any site, but `accounts.google.com` is in `DENY_HOSTS`
+  (`host/src/browser/deny_hosts.rs`), so the proxy refuses it for browser sessions anyway, and
+  moving the Gaia origin costs nothing a page could have used. Chrome's own sign-in, never used
+  here, cannot work.
+  Chrome isolates its Gaia origin in a process of its own; `--isolate-origins=https://
+  accounts.google.com` keeps that for the real host, so site isolation is unchanged.
+- **Preferences** (merged into the profile's `Default/Preferences`, beside the downloads ones):
+  `safebrowsing.enabled` and `scout_reporting_enabled` false, `translate.enabled` false,
+  `net.network_prediction_options` 2 (no preconnect or prefetch), `alternate_error_pages` and
+  `search.suggest_enabled` false, `browser.enable_spellchecking` false (no dictionary
+  download), `url_keyed_anonymized_data_collection` false, autofill profiles and cards off.
+  Chrome kept every one of them across a run (read back from the profile on iris).
+
+**Safe Browsing is off, deliberately.** What that costs depends on the Chrome:
+- With Chrome for Testing nothing is lost: it made no Safe Browsing traffic at all on iris, so
+  it had no lists and no lookups to warn from.
+- With branded Google Chrome, real-time phishing and malware warnings are given up. Chrome
+  157 fetched its real-time lookup keys from `www.gstatic.com/ohttp_gateway`, which is not
+  denied (not in `DENY_HOSTS`), so its hash-prefix check (a prefix of every page's hash sent
+  to Google through a relay) would have warned.
+
+The controls instead: the egress proxy's deny list; for downloads, files keep their OS
+download marks (see "Downloads keep their OS marks"), so the OS still checks a file the lawyer
+opens; and a Clauseo-kept block list of malware and phishing hosts, which is on the later list
+(S27 brief). Nothing else here weakens security: no
+`--disable-web-security`, no certificate, sandbox or site-isolation change (a unit test refuses
+those switches and checks the one feature list of each kind).
+
+**Measured.** G17 item 5 on iris, 300 s idle, Chrome for Testing 147: before, the six hosts
+above; after, none. The same 300 s with Chrome started directly with the guard's switches,
+Google Chrome 157 (branded, the CI runner's kind): before, `clients2.google.com`,
+`www.gstatic.com`, `www.google.com`, `accounts.google.com`,
+`optimizationguide-pa.googleapis.com`; after, none. `update.googleapis.com` came in one of three
+300 s runs without the change on iris, and on CI (above); the url-source switch stops it.
+`real_chrome::idle` holds it: past the page it opens, every request the test proxy sees in
+10 s is for `page.test`.
 
 ### Requirements on stage C's proxy and jail
 
@@ -1019,7 +1107,12 @@ The download (part 3):
   hand, on the Mac mini and the Windows VM).
 - Which Chrome on a real Mac or Windows machine: only fixture folders.
 - That every host in `DENY_HOSTS` is still contacted by Chrome with agent-browser's flags (G17
-  item 5).
+  item 5). With the guard's own switches ("No background hosts") an idle Chrome contacted none of
+  them on iris; the list stays as a backstop.
+- "No background hosts" on macOS and Windows Chrome, and on Edge: measured on Linux only
+  (Chrome for Testing 147 through the guard, Google Chrome 157 started directly). Edge has
+  its own services (`msForceBrowserSignIn` and others in Playwright's list) that these
+  switches may not cover. The traffic while a page is open was not measured, only idle.
 - reqwest's reading of the proxy variables is from its documented behaviour, not from a run.
 - The URL host reader follows the WHATWG URL standard as written; it was not compared with
   Chrome's or the `url` crate's parser on the same inputs.

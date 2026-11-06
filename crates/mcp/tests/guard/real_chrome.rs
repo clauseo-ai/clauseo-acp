@@ -30,6 +30,9 @@ use crate::page_proxy::{DOWNLOADS, HEADING, PageProxy};
 use crate::support::{CDP_PORT, GUARD, Guard, Scratch, guard_args, host_env, left_in};
 use crate::write;
 
+#[path = "real_chrome/idle.rs"]
+mod idle;
+
 /// The binaries, or `None` (with a note) when the test cannot run here.
 fn binaries() -> Option<(PathBuf, PathBuf)> {
     let Some(agent_browser) = std::env::var_os("CLAUSEO_TEST_AGENT_BROWSER") else {
