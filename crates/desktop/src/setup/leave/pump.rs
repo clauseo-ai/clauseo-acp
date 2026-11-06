@@ -36,7 +36,8 @@ use super::super::compose::is_running;
 use super::after::finish;
 use super::hold::Late;
 use super::{
-    Ended, Waiter, after_stop, login_changed, restart_for_login, set_reused, signin_error, wait_on,
+    Ended, Waiter, after_stop, login_changed, restart_for_login, restart_if_usable, set_reused,
+    signin_error, wait_on,
 };
 
 /// See the module docs.
@@ -94,7 +95,9 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
             // The sign-in's own `restart_agents` lifted it.
             hold.keep();
             drop(reads);
-            backend.wiring.leaves.end_late(agent, true);
+            if backend.wiring.leaves.end_late(agent, true) {
+                restart_if_usable(backend, agent).await;
+            }
         }
         if let Some(tell) = leave {
             // Gone only when the leave was dropped meanwhile.
@@ -123,7 +126,12 @@ pub(crate) async fn signin_event(backend: &AgentsBackend, agent: &AgentId, state
             hold.lift(backend).await;
         }
         drop(reads);
-        backend.wiring.leaves.end_late(agent, reuse_ended);
+        // The arrival of an endpoint since the leave began is restarted here (`Leaves::end_late`).
+        #[cfg(test)]
+        backend.wiring.leaves.pause("given_up.end").await;
+        if backend.wiring.leaves.end_late(agent, reuse_ended) {
+            restart_if_usable(backend, agent).await;
+        }
     }
     if reuse_ended {
         login_changed(backend, agent).await;

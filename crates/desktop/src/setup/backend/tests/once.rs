@@ -181,7 +181,11 @@ fn a_give_up_whose_job_ends_still_reused_only_lifts_the_hold() {
     );
     assert!(rig.backend.wiring.reused.get(&codex()), "nothing changed");
     assert!(
-        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        rig.backend
+            .wiring
+            .leaves
+            .begin(&codex(), &rig.backend.host)
+            .is_ok(),
         "the slot is free"
     );
 }
@@ -223,7 +227,11 @@ fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_follows_
     let restarts = restarts.filter(|call| *call == HostCall::RestartAgents(codex()));
     assert_eq!(restarts.count(), 0, "no restart");
     assert!(
-        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        rig.backend
+            .wiring
+            .leaves
+            .begin(&codex(), &rig.backend.host)
+            .is_ok(),
         "the slot is free"
     );
 }

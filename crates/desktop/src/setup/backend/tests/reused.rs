@@ -95,7 +95,11 @@ fn a_replaced_stop_that_fails_while_still_reused_keeps_everything_reused_and_lif
         })
     ));
     assert!(
-        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        rig.backend
+            .wiring
+            .leaves
+            .begin(&codex(), &rig.backend.host)
+            .is_ok(),
         "slot free"
     );
 }
@@ -133,7 +137,11 @@ fn a_replaced_stop_that_fails_after_the_reuse_ended_runs_the_steps_after_the_sto
         Some(SignIn::SignedOut { found: None })
     );
     assert!(
-        rig.backend.wiring.leaves.begin(&codex()).is_ok(),
+        rig.backend
+            .wiring
+            .leaves
+            .begin(&codex(), &rig.backend.host)
+            .is_ok(),
         "slot free"
     );
 }
