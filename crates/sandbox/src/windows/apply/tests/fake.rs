@@ -110,6 +110,34 @@ impl FakeAcl {
         (!self.vanished.contains(found)).then(|| found.clone())
     }
 
+    /// A strict walk in a matter's tree (S15 `PR4h`): each child below `root` a pool SID of
+    /// `strict` owns that isn't one of its `assigned` goes to the lawyer; the first in
+    /// `keeps_owner` refuses as `PoolOwned { owned: Child }`, named. How many went.
+    fn hand_back_foreign(&mut self, root: &Path, strict: &Strict) -> Result<u64, ApplyFailure> {
+        if strict.assigned.is_empty() {
+            return Ok(0);
+        }
+        let named = |sids: &[Sid], owner: &str| sids.iter().any(|s| s.as_str() == owner);
+        let foreign: Vec<PathBuf> = self
+            .owners
+            .iter()
+            .filter(|(path, owner)| {
+                let below = path.starts_with(root) && *path != root;
+                below && named(&strict.pool, owner) && !named(&strict.assigned, owner)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        if let Some(kept) = foreign.iter().find(|p| self.keeps_owner.contains(*p)) {
+            self.refused = Some(kept.clone());
+            let owned = crate::windows::writer::Owned::Child;
+            return Err(ApplyFailure::PoolOwned { owned });
+        }
+        for path in &foreign {
+            self.owners.insert(path.clone(), LAWYER.to_owned());
+        }
+        Ok(foreign.len() as u64)
+    }
+
     /// A shut child below `root`, taken off the list, as the walk reports it.
     fn shut_below(&mut self, root: &Path) -> Option<PathBuf> {
         let at = self
@@ -232,8 +260,13 @@ impl AclWriter for FakeAcl {
             self.refused = Some(child);
             return Err(ApplyFailure::ChildShut);
         }
+        let repaired = match strict {
+            Some(strict) => self.hand_back_foreign(root, strict)?,
+            None => 0,
+        };
         Ok(Walked {
             visited: 1,
+            repaired,
             ..Walked::default()
         })
     }

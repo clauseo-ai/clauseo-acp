@@ -220,7 +220,11 @@ fn strict_for(grants: &[Grant], pool_users: &[Sid]) -> Strict {
             pool.push(sid.clone());
         }
     }
-    Strict { watched, pool }
+    Strict {
+        watched,
+        pool,
+        assigned: Vec::new(),
+    }
 }
 
 /// Writes one target's grants in order: each entry goes in, then the walk carries it down. The

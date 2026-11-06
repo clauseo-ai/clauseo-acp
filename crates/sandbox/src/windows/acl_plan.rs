@@ -214,6 +214,10 @@ pub struct AdmittedPlan {
     matter: MatterId,
     owners: Vec<MatterId>,
     grants: Vec<Grant>,
+    /// The subjects of this launch's matter (its pool user, and its matter SID when set) and the
+    /// pool user of each matter whose fence it plans: the pool owners each one's children may
+    /// have (S15 `PR4h`).
+    assigned: Vec<(MatterId, Sid)>,
     pub(crate) entries: Vec<EntryId>,
     pub(crate) created: Vec<EntryId>,
 }
@@ -233,6 +237,13 @@ impl AdmittedPlan {
     /// or a registered matter whose fence this launch plans.
     pub fn owners(&self) -> &[MatterId] {
         &self.owners
+    }
+
+    /// The subjects assigned to `matter` (see `assigned`); empty when it is neither this
+    /// launch's matter nor one whose fence it plans.
+    pub(crate) fn assigned_to(&self, matter: MatterId) -> Vec<Sid> {
+        let mine = self.assigned.iter().filter(|(m, _)| *m == matter);
+        mine.map(|(_, sid)| sid.clone()).collect()
     }
 
     /// Each grant's ledger entry, in the grants' order, once recorded; empty before.
@@ -267,8 +278,9 @@ impl AdmittedPlan {
     #[cfg(any(windows, test, feature = "test-support"))]
     pub(crate) fn from_fences(fences: &[Fence], pool: &[Sid]) -> Option<AdmittedPlan> {
         let matter = fences.first()?.id;
-        let (mut grants, mut owners) = (Vec::new(), Vec::new());
+        let (mut grants, mut owners, mut assigned) = (Vec::new(), Vec::new(), Vec::new());
         for fence in fences {
+            assigned.push((fence.id, fence.pool_user.clone()));
             let folders: Vec<(&Path, PathKind)> = fence
                 .folders
                 .iter()
@@ -283,6 +295,7 @@ impl AdmittedPlan {
             matter,
             owners,
             grants,
+            assigned,
             entries: Vec::new(),
             created: Vec::new(),
         })
@@ -319,6 +332,7 @@ impl AdmittedPlan {
             matter,
             owners: vec![matter; grants.len()],
             grants,
+            assigned: Vec::new(),
             entries: Vec::new(),
             created: Vec::new(),
         }
@@ -331,6 +345,7 @@ impl AdmittedPlan {
             matter,
             owners: vec![matter; grants.len()],
             grants,
+            assigned: Vec::new(),
             entries: Vec::new(),
             created: Vec::new(),
         }
@@ -428,7 +443,10 @@ pub fn plan(
     // Every registered matter whose fence the ledger doesn't list as applied, as the gate
     // checked it: its entries are its own (the ledger records them under its id).
     let mut owners = vec![matter; plan.grants.len()];
+    let mut assigned = vec![(matter, subjects.pool_user.clone())];
+    assigned.extend(subjects.matter.iter().map(|sid| (matter, sid.clone())));
     for fence in admitted.fences() {
+        assigned.push((fence.id, fence.pool_user.clone()));
         let before = plan.grants.len();
         let folders: Vec<(&Path, PathKind)> = fence
             .folders
@@ -461,6 +479,7 @@ pub fn plan(
         matter,
         owners,
         grants: plan.grants,
+        assigned,
         entries: Vec::new(),
         created: Vec::new(),
     })
