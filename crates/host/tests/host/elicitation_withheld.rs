@@ -4,6 +4,7 @@
 //! call's echo under a scoped form, an echo after the call completed, declined and cancelled
 //! forms, a short value of an unscoped form, and the next turn.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use clauseo_protocol::{
@@ -19,6 +20,7 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 const SECRET: &str = "sk-test-SECRET-123";
 const QUOTED: &str = "say \"hi\" C:\\dir";
 const UNSCOPED: &str = "unscoped-SECRET-9";
+const SIGNER: &str = "Müller-Geheim";
 
 /// The `n`th elicitation the thread logged (from 1).
 fn requested(events: &mut Events, n: usize) -> ElicitationId {
@@ -131,14 +133,47 @@ fn blob_text(host: &Running, output: Option<&TextOrBlob>) -> String {
     }
 }
 
+/// `value` as the store could hold it: raw, JSON-escaped (inside JSON text, which is how a
+/// `raw_output` is stored), and JSON-escaped with non-ASCII chars as `\uXXXX` in either hex case.
+fn forms(value: &str) -> Vec<String> {
+    let quoted = serde_json::to_string(value).unwrap();
+    let escaped = quoted[1..quoted.len() - 1].to_owned();
+    let ascii = |upper: bool| {
+        let mut out = String::new();
+        for c in escaped.chars() {
+            if c.is_ascii() {
+                out.push(c);
+            } else {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    if upper {
+                        write!(out, "\\u{unit:04X}").unwrap();
+                    } else {
+                        write!(out, "\\u{unit:04x}").unwrap();
+                    }
+                }
+            }
+        }
+        out
+    };
+    let mut all = vec![value.to_owned(), escaped.clone(), ascii(false), ascii(true)];
+    all.dedup();
+    all
+}
+
+/// Whether any form of `value` ([`forms`]) is stored under `dir`.
+fn stored(dir: &Path, value: &str) -> bool {
+    forms(value).iter().any(|form| stored_bytes(dir, form))
+}
+
 /// Every byte under the test's folder (the store's database and its WAL, blobs included, the
 /// log file, settings): whether `needle` occurs in any file.
-fn stored(dir: &Path, needle: &str) -> bool {
+fn stored_bytes(dir: &Path, needle: &str) -> bool {
     let mut found = false;
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
-            found |= stored(&path, needle);
+            found |= stored_bytes(&path, needle);
         } else if let Ok(bytes) = std::fs::read(&path) {
             found |= bytes
                 .windows(needle.len())
@@ -167,7 +202,8 @@ fn a_tool_call_echoing_its_form_values_logs_withheld() {
         thread,
         elicitation,
         accept(
-            json!({"server_code": SECRET, "note": "ok", "question_1": ["Fees"], "quoted": QUOTED}),
+            json!({"server_code": SECRET, "note": "ok", "question_1": ["Fees"],
+            "quoted": QUOTED, "signer": SIGNER, "pin": "12345678"}),
         ),
     );
     assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
@@ -176,20 +212,26 @@ fn a_tool_call_echoing_its_form_values_logs_withheld() {
     let logged = logged(&events, "tc-cfg-1");
     // Started (before the answer), the echo, the large echo, the completion.
     assert_eq!(logged.len(), 4, "{logged:?}");
-    // Every string withheld, "ok" and the array's "Fees" included; the JSON stays valid.
+    // Every string of 3 chars or more withheld, the array's "Fees" included, escaped inside
+    // JSON text too, and the PIN echoed as a number; "ok" is under 3 chars. The JSON stays valid.
     assert_eq!(
         inline_json(logged[1].0.as_ref()),
         json!({
             "echo": "configured with [withheld]",
             WITHHELD: 1,
-            "note": WITHHELD,
+            "note": "ok",
             "picked": [WITHHELD],
             "quoted": "got [withheld]",
+            "nested": "{\"quoted\":\"[withheld]\"}",
+            "pin": WITHHELD,
         })
     );
     assert_eq!(
         logged[1].1,
-        ["Configured with [withheld], note [withheld], schedules [withheld]."]
+        [
+            "Configured with [withheld], note ok, schedules [withheld].",
+            "{\"signer\":\"[withheld]\"}",
+        ]
     );
     // Over the inline limit: a blob, scrubbed before it was made.
     let blob = blob_text(&host, logged[2].0.as_ref());
@@ -201,6 +243,7 @@ fn a_tool_call_echoing_its_form_values_logs_withheld() {
         !stored(dir.home(), QUOTED),
         "the store holds the quoted value"
     );
+    assert!(!stored(dir.home(), SIGNER), "the store holds the signer");
 }
 
 /// What a scoped form does not cover: another call's echo, the call's own echo after it
@@ -299,4 +342,22 @@ fn an_unscoped_form_withholds_long_values_from_the_whole_turn() {
     );
     host.shutdown();
     assert!(stored(dir.home(), UNSCOPED));
+}
+
+/// The scan sees a value only stored escaped: the quoted value as a `raw_output` holds it, and
+/// the signer as Python's `ensure_ascii` writes it. A scan for the raw bytes alone misses both.
+#[test]
+fn the_store_scan_finds_escaped_forms() {
+    let dir = Dir::new("elicitation_scan_forms", &[]);
+    let quoted = dir.data().join("quoted.bin");
+    crate::write::write(&quoted, br#"{"quoted":"got say \"hi\" C:\\dir"}"#);
+    assert!(!stored_bytes(dir.home(), QUOTED));
+    assert!(stored(dir.home(), QUOTED));
+    crate::write::remove_file(&quoted);
+    crate::write::write(
+        &dir.data().join("signer.bin"),
+        br#"{"signer":"M\u00FCller-Geheim"}"#,
+    );
+    assert!(!stored_bytes(dir.home(), SIGNER));
+    assert!(stored(dir.home(), SIGNER));
 }

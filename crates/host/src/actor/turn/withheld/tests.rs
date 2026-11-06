@@ -1,12 +1,12 @@
 //! The withheld set: what an answer keeps, how it replaces, and when it lets go.
 
 use clauseo_protocol::{
-    ContentBlock, ElicitationId, RawPayload, TextOrBlob, ToolCallContent, ToolCallPatch,
-    ToolCallStatus, WITHHELD,
+    ContentBlock, ElicitationId, MatterPath, RawFrom, RawPayload, TextOrBlob, ToolCallContent,
+    ToolCallPatch, ToolCallStatus, ToolLocation, WITHHELD,
 };
 use serde_json::{Value, json};
 
-use super::{Withheld, replace_all};
+use super::{Withheld, forms, replace_all};
 
 fn values(json: Value) -> RawPayload {
     serde_json::from_value(json).unwrap()
@@ -65,23 +65,24 @@ fn the_marker_is_never_matched_again() {
 }
 
 #[test]
-fn a_scoped_answer_withholds_every_string_from_its_call() {
+fn a_scoped_answer_withholds_every_string_of_three_chars_or_more_from_its_call() {
     let mut withheld = Withheld::default();
     withheld.requested(id(1), Some("tc-1".into()));
     withheld.accepted(
         id(1),
         &values(
             json!({"api_key": "sk-SECRET", "note": "ok", "picks": ["Fees"], "n": 42,
-            "flag": true, "blank": ""}),
+            "flag": true, "blank": "", "spaced": " a "}),
         ),
     );
-    let mut patch = echo("sk-SECRET ok Fees 42 true", None);
+    // "ok" and " a " are under 3 chars once trimmed: not withheld.
+    let mut patch = echo("sk-SECRET ok Fees 42 true a", None);
     withheld.scrub_patch("tc-1", &mut patch);
     assert!(!says(&patch, "sk-SECRET"), "{patch:?}");
     assert!(!says(&patch, "Fees"), "{patch:?}");
     assert_eq!(
         patch.title.as_deref(),
-        Some("[withheld] [withheld] [withheld] 42 true")
+        Some("[withheld] ok [withheld] 42 true a")
     );
     // Another call keeps its output: the scope is the call.
     let mut other = echo("sk-SECRET", None);
@@ -187,11 +188,12 @@ fn both_sets_apply_to_a_scoped_call() {
     withheld.requested(id(2), None);
     withheld.accepted(id(1), &values(json!({ "v": "abc" })));
     withheld.accepted(id(2), &values(json!({ "v": "xabcdefghx" })));
+    let (scoped, _) = withheld.needles("tc-1").unwrap();
     assert_eq!(
-        replace_all("abc xabcdefghx", &withheld.needles("tc-1").unwrap()).as_deref(),
+        replace_all("abc xabcdefghx", &scoped).as_deref(),
         Some("[withheld] [withheld]")
     );
-    assert_eq!(withheld.needles("tc-2").unwrap(), ["xabcdefghx"]);
+    assert_eq!(withheld.needles("tc-2").unwrap().0, ["xabcdefghx"]);
 }
 
 #[test]
@@ -200,4 +202,190 @@ fn debug_prints_no_value() {
     withheld.requested(id(1), Some("tc-1".into()));
     withheld.accepted(id(1), &values(json!({ "v": "sk-SECRET" })));
     assert!(!format!("{withheld:?}").contains("sk-SECRET"));
+}
+
+/// A scoped set holding `value` for tc-1.
+fn scoped(value: &str) -> Withheld {
+    let mut withheld = Withheld::default();
+    withheld.requested(id(1), Some("tc-1".into()));
+    withheld.accepted(id(1), &values(json!({ "v": value })));
+    withheld
+}
+
+fn raw_output(withheld: &mut Withheld, output: &Value) -> Value {
+    let mut patch = ToolCallPatch {
+        raw_output: Some(TextOrBlob::Inline(output.to_string())),
+        ..ToolCallPatch::default()
+    };
+    withheld.scrub_patch("tc-1", &mut patch);
+    let Some(TextOrBlob::Inline(text)) = &patch.raw_output else {
+        panic!("{patch:?}");
+    };
+    serde_json::from_str(text).unwrap()
+}
+
+/// The review's `rev_uris_names_and_paths_are_not_scrubbed`: every string field of the call
+/// and its content is scrubbed, paths and URIs included.
+#[test]
+fn paths_uris_names_and_every_other_string_field_are_scrubbed() {
+    const S: &str = "sk-test-SECRET-123";
+    let mut withheld = scoped(S);
+    let mut patch = ToolCallPatch {
+        tool_name: Some(format!("tool-{S}").into()),
+        locations: Some(vec![
+            ToolLocation::Inside {
+                path: MatterPath::new(&format!("notes/{S}.txt")).unwrap(),
+                line: Some(4),
+            },
+            ToolLocation::Outside {
+                display: format!("/tmp/{S}/x"),
+            },
+        ]),
+        content: Some(vec![
+            ToolCallContent::Diff {
+                path: ToolLocation::Outside {
+                    display: format!("~/{S}.md"),
+                },
+                old: None,
+                new: TextOrBlob::Inline(String::new()),
+            },
+            ToolCallContent::Content {
+                content: ContentBlock::ResourceLink {
+                    uri: format!("https://x.example/?key={S}"),
+                    name: format!("name {S}"),
+                    mime_type: Some(format!("text/{S}").into()),
+                    title: Some(format!("title {S}")),
+                    description: Some(format!("about {S}")),
+                    size: None,
+                },
+            },
+            ToolCallContent::Content {
+                content: ContentBlock::Resource {
+                    uri: format!("file:///{S}"),
+                    mime_type: None,
+                    text: None,
+                    blob: None,
+                },
+            },
+            ToolCallContent::Content {
+                content: ContentBlock::Image {
+                    data: TextOrBlob::Inline("AAAA".to_owned()),
+                    mime_type: "image/png".into(),
+                    uri: Some(format!("https://img.example/{S}.png")),
+                },
+            },
+            ToolCallContent::Content {
+                content: ContentBlock::Unsupported {
+                    kind: format!("kind-{S}"),
+                    raw_from: RawFrom::Acp,
+                    raw: Some(TextOrBlob::Inline(json!({ "k": S }).to_string())),
+                },
+            },
+        ]),
+        ..ToolCallPatch::default()
+    };
+    withheld.scrub_patch("tc-1", &mut patch);
+    assert!(!says(&patch, S), "{patch:?}");
+    let locations = patch.locations.as_deref().unwrap();
+    assert_eq!(
+        locations.first(),
+        Some(&ToolLocation::Inside {
+            path: MatterPath::new("notes/[withheld].txt").unwrap(),
+            line: Some(4),
+        })
+    );
+}
+
+/// The review's `rev_a_value_json_escaped_inside_a_string_is_not_scrubbed`: an MCP result is
+/// JSON text inside a string, so the value sits there escaped.
+#[test]
+fn a_value_json_escaped_inside_a_string_or_text_is_scrubbed() {
+    let value = "say \"hi\" C:\\dir";
+    let mut withheld = scoped(value);
+    let inner = json!({ "v": value }).to_string();
+    assert_eq!(
+        raw_output(&mut withheld, &json!({ "text": inner })),
+        json!({"text": "{\"v\":\"[withheld]\"}"})
+    );
+    let mut patch = echo(&inner, None);
+    withheld.scrub_patch("tc-1", &mut patch);
+    assert_eq!(patch.title.as_deref(), Some("{\"v\":\"[withheld]\"}"));
+}
+
+/// The review's `rev_non_ascii_value_ascii_escaped_inside_a_string_is_not_scrubbed`: Python's
+/// `ensure_ascii` writes `\u00fc`, in either hex case, and a surrogate pair beyond the BMP.
+#[test]
+fn a_value_ascii_escaped_is_scrubbed_in_both_hex_cases_and_beyond_the_bmp() {
+    let mut withheld = scoped("Müller-Lüdenscheidt");
+    for echoed in [
+        "M\\u00fcller-L\\u00fcdenscheidt",
+        "M\\u00FCller-L\\u00FCdenscheidt",
+    ] {
+        let mut patch = echo(&format!("got {echoed}"), None);
+        withheld.scrub_patch("tc-1", &mut patch);
+        assert_eq!(patch.title.as_deref(), Some("got [withheld]"), "{echoed}");
+    }
+    let mut emoji = scoped("key\u{1F600}abc");
+    let mut patch = echo("x key\\ud83d\\ude00abc", None);
+    emoji.scrub_patch("tc-1", &mut patch);
+    assert_eq!(patch.title.as_deref(), Some("x [withheld]"));
+    let mut patch = echo("x key\\uD83D\\uDE00abc", None);
+    emoji.scrub_patch("tc-1", &mut patch);
+    assert_eq!(patch.title.as_deref(), Some("x [withheld]"));
+}
+
+#[test]
+fn the_forms_of_a_value() {
+    let all: Vec<String> = forms(" Mü\"x ").iter().map(|f| f.to_string()).collect();
+    assert_eq!(
+        all,
+        [
+            " Mü\"x ",
+            " M\\u00fc\\\"x ",
+            " M\\u00FC\\\"x ",
+            " Mü\\\"x ",
+            "Mü\"x",
+            "M\\u00fc\\\"x",
+            "M\\u00FC\\\"x",
+            "Mü\\\"x",
+        ]
+    );
+}
+
+/// The review's `rev_a_string_value_echoed_as_a_json_number_is_not_scrubbed`.
+#[test]
+fn a_value_echoed_as_a_json_number_is_scrubbed() {
+    let mut withheld = scoped("12345678");
+    assert_eq!(
+        raw_output(
+            &mut withheld,
+            &json!({"pin": 12_345_678, "other": 1_234_567, "s": "12345678"})
+        ),
+        json!({"pin": WITHHELD, "other": 1_234_567, "s": WITHHELD})
+    );
+    let mut decimal = scoped("1.50");
+    assert_eq!(
+        raw_output(&mut decimal, &json!({ "fee": 1.5 })),
+        json!({ "fee": WITHHELD })
+    );
+}
+
+#[test]
+fn a_value_pasted_with_spaces_matches_its_trimmed_echo() {
+    let mut withheld = scoped("pasted-value-123 \n");
+    let mut patch = echo("got=pasted-value-123.", None);
+    withheld.scrub_patch("tc-1", &mut patch);
+    assert_eq!(patch.title.as_deref(), Some("got=[withheld]."));
+}
+
+/// The review's `rev_two_withheld_keys_collapse_into_one`.
+#[test]
+fn keys_that_become_withheld_stay_apart() {
+    let mut withheld = Withheld::default();
+    withheld.requested(id(1), Some("tc-1".into()));
+    withheld.accepted(id(1), &values(json!({"a": "first-key", "b": "second-key"})));
+    assert_eq!(
+        raw_output(&mut withheld, &json!({"first-key": 1, "second-key": 2})),
+        json!({"[withheld]": 1, "[withheld] 2": 2})
+    );
 }

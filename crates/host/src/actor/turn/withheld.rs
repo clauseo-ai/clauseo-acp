@@ -6,44 +6,78 @@
 //! turn has them replaced with [`WITHHELD`] before `build.rs` decides inline or blob, so the
 //! event log and the blobs never hold them:
 //!
-//! - a form scoped to a tool call (the scope's `toolCallId`): every non-empty string of the
-//!   values, inside lists included, from that call's later updates, until the call completes
-//!   or fails or the turn ends;
-//! - a form with no tool call scope: every string of [`UNSCOPED_MIN_CHARS`] chars or more, from
-//!   every tool call of the turn, until the turn ends. Shorter strings ("Yes", "Fees") would
-//!   also blank ordinary words of unrelated output.
+//! - a form scoped to a tool call (the scope's `toolCallId`): every string of
+//!   [`SCOPED_MIN_CHARS`] chars or more after trimming, inside lists included, from that call's
+//!   later events, until the call completes or fails or the turn ends;
+//! - a form with no tool call scope: every string of [`UNSCOPED_MIN_CHARS`] chars or more after
+//!   trimming, from every tool call of the turn, until the turn ends. Shorter strings ("Yes",
+//!   "Fees") would also blank ordinary words of unrelated output.
 //!
-//! Numbers and booleans are not withheld: they cannot be told apart from other output. A
-//! declined or cancelled form, and a URL elicitation, keep nothing. The agent's own message
-//! text, and a value it transforms (encodes, splits, rewords), are not covered.
+//! Each value is matched in several forms ([`forms`]): as typed, trimmed, JSON-escaped, and
+//! JSON-escaped with every non-ASCII char as `\uXXXX` (lower and upper hex). A value whose
+//! trimmed text is a JSON number also replaces an equal number in parsed JSON. A declined or
+//! cancelled form, and a URL elicitation, keep nothing. The agent's own message text, and a
+//! value it transforms otherwise (encodes, splits, rewords), are not covered.
 //!
-//! Matching is exact and case-sensitive, earliest match first and the longest value at a
+//! Matching is exact and case-sensitive, earliest match first and the longest form at a
 //! position, so one value inside another leaves no remainder and the marker itself is never
 //! matched again. JSON fields (`raw_input`, `raw_output`, an unsupported block's `raw`) are
-//! parsed and scrubbed in their string leaves and object keys, so escapes cannot hide a match
-//! and the JSON stays valid.
+//! parsed and scrubbed in their string values, numbers and object keys, so the JSON stays
+//! valid. Every other string field of the call is scrubbed as text (`fields.rs`).
+
+mod fields;
 
 use std::collections::BTreeMap;
 
 use clauseo_protocol::{
-    CompactString, ContentBlock, ElicitationId, RawPayload, TextOrBlob, ToolCallContent,
-    ToolCallPatch, ToolCallStatus, WITHHELD,
+    CompactString, ElicitationId, RawPayload, ToolCallPatch, ToolCallStatus, WITHHELD,
 };
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-/// The shortest string, in chars, an elicitation with no tool call scope withholds.
+/// The shortest string, in chars after trimming, a form scoped to a tool call withholds.
+pub(super) const SCOPED_MIN_CHARS: usize = 3;
+
+/// The shortest string, in chars after trimming, a form with no tool call scope withholds.
 pub(super) const UNSCOPED_MIN_CHARS: usize = 8;
+
+/// The forms and numbers withheld from some tool calls.
+#[derive(Default)]
+struct Set {
+    /// Every form of every value ([`forms`]).
+    forms: Vec<Zeroizing<String>>,
+    /// The values whose trimmed text is a JSON number, as `serde_json` writes that number.
+    numbers: Vec<Zeroizing<String>>,
+}
+
+impl Set {
+    fn add(&mut self, value: &str, min_chars: usize) {
+        if value.trim().chars().count() < min_chars {
+            return;
+        }
+        for form in forms(value) {
+            if !self.forms.contains(&form) {
+                self.forms.push(form);
+            }
+        }
+        if let Ok(number) = serde_json::from_str::<serde_json::Number>(value.trim()) {
+            let number = Zeroizing::new(number.to_string());
+            if !self.numbers.contains(&number) {
+                self.numbers.push(number);
+            }
+        }
+    }
+}
 
 /// The withheld strings of one turn. Its `Debug` prints counts only.
 #[derive(Default)]
 pub(super) struct Withheld {
     /// The pending form elicitations scoped to a tool call: the agent's `toolCallId`.
     scopes: BTreeMap<ElicitationId, CompactString>,
-    /// Strings withheld from one tool call, by the agent's `toolCallId`.
-    calls: BTreeMap<CompactString, Vec<Zeroizing<String>>>,
-    /// Strings withheld from every tool call of the turn (unscoped forms).
-    turn: Vec<Zeroizing<String>>,
+    /// What is withheld from one tool call, by the agent's `toolCallId`.
+    calls: BTreeMap<CompactString, Set>,
+    /// What is withheld from every tool call of the turn (unscoped forms).
+    turn: Set,
 }
 
 impl std::fmt::Debug for Withheld {
@@ -51,7 +85,7 @@ impl std::fmt::Debug for Withheld {
         f.debug_struct("Withheld")
             .field("scopes", &self.scopes.len())
             .field("calls", &self.calls.len())
-            .field("turn", &self.turn.len())
+            .field("turn", &self.turn.forms.len())
             .finish()
     }
 }
@@ -72,24 +106,12 @@ impl Withheld {
     pub(super) fn accepted(&mut self, elicitation: ElicitationId, values: &RawPayload) {
         let mut strings = Vec::new();
         collect(values, &mut strings);
-        match self.scopes.remove(&elicitation) {
-            Some(acp) => {
-                let kept = self.calls.entry(acp).or_default();
-                for string in strings {
-                    if !string.is_empty() && !kept.iter().any(|old| **old == *string) {
-                        kept.push(Zeroizing::new(string.to_owned()));
-                    }
-                }
-            }
-            None => {
-                for string in strings {
-                    if string.chars().count() >= UNSCOPED_MIN_CHARS
-                        && !self.turn.iter().any(|old| **old == *string)
-                    {
-                        self.turn.push(Zeroizing::new(string.to_owned()));
-                    }
-                }
-            }
+        let (set, min_chars) = match self.scopes.remove(&elicitation) {
+            Some(acp) => (self.calls.entry(acp).or_default(), SCOPED_MIN_CHARS),
+            None => (&mut self.turn, UNSCOPED_MIN_CHARS),
+        };
+        for string in strings {
+            set.add(string, min_chars);
         }
     }
 
@@ -101,28 +123,14 @@ impl Withheld {
     /// Whether anything is withheld from tool call `acp_id`.
     #[cfg(test)]
     pub(super) fn covers(&self, acp_id: &str) -> bool {
-        !self.turn.is_empty() || self.calls.contains_key(acp_id)
+        !self.turn.forms.is_empty() || self.calls.contains_key(acp_id)
     }
 
     /// Scrubs a tool call's update before it is built; a `Completed` or `Failed` status then
     /// drops what is withheld from that call alone.
     pub(super) fn scrub_patch(&mut self, acp_id: &str, patch: &mut ToolCallPatch) {
-        if let Some(needles) = self.needles(acp_id) {
-            let needles = Needles::new(&needles);
-            if let Some(title) = patch.title.as_mut()
-                && let Some(new) = needles.replace(title)
-            {
-                *title = CompactString::from(new);
-            }
-            if let Some(value) = patch.raw_input.as_mut() {
-                needles.json(value);
-            }
-            if let Some(value) = patch.raw_output.as_mut() {
-                needles.json(value);
-            }
-            for item in patch.content.iter_mut().flatten() {
-                needles.content(item);
-            }
+        if let Some((forms, numbers)) = self.needles(acp_id) {
+            Needles::new(&forms, &numbers).patch(patch);
         }
         self.status(acp_id, patch.status);
     }
@@ -130,20 +138,8 @@ impl Withheld {
     /// Scrubs a tool call the agent starts after the answer.
     pub(super) fn scrub_call(&mut self, call: &mut clauseo_acp::ToolCall) {
         let acp_id = call.acp_id.clone();
-        if let Some(needles) = self.needles(&acp_id) {
-            let needles = Needles::new(&needles);
-            if let Some(new) = needles.replace(&call.title) {
-                call.title = CompactString::from(new);
-            }
-            if let Some(value) = call.raw_input.as_mut() {
-                needles.json(value);
-            }
-            if let Some(value) = call.raw_output.as_mut() {
-                needles.json(value);
-            }
-            for item in &mut call.content {
-                needles.content(item);
-            }
+        if let Some((forms, numbers)) = self.needles(&acp_id) {
+            Needles::new(&forms, &numbers).call(call);
         }
         self.status(&acp_id, Some(call.status));
     }
@@ -157,22 +153,86 @@ impl Withheld {
         }
     }
 
-    /// The strings withheld from `acp_id`, longest first, or `None` when there are none.
-    fn needles(&self, acp_id: &str) -> Option<Vec<&str>> {
-        let mut needles: Vec<&str> = self
-            .calls
-            .get(acp_id)
-            .into_iter()
-            .flatten()
-            .chain(&self.turn)
-            .map(|string| string.as_str())
+    /// The forms withheld from `acp_id`, longest first, and the numbers, or `None` when there
+    /// are none.
+    fn needles(&self, acp_id: &str) -> Option<(Vec<&str>, Vec<&str>)> {
+        let sets = || self.calls.get(acp_id).into_iter().chain([&self.turn]);
+        let mut forms: Vec<&str> = sets()
+            .flat_map(|set| &set.forms)
+            .map(|form| form.as_str())
             .collect();
-        if needles.is_empty() {
+        if forms.is_empty() {
             return None;
         }
-        longest_first(&mut needles);
-        Some(needles)
+        longest_first(&mut forms);
+        let numbers = sets()
+            .flat_map(|set| &set.numbers)
+            .map(|number| number.as_str())
+            .collect();
+        Some((forms, numbers))
     }
+}
+
+/// The forms of `value` matched in tool output: as typed, trimmed (when that differs and is
+/// not empty), and of each of those, the JSON-escaped text (what `serde_json` writes between
+/// the quotes) and that text with every non-ASCII char as `\uXXXX`, in lower and in upper hex,
+/// a char outside the BMP as its surrogate pair (Python's `ensure_ascii`). Without repeats.
+pub(super) fn forms(value: &str) -> Vec<Zeroizing<String>> {
+    let mut bases = vec![value];
+    let trimmed = value.trim();
+    if trimmed != value && !trimmed.is_empty() {
+        bases.push(trimmed);
+    }
+    let mut out: Vec<Zeroizing<String>> = Vec::new();
+    let mut push = |form: Zeroizing<String>| {
+        if !form.is_empty() && !out.contains(&form) {
+            out.push(form);
+        }
+    };
+    for base in bases {
+        push(Zeroizing::new(base.to_owned()));
+        let quoted = Zeroizing::new(serde_json::to_string(base).unwrap_or_default());
+        let escaped = Zeroizing::new(
+            quoted
+                .get(1..quoted.len().saturating_sub(1))
+                .unwrap_or_default()
+                .to_owned(),
+        );
+        if !escaped.is_ascii() {
+            push(ascii_escaped(&escaped, false));
+            push(ascii_escaped(&escaped, true));
+        }
+        push(escaped);
+    }
+    out
+}
+
+/// `text` with every non-ASCII char as `\uXXXX` UTF-16 units, in upper or lower hex.
+fn ascii_escaped(text: &str, upper: bool) -> Zeroizing<String> {
+    let digits: &[u8; 16] = if upper {
+        b"0123456789ABCDEF"
+    } else {
+        b"0123456789abcdef"
+    };
+    let mut out = Zeroizing::new(String::with_capacity(text.len() * 2));
+    for c in text.chars() {
+        if c.is_ascii() {
+            out.push(c);
+            continue;
+        }
+        let mut units = [0u16; 2];
+        for unit in c.encode_utf16(&mut units) {
+            out.push_str("\\u");
+            for shift in [12, 8, 4, 0] {
+                let digit = digits
+                    .get(usize::from((*unit >> shift) & 0xF))
+                    .copied()
+                    .unwrap_or(b'0');
+                out.push(char::from(digit));
+            }
+        }
+    }
+    out
 }
 
 /// Sorts `needles` longest first and drops repeats.
@@ -197,19 +257,20 @@ fn collect<'a>(value: &'a RawPayload, out: &mut Vec<&'a str>) {
     }
 }
 
-/// The strings to replace, longest first.
+/// The forms to replace, longest first, and the numbers.
 struct Needles<'a> {
-    plain: &'a [&'a str],
+    forms: &'a [&'a str],
+    numbers: &'a [&'a str],
 }
 
 impl<'a> Needles<'a> {
-    const fn new(plain: &'a [&'a str]) -> Self {
-        Self { plain }
+    const fn new(forms: &'a [&'a str], numbers: &'a [&'a str]) -> Self {
+        Self { forms, numbers }
     }
 
-    /// `text` with every needle replaced, or `None` when none occurs.
+    /// `text` with every form replaced, or `None` when none occurs.
     fn replace(&self, text: &str) -> Option<String> {
-        replace_all(text, self.plain)
+        replace_all(text, self.forms)
     }
 
     fn text(&self, text: &mut String) {
@@ -218,19 +279,9 @@ impl<'a> Needles<'a> {
         }
     }
 
-    fn inline(&self, value: &mut TextOrBlob) {
-        // ACP hands every value over inline; `build.rs` makes the blobs after this.
-        if let TextOrBlob::Inline(text) = value {
-            self.text(text);
-        }
-    }
-
-    /// A JSON text: scrubbed in its parsed string leaves and keys, written back compact. Text
-    /// that does not parse is scrubbed as text, with each needle also in its JSON-escaped form.
-    fn json(&self, value: &mut TextOrBlob) {
-        let TextOrBlob::Inline(text) = value else {
-            return;
-        };
+    /// A JSON text, parsed and scrubbed in its strings, numbers and keys, written back compact.
+    /// Text that does not parse is scrubbed as text.
+    fn json_text(&self, text: &mut String) {
         if let Ok(mut parsed) = serde_json::from_str::<Value>(text) {
             if self.walk(&mut parsed)
                 && let Ok(new) = serde_json::to_string(&parsed)
@@ -239,25 +290,11 @@ impl<'a> Needles<'a> {
             }
             return;
         }
-        // The escaped copies hold the values too: zeroized on drop.
-        let escaped: Vec<Zeroizing<String>> = self
-            .plain
-            .iter()
-            .filter_map(|needle| {
-                let quoted = Zeroizing::new(serde_json::to_string(needle).ok()?);
-                let inner = quoted.get(1..quoted.len().saturating_sub(1))?;
-                (inner != *needle).then(|| Zeroizing::new(inner.to_owned()))
-            })
-            .collect();
-        let mut all: Vec<&str> = self.plain.to_vec();
-        all.extend(escaped.iter().map(|needle| needle.as_str()));
-        longest_first(&mut all);
-        if let Some(new) = replace_all(text, &all) {
-            *text = new;
-        }
+        self.text(text);
     }
 
-    /// Replaces in every string and key of `value`; whether anything changed.
+    /// Replaces in every string, number and key of `value`; whether anything changed. Keys
+    /// that become equal stay apart: the second is `[withheld] 2`, and so on.
     fn walk(&self, value: &mut Value) -> bool {
         match value {
             Value::String(string) => match self.replace(string) {
@@ -267,6 +304,15 @@ impl<'a> Needles<'a> {
                 }
                 None => false,
             },
+            Value::Number(number) => {
+                let text = Zeroizing::new(number.to_string());
+                if self.numbers.contains(&text.as_str()) {
+                    *value = Value::String(WITHHELD.to_owned());
+                    true
+                } else {
+                    false
+                }
+            }
             Value::Array(items) => items
                 .iter_mut()
                 .fold(false, |changed, item| self.walk(item) | changed),
@@ -282,46 +328,26 @@ impl<'a> Needles<'a> {
                         }
                         None => key,
                     };
+                    let key = free_key(map, key);
                     map.insert(key, item);
                 }
                 changed
             }
-            Value::Null | Value::Bool(_) | Value::Number(_) => false,
+            Value::Null | Value::Bool(_) => false,
         }
     }
+}
 
-    fn block(&self, block: &mut ContentBlock) {
-        match block {
-            ContentBlock::Text { text } => self.text(text),
-            ContentBlock::Resource { text, .. } => {
-                if let Some(text) = text.as_mut() {
-                    self.inline(text);
-                }
-            }
-            ContentBlock::Unsupported { raw, .. } => {
-                if let Some(raw) = raw.as_mut() {
-                    self.json(raw);
-                }
-            }
-            ContentBlock::Image { .. }
-            | ContentBlock::Audio { .. }
-            | ContentBlock::ResourceLink { .. } => {}
-        }
+/// `key`, or `key 2`, `key 3`... the first that `map` does not hold yet.
+fn free_key(map: &serde_json::Map<String, Value>, key: String) -> String {
+    if !map.contains_key(&key) {
+        return key;
     }
-
-    fn content(&self, item: &mut ToolCallContent) {
-        match item {
-            ToolCallContent::Text { text } => self.inline(text),
-            ToolCallContent::Content { content } => self.block(content),
-            ToolCallContent::Diff { old, new, .. } => {
-                if let Some(old) = old.as_mut() {
-                    self.inline(old);
-                }
-                self.inline(new);
-            }
-            ToolCallContent::Unknown { .. } => {}
-        }
-    }
+    // At most `map.len()` suffixes are taken, so one of these is free.
+    (2..=map.len().saturating_add(2))
+        .map(|n| format!("{key} {n}"))
+        .find(|candidate| !map.contains_key(candidate))
+        .unwrap_or(key)
 }
 
 /// `text` with each occurrence of a needle replaced by [`WITHHELD`], scanning left to right:
