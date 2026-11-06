@@ -142,6 +142,24 @@ pub(super) fn on_watch_ended(actor: &mut Actor, watch: u64) {
     }
 }
 
+/// A relay's `recharge` tool result said paid (the relay dropped the connectors crate's account
+/// copy): out of credit ends, the balance it carried shows at once, and the account is read now,
+/// not at the one-a-minute pace, for what the call it resumed spent. The watch on that recharge,
+/// if any, sets the outcome at its next poll.
+pub(super) fn recharged(actor: &mut Actor, balance: Option<i64>) {
+    let now = actor.now();
+    let state = &mut actor.connectors.state;
+    state.out_of_credit = None;
+    if let Some(credits) = balance {
+        state.set_balance(credits, now.wall);
+    }
+    if state.signed_in()
+        && let Err(error) = spawn(actor, None, Job::Recharged)
+    {
+        tracing::warn!(error = %crate::log_file::Cause(&error), "no balance read");
+    }
+}
+
 /// Out of credit, with the payment the connector opened: its pay link when it is ours, and a
 /// watch on its recharge unless that one is watched already.
 pub(super) fn out_of_credit(actor: &mut Actor, payment: clauseo_connectors::PaymentRef) {

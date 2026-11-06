@@ -18,8 +18,6 @@ use crate::error::Error;
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a whole request may take.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
-/// How long a `wait=40` recharge poll may take.
-pub(crate) const POLL_TIMEOUT: Duration = Duration::from_secs(50);
 
 /// The agent for one request, or why there is none (a refused proxy setting).
 pub(crate) type Route = Result<Agent, String>;

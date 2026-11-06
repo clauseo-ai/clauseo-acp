@@ -230,6 +230,9 @@ impl FakeState {
     }
 }
 
+/// How often a fake's [`Config`] polls a recharge (production: 3 s), so tests settle quickly.
+pub const FAKE_RECHARGE_INTERVAL: Duration = Duration::from_millis(100);
+
 /// `prefix` and 32 random hex characters.
 fn random_token(prefix: &str) -> String {
     let mut bytes = [0u8; 16];
@@ -276,8 +279,8 @@ impl FakeHandle {
     }
 
     /// A [`Config`] for this fake: `Origin::Fake`, user agent `Clauseo/0.0.0-test`, no proxy,
-    /// the default timeouts, the fake's own clock, and `state_file` (a [`ScratchDir`]'s
-    /// `state_file()`). Change any field after.
+    /// the default timeouts, recharge polls [`FAKE_RECHARGE_INTERVAL`] apart, the fake's own
+    /// clock, and `state_file` (a [`ScratchDir`]'s `state_file()`). Change any field after.
     pub fn config(&self, state_file: PathBuf) -> Config {
         Config {
             origin: Origin::Fake(self.base_url()),
@@ -285,6 +288,7 @@ impl FakeHandle {
             proxy: ProxyChoice::Direct,
             signin_timeout: SIGNIN_TIMEOUT,
             recharge_deadline: RECHARGE_DEADLINE,
+            recharge_interval: FAKE_RECHARGE_INTERVAL,
             clock: Arc::clone(&self.shared.clock),
             state_file,
         }
@@ -478,6 +482,11 @@ impl FakeHandle {
     /// unknown, paid or already ended one.
     pub fn expire_recharge(&self, recharge_id: &str) -> bool {
         self.end_recharge(recharge_id, "expired")
+    }
+
+    /// Ends an unpaid recharge as `amount_mismatch_held`, as [`FakeHandle::expire_recharge`] does.
+    pub fn hold_recharge(&self, recharge_id: &str) -> bool {
+        self.end_recharge(recharge_id, "amount_mismatch_held")
     }
 
     /// Ends an unpaid recharge as `cancelled`, as [`FakeHandle::expire_recharge`] does.

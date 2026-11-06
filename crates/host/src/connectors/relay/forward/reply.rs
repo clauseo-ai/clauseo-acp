@@ -8,7 +8,13 @@
 //! - `initialize`'s `result.protocolVersion`;
 //! - a `tools/call`'s `result.isError` and, only when it is `true`, its `structuredContent` up to
 //!   [`MAX_STRUCTURED_BYTES`] (a larger one is `OtherError`, logged), which
-//!   [`classify_tool_result_for`] reads from a small value rebuilt around it.
+//!   [`classify_tool_result_for`] reads from a small value rebuilt around it;
+//! - a `recharge` call's `result.structuredContent.status` and `balance_credits`, borrowed, so a
+//!   paid recharge refreshes the balance (`RechargePaid`).
+//!
+//! What reaches the agent is never rebuilt: `content` and `structuredContent`, every block of
+//! each, pass as the connector wrote them. (Claude Code shows its model only `structuredContent`
+//! when a result has one, so what the model must read belongs there; that is the connector's.)
 //!
 //! The answer's own bytes are the line, with any raw `\n` or `\r` (in valid JSON only whitespace
 //! between tokens) made a space so it stays one line. A message with a duplicate top-level key
@@ -71,6 +77,15 @@ pub(super) struct ToolResult<'a> {
         deserialize_with = "present"
     )]
     pub(super) structured: Option<&'a RawValue>,
+}
+
+/// A `recharge` result's `structuredContent`: its status, and the balance after it.
+#[derive(Deserialize)]
+struct RechargeResult<'a> {
+    #[serde(borrow, default, deserialize_with = "present")]
+    status: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    balance_credits: Option<&'a RawValue>,
 }
 
 /// A member that is present, whatever its value (`null` included); a missing one is the
@@ -236,6 +251,15 @@ fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
         ToolOutcome::Ok if spend == Spend::Paid => hub.events.event(RelayEvent::PaidResult {
             session: session.key,
         }),
+        ToolOutcome::Ok if spend == Spend::Recharge => {
+            if let Some(Paid { balance_credits }) = recharge_paid(result) {
+                hub.connector.forget_account();
+                hub.events.event(RelayEvent::RechargePaid {
+                    session: session.key,
+                    balance_credits,
+                });
+            }
+        }
         ToolOutcome::Ok | ToolOutcome::OtherError => {}
     }
 }
@@ -269,6 +293,29 @@ fn tool_outcome(session: &Session, result: &RawValue) -> ToolOutcome {
     let small = json!({"isError": true, "structuredContent": structured});
     let hub = &session.hub;
     classify_tool_result_for(hub.connector.known(), &hub.origin, &small)
+}
+
+/// A `recharge` result that said paid.
+struct Paid {
+    /// Its `balance_credits`, when that is a whole number.
+    balance_credits: Option<i64>,
+}
+
+/// Whether a `recharge` result (not an error) says `structuredContent.status == "paid"`, and
+/// then its `balance_credits` when that is a whole number. Only those two members are read; the
+/// rest (a resumed call's result, say) is skipped unbuilt.
+fn recharge_paid(result: &RawValue) -> Option<Paid> {
+    let read = object::<ToolResult<'_>>(result)?;
+    let is_error = read
+        .is_error
+        .is_some_and(|raw| serde_json::from_str::<bool>(raw.get()).is_ok_and(|yes| yes));
+    let structured = object::<RechargeResult<'_>>(read.structured.filter(|_| !is_error)?)?;
+    let paid = structured.status.and_then(small_string).as_deref() == Some("paid");
+    paid.then(|| Paid {
+        balance_credits: structured
+            .balance_credits
+            .and_then(|raw| serde_json::from_str::<i64>(raw.get()).ok()),
+    })
 }
 
 /// A `protocolVersion` fit for a header: 1 to 32 ASCII letters, digits, `-`, `.` or `_`.

@@ -123,5 +123,6 @@ fn production_config_has_the_brief_s_defaults() {
     assert_eq!(config.proxy, ProxyChoice::Env);
     assert_eq!(config.signin_timeout, Duration::from_mins(5));
     assert_eq!(config.recharge_deadline, Duration::from_mins(15));
+    assert_eq!(config.recharge_interval, Duration::from_secs(3));
     assert!(format!("{config:?}").contains("Clauseo/1.2.3"));
 }

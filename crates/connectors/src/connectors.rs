@@ -283,13 +283,21 @@ impl ConnectorHandle {
         crate::calls::account(self)
     }
 
+    /// Drops the account's copy, so the next [`ConnectorHandle::account`] asks the connector:
+    /// for a balance that changed where this crate did not see it (a paid `recharge` tool
+    /// result through the relay).
+    pub fn forget_account(&self) {
+        *lock(&self.inner.account) = None;
+    }
+
     /// Opens a recharge for `pack`; its pay link is always ours.
     pub fn create_recharge(&self, pack: &str) -> Result<Recharge, Error> {
         crate::calls::create_recharge(self, pack)
     }
 
-    /// Polls the recharge until it is paid (or otherwise settled), the recharge deadline
-    /// passes, or `cancel` is set.
+    /// Polls the recharge (a plain GET every
+    /// [`Config::recharge_interval`](crate::Config::recharge_interval), never `wait` or
+    /// `resume`) until it is settled, the recharge deadline passes, or `cancel` is set.
     pub fn wait_recharge(&self, recharge_id: &str, cancel: &CancelFlag) -> Result<Recharge, Error> {
         crate::calls::wait_recharge(self, recharge_id, cancel)
     }

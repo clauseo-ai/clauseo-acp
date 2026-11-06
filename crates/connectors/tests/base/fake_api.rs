@@ -253,7 +253,11 @@ fn a_recharge_is_created_and_a_wait_poll_returns_when_paid() {
         }
         assert!(fake.mark_paid(&id));
         let paid: Value = serde_json::from_slice(&poll.join().unwrap().body).unwrap();
+        // The connector's paid shape: no `recharge_id`, no `payment`, the balance.
         assert_eq!(paid["status"], "paid");
+        assert_eq!(paid.get("recharge_id"), None);
+        assert_eq!(paid.get("payment"), None);
+        assert_eq!(paid["balance_credits"], fake.balance());
     });
     assert_eq!(
         get(&fake, "/v1/case-law/recharges/rch_nope", Some(&access)).status,

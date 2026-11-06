@@ -159,11 +159,13 @@ fn a_pay_link_that_is_not_ours_is_refused() {
     }
 }
 
+/// The poll is a plain GET: no `wait` (a long wait the connector caps per account) and no
+/// `resume` (it would claim the call the agent's own `recharge` resumes). Paid, the answer
+/// has no `recharge_id` and no `payment`, and its balance comes back.
 #[test]
 fn wait_recharge_polls_until_paid() {
     let rig = rig();
     sign_in(&rig);
-    rig.fake.set_wait_cap(Duration::from_millis(100));
     let recharge = rig.handle.create_recharge("200").unwrap();
     let id = recharge.recharge_id;
     let payer = id.clone();
@@ -181,12 +183,77 @@ fn wait_recharge_polls_until_paid() {
     assert!(rig.fake.mark_paid(&id));
     let paid = waiter.join().unwrap().unwrap();
     assert_eq!(paid.status, RechargeStatus::Paid);
+    assert_eq!(paid.recharge_id, id);
+    assert_eq!(paid.balance_credits, Some(rig.fake.balance()));
     for poll in rig
         .fake
         .requests_to(&format!("/v1/case-law/recharges/{id}"))
     {
-        assert_eq!(poll.query, "wait=40");
+        assert_eq!(poll.query, "");
+        assert_eq!(poll.method, "GET");
+        assert_eq!(poll.body, Vec::<u8>::new());
     }
+}
+
+/// Expired, `amount_mismatch_held` and cancelled end the poll with that status. Expired's
+/// `payment` is a fresh recharge: its other id is not refused, and its link is not taken.
+#[test]
+fn wait_recharge_stops_on_each_settled_status() {
+    let rig = rig();
+    sign_in(&rig);
+    for (end, status) in [
+        (FakeEnd::Expire, "expired"),
+        (FakeEnd::Hold, "amount_mismatch_held"),
+        (FakeEnd::Cancel, "cancelled"),
+    ] {
+        let id = rig.handle.create_recharge("200").unwrap().recharge_id;
+        let polls = format!("/v1/case-law/recharges/{id}");
+        let handle = rig.handle.clone();
+        let asked = id.clone();
+        let waiter = thread::spawn(move || handle.wait_recharge(&asked, &CancelFlag::new()));
+        while rig.fake.requests_to(&polls).is_empty() {
+            thread::park_timeout(Duration::from_millis(10));
+        }
+        assert!(match end {
+            FakeEnd::Expire => rig.fake.expire_recharge(&id),
+            FakeEnd::Hold => rig.fake.hold_recharge(&id),
+            FakeEnd::Cancel => rig.fake.cancel_recharge(&id),
+        });
+        let settled = waiter.join().unwrap().unwrap();
+        assert_eq!(settled.recharge_id, id, "{status}");
+        assert_eq!(settled.status, RechargeStatus::Other(status.to_owned()));
+        assert_eq!(settled.url, None, "{status}");
+        assert_eq!(settled.balance_credits, None, "{status}");
+    }
+}
+
+/// How the fake ends a recharge, for [`wait_recharge_stops_on_each_settled_status`].
+enum FakeEnd {
+    Expire,
+    Hold,
+    Cancel,
+}
+
+/// The connector's coming shape: a top-level `recharge_id` in every state. Its own id passes;
+/// a status the host does not know is polled again, not taken as settled.
+#[test]
+fn a_top_level_recharge_id_of_its_own_passes_and_an_unknown_status_polls_on() {
+    let rig = rig();
+    sign_in(&rig);
+    let id = rig.handle.create_recharge("200").unwrap().recharge_id;
+    let polls = format!("/v1/case-law/recharges/{id}");
+    let json_type = [("Content-Type", "application/json")];
+    let odd = serde_json::json!({"recharge_id": id, "status": "processing"}).to_string();
+    rig.fake
+        .answer_next(&polls, 200, &json_type, odd.as_bytes());
+    let paid = serde_json::json!({"recharge_id": id, "status": "paid", "balance_credits": 2000})
+        .to_string();
+    rig.fake
+        .answer_next(&polls, 200, &json_type, paid.as_bytes());
+    let settled = rig.handle.wait_recharge(&id, &CancelFlag::new()).unwrap();
+    assert_eq!(settled.status, RechargeStatus::Paid);
+    assert_eq!(settled.balance_credits, Some(2000));
+    assert_eq!(rig.fake.requests_to(&polls).len(), 2);
 }
 
 #[test]
@@ -195,9 +262,12 @@ fn wait_recharge_stops_at_the_deadline() {
         config.recharge_deadline = Duration::from_millis(300);
     });
     sign_in(&rig);
-    // A poll that ignored the deadline would be held for the fake's 10 s.
-    rig.fake.set_wait_cap(Duration::from_secs(10));
     let recharge = rig.handle.create_recharge("200").unwrap();
+    // A poll that ignored the deadline would be held for 10 s.
+    rig.fake.delay_next(
+        &format!("/v1/case-law/recharges/{}", recharge.recharge_id),
+        Duration::from_secs(10),
+    );
     let started = SystemClock.now();
     let result = rig
         .handle
@@ -211,9 +281,12 @@ fn wait_recharge_stops_at_the_deadline() {
 fn the_cancel_flag_stops_wait_recharge() {
     let rig = rig();
     sign_in(&rig);
-    // A poll that ignored the flag would be held for the fake's 10 s.
-    rig.fake.set_wait_cap(Duration::from_secs(10));
     let recharge = rig.handle.create_recharge("200").unwrap();
+    // A poll that ignored the flag would be held for 10 s.
+    rig.fake.delay_next(
+        &format!("/v1/case-law/recharges/{}", recharge.recharge_id),
+        Duration::from_secs(10),
+    );
     let cancel = CancelFlag::new();
     let handle = rig.handle;
     let flag = cancel.clone();
@@ -233,7 +306,6 @@ fn the_cancel_flag_stops_wait_recharge() {
 fn wait_recharge_retries_after_a_server_error() {
     let rig = rig();
     sign_in(&rig);
-    rig.fake.set_wait_cap(Duration::from_millis(50));
     let recharge = rig.handle.create_recharge("200").unwrap();
     let id = recharge.recharge_id;
     rig.fake.mark_paid(&id);
@@ -279,15 +351,15 @@ fn a_recharge_id_that_is_not_one_is_refused_before_any_request() {
     assert_eq!(rig.fake.requests().len(), 0);
 }
 
-/// A connector (or a proxy) answering `awaiting_payment` at once is polled at most every 2 s:
-/// within a 4 s deadline, no more than 4 / 2 + 1 = 3 polls.
+/// Polls start `recharge_interval` apart: with 1 s and a 2.5 s deadline, no more than
+/// 2.5 / 1 + 1 = 3 polls. (Production polls every 3 s, `config/tests.rs`.)
 #[test]
-fn an_instant_awaiting_payment_answer_is_polled_at_most_every_2_seconds() {
+fn an_awaiting_payment_answer_is_polled_once_per_interval() {
     let rig = rig_with(FakeOptions::default(), false, |config| {
-        config.recharge_deadline = Duration::from_secs(4);
+        config.recharge_deadline = Duration::from_millis(2_500);
+        config.recharge_interval = Duration::from_secs(1);
     });
     sign_in(&rig);
-    rig.fake.set_wait_cap(Duration::ZERO);
     let recharge = rig.handle.create_recharge("200").unwrap();
     let id = recharge.recharge_id;
     let result = rig.handle.wait_recharge(&id, &CancelFlag::new());
@@ -301,9 +373,10 @@ fn an_instant_awaiting_payment_answer_is_polled_at_most_every_2_seconds() {
 
 #[test]
 fn the_cancel_flag_acts_at_once_during_the_gap_between_polls() {
-    let rig = rig();
+    let rig = rig_with(FakeOptions::default(), false, |config| {
+        config.recharge_interval = Duration::from_secs(3);
+    });
     sign_in(&rig);
-    rig.fake.set_wait_cap(Duration::ZERO);
     let recharge = rig.handle.create_recharge("200").unwrap();
     let id = recharge.recharge_id;
     let polls = format!("/v1/case-law/recharges/{id}");
@@ -311,7 +384,7 @@ fn the_cancel_flag_acts_at_once_during_the_gap_between_polls() {
     let flag = cancel.clone();
     let handle = rig.handle.clone();
     let waiter = thread::spawn(move || handle.wait_recharge(&id, &flag));
-    // The first poll is answered at once; once the fake has seen it, the wait is in its 2 s gap.
+    // The first poll is answered at once; once the fake has seen it, the wait is in its 3 s gap.
     while rig.fake.requests_to(&polls).is_empty() {
         thread::park_timeout(Duration::from_millis(10));
     }
@@ -319,7 +392,7 @@ fn the_cancel_flag_acts_at_once_during_the_gap_between_polls() {
     let cancelled_at = SystemClock.now();
     cancel.cancel();
     assert_eq!(waiter.join().unwrap(), Err(Error::Cancelled));
-    // About 1.9 s of the gap is left, so a wait that ignored the flag would take longer than this.
+    // About 2.9 s of the gap is left, so a wait that ignored the flag would take longer than this.
     let took = SystemClock
         .now()
         .duration_since(cancelled_at)
