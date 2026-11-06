@@ -9,7 +9,13 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(unix)]
+use super::super::chrome::{Chrome, Spec, launch};
+#[cfg(unix)]
+use super::super::parent::Parent;
 use super::super::port_file::Expected;
+#[cfg(unix)]
+use super::Agent;
 use super::refusal;
 
 /// A folder of its own under the system temp folder, removed on drop.
@@ -59,7 +65,12 @@ fn a_match_does_not_end_the_checks() {
 /// A shell script standing in for agent-browser.
 #[cfg(unix)]
 fn script(dir: &Path, body: &str) -> PathBuf {
-    let path = dir.join("fake-agent-browser.sh");
+    script_named(dir, "fake-agent-browser.sh", body)
+}
+
+#[cfg(unix)]
+fn script_named(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
     crate::write::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     crate::write::set_mode(&path, 0o755).unwrap();
     path
@@ -72,6 +83,34 @@ fn env(pairs: &[(&str, &Path)]) -> BTreeMap<String, OsString> {
         env.insert((*name).to_owned(), value.as_os_str().to_owned());
     }
     env
+}
+
+/// The test process's parent.
+#[cfg(unix)]
+fn parent() -> Parent {
+    Parent::now().unwrap()
+}
+
+/// A Chrome stand-in that prints the endpoint line on the claimed port, then waits.
+#[cfg(unix)]
+fn chrome(dir: &Path) -> Chrome {
+    let program = script_named(
+        dir,
+        "fake-chrome.sh",
+        "echo 'DevTools listening on ws://127.0.0.1:61101/devtools/browser/a-1' >&2\nexec sleep 30",
+    );
+    let spec = Spec {
+        executable: &program,
+        cwd: dir,
+        profile: &dir.join("chrome-profile-1-0000abcd"),
+        cdp_port: 61_101,
+        proxy: std::ffi::OsStr::new("http://127.0.0.1:9"),
+        env: &env(&[]),
+    };
+    let mut chrome = launch(&spec).unwrap();
+    let endpoint = chrome.endpoint(61_101, &parent()).unwrap();
+    assert_eq!(endpoint, "ws://127.0.0.1:61101/devtools/browser/a-1");
+    chrome
 }
 
 /// The review's repro: the `.port` file holds the claimed port at first (the first daemon, or
@@ -94,11 +133,17 @@ echo '{"jsonrpc":"2.0","id":2,"result":{}}'
 exec sleep 30"#,
     );
     let outcome = super::run(
-        &program,
-        &[],
-        &scratch.0,
-        &env(&[("PORT_FILE", &port_file)]),
-        vec![Expected::daemon(&scratch.0, "s", 61_102)],
+        Agent {
+            program: &program,
+            args: &[],
+            cwd: &scratch.0,
+            env: &env(&[("PORT_FILE", &port_file)]),
+            port_checks: vec![Expected::daemon(&scratch.0, "s", 61_102)],
+            on_spawn: &mut |_| {},
+            on_reap: &mut || {},
+        },
+        &mut chrome(&scratch.0),
+        &parent(),
     )
     .unwrap();
     assert_eq!(
@@ -122,11 +167,17 @@ echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 exec sleep 30"#,
     );
     let outcome = super::run(
-        &program,
-        &[],
-        &scratch.0,
-        &env(&[("DIR", &scratch.0)]),
-        vec![Expected::stream(&scratch.0, "s", 61_100)],
+        Agent {
+            program: &program,
+            args: &[],
+            cwd: &scratch.0,
+            env: &env(&[("DIR", &scratch.0)]),
+            port_checks: vec![Expected::stream(&scratch.0, "s", 61_100)],
+            on_spawn: &mut |_| {},
+            on_reap: &mut || {},
+        },
+        &mut chrome(&scratch.0),
+        &parent(),
     )
     .unwrap();
     assert_eq!(

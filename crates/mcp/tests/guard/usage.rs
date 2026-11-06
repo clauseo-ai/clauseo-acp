@@ -4,12 +4,17 @@
 use std::ffi::OsStr;
 #[cfg(unix)]
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::support::{CDP_PORT, GUARD, Scratch, example, guard_command, port_args, run};
 use crate::write;
 
-const MODE_USAGE: &str = "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n";
+const MODE_USAGE: &str = if cfg!(unix) {
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, browser-reaper, connector)\n"
+} else {
+    "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n"
+};
 const GUARD_USAGE: &str = if cfg!(windows) {
     "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> \
      --daemon-port <port> -- <agent-browser args...>\n"
@@ -237,7 +242,31 @@ fn an_unstartable_child_exits_1() {
     let args: [&OsStr; 0] = [];
     let output = run(guard_command(&scratch, &not_a_program, &args));
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).starts_with("clauseo-mcp browser-guard: cannot run "));
+    let text = stderr(&output);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.get(..2),
+        Some(
+            [
+                "clauseo-mcp browser-guard: Chrome started; waiting for it to listen on the \
+                 claimed debugging port 61101",
+                "clauseo-mcp browser-guard: Chrome is listening on the claimed debugging port 61101"
+            ]
+            .as_slice()
+        ),
+        "{text}"
+    );
+    assert!(
+        lines
+            .get(2)
+            .is_some_and(|line| line.starts_with("clauseo-mcp browser-guard: cannot run ")),
+        "{text}"
+    );
+    // Chrome started first, so the guard ended it and deleted its profile.
+    assert_eq!(
+        crate::support::run_files(&scratch.cwd()),
+        Vec::<PathBuf>::new()
+    );
 }
 
 /// Unix: the host's socket folder must be there, absolute, a real folder (not a link), mode
@@ -280,9 +309,10 @@ fn an_unsafe_socket_folder_stops_the_guard() {
     write::symlink(scratch.cwd(), &dir).unwrap();
     check(&dir, "it is a link");
     write::remove_dir_all(&dir).unwrap();
-    // `<dir>/<session>.sock`, the session 18 bytes: 104 bytes with an 80-byte folder.
-    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(48)));
-    assert_eq!(long.as_os_str().len(), 80);
+    // `<dir>/<session>.sock`, the session the run's own, at most 23 bytes
+    // (`run-4294967295-ffffffff`): 104 bytes with a 75-byte folder.
+    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(43)));
+    assert_eq!(long.as_os_str().len(), 75);
     write::create_dir_all(&long).unwrap();
     write::set_mode(&long, 0o700).unwrap();
     check(&long, "is 104 bytes, over the 103 a Unix socket allows");

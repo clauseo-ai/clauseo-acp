@@ -13,7 +13,7 @@ workspace = true
 name = "clauseo-mcp"
 path = "src/main.rs"
 
-# serde and serde_json, and `windows` on Windows (below): the guard reads JSON-RPC lines as
+# serde and serde_json, `nix` on Unix and `windows` on Windows (below): the guard reads JSON-RPC lines as
 # `serde_json::Value`, and the connector reads only a line's `id` and `method` (`connector/head.rs`),
 # through serde's derive. No HTTP client, socket crate, async runtime or tauri; `tests/guard/deps.rs`
 # fails on any of them, and ARCHITECTURE.md's row bans them.
@@ -21,8 +21,18 @@ path = "src/main.rs"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
-# Windows only: agent-browser runs in a Job Object the guard owns, so a refused port, and the
-# guard's own exit, end its detached daemon and Chrome (src/browser_guard/job.rs). The features
-# are the workspace line's: the job, the suspended start and the thread resume.
+# Unix only: `killpg` and `kill` for the guard's Chrome process group and agent-browser's
+# detached daemon, and the pid of the process listening on the daemon's socket (`socket`:
+# SO_PEERCRED, LOCAL_PEERPID), in src/browser_guard/chrome.rs and reaper.rs, through nix's safe
+# wrappers. nix needs only libc, bitflags and cfg-if; no socket crate.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["socket"] }
+
+# Windows only: Chrome and agent-browser run in a Job Object the guard owns, so a refused port,
+# and the guard's own exit, end Chrome and agent-browser's detached daemon
+# (src/browser_guard/job.rs); a Toolhelp snapshot and a process handle wait for the guard's
+# parent (src/browser_guard/parent/windows.rs). The workspace line's features, plus
+# `Win32_Storage_FileSystem` for `MoveFileExW`, the download move that never replaces a file
+# (src/write/windows.rs).
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
+windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }

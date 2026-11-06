@@ -3,7 +3,9 @@
 //! (`crates/profile/src/servers.rs`, fn `browser`; decision record 0029). It checks that every
 //! request Chrome makes goes through the session's proxy, loopback included; that WebRTC gathers
 //! (ICE gathering completes and the SDP has an `m=application` line) and leaks no UDP `host` or
-//! `srflx` candidate; and that Chrome's temp profile is gone after the close.
+//! `srflx` candidate; and that the guard's Chrome profile is gone once the guard exits. The
+//! guard starts Chrome itself and agent-browser connects to it; `crates/mcp/tests/guard/
+//! real_chrome.rs` is the CI-run regression test for that path.
 //!
 //! The test stands in for the host's egress proxy with a logging proxy on `127.0.0.1` that
 //! tunnels `CONNECT` and forwards absolute-form `http://` requests. `smoke.test` resolves to a
@@ -46,7 +48,7 @@ mod smoke {
 
     use super::mcp::{self, Guard, poll};
     use super::pages::World;
-    use super::scratch::{self, Scratch, env_file, profiles};
+    use super::scratch::{self, Scratch, env_file};
 
     /// The host of a proxy log entry, which is `host:port`.
     fn host_of(entry: &str) -> &str {
@@ -171,16 +173,30 @@ mod smoke {
             &json!({"interactive": false}),
             open,
         );
+        // example.com's page no longer has an "Example Domain" heading; its one paragraph says
+        // this.
         assert!(
-            snapshot.to_string().contains("Example Domain"),
+            snapshot.to_string().contains("documentation examples"),
             "snapshot: {snapshot}"
         );
-        assert!(
-            !profiles(&cwd).is_empty(),
-            "no {} folder under {} while Chrome runs: TMPDIR/TEMP did not reach agent-browser",
-            scratch::PROFILE_PREFIX,
-            cwd.display()
-        );
+        let profile = std::fs::read_dir(&cwd)
+            .ok()
+            .and_then(|entries| {
+                entries.flatten().map(|entry| entry.path()).find(|path| {
+                    path.is_dir()
+                        && path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.starts_with(scratch::PROFILE_PREFIX))
+                })
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "no {}<run id> in {} while Chrome runs: the guard did not start Chrome",
+                    scratch::PROFILE_PREFIX,
+                    cwd.display()
+                )
+            });
         let page_a = format!("http://smoke.test:{}", world.port_a);
         guard.call(
             "agent_browser_open",
@@ -250,11 +266,11 @@ mod smoke {
             .unwrap_or_default();
         check_report(&body, &log);
 
-        let gone = poll(Duration::from_secs(10), || profiles(&cwd).is_empty());
+        let gone = poll(Duration::from_secs(10), || !profile.exists());
         assert!(
             gone,
-            "temp profiles left after close: {:?}; proxy log: {log:?}",
-            profiles(&cwd)
+            "{} left after the guard exited; proxy log: {log:?}",
+            profile.display()
         );
         scratch.remove();
     }

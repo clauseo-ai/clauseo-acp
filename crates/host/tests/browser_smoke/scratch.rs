@@ -1,5 +1,5 @@
 //! The test's folder under the temp folder, the session id and the inputs from the environment.
-//! Chrome's temp profile folders are looked for here too.
+//! The guard's Chrome profile is looked for here too.
 
 #![expect(
     clippy::disallowed_methods,
@@ -7,14 +7,14 @@
               wall clock"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use clauseo_sandbox::ports::{self, PortClaim};
 
-/// Chrome's temp profile folder, made under the temp folder
-/// (agent-browser v0.41.1 `cli/src/native/cdp/chrome.rs:545-546`).
-pub(crate) const PROFILE_PREFIX: &str = "agent-browser-chrome-";
+/// The start of the name of the Chrome profile the guard starts, `<--cwd>/chrome-profile-<run id>`,
+/// made fresh for each guard run and deleted at its exit (`crates/mcp/src/browser_guard/runs.rs`).
+pub(crate) const PROFILE_PREFIX: &str = "chrome-profile-";
 
 /// The absolute path in variable `name`, which must name an existing file.
 pub(crate) fn env_file(name: &str) -> PathBuf {
@@ -103,29 +103,4 @@ fn session_and_daemon(base: &str) -> (String, Option<PortClaim>) {
         }
     }
     panic!("no session name gave a daemon port in the jail's range");
-}
-
-/// Every folder under `root` whose name starts with [`PROFILE_PREFIX`].
-pub(crate) fn profiles(root: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(folder) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                if entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(PROFILE_PREFIX)
-                {
-                    found.push(path.clone());
-                }
-                pending.push(path);
-            }
-        }
-    }
-    found
 }

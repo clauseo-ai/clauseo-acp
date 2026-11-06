@@ -53,12 +53,15 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     for (name, value) in fixed {
         map.insert(name.to_owned(), value.to_owned());
     }
-    // The WebRTC rule, then the host's CDP port, one per line.
+    // The WebRTC rule alone: the port is no longer pinned through agent-browser's launch.
     map.insert(
         "AGENT_BROWSER_ARGS".to_owned(),
-        format!(
-            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp\n--remote-debugging-port={CDP_PORT}"
-        ),
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_owned(),
+    );
+    // The endpoint the Chrome stand-in printed for the claimed port, never the agent's "9222".
+    map.insert(
+        "AGENT_BROWSER_CDP".to_owned(),
+        format!("ws://127.0.0.1:{CDP_PORT}/devtools/browser/stub-1"),
     );
     map.insert("AGENT_BROWSER_DOWNLOAD_PATH".to_owned(), under("downloads"));
     map.insert(
@@ -147,6 +150,26 @@ fn the_child_sees_exactly_the_allow_list_and_the_given_folder() {
                 );
             }
         }
+    }
+    // Unix: the run's own session name, `run-<guard pid>-<8 hex>` (src/browser_guard/runs.rs), in
+    // place of the host's.
+    if cfg!(unix) {
+        let session = env.remove("AGENT_BROWSER_SESSION").unwrap_or_default();
+        let (pid, nonce) = session
+            .strip_prefix("run-")
+            .and_then(|rest| rest.split_once('-'))
+            .unwrap_or_default();
+        assert!(
+            !pid.is_empty()
+                && pid.bytes().all(|b| b.is_ascii_digit())
+                && nonce.len() == 8
+                && nonce.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{session}"
+        );
+        env.insert(
+            "AGENT_BROWSER_SESSION".to_owned(),
+            scratch.session().to_owned(),
+        );
     }
     assert_eq!(env, expected(&scratch));
     let args: Vec<&str> = report["args"]

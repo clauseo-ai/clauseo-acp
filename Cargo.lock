@@ -1153,6 +1153,7 @@ dependencies = [
 name = "clauseo-mcp"
 version = "0.0.0"
 dependencies = [
+ "nix",
  "serde",
  "serde_json",
  "windows",
@@ -4299,6 +4300,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
