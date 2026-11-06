@@ -221,7 +221,7 @@ pub(crate) struct CodexPrepared {
 }
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
-/// `keys_wait` (the agent's `agent.keys_loading` refusal, `sign_in::keys_wait`) they start once
+/// `keys_wait` (the agent's waited-out key refusal, `sign_in::keys_wait`) they start once
 /// it has resolved.
 pub(super) fn prepare(
     actor: &mut Actor,
@@ -434,7 +434,7 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
-    // A refusal that came, or stayed, while the checks ran (`agent.keys_loading` waited out
+    // A refusal that came, or stayed, while the checks ran (a key refusal waited out
     // included): nothing launches.
     if let Some(error) = super::sign_in::launch_refusal(actor, thread) {
         discard(actor, thread, prepared.run);

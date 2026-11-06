@@ -138,6 +138,9 @@ pub(super) async fn open(
         #[cfg(test)]
         failed_sends: 0,
     };
+    // `agent.keys_loading`'s bound starts with the host (`agent/launch_refusals.rs`).
+    let now = actor.clock.now().mono;
+    actor.wiring.sign_in.refused.start_load_bound(now);
     // The limits model and its first reads; nothing waits on them.
     super::limits::start(&mut actor, cached_limits);
     super::browser_install::start(&mut actor);
