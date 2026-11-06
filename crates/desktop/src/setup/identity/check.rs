@@ -11,7 +11,8 @@ use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
 use super::watch::stamps;
-use super::{Judged, Ticket, Verdict};
+use super::{Judged, Ticket, Verdict, Window};
+use crate::bridge::lock;
 use crate::setup::backend::AgentsBackend;
 use crate::setup::compose::is_running;
 use crate::setup::hook::{replaces_login, setup_vars_with};
@@ -152,14 +153,20 @@ pub(crate) async fn on_state(
     seen
 }
 
-/// Whether `agent`'s launch env, as the launch hook builds it (`setup/hook.rs`'s
-/// `setup_vars`), carries a credential that replaces the shared login: the API key variable
-/// the hook sets (a stored key), or a Claude provider switch (Bedrock, Vertex, Foundry). Then
-/// the identity check does not apply: a key login. An endpoint alone does not count.
+/// Whether the identity check does not apply to `agent` (a key login): it is firm-managed
+/// (`SettingsRead::managed`: a policy locks `agents.<id>`, or the e2e build's
+/// `E2E_AGENTS_MANAGED`), with no Clauseo install for a status read to run (a documented gap:
+/// it still launches on Clauseo's login home); or its launch env, as the launch hook builds it
+/// (`setup/hook.rs`'s `setup_vars`), carries a credential that replaces the shared login: the
+/// API key variable the hook sets (a stored key), or a Claude provider switch (Bedrock, Vertex,
+/// Foundry). An endpoint alone does not count, nor does the lawyer's own `agents.<id>`.
 pub(crate) fn exempt(backend: &AgentsBackend, agent: &AgentId) -> bool {
     let Some(kind) = AgentKind::of(agent) else {
         return false;
     };
+    if lock(&backend.wiring.applied).managed.contains(agent) {
+        return true;
+    }
     let vars = setup_vars_with(Some(&backend.keys), &backend.wiring.plans, agent, kind);
     replaces_login(kind, &vars)
 }
@@ -247,7 +254,7 @@ fn settle(
     if matches!(read, AccountRead::Account(_)) {
         identity.named(agent);
     }
-    match judged {
+    let verdict = match judged {
         Judged::Record(hash) => {
             tracing::info!(%agent, kind = "first", "identity recorded");
             identity.record(agent, Some(hash), now, None)
@@ -262,7 +269,18 @@ fn settle(
             entry.checked_at = Some(now);
             entry.verdict
         }),
+    };
+    // On macOS Claude may keep its login in the Keychain, which no stamp sees: a no-email
+    // sign-in's window lasts for its first check only, whatever it read (a record shut it).
+    let keychain = identity.keychain_fallback && AgentKind::of(agent) == Some(AgentKind::Claude);
+    if keychain && ticket.is_some() {
+        identity.entry(agent, |entry| {
+            if matches!(entry.window, Window::Open(_)) {
+                entry.window = Window::Broken;
+            }
+        });
     }
+    verdict
 }
 
 /// `agent`'s account is not the recorded one: `signin.account_changed` on its launches first,

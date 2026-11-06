@@ -40,8 +40,10 @@ pub(crate) enum Verdict {
     /// The status named another account: the agents were stopped. Refuses
     /// `signin.account_changed` until a sign-in through Clauseo records again; not watched.
     Changed,
-    /// The launch env carries a credential that replaces the shared login (a stored API key,
-    /// or a Claude provider), so a swapped file cannot redirect the launches: not checked, not
+    /// Not checked: the launch env carries a credential that replaces the shared login (a stored
+    /// API key, or a Claude provider), so a swapped file cannot redirect its launches; or the
+    /// agent is firm-managed, with no Clauseo install to read a status from (a documented gap:
+    /// it still launches on Clauseo's login home). Not checked, not
     /// watched, and no refusal while it holds (`setup/refusal.rs` filters this one's). Once it
     /// ends the login is what launches use again: due a check, as [`Verdict::Due`], first.
     KeyLogin,
