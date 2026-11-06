@@ -5,9 +5,9 @@
 //! users, `ClauseoSb01` and on (4 at first, 4 more at a time, at most 32), in the group
 //! `ClauseoSandboxUsers`, and records them in `HKLM\SOFTWARE\Clauseo\Sandbox` with the user who
 //! owns them (`windows::pool`). Each matter runs as its own pool user, at Low integrity.
-//! `windows::UserSetup` (S15 PR4) implements the trait; until then `windows::setup_state` reads
-//! the same marker and record its `state` will. macOS and Linux need no set-up and have no
-//! implementation.
+//! `windows::UserSetup` (S15 `PR4h`) implements the trait on Windows: its `state` reads the
+//! marker and record (`windows::setup_state`), and `run` starts the elevated setup exe. macOS
+//! and Linux need no set-up and have no implementation.
 
 use std::path::PathBuf;
 

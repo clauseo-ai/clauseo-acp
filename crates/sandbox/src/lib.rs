@@ -189,3 +189,5 @@ pub use proxy::{
     Verdict, builtin_allowlist, start_proxy, upstream_for,
 };
 pub use setup::{SandboxSetup, SetAside, SetupError, SetupState};
+#[cfg(windows)]
+pub use windows::UserSetup;

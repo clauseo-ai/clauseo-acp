@@ -17,7 +17,8 @@
 //!   `sandbox_owner_sid`, `sandbox_data_dir`) and the set-up state they give (`setup_state`).
 //! - [`pool`]: the pool users' names (`ClauseoSbNN`) and the machine record's shape.
 //! - `setup` (S15 `PR4d`): the elevated set-up's steps and rollback over its `Machine` seam,
-//!   with the setup exe's exit codes (`SetupExit`).
+//!   with the setup exe's exit codes (`SetupExit`), and the exe's own work (`PR4h`).
+//! - `UserSetup` (Windows, `PR4h`): `SandboxSetup` for the app, starting the setup exe.
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
 //!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
@@ -88,6 +89,8 @@ mod test_world;
 #[cfg(test)]
 #[cfg(windows)]
 mod tests;
+#[cfg(windows)]
+mod user_setup;
 mod write;
 pub mod writer;
 
@@ -125,6 +128,8 @@ pub use set_aside::{
     after_session, before_launch, before_launch_checked, list_set_aside, restore_set_aside,
     set_aside_path,
 };
+#[cfg(windows)]
+pub use user_setup::UserSetup;
 pub use writer::{AclWriter, Added, ApplyFailure, Label, Reach, Strict, Walked};
 
 /// Whether an agent sandbox that grants by ACL can prepare a folder on Windows.

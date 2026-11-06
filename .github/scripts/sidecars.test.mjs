@@ -45,10 +45,10 @@ async function setup(pinOptions) {
     cargo: (args) => {
       cargoCalls.push(args);
       const triple = args[args.indexOf("--target") + 1];
-      const pkg = args[args.indexOf("-p") + 1];
-      const out = join(root, "target", triple, "release", `${pkg}${triple.includes("-windows-") ? ".exe" : ""}`);
+      const name = args.includes("--bin") ? args[args.indexOf("--bin") + 1] : args[args.indexOf("-p") + 1];
+      const out = join(root, "target", triple, "release", `${name}${triple.includes("-windows-") ? ".exe" : ""}`);
       mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, `fake ${pkg}\n`);
+      writeFileSync(out, `fake ${name}\n`);
     },
     agentBrowserOptions: {
       pinPath: await pin(root, pinOptions),
@@ -65,14 +65,33 @@ async function setup(pinOptions) {
   return { root, run, overlay, binaries, cargoCalls, fetchCalls };
 }
 
+const WINDOWS = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
+const isWindows = (triple) => triple.includes("-windows-");
+const SETUP_CARGO = (triple) =>
+  ["build", "--release", "--locked", "-p", "clauseo-sandbox", "--bin", "clauseo-sandbox-setup", "--target", triple];
+
 test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, guard parked", () => {
   assert.deepEqual(
     SIDECARS.map((s) => [s.name, s.targets]),
     [
       ["clauseo-mcp", RELEASE_TARGETS],
       ["clauseo-agent-browser", RELEASE_TARGETS],
+      ["clauseo-sandbox-setup", WINDOWS],
     ],
   );
+});
+
+test("the table lists clauseo-sandbox-setup on the Windows targets only, built from clauseo-sandbox", async () => {
+  const setupRow = SIDECARS.find((s) => s.name === "clauseo-sandbox-setup");
+  assert.deepEqual(setupRow.targets, RELEASE_TARGETS.filter(isWindows));
+  for (const triple of RELEASE_TARGETS) assert.equal(setupRow.targets.includes(triple), isWindows(triple), triple);
+  for (const triple of RELEASE_TARGETS) {
+    const env = await setup();
+    const externalBin = await env.run(triple);
+    assert.equal(externalBin.includes("binaries/clauseo-sandbox-setup"), isWindows(triple), triple);
+    const setupCalls = env.cargoCalls.filter((args) => args.includes("clauseo-sandbox"));
+    assert.deepEqual(setupCalls, isWindows(triple) ? [SETUP_CARGO(triple)] : [], triple);
+  }
 });
 
 // The .deb and .rpm install sidecars into /usr/bin, where a bare agent-browser would collide.
@@ -100,27 +119,39 @@ test("a sidecar named without the clauseo- prefix fails before anything is place
 });
 
 for (const triple of RELEASE_TARGETS) {
-  test(`${triple}: the overlay lists both sidecars, and the copies are named for the target`, async () => {
+  const win = isWindows(triple);
+  test(`${triple}: the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
     const env = await setup();
-    assert.deepEqual(await env.run(triple), ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"]);
-    assert.deepEqual(await env.overlay(), {
-      bundle: { externalBin: ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"] },
-    });
-    const ext = triple.includes("-windows-") ? ".exe" : "";
-    assert.deepEqual(await env.binaries(), [`clauseo-agent-browser-${triple}${ext}`, `clauseo-mcp-${triple}${ext}`].sort());
-    assert.deepEqual(env.cargoCalls, [["build", "--release", "--locked", "-p", "clauseo-mcp", "--target", triple]]);
+    const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : [])];
+    const externalBin = names.map((name) => `binaries/${name}`);
+    assert.deepEqual(await env.run(triple), externalBin);
+    assert.deepEqual(await env.overlay(), { bundle: { externalBin } });
+    const ext = win ? ".exe" : "";
+    assert.deepEqual(await env.binaries(), names.map((name) => `${name}-${triple}${ext}`).sort());
+    assert.deepEqual(env.cargoCalls, [
+      ["build", "--release", "--locked", "-p", "clauseo-mcp", "--target", triple],
+      ...(win ? [SETUP_CARGO(triple)] : []),
+    ]);
     assert.deepEqual(env.fetchCalls, [ASSET]);
     const bin = join(env.root, "crates", "desktop", "binaries");
     assert.equal(await readFile(join(bin, `clauseo-mcp-${triple}${ext}`), "utf8"), "fake clauseo-mcp\n");
     assert.deepEqual(await readFile(join(bin, `clauseo-agent-browser-${triple}${ext}`)), BODY);
+    if (win) {
+      const copy = join(bin, `clauseo-sandbox-setup-${triple}.exe`);
+      assert.equal(await readFile(copy, "utf8"), "fake clauseo-sandbox-setup\n");
+    }
   });
 }
 
 test("a triple the pin marks none leaves agent-browser out of the overlay", async () => {
   const env = await setup({ none: ["aarch64-pc-windows-msvc"] });
-  assert.deepEqual(await env.run("aarch64-pc-windows-msvc"), ["binaries/clauseo-mcp"]);
-  assert.deepEqual(await env.overlay(), { bundle: { externalBin: ["binaries/clauseo-mcp"] } });
-  assert.deepEqual(await env.binaries(), ["clauseo-mcp-aarch64-pc-windows-msvc.exe"]);
+  const externalBin = ["binaries/clauseo-mcp", "binaries/clauseo-sandbox-setup"];
+  assert.deepEqual(await env.run("aarch64-pc-windows-msvc"), externalBin);
+  assert.deepEqual(await env.overlay(), { bundle: { externalBin } });
+  assert.deepEqual(await env.binaries(), [
+    "clauseo-mcp-aarch64-pc-windows-msvc.exe",
+    "clauseo-sandbox-setup-aarch64-pc-windows-msvc.exe",
+  ]);
   assert.deepEqual(env.fetchCalls, []);
 });
 

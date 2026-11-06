@@ -20,9 +20,6 @@ use super::machine::MachineError;
 #[cfg(windows)]
 mod token;
 
-#[cfg(all(windows, test))]
-pub(crate) use token::elevated_tests_on;
-
 /// The process to take the owner from: `recorded`, the parent Windows recorded for this process.
 /// `claimed` (the app's `--parent`) must be that process; with none, `recorded` is used. 0 (no
 /// parent recorded) is refused.
@@ -174,7 +171,7 @@ mod tests {
     mod windows {
         use std::panic::{AssertUnwindSafe, catch_unwind};
 
-        use super::super::token::{elevated_tests_on, thread_has_token};
+        use super::super::token::thread_has_token;
         use super::*;
         use crate::windows::record::current_user_sid;
 
@@ -223,8 +220,7 @@ mod tests {
         #[test]
         #[ignore = "elevated: CI's elevated step only (CLAUSEO_ELEVATED_TESTS=1)"]
         fn elevated_the_owner_from_the_parent_is_impersonated_and_reverted() {
-            if !elevated_tests_on() {
-                eprintln!("skipped: needs an elevated token and CLAUSEO_ELEVATED_TESTS=1");
+            if !crate::windows::test_acl::elevated_tests_enabled() {
                 return;
             }
             let owner = Owner::of_parent(None).unwrap();

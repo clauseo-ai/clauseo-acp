@@ -2,10 +2,11 @@
 //! pool (D-B5, D-B6), then the changes, each failure handed to the rollback (`rollback.rs`).
 
 use std::collections::BTreeSet;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::journal_plan::{JournalAction, journal_plan};
-use super::machine::{LogonRight, Machine, Password, ServiceStart};
+use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
     JournalOutcome, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step,
     cause_of,
@@ -175,7 +176,8 @@ fn plan_pool(
     }
     let mut missing = 0;
     if let (Some(record), false) = (before, dead.is_empty()) {
-        missing = match machine.read_marker() {
+        let marker = machine.as_owner(Machine::read_marker);
+        missing = match marker.unwrap_or_else(|error| MarkerState::Unreadable(error.to_string())) {
             MarkerState::Current(marker) => {
                 dead.iter().filter(|sid| marker.pool.contains(sid)).count()
             }
@@ -187,7 +189,8 @@ fn plan_pool(
         };
         let mut trusted = record.pool.clone();
         trusted.push(record.group.clone());
-        let ledger = machine.ledger(&trusted);
+        let ledger = machine.as_owner(|machine| machine.ledger(&trusted));
+        let ledger = ledger.unwrap_or_else(|error| Err(io::Error::other(error)));
         if let Err(error) = &ledger {
             tracing::warn!(%error, "the ledger can't be read; set-up keeps every dead pool SID");
         }
@@ -227,7 +230,7 @@ fn plan_pool(
     }
     plan.reset = add == 0 && kept > 0;
     if plan.reset {
-        match machine.sessions_open() {
+        match owned(machine, Machine::sessions_open) {
             Ok(false) => {}
             Ok(true) => {
                 return Err(SetupFailure::early(
@@ -267,9 +270,10 @@ fn change(
     let live: Vec<Sid> = users.profiles.iter().map(|(u, _)| u.sid.clone()).collect();
     let fenced = fence(machine, acl, req, run, &group, &live)?;
     let journals = journals(machine, req);
-    machine
-        .protect_for_owner(&users.secrets, &live)
-        .map_err(|error| (Step::Secrets, cause_of(&error)))?;
+    owned(machine, |machine| {
+        machine.protect_for_owner(&users.secrets, &live)
+    })
+    .map_err(|error| (Step::Secrets, cause_of(&error)))?;
     let marker = Marker {
         version: SETUP_VERSION,
         user_sid: req.owner.clone(),
@@ -277,8 +281,7 @@ fn change(
         pool: live,
         set_up_at: machine.now(),
     };
-    machine
-        .write_marker(&marker)
+    owned(machine, |machine| machine.write_marker(&marker))
         .map_err(|error| (Step::Marker, cause_of(&error)))?;
     Ok(SetupReport {
         pool: users.profiles.into_iter().map(|(user, _)| user).collect(),
@@ -528,7 +531,9 @@ fn failed_targets(failed: &[(PathBuf, ApplyFailure)]) -> String {
 
 /// Step 8: when this run made users and matters are registered (an extend, or a re-run that made
 /// a user again), every registered matter is fenced against the grown pool through the owner's
-/// ledger, which the rollback reads after.
+/// ledger, which the rollback reads after. The whole step runs as the owner: the ledger is the
+/// owner's file, and the matters' folders are the owner's, so the elevated process writes there
+/// only what the owner could (K1).
 fn fence(
     machine: &mut impl Machine,
     acl: &mut impl AclWriter,
@@ -542,14 +547,18 @@ fn fence(
     }
     let mut trusted: Vec<Sid> = run.recorded().map(|r| r.pool.clone()).unwrap_or_default();
     trusted.push(group.clone());
-    let mut ledger = machine
-        .ledger(&trusted)
-        .map_err(|error| (Step::Fence, format!("the permission ledger: {error}")))?;
-    let fenced = fence_registered(&mut ledger, &req.matters, live, acl, machine.surroundings());
+    let failed = |cause: String| (Step::Fence, cause);
+    let (ledger, fenced) = machine
+        .as_owner(|machine| {
+            let mut ledger = machine.ledger(&trusted)?;
+            let around = machine.surroundings();
+            let fenced = fence_registered(&mut ledger, &req.matters, live, acl, around);
+            Ok::<_, io::Error>((ledger, fenced))
+        })
+        .map_err(|error| failed(cause_of(&error)))?
+        .map_err(|error| failed(format!("the permission ledger: {error}")))?;
     run.ledger = Some(ledger);
-    fenced
-        .map(Some)
-        .map_err(|error| (Step::Fence, error.to_string()))
+    fenced.map(Some).map_err(|error| failed(error.to_string()))
 }
 
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller

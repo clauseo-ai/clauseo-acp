@@ -144,3 +144,23 @@ fn a_keeping_call_reads_no_ledger() {
         Ok(user(1))
     );
 }
+
+/// The set-up's open sessions (S15 `PR4h`): each listed matter whose set-aside record has a
+/// session open, read under its lock; none when no session is open.
+#[test]
+fn the_open_sessions_are_the_listed_matters_with_a_session_open() {
+    let temp = TempDir::new("review2-open-sessions");
+    let records = TempDir::new("review2-open-sessions-ledger");
+    let ledger = ledger_in(records.path(), &pool(2));
+    let (one, two) = (matter(), matter());
+    let none = OpenSessions::default();
+    let mut sids = sids_in(&temp);
+    assert!(sids.open_sessions().unwrap().is_empty(), "no matter listed");
+    sids.launch(&one, &pool(2), reread(&ledger), &none).unwrap();
+    sids.launch(&two, &pool(2), reread(&ledger), &none).unwrap();
+    assert!(sids_in(&temp).open_sessions().unwrap().is_empty());
+    open_session(temp.path(), &two, "s1");
+    let open = sids_in(&temp).open_sessions().unwrap();
+    assert!(open.is_open(&two) && !open.is_open(&one), "{open:?}");
+    assert!(!open.is_empty());
+}

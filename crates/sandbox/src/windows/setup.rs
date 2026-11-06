@@ -1,7 +1,7 @@
 //! The elevated set-up's engine (S15 `PR4d`, design B): the order of its steps and the rollback
 //! of a failed run, with no Windows call. Every call outside the permission writes goes through
 //! [`Machine`] (`machine.rs`); the writes go through [`AclWriter`]. `WindowsMachine` (`PR4e` to
-//! `PR4g`) is the real machine, and the setup exe (`PR4h`) runs [`set_up`] elevated.
+//! `PR4g`) is the real machine, and the setup exe (`PR4h`, `exe.rs`) runs [`set_up`] elevated.
 //!
 //! [`set_up`] takes the machine-wide lock, then:
 //!
@@ -51,7 +51,12 @@ mod accounts;
 #[cfg(windows)]
 mod accounts_tests;
 pub mod answers;
+pub mod args;
+#[cfg(windows)]
+pub mod around;
 mod create;
+#[cfg(windows)]
+pub mod exe;
 #[cfg(windows)]
 mod ffi;
 #[cfg(windows)]
@@ -78,6 +83,8 @@ pub mod profile;
 pub mod record_values;
 #[cfg(windows)]
 mod record_write;
+pub mod registered;
+pub mod result_file;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
@@ -116,12 +123,17 @@ pub struct SetupRequest {
 
 /// Runs the set-up as the module says, under the machine-wide lock, which a guard gives back
 /// on every return. A held lock is [`SetupExit::LockHeld`]; another owner
-/// [`SetupExit::OtherOwner`]; any other failure [`SetupExit::Failed`], rolled back.
+/// [`SetupExit::OtherOwner`]; any other failure [`SetupExit::Failed`], rolled back. A request
+/// whose owner isn't the machine's (the verified parent's token user, D-B2) fails at
+/// [`Step::Owner`] before the lock, so no argument decides the owner alone.
 pub fn set_up(
     machine: &mut impl Machine,
     acl: &mut impl AclWriter,
     req: &SetupRequest,
 ) -> Result<SetupReport, SetupFailure> {
+    if let Some(failure) = owner_failure(req, machine.owner()) {
+        return Err(failure);
+    }
     if let Err(error) = machine.lock() {
         let exit = if error == MachineError::LockHeld {
             SetupExit::LockHeld
@@ -137,6 +149,21 @@ pub fn set_up(
     }
     let locked = Locked(machine);
     create::run(&mut *locked.0, acl, req)
+}
+
+/// The failure for a request whose owner isn't `owner`, the user who asked (`Owner::sid`,
+/// D-B2): [`Step::Owner`], [`SetupExit::Failed`], nothing touched. `None` when they match. The
+/// setup exe checks it when it builds the request, and [`set_up`] again against its machine.
+pub fn owner_failure(req: &SetupRequest, owner: &Sid) -> Option<SetupFailure> {
+    (req.owner != *owner).then(|| SetupFailure {
+        step: Step::Owner,
+        cause: format!(
+            "the set-up was asked for {}, but the user who asked is {owner}",
+            req.owner
+        ),
+        rolled_back: true,
+        exit: SetupExit::Failed,
+    })
 }
 
 /// The machine while set-up holds its lock: dropping it gives the lock back, so no return path

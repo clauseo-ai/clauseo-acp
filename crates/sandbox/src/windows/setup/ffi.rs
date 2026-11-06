@@ -1,17 +1,22 @@
 //! What the set-up's Windows calls share (S15 `PR4f`): a failed call as a [`MachineError`],
-//! NUL-terminated UTF-16, a token's user as a [`Sid`], and the `HKLM` reads of `ProfileList`.
-#![expect(unsafe_code, reason = "FFI to RegGetValueW")]
+//! NUL-terminated UTF-16, a token's user as a [`Sid`], the `HKLM` reads of `ProfileList`, and
+//! the `ProgramData` known folder (`PR4h`).
+#![expect(unsafe_code, reason = "FFI to RegGetValueW and SHGetKnownFolderPath")]
 
-use std::ffi::c_void;
+use std::ffi::{OsString, c_void};
+use std::os::windows::ffi::OsStringExt;
+use std::path::PathBuf;
 
 use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HANDLE, WIN32_ERROR,
 };
+use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
     RegGetValueW,
 };
-use windows::core::PCWSTR;
+use windows::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows::core::{PCWSTR, PWSTR};
 
 use super::machine::MachineError;
 use crate::windows::record::user_of;
@@ -142,4 +147,35 @@ fn present(code: WIN32_ERROR) -> Result<bool, MachineError> {
         ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(false),
         other => Err(os_code("RegGetValueW", other)),
     }
+}
+
+/// A string `SHGetKnownFolderPath` allocated, freed with `CoTaskMemFree` on drop.
+struct TaskString(PWSTR);
+
+impl Drop for TaskString {
+    fn drop(&mut self) {
+        // SAFETY: the pointer came from SHGetKnownFolderPath (or is null, which the call
+        // accepts) and is freed once, here.
+        unsafe { CoTaskMemFree(Some(self.0.0.cast_const().cast())) };
+    }
+}
+
+/// `%ProgramData%` as Windows knows it (`FOLDERID_ProgramData`), never from the environment,
+/// which the process that started the set-up could have set.
+pub(super) fn program_data() -> Result<PathBuf, MachineError> {
+    let folder = FOLDERID_ProgramData;
+    // SAFETY: `folder` is a live GUID for the call; no token is passed (this user's view,
+    // which for ProgramData is the machine's). The string returned is owned by `TaskString`
+    // at once.
+    let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
+        .map_err(|error| os("SHGetKnownFolderPath", &error))?;
+    let path = TaskString(path);
+    // SAFETY: on success the call wrote a NUL-terminated string, alive until `path` drops.
+    let units = unsafe { path.0.as_wide() };
+    if units.is_empty() {
+        return Err(MachineError::Other(
+            "Windows gave no ProgramData folder".to_owned(),
+        ));
+    }
+    Ok(PathBuf::from(OsString::from_wide(units)))
 }

@@ -367,7 +367,8 @@ fn a_secret_error_becomes_a_failed_setup_error() {
 #[cfg(windows)]
 mod windows {
     use super::*;
-    use crate::windows::setup::owner::{Owner, elevated_tests_on};
+    use crate::windows::setup::owner::Owner;
+    use crate::windows::test_acl::elevated_tests_enabled;
 
     #[test]
     fn dpapi_round_trips_as_this_user_and_other_entropy_fails() {
@@ -422,8 +423,7 @@ mod windows {
     #[test]
     #[ignore = "elevated: CI's elevated step only (CLAUSEO_ELEVATED_TESTS=1)"]
     fn elevated_secrets_round_trip_through_a_duplicated_token_of_this_process() {
-        if !elevated_tests_on() {
-            eprintln!("skipped: needs an elevated token and CLAUSEO_ELEVATED_TESTS=1");
+        if !elevated_tests_enabled() {
             return;
         }
         // The folder's name holds this process's ID, so a leftover from a killed earlier try

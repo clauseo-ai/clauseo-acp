@@ -13,51 +13,19 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
-use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
 use super::super::journal::{journal_size, journal_volumes};
 use super::super::machine::Password;
 use super::super::preflight::{logon_right, machine_domain, seclogon};
 use super::super::processes::{Stopped, running, stop_pool_processes};
 use super::super::profile::{delete_profile, profile_of};
 use super::log_on_once;
-use crate::windows::acl::object::Handle;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
+use crate::windows::test_dacl::elevated;
 
 /// This family's account name prefix (`PR4f`'s logon tests): `ClauseoSbTL`, then six hex
 /// digits, 17 characters in all, under the 20 that local account names allow.
 const PREFIX: &str = "ClauseoSbTL";
-
-/// Whether this process's token is elevated. A token that cannot be asked counts as not.
-// TODO(S15 PR4e): use the shared helper PR4e moves into `test_acl.rs` once it merges.
-#[expect(unsafe_code, reason = "FFI to read this process's token elevation")]
-fn elevated() -> bool {
-    let mut token = HANDLE::default();
-    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a live
-    // out-pointer, owned by `Handle` once written.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }.is_err() {
-        return false;
-    }
-    let token = Handle(token);
-    let mut elevation = TOKEN_ELEVATION::default();
-    let mut needed = 0u32;
-    let len = u32::try_from(size_of::<TOKEN_ELEVATION>()).unwrap_or_default();
-    // SAFETY: `elevation` is live and `len` bytes long for the call, which writes a
-    // TOKEN_ELEVATION into it; the handle came from OpenProcessToken.
-    let asked = unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenElevation,
-            Some((&raw mut elevation).cast()),
-            len,
-            &raw mut needed,
-        )
-    };
-    asked.is_ok() && elevation.TokenIsElevated != 0
-}
 
 /// Whether an elevated test may run here: an elevated token and `CLAUSEO_ELEVATED_TESTS=1`.
 ///

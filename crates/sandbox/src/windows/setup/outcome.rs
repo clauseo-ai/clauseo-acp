@@ -80,14 +80,15 @@ impl SetupExit {
 }
 
 /// What a launch error from `ShellExecuteExW` means for the set-up (D-B4): 1223 (the prompt
-/// declined) is [`SetupError::Refused`]; 1260 is a failure naming the policy; any other code is
-/// a failure naming it.
+/// declined) is [`SetupError::Refused`]; 1260 is a failure naming the policy; 1385 one naming
+/// the logon right ([`LOGON_NOT_GRANTED`]); any other code is a failure naming it.
 pub fn launch_error(code: u32) -> SetupError {
     match code {
         ERROR_CANCELLED => SetupError::Refused,
         ERROR_ACCESS_DISABLED_BY_POLICY => SetupError::Failed(
             "a Windows policy blocks Clauseo's set-up program (error 1260)".to_owned(),
         ),
+        ERROR_LOGON_TYPE_NOT_GRANTED => SetupError::Failed(LOGON_NOT_GRANTED.to_owned()),
         other => SetupError::Failed(format!(
             "Clauseo's set-up program didn't start (error {other})"
         )),

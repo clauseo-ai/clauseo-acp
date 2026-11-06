@@ -1,27 +1,28 @@
 //! The set-up's seams faked in memory: [`FakeMachine`] records every call as a line of text and
-//! fails the calls it is told to; [`FakeAcl`] keeps the entries written. Profiles and
-//! `DeviceSync` are real folders in a temp folder, since the shared-write apply checks they
-//! exist, and the ledger is a real file there.
+//! fails the calls it is told to; [`FakeAcl`] (`fake_acl.rs`) keeps the entries written.
+//! Profiles and `DeviceSync` are real folders in a temp folder, since the shared-write apply
+//! checks they exist, and the ledger is a real file there.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::test_support::TempDir;
 use crate::windows::FolderSupport;
-use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
+use crate::windows::acl_plan::Sid;
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
-use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
+use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
 use crate::windows::sids::Reserved;
-use crate::windows::writer::{
-    AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
-};
+
+pub(super) use super::fake_acl::FakeAcl;
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -111,6 +112,15 @@ pub(super) struct FakeMachine {
     pub(super) journals: BTreeMap<PathBuf, Option<u64>>,
     /// `create_user` of this name answers the owner's SID.
     pub(super) owner_sid_for: Option<String>,
+    /// The owner the machine acts as ([`OWNER`] unless a test says otherwise).
+    pub(super) owner: Sid,
+    /// Whether the calling thread acts as the owner now: inside `as_owner`. A [`FakeAcl`]
+    /// made with [`FakeAcl::of`] shares it, so its writes say whose they were.
+    pub(super) acting: Rc<Cell<bool>>,
+    /// Every call on the owner's files made while not acting as the owner: none, ever.
+    pub(super) outside_owner: Vec<String>,
+    /// `as_owner` fails, as an impersonation Windows refuses would.
+    pub(super) refuse_owner: bool,
     next_rid: u32,
     passwords: u32,
     around: Around,
@@ -150,6 +160,10 @@ impl FakeMachine {
             sessions_open: false,
             journals: BTreeMap::from([(PathBuf::from(VOLUME), Some(32 << 20))]),
             owner_sid_for: None,
+            owner: Sid::parse(OWNER).unwrap(),
+            acting: Rc::new(Cell::new(false)),
+            outside_owner: Vec::new(),
+            refuse_owner: false,
             next_rid: 1000,
             passwords: 0,
             around: Around,
@@ -199,6 +213,14 @@ impl FakeMachine {
             Some(at) => Err(self.fails.remove(at).1),
             None => Ok(()),
         }
+    }
+
+    /// Records `line` as a call on the owner's files, and as made outside the owner when it was.
+    fn owner_call(&mut self, line: &str) -> Result<(), MachineError> {
+        if !self.acting.get() {
+            self.outside_owner.push(line.to_owned());
+        }
+        self.call(line)
     }
 
     fn new_sid(&mut self) -> Sid {
@@ -413,6 +435,9 @@ impl Machine for FakeMachine {
     }
 
     fn read_marker(&mut self) -> MarkerState {
+        if !self.acting.get() {
+            self.outside_owner.push("read_marker".to_owned());
+        }
         self.calls.push("read_marker".to_owned());
         self.state
             .marker
@@ -421,18 +446,18 @@ impl Machine for FakeMachine {
     }
 
     fn write_marker(&mut self, marker: &Marker) -> Result<(), MachineError> {
-        self.call("write_marker")?;
+        self.owner_call("write_marker")?;
         self.state.marker = Some(marker.clone());
         Ok(())
     }
 
     fn sessions_open(&mut self) -> Result<bool, MachineError> {
-        self.call("sessions_open")?;
+        self.owner_call("sessions_open")?;
         Ok(self.sessions_open)
     }
 
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {
-        self.call("ledger").map_err(io::Error::other)?;
+        self.owner_call("ledger").map_err(io::Error::other)?;
         let reserved = Reserved::new([Sid::parse(OWNER).unwrap()]);
         Ledger::open(ledger_path(&self.data_dir()), trusted, &reserved)
     }
@@ -463,7 +488,7 @@ impl Machine for FakeMachine {
         pool: &[Sid],
     ) -> Result<(), MachineError> {
         let sids: Vec<Sid> = secrets.iter().map(|(sid, _)| sid.clone()).collect();
-        self.call(format!("protect_for_owner {}", rids(&sids)))?;
+        self.owner_call(&format!("protect_for_owner {}", rids(&sids)))?;
         let mut file = BTreeMap::new();
         for sid in pool {
             let password = match secrets.iter().find(|(s, _)| s == sid) {
@@ -481,120 +506,23 @@ impl Machine for FakeMachine {
     fn now(&mut self) -> u64 {
         1_800_000_000
     }
-}
 
-pub(super) type Key = (PathBuf, String, Rights, Inherit);
-
-/// The permission writes in memory: the entries on each path, and the walks. An add on
-/// `fail_add` fails; a walk of `fail_walk` fails.
-#[derive(Debug, Default)]
-pub(super) struct FakeAcl {
-    pub(super) aces: BTreeSet<Key>,
-    pub(super) walks: Vec<PathBuf>,
-    pub(super) removed: Vec<Key>,
-    pub(super) fail_add: Option<PathBuf>,
-    pub(super) fail_walk: Option<PathBuf>,
-}
-
-pub(super) fn key(grant: &Grant) -> Key {
-    (
-        grant.path().to_owned(),
-        grant.sid().as_str().to_owned(),
-        grant.rights(),
-        grant.inherit(),
-    )
-}
-
-impl FakeAcl {
-    /// Whether an entry for `sid` with `rights` is on `path`.
-    pub(super) fn has(&self, path: &Path, sid: &Sid, rights: Rights) -> bool {
-        self.aces
-            .iter()
-            .any(|(p, s, r, _)| p == path && s == sid.as_str() && *r == rights)
+    fn owner(&self) -> &Sid {
+        &self.owner
     }
-}
 
-impl AclWriter for FakeAcl {
-    fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
-        if self.fail_add.as_deref() == Some(grant.path()) {
-            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+    fn as_owner<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> Result<T, MachineError> {
+        if self.refuse_owner {
+            return Err(MachineError::Other(
+                "injected: impersonating the owner".to_owned(),
+            ));
         }
-        Ok(if self.aces.insert(key(grant)) {
-            Added::Written
-        } else {
-            Added::AlreadyThere
-        })
-    }
-
-    fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
-        self.aces.remove(&key(grant));
-        self.removed.push(key(grant));
-        Ok(())
-    }
-
-    fn present(&mut self, grant: &Grant) -> io::Result<bool> {
-        Ok(self.aces.contains(&key(grant)))
-    }
-
-    fn propagate(
-        &mut self,
-        root: &Path,
-        _reach: Reach,
-        _strict: Option<&Strict>,
-    ) -> Result<Walked, ApplyFailure> {
-        self.walks.push(root.to_owned());
-        if self.fail_walk.as_deref() == Some(root) {
-            return Err(ApplyFailure::ProtectedChild);
+        if self.acting.get() {
+            return Ok(f(self));
         }
-        Ok(Walked::default())
-    }
-
-    fn same_file(&mut self, _a: &Path, _b: &Path) -> io::Result<bool> {
-        Ok(false)
-    }
-
-    fn file_id(&mut self, _path: &Path) -> io::Result<Option<FileId>> {
-        Ok(None)
-    }
-
-    fn remove_recorded(
-        &mut self,
-        _file: &RecordedFile,
-        grant: &Grant,
-        _prior: Option<Label>,
-    ) -> Result<(), ApplyFailure> {
-        self.remove(grant)
-    }
-
-    fn present_recorded(&mut self, _file: &RecordedFile, grant: &Grant) -> io::Result<bool> {
-        self.present(grant)
-    }
-
-    fn add_expecting(&mut self, grant: &Grant, _expected: &Path) -> Result<Added, ApplyFailure> {
-        self.add(grant)
-    }
-
-    fn refused_at(&mut self) -> Option<PathBuf> {
-        None
-    }
-
-    fn reclaim(&mut self, _root: &Path, _pool: &[Sid]) -> Result<Walked, ApplyFailure> {
-        Ok(Walked::default())
-    }
-
-    fn hand_back_tree(&mut self, _root: &Path, _pool: &[Sid]) -> Result<Walked, ApplyFailure> {
-        Ok(Walked::default())
-    }
-
-    fn hand_back(&mut self, _path: &Path, _pool: &[Sid]) -> Result<bool, ApplyFailure> {
-        Ok(false)
-    }
-
-    fn label(&mut self, _path: &Path) -> io::Result<Option<Label>> {
-        Ok(None)
-    }
-
-    fn restore_label(&mut self, _grant: &Grant, _label: Label) -> Result<(), ApplyFailure> {
-        Ok(())
+        self.acting.set(true);
+        let done = f(self);
+        self.acting.set(false);
+        Ok(done)
     }
 }

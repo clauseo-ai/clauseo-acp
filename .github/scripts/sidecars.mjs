@@ -53,6 +53,16 @@ const cargoBin = (pkg) => async (triple, ctx) => {
 };
 
 /**
+ * Builds one named [[bin]] of a workspace package for the target and returns where cargo left it.
+ * @param {string} pkg the cargo package
+ * @param {string} bin the binary, named in the package's Cargo.toml
+ */
+const cargoPackageBin = (pkg, bin) => async (triple, ctx) => {
+  ctx.cargo(["build", "--release", "--locked", "-p", pkg, "--bin", bin, "--target", triple]);
+  return join(ctx.targetDir, triple, "release", `${bin}${exe(triple)}`);
+};
+
+/**
  * Fetches the pinned agent-browser straight to its destination; null when the pin says none.
  * The pin and the download keep upstream's asset names; only the installed name has the prefix.
  */
@@ -72,7 +82,15 @@ export const SIDECARS = [
   // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
   // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
   // with -C target-feature=+crt-static on Windows (S20-sidecars.md, "Release flags").
-  // S15 adds its rows here: clauseo-sandbox-setup and clauseo-sandbox-run, Windows targets only.
+  // S15's set-up tool, a [[bin]] of the clauseo-sandbox package. Tauri bundles it beside
+  // Clauseo.exe as clauseo-sandbox-setup.exe; hooks.nsh runs it in NSIS_HOOK_PREUNINSTALL, and
+  // the NSIS template deletes it after that hook.
+  {
+    name: "clauseo-sandbox-setup",
+    targets: RELEASE_TARGETS.filter(isWindows),
+    place: cargoPackageBin("clauseo-sandbox", "clauseo-sandbox-setup"),
+  },
+  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only.
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
