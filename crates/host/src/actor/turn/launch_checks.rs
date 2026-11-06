@@ -32,6 +32,16 @@
 //! agent's process tree has been killed (or the agent never started). The session's case-law
 //! relay and its token file (R24, [`relay`]) are made on the same thread and ride the same way.
 //!
+//! Desktop's launch gate (`HostConfig::with_launch_gate`, R17 M3) is asked on the same thread,
+//! for every agent kind, right after the data-folder refusal and before anything is made: a stat
+//! of the agent's shared login file, so a login changed since desktop's last poll is caught at
+//! this launch. Its refusal code comes back as its own answer ([`TurnInput::Gated`]), never
+//! written into the launch refusals by the host, and [`gate::on_gated`] fails the waiting
+//! work with it, or, for a code the launch waits out (`agent.identity_checking`), sends the
+//! launch back through `sign_in::keys_wait` and phase one again, once per launch
+//! ([`Preparing::gate_waited`]). A panic, or a code that is no launch refusal, fails closed
+//! with `agent.launch_failed`.
+//!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
 //! swept through a link at `<data>/run` or `<data>/agent-state`.
@@ -63,6 +73,9 @@ pub(super) struct Preparing {
     id: u64,
     /// The work that waits for the agent's session.
     pub(super) waiting: Vec<Waiting>,
+    /// This launch already waited once for a refusal the launch gate answered: another
+    /// waited-out answer fails it (`gate.rs`).
+    gate_waited: bool,
 }
 
 /// What a launch's checks found.
@@ -222,17 +235,19 @@ pub(crate) struct CodexPrepared {
 
 /// Phase one: the checks go to their thread, and `waiting` waits on the thread's state. With
 /// `keys_wait` (the agent's waited-out key refusal, `sign_in::keys_wait`) they start once
-/// it has resolved.
+/// it has resolved. `gate_waited`: this launch already waited for a launch gate's answer.
 pub(super) fn prepare(
     actor: &mut Actor,
     thread: ThreadId,
     waiting: Vec<Waiting>,
     keys_wait: Option<impl std::future::Future<Output = ()> + Send + 'static>,
+    gate_waited: bool,
 ) {
     let id = agents::next_agent_id();
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
     let login = login_hook(actor, thread);
+    let launch_gate = gate::of(actor, thread);
     let LaunchPaths {
         stored,
         data,
@@ -253,7 +268,11 @@ pub(super) fn prepare(
     let Some(state) = state(actor, thread) else {
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
+    state.preparing = Some(Box::new(Preparing {
+        id,
+        waiting,
+        gate_waited,
+    }));
     let check = FolderCheck {
         matter: Some(run.key.matter),
         source: actor.folder_check,
@@ -272,6 +291,10 @@ pub(super) fn prepare(
                 data_folder::refuse_data_folder(&stored, &data)?;
                 // The working folder the agent starts in, as spawn takes it (`session_folder`).
                 crate::matter_worker::refuse_too_deep(&crate::agent::session_folder(&stored))?;
+                // Desktop's launch gate, before anything is made (`gate.rs`).
+                if let Some(code) = gate::ask(launch_gate)? {
+                    return Ok(Found::Gated(code));
+                }
                 let mut answer = None;
                 let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
                 let codex = match codex_home {
@@ -305,7 +328,7 @@ pub(super) fn prepare(
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
-                Ok(Prepared {
+                Ok(Found::Prepared(Box::new(Prepared {
                     stored,
                     codex,
                     claude_home,
@@ -313,11 +336,16 @@ pub(super) fn prepare(
                     run,
                     skills_written,
                     packs_skipped,
-                })
+                })))
             },
             undo_late,
         )
         .await;
+        let result = match result {
+            Ok(Found::Gated(code)) => return Input::Turn(TurnInput::Gated { thread, id, code }),
+            Ok(Found::Prepared(prepared)) => Ok(*prepared),
+            Err(error) => Err(error),
+        };
         let result = match (result, login) {
             (Ok(mut prepared), Some((hook, agent))) => {
                 if let Some(codex) = prepared.codex.as_mut() {
@@ -342,9 +370,12 @@ fn claim(run: &mut RunFolders, data: &Path, claims: (browser::BrowserPrep, relay
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the
-/// run folder with the token file.
-fn undo_late(late: Prepared) {
-    let Prepared { run, .. } = late;
+/// run folder with the token file. A launch the gate refused made nothing.
+fn undo_late(late: Found) {
+    let Found::Prepared(late) = late else {
+        return;
+    };
+    let Prepared { run, .. } = *late;
     relay::end(&run);
     run.remove();
     // Its claims and relay go now, after the folder.
@@ -519,6 +550,8 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 }
 
 mod browser;
+pub(super) mod gate;
+use gate::Found;
 pub(super) mod relay;
 mod sweep;
 pub(crate) use sweep::RunSweep;
