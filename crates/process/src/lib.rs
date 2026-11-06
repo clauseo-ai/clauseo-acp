@@ -108,7 +108,7 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
-pub use handle::{ExitReport, Handle, ShutdownOutcome};
+pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
 };

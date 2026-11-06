@@ -1,16 +1,17 @@
 //! The desktop's egress proxies: a host built as the app builds it offers the browser (the
-//! stage B bug: no proxy was passed, so every session showed `NoProxy`), one proxy per session
-//! (two sessions of one matter get two), `close` of an unknown session does nothing, and the
-//! quit's `stop_all` stops every proxy still open.
+//! stage B bug: no proxy was passed, so every session showed `NoProxy`), and an agent's
+//! restart closes the earlier launch's proxy; one proxy per session (two sessions of one matter
+//! get two); `close` of an unknown session does nothing; a proxy that does not start stores
+//! nothing; and the quit stops the host first, then every proxy still open.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::{EgressProxy as _, McpServer, ProfileHook, SessionKey};
+use clauseo_host::{EgressProxy, HostConfig, McpServer, ProfileHook, SessionKey};
 use clauseo_protocol::{AgentId, DeliveryRequest, HostCommand, MatterId, PromptBlock, ThreadId};
 use clauseo_sandbox::{Allowlist, Denial, DenialSink, ProxyConfig, Upstream};
 use serde_json::{Map, Value, json};
@@ -82,12 +83,19 @@ fn each_session_of_a_matter_gets_its_own_proxy() {
     distinct.dedup();
     assert_eq!(distinct.len(), 3, "{ports:?}");
     proxies.close(sessions[0]);
-    assert!(!listening(ports[0]), "the closed session's proxy stopped");
+    let mut left = vec![sessions[1], sessions[2]];
+    left.sort_unstable();
+    assert_eq!(proxies.open_sessions(), left);
+    assert_eq!(
+        proxies.port_for(sessions[0]),
+        None,
+        "the closed one is gone"
+    );
     assert!(listening(ports[1]) && listening(ports[2]));
     proxies.stop_all();
 }
 
-/// The quit's `stop_all` stops every proxy still open: none is left, and none listens.
+/// The quit's `stop_all` stops every proxy still open: none is left.
 #[test]
 fn stop_all_stops_every_open_proxy() {
     let proxies = DesktopProxies::default();
@@ -100,10 +108,42 @@ fn stop_all_stops_every_open_proxy() {
     assert!(ports.iter().all(|port| listening(*port)));
     proxies.stop_all();
     assert_eq!(proxies.open_count(), 0);
-    assert!(ports.iter().all(|port| !listening(*port)), "{ports:?}");
     assert_eq!(proxies.port_for(key(2, 1)), None);
     // A second stop has nothing to do.
     proxies.stop_all();
+}
+
+/// A proxy that does not start (here its upstream is refused) stores nothing.
+#[test]
+fn a_proxy_that_does_not_start_stores_nothing() {
+    let proxies = DesktopProxies::default();
+    let refused = ProxyConfig {
+        upstream: Upstream::Fixed("http://proxy.invalid:8080/with-a-path".parse().unwrap()),
+        ..config()
+    };
+    assert!(proxies.open(key(2, 1), refused).is_err());
+    assert_eq!(proxies.open_count(), 0);
+    assert_eq!(proxies.port_for(key(2, 1)), None);
+}
+
+/// The quit stops the host first, with the proxies still open, then the proxies.
+#[test]
+fn the_quit_stops_the_host_then_the_proxies() {
+    let proxies = DesktopProxies::default();
+    proxies.open(key(2, 1), config()).unwrap();
+    let ended = super::stop_in_order(
+        || {
+            assert_eq!(
+                proxies.open_count(),
+                1,
+                "the proxy is open while the host stops"
+            );
+            clauseo_host::HostExit::Stopped
+        },
+        Some(&proxies),
+    );
+    assert!(matches!(ended, clauseo_host::HostExit::Stopped));
+    assert_eq!(proxies.open_count(), 0);
 }
 
 /// A profile that offers only a `browser` entry whose sidecars are this test binary, so the
@@ -187,32 +227,33 @@ fn scenario(test: &str, lines: &str) -> Scratch {
     scratch
 }
 
-/// The bug stage B found: with the proxies wired as `start_host` wires them, a session's
-/// `session/new` carries the `browser` entry (it was always `mcpServers: []`, `NoProxy`). Its
-/// proxy is open while the session runs, and closed once the host has stopped it.
-#[test]
-fn a_host_wired_as_the_app_wires_it_offers_the_browser() {
-    let scratch = scenario("egress-browser", &lines());
-    let proxies = Arc::new(DesktopProxies::default());
-    let host = {
-        let proxies = Arc::clone(&proxies);
-        let managed = scratch.path().join("no-managed-mcp.json");
+/// A host on `scratch` with its egress proxy set by `wire`, the `browser` entry from
+/// [`BrowserOnly`] and a forced Chrome.
+fn wired_host(
+    scratch: &Scratch,
+    wire: impl FnOnce(HostConfig) -> HostConfig + Send + 'static,
+) -> crate::test_support::Running {
+    let managed = scratch.path().join("no-managed-mcp.json");
+    #[cfg(unix)]
+    let sockets = scratch.dir("sockets");
+    scratch.start_with(move |config| {
+        let config = wire(config)
+            .with_profile_hook(Box::new(BrowserOnly))
+            .with_browser_executable(Some(PathBuf::from("/chrome")))
+            .with_managed_mcp_path(managed);
         #[cfg(unix)]
-        let sockets = scratch.dir("sockets");
-        scratch.start_with(move |config| {
-            let config = with_proxies(config, &proxies)
-                .with_profile_hook(Box::new(BrowserOnly))
-                .with_browser_executable(Some(PathBuf::from("/chrome")))
-                .with_managed_mcp_path(managed);
-            #[cfg(unix)]
-            let config = config.with_browser_socket_root(sockets);
-            config
-        })
-    };
-    let thread = host.thread();
-    let bridge = host.bridge();
-    let messages = open(&bridge, crate::MAIN_WINDOW);
-    block_on(bridge.subscribe(crate::MAIN_WINDOW, stream(thread), None)).unwrap();
+        let config = config.with_browser_socket_root(sockets);
+        config
+    })
+}
+
+/// Sends a prompt on `thread` and reads `messages` until the agent's `Done.`, which it sends
+/// only after a `session/new` with the browser entry.
+fn prompt_until_done(
+    host: &crate::test_support::Running,
+    messages: &crate::test_support::Messages,
+    thread: ThreadId,
+) {
     host.run(HostCommand::SendPrompt {
         thread,
         content: vec![PromptBlock::Text {
@@ -220,7 +261,6 @@ fn a_host_wired_as_the_app_wires_it_offers_the_browser() {
         }],
         delivery: DeliveryRequest::Queue,
     });
-    // The agent answers only after a `session/new` with the browser entry.
     loop {
         let text = messages.next_text();
         assert!(
@@ -228,10 +268,101 @@ fn a_host_wired_as_the_app_wires_it_offers_the_browser() {
             "the turn failed: {text}"
         );
         if text.contains("Done.") {
-            break;
+            return;
         }
     }
+}
+
+/// The bug stage B found: with the proxies wired as `start_host` wires them, a session's
+/// `session/new` carries the `browser` entry (it was always `mcpServers: []`, `NoProxy`). Its
+/// proxy is open while the session runs, and closed once the host has stopped it.
+#[test]
+fn a_host_wired_as_the_app_wires_it_offers_the_browser() {
+    let scratch = scenario("egress-browser", &lines());
+    let proxies = Arc::new(DesktopProxies::default());
+    let wired = Arc::clone(&proxies);
+    // As `start_host` wires them.
+    let host = wired_host(&scratch, move |config| with_proxies(config, &wired));
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let messages = open(&bridge, crate::MAIN_WINDOW);
+    block_on(bridge.subscribe(crate::MAIN_WINDOW, stream(thread), None)).unwrap();
+    prompt_until_done(&host, &messages, thread);
     assert_eq!(proxies.open_count(), 1, "the session's proxy is open");
     drop(host);
     assert_eq!(proxies.open_count(), 0, "closed when the session ended");
+}
+
+/// An agent that exits after its turn starts again for the next prompt: the earlier launch's
+/// proxy closed when it ended, and the new launch has its own.
+#[test]
+fn an_agent_restart_closes_the_earlier_proxy() {
+    // No `session/load`, so the next launch starts a new session the same scenario expects.
+    let lines = format!("{}\n{}", lines(), json!({"exit": {"code": 0}}))
+        .replace(r#""loadSession":true"#, r#""loadSession":false"#);
+    let scratch = scenario("egress-restart", &lines);
+    let proxies = Arc::new(DesktopProxies::default());
+    let logged = Arc::new(Logged {
+        inner: Arc::clone(&proxies),
+        log: Mutex::default(),
+    });
+    let wired: Arc<dyn EgressProxy> = Arc::clone(&logged) as Arc<dyn EgressProxy>;
+    let host = wired_host(&scratch, move |config| config.with_egress_proxy(wired));
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let messages = open(&bridge, crate::MAIN_WINDOW);
+    block_on(bridge.subscribe(crate::MAIN_WINDOW, stream(thread), None)).unwrap();
+    prompt_until_done(&host, &messages, thread);
+    until_closed(&proxies);
+    prompt_until_done(&host, &messages, thread);
+    until_closed(&proxies);
+    drop(host);
+    let log = logged.log.lock().unwrap().clone();
+    let [
+        ("open", first),
+        ("close", first_closed),
+        ("open", second),
+        ("close", second_closed),
+    ] = log.as_slice()
+    else {
+        panic!("not one launch's proxy after the other: {log:?}");
+    };
+    assert_eq!(first, first_closed);
+    assert_eq!(second, second_closed);
+    assert_eq!(first.thread, second.thread);
+    assert_ne!(first.launch, second.launch, "the restart is a new launch");
+}
+
+/// [`DesktopProxies`] with each open and close recorded, in order.
+struct Logged {
+    inner: Arc<DesktopProxies>,
+    log: Mutex<Vec<(&'static str, SessionKey)>>,
+}
+
+impl EgressProxy for Logged {
+    fn open(&self, session: SessionKey, config: ProxyConfig) -> Result<(), clauseo_sandbox::Error> {
+        self.log.lock().unwrap().push(("open", session));
+        self.inner.open(session, config)
+    }
+
+    fn port_for(&self, session: SessionKey) -> Option<u16> {
+        self.inner.port_for(session)
+    }
+
+    fn close(&self, session: SessionKey) {
+        self.log.lock().unwrap().push(("close", session));
+        self.inner.close(session);
+    }
+}
+
+/// Waits until no proxy is open: the session's agent exited and its removal closed the proxy.
+fn until_closed(proxies: &DesktopProxies) {
+    let (_keep, never) = std::sync::mpsc::channel::<()>();
+    for _ in 0..600 {
+        if proxies.open_count() == 0 {
+            return;
+        }
+        let _timed_out = never.recv_timeout(Duration::from_millis(50));
+    }
+    panic!("the ended launch's proxy was not closed");
 }

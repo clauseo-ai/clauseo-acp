@@ -104,6 +104,11 @@ quick-xml = { workspace = true }
 rusqlite = { workspace = true }
 criterion = { workspace = true }
 
+# The egress tests' straggler (`tests/host/egress.rs`): the test becomes the agent's orphans'
+# reaper (Linux's child subreaper) and reaps one by pid when it is done with it.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["process"] }
+
 # The host's Windows folder-check tests give a folder a protected DACL (`windows::test_dacl`).
 [target.'cfg(windows)'.dev-dependencies]
 clauseo-sandbox = { path = "../sandbox", features = ["test-support"] }

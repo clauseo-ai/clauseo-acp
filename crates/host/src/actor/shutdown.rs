@@ -27,6 +27,12 @@ pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
 /// Stops the snapshot thread (its queue is already empty), the matter threads, and closes the
 /// store.
 pub(super) async fn close(actor: Actor) -> Result<(), Error> {
+    // The sessions held past their removal's wait free their proxy, relay and ports now; their
+    // run folders stay for the next start's sweep.
+    let held = actor.wiring.held.release_all();
+    if held > 0 {
+        tracing::info!(target: LIFECYCLE, held, "held sessions released at stop");
+    }
     let Actor {
         store,
         snapshots,

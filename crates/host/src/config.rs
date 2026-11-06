@@ -35,10 +35,12 @@ mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
 mod sandbox;
 pub use sandbox::{Detect, Sandbox};
-mod session;
+mod egress;
 #[cfg(feature = "test-support")]
-pub use session::TestProxy;
-pub use session::{EgressProxy, SessionKey};
+pub use egress::TestProxy;
+pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
+mod session;
+pub use session::SessionKey;
 mod wiring;
 pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
@@ -199,6 +201,24 @@ impl HostConfig {
     /// [`EgressProxy`]). The agent's own environment never points at it (tier C).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
+        self
+    }
+
+    /// How long a session's removal waits for the agent's tree and its Chrome to be gone before
+    /// it frees the session's proxy, relay, ports and run folder (default
+    /// [`DEFAULT_TREE_WAIT`]); past it they are held until the host stops. Tests shorten it.
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait(mut self, wait: std::time::Duration) -> Self {
+        self.wiring.tree_wait = wait;
+        self
+    }
+
+    /// A hook run off the host thread as a session's removal starts that wait, with the port
+    /// the host claimed for the session's Chrome debugging port (none without browser claims):
+    /// a test binds it there, standing in for a Chrome that outlives the agent.
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait_hook(mut self, hook: Arc<dyn Fn(Option<u16>) + Send + Sync>) -> Self {
+        self.wiring.tree_wait_hook = Some(hook);
         self
     }
 
