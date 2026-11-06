@@ -80,9 +80,10 @@ export const commands = {
 	 *  Opens the document `file` names with its default app. Refused with `command.invalid` when
 	 *  the host did not issue the ref, when the file is not inside its matter's folder, and when
 	 *  it is not a document type (`open::DOCUMENT_TYPES`). One at a time and at most one a second:
-	 *  `command.conflict` otherwise.
+	 *  `command.conflict` otherwise. A Word document whose path is too long for Word opens in
+	 *  Protected View (`protected_view`), or is refused with `matter.document_path_too_long`.
 	 */
-	openFile: (file: FileRefId) => typedError<null, HostError>(__TAURI_INVOKE("open_file", { file })),
+	openFile: (file: FileRefId) => typedError<OpenedFile, HostError>(__TAURI_INVOKE("open_file", { file })),
 	/**  Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
 	reveal: (target: RevealTarget) => typedError<null, HostError>(__TAURI_INVOKE("reveal", { target })),
 	/**
@@ -1555,6 +1556,8 @@ export type ErrorCode =
 "agent.keys_loading" | 
 /** A stored API key could not be read from the system's key store (no answer in time, or the read was refused, often at a permission prompt); no agent was started. Trying again once it can be read can succeed. */
 "agent.key_unreadable" | 
+/** A Word document's path is too long for Word to open, even with its folders' short names (Windows): move the matter's folder nearer the top of its drive, or shorten its folder names. */
+"matter.document_path_too_long" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -3223,6 +3226,15 @@ export type NoticeLevel =
 "warning" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  What `open_file` tells the page about a document it opened. */
+export type OpenedFile = {
+	/**
+	 *  Word opens it in Protected View: its path was too long for Word, so it opened through its
+	 *  folders' short names (`word_path`), and the lawyer chooses Enable Editing to change it.
+	 */
+	protected_view: boolean,
+};
 
 /**
  *  Files changed outside Clauseo between turns (the lawyer, Word, a sync client), captured in

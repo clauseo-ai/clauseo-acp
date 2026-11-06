@@ -256,7 +256,7 @@ const SHEET = [file(NOTICE)];
 /** A PDF, whose sheet shows both sides and says a PDF shows only whether it changed. */
 const PDF_SHEET = [file("Annexure 3.pdf")];
 /** H11's open_file, standing in on the review page: it opens nothing. */
-const OPENS: StandIns = { openFile: async () => undefined };
+const OPENS: StandIns = { openFile: async () => ({ protected_view: false }) };
 
 /** U8's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U8: Entry[] = [

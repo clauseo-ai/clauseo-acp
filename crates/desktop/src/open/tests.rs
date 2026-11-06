@@ -13,6 +13,7 @@ use super::*;
 use crate::test_support::Scratch;
 
 mod links;
+mod word;
 
 /// What the fake OS was asked to do, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +24,9 @@ enum Opened {
     Reveal(PathBuf),
 }
 
+/// The fake OS, and the short folder it gives every folder (`None`: no 8.3 names).
 #[derive(Default)]
-struct FakeOpener(Mutex<Vec<Opened>>);
+struct FakeOpener(Mutex<Vec<Opened>>, Option<PathBuf>);
 
 impl FakeOpener {
     fn opened(&self) -> Vec<Opened> {
@@ -50,6 +52,9 @@ impl Opener for FakeOpener {
             .unwrap()
             .push(Opened::Reveal(path.to_path_buf()));
         Ok(())
+    }
+    fn short_folder(&self, _folder: &Path) -> Option<PathBuf> {
+        self.1.clone()
     }
 }
 
@@ -167,7 +172,7 @@ fn external(
 }
 
 /// `open_file` through a fresh gate.
-fn file(host: &FakeHost, opener: &FakeOpener, file: FileRefId) -> Result<(), HostError> {
+fn file(host: &FakeHost, opener: &dyn Opener, file: FileRefId) -> Result<OpenedFile, HostError> {
     let clock = Clock::new();
     let gate = gate::Gate::default();
     block_on(open_file(host, opener, &gate, &|| clock.now(), file))
@@ -296,7 +301,8 @@ fn deep_folders() -> Vec<String> {
 }
 
 /// On Windows a document past `MAX_PATH` in a short matter folder is accepted, and it is handed on
-/// verbatim, as a long path must be. Both sides canonicalize verbatim, so `starts_with` finds
+/// verbatim, as a long path must be (a PDF: a Word document this long opens through its short
+/// folders, `word.rs`). Both sides canonicalize verbatim, so `starts_with` finds
 /// the folder. A file outside the matter, named through `..`, is still refused.
 #[cfg(windows)]
 #[test]
@@ -308,7 +314,7 @@ fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
     let nested = deep_folders();
     let rel = nested.join("/");
     scratch.dir(&format!("Acme/{rel}"));
-    let brief = scratch.file(&format!("Acme/{rel}/Brief.docx"), b"PK");
+    let brief = scratch.file(&format!("Acme/{rel}/Brief.pdf"), b"PK");
     let long = dunce::canonicalize(&brief).unwrap();
     assert!(
         long.as_os_str().encode_wide().count() > 260,
@@ -327,7 +333,7 @@ fn a_long_document_in_a_short_matter_folder_opens_verbatim() {
     file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opener.opened(),
-        [Opened::Path(document.path, "docx".to_owned())]
+        [Opened::Path(document.path, "pdf".to_owned())]
     );
 
     // `Acme\<first folder>\..\..\Outside.docx` is `Outside.docx` beside the matter's folder.

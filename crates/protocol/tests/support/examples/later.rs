@@ -52,6 +52,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::AgentKeyUnreadable,
             "a stored API key could not be read",
         ),
+        failed(
+            ErrorCode::MatterDocumentPathTooLong,
+            "the document's path is too long for Word",
+        ),
     ]
 }
 

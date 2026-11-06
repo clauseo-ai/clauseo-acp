@@ -55,7 +55,7 @@ function useVersions(
 }
 
 /** A stand-in's refusal is logged; the lawyer declining the computer's own confirm says nothing. */
-const quietly = (run: Promise<void>) =>
+const quietly = (run: Promise<unknown>) =>
   run.catch((error: unknown) => {
     if (isHostError(error) && error.code === "transport.unauthorized") return;
     console.warn(`a Versions act failed: ${JSON.stringify(error)}`);

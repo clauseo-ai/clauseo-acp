@@ -33,6 +33,7 @@ import type {
   ConnectorCommand,
   SettingsSection,
   FileRefId,
+  OpenedFile,
   HostError,
   HostQuery,
   PermissionRequestId,
@@ -101,9 +102,10 @@ export type FakeHost = {
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   pickFolder?: () => PickedFolder | null;
   /** Answer `openExternal`, `openFile` and `reveal`; throwing refuses (a HostError, such as the declined confirm's
-   * `transport.unauthorized`). Without one the call succeeds. */
+   * `transport.unauthorized`). Without one the call succeeds; an `openFile` that returns nothing opens outside
+   * Protected View. */
   openExternal?: (url: string) => void | Promise<void>;
-  openFile?: (file: FileRefId) => void | Promise<void>;
+  openFile?: (file: FileRefId) => OpenedFile | void | Promise<OpenedFile | void>;
   reveal?: (target: RevealTarget) => void | Promise<void>;
   /** With it, the fake has the settings window (`openSettings`), and this answers each open; throwing refuses. Without
    * it the fake has no `openSettings`, like a host without the window. Read when the fake is made. */
@@ -435,9 +437,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.openExternal?.(url));
   }
 
-  async openFile(file: FileRefId): Promise<void> {
+  async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });
-    await this.#answer(() => this.host.openFile?.(file));
+    return (await this.#answer(() => this.host.openFile?.(file))) ?? { protected_view: false };
   }
 
   async reveal(target: RevealTarget): Promise<void> {
@@ -445,9 +447,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.reveal?.(target));
   }
 
-  async #answer(run: () => void | Promise<void>): Promise<void> {
+  async #answer<T>(run: () => T | Promise<T>): Promise<T> {
     try {
-      await run();
+      return await run();
     } catch (error) {
       throw toHostError(error);
     }

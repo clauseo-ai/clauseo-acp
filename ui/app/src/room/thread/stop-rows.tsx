@@ -2,7 +2,8 @@
 // the stop at the usage limit, its mark and its note with the reset (U12). An Undo refused because a program holds a
 // file shows the lock's lines under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one
 // Word document the wall lists offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in
-// its error line when the open fails. Focus follows the lock: to Try again when the lines come, back to Undo (or the
+// its error line when the open fails, or in a quiet line under the note when Word opened the file in Protected View
+// (until the next open or Undo). Focus follows the lock: to Try again when the lines come, back to Undo (or the
 // note) when they go.
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
@@ -65,6 +66,8 @@ function Changed({ entry }: { entry: StepEntry }) {
   const { openerFor } = useWordOpen();
   // a failed Open in Word, by its code, for the note's error line
   const [openFailed, setOpenFailed] = useState<string | null>(null);
+  // the last open went through in Protected View: a quiet line says so until the next open or Undo
+  const [protectedView, setProtectedView] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
   const undoable = entry.checkpoint_after !== undefined;
@@ -82,7 +85,11 @@ function Changed({ entry }: { entry: StepEntry }) {
           label: opener.label,
           onOpen: () => {
             setOpenFailed(null);
-            void opener.onOpen().then(setOpenFailed);
+            setProtectedView(false);
+            void opener.onOpen().then((opened) => {
+              setOpenFailed(opened.refused);
+              setProtectedView(opened.protectedView);
+            });
           },
         };
   // a refusal again keeps what it said until the host answers: a lock stays a lock, another code replaces it
@@ -100,6 +107,7 @@ function Changed({ entry }: { entry: StepEntry }) {
     if (pending) return;
     setRefused(null);
     setOpenFailed(null);
+    setProtectedView(false);
     send();
   };
   // Undo asks about a paper the lawyer edited since Clauseo's change: PreviewUndo says which, on each press, and Undo
@@ -142,6 +150,11 @@ function Changed({ entry }: { entry: StepEntry }) {
         error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
         testIds={{ paper: "file-changed", undo: "undo", error: "error", open: "open-in-word" }}
       />
+      {protectedView && opener !== undefined && shown === null && (
+        <p className={QUIET} role="status" data-testid="open-protected-view">
+          <Say>{opener.protectedLine}</Say>
+        </p>
+      )}
       {locked && (
         <Suspense fallback={null}>
           <WordLock

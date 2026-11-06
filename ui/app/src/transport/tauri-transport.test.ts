@@ -97,10 +97,11 @@ describe("TauriTransport", () => {
     await expect(t.pickFolder()).resolves.toBeNull();
   });
 
-  test("open_external, open_file and reveal send their argument and resolve to nothing", async () => {
+  test("open_external, open_file and reveal send their argument; open_file resolves to what the host opened", async () => {
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.openExternal("https://example.com/a")).resolves.toBeUndefined();
-    await expect(t.openFile("ref-1")).resolves.toBeUndefined();
+    answers.set("open_file", () => ({ protected_view: true }));
+    await expect(t.openFile("ref-1")).resolves.toEqual({ protected_view: true });
     await expect(t.reveal({ matter: "m-1" })).resolves.toBeUndefined();
     await expect(t.reveal("app_data")).resolves.toBeUndefined();
     const sent = invoked.filter((i) =>

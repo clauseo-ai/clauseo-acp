@@ -80,6 +80,8 @@ export type ThreadState = {
   undoLocked?: string[];
   /** H8's papers, as list_papers lists them: the wall's tiles, and a change note's Open in Word (U9). */
   papers?: PaperSummary[];
+  /** open_file says Word opened the file in Protected View, as for a path too long for Word (U9). */
+  protectedView?: boolean;
   /** How list_papers answers, for the `@` menu's states (with `papers`, or alone, the papers it lists): never (pending),
    * refused, or with the list stopping short (truncated). Without it, the list answers in full. */
   papersAnswer?: "pending" | "failed" | "truncated";
@@ -195,6 +197,7 @@ export function threadHost(state: ThreadState): FakeTransport {
           );
         }
       }),
+    ...(state.protectedView === true ? { openFile: () => ({ protected_view: true }) } : {}),
     ...(state.connectors !== undefined
       ? { next: connectorsNext(state, state.connectors), openSettings: () => {} }
       : state.papers !== undefined || state.papersAnswer !== undefined

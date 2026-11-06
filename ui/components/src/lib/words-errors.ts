@@ -74,6 +74,7 @@ export type ErrorCode =
   | "signin.agents_still_running"
   | "agent.keys_loading"
   | "agent.key_unreadable"
+  | "matter.document_path_too_long"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -159,6 +160,8 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.keys_loading": "Clauseo is still starting. Try again in a moment.",
   "agent.key_unreadable":
     "Clauseo couldn't check for a saved API key in time. If this computer asks for permission, allow it, then try again.",
+  "matter.document_path_too_long":
+    "This file's path is too long for Word. Move the matter's folder nearer the top of the drive, or shorten its folder names.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

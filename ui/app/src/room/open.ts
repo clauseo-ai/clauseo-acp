@@ -9,7 +9,7 @@ import type { Papers } from "./host-next.ts";
 
 /** Runs an open or show call and gives its refusal's code: null when it went through or the lawyer declined the
  * confirm; any other refusal also goes to the console. For a caller with a place to say why, such as the change note. */
-export async function refusalOf(name: string, call: Promise<void>): Promise<string | null> {
+export async function refusalOf(name: string, call: Promise<unknown>): Promise<string | null> {
   try {
     await call;
     return null;
@@ -22,7 +22,7 @@ export async function refusalOf(name: string, call: Promise<void>): Promise<stri
 }
 
 /** Runs an open or show call: a declined confirm is silent, any other refusal a console warning. */
-export async function quietly(name: string, call: Promise<void>): Promise<void> {
+export async function quietly(name: string, call: Promise<unknown>): Promise<void> {
   await refusalOf(name, call);
 }
 

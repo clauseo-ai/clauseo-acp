@@ -401,4 +401,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (353, 0xc410_7170_fdb4_985c),
         (255, 0x2e69_08c2_29d7_393b),
     ),
+    (
+        "added/turn_failed-MatterDocumentPathTooLong",
+        include_bytes!("added/turn_failed-MatterDocumentPathTooLong.jsonl"),
+        include_bytes!("added/turn_failed-MatterDocumentPathTooLong.msgpack"),
+        (368, 0x9d86_9346_283d_6480),
+        (270, 0x1931_dad4_d2f0_1e3c),
+    ),
 ];

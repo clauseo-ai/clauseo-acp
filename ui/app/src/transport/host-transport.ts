@@ -12,6 +12,7 @@ import type {
   HostError,
   HostEvent,
   HostQuery,
+  OpenedFile,
   PatchBatch,
   PermissionRequestId,
   PickedFolder,
@@ -53,8 +54,9 @@ export interface HostTransport {
    * confirm names its host. A declined confirm rejects with `transport.unauthorized`; a bad link with
    * `command.invalid`. */
   openExternal(url: string): Promise<void>;
-  /** Opens a matter document with its default app. */
-  openFile(file: FileRefId): Promise<void>;
+  /** Opens a matter document with its default app; `protected_view` says Word opened it in Protected View (a Word
+   * document whose path is too long for Word, opened by its folders' short names on Windows). */
+  openFile(file: FileRefId): Promise<OpenedFile>;
   /** Shows a matter's folder, or the app data folder, in Finder or File Explorer. */
   reveal(target: RevealTarget): Promise<void>;
   /** Opens the settings window, or brings it to the front when it is open already (H14's `open_settings`), at

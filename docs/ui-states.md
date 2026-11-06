@@ -317,6 +317,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Leave order | `ErrorCode::SigninAgentsStillRunning` | yes |
 | Launch while the keys load (0048) | `ErrorCode::AgentKeysLoading` | yes |
 | Launch with an unreadable key (0048) | `ErrorCode::AgentKeyUnreadable` | yes |
+| Open in Word with a path too long for Word (0026, Windows) | `ErrorCode::MatterDocumentPathTooLong` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

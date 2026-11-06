@@ -1,6 +1,6 @@
 // U9's copy review entries (Word), apart from registry.tsx to keep that file under the size limit: the change note over a
 // turn that changed one Word document, whose Undo Word refuses while the file is open; the Versions restore that the
-// lock refuses; and the note's and the wall's Open in Word. Two files held open name both (06 and 07). Each state is the real room over a host scripted for it
+// lock refuses; the note's and the wall's Open in Word, and the note's line when Word opens the file in Protected View. Two files held open name both (06 and 07). Each state is the real room over a host scripted for it
 // (hosts.ts, registry-u8.tsx's versionsHost), then the presses that bring it.
 import { NO_STAND_INS } from "../room/versions/stand-ins.ts";
 import { agentText, step, userMessage, uuid } from "../testing/stream-script.ts";
@@ -79,7 +79,7 @@ const undoRefused = () => (
  * map to the numbers: 01 the undo's line, 02 the hold's line, 03 Try again, 04 the restore's line, 05 Open in Word, 06
  * the undo's line with two Word documents held, 07 the restore's (the id form is "U9-" and two digits, status.ts), 08
  * the sentence under one file's line, 09 the one under two files' lines, 10 the sentence under the draft's dialog (its
- * words are the reader's). */
+ * words are the reader's), 11 the line under the note when Word opened its file in Protected View (the reader's). */
 export const U9: Entry[] = [
   {
     id: "U9-01",
@@ -131,6 +131,26 @@ export const U9: Entry[] = [
       <RoomFocusing
         host={() => threadHost({ entries: [QUESTION, ANSWER, changed()], papers: PAPERS })}
         focus='aside.room-pane li.tile button.tile-face[data-testid="open-in-word"]'
+      />
+    ),
+  },
+  {
+    id: "U9-11",
+    words: readerWords(
+      "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
+    ),
+    screen: "room/thread",
+    ...WINDOW,
+    render: () => (
+      <RoomClicking
+        host={() =>
+          threadHost({
+            entries: [QUESTION, ANSWER, changed()],
+            papers: PAPERS,
+            protectedView: true,
+          })
+        }
+        clicks={['[data-testid="files-changed"] [data-testid="open-in-word"]']}
       />
     ),
   },

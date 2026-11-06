@@ -1504,7 +1504,8 @@ expression: counts_schema()
         "matter.folder_too_deep",
         "signin.agents_still_running",
         "agent.keys_loading",
-        "agent.key_unreadable"
+        "agent.key_unreadable",
+        "matter.document_path_too_long"
       ],
       "type": "string"
     },

@@ -64,6 +64,16 @@ added: the dialog and opener plugins are called from Rust, as before.
   count). Refusals are `command.invalid`, or
   `matter.folder_missing` when the folder is gone; a failure of the OS to open, or a type macOS
   has no app for, is `internal`. No confirm: the lawyer clicked one of their own documents.
+- **A Word document whose path is too long for Word** (added 2026-11-06, `open/word_path.rs`).
+  Word on Windows cannot open a file whose full path is over 259 UTF-16 units. For a Word
+  document (`docx`, `doc`, `docm`, `dotx`, `dotm`, `rtf`, any case) over that, `open_file` opens
+  the 8.3 short form of its folder (`GetShortPathNameW`) joined to its real file name, when that
+  is within 259 units, and answers `{ "protected_view": true }`, since Word opens a file reached
+  that way in Protected View; the page says so. The file name is never shortened: Word would
+  title the window with the short name. With no short form (8.3 names off, many network shares)
+  or a result still too long, it is refused as `matter.document_path_too_long`, which adds an
+  error code (0003). Every other file, and every path within the limit, opens as before with
+  `{ "protected_view": false }`.
 - **`reveal { target }`.** `target` is `{ "matter": MatterId }` or `"app_data"`, never a path.
   The host answers the matter's folder (`command.unknown_matter` otherwise); the app data folder
   is the one `Locations::resolve` found at start-up. The folder is shown selected in its parent

@@ -3,7 +3,8 @@
 // tile (a press, Enter or Space, with the hint on hover and keyboard focus and the label for screen readers) and from
 // a change note naming it while the changes stand; never for a .pdf, a .txt or a paper the wall doesn't list. A second
 // press while an open is on its way sends nothing. A declined open is quiet; a failed one says why under the note, and
-// only in the console for a tile.
+// only in the console for a tile. An open Word started in Protected View says so in a quiet line under the note, until
+// the next open or Undo.
 import { IconFileGeneric, IconFilePdf, IconFileWord } from "@clauseo/components/icons/icons.tsx";
 import { iconIn } from "@clauseo/components/icons/icon-in.tsx";
 import { readFileSync } from "node:fs";
@@ -255,7 +256,13 @@ test("two quick presses on the note's Open in Word send one open_file", async ()
 const noteError = () =>
   h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="error"]') ?? null;
 
-for (const code of ["internal", "command.conflict", "matter.folder_missing", "command.invalid"]) {
+for (const code of [
+  "internal",
+  "command.conflict",
+  "matter.folder_missing",
+  "command.invalid",
+  "matter.document_path_too_long",
+]) {
   test(`a failed open from the note says why in its error line, by its code: ${code}`, async () => {
     h = await withPapers();
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -274,6 +281,67 @@ for (const code of ["internal", "command.conflict", "matter.folder_missing", "co
     expect(noteError()).toBeNull();
   });
 }
+
+const PROTECTED =
+  "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.";
+const protectedLine = () =>
+  h!.one("files-changed")?.querySelector<HTMLElement>('[data-testid="open-protected-view"]') ??
+  null;
+const openFromNote = async () => {
+  await h!.click(h!.one("files-changed")?.querySelector('[data-testid="open-in-word"]'));
+  await h!.settle();
+};
+
+test("an open in Protected View says so in a quiet line under the note; the next open clears it", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  expect(protectedLine()).toBeNull();
+  await openFromNote();
+  expect(protectedLine()?.textContent).toBe(PROTECTED);
+  expect(protectedLine()?.getAttribute("role")).toBe("status");
+  expect(protectedLine()?.closest('[role="alert"]')).toBeNull();
+  expect(noteError()).toBeNull();
+  // the next open clears it as it goes, and an open outside Protected View leaves it gone
+  h.transport.host.openFile = () => ({ protected_view: false });
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+});
+
+test("an open outside Protected View, or a failed one, shows no Protected View line", async () => {
+  h = await withPapers();
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(opened()).toHaveLength(1);
+  expect(protectedLine()).toBeNull();
+  h.transport.host.openFile = () => {
+    throw { code: "matter.document_path_too_long", message: "for logs", retryable: false };
+  };
+  await openFromNote();
+  expect(protectedLine()).toBeNull();
+  expect(noteError()?.dataset["code"]).toBe("matter.document_path_too_long");
+});
+
+test("Undo clears the Protected View line", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  h.deliver([reset([changed(["drafts/Reply.docx"])])]);
+  await openFromNote();
+  expect(protectedLine()).not.toBeNull();
+  await h.click(h.one("undo"));
+  await h.settle();
+  expect(protectedLine()).toBeNull();
+});
+
+test("a tile's open in Protected View says nothing in the room (it has no place to)", async () => {
+  h = await withPapers();
+  h.transport.host.openFile = () => ({ protected_view: true });
+  await h.click(faceOf("Reply.docx"));
+  await h.settle();
+  expect(opened()).toEqual([uuid(1, 8)]);
+  expect(h.host.querySelector('[data-testid="open-protected-view"]')).toBeNull();
+});
 
 test("a declined open from the note says nothing", async () => {
   h = await withPapers();

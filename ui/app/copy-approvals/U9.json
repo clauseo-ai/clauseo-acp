@@ -78,5 +78,13 @@
     "at": "2026-11-05",
     "by": "Rohan",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+  },
+  "U9-11": {
+    "en": "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
+    "hi": null,
+    "hi_status": "later",
+    "status": "provisional",
+    "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }
