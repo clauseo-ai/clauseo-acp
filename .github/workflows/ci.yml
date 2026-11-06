@@ -143,7 +143,10 @@ jobs:
     name: fast-lane
     # Not on push (Rohan's CI decision, 2026-11-04): the merge queue already ran it on this code.
     if: github.event_name != 'push'
-    runs-on: ubuntu-24.04
+    # The merge group's Linux build and test job's image (ubuntu-22.04, below), so a test that only
+    # 22.04 fails shows on the pull request: #441's (2026-11-05) passed here on 24.04 and failed
+    # the queue on 22.04.
+    runs-on: ubuntu-22.04
     # 40, not 30: the apt step is seconds from the .deb cache, but a new runner image misses it once,
     # and on 2026-11-05 a slow Ubuntu archive took 15 to 30 minutes over a miss (#469, #462).
     timeout-minutes: 40
@@ -183,10 +186,12 @@ jobs:
       - name: Test the release scripts and release.yml's rules
         run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs
 
-      # Saved on main only, as every Rust cache here.
+      # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
+      # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
+          key: ubuntu-22.04
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Every pinned tool, as prebuilt binaries; nothing is built from source.
