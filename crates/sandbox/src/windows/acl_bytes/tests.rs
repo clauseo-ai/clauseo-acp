@@ -517,3 +517,58 @@ fn an_auto_inherited_child_keeps_an_explicit_entry_equal_to_an_inherited_one() {
     let read = Descriptor::parse(&after).unwrap();
     assert_eq!(read.dacl, Some(empty_acl().as_slice()));
 }
+
+/// S15 `PR4h`: a hand-back read back through its handle. Its descriptor: owned by `owner`, with
+/// the entries `aces` in its DACL.
+fn read_back(owner: &str, aces: &[&[u8]]) -> Vec<u8> {
+    let dacl = render(2, aces);
+    let owner = sid_bytes(&sid(owner));
+    rebuild(
+        &build_descriptor(0, Some(&dacl), None),
+        Some(&owner),
+        None,
+        0,
+    )
+    .unwrap()
+}
+
+/// The desktop user, the matter's own pool user, another pool user, and the pool as bytes.
+const HB_ME: &str = "S-1-5-21-7-8-9-1001";
+const HB_OWN: &str = "S-1-5-21-1-2-3-1005";
+const HB_OTHER: &str = "S-1-5-21-1-2-3-1006";
+
+fn handed(after: &[u8]) -> bool {
+    let pool = [sid_bytes(&sid(HB_OWN)), sid_bytes(&sid(HB_OTHER))];
+    let own = [sid_bytes(&sid(HB_OWN))];
+    handed_back(after, &pool, &own, &sid_bytes(&sid(HB_ME))).unwrap()
+}
+
+#[test]
+fn a_hand_back_with_another_pool_users_allow_left_is_refused() {
+    let left = spec(HB_OTHER, Rights::Modify).bytes();
+    assert!(!handed(&read_back(HB_ME, &[&left])));
+    let everyone = spec("S-1-1-0", Rights::ReadAndExecute).bytes();
+    assert!(
+        !handed(&read_back(HB_ME, &[&everyone])),
+        "a broad group's too"
+    );
+}
+
+#[test]
+fn a_hand_back_whose_owner_isnt_the_desktop_user_is_refused() {
+    assert!(!handed(&read_back(HB_OTHER, &[])));
+    assert!(!handed(&read_back(HB_OWN, &[])));
+}
+
+#[test]
+fn a_hand_back_keeping_the_matters_own_pool_users_allow_is_accepted() {
+    let own = spec(HB_OWN, Rights::Modify).bytes();
+    assert!(handed(&read_back(HB_ME, &[&own])));
+}
+
+#[test]
+fn a_clean_hand_back_is_accepted_inherited_entries_aside() {
+    assert!(handed(&read_back(HB_ME, &[])));
+    let inherited = inherited(HB_OTHER, Rights::Modify);
+    assert!(handed(&read_back(HB_ME, &[&inherited])));
+}

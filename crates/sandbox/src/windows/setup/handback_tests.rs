@@ -2,9 +2,9 @@
 //! pool user owns, inside a matter's tree, goes to the desktop user, losing that user's explicit
 //! allow and taking the inherited deny; one whose hand-back lacks `WRITE_OWNER` is refused as
 //! `PoolOwned { owned: Child }`. Only in CI's elevated step (`#[ignore]`, and skipped at run time
-//! unless the token is elevated and `CLAUSEO_ELEVATED_TESTS=1`). The accounts carry this
-//! family's own prefix ([`FAMILY`]) and a random suffix, and each test first clears what a
-//! killed earlier try left, by prefix.
+//! unless the token is elevated and `CLAUSEO_ELEVATED_TESTS=1`). Each test's account carries
+//! that test's own prefix ([`FAMILY_A`], [`FAMILY_B`]) and a random suffix, and each test first
+//! clears what a killed earlier try of it left, by its prefix.
 
 use std::path::{Path, PathBuf};
 
@@ -23,29 +23,35 @@ use crate::windows::test_dacl::{auto_inherit_with, drop_privileges, give_owner, 
 use crate::windows::test_world::OTHER_POOL_SIDS;
 use crate::windows::writer::{AclWriter, ApplyFailure, Owned, Reach, Strict};
 
-/// The start of every account this family makes: `ClauseoHbk` and six hex digits.
-const FAMILY: &str = "ClauseoHbk";
+/// Each test's own account prefix (`ClauseoHbkA` or `ClauseoHbkB`, then six hex digits), so
+/// one test's sweep never deletes the other's account.
+const FAMILY_A: &str = "ClauseoHbkA";
+const FAMILY_B: &str = "ClauseoHbkB";
 
-/// Deletes every local account whose name starts with [`FAMILY`].
-fn sweep() {
-    for name in names_starting(FAMILY, Kind::User).unwrap_or_default() {
+/// Deletes every local account whose name starts with `family`.
+fn sweep(family: &str) {
+    for name in names_starting(family, Kind::User).unwrap_or_default() {
         drop(accounts::delete_user(&name));
     }
 }
 
-/// Sweeps when dropped, so a failed assertion still cleans up.
-struct Sweep;
+/// Sweeps its family when dropped, so a failed assertion still cleans up.
+struct Sweep(&'static str);
 
 impl Drop for Sweep {
     fn drop(&mut self) {
-        sweep();
+        sweep(self.0);
     }
 }
 
-/// A fresh local account of this family: the other matter's pool user.
-fn other_account() -> Sid {
+/// A fresh local account of `family`: the other matter's pool user. Sweeps that family first
+/// (what a killed earlier try left) and again when the guard drops.
+fn other_account(family: &'static str) -> (Sweep, Sid) {
+    sweep(family);
+    let guard = Sweep(family);
     let password = password::generate().unwrap();
-    accounts::create_user(&format!("{FAMILY}{}", suffix()), &password).unwrap()
+    let name = format!("{family}{}", suffix());
+    (guard, accounts::create_user(&name, &password).unwrap())
 }
 
 /// A matter folder in a temp folder whose `item` (a file, made) another account `other` owns
@@ -94,9 +100,7 @@ fn elevated_another_pool_users_child_goes_to_the_desktop_user_without_its_allow(
     if !elevated_tests_enabled() {
         return;
     }
-    sweep();
-    let _sweep = Sweep;
-    let other = other_account();
+    let (_sweep, other) = other_account(FAMILY_A);
     let allow = format!("D:(A;;FA;;;{other})");
     let set = |path: &Path| auto_inherit_with(path, &allow).unwrap();
     let (dir, doc) = matter_with("handback-elevated", "moved/doc.txt", &other, &set);
@@ -125,9 +129,7 @@ fn elevated_a_child_whose_owner_cant_be_changed_is_refused_as_pool_owned() {
     if !elevated_tests_enabled() {
         return;
     }
-    sweep();
-    let _sweep = Sweep;
-    let other = other_account();
+    let (_sweep, other) = other_account(FAMILY_B);
     let me = current_user_sid().unwrap();
     let only_read_and_dac = format!("D:P(A;;FRWD;;;{me})");
     let set = |path: &Path| protect_with(path, &only_read_and_dac).unwrap();

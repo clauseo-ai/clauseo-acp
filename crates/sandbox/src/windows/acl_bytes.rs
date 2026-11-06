@@ -20,7 +20,7 @@ use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
 pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
-pub(crate) use steps::{Write, lacking, writes};
+pub(crate) use steps::{Write, handed_back, lacking, writes};
 
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 pub(crate) const ALLOWED: u8 = 0;

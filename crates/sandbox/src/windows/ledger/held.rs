@@ -295,3 +295,20 @@ pub(super) fn drop_gone(
         .retain(|slot| !matches!(slot, Slot::Known(known) if gone.contains(&known.entry.id)));
     gone.len()
 }
+
+/// Marks each of `ids` that is `applied` `pending` again: a root's hand-back stripped its
+/// permission entry and writing it back failed (S15 `PR4h`). The matter's next launch writes it
+/// again, as it writes every grant its plan names, and walks it. Whether anything changed.
+pub(super) fn mark_pending(state: &mut State, ids: &[EntryId]) -> bool {
+    let mut changed = false;
+    for slot in &mut state.slots {
+        if let Slot::Known(known) = slot
+            && ids.contains(&known.entry.id)
+            && known.entry.state == EntryState::Applied
+        {
+            known.entry.state = EntryState::Pending;
+            changed = true;
+        }
+    }
+    changed
+}

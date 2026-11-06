@@ -10,7 +10,7 @@ use super::strict_for;
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, Sid};
 use crate::windows::admit::PathKind;
-use crate::windows::ledger::{Entry, EntryState, Ledger};
+use crate::windows::ledger::{Entry, EntryId, EntryState, Ledger};
 use crate::windows::writer::{AclWriter, ApplyFailure, Owned};
 
 /// The kinds of root handed back when a pool user owns it: rare (a folder an agent made, moved
@@ -32,7 +32,8 @@ pub(super) const ROOT_KINDS: [PathKind; 6] = [
 /// The cleaning strips the pool's explicit allows and our label from the root, the matter's
 /// own `Modify` included, which `ledger` may list as applied; a fence-only plan (set-up's
 /// extend) doesn't plan those grants. So every entry `ledger` lists on a root handed back is
-/// written again here, at once ([`AclWriter::add`] leaves one still there as it is).
+/// written again here, at once ([`AclWriter::add`] leaves one still there as it is; see
+/// `restore_entries` for one that fails).
 ///
 /// A hand-back refused for want of a right ([`ApplyFailure::ChildShut`]: the handle got no
 /// `WRITE_OWNER` or `WRITE_DAC`), or that read back still another's or with a pool user's allow
@@ -41,7 +42,7 @@ pub(super) const ROOT_KINDS: [PathKind; 6] = [
 /// left to the writes that follow.
 pub(super) fn hand_back_roots(
     plan: &AdmittedPlan,
-    ledger: &Ledger,
+    ledger: &mut Ledger,
     acl: &mut dyn AclWriter,
     extra: &[Sid],
 ) -> Result<(), Error> {
@@ -63,7 +64,7 @@ pub(super) fn hand_back_roots(
         let failure = match acl.hand_back(path, &pool) {
             Ok(false) => continue,
             Ok(true) => {
-                restore_entries(ledger, acl, path).map_err(refuse)?;
+                restore_entries(ledger, acl, path);
                 continue;
             }
             Err(ApplyFailure::ChildShut | ApplyFailure::PoolOwned { .. }) => {
@@ -78,20 +79,36 @@ pub(super) fn hand_back_roots(
 }
 
 /// Writes again each entry `ledger` lists, applied or pending, on `path`, a root just handed
-/// back (the credential link's aside: it is a file in the state folder, never a root).
-fn restore_entries(
-    ledger: &Ledger,
-    acl: &mut dyn AclWriter,
-    path: &Path,
-) -> Result<(), ApplyFailure> {
-    let listed = ledger.entries().filter(|e| {
-        e.path == path
-            && e.kind != PathKind::CredentialLink
-            && matches!(e.state, EntryState::Applied | EntryState::Pending)
-    });
-    let grants: Vec<_> = listed.map(Entry::grant).collect();
-    for grant in &grants {
-        acl.add(grant)?;
+/// back (the credential link's aside: it is a file in the state folder, never a root). A write
+/// that fails is tried once more. One that fails again leaves its entry `pending`, logged once
+/// with no path, and the launch goes on: that matter's next launch writes it again, as it writes
+/// every grant its plan names. Until then the matter's agent may lack its own access to the
+/// root, which fails closed (ADR 0049).
+fn restore_entries(ledger: &mut Ledger, acl: &mut dyn AclWriter, path: &Path) {
+    let listed: Vec<Entry> = ledger
+        .entries()
+        .filter(|e| {
+            e.path == path
+                && e.kind != PathKind::CredentialLink
+                && matches!(e.state, EntryState::Applied | EntryState::Pending)
+        })
+        .cloned()
+        .collect();
+    let failed: Vec<EntryId> = listed
+        .iter()
+        .filter(|e| {
+            let grant = e.grant();
+            acl.add(&grant).or_else(|_| acl.add(&grant)).is_err()
+        })
+        .map(|e| e.id)
+        .collect();
+    if failed.is_empty() {
+        return;
     }
-    Ok(())
+    let marked = ledger.mark_pending(&failed).err().map(|e| e.kind());
+    tracing::warn!(
+        entries = failed.len(),
+        ?marked,
+        "a root handed back didn't get its entries written again; left pending"
+    );
 }

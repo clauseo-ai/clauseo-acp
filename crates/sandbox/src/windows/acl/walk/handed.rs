@@ -10,9 +10,7 @@ use windows::Win32::Security::{
 use super::Mode;
 use crate::windows::acl::READ_ALL;
 use crate::windows::acl::object::Object;
-use crate::windows::acl_bytes::{
-    Acl, Descriptor, Write, broad_allow, owner_bytes, owner_descriptor,
-};
+use crate::windows::acl_bytes::{Write, handed_back, owner_descriptor};
 use crate::windows::writer::{ApplyFailure, Owned};
 
 /// The writes `settle` decided on: the DACL (with how it is set), the hand-back's owner, the
@@ -58,18 +56,14 @@ pub(super) fn make(
     Ok(written)
 }
 
-/// A hand-back read again through its handle once written: the owner is `me` and no explicit
-/// allow for a pool SID but `own` (nor for a broad group) is left. Another pool user's allow put
-/// back between the owner write and the DACL write, or an owner changed since, refuses as
-/// [`ApplyFailure::PoolOwned`]. A handle that pool user opened with `WRITE_DAC` before the
-/// owner write can still write later: that residual is ADR 0049's.
+/// A hand-back read again through its handle once written ([`handed_back`]): the owner is `me`
+/// and no explicit allow for a pool SID but `own` (nor for a broad group) is left. Another pool
+/// user's allow put back between the owner write and the DACL write, or an owner changed since,
+/// refuses as [`ApplyFailure::PoolOwned`]. A handle that pool user opened with `WRITE_DAC`
+/// before the owner write can still write later: that residual is ADR 0049's.
 fn handed(after: &[u8], pool: &[Vec<u8>], own: &[Vec<u8>], me: &[u8]) -> Result<(), ApplyFailure> {
-    let io = |e: io::Error| ApplyFailure::Io(e.kind());
-    let others: Vec<Vec<u8>> = pool.iter().filter(|p| !own.contains(p)).cloned().collect();
-    let dacl = Descriptor::parse(after).map_err(io)?.dacl;
-    let dacl = dacl.map(Acl::parse).transpose().map_err(io)?;
-    let allowed = dacl.as_ref().is_some_and(|d| broad_allow(d, &others));
-    if owner_bytes(after) != Some(me) || allowed {
+    let checked = handed_back(after, pool, own, me).map_err(|e| ApplyFailure::Io(e.kind()))?;
+    if !checked {
         return Err(ApplyFailure::PoolOwned {
             owned: Owned::Child,
         });
