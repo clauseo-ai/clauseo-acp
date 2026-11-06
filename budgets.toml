@@ -414,15 +414,20 @@ measured_by = "design rule"
 status = "unmeasured"
 source = "synthesis §4; doc 15"
 
+# Rohan, 2026-11-06: was 600 (synthesis §4), now 300 on G3's proposal (decision record 0052). G3
+# items 3 and 4, macOS, Node 24.22.0 (measurements/g3-agent-cost-and-resume.md, #427 and #431): a
+# stop frees about 194 MB (claude-agent-acp) or 99 MB (codex-acp) at 600 s idle, and session/load
+# comes back in 508 ms or 391 ms. Still unmeasured by this repo's tooling: G3 timed the stop's gain
+# and the resume by hand, and Windows item 4 is pending.
 [[budget]]
 id = "agent_idle_stop"
 metric = "idle time before a live agent is stopped"
-limit = 600.0
+limit = 300.0
 unit = "s"
 gate = "alert"
-measured_by = "design rule"
+measured_by = "G3 items 3 and 4 (macOS, Node 24.22.0), by hand"
 status = "unmeasured"
-source = "synthesis §4; doc 15"
+source = "synthesis §4; doc 15; G3 (#427, #431)"
 
 [[budget]]
 id = "cargo_check_app_edit"
