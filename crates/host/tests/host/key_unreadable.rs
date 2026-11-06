@@ -1,9 +1,10 @@
 //! `agent.key_unreadable` (decision record 0048, R20 P5b A4): desktop refuses an agent's
 //! launches with it once that agent's stored key was tried and its read failed or did not answer
-//! in time. A launch meeting it asks desktop to read the key again (`HostConfig::with_key_retry`)
-//! and waits at most 2 s on the host clock: lifted in time, it goes on with the key; still
-//! refused, it fails with the code and no process starts. `agent.keys_loading` past its bound
-//! (desktop never loaded the keys) refuses the same way.
+//! in time. A launch meeting it asks desktop to read the key again
+//! (`HostConfig::with_launch_retry`, with the code) and waits at most 2 s on the host clock:
+//! lifted in time, it goes on with the key; still refused, it fails with the code and no process
+//! starts. `agent.keys_loading` past its bound (desktop never loaded the keys) refuses the same
+//! way. R17's `agent.identity_checking` asks through the same retry, with its code.
 
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex};
@@ -28,14 +29,14 @@ fn a_launch_meeting_key_unreadable_asks_for_a_read_again_and_goes_on_once_it_lif
     let launches = Arc::clone(&recording.envs);
     let slot = Arc::new(Mutex::new(None));
     let hook = SlotKey(Arc::clone(&slot));
-    let retries: Arc<Mutex<Vec<AgentId>>> = Arc::default();
+    let retries: Arc<Mutex<Vec<(AgentId, ErrorCode)>>> = Arc::default();
     let asked = Arc::clone(&retries);
     let host = dir.start_launching(0, Arc::new(recording), |config| {
         config
             .with_profile_hook(Box::new(hook))
             .with_launch_refused(fake(), ErrorCode::AgentKeyUnreadable)
-            .with_key_retry(Arc::new(move |agent: &AgentId| {
-                asked.lock().unwrap().push(agent.clone());
+            .with_launch_retry(Arc::new(move |agent: &AgentId, code: ErrorCode| {
+                asked.lock().unwrap().push((agent.clone(), code));
             }))
     });
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
@@ -46,7 +47,7 @@ fn a_launch_meeting_key_unreadable_asks_for_a_read_again_and_goes_on_once_it_lif
     until_keys_wait_armed(&host);
     assert_eq!(
         *retries.lock().unwrap(),
-        vec![fake()],
+        vec![(fake(), ErrorCode::AgentKeyUnreadable)],
         "desktop asked to read again"
     );
     host.clock.advance(KEYS_WAIT);
@@ -109,6 +110,56 @@ fn keys_loading_never_lifted_refuses_as_key_unreadable_past_the_bound() {
     let failed = turn_failed(&events, turn).unwrap_or_else(|| panic!("{}", events.dump()));
     assert_eq!(failed.code, ErrorCode::AgentKeyUnreadable);
     assert_eq!(launches.lock().unwrap().len(), 0, "no process started");
+    host.settle();
+    events.drain_ready();
+    events.assert_no_mismatch();
+    host.shutdown();
+}
+
+/// R17: a launch meeting `agent.identity_checking` asks desktop for the identity check through
+/// the same launch retry, with that code, waits at most 2 s, and goes on once desktop lifts it.
+#[test]
+fn a_launch_meeting_identity_checking_asks_for_the_check_and_goes_on_once_it_lifts() {
+    let dir = Dir::new(
+        "identity_checking",
+        &[(FAKE, Scenario::Local("launch-refused"))],
+    );
+    let recording = Recording::new(&dir);
+    let launches = Arc::clone(&recording.envs);
+    let retries: Arc<Mutex<Vec<(AgentId, ErrorCode)>>> = Arc::default();
+    let asked = Arc::clone(&retries);
+    let host = dir.start_launching(0, Arc::new(recording), |config| {
+        config
+            .with_launch_refused(fake(), ErrorCode::AgentIdentityChecking)
+            .with_launch_retry(Arc::new(move |agent: &AgentId, code: ErrorCode| {
+                asked.lock().unwrap().push((agent.clone(), code));
+            }))
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Look at the matter.");
+    until_keys_wait_armed(&host);
+    assert_eq!(
+        *retries.lock().unwrap(),
+        vec![(fake(), ErrorCode::AgentIdentityChecking)],
+        "desktop asked for the check, with the code"
+    );
+    host.clock.advance(KEYS_WAIT);
+    assert_eq!(events.until_turn_ended(first).stop, StopReason::Failed);
+    let failed = turn_failed(&events, first).unwrap_or_else(|| panic!("{}", events.dump()));
+    assert_eq!(failed.code, ErrorCode::AgentIdentityChecking);
+    assert!(failed.code.is_retryable());
+    assert_eq!(launches.lock().unwrap().len(), 0, "no process started");
+    // The check confirms the account: desktop lifts the refusal and the waiting launch goes on.
+    let (second, _) = host.prompt(thread, "Look again.");
+    until_keys_wait_armed(&host);
+    wait(
+        "set_launch_refused",
+        host.handle.set_launch_refused(fake(), None),
+    )
+    .unwrap();
+    assert_eq!(events.until_turn_ended(second).stop, StopReason::EndTurn);
+    assert_eq!(launches.lock().unwrap().len(), 1);
     host.settle();
     events.drain_ready();
     events.assert_no_mismatch();
