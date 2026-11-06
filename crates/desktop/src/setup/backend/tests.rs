@@ -3,6 +3,7 @@
 //! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, no key in a log, and the
 //! two launchers; installs, keys, endpoints, sign-in bars and sign-in races in `tests/`.
 
+mod after;
 mod counts;
 mod endpoint;
 mod fakes;

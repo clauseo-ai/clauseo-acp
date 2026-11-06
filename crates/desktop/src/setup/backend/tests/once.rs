@@ -1,10 +1,11 @@
 //! A lawyer's leave on the recording fakes: one leave per agent (a double `StopUsingLogin`, a
 //! split arriving during one), the 30 s wait running out (`StopUsingLogin` answers done, the
 //! agent shows `Switching`, then `stuck`, and the holds stay until S18's stop job ends: a late
-//! `SignedOut` runs the steps after the stop, then lifts the hold; a job that ends still reused
-//! or `Failed` only lifts it; a key whose leave gives up answers `command.conflict`), a stale
-//! state queued before the leave waited, Clauseo's own login signed out, and the hold lifted when
-//! the leave is dropped mid-way or `restart_agents` fails once.
+//! `SignedOut` runs the steps after the stop, then the rule of `after.rs` (held here, with nothing
+//! usable); a job that ends still reused or `Failed` only lifts it; a key whose leave gives up
+//! answers `command.conflict`), a stale state queued before the leave waited, Clauseo's own
+//! login signed out, and the hold lifted when the leave is dropped mid-way or `restart_agents`
+//! fails once.
 
 use std::future::{Future as _, poll_fn};
 use std::task::Poll;
@@ -186,7 +187,7 @@ fn a_give_up_whose_job_ends_still_reused_only_lifts_the_hold() {
 }
 
 #[test]
-fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_lifts_the_hold() {
+fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_follows_the_rule() {
     let rig = reused_codex();
     let mut script = rig.timer.script();
     let setup = rig.setup();
@@ -212,15 +213,15 @@ fn a_late_signed_out_after_a_give_up_runs_the_steps_after_the_stop_then_lifts_th
             "host.remove_login_links",
             "host.set_agent_launch",
             "readers.set_entry",
-            "host.restart_agents",
             "readers.release",
             "host.login_changed",
-        ]
+        ],
+        "the leave finished with nothing usable: held for the next login"
     );
     ends_own(&rig);
     let restarts = rig.host.calls().into_iter();
     let restarts = restarts.filter(|call| *call == HostCall::RestartAgents(codex()));
-    assert_eq!(restarts.count(), 1, "once, after the steps");
+    assert_eq!(restarts.count(), 0, "no restart");
     assert!(
         rig.backend.wiring.leaves.begin(&codex()).is_ok(),
         "the slot is free"

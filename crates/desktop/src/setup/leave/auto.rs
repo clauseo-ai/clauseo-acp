@@ -10,7 +10,10 @@
 //! is not called. The agent shows `Switching { since, stuck }` from that first end, and the leave
 //! tries again after 5 s, 30 s, then every 5 minutes, until a try finishes or a new `SignedIn`
 //! arrives. It never gives up. A try again that finishes ends `Switching` (the state after it
-//! shows), drops the reads' hold, and calls `restart_agents`, so the held questions run once.
+//! shows) and drops the reads' hold. Any try that finishes, the first or a try again, then
+//! follows one rule ([`finish`]): `restart_agents` runs the held questions once when a stored
+//! key, an endpoint or Clauseo's own login remains, else the hold stays for the next login and
+//! the agent shows signed out.
 //! `stuck` turns true [`STUCK_AFTER`](super::hold::STUCK_AFTER) after `since`, a try again between
 //! changing neither. The hold lives in memory only: quitting Clauseo clears it, and the next
 //! start's status check finds the split or the changed login and leaves again.
@@ -38,13 +41,14 @@ use std::panic::AssertUnwindSafe;
 use std::pin::pin;
 use std::sync::Arc;
 
-use clauseo_agents::{Found, SigninState, Source};
+use clauseo_agents::Found;
 use clauseo_protocol::{AgentId, AgentKind, HostError};
 use futures::channel::oneshot;
 use futures::future::{Either, select};
 use futures::{FutureExt as _, StreamExt as _};
 
 use super::super::backend::AgentsBackend;
+use super::after::{finish, own_login_shown};
 use super::hold::HostHold;
 use super::{NotLeft, Over, Wait, Whose, attempt, login_changed, retry_after, taken_over};
 
@@ -76,10 +80,8 @@ pub(crate) async fn follow(backend: &AgentsBackend) {
 
 /// How an automatic leave ended.
 enum End {
-    /// Its first try finished: the hold stays until the new login is in place.
-    First,
-    /// A try again finished: `restart_agents` runs the held questions.
-    Again,
+    /// A try finished, the first or a try again: [`finish`] lifts the hold or keeps it.
+    Left,
     /// The pump handled a new `SignedIn`, `restart_agents` included.
     NewSignIn,
     /// A new login took the reused one's place ([`taken_over`]).
@@ -113,7 +115,7 @@ pub(crate) async fn auto_leave(
     let reads = backend.wiring.readers.hold(kind).await;
     let hold = HostHold::on_panic(Arc::clone(&backend.host), agent.clone());
     let end = match attempt(backend, agent, kind, why, Whose::Auto).await {
-        Ok(_) => End::First,
+        Ok(_) => End::Left,
         Err(NotLeft::NewSignIn) => End::NewSignIn,
         Err(NotLeft::TakenOver(Over::SignedIn)) => End::TakenOver,
         Err(not_left) => {
@@ -137,12 +139,12 @@ pub(crate) async fn auto_leave(
     slot.left();
     drop(reads);
     match end {
-        End::Again => hold.lift().await,
+        End::Left => finish(backend, agent, hold).await,
         End::TakenOver if own_login_shown(backend, agent) || leaves.told_signed_in(agent) => {
             // The pump may have lifted it before this leave's last `stop_agents`.
             hold.lift().await;
         }
-        End::First | End::NewSignIn | End::TakenOver => hold.keep(),
+        End::NewSignIn | End::TakenOver => hold.keep(),
     }
     login_changed(backend, agent).await;
     Ok(())
@@ -167,7 +169,7 @@ async fn try_again(
             // Skipped, never cancelled: should the sign-in fail, the next try runs.
             Some(Over::Running) => log_try(agent, &NotLeft::TakenOver(Over::Running)),
             None => match attempt(backend, agent, kind, why, Whose::Auto).await {
-                Ok(_) => return End::Again,
+                Ok(_) => return End::Left,
                 Err(NotLeft::NewSignIn) => break End::NewSignIn,
                 Err(NotLeft::TakenOver(Over::SignedIn)) => break End::TakenOver,
                 Err(not_left) => log_try(agent, &not_left),
@@ -180,17 +182,6 @@ async fn try_again(
     };
     tracing::info!(%agent, "a new sign-in ended an automatic leave");
     end
-}
-
-/// Whether the pump has shown Clauseo's own login for `agent`: it has handled its `SignedIn`.
-fn own_login_shown(backend: &AgentsBackend, agent: &AgentId) -> bool {
-    matches!(
-        backend.compose.s18(agent),
-        Some(SigninState::SignedIn {
-            source: Source::Own,
-            ..
-        })
-    )
 }
 
 /// A try that did not finish, by its code.

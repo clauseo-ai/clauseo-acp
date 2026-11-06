@@ -135,12 +135,14 @@ impl HostHold {
         }
     }
 
-    /// The leave finished: the hold stays until the new login is in place.
+    /// The leave finished with nothing usable (`after.rs`), or a new login's `restart_agents`
+    /// lifted it: the hold stays until the new login is in place.
     pub(crate) fn keep(mut self) {
         self.armed = false;
     }
 
-    /// The leave did not finish: `restart_agents` lifts the hold.
+    /// The leave did not finish, or finished with a usable login (`after.rs`): `restart_agents`
+    /// lifts the hold.
     pub(crate) async fn lift(mut self) {
         self.armed = false;
         lift(&*self.host, &self.agent).await;

@@ -20,16 +20,19 @@
 //! 2 minutes). Then the steps after the stop run if it stopped (not on a `Failed`), `Switching`
 //! ends, and `restart_agents` lifts the hold (review A2). The agent's slot stays taken till
 //! then. `StopUsingLogin` answers done; the commands that leave first ([`leave_first`])
-//! answer `command.conflict`, with nothing stored or started. A leave that finishes leaves the
-//! hold: `restart_agents` runs once the new login, key or endpoint is in place, on the
-//! `SignedIn` the pump sees or after a key or an endpoint is stored. A new `SignedIn` that
-//! lands during the leave ends it as done: the pump has handled it, `restart_agents` included
-//! (review A1).
+//! answer `command.conflict`, with nothing stored or started. A leave that finishes, at once or
+//! late, follows one rule (`after.rs`): `restart_agents` when a stored key, an endpoint or
+//! Clauseo's own login remains, else the hold stays, the agent shown signed out, until the new
+//! login's `SignedIn` the pump sees. A leave that is a key's or an endpoint's first step leaves
+//! the restart to its command, once the key or the endpoint is stored ([`After::Command`]). A
+//! new `SignedIn` that lands during the leave ends it as done: the pump has handled it,
+//! `restart_agents` included (review A1).
 //!
 //! **An automatic leave** (`auto.rs`: a split, or a reuse S18 ended by itself) that does not
 //! finish keeps the hold and tries again, showing `Switching`. It never asks S18 to stop once a
 //! new login took over, nor while a sign-in runs ([`taken_over`]).
 
+mod after;
 mod auto;
 mod hold;
 mod pump;
@@ -42,6 +45,7 @@ use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SignInSource};
 use futures::channel::oneshot;
 use futures::future::{Either, select};
 
+pub(crate) use self::after::{After, restart_if_usable};
 #[cfg(test)]
 pub(crate) use self::auto::auto_leave;
 pub(crate) use self::auto::follow as follow_auto_leaves;
@@ -125,9 +129,13 @@ pub(crate) enum Left {
 /// A lawyer's leave of `agent`'s reused login, as the first step of another command
 /// (`UseDifferentAccount`, a key or an endpoint): one that is still pending answers
 /// `command.conflict`, with nothing stored or started, since S18's stop job may still end the
-/// reuse or fail, and rewrite the entry under the command's change.
-pub(crate) async fn leave_first(backend: &AgentsBackend, agent: &AgentId) -> Result<(), HostError> {
-    match leave_reused(backend, agent).await? {
+/// reuse or fail, and rewrite the entry under the command's change. `after`: who restarts.
+pub(crate) async fn leave_first(
+    backend: &AgentsBackend,
+    agent: &AgentId,
+    after: After,
+) -> Result<(), HostError> {
+    match leave_reused(backend, agent, after).await? {
         Left::Done => Ok(()),
         Left::Pending => Err(HostError::new(
             ErrorCode::CommandConflict,
@@ -136,10 +144,12 @@ pub(crate) async fn leave_first(backend: &AgentsBackend, agent: &AgentId) -> Res
     }
 }
 
-/// A lawyer's leave of `agent`'s reused login: see the module docs.
+/// A lawyer's leave of `agent`'s reused login: see the module docs. Once it finished, the
+/// agents restart by the rule (`after.rs`), unless its command restarts them (`after`).
 pub(crate) async fn leave_reused(
     backend: &AgentsBackend,
     agent: &AgentId,
+    after: After,
 ) -> Result<Left, HostError> {
     let Some(kind) = AgentKind::of(agent) else {
         return Err(HostError::new(ErrorCode::CommandInvalid, "no such agent"));
@@ -158,9 +168,14 @@ pub(crate) async fn leave_reused(
     };
     match tried {
         Ok(first_error) => {
-            hold.keep();
             slot.left();
             drop(reads);
+            // A command that fails here stops: the rule decides for it.
+            if after == After::Rule || first_error.is_some() {
+                self::after::finish(backend, agent, hold).await;
+            } else {
+                hold.keep();
+            }
             login_changed(backend, agent).await;
             first_error.map_or(Ok(Left::Done), Err)
         }

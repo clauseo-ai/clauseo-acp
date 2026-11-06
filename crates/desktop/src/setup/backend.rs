@@ -196,7 +196,7 @@ impl AgentsBackend {
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
                 if self.reused(&agent) {
-                    leave::leave_first(self, &agent).await?;
+                    leave::leave_first(self, &agent, leave::After::Rule).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
@@ -212,7 +212,7 @@ impl AgentsBackend {
                     )));
                 }
                 // Done also while S18's stop job runs on: the agent shows `Switching`.
-                let _left = leave::leave_reused(self, &agent).await?;
+                let _left = leave::leave_reused(self, &agent, leave::After::Rule).await?;
             }
             SetupCommand::FindLogin { .. } => {
                 agents
@@ -265,7 +265,7 @@ impl AgentsBackend {
             return Err(key_stored(agent));
         }
         if left {
-            leave::leave_first(self, agent).await?;
+            leave::leave_first(self, agent, leave::After::Command).await?;
         }
         let hold = leave::hold_reads(self, agent).await;
         let then = self.key_trigger(agent);
@@ -273,7 +273,7 @@ impl AgentsBackend {
         drop(hold);
         if let Err(error) = stored {
             if left {
-                leave::restart(self, agent).await;
+                leave::restart_if_usable(self, agent).await;
             }
             return Err(error);
         }
@@ -309,7 +309,7 @@ impl AgentsBackend {
         .await?;
         let left = url.is_some() && self.reused(agent);
         if left {
-            leave::leave_first(self, agent).await?;
+            leave::leave_first(self, agent, leave::After::Command).await?;
         }
         let firm = url.is_some() || info.provider;
         let hold = leave::hold_reads(self, agent).await;
@@ -317,7 +317,7 @@ impl AgentsBackend {
         drop(hold);
         if let Err(error) = set {
             if left {
-                leave::restart(self, agent).await;
+                leave::restart_if_usable(self, agent).await;
             }
             return Err(error);
         }
