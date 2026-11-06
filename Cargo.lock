@@ -1270,6 +1270,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

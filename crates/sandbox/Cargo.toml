@@ -40,6 +40,8 @@ base64 = { workspace = true }
 subtle = { workspace = true }
 # Tier B's files, read and written on every OS: the ACL ledger, matters.json and setup.json.
 serde_json = { workspace = true }
+# The elevated set-up's pool passwords are wiped from memory on drop (src/windows/setup).
+zeroize = { workspace = true }
 # The egress proxy's upstream: proxy URLs, and the logs of an ignored setting or a failed lookup.
 # (url and tracing are listed above.)
 
