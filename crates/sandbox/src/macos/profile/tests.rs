@@ -91,6 +91,44 @@ fn with_a_credential_link() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
+/// M4: the credential link gets read and `file-write-data`; every other write to it (chmod,
+/// chflags, xattr, chown, setugid, times, ACL) is denied after every allow that covers it, with
+/// data, unlink and create allowed back. Seatbelt applies the last match.
+#[test]
+fn the_credential_link_takes_data_writes_but_not_metadata() {
+    let w = World::new("profile-credential-link-metadata");
+    let policy = w
+        .builder()
+        .credential_link(w.at("data/agent-state/m1/codex/auth.json"))
+        .read_only_in_state(w.at("data/agent-state/m1/codex/config.toml"))
+        .build()
+        .unwrap();
+    let text = SeatbeltProfile::new(&policy, TAG)
+        .unwrap()
+        .text()
+        .to_owned();
+    let link = "(literal (param \"CREDENTIAL_LINK\"))";
+    let allow = format!("(allow file-read* file-write-data\n  {link})");
+    assert_eq!(text.matches(&allow).count(), 2, "{text}");
+    for rule in text
+        .split("\n(")
+        .filter(|r| r.starts_with("allow file-read* file-write*"))
+    {
+        assert!(!rule.contains("CREDENTIAL_LINK"), "{rule}");
+    }
+    let deny = format!("(deny file-write*\n  {link}\n  (with message \"{TAG}\"))");
+    let back = format!("(allow file-write-data file-write-unlink file-write-create\n  {link})");
+    let deny_at = text.find(&deny).expect(&text);
+    let back_at = text.find(&back).expect(&text);
+    assert!(deny_at < back_at, "{text}");
+    // After the last allow of the state folder, so the deny wins; before its read-only denies.
+    let last_state = text.rfind("(subpath (param \"STATE\"))").unwrap();
+    assert!(deny_at > last_state, "{text}");
+    let read_only_at = text.find("; Read-only in the state folder").expect(&text);
+    assert!(back_at < read_only_at, "{text}");
+    assert_eq!(text.matches(link).count(), 4, "{text}");
+}
+
 #[test]
 fn with_a_browser_socket_folder() {
     let w = World::new("profile-browser-sockets");
