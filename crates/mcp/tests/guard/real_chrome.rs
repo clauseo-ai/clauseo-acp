@@ -414,7 +414,8 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     let (command, cdp) = command_with(&scratch, &binaries, &proxy, true);
     let mut guard = Guard::start(command);
     guard.stderr_until("Chrome started; waiting for it to listen");
-    let listening = (0..200).any(|_| {
+    // 60 s: on the loaded CI runner Chrome once took over 10 s to listen (.config/nextest.toml).
+    let listening = (0..1200).any(|_| {
         let up = std::net::TcpStream::connect(format!("127.0.0.1:{cdp}")).is_ok();
         if !up {
             std::thread::sleep(Duration::from_millis(50));
