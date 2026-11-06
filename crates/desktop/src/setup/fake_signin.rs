@@ -375,6 +375,9 @@ impl SetupAgents for FakeSignin {
     fn shutdown(&self, wait: Duration) -> bool {
         self.real.shutdown(wait)
     }
+    fn set_network(&self, network: clauseo_agents::Network) {
+        self.real.set_network(network);
+    }
 }
 
 #[cfg(test)]

@@ -2,7 +2,8 @@
 //! "plans snapshot, refreshed on each `SettingsChanged`"): each agent's firm plan for the
 //! launch hook, whether it has an endpoint or provider, whether a firm policy sets one, and
 //! whether an unreadable policy blocks it (`firm_policy.rs`, which also brings the
-//! `firm-policy` markers up to date).
+//! `firm-policy` markers up to date), and the network facts the agents' proxy and CA files are
+//! resolved from (`network.rs`: the next install, sign-in and launch take them).
 //!
 //! [`apply_settings`] tells [`Compose`](super::compose::Compose) what changed. A
 //! firm policy's endpoint or provider that arrives ends a running sign-in quietly, the same
@@ -28,6 +29,7 @@ use super::backend::AgentsBackend;
 use super::firm_policy::firm_policy;
 use super::hook::plans_of;
 use super::leave::restart_if_usable;
+use super::network::NetworkFacts;
 use crate::bridge::lock;
 
 /// The settings as setup reads them.
@@ -41,6 +43,8 @@ pub(crate) struct SettingsRead {
     pub(crate) blocked: BTreeSet<AgentId>,
     /// Every plan, for the launch hook.
     pub(crate) plans: BTreeMap<AgentId, Plan>,
+    /// What the network route is resolved from (`setup/network.rs`).
+    pub(crate) network: NetworkFacts,
 }
 
 impl SettingsRead {
@@ -64,12 +68,14 @@ impl SettingsRead {
             .filter(|agent| effective.is_locked(&format!("plans.{agent}")))
             .cloned()
             .collect();
+        let network = NetworkFacts::read(effective, known.clone());
         let blocked = firm_policy(effective, &SystemFiles, known);
         Self {
             firm,
             firm_policy: policy_set,
             blocked,
             plans: plans_of(effective),
+            network,
         }
     }
 }
@@ -84,6 +90,8 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
         .write()
         .unwrap_or_else(PoisonError::into_inner) = read.plans.clone();
     backend.wiring.readers.set_blocked(read.blocked.clone());
+    // Resolved off this thread: the next install, sign-in and launch take the new route.
+    backend.wiring.network.update(read.network.clone());
     let before = std::mem::replace(&mut *lock(&backend.wiring.applied), read.clone());
     let mut arrived = Vec::new();
     for agent in backend.known.keys() {

@@ -13,6 +13,7 @@ mod key_reads;
 mod key_state;
 mod keys;
 mod leave;
+mod network;
 mod once;
 mod quit;
 mod races;

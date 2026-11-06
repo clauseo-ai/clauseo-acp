@@ -1,7 +1,8 @@
 //! What piece B adds to the setup backend: the limits readers it holds and swaps entries in,
 //! the reused logins the host's login check reads, the waiters on S18's states, the running
 //! leaves and the leave's timer, the plans
-//! snapshot the launch hook reads, and what it last took from the settings.
+//! snapshot the launch hook reads, what it last took from the settings, and where the network
+//! route is resolved.
 
 use clauseo_protocol::{AgentId, ErrorCode};
 use std::collections::BTreeMap;
@@ -12,6 +13,7 @@ use clauseo_process::AsyncIoTimer;
 
 use super::leave::{LeaveTimer, Leaves, Waiters};
 use super::login_check::ReusedLogins;
+use super::network::NetworkFollow;
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 
@@ -32,6 +34,9 @@ pub(crate) struct Wiring {
     pub(crate) refused: Mutex<BTreeMap<AgentId, ErrorCode>>,
     /// Held across each change of a refusal, so the host's and [`Self::refused`] keep step.
     pub(crate) refusal_gate: futures::lock::Mutex<()>,
+    /// Where each settings read's network facts go (`setup/network.rs`): none until the setup
+    /// thread sets it.
+    pub(crate) network: NetworkFollow,
 }
 
 impl Wiring {
@@ -55,7 +60,15 @@ impl Wiring {
             refused: Mutex::new(refused.into_iter().collect()),
             refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
+            network: NetworkFollow::default(),
         }
+    }
+
+    /// The network facts of each settings read go to `network`.
+    #[must_use]
+    pub(crate) fn with_network(mut self, network: NetworkFollow) -> Self {
+        self.network = network;
+        self
     }
 
     /// The leave's waits on `timer` (the tests' hand-driven one).

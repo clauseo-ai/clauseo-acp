@@ -107,6 +107,7 @@ impl crate::setup::backend::SetupAgents for Real {
     fn shutdown(&self, _: Duration) -> bool {
         true
     }
+    fn set_network(&self, _: clauseo_agents::Network) {}
 }
 
 fn fake(hold: Duration) -> (FakeSignin, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {

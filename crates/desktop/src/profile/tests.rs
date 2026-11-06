@@ -335,7 +335,11 @@ fn a_relative_path_folder_is_never_prepended() {
 
 /// Setup's hook with no key and no plan.
 fn setup_hook() -> crate::setup::SetupHook {
-    crate::setup::SetupHook::new(crate::setup::KeySlot::default(), std::sync::Arc::default())
+    crate::setup::SetupHook::new(
+        crate::setup::KeySlot::default(),
+        std::sync::Arc::default(),
+        std::sync::Arc::default(),
+    )
 }
 
 /// With no profile the host gets setup's hook alone: no `_meta`, no `PATH` folder.

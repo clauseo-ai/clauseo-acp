@@ -359,15 +359,16 @@ fn start_host<R: Runtime>(
         let keys = setup::KeySlot::default();
         let key_notes = Arc::new(setup::KeyNotes::new());
         let key_retry = key_notes.retry_hook();
-        let launcher: Arc<dyn clauseo_process::Launcher> =
-            Arc::new(host_launcher(SystemDirs.home()));
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
+        let network: setup::NetworkSlot =
+            Arc::new(std::sync::RwLock::new(setup_read.network_at_start()));
         let readers = Arc::new(
             setup::SwappableReaders::new(
                 &effective,
-                launcher,
+                Arc::new(host_launcher(SystemDirs.home())),
                 Arc::clone(&keys),
                 Arc::clone(&plans),
+                Arc::clone(&network),
             )
             .with_blocked(setup_read.blocked()),
         );
@@ -378,6 +379,7 @@ fn start_host<R: Runtime>(
             readers: Arc::clone(&readers) as Arc<dyn setup::LeaveReaders>,
             reused: reused.clone(),
             plans: Arc::clone(&plans),
+            network: Arc::clone(&network),
             reread: Box::new(move || load_effective(&reread_at)),
             notes: key_notes,
         };
@@ -411,7 +413,7 @@ fn start_host<R: Runtime>(
             machine_memory::total_bytes,
             HostConfig::with_machine_memory,
         );
-        let hook = setup::SetupHook::new(keys, plans);
+        let hook = setup::SetupHook::new(keys, plans, network);
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = update::with_updater(&app, config, &locations);
         update::start_host(&app, with_profile(config, profile, hook))

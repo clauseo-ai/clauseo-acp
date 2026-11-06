@@ -2,7 +2,7 @@
 //! opener, each recording what it was asked, and the backend over them.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
-use crate::setup::confirm::{Ask, SetupConfirm};
+use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::LeaveTimer;
@@ -35,6 +35,9 @@ use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod ui;
+
+pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
 
 /// What the fake `Agents` was asked, by name and agent.
@@ -64,6 +67,8 @@ pub(super) struct FakeAgents {
     pub(super) feed: Mutex<Option<UnboundedSender<AgentsEvent>>>,
     /// What `install_tries` answers, by agent.
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
+    /// Each `set_network`, in order.
+    pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
 }
 
 impl FakeAgents {
@@ -168,6 +173,9 @@ impl SetupAgents for FakeAgents {
     fn shutdown(&self, _wait: Duration) -> bool {
         lock(&self.journal).push("agents.shutdown".to_owned());
         true
+    }
+    fn set_network(&self, network: clauseo_agents::Network) {
+        lock(&self.networks).push(network);
     }
 }
 
@@ -381,36 +389,6 @@ impl SetupHost for RecordingHost {
     }
 }
 
-/// The confirms, answered `answer`, each ask recorded.
-pub(super) struct FakeConfirm {
-    pub(super) answer: bool,
-    pub(super) asked: Mutex<Vec<Ask>>,
-}
-
-impl SetupConfirm for FakeConfirm {
-    fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool> {
-        lock(&self.asked).push(ask);
-        Box::pin(std::future::ready(self.answer))
-    }
-}
-
-/// The opener, each URL recorded.
-#[derive(Default)]
-pub(super) struct FakeOpener(pub(super) Mutex<Vec<String>>);
-
-impl Opener for FakeOpener {
-    fn open_url(&self, url: &str) -> Result<(), HostError> {
-        lock(&self.0).push(url.to_owned());
-        Ok(())
-    }
-    fn open_path(&self, _path: &Path, _kind: &str) -> Result<(), HostError> {
-        Ok(())
-    }
-    fn reveal(&self, _path: &Path) -> Result<(), HostError> {
-        Ok(())
-    }
-}
-
 /// A backend over the fakes, its confirm answering `accept`, and the fakes.
 pub(super) struct Rig {
     pub(super) backend: Arc<AgentsBackend>,
@@ -427,6 +405,8 @@ pub(super) struct Rig {
     pub(super) timer: Arc<FakeTimer>,
     /// The pump's usage counts.
     pub(super) counts: Arc<FakeCounts>,
+    /// The network route each settings read resolves into (`network::inline`).
+    pub(super) network: crate::setup::NetworkSlot,
 }
 
 pub(super) fn home(agent: &AgentId) -> PathBuf {
@@ -440,22 +420,29 @@ pub(super) fn rig(accept: bool) -> Rig {
 /// [`rig`] whose `KeyCache` loads from `keychain` (a memory one) at start.
 pub(super) fn rig_on(accept: bool, keychain: Keychain) -> Rig {
     let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
-    rig_with(accept, keychain, keys, false)
+    rig_with(accept, keychain, keys, false, true)
 }
 
 /// [`rig`] over `keys`, loaded from `keychain` (a memory one) with notes, say.
 pub(super) fn rig_keys(keychain: Keychain, keys: KeyCache) -> Rig {
-    rig_with(true, keychain, keys, false)
+    rig_with(true, keychain, keys, false, true)
 }
 
 /// [`rig`] with Claude's `plans.<id>` set by policy when `plan_locked`.
 pub(super) fn rig_locked(plan_locked: bool) -> Rig {
     let keychain = Keychain::memory();
     let keys = KeyCache::load_all(keychain.clone(), [&claude(), &codex()]);
-    rig_with(true, keychain, keys, plan_locked)
+    rig_with(true, keychain, keys, plan_locked, true)
 }
 
-fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool) -> Rig {
+/// The rig; its first network route lands at once when `routed`.
+pub(super) fn rig_with(
+    accept: bool,
+    keychain: Keychain,
+    keys: KeyCache,
+    plan_locked: bool,
+    routed: bool,
+) -> Rig {
     let journal = Journal::default();
     let agents = Arc::new(FakeAgents {
         journal: Arc::clone(&journal),
@@ -489,6 +476,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             (agent, info)
         })
         .collect();
+    let (network, follow) = super::network::inline(Arc::clone(&agents) as Arc<dyn SetupAgents>);
     let backend = Arc::new(AgentsBackend {
         agents: Arc::clone(&agents) as Arc<dyn SetupAgents>,
         keys: Arc::new(keys),
@@ -507,9 +495,16 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
             SettingsRead::default(),
             Vec::new(),
         )
-        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>),
+        .with_timer(Arc::clone(&timer) as Arc<dyn LeaveTimer>)
+        .with_network(follow),
         counts: Arc::clone(&counts) as Arc<dyn SetupCounts>,
     });
+    if routed {
+        backend
+            .wiring
+            .network
+            .update(SettingsRead::default().network);
+    }
     Rig {
         backend,
         agents,
@@ -522,6 +517,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
         journal,
         timer,
         counts,
+        network,
     }
 }
 

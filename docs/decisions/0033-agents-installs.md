@@ -259,6 +259,30 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    macOS's `scutil --proxy`; Linux has none) and keeps it for later installs. PAC files and
    authenticating proxies wait for G10.
 
+   S17's firm proxy (desktop's `setup/network.rs`) is the caller's one resolver, which the
+   installs, the sign-ins and the agents' launches all take. First match wins:
+   `network.upstream_proxy` (a policy's over the lawyer's), then `HTTPS_PROXY` or
+   `https_proxy`, then the OS's proxy behind one switch, `OS_FALLBACK` (on): the sandbox's
+   `Upstream::System` lookup (macOS `CFNetwork`, Windows `WinHTTP`, PAC and WPAD included, bounded
+   and cached there), asked per target: the registry (or the firm's mirror) for installs, the
+   agent's first sign-in host for its sign-in, its primary API host (`api.anthropic.com` or a
+   Claude plan's endpoint, `api.openai.com`) for its launches. A PAC `DIRECT` is no proxy, and an
+   empty value is unset. The CA files are `network.ca_certs` alone. `Agents` starts with the
+   settings' and the environment's route; the OS's, which can wait on WPAD, follows from a
+   thread of desktop's own, and every `SettingsChanged` resolves again: `Agents::set_network`
+   hands the result to the next install and sign-in job (`InstallConfig::proxy` and
+   `signin_proxy`), and the launch hook adds `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
+   (loopback) and the CA file under sign-in's variable (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`),
+   never over a variable the firm plan's `env` or the agent's own entry sets. The log names the
+   source (`policy`, `setting`, `env`, `os` or `none`) with each proxy's scheme, host and port
+   only. Limits: one proxy serves a launch's every host, the OS's answer for the agent's primary
+   API host; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log says
+   `os` for both; an install, retry or sign-in pressed before the OS's first answer lands waits
+   for it (at most 20 s), so its first try never goes direct, but a launch before it takes none. Chaining the sandbox's
+   egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives it
+   `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
+   `https://` setting, which that proxy cannot chain to, is logged once per change.
+
 ## Consequences
 
 - A pin bump in G16's file moves both agents to new `<hash>` folders by itself. The sizes table

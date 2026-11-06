@@ -53,7 +53,7 @@ pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{FirstRun, checked_endpoint, invalid, plan_method};
+use self::parts::{FirstRun, checked_endpoint, invalid, network_first, plan_method, retry};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -133,6 +133,7 @@ impl AgentsBackend {
             return Err(invalid(format!("{agent} is not an agent Clauseo sets up")));
         };
         let agents = &*self.agents;
+        network_first(self, &command).await;
         match command {
             SetupCommand::InstallAgent { .. } => {
                 let megabytes = match agents.state(&agent) {
@@ -147,7 +148,7 @@ impl AgentsBackend {
             }
             SetupCommand::RetryAgentInstall {
                 use_system_proxy, ..
-            } => self.retry(&agent, use_system_proxy)?,
+            } => retry(self, &agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
@@ -332,22 +333,6 @@ impl AgentsBackend {
             self.end_sign_in(agent);
         }
         leave::restart_for_login(self, agent).await;
-        Ok(())
-    }
-
-    /// `RetryAgentInstall`: `command.invalid` unless `agent`'s install is `Failed`, `Waiting` or
-    /// `Paused`, since it asks nothing; a missing agent installs through `InstallAgent`'s confirm.
-    fn retry(&self, agent: &AgentId, use_system_proxy: bool) -> Result<(), HostError> {
-        let restartable = matches!(
-            self.agents.state(agent),
-            Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
-        );
-        if !restartable {
-            return Err(invalid(format!(
-                "{agent}'s install is not failed, waiting or paused; installing asks first"
-            )));
-        }
-        self.agents.retry(agent, use_system_proxy);
         Ok(())
     }
 
