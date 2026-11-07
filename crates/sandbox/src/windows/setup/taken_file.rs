@@ -7,7 +7,8 @@
 //!
 //! The file is the lawyer's, so what it says lets the app do nothing the lawyer couldn't: the
 //! strip touches only an item the lawyer owns, at that path with that file ID, inside a tree the
-//! ledger owes a clean-up. Pure apart from the file's read and write: tested on every OS.
+//! ledger owes a clean-up. Pure apart from the file's read and write: tested on every OS; built
+//! for Windows and the tests alone.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,7 +27,6 @@ pub const TAKEN_FILE: &str = "reclaim-taken.json";
 pub const TAKEN_CAP: usize = 10_000;
 
 /// The most the file may hold: far more than [`TAKEN_CAP`] items.
-#[cfg(any(windows, test))]
 const FILE_CAP: u64 = 16 * 1024 * 1024;
 
 /// The file's contents.
@@ -42,10 +42,6 @@ pub fn path(data_dir: &Path) -> PathBuf {
 
 /// Writes the first [`TAKEN_CAP`] of `taken` atomically, as `result_file::write` writes: the
 /// folder made if missing, the old file checked first and the new one after.
-#[cfg_attr(
-    not(any(windows, test)),
-    expect(dead_code, reason = "the exe that writes it is Windows only")
-)]
 pub(crate) fn write(data_dir: &Path, taken: &[TakenItem]) -> io::Result<()> {
     let file = path(data_dir);
     let listed = Taken {
@@ -64,7 +60,6 @@ pub(crate) fn write(data_dir: &Path, taken: &[TakenItem]) -> io::Result<()> {
 /// The items listed, through the one handle its checks go through (`write::read_owned_file`):
 /// none when the file is missing; why when it can't be read or parsed, is a link, has a second
 /// hard link, or is too large.
-#[cfg(any(windows, test))]
 pub(crate) fn read(data_dir: &Path) -> Result<Vec<TakenItem>, String> {
     match write::read_owned_file(&path(data_dir), FILE_CAP) {
         Ok(Some(bytes)) => serde_json::from_slice::<Taken>(&bytes)
@@ -76,7 +71,6 @@ pub(crate) fn read(data_dir: &Path) -> Result<Vec<TakenItem>, String> {
 }
 
 /// Removes the file, so a run that writes none isn't read as the last one's. Missing is fine.
-#[cfg(any(windows, test))]
 pub(crate) fn remove(data_dir: &Path) -> io::Result<()> {
     write::remove_owned_file(&path(data_dir))
 }
