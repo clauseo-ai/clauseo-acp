@@ -34,6 +34,8 @@ fn config() -> ProxyConfig {
         upstream: Upstream::Direct,
         denials: Arc::new(Ignore),
         record: None,
+        // The host opens a session's proxy only when it has the browser.
+        browser: true,
     }
 }
 

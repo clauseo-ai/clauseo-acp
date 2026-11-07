@@ -82,7 +82,7 @@ impl EgressProxy for DesktopProxies {
     fn port_for(&self, session: SessionKey) -> Option<u16> {
         lock(&self.open)
             .get(&session)
-            .map(ProxyHandle::browser_port)
+            .and_then(ProxyHandle::browser_port)
     }
 
     fn close(&self, session: SessionKey) {
