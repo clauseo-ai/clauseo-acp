@@ -44,9 +44,9 @@ use url::Url;
 #[cfg(test)]
 use self::bounded::bounded;
 use crate::{Clock, Error, SystemClock};
-#[cfg(any(target_os = "macos", windows, test))]
-pub(crate) use answer::Configured;
 pub(crate) use answer::{Answer, Decided, Failure};
+#[cfg(any(target_os = "macos", windows, test))]
+pub(crate) use answer::{Configured, PacSetting};
 pub use answer::{UpstreamAnswer, upstream_answer, upstream_for};
 use os::{os_intent, os_route};
 #[cfg(test)]
@@ -186,7 +186,7 @@ pub(crate) type OsAnswer = dyn Fn(Scheme, &str, u16) -> Answer + Send + Sync;
 
 /// Whether the settings show the firm meant a proxy, read when a lookup failed without asking
 /// the OS for a route (no lookup slot, or too slow for the egress proxy).
-type Intent = dyn Fn() -> Failure + Send + Sync;
+pub(crate) type Intent = dyn Fn() -> Failure + Send + Sync;
 
 /// One launch's upstream lookup, shared by its connections.
 pub(crate) struct Lookup {

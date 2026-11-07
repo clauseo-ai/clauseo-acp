@@ -108,7 +108,10 @@ pub(super) async fn route(ctx: &Ctx, target: &Target, exchange: &mut Exchange) -
         tracing::warn!("egress: upstream lookup too slow; taken as failed");
         let lookup = Arc::clone(&ctx.lookup);
         let intent = blocking::unblock(move || lookup.intent());
-        let failure = within(ctx.limits.connect, intent).await.unwrap_or_default();
+        // A settings read that does not finish counts as a proxy meant: refuse, not direct.
+        let failure = within(ctx.limits.connect, intent)
+            .await
+            .unwrap_or(Failure::MeantProxy);
         Decided {
             answer: Answer::Failed(failure),
             got: None,

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::harness::{Rig, Setup, echo, rig, round_trip, upstream};
-use crate::proxy::upstream::{Answer, Configured, Failure, Scheme};
+use crate::proxy::upstream::{Answer, Configured, Failure, PacSetting, Scheme};
 use crate::proxy::{Limits, Verdict};
 use crate::{Denial, Route, Upstream};
 
@@ -97,13 +97,14 @@ fn at_10_minutes_the_route_is_not_reused_and_a_meant_proxy_refuses() {
     assert_eq!(rig.records(2)[1].verdict, Verdict::Failed);
 }
 
-/// A PAC URL, a static proxy and a PAC script that would not run (12166) each refuse with
-/// nothing to reuse: CONNECT and plain HTTP alike get 502, and nothing is dialled.
+/// A PAC URL or inline script, a static proxy, a PAC script that would not run (12166) and
+/// settings that could not be read each refuse with nothing to reuse: CONNECT and plain HTTP
+/// alike get 502, and nothing is dialled.
 #[test]
 fn a_pac_url_a_static_proxy_or_a_broken_script_refuses_with_nothing_to_reuse() {
     let cases = [
         Configured {
-            pac_url: true,
+            pac: PacSetting::Named,
             ..Configured::default()
         },
         Configured {
@@ -112,6 +113,10 @@ fn a_pac_url_a_static_proxy_or_a_broken_script_refuses_with_nothing_to_reuse() {
         },
         Configured {
             broken_script: true,
+            ..Configured::default()
+        },
+        Configured {
+            unreadable: true,
             ..Configured::default()
         },
     ];
@@ -137,7 +142,7 @@ fn a_pac_url_a_static_proxy_or_a_broken_script_refuses_with_nothing_to_reuse() {
     }
 }
 
-/// A plain network (nothing configured, no WPAD) goes direct, as before.
+/// A plain network (settings read, nothing configured, no WPAD) goes direct, as before.
 #[test]
 fn a_failed_lookup_on_a_plain_network_goes_direct() {
     let (rig, answers) = failing_rig();
@@ -199,7 +204,7 @@ fn a_lookup_too_slow_refuses_when_the_settings_meant_a_proxy() {
         allow: vec!["a.test"],
         upstream: Upstream::System,
         answers: Some(Box::new(hung)),
-        intent: Failure::MeantProxy,
+        intent: Some(Box::new(|| Failure::MeantProxy)),
         limits: Limits {
             connect: Duration::from_millis(100),
             ..Limits::default()
@@ -210,4 +215,52 @@ fn a_lookup_too_slow_refuses_when_the_settings_meant_a_proxy() {
     assert_eq!(rig.net.dialled(), Vec::<SocketAddr>::new());
     assert_eq!(rig.denials(), vec![unavailable("a.test", 443)]);
     drop(release);
+}
+
+/// A lookup too slow whose settings read is too slow as well refuses rather than going direct;
+/// one whose settings read nothing goes direct.
+#[test]
+fn a_lookup_too_slow_refuses_when_the_settings_cannot_be_read_in_time() {
+    for (slow_settings, code) in [(true, 502), (false, 200)] {
+        let (release, wait) = mpsc::channel::<()>();
+        let wait = Arc::new(Mutex::new(wait));
+        let held = Arc::clone(&wait);
+        let hung = move |_: Scheme, _: &str, _: u16| -> Answer {
+            if held.lock().unwrap().recv().is_err() {
+                // Released by the test dropping its end.
+            }
+            Answer::Route(Route::Direct)
+        };
+        let settings = move || {
+            if slow_settings && wait.lock().unwrap().recv().is_err() {
+                // Released by the test dropping its end.
+            }
+            Failure::Unmeant
+        };
+        let rig = rig(Setup {
+            allow: vec!["a.test"],
+            upstream: Upstream::System,
+            answers: Some(Box::new(hung)),
+            intent: Some(Box::new(settings)),
+            limits: Limits {
+                connect: Duration::from_millis(100),
+                ..Limits::default()
+            },
+            ..Setup::default()
+        });
+        rig.net.name("a.test", &["192.0.2.10"]);
+        rig.net.route("192.0.2.10:443", echo());
+        assert_eq!(
+            rig.connect("a.test:443").1,
+            code,
+            "slow settings: {slow_settings}"
+        );
+        let denials = if slow_settings {
+            vec![unavailable("a.test", 443)]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(rig.denials(), denials);
+        drop(release);
+    }
 }
