@@ -1148,6 +1148,17 @@ leaves that profile, both naming the part.
     its own can end, and the exit code is the one thing the host reads. The code the run would
     have had is said on stderr. A process that only can't be checked (its job, its start time) and
     a sweep that still found new processes after eight rounds stay `RunExit::Sweep`.
+  - **Escapees until `\Clauseo\SandboxStop` (interim).** An escapee that shut its own DACL and
+    survives a sweep is alive in the next logon gap, the next inner's or an end sweeper's, and
+    can open that runner's process, thread or Medium token before the outer's shut. The job's end
+    doesn't reach it (it is outside the job), and no sweep of the pool user's can end it. B's PR 3
+    adds the `SYSTEM`-side scheduled task `\Clauseo\SandboxStop`, which kills every process of a
+    pool user's SID whatever its DACL; the outer starts it on an `Escapee` report, and Clauseo
+    starts it at its own start after an unclean session (`unclean_sessions`). Until then the
+    first act refuses every launch for that pool user (`RunExit::Escapee`, no agent), so that
+    pool user's matter is blocked until the escapee is gone (a restart ends it). The refusal
+    keeps the agent from starting; it doesn't close the gap itself, which stays open to the
+    escapee until PR 3. PR 3 lands before PR 6, which first sends lawyers' agents through tier B.
   - **The unclean-session marker.** Once it has read the launch, before anything runs as the
     pool user, the outer writes `<data_dir>\sandbox\run\<launch id>.session`, holding the pool
     user's SID, as the launch file is written: atomically, with the run folder's three entries
@@ -1185,7 +1196,8 @@ leaves that profile, both naming the part.
   names it as the pool user's. At the first act it fails the launch closed (`RunExit::Escapee`,
   no agent); at the tick and the end it is logged, reported, and tried again, and the run exits
   `RunExit::Escapee`. While it lives, every launch for
-  that pool user fails closed. The agent can make one of its own processes so (a process sets its
+  that pool user fails closed, and it is alive in each logon gap (see "Escapees until
+  `\Clauseo\SandboxStop`"). The agent can make one of its own processes so (a process sets its
   own DACL through its pseudo-handle), and so can a child it starts with a descriptor of its own,
   or one a service starts; only one outside the job outlives the session. The agent can't change
   its token's default DACL for a service to pass on (its token's DACL, above). The design that closes this is AppContainer, after launch (see
