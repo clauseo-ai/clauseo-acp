@@ -531,7 +531,7 @@ pub(crate) fn shown(proxy: &str) -> String {
 mod ask;
 mod follow;
 
-pub(crate) use ask::{Answered, OsAnswer, ask_all, kept_over_unknown};
+pub(crate) use ask::{Answered, KEEP_FOR, Known, OsAnswer, ask_all};
 mod launch;
 
 pub(crate) use launch::with_loopback;

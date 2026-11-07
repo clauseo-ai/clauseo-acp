@@ -636,8 +636,8 @@ Coming:
   - the OS is asked at start, when the settings change and again once the answer is a minute
     old, each time within 5 s; at start or after a settings change, a lookup slower than that
     counts as direct until it answers (up to 15 s more). On the minute's refresh, a lookup that
-    fails or is slow keeps the answer before it: only the OS answering `DIRECT` turns the proxy
-    off. After changing networks (office, home, VPN), the new proxy is used within about a
+    fails or is slow keeps the answer before it, for up to 10 minutes from the last real answer:
+    within that, only the OS answering `DIRECT` turns the proxy off. After changing networks (office, home, VPN), the new proxy is used within about a
     minute.
 
   Known issue: on Windows, a machine-wide `SSL_CERT_FILE` (set by Anaconda, for example) can
