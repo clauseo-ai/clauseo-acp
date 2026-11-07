@@ -101,7 +101,7 @@ export const HI = {
   "There isn't enough free space on this computer for the download.":
     "इस कंप्यूटर पर डाउनलोड के लिए पर्याप्त खाली जगह नहीं है।",
   "Setting up didn't finish. Try again.": "सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
-  "Sign-in was cancelled in the browser.": "ब्राउज़र में साइन इन रद्द कर दिया गया।",
+  "Sign-in was cancelled.": "साइन इन रद्द हो गया।",
   "The sign-in link expired. Try again.": "साइन इन का लिंक समाप्त हो गया। फिर से प्रयास करें।",
   "This account has no plan that works with Clauseo.":
     "इस खाते में ऐसा कोई प्लान नहीं है जो Clauseo के साथ काम करे।",

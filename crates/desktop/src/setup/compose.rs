@@ -27,7 +27,7 @@
 //!
 //! A sign-in the backend ends because a key or an endpoint took over ([`Compose::expect_end`])
 //! ends without an error: S18's `Failed { code: Cancelled }` for it is taken as `SignedOut`, so
-//! the window gets the `ApiKey` or `Firm` line, never "cancelled in the browser". Its running
+//! the window gets the `ApiKey` or `Firm` line, never "Sign-in was cancelled.". Its running
 //! states pass through until then, as rule 1 says.
 
 use std::collections::BTreeMap;
