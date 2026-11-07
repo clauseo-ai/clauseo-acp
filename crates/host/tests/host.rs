@@ -125,6 +125,9 @@ mod counts;
 #[path = "host/data_fence.rs"]
 mod data_fence;
 #[cfg(test)]
+#[path = "host/documents_later.rs"]
+mod documents_later;
+#[cfg(test)]
 #[path = "host/e2e_scenarios.rs"]
 mod e2e_scenarios;
 #[cfg(test)]

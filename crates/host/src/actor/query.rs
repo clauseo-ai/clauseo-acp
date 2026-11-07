@@ -34,15 +34,18 @@ mod skill_packs;
 
 /// Where new matters go, for display (`GetDefaultLocation`).
 /// With none (no Documents folder, issue #365) it answers `command.invalid`, and the form asks
-/// for a folder, as it does when the read fails.
+/// for a folder, as it does when the read fails. While Documents is still being looked up
+/// `query` holds it for the answer (`documents.rs`), and past the bound it is refused as
+/// retryable.
 fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
-    let answer = match actor.effective.default_matters_dir() {
+    let answer = match super::documents::default_matters_dir(actor) {
         Some(location) => {
             let display = super::rail::folder_display(location, &actor.home_spellings);
             Ok(QueryResult::DefaultLocation(
                 clauseo_protocol::DefaultLocation { display },
             ))
         }
+        None if super::documents::pending(actor) => Err(super::documents::not_yet()),
         None => Err(super::matters::no_default_location()),
     };
     let _gone = reply.send(answer);
@@ -59,6 +62,9 @@ pub(super) fn query(
         let _gone = reply.send(Err(error));
         return;
     }
+    let Err(reply) = super::documents::hold_query(actor, principal, query, reply) else {
+        return;
+    };
     match *query {
         HostQuery::ListMatters => list_matters(actor, reply),
         HostQuery::ListThreads { matter } => {

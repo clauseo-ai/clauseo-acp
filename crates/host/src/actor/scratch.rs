@@ -113,10 +113,15 @@ pub(crate) struct ScratchWait {
 }
 
 /// Starts the scan for the Scratch matter's folder, and the [`READY_WAIT`] timer. With no
-/// default matters folder (no Documents folder, issue #365) there is no Scratch matter this run.
+/// default matters folder (no Documents folder, issue #365) there is no Scratch matter this run;
+/// while Documents is still being looked up the scan waits for its answer ([`start_late`]).
 pub(super) fn start(actor: &mut Actor) {
-    let Some(base) = actor.effective.default_matters_dir().map(Path::to_path_buf) else {
-        tracing::warn!("no default matters folder: no Scratch matter");
+    let Some(base) = super::documents::default_matters_dir(actor).map(Path::to_path_buf) else {
+        if super::documents::pending(actor) {
+            tracing::info!("the Scratch matter waits for the Documents lookup");
+        } else {
+            tracing::warn!("no default matters folder: no Scratch matter");
+        }
         return;
     };
     actor.scratch_wait.scanning = true;
@@ -127,6 +132,22 @@ pub(super) fn start(actor: &mut Actor) {
         let found = off_actor(clock, SCAN_JOB, move || Ok(scan(&base))).await;
         Input::Scratch(ScratchInput::Scanned(found))
     });
+}
+
+/// The Documents lookup answered after the start (`documents.rs`): the scan starts as at the
+/// start when the host has no Scratch matter, is not finding or making one, and is not
+/// stopping. Started during start-up, ready waits for it as it does at the start; once serving,
+/// nothing waits, and a Scratch made later joins the list as any new matter does.
+pub(super) fn start_late(actor: &mut Actor) {
+    let listed = actor
+        .matters
+        .values()
+        .any(|matter| matter.row.kind == MatterKind::Scratch);
+    let stopping = matches!(actor.phase, HostPhase::Stopping(_));
+    if listed || stopping || holds_start(actor) {
+        return;
+    }
+    start(actor);
 }
 
 /// One [`ScratchInput`].

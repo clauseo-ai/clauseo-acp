@@ -1,8 +1,8 @@
 //! A folder lookup with a time limit, for a known folder that may sit on a network share: a
 //! Documents folder redirected to a share that is down (a firm laptop off VPN) can hold an
-//! existence check on SMB for 20 to 40 s or more, and the desktop's host waits on Documents before
-//! it starts (on its own thread, never the main one: `Locations::with_documents`). Plain Rust, so
-//! it is tested on every OS.
+//! existence check on SMB for 20 to 40 s or more. The desktop looks Documents up on a thread of
+//! its own (`Locations::with_documents`), never the main one or the host's start, and the host
+//! takes it when it answers. Plain Rust, so it is tested on every OS.
 
 #[cfg(test)]
 mod tests;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, mpsc};
 use std::time::Duration;
 
-/// How long the start waits for the Documents folder before it goes on without one.
+/// How long the Documents lookup waits for the folder before it goes on without one.
 pub(crate) const DOCUMENTS_WAIT: Duration = Duration::from_secs(2);
 
 /// Why a looked-up folder is not used. Logged; never carries the path.

@@ -1,5 +1,6 @@
-//! What `HostConfig::into_parts` hands the host thread (`ConfigParts`) and the updater's seams
-//! (`UpdateSeams`). Kept apart from `config.rs`, whose `HostConfig` builds them.
+//! What `HostConfig` taken apart (`ConfigParts::from`) hands the host thread (`ConfigParts`) and
+//! the updater's seams (`UpdateSeams`). Kept apart from `config.rs`, whose `HostConfig` builds
+//! them.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use crate::ids::IdSource;
 use crate::search::SearchSeams;
 use crate::update::Updater;
 
-use super::{IdleStop, LaunchWiring, ProfileHook, Sandbox};
+use super::{HostConfig, IdleStop, LaunchWiring, ProfileHook, Sandbox};
 
 /// A `HostConfig` taken apart by the host thread.
 pub(crate) struct ConfigParts {
@@ -22,6 +23,8 @@ pub(crate) struct ConfigParts {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
+    /// The default matters folder's late answer (`with_documents_later`), if it comes late.
+    pub(crate) documents: Option<crate::actor::documents::Later>,
     pub(crate) home_folder: Option<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Box<dyn IdSource>,
@@ -47,6 +50,38 @@ pub(crate) struct ConfigParts {
     pub(crate) idle: IdleStop,
     /// The sandbox seam (`with_sandbox`), if any.
     pub(crate) sandbox: Option<Sandbox>,
+}
+
+/// Takes the config apart.
+impl From<HostConfig> for ConfigParts {
+    fn from(config: HostConfig) -> Self {
+        Self {
+            effective: config.effective,
+            launcher: config.launcher,
+            profile: config.profile,
+            refused_folders: config.refused_folders,
+            documents: config.documents,
+            home_folder: config.home_folder,
+            clock: config.clock,
+            ids: config.ids,
+            patch_window_bytes: config.patch_window_bytes,
+            app_capacity: config.app_capacity,
+            managed_mcp: config.managed_mcp,
+            codex_hooks: config.codex_hooks,
+            folder_check: config.folder_check,
+            pre_write_guard: config.pre_write_guard,
+            limits_reader: config.limits_reader,
+            wiring: config.wiring,
+            scan_walk: config.scan_walk,
+            scratch: config.scratch,
+            folder_probes: config.folder_probes,
+            counts: config.counts,
+            search: config.search,
+            update: config.update,
+            idle: config.idle,
+            sandbox: config.sandbox,
+        }
+    }
 }
 
 /// The updater and what its machine starts from (decision record 0037).

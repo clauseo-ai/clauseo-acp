@@ -53,6 +53,7 @@ pub struct HostConfig {
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
+    documents: Option<crate::actor::documents::Later>,
     home_folder: Option<PathBuf>,
     clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
@@ -90,6 +91,7 @@ impl HostConfig {
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),
+            documents: None,
             home_folder: SystemDirs.home(),
             clock: Arc::new(SystemClock),
             ids: Box::new(RandomV7::new()),
@@ -161,6 +163,19 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// The default matters folder comes later (default: it is in the settings from the start):
+    /// the host starts without waiting on Documents and takes `later`'s folders when they come
+    /// (`Locations::with_documents`). Until then `GetDefaultLocation`, a create or check in the
+    /// default location and the Scratch matter wait for them, at most 5 s on the host clock,
+    /// then are refused as retryable; a dropped sender leaves no default matters folder.
+    pub fn with_documents_later(
+        mut self,
+        later: futures::channel::oneshot::Receiver<clauseo_settings::Locations>,
+    ) -> Self {
+        self.documents = Some(later);
         self
     }
 
@@ -564,35 +579,6 @@ impl HostConfig {
     /// The receiving end of the login splits, for `HostHandle::login_splits`.
     pub(crate) fn login_splits(&self) -> LoginSplits {
         self.wiring.sign_in.receiver()
-    }
-
-    /// Takes the config apart.
-    pub(crate) fn into_parts(self) -> ConfigParts {
-        ConfigParts {
-            effective: self.effective,
-            launcher: self.launcher,
-            profile: self.profile,
-            refused_folders: self.refused_folders,
-            home_folder: self.home_folder,
-            clock: self.clock,
-            ids: self.ids,
-            patch_window_bytes: self.patch_window_bytes,
-            app_capacity: self.app_capacity,
-            managed_mcp: self.managed_mcp,
-            codex_hooks: self.codex_hooks,
-            folder_check: self.folder_check,
-            pre_write_guard: self.pre_write_guard,
-            limits_reader: self.limits_reader,
-            wiring: self.wiring,
-            scan_walk: self.scan_walk,
-            scratch: self.scratch,
-            folder_probes: self.folder_probes,
-            counts: self.counts,
-            search: self.search,
-            update: self.update,
-            idle: self.idle,
-            sandbox: self.sandbox,
-        }
     }
 }
 

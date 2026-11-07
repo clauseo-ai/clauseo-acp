@@ -13,7 +13,7 @@ use futures::executor::LocalSpawner;
 
 use super::input::Input;
 use super::{Actor, HostPhase, MatterEntry, ThreadEntry, Work, turn};
-use crate::config::HostConfig;
+use crate::config::{ConfigParts, HostConfig};
 use crate::encode::Encoder;
 use crate::error::Error;
 use crate::ids::Ids;
@@ -30,7 +30,7 @@ pub(super) async fn open(
     post: async_channel::Sender<Input>,
     ready: mpsc::Sender<Result<(), Error>>,
 ) -> Result<Actor, Error> {
-    let parts = config.into_parts();
+    let parts = ConfigParts::from(config);
     let data_dir = parts.effective.data_dir().to_path_buf();
     let (scratch_scan, scratch_wait) = parts.scratch.split();
     write::create_dir_all(&data_dir).map_err(|error| Error::Store(error.into()))?;
@@ -95,6 +95,7 @@ pub(super) async fn open(
         pack_generations: BTreeMap::new(),
         turn_path: super::turn::wide::TurnPath::new(parts.idle),
         refused_folders: parts.refused_folders,
+        documents: super::documents::DocumentsWait::new(parts.documents),
         home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),
         home: parts.home_folder,
         clock: parts.clock,
@@ -179,11 +180,13 @@ fn start_services(actor: &mut Actor, cached: Vec<AccountLimits>) {
     );
 }
 
-/// Queues the start-up work: the Scratch matter when there is none, and the load and
+/// Queues the start-up work: the wait for a late Documents answer, the Scratch matter when there
+/// is none, and the load and
 /// reconciliation of every thread that is not archived and whose matter is on the list (a
 /// forgotten matter's threads were idle when it was forgotten, and stay as they are). The loop
 /// answers `start` once all of it is done.
 pub(super) fn begin_startup(actor: &mut Actor) {
+    super::documents::start(actor);
     let has_scratch = actor
         .matters
         .values()
