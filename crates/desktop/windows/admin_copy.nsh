@@ -1,8 +1,8 @@
 ; The admin copy of the sandbox's set-up program (S15 tier B), which hooks.nsh includes at file
-; scope (so where the template includes hooks.nsh, installer.nsi:36). Elevated code runs the set-up
-; program only from CLAUSEO_ADMIN_DIR (%ProgramFiles%\Clauseo\Sandbox), which only administrators
-; can write, never from $INSTDIR, which a per-user install leaves writable by the lawyer's
-; processes. The copy comes from this installer's own payload, before Clauseo or any agent has run.
+; scope. Elevated code runs the set-up program only from CLAUSEO_ADMIN_DIR
+; (%ProgramFiles%\Clauseo\Sandbox), which only administrators can write, never from $INSTDIR, which
+; a per-user install leaves writable by the lawyer's processes. The copy comes from this
+; installer's own payload, before Clauseo or any agent has run.
 ;
 ; Per user (interactive, not /UPDATE), at the end of NSIS_HOOK_POSTINSTALL, the outer instance,
 ; running as the lawyer and unelevated, reads its own user SID from its token, creates the
@@ -15,17 +15,10 @@
 ; $EXEPATH open sharing only reads until it exits, so nothing can rewrite, rename or delete it
 ; meanwhile.
 ;
-; In the elevated instance, two things run, and nothing else of the template's after .onInit
-; (which only reads switches and the registry, and has no single-instance or app-running check):
-; - CLAUSEO_ADMIN_SECTION_ONLY, the script's first section, unselects every section but `Install`,
-;   so Section WebView2 (installer.nsi:553-643) never runs. /UPDATE would skip only its install,
-;   not its version check, whose Abort/Retry/Ignore box NSIS shows even under /S.
-; - NSIS_HOOK_PREINSTALL, the first step of `Install` (installer.nsi:648), takes the owner's SID
-;   and data folder from the arguments the outer instance passed, never from its own token or
-;   environment (an administrator's, when someone else typed their password into the prompt),
-;   writes the program from the payload and runs `--adopt` there (CLAUSEO_ADMIN_COPY), then quits
-;   with 100 + its exit code, before the template's CheckIfAppIsRunning (:652) or any of its Files.
-;   The section can't do this itself: ARCH, INSTALLMODE and BUNDLEID are defined after :36.
+; The elevated instance runs CLAUSEO_ELEVATED_BRANCH (admin_elevated.nsh), which the repo's copy
+; of Tauri's template (windows/nsis/installer.nsi, decision 0035) inserts first in .onInit, and
+; quits there: before any plug-in (so nothing is loaded from a plug-in folder under the lawyer's
+; %TEMP%), page or section of the template's.
 ;
 ; The outer instance then says set up (a details line), or shows one box: declined, another
 ; account, or failed. The install has succeeded either way, with tier C. /S and /P can't ask: a
@@ -71,52 +64,17 @@
 !define CLAUSEO_RECORD_MACHINE "machine"
 !define CLAUSEO_RECORD_OWNER_SID "OwnerSid"
 !define CLAUSEO_RECORD_VERSION "AdminCopyVersion"
+; Each user's profile folder, as Windows records it (HKLM, administrators only):
+; <key>\<SID>\ProfileImagePath.
+!define CLAUSEO_PROFILE_LIST "SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
 ; The installers' own exit codes under /S (SetErrorLevel), clear of NSIS's 0 to 2 and of #638's
 ; 20 and 21 (packaging-setup-exe-missing). 22: a silent per-user install, which can't ask for the
 ; UAC prompt, skipped the admin copy. 23: the per-machine installer's --adopt failed.
 !define CLAUSEO_EXIT_ADMIN_COPY_SKIPPED 22
 !define CLAUSEO_EXIT_ADMIN_COPY_FAILED 23
 
-; $R0 1 when the switch is one of this instance's arguments, whole: GetOptions finds it after the
-; program's path, and it carries no value (so not /CLAUSEO_ADMIN_SECTIONX nor ...=x). NSIS has
-; already cut $CMDLINE before " /D=". Uses $R1.
-!macro CLAUSEO_ADMIN_SWITCH_GIVEN
-  StrCpy $R0 0
-  ${GetParameters} $R1
-  ClearErrors
-  ${GetOptions} $R1 "${CLAUSEO_ADMIN_SWITCH}" $R1
-  ${IfNot} ${Errors}
-  ${AndIf} $R1 == ""
-    StrCpy $R0 1
-  ${EndIf}
-!macroend
-
-; The elevated instance runs no section of the template's but `Install` (header). The script's
-; first section, since hooks.nsh comes before every section; hidden, so it always runs, and does
-; nothing without the switch. An index past the last sets the error flag.
-Section "-CLAUSEO_ADMIN_SECTION_ONLY"
-  Push $R0
-  Push $R1
-  Push $R2
-  !insertmacro CLAUSEO_ADMIN_SWITCH_GIVEN
-  ${If} $R0 = 1
-    StrCpy $R2 0
-    ${Do}
-      ClearErrors
-      SectionGetText $R2 $R1
-      ${If} ${Errors}
-        ${ExitDo}
-      ${EndIf}
-      ${If} $R1 != "Install"
-        SectionSetFlags $R2 0
-      ${EndIf}
-      IntOp $R2 $R2 + 1
-    ${Loop}
-  ${EndIf}
-  Pop $R2
-  Pop $R1
-  Pop $R0
-SectionEnd
+; The elevated instance's branch, which the template inserts first in .onInit.
+!include "${__FILEDIR__}\admin_elevated.nsh"
 
 ; Writes the set-up program from this installer's payload into CLAUSEO_ADMIN_DIR and runs
 ; `--adopt ARGS` from there with ExecWait, never through cmd.exe or anything else, as --adopt
@@ -159,7 +117,8 @@ SectionEnd
 ; per machine (OWNER ""), AdminCopyOwner is there and isn't "machine" (OwnerSid, a user's set-up,
 ; is normal there). 2: the admin copy is from a newer build than this installer
 ; (CLAUSEO_NEWER_THAN_THIS), so an older installer never puts an older copy back. A value that is
-; missing or can't be read checks nothing; --adopt checks again. Uses $R5 to $R7 and $R9.
+; missing or can't be read checks nothing; --adopt checks again. Plain NSIS, no plug-in or
+; library function, as the elevated branch needs. Uses $R5, $R7, $R8 and $0 to $4.
 !macro CLAUSEO_RECORD_CHECK OWNER
   StrCpy $R1 0
   ReadRegStr $R5 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_COPY_OWNER}"
@@ -188,114 +147,63 @@ SectionEnd
 !macroend
 
 ; $R1 set to 2 when the version in $R5 (semver, as the record holds it) is newer than this
-; installer's ${VERSION}: by its x.y.z (WordFunc's VersionCompare), then a release before a
-; pre-release of the same x.y.z (two pre-releases of one x.y.z count as the same). In plain NSIS,
-; no plug-in: the elevated instance loads as few DLLs from its plug-in folder as it can. Uses $R5
-; to $R7 and $R9.
+; installer's ${VERSION}: x, y and z compared in turn as numbers, then a release before a
+; pre-release of the same x.y.z (two pre-releases of one x.y.z count as the same). Plain NSIS.
+; Uses $R7, $R8 and $0 to $4.
 !macro CLAUSEO_NEWER_THAN_THIS
-  StrCpy $R9 "${VERSION}"
-  StrCpy $R7 0
-  ${StrLoc} $R6 $R9 "-" ">"
-  ${If} $R6 != ""
-    StrCpy $R9 $R9 $R6
-    StrCpy $R7 1
+  StrCpy $2 $R5
+  StrCpy $3 "${VERSION}"
+  StrCpy $4 0
+  !insertmacro CLAUSEO_COMPARE_PART
+  !insertmacro CLAUSEO_COMPARE_PART
+  !insertmacro CLAUSEO_COMPARE_PART
+  ; Same x.y.z: what is left starts with "-" for a pre-release.
+  ${If} $4 = 0
+    StrCpy $0 $2 1
+    StrCpy $1 $3 1
+    ${If} $1 == "-"
+    ${AndIf} $0 != "-"
+      StrCpy $4 1
+    ${EndIf}
   ${EndIf}
-  ${StrLoc} $R6 $R5 "-" ">"
-  ${If} $R6 != ""
-    StrCpy $R5 $R5 $R6
-    IntOp $R7 $R7 - 1
-  ${EndIf}
-  ; $R7 1: this installer is a pre-release and the record's copy a release of the same x.y.z.
-  ${VersionCompare} $R5 $R9 $R6
-  ${If} $R6 = 1
-    StrCpy $R1 2
-  ${ElseIf} $R6 = 0
-  ${AndIf} $R7 = 1
+  ${If} $4 = 1
     StrCpy $R1 2
   ${EndIf}
 !macroend
 
-; $R0 set to 0 unless VALUE can stand in a quoted argument of --adopt's command line: not empty,
-; no quote, not ending in a backslash (which would escape the closing quote). Uses $R5.
-!macro CLAUSEO_CHECK_PATH VALUE
-  StrCpy $R5 "${VALUE}" 1 -1
-  ${If} "${VALUE}" == ""
-  ${OrIf} $R5 == "\"
-    StrCpy $R0 0
-  ${EndIf}
-  ${StrLoc} $R5 "${VALUE}" "$\"" ">"
-  ${If} $R5 != ""
-    StrCpy $R0 0
+; One part of x.y.z from each version ($2 the record's, $3 this installer's), into $R7 and $R8;
+; $4 becomes 1 (the record's newer) or -1 at the first part that differs.
+!macro CLAUSEO_COMPARE_PART
+  !insertmacro CLAUSEO_TAKE_NUMBER $2 $R7
+  !insertmacro CLAUSEO_TAKE_NUMBER $3 $R8
+  ${If} $4 = 0
+    ${If} $R7 > $R8
+      StrCpy $4 1
+    ${ElseIf} $R7 < $R8
+      StrCpy $4 -1
+    ${EndIf}
   ${EndIf}
 !macroend
 
-; $R0 set to 0 unless VALUE is a SID string: "S-1-", then only digits and dashes, at most 184
-; characters (a SID's longest). Uses $R5, $R6 and $R7.
-!macro CLAUSEO_CHECK_SID VALUE
-  StrCpy $R5 "${VALUE}" 4
-  StrLen $R6 "${VALUE}"
-  ${IfNot} $R5 S== "S-1-"
-  ${OrIf} $R6 > 184
-    StrCpy $R0 0
-  ${EndIf}
-  StrCpy $R6 4
+; NUM: the digits at the start of STR as a number (0 when there are none); STR loses them and one
+; "." after them. A character is a digit when IntOp gives it back unchanged. Uses $0 and $1.
+!macro CLAUSEO_TAKE_NUMBER STR NUM
+  StrCpy ${NUM} 0
   ${Do}
-    StrCpy $R5 "${VALUE}" 1 $R6
-    ${If} $R5 == ""
+    StrCpy $0 ${STR} 1
+    IntOp $1 $0 + 0
+    ${If} $0 == ""
+    ${OrIf} $1 S!= $0
       ${ExitDo}
     ${EndIf}
-    ${StrLoc} $R7 "0123456789-" $R5 ">"
-    ${If} $R7 == ""
-      StrCpy $R0 0
-    ${EndIf}
-    IntOp $R6 $R6 + 1
+    IntOp ${NUM} ${NUM} * 10
+    IntOp ${NUM} ${NUM} + $0
+    StrCpy ${STR} ${STR} "" 1
   ${Loop}
-!macroend
-
-; The elevated instance of the per-user installer (header): with the switch it is the admin
-; section only and quits here. Without it, the install goes on as the template has it. The
-; per-machine installer never takes the switch.
-!macro NSIS_HOOK_PREINSTALL
-  !if "${INSTALLMODE}" == "currentUser"
-    Push $R0
-    Push $R1
-    Push $R2
-    Push $R3
-    !insertmacro CLAUSEO_ADMIN_SWITCH_GIVEN
-    ${If} $R0 = 1
-      ; The owner, as the outer instance passed it, and $INSTDIR, its /D=. --adopt checks both
-      ; against the outer instance's token and profile; these checks only keep the command line
-      ; whole. A refused argument runs nothing (99).
-      ${GetParameters} $R1
-      ${GetOptions} $R1 "${CLAUSEO_OWNER_SID_OPTION}" $R2
-      ${GetOptions} $R1 "${CLAUSEO_DATA_DIR_OPTION}" $R3
-      StrCpy $R0 1
-      !insertmacro CLAUSEO_CHECK_SID $R2
-      !insertmacro CLAUSEO_CHECK_PATH $R3
-      !insertmacro CLAUSEO_CHECK_PATH $INSTDIR
-      StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
-      ${If} $R0 = 1
-        !insertmacro CLAUSEO_RECORD_CHECK $R2
-        ${If} $R1 = 1
-          IntOp $R8 ${CLAUSEO_ADMIN_EXIT_BASE} + ${CLAUSEO_ADOPT_OTHER_ACCOUNT}
-        ${ElseIf} $R1 = 2
-          StrCpy $R8 ${CLAUSEO_ADMIN_NEWER_KEPT}
-        ${Else}
-          !insertmacro CLAUSEO_ADMIN_COPY '--owner-sid $R2 --user-install-dir "$INSTDIR" --data-dir "$R3"'
-          ${If} $R8 <> ${CLAUSEO_ADMIN_NOT_RUN}
-            IntOp $R8 $R8 + ${CLAUSEO_ADMIN_EXIT_BASE}
-          ${EndIf}
-        ${EndIf}
-      ${EndIf}
-      ; Quit runs no callback (.onInstSuccess, .onInstFailed): the exit code is this one.
-      SetErrorLevel $R8
-      Quit
-    ${EndIf}
-    Pop $R3
-    Pop $R2
-    Pop $R1
-    Pop $R0
-  !endif
+  StrCpy $0 ${STR} 1
+  ${If} $0 == "."
+    StrCpy ${STR} ${STR} "" 1
+  ${EndIf}
 !macroend
 
 ; $R2: this process's user SID as a string, or "" when it can't be read. The outer instance's,
@@ -440,8 +348,15 @@ SectionEnd
 ; The per-machine installer's admin copy (header), every run. The copy goes to CLAUSEO_ADMIN_DIR
 ; whatever $INSTDIR is; --adopt takes any $INSTDIR that only SYSTEM, Administrators or
 ; TrustedInstaller can change. A box only interactively: never under /S (exit 23), /P or
-; /UPDATE. A newer copy already there stays, with a details line. Uses $R1, $R5 and $R8.
+; /UPDATE. A newer copy already there stays, with a details line. Keeps $0 to $4 and $R1; uses
+; $R5, $R7 and $R8, which NSIS_HOOK_POSTINSTALL keeps.
 !macro CLAUSEO_ADMIN_COPY_MACHINE
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $R1
   !insertmacro CLAUSEO_RECORD_CHECK ""
   ${If} $R1 = 1
     ; Another user's per-user install placed the copy: --adopt would refuse (2), and the copy stays.
@@ -455,6 +370,12 @@ SectionEnd
     SetOutPath "$INSTDIR"
     !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
   ${EndIf}
+  Pop $R1
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
 !macroend
 
 ; The per-machine outcome of --adopt's code in $R8: done, a newer copy kept (9), or failed.

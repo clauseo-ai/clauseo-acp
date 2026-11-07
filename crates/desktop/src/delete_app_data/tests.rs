@@ -10,6 +10,7 @@ mod make;
 mod sandbox_link;
 mod set_aside;
 mod sources;
+mod template;
 #[cfg(windows)]
 mod windows;
 

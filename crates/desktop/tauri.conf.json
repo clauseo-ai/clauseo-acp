@@ -43,7 +43,8 @@
         "sidebarImage": "icons/installer-sidebar.bmp",
         "headerImage": "icons/installer-header.bmp",
         "languages": ["English"],
-        "customLanguageFiles": { "English": "windows/nsis/English.nsh" }
+        "customLanguageFiles": { "English": "windows/nsis/English.nsh" },
+        "template": "windows/nsis/installer.nsi"
       }
     },
     "linux": {

@@ -2,9 +2,9 @@
 ; release overlay crates/desktop/release/windows.conf.json names this file, so it is in the
 ; Windows installers that release.yml builds and in nothing else. The template (tauri-cli 2.12.2,
 ; installer.nsi) inserts NSIS_HOOK_PREUNINSTALL first in `Section Uninstall` (lines 783-787),
-; before its own CheckIfAppIsRunning (789) and its "delete app data" block (877-891), and
-; NSIS_HOOK_PREINSTALL first in `Section Install` (648-650), after only `SetOutPath $INSTDIR`
-; and before its CheckIfAppIsRunning (652).
+; before its own CheckIfAppIsRunning (789) and its "delete app data" block (877-891). Line
+; numbers are upstream's; the repo's copy (windows/nsis/installer.nsi, bundle.windows.nsis.template)
+; adds one marked block at the top of .onInit (decision 0035).
 ;
 ; NSIS_HOOK_PREUNINSTALL runs only for a real uninstall: Tauri's installer runs the old
 ; uninstaller with /UPDATE during an update ($UpdateMode = 1), which keeps everything.
@@ -54,8 +54,8 @@
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
 ;
 ; The admin copy of the sandbox's set-up program (S15 tier B) is in admin_copy.nsh, included
-; here: a hidden first section and NSIS_HOOK_PREINSTALL for the per-user installer's elevated
-; instance, and the macros NSIS_HOOK_POSTINSTALL ends with.
+; here: the elevated instance's branch, which the template's .onInit block inserts
+; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
 !include "${__FILEDIR__}\admin_copy.nsh"
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test

@@ -119,9 +119,18 @@ Developer ID.
 - **English only.** The dialog and the installer ship in English; new words are English-only for
   now. The installer's `languages` is `["English"]` (Hindi, in PR 1, is dropped): Tauri 2.12.2
   has no Hindi for its own 27 messages, and the Hindi drafts are deferred. No language picker.
-- **Stock installer pages.** Tauri's MUI pages as they come, no custom `installer.nsi`: page
-  words of our own would need a template kept in step with every Tauri upgrade. The words list's
-  per-machine lines are parked with it. The uninstall-declined line is S15a's.
+- **Stock installer pages.** Tauri's MUI pages as they come, with no page words of our own. The
+  installer is built from `crates/desktop/windows/nsis/installer.nsi`
+  (`bundle.windows.nsis.template`): a byte-identical copy of tauri-cli 2.12.2's template plus one
+  marked block, `admin-section`, at the top of `.onInit` (S15 tier B, 2026-11-07). That block
+  runs the per-user installer's elevated instance (`/CLAUSEO_ADMIN_SECTION`) and quits before any
+  plug-in, page or section. The hooks alone couldn't do that: the template's `.onInit` calls a
+  plug-in under `/S`, which NSIS extracts into `$PLUGINSDIR` under `%TEMP%`, a folder the lawyer's
+  processes can rename while the elevated instance is about to load from it. A test holds the
+  copy to upstream plus a known list of named blocks (by SHA-256 of what is left with the blocks
+  taken out) and to the CLI version in `ui/package.json`, so CI fails when either moves. Every
+  Tauri upgrade copies the new template again, puts the blocks back and updates the pin. The
+  words list's per-machine lines are parked with it. The uninstall-declined line is S15a's.
 - **One installer line of our own.** Tauri's "Delete the application data" box removes the whole
   data folder, store included, so its label says what goes: "Also delete conversations, saved
   versions and settings" (unticked, as Tauri draws it). `customLanguageFiles` replaces the

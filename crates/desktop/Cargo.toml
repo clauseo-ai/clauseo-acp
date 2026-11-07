@@ -166,6 +166,8 @@ libc = { workspace = true }
 tauri-plugin-updater.workspace = true
 
 [dev-dependencies]
+# The NSIS template's pin (delete_app_data/tests/template.rs): SHA-256 of upstream's text.
+sha2 = { workspace = true }
 # S15's setup exe codes, its `--remove` arguments and its lock wait, which the uninstall hook's
 # sources test holds (`windows::setup` is built off Windows with test-support); and the
 # deletion's tests (src/delete_app_data/tests/set_aside.rs) off Windows, which use the set-aside
