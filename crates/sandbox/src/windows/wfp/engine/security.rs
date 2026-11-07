@@ -15,10 +15,12 @@ use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FwpmSubLayerGetSecurityInfoByKey0, FwpmSubLayerSetSecurityInfoByKey0,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS, SetEntriesInAclW,
-    TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    ConvertSidToStringSidW, ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS,
+    SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
 };
-use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE, PSID};
+use windows::Win32::Security::{
+    ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE, OWNER_SECURITY_INFORMATION, PSID,
+};
 use windows::core::{GUID, HSTRING, PWSTR};
 
 use super::{Engine, check, code_of};
@@ -126,6 +128,78 @@ pub(in crate::windows::wfp) fn grant(
     // SAFETY: `merged` came from SetEntriesInAclW (LocalAlloc) and is freed once, here.
     unsafe { LocalFree(Some(HLOCAL(merged.cast()))) };
     check("Fwpm*SetSecurityInfoByKey0", code, &[])
+}
+
+/// The owner of `object` in `ns`, as a SID string.
+pub(in crate::windows::wfp) fn owner_of(
+    engine: &Engine,
+    ns: &Namespace,
+    object: Object,
+) -> Result<String, WfpError> {
+    let (kind, key) = kind_and_key(ns, object);
+    let key = key.as_ref().map(ptr::from_ref);
+    let info = OWNER_SECURITY_INFORMATION.0;
+    let mut owner = PSID::default();
+    let mut sd = windows::Win32::Security::PSECURITY_DESCRIPTOR::default();
+    let no_sid = ptr::null_mut::<PSID>();
+    let no_acl = ptr::null_mut::<*mut ACL>();
+    let handle = engine.handle;
+    // SAFETY: `key` is as in [`grant`]; the group, DACL and SACL out-pointers are null, which
+    // the calls allow when not asked for; `owner` and `sd` are live out-pointers. `sd` is
+    // WFP's and freed below; `owner` points into it.
+    let code = unsafe {
+        match kind {
+            Kind::Filter => FwpmFilterGetSecurityInfoByKey0(
+                handle,
+                key,
+                info,
+                &raw mut owner,
+                no_sid,
+                no_acl,
+                no_acl,
+                &raw mut sd,
+            ),
+            Kind::Sublayer => FwpmSubLayerGetSecurityInfoByKey0(
+                handle,
+                key,
+                info,
+                &raw mut owner,
+                no_sid,
+                no_acl,
+                no_acl,
+                &raw mut sd,
+            ),
+            Kind::Provider => FwpmProviderGetSecurityInfoByKey0(
+                handle,
+                key,
+                info,
+                &raw mut owner,
+                no_sid,
+                no_acl,
+                no_acl,
+                &raw mut sd,
+            ),
+        }
+    };
+    check("Fwpm*GetSecurityInfoByKey0", code, &[])?;
+    let mut text = PWSTR::null();
+    // SAFETY: `owner` points into `sd`, still live; `text` is LocalAlloc'd and freed below.
+    let converted = unsafe { ConvertSidToStringSidW(owner, &raw mut text) };
+    // SAFETY: as above; the conversion gave a NUL-terminated string.
+    let found = converted
+        .ok()
+        .and_then(|()| unsafe { text.to_string() }.ok());
+    if !text.is_null() {
+        // SAFETY: from the conversion (LocalAlloc), freed once, here.
+        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+    }
+    let mut wfp_sd = sd.0;
+    // SAFETY: `sd` came from the get call above and is freed once, here.
+    unsafe { FwpmFreeMemory0(&raw mut wfp_sd) };
+    found.ok_or(WfpError {
+        call: "ConvertSidToStringSidW",
+        code: 0,
+    })
 }
 
 /// `acl` with `sid`'s allow of `mask` merged in (or every allow of `sid` taken out), as a new
