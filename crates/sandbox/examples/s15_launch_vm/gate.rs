@@ -9,8 +9,11 @@
 //! - PASS when it was refused at a discriminating effect (strict mode: at each of the three);
 //! - INFO when no effect is discriminating (strict mode: FAIL).
 //!
-//! `switch-desktop` counts only in strict mode (`--interactive-desktop`); otherwise it is
-//! information. An effect no control could carry is named in the row text as information.
+//! `switch-desktop` is information outside strict mode. Strict mode (`--interactive-desktop`,
+//! [`strict_gate`]) has its own rules: desktop-create and clipboard-write must each be carried by
+//! (g) and refused for the agent; for `switch-desktop` the agent must be refused and variant (f)'s
+//! token on `WinSta0` (`w`) must succeed. Anything else is FAIL. An effect no control could
+//! carry is named in the row text as information.
 
 /// The calls of a clipboard write whose failure is the job's `WRITECLIPBOARD` limit (the owner
 /// window and the memory block come before or beside them and prove nothing).
@@ -133,6 +136,8 @@ pub(crate) enum Rank {
     Close,
     /// (e) and (f): evidence only.
     Far,
+    /// (w): (f)'s token on `WinSta0`, strict mode's `SwitchDesktop` control only.
+    Interactive,
 }
 
 /// One control variant's run.
@@ -175,6 +180,16 @@ enum Status {
 
 /// The gate (the module's rules) on the agent's results and the controls'.
 pub(crate) fn gate(agent: &[Got; 3], controls: &[Control], strict: bool) -> Judged {
+    if strict {
+        strict_gate(agent, controls)
+    } else {
+        lenient_gate(agent, controls)
+    }
+}
+
+/// The gate outside strict mode (the module's first rules).
+fn lenient_gate(agent: &[Got; 3], controls: &[Control]) -> Judged {
+    let strict = false;
     let g = controls
         .iter()
         .find(|c| c.rank == Rank::Agent && c.shape.is_ok());
@@ -296,6 +311,80 @@ pub(crate) fn gate(agent: &[Got; 3], controls: &[Control], strict: bool) -> Judg
     }
 }
 
+/// Strict mode's gate (the module's rules). Desktop-create and clipboard-write: (g), with its
+/// own shape, succeeded and the agent's child was refused. `SwitchDesktop`: the agent's child
+/// didn't succeed and (w) did. Each effect is named with the call and code when it falls short.
+fn strict_gate(agent: &[Got; 3], controls: &[Control]) -> Judged {
+    let counted = |rank: Rank| controls.iter().find(|c| c.rank == rank && c.shape.is_ok());
+    let (g, w) = (counted(Rank::Agent), counted(Rank::Interactive));
+    let mut parts = Vec::new();
+    let mut carriers = Vec::new();
+    let mut proven = 0usize;
+    for (at, effect) in EFFECTS.into_iter().enumerate() {
+        let label = effect.label();
+        let mine = agent
+            .get(at)
+            .cloned()
+            .unwrap_or(Got::Failed("none".to_owned()));
+        let (control, key, name) = if effect == Effect::Switch {
+            (w, 'w', "(w), variant (f)'s token on WinSta0")
+        } else {
+            (
+                g,
+                'g',
+                "(g), the agent's token on its own station outside the job",
+            )
+        };
+        let theirs = control.and_then(|c| c.got.get(at));
+        let part = match (theirs, &mine) {
+            (_, Got::Ok) => format!("{label}: the agent's child succeeded: the limit is missing"),
+            (None, _) => {
+                format!("{label}: {name} didn't run or doesn't count, so nothing proves it")
+            }
+            (Some(Got::Ok), Got::Refused(code) | Got::Failed(code)) if effect == Effect::Switch => {
+                proven += 1;
+                carriers.push(key);
+                format!(
+                    "{label}: the agent's child was refused ({code}) and {name} switched; this \
+                     pair differs in station as well as job, so it shows the agent can't switch \
+                     the user's desktop, not the job's limit alone"
+                )
+            }
+            (Some(Got::Ok), Got::Refused(code)) => {
+                proven += 1;
+                carriers.push(key);
+                format!("{label}: carried by {name}; the agent's child was refused ({code})")
+            }
+            (Some(Got::Ok), Got::Failed(code)) => format!(
+                "{label}: carried by {name}, but the agent's child gave {code}, not the limit's \
+                 refusal"
+            ),
+            (Some(other), _) => format!(
+                "{label}: {name} couldn't {} ({}), so the row proves nothing there",
+                effect.verb(),
+                other.text()
+            ),
+        };
+        parts.push(part);
+    }
+    carriers.dedup();
+    let kind = if proven == EFFECTS.len() {
+        Kind::Pass
+    } else {
+        Kind::Fail
+    };
+    Judged {
+        kind,
+        text: format!(
+            "--interactive-desktop: desktop-create and clipboard-write need (g) to succeed and the \
+             agent's child to be refused, SwitchDesktop needs (w) to succeed and the agent's \
+             child to be refused; {}",
+            parts.join("; ")
+        ),
+        carriers,
+    }
+}
+
 /// `(a)`, `(a), (b)`…, or empty.
 fn keys(keys: impl Iterator<Item = char>) -> String {
     keys.map(|k| format!("({k})"))
@@ -395,17 +484,65 @@ mod tests {
         assert_eq!(gate(&agent(), &[a], false).kind, Kind::Info);
     }
 
+    /// Strict mode's controls as the VM should see them: (g) creates and writes, (w) switches.
+    fn strict_controls() -> [Control; 2] {
+        [
+            control('g', Rank::Agent, [Got::Ok, no("1"), Got::Ok]),
+            control('w', Rank::Interactive, [Got::Ok, Got::Ok, Got::Ok]),
+        ]
+    }
+
     #[test]
-    fn strict_mode_needs_each_effect_discriminating_and_refused() {
-        let all = control('a', Rank::Close, [Got::Ok, Got::Ok, Got::Ok]);
-        assert_eq!(gate(&agent(), &[all], true).kind, Kind::Pass);
-        let no_switch = control('a', Rank::Close, [Got::Ok, no("1"), Got::Ok]);
-        assert_eq!(
-            gate(&agent(), std::slice::from_ref(&no_switch), true).kind,
-            Kind::Fail
+    fn strict_mode_passes_with_g_carrying_desktop_and_clipboard_and_w_the_switch() {
+        let judged = gate(&agent(), &strict_controls(), true);
+        assert_eq!(judged.kind, Kind::Pass, "{}", judged.text);
+        assert_eq!(judged.carriers, ['g', 'w']);
+        assert!(judged.text.contains("differs in station as well as job"));
+    }
+
+    #[test]
+    fn strict_mode_fails_when_a_carries_the_clipboard_but_g_did_not() {
+        let g = control(
+            'g',
+            Rank::Agent,
+            [Got::Ok, no("1"), no("failed OpenClipboard 5")],
         );
-        assert_eq!(gate(&agent(), &[no_switch], false).kind, Kind::Pass);
+        let a = control('a', Rank::Close, [Got::Ok, Got::Ok, Got::Ok]);
+        let [_, w] = strict_controls();
+        let judged = gate(&agent(), &[g, a, w], true);
+        assert_eq!(judged.kind, Kind::Fail);
+        assert!(judged.text.contains("clipboard: (g)"), "{}", judged.text);
+        assert!(judged.text.contains("failed OpenClipboard 5"));
+        // No (g) at all: (a) carries nothing either.
+        let a = control('a', Rank::Close, [Got::Ok, Got::Ok, Got::Ok]);
+        let [_, w] = strict_controls();
+        assert_eq!(gate(&agent(), &[a, w], true).kind, Kind::Fail);
         assert_eq!(gate(&agent(), &[], true).kind, Kind::Fail);
+    }
+
+    #[test]
+    fn strict_mode_fails_when_g_cannot_create_a_desktop() {
+        let [_, w] = strict_controls();
+        let g = control('g', Rank::Agent, [no("8"), no("1"), Got::Ok]);
+        let judged = gate(&agent(), &[g, w], true);
+        assert_eq!(judged.kind, Kind::Fail);
+        assert!(judged.text.contains("desktop: (g)") && judged.text.contains("(8)"));
+    }
+
+    #[test]
+    fn strict_mode_switch_needs_the_agent_refused_and_w_switching() {
+        let mut switched = agent();
+        switched[1] = Got::Ok;
+        assert_eq!(gate(&switched, &strict_controls(), true).kind, Kind::Fail);
+        let [g, mut w] = strict_controls();
+        w.got[1] = no("1");
+        let judged = gate(&agent(), &[g.clone(), w], true);
+        assert_eq!(judged.kind, Kind::Fail);
+        assert!(judged.text.contains("proves nothing"));
+        // (w) on the wrong station doesn't count.
+        let [_, mut w] = strict_controls();
+        w.shape = Err("station".to_owned());
+        assert_eq!(gate(&agent(), &[g, w], true).kind, Kind::Fail);
     }
 
     #[test]

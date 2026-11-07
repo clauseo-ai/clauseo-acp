@@ -33,7 +33,10 @@ only when prepare ran the set-up.
 - **Interactive desktop** (`--interactive-desktop`): first candidate carrying PR 5; an
   interactive desktop session (console or RDP, not session 0); run the harness with
   `--interactive-desktop`; the agent's node child is refused CreateDesktopW, SwitchDesktop and
-  clipboard writes, and a control outside the job succeeds at each.
+  clipboard writes. CreateDesktopW and the clipboard write each succeed for variant (g), the
+  agent's token shape on the agent's own window station outside the runner's job. SwitchDesktop
+  succeeds for variant (f)'s token on WinSta0 (the control `w`); that pair differs in station as
+  well as job, so it shows the agent can't switch the user's desktop, not the job's limit alone.
 
   In the copy's console or RDP session (not over SSH's session 0), from the copy's own folder
   (not `C:\ClauseoS15Vm\bin`, which prepare fills and cleanup deletes):
@@ -44,10 +47,11 @@ only when prepare ran the set-up.
   ```
 
   (one line), or after `prepare`, `C:\s15\s15_launch_vm.exe row node-pipes --interactive-desktop`.
-  With the flag, `node-pipes` fails unless each of the three effects has a control that
-  succeeded at it (variant (g) when it ran, else (a) to (d)) and the agent's node child was
-  refused it. Without it (CI), `SwitchDesktop` is information only and one such effect is
-  enough (below).
+  With the flag, `node-pipes` fails, naming the call and code, unless (g) succeeded at
+  CreateDesktopW and at the clipboard write and the agent's node child was refused each, and (w)
+  switched desktops while the agent's child didn't; (a) to (f) carry nothing there. Without it
+  (CI), `SwitchDesktop` is information only and one effect carried by (g), or by (a) to (d)
+  when (g) didn't run, is enough (below).
 
 ## The rows
 
