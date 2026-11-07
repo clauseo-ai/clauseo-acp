@@ -111,7 +111,12 @@ pub(crate) fn own_token() -> io::Result<TokenFacts> {
     // SAFETY: the pseudo-handle needs no closing; `token` is a live out-pointer.
     unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }
         .map_err(|e| os(&e))?;
-    let token = Owned(token);
+    token_facts(Owned(token).0)
+}
+
+/// What [`own_token`] reads, from `token` (a live handle with `TOKEN_QUERY`).
+pub(crate) fn token_facts(token: HANDLE) -> io::Result<TokenFacts> {
+    let token = Borrowed(token);
     let user = information(token.0, TokenUser)?;
     // SAFETY: GetTokenInformation wrote a TOKEN_USER at the start of the aligned buffer.
     let user = unsafe { &*user.as_ptr().cast::<TOKEN_USER>() };
@@ -127,6 +132,9 @@ pub(crate) fn own_token() -> io::Result<TokenFacts> {
         privileges: privileges(token.0)?,
     })
 }
+
+/// A token handle someone else closes.
+struct Borrowed(HANDLE);
 
 /// `class` of `token`, in u64 words so any of the structures is aligned in it.
 fn information(token: HANDLE, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u64>> {
