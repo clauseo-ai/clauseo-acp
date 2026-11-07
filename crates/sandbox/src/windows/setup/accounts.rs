@@ -303,8 +303,9 @@ pub(super) fn hide(name: &str) -> Result<(), MachineError> {
     set_value(&Key(opened), name, &RegValue::Dword(0))
 }
 
-/// Removes `name`'s sign-in screen value. A missing key or value is `Ok`.
-fn unhide(name: &str) -> Result<(), MachineError> {
+/// Removes `name`'s sign-in screen value. A missing key or value is `Ok`. `--remove` calls it
+/// before [`delete_user`], so the value never outlives the account it is named after.
+pub(super) fn unhide(name: &str) -> Result<(), MachineError> {
     let subkey = HSTRING::from(HIDDEN_USERS);
     let mut opened = HKEY::default();
     // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.

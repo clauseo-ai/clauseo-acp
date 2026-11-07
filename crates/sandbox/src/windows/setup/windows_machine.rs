@@ -75,7 +75,7 @@ impl Names {
 
     /// The real account name of the engine's `name`: a pool name with [`Names::users`] for
     /// its prefix; any other name as it is.
-    fn real(&self, name: &str) -> String {
+    pub(super) fn real(&self, name: &str) -> String {
         match (pool_number(name), name.strip_prefix(POOL_PREFIX)) {
             (Some(_), Some(digits)) => format!("{}{digits}", self.users),
             _ => name.to_owned(),
@@ -83,7 +83,7 @@ impl Names {
     }
 
     /// The engine's name for the real account name `real`, the inverse of [`Names::real`].
-    fn engine(&self, real: String) -> String {
+    pub(super) fn engine(&self, real: String) -> String {
         match real.strip_prefix(self.users.as_str()) {
             Some(digits) if pool_number(&format!("{POOL_PREFIX}{digits}")).is_some() => {
                 format!("{POOL_PREFIX}{digits}")
@@ -156,10 +156,11 @@ impl std::fmt::Debug for WindowsMachine {
 }
 
 /// The thread acting as the owner: set while it lives, cleared on drop (a panic's included).
-struct Acting(Rc<Cell<bool>>);
+/// `--remove`'s machine (`remove/windows_removal.rs`) keeps its flag the same way.
+pub(super) struct Acting(Rc<Cell<bool>>);
 
 impl Acting {
-    fn set(flag: &Rc<Cell<bool>>) -> Acting {
+    pub(super) fn set(flag: &Rc<Cell<bool>>) -> Acting {
         flag.set(true);
         Acting(Rc::clone(flag))
     }

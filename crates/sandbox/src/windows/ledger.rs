@@ -64,6 +64,8 @@ mod owed;
 mod recorded;
 mod settle;
 
+#[cfg(windows)]
+pub(crate) use file::from_bytes;
 use file::{Known, Slot, State, Trust, invalid, read_state};
 #[cfg(test)]
 pub(crate) use held::ByPath;

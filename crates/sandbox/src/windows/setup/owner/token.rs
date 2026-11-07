@@ -11,16 +11,21 @@ use std::ffi::c_void;
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessBasicInformation};
 use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::Security::{
-    DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser, RevertToSelf,
-    SECURITY_IMPERSONATION_LEVEL, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_IMPERSONATE,
-    TOKEN_QUERY, TokenImpersonation, TokenImpersonationLevel,
+    CheckTokenMembership, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, DuplicateTokenEx,
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, ImpersonateLoggedOnUser,
+    RevertToSelf, SECURITY_IMPERSONATION_LEVEL, SID_AND_ATTRIBUTES, SecurityImpersonation,
+    SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_DUPLICATE, TOKEN_ELEVATION,
+    TOKEN_ELEVATION_TYPE, TOKEN_IMPERSONATE, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
+    TOKEN_QUERY, TokenElevation, TokenElevationType, TokenElevationTypeFull, TokenImpersonation,
+    TokenImpersonationLevel, TokenIntegrityLevel,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, GetProcessTimes, OpenProcess, OpenProcessToken,
     OpenThreadToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-use super::MachineError;
+use super::super::accounts::LocalSid;
+use super::{MEDIUM_RID, MachineError, needs_lowering};
 use crate::windows::record::user_of;
 use crate::windows::sids::Sid;
 
@@ -166,7 +171,7 @@ impl Token {
         unsafe {
             DuplicateTokenEx(
                 primary.0,
-                TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE,
+                TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT,
                 None,
                 SecurityImpersonation,
                 TokenImpersonation,
@@ -207,6 +212,134 @@ impl Token {
         checked
     }
 
+    /// Whether this token holds more than a standard user's ([`needs_lowering`]): a full
+    /// elevated token, Administrators enabled, or an integrity level above Medium.
+    pub(super) fn elevated(&self) -> Result<bool, MachineError> {
+        let full = self.elevation_type()? == TokenElevationTypeFull;
+        Ok(needs_lowering(
+            full,
+            self.admins_enabled()?,
+            self.integrity()?,
+        ))
+    }
+
+    /// A standard user's copy of this token: Administrators made deny-only and every privilege
+    /// but `SeChangeNotifyPrivilege` deleted (`CreateRestrictedToken` with
+    /// `DISABLE_MAX_PRIVILEGE`), then its integrity level set to Medium. Checked after: a copy
+    /// with Administrators still enabled or above Medium is refused.
+    pub(super) fn lowered(&self) -> Result<Token, MachineError> {
+        let admins = LocalSid::parse(&sid(ADMINISTRATORS)?)?;
+        let disable = [SID_AND_ATTRIBUTES {
+            Sid: admins.0,
+            Attributes: 0,
+        }];
+        let mut restricted = HANDLE::default();
+        // SAFETY: the token is open with TOKEN_DUPLICATE; `disable` and the SID it points to
+        // live for the call; `restricted` is a live out-pointer, owned by a `Token` at once.
+        unsafe {
+            CreateRestrictedToken(
+                self.0,
+                DISABLE_MAX_PRIVILEGE,
+                Some(&disable),
+                None,
+                None,
+                &raw mut restricted,
+            )
+        }
+        .map_err(|error| os("CreateRestrictedToken", &error))?;
+        let restricted = Token(restricted);
+        let medium = LocalSid::parse(&sid(MEDIUM_LABEL)?)?;
+        let label = TOKEN_MANDATORY_LABEL {
+            Label: SID_AND_ATTRIBUTES {
+                Sid: medium.0,
+                Attributes: SE_GROUP_INTEGRITY,
+            },
+        };
+        let size = u32::try_from(size_of::<TOKEN_MANDATORY_LABEL>()).unwrap_or(u32::MAX);
+        // SAFETY: the restricted token has TOKEN_ADJUST_DEFAULT (it keeps this token's access);
+        // `label` and the SID it points to live for the call.
+        unsafe {
+            SetTokenInformation(
+                restricted.0,
+                TokenIntegrityLevel,
+                (&raw const label).cast(),
+                size,
+            )
+        }
+        .map_err(|error| os("SetTokenInformation", &error))?;
+        if restricted.admins_enabled()? || restricted.integrity()? > MEDIUM_RID {
+            return Err(MachineError::Other(
+                "the owner's token couldn't be lowered to a standard user's".to_owned(),
+            ));
+        }
+        Ok(restricted)
+    }
+
+    /// Whether Administrators is an enabled group of this (impersonation) token.
+    fn admins_enabled(&self) -> Result<bool, MachineError> {
+        let admins = LocalSid::parse(&sid(ADMINISTRATORS)?)?;
+        let mut member = windows::core::BOOL::default();
+        // SAFETY: the token is an impersonation token open with TOKEN_QUERY; the SID lives for
+        // the call; `member` is a live out-pointer.
+        unsafe { CheckTokenMembership(Some(self.0), admins.0, &raw mut member) }
+            .map_err(|error| os("CheckTokenMembership", &error))?;
+        Ok(member.as_bool())
+    }
+
+    /// The token's elevation type.
+    fn elevation_type(&self) -> Result<TOKEN_ELEVATION_TYPE, MachineError> {
+        let mut kind = TOKEN_ELEVATION_TYPE::default();
+        self.fixed(TokenElevationType, &mut kind)?;
+        Ok(kind)
+    }
+
+    /// The relative id of the token's integrity level (`S-1-16-<rid>`).
+    fn integrity(&self) -> Result<u32, MachineError> {
+        let mut buffer = [0u64; 16];
+        let size = u32::try_from(size_of_val(&buffer)).unwrap_or(u32::MAX);
+        let mut needed = 0u32;
+        // SAFETY: the token is open with TOKEN_QUERY; `buffer` is live, aligned for a
+        // TOKEN_MANDATORY_LABEL and `size` bytes long; the call writes the label and its SID
+        // into it.
+        unsafe {
+            GetTokenInformation(
+                self.0,
+                TokenIntegrityLevel,
+                Some(buffer.as_mut_ptr().cast()),
+                size,
+                &raw mut needed,
+            )
+        }
+        .map_err(|error| os("GetTokenInformation", &error))?;
+        // SAFETY: the call above filled `buffer` with a TOKEN_MANDATORY_LABEL whose SID points
+        // into the buffer, which lives until the reads below are done; a label SID has one
+        // sub-authority, its level, so index `count - 1` is in range.
+        let rid = unsafe {
+            let label = &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>();
+            let count = *GetSidSubAuthorityCount(label.Label.Sid);
+            *GetSidSubAuthority(label.Label.Sid, u32::from(count.saturating_sub(1)))
+        };
+        Ok(rid)
+    }
+
+    /// A fixed-size token information class read into `out`.
+    fn fixed<T>(&self, class: TOKEN_INFORMATION_CLASS, out: &mut T) -> Result<(), MachineError> {
+        let size = u32::try_from(size_of::<T>()).unwrap_or(u32::MAX);
+        let mut needed = 0u32;
+        // SAFETY: the token is open with TOKEN_QUERY; `out` is live and `size` bytes long,
+        // and `class` is one whose answer has `T`'s layout.
+        unsafe {
+            GetTokenInformation(
+                self.0,
+                class,
+                Some(std::ptr::from_mut(out).cast()),
+                size,
+                &raw mut needed,
+            )
+        }
+        .map_err(|error| os("GetTokenInformation", &error))
+    }
+
     /// The calling thread's token, opened with the process's own identity for the check.
     fn of_thread() -> Result<Token, MachineError> {
         let mut handle = HANDLE::default();
@@ -236,6 +369,90 @@ impl Token {
         .map_err(|error| os("GetTokenInformation", &error))?;
         Ok(level)
     }
+}
+
+/// `BUILTIN\Administrators`.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
+/// The Medium mandatory level.
+const MEDIUM_LABEL: &str = "S-1-16-8192";
+/// `SE_GROUP_INTEGRITY`.
+const SE_GROUP_INTEGRITY: u32 = 0x20;
+/// LOCAL SYSTEM.
+const SYSTEM: &str = "S-1-5-18";
+
+/// `text` as a SID.
+fn sid(text: &str) -> Result<Sid, MachineError> {
+    Sid::parse(text).map_err(|error| MachineError::Other(error.to_string()))
+}
+
+/// This process's token: whether it is elevated (`TokenElevation`) and whether its user is
+/// LOCAL SYSTEM, for `--per-machine`'s check.
+pub(crate) fn this_process() -> Result<(bool, bool), MachineError> {
+    let token = Token::impersonation_of(&Process::current())?;
+    let mut elevation = TOKEN_ELEVATION::default();
+    token.fixed(TokenElevation, &mut elevation)?;
+    Ok((
+        elevation.TokenIsElevated != 0,
+        token.user()?.as_str() == SYSTEM,
+    ))
+}
+
+/// Whether the calling thread's token is no stronger than a standard user's: Administrators
+/// not enabled, Medium or lower. For the tests of the lowered owner.
+#[cfg(test)]
+pub(crate) fn thread_is_standard() -> bool {
+    Token::of_thread().is_ok_and(|thread| {
+        !thread.admins_enabled().unwrap_or(true)
+            && thread.integrity().unwrap_or(u32::MAX) <= MEDIUM_RID
+    })
+}
+
+/// How many privileges the calling thread's token holds besides `SeChangeNotifyPrivilege`,
+/// enabled or not: for the tests of the lowered owner. `None` when it can't be read.
+#[cfg(test)]
+pub(crate) fn thread_extra_privileges() -> Option<usize> {
+    use windows::Win32::Security::{
+        LookupPrivilegeValueW, SE_CHANGE_NOTIFY_NAME, TOKEN_PRIVILEGES, TokenPrivileges,
+    };
+
+    let thread = Token::of_thread().ok()?;
+    let mut buffer = [0u64; 512];
+    let size = u32::try_from(size_of_val(&buffer)).ok()?;
+    let mut needed = 0u32;
+    // SAFETY: the token is open with TOKEN_QUERY; `buffer` is live, aligned for a
+    // TOKEN_PRIVILEGES and `size` bytes long.
+    unsafe {
+        GetTokenInformation(
+            thread.0,
+            TokenPrivileges,
+            Some(buffer.as_mut_ptr().cast()),
+            size,
+            &raw mut needed,
+        )
+    }
+    .ok()?;
+    let mut notify = windows::Win32::Foundation::LUID::default();
+    // SAFETY: no system name; the privilege's name is a static NUL-terminated string; `notify`
+    // is a live out-pointer.
+    unsafe {
+        LookupPrivilegeValueW(
+            windows::core::PCWSTR::null(),
+            SE_CHANGE_NOTIFY_NAME,
+            &raw mut notify,
+        )
+    }
+    .ok()?;
+    // SAFETY: the call above filled `buffer` with a TOKEN_PRIVILEGES whose `PrivilegeCount`
+    // entries follow it inside the buffer, which outlives the slice.
+    let privileges = unsafe {
+        let list = buffer.as_ptr().cast::<TOKEN_PRIVILEGES>();
+        let count = usize::try_from((*list).PrivilegeCount).ok()?;
+        std::slice::from_raw_parts((*list).Privileges.as_ptr(), count)
+    };
+    let is_notify = |luid: &windows::Win32::Foundation::LUID| {
+        luid.LowPart == notify.LowPart && luid.HighPart == notify.HighPart
+    };
+    Some(privileges.iter().filter(|p| !is_notify(&p.Luid)).count())
 }
 
 /// Whether the calling thread holds an impersonation token: for the tests of the guard.

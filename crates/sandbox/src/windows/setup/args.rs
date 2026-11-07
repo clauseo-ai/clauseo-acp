@@ -4,14 +4,18 @@
 //! - `--set-up --parent <pid> --data-dir <path> [--add <n>]`: set up, re-run or extend
 //!   (`--add`, 1 to [`POOL_CAP`]). The data folder is a plain drive-letter path (`C:\...`).
 //! - `--reclaim --parent <pid>`: the elevated clean-up (`PR4i`).
-//! - `--remove`: the uninstall (`PR4j`); the hook passes nothing else.
+//! - `--remove [--per-machine]`: the uninstall (`PR4j`). The hook adds `--per-machine` only in
+//!   the per-machine installer, chosen when the installer is built; nothing else ever. Who asked
+//!   comes from the process's recorded parent (D-B2), never from an argument.
 //!
-//! Each flag takes its value as the next argument (never `--flag=value`) and comes once.
+//! `--per-machine` is the one flag without a value. Every other flag takes its value as the next
+//! argument (never `--flag=value`). Each flag comes once.
 //! Anything else is a [`Usage`] error, and the exe exits `Usage`. `--parent` names the process
 //! that asked; the exe checks it against the parent Windows recorded (D-B2), so it never decides
 //! the owner alone. `--data-dir` is written as admin into the record's `DataDir`, so it is held
 //! to a plain local path here and resolved as the owner after ([`data_dir_of`]).
-//! `PR4j`'s `--remove` treats `DataDir` as untrusted and acts on it only as the owner.
+//! `--remove` treats `DataDir` as untrusted: checked the same way, and acted on as the owner, or,
+//! in a per-machine removal the owner didn't ask for, only as `remove.rs` limits it.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -36,14 +40,18 @@ pub enum Mode {
         parent: u32,
     },
     /// `--remove`.
-    Remove,
+    Remove {
+        /// `--per-machine`: a per-machine uninstall, which removes every pool the record names,
+        /// whoever asked (D-B9 as ruled). Without it, only the record's owner removes anything.
+        per_machine: bool,
+    },
 }
 
 /// Why a command line isn't one the exe takes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
-         --reclaim --parent <pid> | --remove ({0})"
+         --reclaim --parent <pid> | --remove [--per-machine] ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -54,10 +62,18 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut parent = None;
     let mut data_dir = None;
     let mut add = None;
+    let mut per_machine = false;
     while let Some(flag) = args.next() {
         let flag = flag
             .into_string()
             .map_err(|arg| Usage(format!("{} isn't text", arg.to_string_lossy())))?;
+        if flag == PER_MACHINE {
+            if per_machine {
+                return Err(Usage(format!("{flag} given twice")));
+            }
+            per_machine = true;
+            continue;
+        }
         let slot = match flag.as_str() {
             "--parent" => &mut parent,
             "--data-dir" => &mut data_dir,
@@ -80,6 +96,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             Ok(())
         }
     };
+    if per_machine && mode != "--remove" {
+        return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
+    }
     match mode {
         "--set-up" => Ok(Mode::SetUp {
             parent: parent_of(parent)?,
@@ -97,11 +116,14 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             refuse("--parent", parent.is_some())?;
             refuse("--data-dir", data_dir.is_some())?;
             refuse("--add", add.is_some())?;
-            Ok(Mode::Remove)
+            Ok(Mode::Remove { per_machine })
         }
         other => Err(Usage(format!("unknown mode {other:?}"))),
     }
 }
+
+/// The flag the per-machine installer's hook adds to `--remove`.
+pub const PER_MACHINE: &str = "--per-machine";
 
 /// `--parent`: a process ID, in decimal, never 0.
 fn parent_of(value: Option<OsString>) -> Result<u32, Usage> {

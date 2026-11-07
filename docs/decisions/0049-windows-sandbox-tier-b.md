@@ -472,6 +472,56 @@ standard user can write. Swapping the exe itself stays open in a per-user instal
 install closes both, since only administrators can write its folder under Program Files (PR4j's
 `--per-machine`, with stage F).
 
+### Removal (`--remove`, PR4j)
+
+The uninstaller's hook runs `clauseo-sandbox-setup.exe --remove` elevated (`runas`). The
+per-machine installer, already elevated, opens it with `open` and adds `--per-machine`, chosen
+when it is built (the template's `INSTALLMODE`; only `currentUser` and `perMachine` build,
+stage F), never at run time. `--per-machine` runs only in an elevated or SYSTEM process. The exe
+takes the user who asked from its recorded parent (D-B2), never from an argument.
+
+- **Who removes (D-B9 as ruled).** Per-user, only the record's owner. Anyone else's uninstall
+  exits 0 having touched nothing; a parent that can't be found exits 3, nothing touched.
+  Per-machine, every pool in the record goes, whoever uninstalls, LOCAL SYSTEM under Intune's
+  silent `/S` included.
+- **Order**, under the set-up lock, waited for at most 60 s (else exit 5, nothing touched; with
+  no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
+  `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
+  `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
+  sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record. The
+  first failure stops the run: exit 4, the record kept with `Removing` and every pool SID (so a
+  later run still trusts the ledger), the ledger kept. A re-run skips what is gone.
+- **The ledger, as the owner** (the parent is the owner): `DataDir`, which the owner can
+  influence, is checked as `--data-dir` is and used only while acting as the owner; every matter
+  is forgotten (`forget_matter`) acting as the owner, with a standard user's token: an elevated
+  parent's (the per-machine uninstaller's) is copied with Administrators deny-only, no privilege
+  but `SeChangeNotifyPrivilege` and Medium integrity first. If that fails, a per-machine run takes
+  the administrator's path below; a per-user run exits 3, nothing touched. Anything left keeps
+  the record.
+- **The ledger, as an administrator for an absent owner** (per-machine; no impersonation): the
+  ledger is read from a `DataDir` the owner owns, opened relative to its checked `sandbox`
+  folder's handle, and never written. The only change is removing one access entry, for an entry
+  that names a recorded pool SID or the group, is no label, records no file by ID, lies in a
+  matter folder the ledger records (not a drive's root), and whose folder, checked right before,
+  has no junction or link on the way, is the owner's, and passes the gate's folder check; and
+  taking the recorded Low label off each such matter folder's root (removing a label only
+  tightens). So a crafted ledger can't steer an administrator onto anything the owner couldn't
+  change themselves (K1). No walk, label written, hand-back, add or delete.
+- **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
+  the app delete `sandbox\` when the box is ticked. The hook waits 120 s at most and never ends
+  the exe: each step leaves a state the next run starts from. After a timeout with the box
+  ticked, the lawyer sees the usual kept-folder box for `sandbox\` while the tool may still be
+  writing there; that is accepted, since the tool keeps its records consistent at every step and
+  reinstalling then uninstalling recovers.
+- **Recovery** from a partial removal: reinstall Clauseo, then uninstall it again.
+
+**Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
+even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which
+hold nothing (K10). The Low label comes off each matter folder's root, but its inherited copies
+below the root stay (no walk runs for an absent owner), as do labels on folders that fail the
+check: there a Low-integrity process of the owner's may still write where the owner can. The
+owner's own uninstall first, or the per-user install, avoids it.
+
 ### Shared writable places
 
 A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:
@@ -647,9 +697,9 @@ measurements; a wrap only costs a full walk, so a larger journal makes them rare
 - A lawyer without admin rights can't answer the set-up prompt, so no pool is made and the
   machine stays on tier C. Firms often lock admin rights down, so this is common. A "B-minus"
   tier (the lawyer's own token at Low integrity, no accounts, no prompt) may follow v1.
-- Uninstall (S15a, fix 5) removes, for each pool user, the profile and then the account, then the
-  entries naming pool SIDs, from the ledger. Deleting the account first leaves its profile folder
-  and `ProfileList` key behind.
+- Uninstall (S15 PR4j, "Removal" above) removes, for each pool user, its `LocalLow` deny, its
+  profile and then its account, then `DeviceSync`'s deny, the ledger's entries, the group and the
+  record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
 
