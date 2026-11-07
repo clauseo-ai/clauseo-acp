@@ -9,12 +9,17 @@ use std::path::Path;
 
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::Security::Cryptography::{
-    CERT_OPEN_STORE_FLAGS, CERT_QUERY_ENCODING_TYPE, CERT_STORE_ADD_ALWAYS, CERT_STORE_PROV_MEMORY,
-    CertAddEncodedCertificateToStore, CertOpenStore, X509_ASN_ENCODING,
+    CERT_CONTEXT, CERT_DISALLOWED_ENHKEY_USAGE_PROP_ID, CERT_DISALLOWED_FILETIME_PROP_ID,
+    CERT_ENHKEY_USAGE_PROP_ID, CERT_OPEN_STORE_FLAGS, CERT_QUERY_ENCODING_TYPE,
+    CERT_STORE_ADD_ALWAYS, CERT_STORE_PROV_MEMORY, CRYPT_INTEGER_BLOB,
+    CertAddEncodedCertificateToStore, CertFreeCertificateContext, CertOpenStore,
+    CertSetCertificateContextProperty, X509_ASN_ENCODING,
 };
 
 use super::store::{Store, export_from};
-use super::tests::{INTERMEDIATE, OTHER, ROOT, der_of, pem_of};
+use super::tests::{
+    CLIENT_ONLY, INTERMEDIATE, OTHER, ROOT, SERVER_AND_CODE, SERVER_ONLY, der_of, pem_of,
+};
 use super::{ensure_with, path};
 use crate::windows::private_dir::owner;
 use crate::windows::record::current_user_sid;
@@ -56,6 +61,80 @@ fn memory_store(pems: &[&str]) -> Store {
         .unwrap();
     }
     store
+}
+
+/// A memory store holding [`ROOT`] with the property `id` set to `value`.
+fn limited_root(id: u32, value: &[u8]) -> Store {
+    let store = memory_store(&[]);
+    let der = der_of(ROOT);
+    let mut context: *mut CERT_CONTEXT = std::ptr::null_mut();
+    // SAFETY: the store is open and `der` lives for the call; the context it gives back is
+    // freed below.
+    unsafe {
+        CertAddEncodedCertificateToStore(
+            Some(store.raw()),
+            X509_ASN_ENCODING,
+            &der,
+            CERT_STORE_ADD_ALWAYS,
+            Some(&raw mut context),
+        )
+    }
+    .unwrap();
+    let mut bytes = value.to_vec();
+    let blob = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(bytes.len()).unwrap(),
+        pbData: bytes.as_mut_ptr(),
+    };
+    // SAFETY: the context is live; `blob` and the bytes it points at live for the call, which
+    // copies them.
+    unsafe { CertSetCertificateContextProperty(context, id, 0, Some((&raw const blob).cast())) }
+        .unwrap();
+    // SAFETY: the context came from the add above and is freed once; the store keeps the cert.
+    assert!(unsafe { CertFreeCertificateContext(Some(context)) }.as_bool());
+    store
+}
+
+#[test]
+fn a_root_limited_by_its_store_properties_is_dropped_and_counted() {
+    // A FILETIME, any one: a disallowed time set at all limits the root.
+    let time = 0x01DB_0000_0000_0000_u64.to_le_bytes();
+    for (what, id, value) in [
+        (
+            "every purpose off",
+            CERT_ENHKEY_USAGE_PROP_ID,
+            &[0x30, 0x00][..],
+        ),
+        ("client auth only", CERT_ENHKEY_USAGE_PROP_ID, CLIENT_ONLY),
+        (
+            "server auth disallowed",
+            CERT_DISALLOWED_ENHKEY_USAGE_PROP_ID,
+            SERVER_ONLY,
+        ),
+        (
+            "a disallowed time",
+            CERT_DISALLOWED_FILETIME_PROP_ID,
+            &time[..],
+        ),
+    ] {
+        let filtered = export_from(&[limited_root(id, value), memory_store(&[OTHER])], &[]);
+        assert_eq!(filtered.dropped_limited, 1, "{what}");
+        assert_eq!(filtered.pem, pem_of(OTHER), "{what}");
+    }
+    // Limited in one root store, plain in another: dropped from both.
+    let both = [
+        limited_root(CERT_ENHKEY_USAGE_PROP_ID, CLIENT_ONLY),
+        memory_store(&[ROOT]),
+    ];
+    assert_eq!(export_from(&both, &[]).kept, 0);
+    // Server auth among its usages, or another usage disallowed: kept.
+    for (id, value) in [
+        (CERT_ENHKEY_USAGE_PROP_ID, SERVER_AND_CODE),
+        (CERT_DISALLOWED_ENHKEY_USAGE_PROP_ID, CLIENT_ONLY),
+    ] {
+        let filtered = export_from(&[limited_root(id, value)], &[]);
+        assert_eq!((filtered.kept, filtered.dropped_limited), (1, 0));
+        assert_eq!(filtered.pem, pem_of(ROOT));
+    }
 }
 
 fn sid(text: &str) -> Sid {
