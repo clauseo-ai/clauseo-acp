@@ -315,7 +315,8 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
-    )?
+    )
+    .map_err(super::launch_checks::folder::gone_at_spawn)?
     .with_redacted(redacted);
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude

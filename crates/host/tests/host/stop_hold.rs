@@ -173,6 +173,8 @@ fn a_stubborn_agent_still_gets_stop_agents_its_answer_once_the_wait_runs_out() {
 
     // The agent ignores its stdin closing and SIGTERM. One move of the clock past the wait
     // fires it and the ladder's first step only: the ladder's kill is 3 s after its SIGTERM.
+    // The launch's folder check armed a timer of the same 10 s; only stop_agents' counts.
+    host.clock.forget_armed();
     let clock = host.clock.clone();
     let mover = async move {
         while clock.next_armed().await != STOP_WAIT {}

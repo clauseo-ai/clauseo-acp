@@ -37,7 +37,8 @@ impl LaunchSpec {
     /// so nothing is looked up on `PATH` or in the current folder, which differ by OS. A program
     /// whose name ends in `.cmd` or `.bat`, in any case and with any trailing dots or spaces
     /// (which Windows drops), is refused on every OS: Windows runs batch files through `cmd.exe`,
-    /// a shell. Each failure is [`Error::InvalidSpec`].
+    /// a shell. A working folder that is not a folder is [`Error::NoWorkingFolder`]; each other
+    /// failure is [`Error::InvalidSpec`].
     pub fn new(
         program: PathBuf,
         args: Vec<OsString>,
@@ -58,7 +59,7 @@ impl LaunchSpec {
             ));
         }
         if !cwd.is_dir() {
-            return Err(invalid("the working folder", &cwd, "is not a folder"));
+            return Err(Error::NoWorkingFolder);
         }
         Ok(LaunchSpec {
             program,
@@ -129,9 +130,10 @@ impl std::fmt::Debug for RedactedEnv<'_> {
     }
 }
 
-/// An [`Error::InvalidSpec`] saying `which` (`path`) `what`.
-fn invalid(which: &str, path: &Path, what: &str) -> Error {
-    Error::InvalidSpec(format!("{which} {} {what}", path.display()))
+/// An [`Error::InvalidSpec`] saying `which` `what`. The path is not in it: it can hold the
+/// user's name, and the text reaches the lawyer's screen as a failure's detail.
+fn invalid(which: &str, _path: &Path, what: &str) -> Error {
+    Error::InvalidSpec(format!("{which} {what}"))
 }
 
 /// Whether `program` names a batch file: it ends in `.cmd` or `.bat`, in any case, once trailing

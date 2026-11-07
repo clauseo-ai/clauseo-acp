@@ -265,6 +265,16 @@ pub(super) fn prepare(
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
         }
+        // Before anything is made for the launch: a folder that is gone, or does not answer,
+        // is `matter.folder_missing`, not a spawn that fails in it (`folder.rs`).
+        let there = folder::check(Arc::clone(&clock), matter, stored.clone()).await;
+        if let Err(error) = there {
+            return Input::Turn(TurnInput::Prepared {
+                thread,
+                id,
+                result: Err(error),
+            });
+        }
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -519,6 +529,7 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 }
 
 mod browser;
+pub(super) mod folder;
 pub(super) mod relay;
 mod sweep;
 pub(crate) use sweep::RunSweep;
