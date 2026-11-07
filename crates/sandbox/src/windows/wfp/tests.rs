@@ -20,6 +20,7 @@ use crate::{Error, Loopback, Policy};
 use clauseo_protocol::ErrorCode;
 
 mod check;
+mod ports;
 
 pub(super) fn sid(rid: u32) -> Sid {
     Sid::parse(&format!("S-1-5-21-11-22-33-{rid}")).unwrap()
