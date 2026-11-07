@@ -403,13 +403,14 @@ fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
             "${IfNot} ${Silent}",
         ],
     );
-    // 25 in every mode, the box skipped under /S by /SD.
+    // 25 in every mode, the box skipped under /S by /SD and under /P and /UPDATE by the scan.
     let temp = macro_body(&code, "CLAUSEO_SAFE_PLUGINSDIR");
     assert_run(
         temp,
         &[
-            "!if \"${INSTALLMODE}\" == \"perMachine\"",
             "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "!endif",
+            "${EndIf}",
             "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",
         ],
     );

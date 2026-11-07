@@ -416,9 +416,10 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   hold keeps its owner from serving another matter. A lawyer's own item keeps its permissions
   as they were. A hand-back that fails is logged and leaves the item set aside.
 - **The per-machine uninstaller's copy of itself in the user's `%TEMP%`**, started elevated
-  before any script can act ("Admin copy", "Also open"): same-user code can swap it between the
-  copy and the start. The installers' own plug-ins load from an administrators-only folder
-  (`safe_temp.nsh`); the uninstaller's don't yet. Owner: stage F's uninstaller decision.
+  before any script can act ("Admin copy", "Closed: the per-machine uninstaller's copy"): closed
+  for installs registered by this version, which run it in place (`_?=`) with its plug-ins in the
+  administrators-only folder. An install registered by an older version keeps its old
+  `UninstallString`, and so the copy, until it's reinstalled.
 
 ### Accepted risk: two hijacked agents at once
 
@@ -600,16 +601,28 @@ started elevated, by the app or by the uninstall hook.
   `Main.c:71-80`, `:259-284`). Elevated, that gives an admin-owned empty folder at a path the
   user's code chose, and a one-shot race on the delete. No way to run code through it is known;
   the per-machine installer had the same exposure, and the script can't prevent it.
-- **Also open: the per-machine uninstaller runs a copy of itself from `%TEMP%`.** Started from
-  Apps & Features, its `UninstallString` is the template's `"<install folder>\uninstall.exe"`,
-  with no `_?=`. The elevated stub then, before any script, makes `%TEMP%\~nsu<n>.tmp` (locked to
-  Administrators, but inside the user's folder), copies itself there as `Un.exe` and starts that
-  copy elevated with `_?=` (NSIS 3.11 `Main.c:322-420`, makensis `build.cpp:2329-2330`); the copy's
-  `un.onInit` then loads `nsis_tauri_utils` and System from its own `$PLUGINSDIR` in `%TEMP%`.
-  The user's code can rename the `~nsu` folder between the copy and the start, so what runs
-  elevated is theirs; no `un.onInit` code can come first. The installer's reinstall page runs the
-  old uninstaller in place (`_?=`), so it isn't affected. The fix (`_?=` in `UninstallString` with
-  the uninstaller deleted at restart, or a relaunch from the administrators-only folder) is open.
+- **Closed: the per-machine uninstaller's copy of itself in `%TEMP%`.** Without `_?=` on its
+  command line, the elevated stub makes `%TEMP%\~nsu<n>.tmp`, copies itself there as `Un.exe` and
+  starts that copy elevated before any script runs (NSIS 3.11 `Main.c:322-420`); the user's code
+  could rename the folder between the copy and the start. The per-machine installer now registers
+  `UninstallString` `"<folder>\uninstall.exe" _?=<folder>` and `QuietUninstallString` with `/S`
+  before the `_?=` (template block `uninstall-string`), so the uninstaller runs in place. Its
+  `un.onInit` first makes the administrators-only plug-in folder (block `un-admin-section`, the
+  installer's `CLAUSEO_MACHINE_START`, exit 25 on failure, its box skipped under `/S`, `/P` and
+  `/UPDATE`), so `SetContext`'s System and `nsis_tauri_utils` no longer load from `%TEMP%`. A
+  running image can't be deleted, so at the end of the section (`uninstall_in_place.nsh`, block
+  `uninstall-self-delete`) it renames itself to `uninstall.<GetTempFileName stem>.old` and starts,
+  once (from `un.onGUIEnd` when it has a window, from the section under `/S`), a hidden
+  `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes that one
+  file and removes `installer-temp` and the install folder only if empty. `/d` keeps out HKCU's
+  `AutoRun`, which an elevated cmd would otherwise run from the user's hive. It builds no line,
+  and leaves the file, when the folder's path or the renamed one holds one of `% ^ & | < > " !`.
+  The reinstall page runs the old uninstaller this way too, never with `/UPDATE`; its own
+  `_?=` comes last on the line, which NSIS takes, and the self-delete can only remove the
+  renamed file and empty folders, so it isn't skipped there. **Residual:** an install registered
+  by an older version keeps its old `UninstallString` (no `_?=`), and so the `%TEMP%` copy,
+  until it's reinstalled, and `uninstall.exe` started by hand without `_?=` still copies itself.
+  Not yet run on Windows.
 - Keeping the copy current after an app update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)

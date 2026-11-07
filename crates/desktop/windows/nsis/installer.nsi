@@ -744,7 +744,16 @@ Section Install
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
   WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$\"$INSTDIR$\""
-  WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  ; >>> clauseo: uninstall-string
+  ; Per machine, the uninstaller runs in place (_?=), not from a copy in %TEMP% started elevated,
+  ; and says so to silent callers too (uninstall_in_place.nsh). Per user, Tauri's line.
+  !if "${INSTALLMODE}" == "perMachine"
+    WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\" _?=$INSTDIR"
+    WriteRegStr SHCTX "${UNINSTKEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S _?=$INSTDIR"
+  !else
+    WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  !endif
+  ; <<< clauseo: uninstall-string
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoModify" "1"
   WriteRegDWORD SHCTX "${UNINSTKEY}" "NoRepair" "1"
 
@@ -795,6 +804,13 @@ Function .onInstSuccess
 FunctionEnd
 
 Function un.onInit
+  ; >>> clauseo: un-admin-section
+  ; The per-machine uninstaller's protected plug-in folder (safe_temp.nsh), first, before
+  ; SetContext's ${RunningX64} loads System; empty per user.
+  !ifmacrodef CLAUSEO_MACHINE_START
+    !insertmacro CLAUSEO_MACHINE_START
+  !endif
+  ; <<< clauseo: un-admin-section
   !insertmacro SetContext
 
   !if "${INSTALLMODE}" == "both"
@@ -927,6 +943,13 @@ Section Uninstall
   !ifmacrodef NSIS_HOOK_POSTUNINSTALL
     !insertmacro NSIS_HOOK_POSTUNINSTALL
   !endif
+  ; >>> clauseo: uninstall-self-delete
+  ; Per machine, after everything else is removed: the running uninstall.exe renamed, and a
+  ; delayed delete of it and the empty folders (uninstall_in_place.nsh).
+  !ifmacrodef CLAUSEO_UNINSTALL_SELF_DELETE
+    !insertmacro CLAUSEO_UNINSTALL_SELF_DELETE
+  !endif
+  ; <<< clauseo: uninstall-self-delete
 
   ; Auto close if passive mode or updating
   ${If} $PassiveMode = 1
@@ -934,6 +957,15 @@ Section Uninstall
     SetAutoClose true
   ${EndIf}
 SectionEnd
+; >>> clauseo: un-gui-end
+; The self-delete's start when the uninstaller had a window (interactive, /P), after it closes
+; (uninstall_in_place.nsh); /S starts it from the section instead.
+Function un.onGUIEnd
+  !ifmacrodef CLAUSEO_UNINSTALL_GUI_END
+    !insertmacro CLAUSEO_UNINSTALL_GUI_END
+  !endif
+FunctionEnd
+; <<< clauseo: un-gui-end
 
 Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""

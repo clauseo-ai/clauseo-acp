@@ -15,6 +15,7 @@ mod set_aside;
 mod setup_exe_missing;
 mod sources;
 mod template;
+mod uninstall_in_place;
 mod window_reach;
 #[cfg(windows)]
 mod windows;
