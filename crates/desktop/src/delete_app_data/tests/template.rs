@@ -1,9 +1,10 @@
 //! The repo's NSIS template (`windows/nsis/installer.nsi`, `bundle.windows.nsis.template`) is
 //! tauri-cli 2.12.2's own plus a known list of named blocks: `no-solid` (no /SOLID, so nothing is
-//! unpacked into %TEMP%) and `admin-section` (first in `.onInit`), which runs the elevated branch
-//! of `admin_elevated.nsh`; that branch loads no plug-in, calls no function and reads nothing the
-//! lawyer can write before it extracts. Clauseo's main window class is the one the branch looks
-//! for.
+//! unpacked into %TEMP%), `finish-show` and `finish-show-function` (the finish page hides "Run
+//! Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs the
+//! elevated branch of `admin_elevated.nsh`; that branch loads no plug-in, calls no function and
+//! reads nothing the lawyer can write before it extracts. Clauseo's main window class is the one
+//! the branch looks for.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -31,11 +32,21 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 2] = [
+const BLOCKS: [Block; 4] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
         replaces: Some("  SetCompressor /SOLID \"{{compression}}\""),
+    },
+    Block {
+        name: "finish-show",
+        after: "!define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary",
+        replaces: None,
+    },
+    Block {
+        name: "finish-show-function",
+        after: "!insertmacro MUI_PAGE_FINISH",
+        replaces: None,
     },
     Block {
         name: "admin-section",
@@ -135,16 +146,71 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
     );
 }
 
-#[test]
-fn no_solid_compresses_each_file_on_its_own() {
-    let (blocks, _) = split_blocks(&read(TEMPLATE));
-    let code: Vec<&str> = block_named(&blocks, "no-solid")
+/// The code lines of the block named `name`, comments and blank lines left out.
+fn block_code<'a>(blocks: &'a [Found], name: &str) -> Vec<&'a str> {
+    block_named(blocks, name)
         .lines
         .iter()
         .map(String::as_str)
         .filter(|line| !line.is_empty() && !line.starts_with(';'))
-        .collect();
-    assert_eq!(code, ["SetCompressor \"{{compression}}\""]);
+        .collect()
+}
+
+#[test]
+fn no_solid_compresses_each_file_on_its_own() {
+    let (blocks, _) = split_blocks(&read(TEMPLATE));
+    assert_eq!(
+        block_code(&blocks, "no-solid"),
+        ["SetCompressor \"{{compression}}\""]
+    );
+}
+
+#[test]
+fn the_finish_page_hides_run_clauseo_after_a_wait_that_timed_out() {
+    let (blocks, _) = split_blocks(&read(TEMPLATE));
+    assert_eq!(
+        block_code(&blocks, "finish-show"),
+        ["!define MUI_PAGE_CUSTOMFUNCTION_SHOW ClauseoFinishShow"]
+    );
+    assert_eq!(
+        block_code(&blocks, "finish-show-function"),
+        [
+            "Function ClauseoFinishShow",
+            "!ifmacrodef CLAUSEO_FINISH_SHOW",
+            "!insertmacro CLAUSEO_FINISH_SHOW",
+            "!endif",
+            "FunctionEnd",
+        ]
+    );
+    let code = admin_code();
+    assert_eq!(
+        macro_body(&code, "CLAUSEO_FINISH_SHOW")[1..],
+        [
+            "${If} $ClauseoAdminTimedOut = 1",
+            "${NSD_Uncheck} $mui.FinishPage.Run",
+            "ShowWindow $mui.FinishPage.Run ${SW_HIDE}",
+            "${EndIf}",
+        ]
+    );
+    line_with(&code, &["Var ClauseoAdminTimedOut"]);
+    // Set by both waits when they time out: the outer instance's and the per-machine one's.
+    let ask = macro_body(&code, "CLAUSEO_ASK_FOR_THE_ADMIN_SECTION");
+    assert_run(
+        ask,
+        &[
+            "${If} $R9 = 258",
+            "StrCpy $R6 7",
+            "StrCpy $ClauseoAdminTimedOut 1",
+        ],
+    );
+    let says = macro_body(&code, "CLAUSEO_ADMIN_COPY_MACHINE_SAYS");
+    assert_run(
+        says,
+        &[
+            "DetailPrint \"$(adminCopyStillRunning)\"",
+            "StrCpy $ClauseoAdminTimedOut 1",
+        ],
+    );
 }
 
 #[test]
@@ -195,6 +261,50 @@ fn reached<'a>(code: &'a [String], name: &str) -> Vec<(String, &'a [String])> {
     out
 }
 
+/// What the elevated branch may not hold: a plug-in call, %TEMP% and the plug-in folder, the
+/// environment, the lawyer's registry (HKCR merges in HKCU) and folders, and file reads.
+const REFUSED: [&str; 18] = [
+    "::",
+    "$TEMP",
+    "$PLUGINSDIR",
+    "InitPluginsDir",
+    "ReadEnvStr",
+    "ExpandEnvStrings",
+    "HKCU",
+    "HKCR",
+    "HKU",
+    "HKEY_USERS",
+    "HKEY_CURRENT_USER",
+    "SHCTX",
+    "$LOCALAPPDATA",
+    "$APPDATA",
+    "$PROFILE",
+    "$EXEDIR",
+    "ReadINIStr",
+    "FileOpen",
+];
+
+/// The first of `REFUSED` that `line` holds.
+fn refused_word(line: &str) -> Option<&'static str> {
+    REFUSED.into_iter().find(|word| line.contains(word))
+}
+
+#[test]
+fn the_refused_words_catch_the_lawyers_registry_and_files() {
+    assert_eq!(
+        refused_word("ReadRegStr $R5 HKCR \"Software\\Clauseo\" \"x\""),
+        Some("HKCR")
+    );
+    assert_eq!(
+        refused_word("ReadINIStr $R5 \"$R3\\a.ini\" s k"),
+        Some("ReadINIStr")
+    );
+    assert_eq!(
+        refused_word("ReadRegStr $R4 HKLM \"${CLAUSEO_PROFILE_LIST}\\$R2\" \"ProfileImagePath\""),
+        None
+    );
+}
+
 #[test]
 fn the_elevated_branch_loads_no_plug_in_calls_no_function_and_reads_nothing_the_lawyer_writes() {
     let code = admin_code();
@@ -216,25 +326,11 @@ fn the_elevated_branch_loads_no_plug_in_calls_no_function_and_reads_nothing_the_
     let logic = [
         "If", "IfNot", "ElseIf", "Else", "EndIf", "AndIf", "OrIf", "Do", "Loop", "ExitDo", "Errors",
     ];
-    let refused = [
-        "::",
-        "$TEMP",
-        "$PLUGINSDIR",
-        "InitPluginsDir",
-        "ReadEnvStr",
-        "ExpandEnvStrings",
-        "HKCU",
-        "SHCTX",
-        "$LOCALAPPDATA",
-        "$APPDATA",
-        "$PROFILE",
-        "$EXEDIR",
-    ];
     for (name, body) in &macros {
         for line in *body {
             assert!(!line.starts_with("Call "), "{name}: {line}");
-            for word in refused {
-                assert!(!line.contains(word), "{name}: {word} in {line}");
+            if let Some(word) = refused_word(line) {
+                panic!("{name}: {word} in {line}");
             }
             for piece in line.split("${").skip(1) {
                 let token = piece.split('}').next().unwrap();

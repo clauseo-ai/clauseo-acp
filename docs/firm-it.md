@@ -48,16 +48,27 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   raises no prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
   elevated, sets up the same folder on every install and update.
 
-**Exit codes** of the installers under `/S`, besides NSIS's 0 (done), 1 (cancelled) and 2
-(stopped by an error):
+**Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
+error). Only the last code set is reported, so an install that set several reports one of them.
+
+What a silent (`/S`) install can return:
 
 | Code | Meaning |
 |---|---|
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
-| 23 | Per-machine install: installed, but setting up Safe workspace failed |
+| 23 | Per-machine install: installed, but Safe workspace's set-up failed, or hadn't finished after 10 minutes |
+
+A 23 after a 10-minute wait means the set-up may still be running; the Safe workspace section of
+Clauseo's Settings shows whether it finished.
+
+What an interactive install can also return:
+
+| Code | Meaning |
+|---|---|
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
-Only the last code set is reported, so an install that set several reports one of them.
+An interactive per-machine install never sets 23: it shows a box when setting up failed, and a
+line in its details list when it was still running.
 
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.

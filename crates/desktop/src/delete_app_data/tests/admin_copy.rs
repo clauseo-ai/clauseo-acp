@@ -217,7 +217,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "Pop $0",
     ];
     assert_eq!(body[1..], expected, "{body:?}");
-    // A box only interactively: never under /S (23), /P or /UPDATE.
+    // A box only interactively: never under /S (23, also past the wait), /P or /UPDATE.
     let says = macro_body(&admin, "CLAUSEO_ADMIN_COPY_MACHINE_SAYS");
     let expected = [
         "${If} $R8 = ${CLAUSEO_ADOPT_DONE}",
@@ -226,6 +226,10 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "DetailPrint \"$(adminCopyNewerKept)\"",
         "${ElseIf} $R8 = ${CLAUSEO_ADMIN_TIMED_OUT}",
         "DetailPrint \"$(adminCopyStillRunning)\"",
+        "StrCpy $ClauseoAdminTimedOut 1",
+        "${If} ${Silent}",
+        "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}",
+        "${EndIf}",
         "${Else}",
         "DetailPrint \"$(adminCopyMachineFailed)\"",
         "${If} ${Silent}",
@@ -341,4 +345,47 @@ fn the_record_is_checked_before_anything_is_written_into_the_admin_folder() {
         );
         assert!(check < copy, "{name}: {body:?}");
     }
+}
+
+/// The codes in the first table after `heading` in firm-it.md.
+fn firm_it_codes(firm: &str, heading: &str) -> Vec<u8> {
+    let (_, rest) = firm
+        .split_once(heading)
+        .unwrap_or_else(|| panic!("no {heading:?}"));
+    rest.lines()
+        .skip_while(|line| !line.starts_with('|'))
+        .take_while(|line| line.starts_with('|'))
+        .filter_map(|line| line.split('|').nth(1)?.trim().parse().ok())
+        .collect()
+}
+
+#[test]
+fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
+    let code = admin_code();
+    // The values themselves: admin_copy_ask.rs's the_installers_exit_codes_are_their_own.
+    let firm = read("../../docs/firm-it.md");
+    assert_eq!(
+        firm_it_codes(&firm, "What a silent (`/S`) install can return:"),
+        [22, 23]
+    );
+    assert_eq!(
+        firm_it_codes(&firm, "What an interactive install can also return:"),
+        [24]
+    );
+    // 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait ran out.
+    let ask = macro_body(&code, ASK);
+    let silent = line_with(ask, &["${ElseIf} ${Silent}"]);
+    let interactive = silent + line_with(&ask[silent..], &["${Else}"]);
+    assert!(interactive < line_with(ask, &["SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}"]));
+    let says = macro_body(&code, "CLAUSEO_ADMIN_COPY_MACHINE_SAYS");
+    assert_run(
+        says,
+        &[
+            "${ElseIf} $R8 = ${CLAUSEO_ADMIN_TIMED_OUT}",
+            "DetailPrint \"$(adminCopyStillRunning)\"",
+            "StrCpy $ClauseoAdminTimedOut 1",
+            "${If} ${Silent}",
+            "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}",
+        ],
+    );
 }
