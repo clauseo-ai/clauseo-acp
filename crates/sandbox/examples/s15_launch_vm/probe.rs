@@ -9,6 +9,12 @@
 //! - `open-process <pid>`: `open-process <pid> <code>` (0 when it opened).
 //! - `open-pipes <name>...`: `pipe <name> read <code> write <code>` per name.
 //! - `spawn-child`: starts `probe wait`, prints `pid <self>` and `child <pid>`, then waits.
+//! - `child-token`: starts `probe token-adjust-default` as its child (in its job, under its
+//!   token, as `spawn-child` does), prints the child's lines, then `child-token exit <hex>`
+//!   (or `child-token error <code>` when it couldn't start it); exits 0.
+//! - `token-adjust-default`: `token-adjust-default opened` when
+//!   `OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT)` opens its own token, else
+//!   `token-adjust-default refused <code>`.
 //! - `echo`: `echo <line>` for each stdin line; exits 0 at end of input.
 //! - `stdin-null <program> <args>...`: runs the program with its stdin on `NUL`; its exit code.
 //! - `exit <n>`: exits `n` (decimal, or hex with `0x`; any 32-bit code).
@@ -54,7 +60,7 @@ use std::time::Duration;
 use clauseo_sandbox::windows::sids::Sid;
 use clauseo_sandbox::windows::token::default_dacl;
 
-use super::sys::{say, sleep, start};
+use super::sys::{output, say, sleep, start};
 use super::{ui, win};
 
 /// Runs the probe `args` names (the arguments after `probe`).
@@ -99,6 +105,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         "spawn-child" => spawn_child(),
+        "child-token" => child_token(),
+        "token-adjust-default" => token_adjust_default(),
         "items" => super::probe_items::run(rest),
         "wts" => {
             for line in super::win_pool::wts_lines() {
@@ -172,9 +180,9 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             None => usage("write <path>"),
         },
         _ => usage(
-            "token|wait|hold|open-process|open-pipes|spawn-child|items|echo|exit|read|write|job-ui|\
-             ui-control|ui-relay|clipboard-read|clipboard-write|find-atom|runners|breakaway|\
-             handles|desktop",
+            "token|wait|hold|open-process|open-pipes|spawn-child|child-token|token-adjust-default|\
+             items|echo|exit|read|write|job-ui|ui-control|ui-relay|clipboard-read|clipboard-write|\
+             find-atom|runners|breakaway|handles|desktop",
         ),
     }
 }
@@ -367,6 +375,46 @@ fn spawn_child() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+/// `token-adjust-default`: whether this process opens its own token with `TOKEN_ADJUST_DEFAULT`.
+fn token_adjust_default() -> ExitCode {
+    match win::own_token_adjust_default_code() {
+        0 => say("token-adjust-default opened"),
+        code => say(&format!("token-adjust-default refused {code}")),
+    }
+    ExitCode::SUCCESS
+}
+
+/// `child-token`: `probe token-adjust-default` as its child, inside its job and under its token;
+/// the child's lines relayed, then its exit. Always exits 0: the row reads the lines.
+fn child_token() -> ExitCode {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(error) => {
+            say(&format!("child-token error {}", code(&error)));
+            return ExitCode::SUCCESS;
+        }
+    };
+    let mut command = Command::new(exe);
+    command
+        .args(["probe", "token-adjust-default"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    match output(&mut command) {
+        Ok(ran) => {
+            for line in String::from_utf8_lossy(&ran.stdout).lines() {
+                say(line.trim_end());
+            }
+            let exit = ran.status.code().map_or_else(
+                || "none".to_owned(),
+                |c| format!("{:#x}", c.cast_unsigned()),
+            );
+            say(&format!("child-token exit {exit}"));
+        }
+        Err(error) => say(&format!("child-token error {}", code(&error))),
+    }
+    ExitCode::SUCCESS
 }
 
 /// `stdin-null <program> <args>...`: runs the program with its stdin on `NUL` and this probe's
