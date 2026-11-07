@@ -1318,7 +1318,9 @@ admin copy.
 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`
    (`REG_MULTI_SZ`, a value appended to the set-up's, deleted with them by `--remove`), under
    the set-up lock with a 30 s wait. Each user is added as soon as a pass or the BITS step finds
-   it, so a run the task's limit kills has still marked every user it saw. Once the lock stays
+   it, so a run the task's limit kills has still marked every user it saw. A pass that finds a
+   process of unknown user marks every pool user at once, since it may be any of theirs (the
+   run still ends at 48). Once the lock stays
    held or a write fails, no more users are tried (49), so the wait comes once at most.
    Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run.
 

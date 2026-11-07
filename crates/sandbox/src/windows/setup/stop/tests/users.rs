@@ -116,13 +116,43 @@ fn a_process_no_source_names_is_unknown_and_never_done() {
     fake.snapshots = vec![Ok(first), Ok(vec![unknown])];
     let exit = stop(&mut fake);
     assert_eq!(exit, StopExit::NotStopped);
-    // It isn't stopped, but the pool user's process beside it is, and its user marked.
+    // It isn't stopped, but the pool user's process beside it is; it may be any pool user's,
+    // so every one is marked.
     assert_eq!(fake.stopped(), [10]);
-    assert_eq!(fake.resets, [sid(1010)]);
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     let (error, line) = &fake.logged[0];
     assert!(error);
     assert!(line.contains("1 unknown"), "{line}");
     assert!(line.contains("user couldn't be read"), "{line}");
+}
+
+#[test]
+fn a_process_of_unknown_user_marks_every_pool_user_before_anything_is_stopped() {
+    let mut fake = Fake::new(&[1010, 1011, 1012]);
+    let first = vec![
+        process(36, None, None, None),
+        process(10, Some(sid(1010)), Some(sid(1010)), None),
+    ];
+    fake.snapshots = vec![Ok(first), Ok(vec![process(36, None, None, None)])];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(StopExit::NotStopped.as_code(), 48);
+    // One mark of all three, in the first pass, before the pool user's process is suspended;
+    // the second pass finds no one new to mark.
+    assert_eq!(fake.done[..3], ["snapshot", "mark 3", "suspend 10"]);
+    assert_eq!(
+        fake.done
+            .iter()
+            .filter(|line| line.starts_with("mark"))
+            .count(),
+        1
+    );
+    assert_eq!(fake.resets, [sid(1010), sid(1011), sid(1012)]);
+    assert_eq!(fake.stopped(), [10]);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("1 found running") && line.contains("1 unknown"),
+        "{line}"
+    );
 }
 
 #[test]
