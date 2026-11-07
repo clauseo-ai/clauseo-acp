@@ -403,7 +403,19 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
         assert_eq!(RunExit::from_code(exit.code()), Some(exit));
     }
     assert_eq!(RunExit::from_code(0), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 12), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 13), None);
+    assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
+    // An agent exiting with a runner code never passes for a runner failure.
+    for code in [
+        RunExit::Password.code(),
+        RunExit::SecondaryLogon.code(),
+        RUN_EXIT_BASE + 0xff,
+    ] {
+        assert_eq!(agent_code(code), RunExit::AgentReserved.code());
+    }
+    for code in [0, 7, RUN_EXIT_BASE - 1, RUN_EXIT_BASE + 0x100, 0xC000_0142] {
+        assert_eq!(agent_code(code), code);
+    }
     assert_eq!(
         RunExit::SecondaryLogon.no_sandbox(),
         Some(crate::NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned()))

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use super::RunExit;
 use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
-use super::spawn::{Agent, Desktop, quiet_errors, start_agent};
+use super::spawn::{Agent, Desktop, quiet_errors, restrict_dll_search, start_agent};
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::open_client;
 use crate::windows::pipe::{PipeSet, Role};
@@ -22,6 +22,7 @@ struct Failure(RunExit, String);
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str) -> u32 {
+    restrict_dll_search();
     quiet_errors();
     let Ok(set) = PipeSet::parse(base) else {
         return RunExit::Usage.code();
@@ -81,7 +82,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch) -> Result<(super::spawn::Process, 
     )
     .map_err(|e| Failure(RunExit::Token, e.to_string()))?;
     for folder in &launch.folders {
-        write::make_agent_folder(Path::new(folder))
+        write::make_agent_folder(Path::new(&launch.folder_base), Path::new(folder))
             .map_err(|e| fail(RunExit::Token, "profile folder", &e))?;
     }
     let stdio = [Role::In, Role::Out, Role::Err]

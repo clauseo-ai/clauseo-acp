@@ -33,6 +33,8 @@ pub struct InnerLaunch {
     pub env: Vec<(String, String)>,
     /// The state folder's places to make first, as the pool user (`env::profile_folders`).
     pub folders: Vec<String>,
+    /// The folder they all lie below, which exists: the state folder.
+    pub folder_base: String,
 }
 
 impl std::fmt::Debug for InnerLaunch {

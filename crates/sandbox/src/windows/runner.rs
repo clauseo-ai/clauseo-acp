@@ -372,6 +372,8 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
     // The file's own protected DACL (the desktop user, SYSTEM, Administrators), which the outer
     // runner requires before it reads it (`private_dir::read_unchanged`).
     super::write::check_owned_file(&path)?;
+    #[cfg(windows)]
+    super::private_dir::own_file(&path)?;
     Ok(path)
 }
 
@@ -403,10 +405,13 @@ pub enum RunExit {
     Token,
     /// The agent couldn't be started.
     Spawn,
+    /// The agent exited with a code in the runner's own range, which the outer runner never
+    /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
+    AgentReserved,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 12] = [
+    const ALL: [RunExit; 13] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -419,6 +424,7 @@ impl RunExit {
         RunExit::Job,
         RunExit::Token,
         RunExit::Spawn,
+        RunExit::AgentReserved,
     ];
 
     /// The exit code.
@@ -454,8 +460,20 @@ impl RunExit {
             | RunExit::Pipe
             | RunExit::Job
             | RunExit::Token
-            | RunExit::Spawn => None,
+            | RunExit::Spawn
+            | RunExit::AgentReserved => None,
         }
+    }
+}
+
+/// The agent's exit code as the runner passes it on: one in the runner's own range
+/// (`RUN_EXIT_BASE` to `+0xff`) becomes [`RunExit::AgentReserved`], so an agent can never pass
+/// for a runner failure (a set-up one among them) in the host's eyes.
+pub fn agent_code(code: u32) -> u32 {
+    if (RUN_EXIT_BASE..=RUN_EXIT_BASE + 0xff).contains(&code) {
+        RunExit::AgentReserved.code()
+    } else {
+        code
     }
 }
 

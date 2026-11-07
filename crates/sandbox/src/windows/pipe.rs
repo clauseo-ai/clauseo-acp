@@ -6,11 +6,12 @@
 //!   launch ([`PipeSet::random`]). Names can be listed by anyone, so the name is no secret: what
 //!   protects each pipe is its DACL, one instance, and the outer's check of who connected.
 //! - **DACL** ([`pipe_sddl`]), set explicitly on every pipe: the desktop user and the pool user,
-//!   protected, nothing else. `Everyone` stays in the (B) token (D11), and NPFS gives a pipe made
-//!   with no descriptor `Everyone` read; with this DACL another matter's agent (another pool
-//!   user) opening any of the four gets error 5. No label: a pipe without one is Medium with
-//!   no-write-up, so even this matter's own Low agent can't open a write end by name; it holds
-//!   only the handles the inner runner opened and passed down.
+//!   protected, read and write only, nothing else. `Everyone` stays in the (B) token (D11), and
+//!   NPFS gives a pipe made with no descriptor `Everyone` read; with this DACL another matter's
+//!   agent (another pool user) opening any of the four gets error 5. A Medium label with
+//!   no-read-up and no-write-up keeps this matter's own Low agent (a second session's) from
+//!   opening one by name too; the agent holds only the handles the inner runner (Medium) opened
+//!   and passed down.
 //! - **One instance each**, made with `FILE_FLAG_FIRST_PIPE_INSTANCE` (so a squatter that made
 //!   the name first fails the launch rather than receive it) and `PIPE_REJECT_REMOTE_CLIENTS`.
 //!   The outer checks every client is the inner runner's pid, and on `ctl` that the pid's token
@@ -116,10 +117,18 @@ impl fmt::Debug for PipeSet {
     }
 }
 
-/// Every runner pipe's descriptor: protected, the desktop user and the pool user with full
-/// access, and no one else (D11).
+/// What the desktop user and the pool user may do on a runner pipe: `FILE_GENERIC_READ |
+/// FILE_GENERIC_WRITE` (`0x12019f`), never `WRITE_DAC` or `WRITE_OWNER`.
+pub const PIPE_RIGHTS: u32 = 0x0012_019f;
+
+/// Every runner pipe's descriptor (D11): protected, the desktop user and the pool user with
+/// [`PIPE_RIGHTS`] and no one else, and a Medium label with no-write-up and no-read-up, so
+/// neither this matter's own Low agent nor any other Low process opens one by name.
 pub fn pipe_sddl(desktop_user: &Sid, pool_user: &Sid) -> String {
-    format!("D:P(A;;GA;;;{desktop_user})(A;;GA;;;{pool_user})")
+    format!(
+        "D:P(A;;0x{PIPE_RIGHTS:x};;;{desktop_user})(A;;0x{PIPE_RIGHTS:x};;;{pool_user})\
+         S:(ML;;NWNR;;;ME)"
+    )
 }
 
 /// `bytes` as lowercase hex.
