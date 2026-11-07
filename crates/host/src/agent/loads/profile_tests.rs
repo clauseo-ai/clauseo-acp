@@ -105,6 +105,7 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
         switch: ON,
         control: McpControl::Clauseo,
         slot_free: true,
+        proxy_set: true,
         port: Some(8123),
         executable: chrome,
         browser_dir,
@@ -212,6 +213,7 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                proxy_set: false,
                 port: None,
                 executable: None,
                 ..base
@@ -220,6 +222,7 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                port: None,
                 executable: None,
                 ..base
             },
@@ -227,10 +230,15 @@ fn each_reason_drops_the_browser_in_order() {
         ),
         (
             BrowserInputs {
+                port: None,
                 claims: None,
                 ..base
             },
             ToolsUnavailableReason::BrowserNotInstalled,
+        ),
+        (
+            BrowserInputs { port: None, ..base },
+            ToolsUnavailableReason::NoProxy,
         ),
     ];
     for (case, expected) in cases {

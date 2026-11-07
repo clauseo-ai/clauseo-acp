@@ -1,4 +1,4 @@
-//! The session key and the egress proxy seam the launch's browser entry asks.
+//! The session key the egress proxy (`config/egress.rs`) and the launch's browser entry use.
 
 use clauseo_protocol::{MatterId, ThreadId};
 
@@ -19,24 +19,5 @@ impl SessionKey {
     /// session name.
     pub fn id(&self) -> String {
         format!("{}-{}", self.thread, self.launch)
-    }
-}
-
-/// The egress proxy, as the host asks it (stage C's R17 implements it). Until it exists,
-/// production passes none and the `browser` entry is left out (`NoProxy`).
-pub trait EgressProxy: Send + Sync {
-    /// The port of `session`'s browser listener, or none.
-    fn port_for(&self, session: SessionKey) -> Option<u16>;
-}
-
-/// A proxy stand-in for tests: the same port for every session.
-#[cfg(feature = "test-support")]
-#[derive(Debug, Clone, Copy)]
-pub struct TestProxy(pub u16);
-
-#[cfg(feature = "test-support")]
-impl EgressProxy for TestProxy {
-    fn port_for(&self, _session: SessionKey) -> Option<u16> {
-        Some(self.0)
     }
 }

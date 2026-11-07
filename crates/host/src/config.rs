@@ -35,10 +35,12 @@ mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
 mod sandbox;
 pub use sandbox::{Detect, Sandbox};
-mod session;
+mod egress;
 #[cfg(feature = "test-support")]
-pub use session::TestProxy;
-pub use session::{EgressProxy, SessionKey};
+pub use egress::TestProxy;
+pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
+mod session;
+pub use session::SessionKey;
 mod wiring;
 pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
@@ -193,10 +195,31 @@ impl HostConfig {
         self
     }
 
-    /// The egress proxy that gives each session's browser its port (default: none, so no session
-    /// gets the `browser` server and the header shows it unavailable with `NoProxy`).
+    /// The egress proxy giving each session's browser its port (default: none: no `browser`
+    /// server, shown as `NoProxy`); one opens per launch with the browser ([`EgressProxy`]).
     pub fn with_egress_proxy(mut self, proxy: Arc<dyn EgressProxy>) -> Self {
         self.wiring.proxy = Some(proxy);
+        self
+    }
+
+    /// The removal wait's cap (default [`DEFAULT_TREE_WAIT`]; `launch_checks::straggler`).
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait(mut self, wait: std::time::Duration) -> Self {
+        self.wiring.tree_wait = wait;
+        self
+    }
+
+    /// Runs as a removal's wait starts, with the session's Chrome port: a test binds it there.
+    #[cfg(feature = "test-support")]
+    pub fn with_tree_wait_hook(mut self, hook: Arc<dyn Fn(Option<u16>) + Send + Sync>) -> Self {
+        self.wiring.tree_wait_hook = Some(hook);
+        self
+    }
+
+    /// Makes every removal's thread fail to start: a test checks the run's parts are held.
+    #[cfg(feature = "test-support")]
+    pub fn with_removal_thread_failing(mut self) -> Self {
+        self.wiring.removal_thread_fails = true;
         self
     }
 

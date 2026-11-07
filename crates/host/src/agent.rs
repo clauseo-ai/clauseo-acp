@@ -43,7 +43,9 @@ use std::task::{Poll, Waker};
 use std::time::Duration;
 
 use clauseo_acp::{AcpClient, AcpEvent, ReadProgress};
-use clauseo_process::{Descendants, Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome};
+use clauseo_process::{
+    Descendants, Handle, LaunchSpec, Launched, Launcher, ShutdownOutcome, TreeWatch,
+};
 use clauseo_protocol::DetachReason;
 use futures::channel::oneshot;
 use futures::executor::LocalSpawner;
@@ -154,6 +156,9 @@ pub(crate) struct AgentLink {
     /// The ACP connection; its calls run as spawned tasks that post their results.
     pub(crate) client: AcpClient,
     pid: u32,
+    /// Whether the agent's tree is gone, for the run folder's removal (`launch_checks::discard`);
+    /// it outlives the process handle the owner task holds.
+    tree: TreeWatch,
     /// The agent's descendants, which a cancelled turn's sweep lists and ends
     /// ([`leftovers`]); it keeps nothing alive.
     descendants: Descendants,
@@ -168,6 +173,11 @@ impl AgentLink {
     /// The agent's process id, for logs.
     pub(crate) fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// A watch on the agent's tree, for the wait before its session's run folder goes.
+    pub(crate) fn tree_watch(&self) -> TreeWatch {
+        self.tree.clone()
     }
 
     /// The agent's descendants, for a cancelled turn's sweep.
@@ -218,13 +228,16 @@ impl AgentLink {
 
 /// Launches the agent, connects ACP over its pipes and spawns its tasks on `spawner`. Every event
 /// and the final [`Ended`] go to `post`. Nothing is sent to the agent until the actor calls the
-/// client (`initialize` first).
+/// client (`initialize` first). `tree` gets the agent's [`TreeWatch`] as soon as its process
+/// exists, so a launch that fails after that (a task that cannot be spawned, which drops and
+/// kills the process) still has its tree waited for before the session's run is freed.
 pub(crate) fn start(
     spawner: &LocalSpawner,
     launcher: &dyn Launcher,
     spec: &LaunchSpec,
     clock: Arc<dyn Clock>,
     post: Rc<dyn Fn(AgentInput)>,
+    tree: &mut Option<TreeWatch>,
 ) -> Result<AgentLink, Error> {
     let Launched {
         stdin,
@@ -235,6 +248,8 @@ pub(crate) fn start(
     } = launcher.launch(spec)?;
     let pid = handle.pid();
     let descendants = handle.descendants();
+    let handle_tree = handle.tree_watch();
+    *tree = Some(handle_tree.clone());
     #[cfg(not(test))]
     let (client, events, driver) =
         clauseo_acp::connect(stdin, stdout, clauseo_acp::ConnectOptions::default());
@@ -282,6 +297,7 @@ pub(crate) fn start(
     Ok(AgentLink {
         client,
         pid,
+        tree: handle_tree,
         descendants,
         stop: Some(stop),
         events: fence_events,

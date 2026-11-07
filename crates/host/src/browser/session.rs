@@ -70,6 +70,8 @@ pub(crate) struct BrowserSession {
     /// The socket folder, `{socket_dir}`; R17 hands it to `PolicyBuilder::browser_socket_dir`.
     #[cfg(unix)]
     pub(crate) socket_dir: BrowserSocketDir,
+    /// Whether this session's Chrome runs under the agent's tree ([`super::BrowserLaunch`]).
+    pub(crate) chrome_in_tree: bool,
 }
 
 /// Why a browser session could not be claimed. The browser is left out
@@ -143,6 +145,8 @@ impl BrowserSession {
             },
             #[cfg(unix)]
             socket_dir,
+            // InJail, the only launch the host builds (`HostConfig::with_browser_launch`).
+            chrome_in_tree: super::BrowserLaunch::InJail.chrome_in_tree(),
         })
     }
 }

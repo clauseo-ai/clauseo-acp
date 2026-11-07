@@ -4,7 +4,9 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::actor::turn::HeldRuns;
 use crate::agent::login_link::SignIn;
 use crate::browser::chrome::ChromeRoots;
 use crate::browser::install::InstallTools;
@@ -15,6 +17,10 @@ use super::EgressProxy;
 /// A hook run with a session's run folder just before it is removed
 /// (`HostConfig::with_run_removal_hook`).
 pub(crate) type RunRemovalHook = Arc<dyn Fn(&std::path::Path) + Send + Sync>;
+
+/// A hook run as a session's removal starts waiting for its processes, with the session's
+/// claimed Chrome debugging port (`HostConfig::with_tree_wait_hook`).
+pub(crate) type TreeWaitHook = Arc<dyn Fn(Option<u16>) + Send + Sync>;
 
 /// A hook run between a skill pack's two reads, with its id (`HostConfig::with_pack_read_hook`).
 pub(crate) type PackReadHook = Arc<dyn Fn(&str) + Send + Sync>;
@@ -52,6 +58,18 @@ pub(crate) struct LaunchWiring {
     /// Run off the actor with a run folder's path just before the folder is removed, for tests
     /// (`launch_checks::discard`).
     pub(crate) run_removal_hook: Option<RunRemovalHook>,
+    /// How long a run folder's removal waits for the agent's tree and its Chrome to be gone
+    /// (`HostConfig::with_tree_wait`, default `DEFAULT_TREE_WAIT`).
+    pub(crate) tree_wait: Duration,
+    /// Run off the actor as a session's removal starts its wait, with the session's claimed
+    /// Chrome debugging port, for tests (`HostConfig::with_tree_wait_hook`).
+    pub(crate) tree_wait_hook: Option<TreeWaitHook>,
+    /// Whether a run folder removal's thread fails to start, for tests
+    /// (`HostConfig::with_removal_thread_failing`).
+    pub(crate) removal_thread_fails: bool,
+    /// The sessions whose removal ran past [`Self::tree_wait`]: their proxy, relay and claims,
+    /// held until the host stops (`launch_checks::straggler`).
+    pub(crate) held: HeldRuns,
 }
 
 impl Default for LaunchWiring {
@@ -71,6 +89,10 @@ impl Default for LaunchWiring {
             relays: None,
             connectors: None,
             run_removal_hook: None,
+            tree_wait: super::DEFAULT_TREE_WAIT,
+            tree_wait_hook: None,
+            removal_thread_fails: false,
+            held: HeldRuns::default(),
         }
     }
 }
@@ -89,6 +111,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("sign_in", &self.sign_in)
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
+            .field("tree_wait", &self.tree_wait)
             .finish_non_exhaustive()
     }
 }

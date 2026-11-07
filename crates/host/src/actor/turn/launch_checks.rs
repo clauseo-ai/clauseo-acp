@@ -29,8 +29,10 @@
 //! on macOS and Linux, its socket folder ([`BrowserSession`]); a missing sidecar or a failed
 //! claim leaves the browser out (`BrowserNotInstalled`) with a log line, and the launch goes
 //! on. The claims ride on [`RunFolders`] and drop with the run folder, off the actor, once the
-//! agent's process tree has been killed (or the agent never started). The session's case-law
-//! relay and its token file (R24, [`relay`]) are made on the same thread and ride the same way.
+//! agent's process tree and its Chrome are gone ([`straggler`]), or the agent never started.
+//! The session's case-law relay and its token file (R24, [`relay`]) are made on the same thread
+//! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
+//! is found and closed as the run drops.
 //!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
@@ -39,6 +41,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use clauseo_process::TreeWatch;
 use clauseo_profile::{PacksWritten, SkillWrite, SkillsWritten};
 use clauseo_protocol::{AgentId, AgentKind, ThreadId};
 
@@ -136,6 +139,19 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
+    /// session can get the browser and its Chrome and claims were found; none otherwise, or
+    /// when it did not open (`NoProxy`). It closes when the last clone drops, normally in
+    /// [`discard`]'s off-actor removal once the agent's tree and Chrome are gone. Last of the
+    /// fields, so the claims and the relay drop first. Stage C's R17 adds its ports to the
+    /// session's policy (`proxy_ports`).
+    pub(crate) egress: Option<Arc<egress::EgressGuard>>,
+    /// The run's lease on its claims, relay and proxy ([`straggler::Lease`]), shared by its
+    /// clones: they are freed only after a completed wait, and held until the host stops on
+    /// any other drop.
+    pub(crate) lease: Arc<straggler::Lease>,
+    /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
+    pub(crate) slot_waited: bool,
 }
 
 impl RunFolders {
@@ -155,6 +171,9 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
+            egress: None,
+            lease: Arc::default(),
+            slot_waited: false,
         }
     }
 
@@ -250,6 +269,8 @@ pub(super) fn prepare(
         }
     };
     let job = codex::prepare::Job::launch(run.key.matter);
+    let slot_wait = browser::slot_wait(actor, run.key, &claims.browser);
+    run.slot_waited = slot_wait.is_some();
     let Some(state) = state(actor, thread) else {
         return;
     };
@@ -265,6 +286,11 @@ pub(super) fn prepare(
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
         }
+        // Whether a slot is there for the browser after a wait; without one, it is.
+        let slot = match slot_wait {
+            Some(slot_wait) => slot_wait.await,
+            None => true,
+        };
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -301,7 +327,7 @@ pub(super) fn prepare(
                 }
                 run.make(&data, &sweep)?;
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
-                claim(&mut run, &data, claims);
+                claim(&mut run, &data, claims, slot);
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
@@ -334,20 +360,38 @@ pub(super) fn prepare(
     });
 }
 
-/// The session's browser claims and case-law relay (`claims`), made on the launch-prep thread.
-fn claim(run: &mut RunFolders, data: &Path, claims: (browser::BrowserPrep, relay::CaseLawPrep)) {
-    let (browser, case_law) = claims;
+/// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
+/// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
+fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
+    let Claims {
+        browser,
+        case_law,
+        egress,
+        held,
+    } = claims;
+    let browser = if slot { browser } else { browser.skipped() };
     (run.chrome, run.browser_session) = browser.prepare(data, &run.key.id());
+    // The launch offers the browser only once its Chrome was found and claimed.
+    let offered = run.chrome.is_some() && run.browser_session.is_some();
+    run.egress = egress.open(run.key, offered);
     run.case_law = case_law.open(run);
+    let parts = straggler::Parts {
+        browser: run.browser_session.clone(),
+        case_law: run.case_law.clone(),
+        egress: run.egress.clone(),
+    };
+    run.lease.keep(held, parts);
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the
-/// run folder with the token file.
+/// run folder with the token file. No agent was started, so nothing waits.
 fn undo_late(late: Prepared) {
     let Prepared { run, .. } = late;
+    // Nothing to wait for: no agent was started, so its parts are freed as it drops.
+    run.lease.wait_done();
     relay::end(&run);
     run.remove();
-    // Its claims and relay go now, after the folder.
+    // Its claims, relay and proxy go now, after the folder.
     drop(run);
 }
 
@@ -416,7 +460,7 @@ pub(super) fn on_prepared(
         .and_then(|state| state.preparing.take_if(|preparing| preparing.id == id));
     let Some(preparing) = preparing else {
         if let Ok(stale) = result {
-            discard(actor, thread, stale.run);
+            discard(actor, thread, stale.run, None);
         }
         return;
     };
@@ -430,24 +474,25 @@ pub(super) fn on_prepared(
         }
     };
     if host_stopping(actor) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
+    browser::warn_if_still_full(actor, &prepared.run);
     // A refusal that came, or stayed, while the checks ran (a key refusal waited out
     // included): nothing launches.
     if let Some(error) = super::sign_in::launch_refusal(actor, thread) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
     if let Err(error) = super::sign_in::check_launch(actor, thread, &prepared) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
     if let Err(error) = super::profile_loads::launch_keys(actor, thread, &mut prepared) {
-        discard(actor, thread, prepared.run);
+        discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
@@ -456,7 +501,7 @@ pub(super) fn on_prepared(
     if let Some(state) = state(actor, thread) {
         state.run = Some(run.clone());
     }
-    agents::launch_now(actor, thread, waiting, *prepared);
+    let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
     let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
     if launched {
         packs::hold_notice(actor, thread, packs_skipped);
@@ -464,62 +509,28 @@ pub(super) fn on_prepared(
         if let Some(state) = state(actor, thread) {
             state.run = None;
         }
-        discard(actor, thread, run);
+        // A process that was started and then failed is waited for like any other.
+        discard(actor, thread, run, failed_tree);
     }
 }
 
-/// Removes `run` (`thread`'s launch's run folder) off the actor and drops its browser claims
-/// there; the notes folder stays. The session has ended (its agent's tree killed) or never
-/// started, so its browser slot, if it held one, is free. The removal counts as work in flight
-/// ([`super::super::Work::run_removals`]) until its [`TurnInput::RunRemoved`], so shutdown
-/// answers only once the folder and the claims are gone (or the removal's wait has passed).
-fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
-    actor.wiring.browser_slots.release(run.key);
-    let clock = std::sync::Arc::clone(&actor.clock);
-    let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
-    actor.work.run_removals += 1;
-    let hook = actor.wiring.run_removal_hook.clone();
-    actor.spawn_post(async move {
-        let removed = codex::prepare::off_actor(clock, job, move || {
-            // The token is revoked before its file goes with the folder.
-            relay::end(&run);
-            if let Some(hook) = &hook {
-                hook(&run.root);
-            }
-            run.remove();
-            // The browser claims and the case-law relay go here, off the actor and after the
-            // agent's tree was killed: the socket folder is removed, the relay stops listening
-            // and the ports are free for the next session.
-            drop(run);
-            Ok(())
-        })
-        .await;
-        if let Err(error) = removed {
-            tracing::warn!(
-                %thread,
-                error = %Cause(&error),
-                "a session's run folder was not removed"
-            );
-        }
-        Input::Turn(TurnInput::RunRemoved)
-    });
-}
-
-/// A run folder's removal ended: shutdown no longer waits for it.
-pub(super) fn on_run_removed(actor: &mut Actor) {
-    actor.work.run_removals = actor.work.run_removals.saturating_sub(1);
-}
-
-/// Removes `thread`'s run folder off the actor, once its agent has ended or failed to launch.
-/// The notes folder stays.
-pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
+/// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
+/// has ended. The notes folder stays.
+pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
     if let Some(run) = state(actor, thread).and_then(|state| state.run.take()) {
-        discard(actor, thread, run);
+        discard(actor, thread, run, Some(tree));
     }
 }
 
 mod browser;
+mod egress;
+use paths::Claims;
 pub(super) mod relay;
+mod straggler;
+pub(crate) use straggler::HeldRuns;
+mod removal;
+use removal::discard;
+pub(super) use removal::on_run_removed;
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

@@ -95,7 +95,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     super::super::idle::ended(actor, thread);
     // Its pending questions went with it.
     super::super::super::limits::asking_changed(actor);
-    launch_checks::remove_run(actor, thread);
+    launch_checks::remove_run(actor, thread, agent.link.tree_watch());
     let Agent {
         session,
         waiting,

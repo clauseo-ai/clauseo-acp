@@ -9,9 +9,11 @@
 //! 2. The firm's `managed-mcp.json` ([`McpControl::Managed`]): no Clauseo server at all goes,
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
-//! 4. No proxy port for the session: `NoProxy` (every session until stage C's proxy).
+//! 4. No proxy set: `NoProxy`.
 //! 5. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
+//! 6. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
+//!    after 5 found everything (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -58,7 +60,9 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) control: McpControl,
     /// Whether this session holds a browser slot or one is free (`browser::limits`).
     pub(crate) slot_free: bool,
-    /// The proxy's port for this session, if there is a proxy.
+    /// Whether a proxy is set (`HostConfig::with_egress_proxy`).
+    pub(crate) proxy_set: bool,
+    /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
     /// The Chrome picked for this session, if any.
     pub(crate) executable: Option<&'a Path>,
@@ -150,16 +154,19 @@ fn browser_entry(
     if !inputs.slot_free {
         return Err(ToolsUnavailableReason::TooManyBrowsers);
     }
-    let port = inputs
-        .port
-        .ok_or(ToolsUnavailableReason::NoProxy)?
-        .to_string();
+    if !inputs.proxy_set {
+        return Err(ToolsUnavailableReason::NoProxy);
+    }
     let executable = inputs
         .executable
         .ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
     let claims = inputs
         .claims
         .ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
+    let port = inputs
+        .port
+        .ok_or(ToolsUnavailableReason::NoProxy)?
+        .to_string();
     let (Some(executable), Some(browser_dir)) = (
         executable.to_str(),
         dunce::simplified(inputs.browser_dir).to_str(),
