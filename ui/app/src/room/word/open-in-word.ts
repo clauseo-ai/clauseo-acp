@@ -1,30 +1,34 @@
-// "Open in Word" (H11): a Word document the wall's list_papers lists opens with the computer's program through
-// open_file, from its tile and from a change note that names it. The room builds one WordOpen for the open matter and
-// hands it down by context. A press while that file's open is on its way does nothing. A declined confirm is quiet; a
-// failed open gives its code to the caller, which the change note shows in its error line, and an open Word started in
-// Protected View (a path too long for Word, on Windows) says so, which the note, and the wall under its tiles, show in
-// a quiet line. A path too long for Word comes with a way to show the matter's folder (reveal), where the folders to
-// move or rename are; a tile's other failures go only to the console. The label comes from the
-// reader's words, loaded only once a listed paper is a Word document, so the room's first load carries none of them.
+// "Open in Word" (H11): a Word document the wall's list_papers lists opens with the computer's
+// program through open_file, from its tile and from a change note that names it. The room builds
+// one WordOpen for the open matter and hands it down by context. A press while that file's open is
+// on its way does nothing. A declined confirm is quiet; a failed open gives its code to the caller,
+// which the change note shows in its error line, and an open Word started in Protected View (a path
+// too long for Word, on Windows) says so, which the note, and the wall under its tiles, show in a
+// quiet line. A path too long for Word comes with a way to show the matter's folder (reveal), where
+// the folders to move or rename are; a show's refusal is given to the caller as an open's is. The
+// label comes from the reader's words, loaded only once a listed paper is a Word document, so the
+// room's first load carries none of them.
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
-import { quietly, refusalOf, type ListedPapers } from "../open.ts";
+import { refusalOf, type ListedPapers } from "../open.ts";
 import { isWordFile } from "./lock.ts";
 
 /** How a press went: the refusal's code, or null when it opened, the lawyer declined, or an open of the same file was
  * already on its way; and whether Word opened the file in Protected View. */
 export type WordOpened = { refused: string | null; protectedView: boolean };
 
-/** A press that opens a paper in Word, with its words: its label, and the line for an open in Protected View; and
- * Show in folder's press, which shows the matter's folder, for a path too long for Word. */
+/** A press that opens a paper in Word, with its words: its label, and the line for an open in
+ * Protected View; and Show in folder's press, which shows the matter's folder, for a path too
+ * long for Word, and gives its refusal's code, or null when it went through or the lawyer
+ * declined. */
 export type WordOpener = {
   label: string;
   protectedLine: string;
   onOpen: () => Promise<WordOpened>;
-  onReveal: () => void;
+  onReveal: () => Promise<string | null>;
 };
 
 const NOT_SENT: WordOpened = { refused: null, protectedView: false };
@@ -74,7 +78,7 @@ export function useWordOpeners(
       "This file's path is long, so Word opens it in Protected View. Choose Enable Editing to make changes.",
     );
     const { matter } = listed;
-    const onReveal = () => void quietly("reveal", transport.reveal({ matter }));
+    const onReveal = () => refusalOf("reveal", transport.reveal({ matter }));
     const openers = new Map<string, WordOpener>();
     for (const p of listed.papers.papers) {
       if (!isWordFile(p.path)) continue;

@@ -74,6 +74,7 @@ export function WorkComposer({
   doing = null,
   asks = null,
   refused,
+  refusedActions,
   failed,
   stopped = null,
   noteFor,
@@ -114,6 +115,9 @@ export function WorkComposer({
   asks?: "permission" | "question" | null;
   /** The code of a refused command, until the next Ask. */
   refused: string | null;
+  /** Optional: the refused line's way on, such as Locate folder for a folder gone or not the
+   * matter's. */
+  refusedActions?: ReactNode;
   /** The lost stream's line, until Try again brings it back. */
   failed: BreakLine | null;
   /** The stopped answer's line, while nothing runs. */
@@ -328,6 +332,7 @@ export function WorkComposer({
                 : errorWords(w.lang, refused, agentPlan),
             pill: null,
             code: refused,
+            ...(refusedActions === undefined ? {} : { actions: refusedActions }),
           },
           testId: "error",
         }

@@ -1,10 +1,12 @@
-// H11: what the room does with the lawyer's open and show actions: a link or paper in an answer (the renderer's
-// MarkdownHost) and a matter row's Show in Finder. The host draws the link's confirm itself, so a decline
-// (`transport.unauthorized`) is the lawyer's own answer and says nothing. The room has no surface for a failed action
-// of this kind, so any other refusal only goes to the console, the way matters.ts reports a failed command.
+// H11: what the room does with the lawyer's open and show actions: a link or paper in an answer
+// (the renderer's MarkdownHost) and a matter row's Show in Finder. The host draws the link's
+// confirm itself, so a decline (`transport.unauthorized`) is the lawyer's own answer and says
+// nothing. A paper's refused open stands in the room's ActRefusals (act-refusals.ts), which the
+// composer's line says; a link's other refusals only go to the console.
 import type { MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { toHostError, type HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
+import type { ActRefusals } from "./act-refusals.ts";
 import type { Papers } from "./host-next.ts";
 
 /** Runs an open or show call and gives its refusal's code: null when it went through or the lawyer declined the
@@ -40,11 +42,18 @@ export type ListedPapers = { matter: MatterId; papers: Papers } | null;
 export class AnswerHost implements MarkdownHost {
   readonly #transport: HostTransport;
   readonly #matter: MatterId | null;
+  readonly #refusals: ActRefusals | null;
   #listed: ListedPapers = null;
 
-  constructor(transport: HostTransport, matter: MatterId | null) {
+  /** `refusals`: where a paper's refused open stands; left out, it only goes to the console. */
+  constructor(
+    transport: HostTransport,
+    matter: MatterId | null,
+    refusals: ActRefusals | null = null,
+  ) {
     this.#transport = transport;
     this.#matter = matter;
+    this.#refusals = refusals;
   }
 
   /** The papers the wall listed now. */
@@ -64,6 +73,9 @@ export class AnswerHost implements MarkdownHost {
     const { papers } = listed.papers;
     const paper = papers.find((p) => p.file === id) ?? papers.find((p) => p.path === id);
     if (paper === undefined) return;
-    void quietly("open_file", this.#transport.openFile(paper.file));
+    const opened = this.#transport.openFile(paper.file);
+    void (this.#refusals === null
+      ? quietly("open_file", opened)
+      : this.#refusals.track("open", this.#matter, opened));
   }
 }

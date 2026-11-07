@@ -13,7 +13,10 @@
 // the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
-// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). Versions opens and shows files through the
+// change note naming one, open it in Word (word/open-in-word.ts; the tiles are paper-wall.tsx). A
+// refused open or show says why where it came from, with Locate folder for a folder gone or not the
+// matter's (act-refusals.ts; the room gives LocateFolderContext for the open matter). Versions
+// opens and shows files through the
 // transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in its own
 // window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
 import {
@@ -57,6 +60,7 @@ import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
 import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
+import { LocateFolderContext, type ActRefusals } from "./act-refusals.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { usePickWait } from "./picker-wait.ts";
 import { FolderChooserHost } from "./folder-chooser-host.tsx";
@@ -121,8 +125,12 @@ function useAnswerHost(
   transport: HostTransport,
   matter: MatterId | null,
   listed: ListedPapers,
+  refusals: ActRefusals,
 ): MarkdownHost {
-  const host = useMemo(() => new AnswerHost(transport, matter), [transport, matter]);
+  const host = useMemo(
+    () => new AnswerHost(transport, matter, refusals),
+    [transport, matter, refusals],
+  );
   useEffect(() => host.show(listed), [host, listed]);
   return host;
 }
@@ -261,7 +269,13 @@ function RoomFrame({
     view.matters.every((m) => m.kind === "scratch");
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
-  const answers = useAnswerHost(transport, open?.matter ?? null, listed);
+  const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
+  // the open matter's refused open (an answer's paper, Find's), on the composer's line; Locate
+  // folder for its folder
+  const { refusals } = matters;
+  const refused = useSyncExternalStore(refusals.subscribe, refusals.view, refusals.view);
+  const opened = open === null ? undefined : refused.get(open.matter);
+  const locate = open === null ? null : () => void matters.locate(open.matter, locating.track);
   const word = useWordOpeners(transport, listed, w.lang);
   const ownStandIns = useTransportStandIns(transport);
   const { platform } = useDisplay();
@@ -457,97 +471,101 @@ function RoomFrame({
         </Suspense>
       )}
       {shield.note}
-      <main className="room-centre" ref={nodes.slot("centre")}>
-        {setup && (
-          <Suspense fallback={null}>
-            <FirstRun
-              transport={transport}
-              matters={matters}
-              conversations={conversations}
-              talks={talks}
-              zone={view.zone}
-              welcome={welcome}
-            />
-          </Suspense>
-        )}
-        {welcome ? null : open !== null && view.folderMissing ? (
-          // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
-          <>
-            <MovedFolder
-              {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
-              onLocate={() => void matters.locate(open.matter, locating.track)}
-            />
-            {locating.opening && <PickerLine />}
-            <LocateGate onLocate={() => void matters.locate(open.matter, locating.track)} />
-          </>
-        ) : (
-          <StoreContext value={store}>
-            {versions.centre}
-            {scratch && <ScratchLine />}
-            {retried !== null && (
-              <Suspense fallback={null}>
-                <RetriedLine
-                  time={clockOf(retried.at, view.now, view.zone, w.lang).time}
-                  title={retried.title ?? mt(w.lang, "New conversation")}
-                  onOpen={() => conversations.open(retried.from)}
-                />
-              </Suspense>
-            )}
-            {/* a new conversation, before its first question: what it reads, once the papers are counted. A matter with
-                no conversation yet shows the same line: the design's FirstQuestion (empty.tsx: "Clauseo has read this
-                matter's {n} papers.", and that each answer cites its page) goes here once stage D reads the papers
-                ahead and answers carry citations; until then those are promises the room can't keep */}
-            {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
-              <p
-                className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
-                data-testid="new-conversation-line"
-              >
-                <Say>
-                  {papers.papers.length === 1
-                    ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
-                    : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
-                        n: papers.papers.length,
-                      })}
-                </Say>
-              </p>
-            )}
-            {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
-            <MarkdownHostContext value={answers}>
-              <WordOpenContext value={word}>
-                <AgentPlanContext value={agentPlan}>
-                  <ToolLineContext value={toolRoom}>
-                    <ProtectionContext value={shield.composer}>
-                      <Work
-                        key={talks.open ?? open?.matter ?? "none"}
-                        transport={transport}
-                        matter={open}
-                        drafts={drafts}
-                        draftKey={talks.open}
-                        conversation={link}
-                        choice={choice}
-                        plan={plan}
-                        focus={talks.focus?.n ?? null}
-                        archived={talks.archived}
-                        onThread={matters.onThread}
-                        conversations={conversations}
-                        folderShut={folderShut}
-                      />
-                    </ProtectionContext>
-                  </ToolLineContext>
-                </AgentPlanContext>
-              </WordOpenContext>
-            </MarkdownHostContext>
-          </StoreContext>
-        )}
-      </main>
-      <aside className="room-pane" ref={nodes.slot("pane")}>
-        {papers !== null &&
-          (papers.papers.length === 0 ? (
-            <EmptyPapers body={false} />
+      <LocateFolderContext value={locate}>
+        <main className="room-centre" ref={nodes.slot("centre")}>
+          {setup && (
+            <Suspense fallback={null}>
+              <FirstRun
+                transport={transport}
+                matters={matters}
+                conversations={conversations}
+                talks={talks}
+                zone={view.zone}
+                welcome={welcome}
+              />
+            </Suspense>
+          )}
+          {welcome ? null : open !== null && view.folderMissing ? (
+            // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
+            <>
+              <MovedFolder
+                {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
+                onLocate={() => void matters.locate(open.matter, locating.track)}
+              />
+              {locating.opening && <PickerLine />}
+              <LocateGate onLocate={() => void matters.locate(open.matter, locating.track)} />
+            </>
           ) : (
-            <PaperWall key={listed?.matter} papers={papers} word={word} />
-          ))}
-      </aside>
+            <StoreContext value={store}>
+              {versions.centre}
+              {scratch && <ScratchLine />}
+              {retried !== null && (
+                <Suspense fallback={null}>
+                  <RetriedLine
+                    time={clockOf(retried.at, view.now, view.zone, w.lang).time}
+                    title={retried.title ?? mt(w.lang, "New conversation")}
+                    onOpen={() => conversations.open(retried.from)}
+                  />
+                </Suspense>
+              )}
+              {/* a new conversation, before its first question: what it reads, once the papers are counted. A
+                matter with no conversation yet shows the same line: the design's FirstQuestion (empty.tsx:
+                "Clauseo has read this matter's {n} papers.", and that each answer cites its page) goes here once
+                stage D reads the papers ahead and answers carry citations; until then those are promises the room
+                can't keep */}
+              {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
+                <p
+                  className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
+                  data-testid="new-conversation-line"
+                >
+                  <Say>
+                    {papers.papers.length === 1
+                      ? mt(w.lang, "A new conversation. It reads this matter's one paper.")
+                      : mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
+                          n: papers.papers.length,
+                        })}
+                  </Say>
+                </p>
+              )}
+              {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
+              <MarkdownHostContext value={answers}>
+                <WordOpenContext value={word}>
+                  <AgentPlanContext value={agentPlan}>
+                    <ToolLineContext value={toolRoom}>
+                      <ProtectionContext value={shield.composer}>
+                        <Work
+                          key={talks.open ?? open?.matter ?? "none"}
+                          transport={transport}
+                          matter={open}
+                          drafts={drafts}
+                          draftKey={talks.open}
+                          conversation={link}
+                          choice={choice}
+                          plan={plan}
+                          focus={talks.focus?.n ?? null}
+                          archived={talks.archived}
+                          onThread={matters.onThread}
+                          conversations={conversations}
+                          folderShut={folderShut}
+                          openRefused={opened?.act === "open" ? opened.code : null}
+                        />
+                      </ProtectionContext>
+                    </ToolLineContext>
+                  </AgentPlanContext>
+                </WordOpenContext>
+              </MarkdownHostContext>
+            </StoreContext>
+          )}
+        </main>
+        <aside className="room-pane" ref={nodes.slot("pane")}>
+          {papers !== null &&
+            (papers.papers.length === 0 ? (
+              <EmptyPapers body={false} />
+            ) : (
+              <PaperWall key={listed?.matter} papers={papers} word={word} />
+            ))}
+        </aside>
+      </LocateFolderContext>
     </div>
   );
 }

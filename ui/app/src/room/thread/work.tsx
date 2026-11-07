@@ -39,6 +39,8 @@ import { WorkComposer } from "./work-composer.tsx";
 import { ArchivedLine } from "../archived.tsx";
 import { useToolsSegment } from "../tool-line-load.ts";
 import { FolderSupportContext, notedFolder } from "../folder-support.ts";
+import { locatable, useLocateFolder } from "../act-refusals.ts";
+import { LocateButton } from "../locate-button.tsx";
 import { hasSetup } from "../first-run/hold.ts";
 
 /** Folder rights' notice, loaded only for a matter whose folder Clauseo can't fence. */
@@ -92,6 +94,7 @@ export function Work({
   conversations,
   archived = false,
   folderShut,
+  openRefused = null,
 }: {
   transport: HostTransport;
   matter: MatterSummary | null;
@@ -115,6 +118,9 @@ export function Work({
   archived?: boolean;
   /** The matters whose folder notice the lawyer closed (room.tsx keeps them above Work's key, as the drafts). */
   folderShut?: Set<MatterId>;
+  /** A paper's open from an answer or from Find, refused, by its code, until the next try
+   * (act-refusals.ts). */
+  openRefused?: string | null;
 }) {
   const store = useViewStore();
   const field = useRef<ComposerHandle>(null);
@@ -193,6 +199,9 @@ export function Work({
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
   // U7: a refused Stop the other, by its code, on the composer's line until the next press or Ask
   const [otherRefused, refuseOther] = useRefused();
+  const shownRefused = session.refused ?? otherRefused ?? openRefused;
+  // a folder gone, or not the matter's: Locate folder on the line (act-refusals.ts)
+  const locate = useLocateFolder();
   const ask = (text: string, how?: AskHow) => {
     refuseOther(null);
     return session.ask(text, how);
@@ -255,7 +264,10 @@ export function Work({
           busy={busy}
           doing={doing}
           asks={asks}
-          refused={session.refused ?? otherRefused}
+          refused={shownRefused}
+          {...(locatable(shownRefused) && locate !== null
+            ? { refusedActions: <LocateButton onLocate={locate} /> }
+            : {})}
           failed={
             failed === null
               ? null

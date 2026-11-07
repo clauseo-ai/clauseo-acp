@@ -1,7 +1,8 @@
-// The wall's tiles: one per paper the wall lists, a Word document's tile opening it in Word (word/open-in-word.ts).
-// What a tile's open said stands under the tiles until the next press of a tile (word/wall-said.tsx, in the thread's
-// chunk with the change note's lines): the Protected View line, or a path too long for Word with Show in folder. The
-// room keys the wall by its matter, so another matter's wall starts with nothing under it.
+// The wall's tiles: one per paper the wall lists, a Word document's tile opening it in Word
+// (word/open-in-word.ts). What a tile's open said stands under the tiles until the next press of a
+// tile (word/wall-said.tsx, in the thread's chunk with the change note's lines): the Protected View
+// line, or a refused open's words. The room keys the wall by its matter, so another matter's wall
+// starts with nothing under it.
 import { fileTypeIcon } from "@clauseo/components/icons/file-type.ts";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
@@ -53,7 +54,13 @@ export function PaperWall({ papers, word }: { papers: Papers; word: WordOpen }) 
       </ol>
       {said && saidBy && (
         <Suspense fallback={null}>
-          <WallSaid opener={saidBy} opened={said.opened} />
+          <WallSaid
+            opener={saidBy}
+            opened={said.opened}
+            onRefused={(refused) =>
+              setSaid({ path: said.path, opened: { refused, protectedView: false } })
+            }
+          />
         </Suspense>
       )}
     </LayerProvider>

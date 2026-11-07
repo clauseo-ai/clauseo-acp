@@ -20,6 +20,7 @@ import { revealKey, ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { useNow } from "../../store/limits.ts";
 import { toHostError } from "../../transport/host-transport.ts";
+import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
 import type {
@@ -139,6 +140,11 @@ function Changed({ entry }: { entry: StepEntry }) {
     back?.focus();
   }, [locked]);
   const undoRefusal = refused === null || locked ? null : refused.code;
+  // a folder gone, or not the matter's: Locate folder beside the words (act-refusals.ts)
+  const locate = useLocateFolder();
+  // Show in folder's refusal takes the line's place; one that goes through leaves the line as it is
+  const reveal = (o: WordOpener) => () =>
+    void o.onReveal().then((code) => code !== null && setOpenFailed(code));
   const shown = undoRefusal ?? openFailed;
   return (
     <div data-testid="files-changed" ref={box}>
@@ -152,14 +158,16 @@ function Changed({ entry }: { entry: StepEntry }) {
         error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
         errorAction={
           shown === "matter.document_path_too_long" && opener !== undefined
-            ? { label: ui(w.lang, revealKey(platform)), onAction: opener.onReveal }
-            : undefined
+            ? { label: ui(w.lang, revealKey(platform)), onAction: reveal(opener) }
+            : locatable(shown) && locate !== null
+              ? { label: ui(w.lang, "Locate folder"), onAction: locate }
+              : undefined
         }
         testIds={{
           paper: "file-changed",
           undo: "undo",
           error: "error",
-          errorAction: "reveal",
+          errorAction: locatable(shown) ? "locate-folder" : "reveal",
           open: "open-in-word",
         }}
       />
