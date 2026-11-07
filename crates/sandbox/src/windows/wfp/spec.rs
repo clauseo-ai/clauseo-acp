@@ -12,9 +12,9 @@
 //! action right. So:
 //! - set-up's block filters (weight [`BLOCK_WEIGHT`]) catch every token that holds a pool user's
 //!   SID or the pool group's, enabled or deny-only (`sddl.rs`), and block every connect, loopback
-//!   and 61080-61179 included, ICMP at resource assignment, and inbound that isn't loopback;
+//!   and 46100-46199 included, ICMP at resource assignment, and inbound that isn't loopback;
 //! - one static permit per pool user (weight [`PERMIT_WEIGHT`]) opens `127.0.0.1` over TCP on
-//!   61080-61179 for that user, and nothing else. Within the range the listeners' per-launch
+//!   46100-46199 for that user, and nothing else. Within the range the listeners' per-launch
 //!   secrets are the cross-matter check (orchestrator ruling, 2026-11-07);
 //! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback and
 //!   loopback TCP outside the range, a second cap on the permits.
@@ -27,7 +27,7 @@ pub use super::rules::{
     NON_LOOPBACK_ADDRESSES, RuleProtocol, RuleSpec, outside_range, rule_names, rule_users,
 };
 pub use super::sddl::{allowed_users, denied_users, not_pool_sddl, user_sddl};
-use crate::ports::WINDOWS_PORTS;
+use crate::ports::TIER_B_PORTS;
 use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
 use crate::{Loopback, Policy};
@@ -435,7 +435,7 @@ pub fn block_filters(ns: &Namespace, group: &Sid, pool: &[Sid]) -> Vec<FilterSpe
 pub const BLOCK_COUNT: usize = BLOCKS.len();
 
 /// The static permit for `user`, the `i`th pool user (sorted): `127.0.0.1` over TCP on
-/// [`WINDOWS_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent.
+/// [`TIER_B_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent.
 pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
     FilterSpec {
         key: ns.filter_key(PERMIT_BASE + i),
@@ -447,7 +447,7 @@ pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
             Condition::Users(vec![user.clone()]),
             Condition::RemoteV4(Ipv4Addr::LOCALHOST),
             Condition::Protocol(PROTOCOL_TCP),
-            Condition::RemotePorts(*WINDOWS_PORTS.start(), *WINDOWS_PORTS.end()),
+            Condition::RemotePorts(*TIER_B_PORTS.start(), *TIER_B_PORTS.end()),
         ],
     }
 }
@@ -478,13 +478,13 @@ pub fn permit_ports(policy: &Policy) -> Result<Vec<u16>, NetworkGap> {
     checked_ports(&ports)
 }
 
-/// `ports` sorted and de-duplicated; a port outside [`WINDOWS_PORTS`], which the firewall
+/// `ports` sorted and de-duplicated; a port outside [`TIER_B_PORTS`], which the firewall
 /// and the permit leave closed, is refused.
 pub fn checked_ports(ports: &[u16]) -> Result<Vec<u16>, NetworkGap> {
     let mut ports = ports.to_vec();
     ports.sort_unstable();
     ports.dedup();
-    if let Some(port) = ports.iter().find(|port| !WINDOWS_PORTS.contains(port)) {
+    if let Some(port) = ports.iter().find(|port| !TIER_B_PORTS.contains(port)) {
         return Err(NetworkGap::PortOutsideRange(*port));
     }
     Ok(ports)

@@ -4,12 +4,12 @@
 
 //! Set-up's Windows Firewall rules as plain data (S15 PR7), built and tested on every OS: what
 //! isn't loopback blocked both ways, loopback UDP blocked, and loopback TCP blocked outside
-//! [`WINDOWS_PORTS`], the one place the range is excepted (`spec.rs` says why). `firewall.rs`
+//! [`TIER_B_PORTS`], the one place the range is excepted (`spec.rs` says why). `firewall.rs`
 //! writes them on Windows.
 
 use super::sddl::aces;
 use super::spec::Namespace;
-use crate::ports::WINDOWS_PORTS;
+use crate::ports::TIER_B_PORTS;
 use crate::windows::sids::Sid;
 
 /// The remote addresses the firewall rules call loopback (Codex's literal).
@@ -58,7 +58,7 @@ pub struct RuleSpec {
 }
 
 /// The firewall rules: what isn't loopback, both ways; loopback UDP; loopback TCP outside
-/// [`WINDOWS_PORTS`], the one place the range is excepted.
+/// [`TIER_B_PORTS`], the one place the range is excepted.
 pub fn rules(ns: &Namespace, pool: &[Sid]) -> Vec<RuleSpec> {
     let users = rule_users(pool);
     let rule = |suffix: &str, description: &str, direction, protocol, remote, ports| RuleSpec {
@@ -97,7 +97,7 @@ pub fn rules(ns: &Namespace, pool: &[Sid]) -> Vec<RuleSpec> {
         ),
         rule(
             "block_loopback_tcp",
-            "Block Loopback TCP Outside 61080-61179",
+            "Block Loopback TCP Outside 46100-46199",
             Direction::Out,
             RuleProtocol::Tcp,
             LOOPBACK_ADDRESSES,
@@ -124,12 +124,12 @@ pub fn rule_users(sids: &[Sid]) -> String {
     format!("O:LSD:{}", aces('A', sids))
 }
 
-/// Every TCP port outside [`WINDOWS_PORTS`], as the firewall writes port ranges.
+/// Every TCP port outside [`TIER_B_PORTS`], as the firewall writes port ranges.
 pub fn outside_range() -> String {
     format!(
         "1-{},{}-65535",
-        WINDOWS_PORTS.start() - 1,
-        WINDOWS_PORTS.end() + 1
+        TIER_B_PORTS.start() - 1,
+        TIER_B_PORTS.end() + 1
     )
 }
 
@@ -205,8 +205,8 @@ impl FirewallTrouble {
                 format!("a firewall call failed ({what}, error {code:#x}), so {STILL_ENFORCED}")
             }
             FirewallTrouble::RuleUsers { rule, read_back } => format!(
-                "the firewall rule {rule} reads back with other users than the pool's ({read_back}), \
-                 so {STILL_ENFORCED}"
+                "the firewall rule {rule} reads back with other users than the pool's \
+                 ({read_back}), so {STILL_ENFORCED}"
             ),
         }
     }
