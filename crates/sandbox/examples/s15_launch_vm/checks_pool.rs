@@ -408,15 +408,19 @@ pub(crate) fn token_config(ctx: &Ctx<'_>) -> Result<String, String> {
 /// The `wts-visibility` row, information only: `probe wts` as A's pool user (outside any job, on
 /// a control station of its own, ended at [`WTS_LIMIT`] if it still runs), which counts the
 /// processes a Toolhelp snapshot shows, what `WTSEnumerateProcessesW` returns (entries, those with
-/// a user SID, those of the pool user) and the Toolhelp processes WTS left out. Always INFO
-/// (`pool_verdict::wts_visibility`), a failure to run the probe too.
+/// a user SID, those of the pool user) and the Toolhelp processes WTS left out, each noted as
+/// information. PASS whenever the probe ran (`pool_verdict::wts_visibility`); INFO only when it
+/// couldn't run, naming why. Never FAIL.
 pub(crate) fn wts_visibility(ctx: &Ctx<'_>) -> Outcome {
     let lines = match wts_lines(ctx) {
         Ok(lines) => lines,
         Err(why) => return Outcome::Info(format!("probe wts didn't run: {why}")),
     };
     match pool_verdict::wts_visibility(&lines) {
-        Verdict::Pass(text) | Verdict::Fail(text) | Verdict::Info(text) => Outcome::Info(text),
+        Verdict::Pass(text) | Verdict::Fail(text) | Verdict::Info(text) => {
+            ctx.note(&format!("information: {text}"));
+            Outcome::Pass(text)
+        }
     }
 }
 
@@ -441,7 +445,7 @@ fn wts_lines(ctx: &Ctx<'_>) -> Result<Vec<String>, String> {
         pool.name, ran.pid, ran.code
     ));
     for line in &ran.lines {
-        ctx.note(&format!("A: {line}"));
+        ctx.note(&format!("information: {line}"));
     }
     Ok(ran.lines)
 }
