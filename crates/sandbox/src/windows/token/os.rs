@@ -10,7 +10,8 @@ use std::iter::once;
 use std::ptr::null_mut;
 
 use windows::Win32::Foundation::{
-    ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, HANDLE, HLOCAL, LocalFree,
+    ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_INVALID_PARAMETER, HANDLE, HLOCAL,
+    LocalFree,
 };
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
@@ -29,7 +30,8 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, OpenProcessToken, OpenThread, THREAD_ACCESS_RIGHTS,
+    GetCurrentProcess, GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, OpenProcessToken,
+    OpenThread, THREAD_ACCESS_RIGHTS,
 };
 use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
 use windows::core::{BOOL, PCWSTR, PWSTR};
@@ -264,15 +266,31 @@ pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::R
         own_process,
         &LocalDescriptor::new(&runner_process_sddl(desktop_user))?,
     )?;
-    let thread = LocalDescriptor::new(&runner_thread_sddl(desktop_user))?;
-    for id in own_threads()? {
+    shut_threads(&runner_thread_sddl(desktop_user))
+}
+
+/// Gives every thread of this process the protected DACL of `sddl`. The current thread goes
+/// through its pseudo-handle, which carries every right whatever its DACL: the outer runner shut
+/// it while the inner was suspended, so opening it by its id fails with 5 (the third harness run,
+/// 42354749074, failed every launch so). Every other thread is opened by its id with
+/// `WRITE_DAC`; one this process's own token is refused (5) is shut already, since the agent's
+/// rights there are a subset of this token's, and is left as it is. A thread that ended since the
+/// snapshot (87) needs nothing.
+pub(in crate::windows) fn shut_threads(sddl: &str) -> io::Result<()> {
+    let thread = LocalDescriptor::new(sddl)?;
+    // SAFETY: the pseudo-handle of this thread needs no close and carries every right.
+    set_kernel_dacl(unsafe { GetCurrentThread() }, &thread)?;
+    // SAFETY: no arguments.
+    let me = unsafe { GetCurrentThreadId() };
+    for id in own_threads()?.into_iter().filter(|id| *id != me) {
         // SAFETY: a thread of this process, opened by its id with WRITE_DAC; the handle is owned
         // by `Handle` and closed on drop.
         let opened = unsafe { OpenThread(THREAD_ACCESS_RIGHTS(WRITE_DAC.0), false, id) };
         match opened {
             Ok(handle) => set_kernel_dacl(Handle(handle).0, &thread)?,
-            // A thread that ended since the snapshot needs nothing.
-            Err(error) if error.code() == ERROR_INVALID_PARAMETER.to_hresult() => {}
+            Err(error)
+                if error.code() == ERROR_INVALID_PARAMETER.to_hresult()
+                    || error.code() == ERROR_ACCESS_DENIED.to_hresult() => {}
             Err(error) => return Err(os_error(&error)),
         }
     }
