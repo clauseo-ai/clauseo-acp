@@ -7,7 +7,10 @@
 ; folder, which NSIS makes under %TEMP%, a folder of the lawyer's when the lawyer approved the
 ; prompt), no page, no section. So everything here is plain NSIS instructions and LogicLib (which
 ; expands to plain jumps): no `::` plug-in call, no `Call`, no library function such as
-; GetOptions, StrLoc or VersionCompare. A test holds that.
+; GetOptions, StrLoc or VersionCompare. A test holds that. Should anything here ever load, it would
+; load from the branch's own temporary folder under Program Files (CLAUSEO_SAFE_PLUGINSDIR,
+; safe_temp.nsh), which it makes once it has the switch and Clauseo isn't running, and which sets
+; $PLUGINSDIR and $TEMP; that macro's two UnsafeStrCpy lines are the only $TEMP the test allows.
 ;
 ; It reads nothing the lawyer can write before it extracts: not the environment or HKCU, and
 ; nothing from %TEMP%. Before .onInit, though, the NSIS stub itself creates the %TEMP% folder,
@@ -225,6 +228,9 @@
         SetErrorLevel ${CLAUSEO_ADMIN_APP_RUNNING}
         Quit
       ${EndIf}
+      ; Its own temporary folder under Program Files (safe_temp.nsh), so anything that ever loads
+      ; here loads from there, never from the lawyer's %TEMP%; it quits with 99 when it can't.
+      !insertmacro CLAUSEO_SAFE_PLUGINSDIR
       !insertmacro CLAUSEO_CHECK_SID $R2
       StrCpy $R4 ""
       ${If} $R0 = 1

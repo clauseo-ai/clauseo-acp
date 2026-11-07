@@ -117,14 +117,17 @@ fn the_installers_exit_codes_are_their_own() {
         .collect();
     let admin: Vec<&(String, u32)> = codes
         .iter()
-        .filter(|(name, _)| name.starts_with("ADMIN_COPY_") || name == "APP_RUNNING")
+        .filter(|(name, _)| {
+            name.starts_with("ADMIN_COPY_") || name == "APP_RUNNING" || name == "TEMP_FAILED"
+        })
         .collect();
     assert_eq!(
         admin,
         [
             &("ADMIN_COPY_SKIPPED".to_owned(), 22),
             &("ADMIN_COPY_FAILED".to_owned(), 23),
-            &("APP_RUNNING".to_owned(), 24)
+            &("APP_RUNNING".to_owned(), 24),
+            &("TEMP_FAILED".to_owned(), 25)
         ]
     );
     // Each installer code once (#638's 20 and 21 join these when both land).
