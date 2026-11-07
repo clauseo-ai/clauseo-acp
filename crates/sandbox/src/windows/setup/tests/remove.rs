@@ -50,7 +50,8 @@ fn full_removal() -> Vec<String> {
             format!("delete_user ClauseoSb0{n}"),
         ]);
     }
-    // Only once every pool account is gone (a stray that wouldn't stop must stay filtered).
+    // Only once every pool account is gone and a second sweep ran (a stray must stay filtered).
+    lines.push(format!("stop_strays {}", strays.join(",")));
     lines.push("remove_network".to_owned());
     lines.extend(
         [
@@ -139,6 +140,8 @@ fn the_network_goes_only_after_every_account() {
         .position(|line| line.starts_with("stop_strays"))
         .unwrap();
     assert!(strays < last_user && last_user < network, "{lines:?}");
+    // The second sweep is the call right before the network goes.
+    assert!(lines[network - 1].starts_with("stop_strays"), "{lines:?}");
 }
 
 #[test]
