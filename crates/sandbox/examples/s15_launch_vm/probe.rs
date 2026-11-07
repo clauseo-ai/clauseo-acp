@@ -9,7 +9,12 @@
 //! - `spawn-child`: starts `probe wait`, prints `pid <self>` and `child <pid>`, then waits.
 //! - `echo`: `echo <line>` for each stdin line; exits 0 at end of input.
 //! - `exit <n>`: exits `n` (decimal, or hex with `0x`; any 32-bit code).
-//! - `job-ui`: `ui-limits <hex>`, the UI limits of the job it runs in (`token` prints it too).
+//! - `job-ui [atom]`: `ui-limits <hex>`, the UI limits of the innermost job it runs in; then
+//!   the limits' effect: `ui-effect desktop-create <code>` (`CreateDesktopW` on its own window
+//!   station, 0 when it made one, closed at once) and `ui-effect clipboard-write ok` or
+//!   `ui-effect clipboard-write failed <call> <code>` (the call that failed, `GetLastError`);
+//!   with `atom`, `ui-info atom <name> <n>` (`GlobalFindAtomW`, 0 when none). `token` prints
+//!   all but the atom line too.
 //! - `clipboard-read`: `clipboard-read ok <text>` or `clipboard-read error <why>`.
 //! - `clipboard-write <text>`: `clipboard-write ok` or `clipboard-write error <why>`.
 //! - `find-atom <name>`: `atom <n>`, 0 when `GlobalFindAtomW` finds none.
@@ -66,7 +71,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             None => usage("exit <n>"),
         },
         "job-ui" => {
-            job_ui();
+            job_ui(rest.first().map(String::as_str));
             ExitCode::SUCCESS
         }
         "clipboard-read" => {
@@ -134,18 +139,30 @@ fn exit_with(code: u32) -> ExitCode {
     std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()))
 }
 
-/// The UI limits of the innermost job it is in, and their effect: a clipboard write, which the
-/// runner's job refuses. A process node starts sits in libuv's own job inside the runner's,
-/// whose limits read as none; the runner's still bind it (nested jobs' limits combine), and the
-/// write's refusal shows they do.
-fn job_ui() {
+/// The UI limits of the innermost job it is in, and their effect. A process node starts sits in
+/// libuv's own job inside the runner's, whose limits read as none; the runner's still bind it
+/// (nested jobs' limits combine), and the effect shows they do: `CreateDesktopW` on its own
+/// station (whose DACL grants the pool user `GA`) refused with 5 by the `DESKTOP` limit, and a
+/// clipboard write refused with 5 by `WRITECLIPBOARD`. `atom`, the harness's global atom, is
+/// looked up as information: atoms are per window station, so it is hidden here anyway.
+fn job_ui(atom: Option<&str>) {
     match win::job_ui_limits() {
         Ok(limits) => say(&format!("ui-limits {limits:#x}")),
         Err(error) => say(&format!("ui-limits error {}", code(&error))),
     }
-    match ui::write_text("clauseo-ui-effect") {
+    say(&format!(
+        "ui-effect desktop-create {}",
+        super::win_desk::create_desktop_code()
+    ));
+    match ui::write_failed("clauseo-ui-effect") {
         Ok(()) => say("ui-effect clipboard-write ok"),
-        Err(why) => say(&format!("ui-effect clipboard-write refused {why}")),
+        Err(failed) => say(&format!(
+            "ui-effect clipboard-write failed {} {}",
+            failed.call, failed.code
+        )),
+    }
+    if let Some(name) = atom {
+        say(&format!("ui-info atom {name} {}", ui::find_atom(name)));
     }
 }
 
@@ -163,7 +180,7 @@ fn token() -> ExitCode {
             for (name, attributes) in &facts.privileges {
                 say(&format!("privilege {name} {attributes:#x}"));
             }
-            job_ui();
+            job_ui(None);
             ExitCode::SUCCESS
         }
         Err(error) => {

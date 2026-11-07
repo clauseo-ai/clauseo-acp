@@ -4,11 +4,12 @@
 // OpenAI Responses half), with the CONNECT proxy, the absolute-form forwarding and the Anthropic
 // half left out: this copy proxies nothing. Requests in absolute form get 403.
 //
-//   node mock-responses.mjs port=N matter=DIR log=FILE [probe=EXE]
+//   node mock-responses.mjs port=N matter=DIR log=FILE [probe=EXE] [atom=NAME]
 //
 // The first request that offers a shell tool gets one shell call that writes
 // s15-codex.txt (holding s15-codex-ok) in DIR, and with probe=EXE (a path with no space) also runs
-// `EXE probe job-ui` into s15-codex-job.txt; once a tool's output comes back, the turn ends.
+// `EXE probe job-ui [NAME]` into s15-codex-job.txt (NAME, the harness's atom, has no space);
+// once a tool's output comes back, the turn ends.
 // It keeps no state: it reads the history in each request. Each request is one JSON line in FILE;
 // `outputs` holds the tool results the request carried. The first line is `listening`.
 import fs from 'node:fs';
@@ -51,7 +52,8 @@ function responses(body, res) {
   const names = tools.map((t) => t.name || t.type);
   const input = Array.isArray(body.input) ? body.input : [];
   const outputs = input.filter((i) => /_output$/.test(i.type || ''));
-  const job = opts.probe ? ` & ${opts.probe} probe job-ui> s15-codex-job.txt` : '';
+  const atom = opts.atom ? ` ${opts.atom}` : '';
+  const job = opts.probe ? ` & ${opts.probe} probe job-ui${atom}> s15-codex-job.txt` : '';
   const inner = `echo s15-codex-ok> s15-codex.txt${job}`;
   const argv = ['cmd.exe', '/d', '/c', inner];
   const cmd = `cmd.exe /d /c "${inner}"`;

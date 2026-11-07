@@ -1,7 +1,8 @@
 //! The Win32 calls of the `desktop` row: the harness's dump of `WinSta0`'s and
 //! `WinSta0\Default`'s DACLs as SDDL, and the probe's tries (its own station's name, opening
 //! `WinSta0` and then `Default` on it, `SwitchDesktop` on its own desktop, a GDI capture of the
-//! screen it can reach). Each gives a plain value
+//! screen it can reach), and `CreateDesktopW` on the caller's own station (`job-ui`'s effect,
+//! and the harness's control). Each gives a plain value
 //! or the Win32 code, never a panic.
 #![expect(
     unsafe_code,
@@ -221,6 +222,45 @@ pub(crate) fn try_winsta0() -> WinSta0Path {
     // SAFETY: opened above and no longer the process's station; closed once.
     drop(unsafe { CloseWindowStation(station) });
     got
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    /// Declared here: the crate's binding takes a `DEVMODEW` this call never passes.
+    fn CreateDesktopW(
+        name: *const u16,
+        device: *const u16,
+        mode: *const std::ffi::c_void,
+        flags: u32,
+        access: u32,
+        attributes: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+}
+
+/// The code `CreateDesktopW` gives for a new desktop on this process's own window station; 0
+/// when it was made (it is closed at once). The job's `DESKTOP` UI limit refuses it with 5.
+pub(crate) fn create_desktop_code() -> u32 {
+    let name: Vec<u16> = format!("ClauseoS15Fx-{}", std::process::id())
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: the name is NUL-terminated and outlives the call; no device, mode or attributes.
+    let desktop = unsafe {
+        CreateDesktopW(
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            DESKTOP_READOBJECTS.0,
+            std::ptr::null(),
+        )
+    };
+    if desktop.is_null() {
+        return u32::try_from(last()).unwrap_or(u32::MAX);
+    }
+    // SAFETY: made above, closed once.
+    drop(unsafe { CloseDesktop(windows::Win32::System::StationsAndDesktops::HDESK(desktop)) });
+    0
 }
 
 /// The code `SwitchDesktop` on this thread's own desktop gives; 0 when it switched.
