@@ -26,7 +26,8 @@
 
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, OnceLock, mpsc};
+use std::thread;
 use std::time::Duration;
 
 use super::sweep::SWEPT;
@@ -51,6 +52,11 @@ pub(crate) const EMPTY_WAIT: Duration = Duration::from_millis(400);
 pub(crate) const SWEEPER_BUDGET: Duration = Duration::from_millis(500);
 /// How often it looks meanwhile.
 pub(crate) const EMPTY_POLL: Duration = Duration::from_millis(25);
+/// How many pieces of the host's stdin (each up to [`PIECE`]) wait for the agent's stdin: up to
+/// 16 MiB the agent hasn't read yet, past which the read waits too ([`relay_stdin`]).
+const STDIN_PIECES: usize = 256;
+/// The largest piece read from the host's stdin at once.
+const PIECE: usize = 64 * 1024;
 
 /// The calls that start the sweeper; Windows' are `outer/end.rs`'s.
 pub(crate) trait SweeperSteps {
@@ -256,6 +262,14 @@ impl<S: SweeperSteps> EndSweep<S> {
         self.stdin_ended.get_or_init(|| self.steps.now());
     }
 
+    /// What is left of `grace` since the host's stdin ended, on the steps' clock; all of it
+    /// before then.
+    fn grace_left(&self, grace: Duration) -> Duration {
+        self.stdin_ended.get().map_or(grace, |ended| {
+            grace.saturating_sub(self.steps.now().saturating_sub(*ended))
+        })
+    }
+
     /// Waits up to `wait` for a path to begin the end; whether one did.
     pub(crate) fn wait_begun(&self, wait: Duration) -> bool {
         let Ok(begun) = self.begun.lock() else {
@@ -368,29 +382,64 @@ pub(crate) fn copy(mut from: impl Read, mut to: impl Write) -> CopyEnd {
     }
 }
 
-/// The host's stdin relayed to the agent's. When the host's side ends, the agent's stdin is
-/// closed (`close`), so the agent reads the end of its input, and it has `grace` ([`GRACE`]) to
-/// finish (the stdin end's time is kept first, [`EndSweep::stdin_ended`]): the inner's exit
-/// begins the end meanwhile ([`inner_exited`]), its output and code kept. When no path began it
-/// by then, this one does ([`EndSignal::Stdin`]): the job ends, and the agent with it, inside the
-/// host's 2 s. An agent that closed its own stdin ends nothing.
-pub(crate) fn relay_stdin<S: SweeperSteps, W: Write>(
-    from: impl Read,
+/// The host's stdin relayed to the agent's. This thread reads the host's stdin and hands each
+/// piece over a bounded channel ([`STDIN_PIECES`]) to a writer thread of its own, which writes
+/// to the agent's stdin; when the host's side ends (or fails), the stdin end's time is kept
+/// ([`EndSweep::stdin_ended`]) at once, even while the writer is still blocked on an agent that
+/// isn't reading, so the deadline counts from the host's real end. The writer then hands over
+/// what is left and closes the agent's stdin (`close`), so the agent reads the end of its input;
+/// the agent has what is left of `grace` ([`GRACE`]), counted from the stdin end, to finish:
+/// the inner's exit begins the end meanwhile ([`inner_exited`]), its output and code kept. When
+/// no path began it by then, this one does ([`EndSignal::Stdin`]): the job ends, and the agent
+/// with it, inside the host's 2 s; a writer still blocked then fails, its pipe's other end gone
+/// with the job, and closes. An agent that closed its own stdin ends nothing: the writer stops,
+/// and the host's stdin is still read, its end still kept and acted on. Past [`STDIN_PIECES`]
+/// pieces the agent hasn't read, the read waits for the writer, so the end is seen late.
+pub(crate) fn relay_stdin<S: SweeperSteps, W: Write + Send>(
+    mut from: impl Read,
     to: W,
     end: &EndSweep<S>,
     grace: Duration,
-    close: impl FnOnce(W),
+    close: impl FnOnce(W) + Send,
 ) {
-    let mut to = to;
-    let ended = copy(from, &mut to);
-    if ended == CopyEnd::Source {
+    let (pieces, handed) = mpsc::sync_channel::<Vec<u8>>(STDIN_PIECES);
+    let (closed, close_seen) = mpsc::channel::<()>();
+    thread::scope(|scope| {
+        let writer = thread::Builder::new().spawn_scoped(scope, move || {
+            let mut to = to;
+            for piece in handed {
+                if to.write_all(&piece).and_then(|()| to.flush()).is_err() {
+                    break;
+                }
+            }
+            close(to);
+            let _sent = closed.send(());
+        });
+        if writer.is_err() {
+            // The agent's stdin, dropped with the closure, is closed at once.
+            end.steps()
+                .log("clauseo-sandbox-run: the agent's stdin writer didn't start");
+        }
+        let mut pieces = Some(pieces);
+        let mut buffer = vec![0u8; PIECE];
+        loop {
+            let read = match from.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => read,
+            };
+            let piece = buffer.get(..read).unwrap_or_default().to_vec();
+            // Once the writer stopped, what is read is dropped, but the end is still awaited.
+            if pieces.as_ref().is_some_and(|to| to.send(piece).is_err()) {
+                pieces = None;
+            }
+        }
         end.stdin_ended();
-    }
-    close(to);
-    if ended == CopyEnd::Source {
-        end.wait_begun(grace);
+        drop(pieces);
+        // The close comes before the grace's end, unless the writer is blocked.
+        let _closed = close_seen.recv_timeout(grace);
+        end.wait_begun(end.grace_left(grace));
         end.trigger(EndSignal::Stdin);
-    }
+    });
 }
 
 /// The outer's order once the inner exited with `inner` (`None` when its wait failed), the agent
@@ -412,5 +461,7 @@ pub(crate) fn inner_exited<S: SweeperSteps>(
     })
 }
 
+#[cfg(test)]
+mod stdin_tests;
 #[cfg(test)]
 mod tests;
