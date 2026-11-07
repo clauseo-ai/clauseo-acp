@@ -33,7 +33,7 @@ const BENIGN_START: Duration = Duration::from_secs(30);
 const SERVICES: [&str; 4] = ["seclogon", "Winmgmt", "Schedule", "BITS"];
 
 /// The row's result from `verdict`: an INFO verdict marks the row INFO ([`Ctx::info`]).
-fn judge(ctx: &Ctx<'_>, verdict: Verdict) -> Result<String, String> {
+pub(crate) fn judge(ctx: &Ctx<'_>, verdict: Verdict) -> Result<String, String> {
     match verdict {
         Verdict::Pass(note) => Ok(note),
         Verdict::Fail(why) => Err(why),
@@ -103,7 +103,7 @@ fn listing_in_session(ctx: &Ctx<'_>, sid: &str, outer: u32) -> Vec<String> {
 }
 
 /// Ends the session `a` (its stdin closed) and notes how it ended.
-fn end_session(ctx: &Ctx<'_>, a: Running, until: Instant) -> Result<(), String> {
+pub(crate) fn end_session(ctx: &Ctx<'_>, a: Running, until: Instant) -> Result<(), String> {
     let done = a.finish(until)?;
     ctx.note(&format!("A: probe hold: {}", summary(&done)));
     for line in &done.stderr {

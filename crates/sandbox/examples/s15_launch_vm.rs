@@ -37,6 +37,9 @@ fn main() -> ExitCode {
 #[path = "s15_launch_vm/checks.rs"]
 mod checks;
 #[cfg(windows)]
+#[path = "s15_launch_vm/checks_cleanup.rs"]
+mod checks_cleanup;
+#[cfg(windows)]
 #[path = "s15_launch_vm/checks_ctl.rs"]
 mod checks_ctl;
 #[cfg(windows)]
@@ -51,6 +54,9 @@ mod checks_sec;
 #[cfg(windows)]
 #[path = "s15_launch_vm/checks_ui.rs"]
 mod checks_ui;
+#[cfg(windows)]
+#[path = "s15_launch_vm/cleanup_verdict.rs"]
+mod cleanup_verdict;
 #[cfg(windows)]
 #[path = "s15_launch_vm/cli.rs"]
 mod cli;
@@ -75,6 +81,9 @@ mod prepare;
 #[cfg(windows)]
 #[path = "s15_launch_vm/probe.rs"]
 mod probe;
+#[cfg(windows)]
+#[path = "s15_launch_vm/probe_items.rs"]
+mod probe_items;
 #[cfg(windows)]
 #[path = "s15_launch_vm/probe_sec.rs"]
 mod probe_sec;
