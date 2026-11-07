@@ -28,6 +28,7 @@ use crate::log_file::Cause;
 const SCRATCH: &str = "Scratch";
 
 /// How long start-up's ready waits for the Scratch matter, from when its scan began.
+/// First run: with Documents looked up late (`documents.rs`), Scratch can appear after ready.
 pub(crate) const READY_WAIT: Duration = Duration::from_secs(3);
 
 /// How long the scan is waited for before there is no Scratch matter this run. Nothing waits on
