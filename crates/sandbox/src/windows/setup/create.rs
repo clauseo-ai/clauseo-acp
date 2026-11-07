@@ -377,12 +377,11 @@ fn keep_user(
         users.profiles.push((user.clone(), profile.path));
         return Ok(());
     }
-    if wipe {
-        machine
-            .delete_profile(&user.sid)
-            .map_err(|error| (Step::ResetProfile, cause_of(&error)))?;
-        users.profiles_reset.push(user.clone());
-    }
+    let old = if wipe {
+        Some(resets::delete(machine, user)?)
+    } else {
+        None
+    };
     let password = machine.new_password();
     machine
         .set_password(name, &password)
@@ -396,6 +395,10 @@ fn keep_user(
         .hide(name)
         .map_err(|error| (Step::Hide, cause_of(&error)))?;
     let path = log_on(machine, name, &password)?;
+    if let Some(old) = &old {
+        resets::check_remade(user, old.as_deref(), &path)?;
+        users.profiles_reset.push(user.clone());
+    }
     users.profiles.push((user.clone(), path));
     users.secrets.push((user.sid.clone(), password));
     Ok(())

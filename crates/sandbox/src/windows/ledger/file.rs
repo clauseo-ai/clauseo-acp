@@ -101,6 +101,12 @@ impl State {
         })
     }
 
+    /// How many entries are set aside: unread or untrusted.
+    pub(super) fn set_aside_entries(&self) -> usize {
+        let set_aside = |slot: &&Slot| matches!(slot, Slot::SetAside(_));
+        self.slots.iter().filter(set_aside).count()
+    }
+
     /// Whether an entry names `sid`: a trusted one whose SID it is, or a kept entry or kept
     /// hand-back holding it as any string value at any depth, compared without ASCII case,
     /// since a kept item's shape is unknown.

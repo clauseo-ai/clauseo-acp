@@ -234,3 +234,50 @@ fn a_reused_user_stays_denied_on_the_other_matters() {
     });
     assert!(denied, "user 1 is still denied on {kept}");
 }
+
+/// Version 3 always writes `needs_reset`, empty or not, and refuses a file without it.
+#[test]
+fn version_3_always_writes_needs_reset_and_requires_it() {
+    let temp = TempDir::new("reuse-v3-field");
+    let mut sids = sids_in(&temp);
+    sids.sid_for(&matter()).unwrap();
+    let path = temp.path().join(SANDBOX_DIR).join(MATTERS_FILE);
+    let json: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(json["needs_reset"], serde_json::json!([]));
+    temp.file(
+        &format!("{SANDBOX_DIR}/{MATTERS_FILE}"),
+        r#"{"version":3,"matters":{}}"#,
+    );
+    assert!(
+        MatterSids::load(temp.path()).is_err(),
+        "a missing field fails closed"
+    );
+}
+
+/// A release that lands while set-up clears its marks (another instance, between set-up's read
+/// and its clear) keeps its user marked: the clear reads the file again under the lock.
+#[test]
+fn a_release_during_a_clear_stays_marked() {
+    let temp = TempDir::new("reuse-clear-race");
+    let records = TempDir::new("reuse-clear-race-ledger");
+    let ledger = ledger_in(records.path(), &pool(2));
+    let none = OpenSessions::default();
+    let mut app = sids_in(&temp);
+    let (one, two) = (matter(), matter());
+    assert_eq!(
+        app.launch(&one, &pool(2), reread(&ledger), &none),
+        Ok(user(1))
+    );
+    assert_eq!(
+        app.launch(&two, &pool(2), reread(&ledger), &none),
+        Ok(user(2))
+    );
+    app.release(&one, UNIX_EPOCH).unwrap();
+    // Set-up reads the marks, then the app releases the other matter before set-up clears.
+    let mut setup = sids_in(&temp);
+    assert_eq!(setup.resets_due(), [user(1)]);
+    app.release(&two, UNIX_EPOCH).unwrap();
+    assert_eq!(setup.reset_done(&setup.resets_due()), Ok(vec![user(1)]));
+    let after: Vec<Sid> = sids_in(&temp).needs_reset().iter().cloned().collect();
+    assert_eq!(after, [user(2)], "the later release keeps its mark");
+}

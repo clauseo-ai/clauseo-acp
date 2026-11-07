@@ -23,8 +23,8 @@ use crate::windows::setup::{
 use crate::windows::sids::Reserved;
 
 pub(super) use super::fake_acl::FakeAcl;
-use super::fake_more::Around;
 pub(super) use super::fake_more::folder_name;
+use super::fake_more::{Around, ProfileFaults};
 
 /// The owner's SID, and its account's name.
 pub(super) const OWNER: &str = "S-1-5-21-7-8-9-1001";
@@ -116,6 +116,7 @@ pub(super) struct FakeMachine {
     pub(super) no_local_low: BTreeSet<String>,
     /// The users the owner's `matters.json` marks as owed a profile reset.
     pub(super) needs_reset: BTreeSet<Sid>,
+    pub(super) faults: ProfileFaults,
     next_rid: u32,
     passwords: u32,
     around: Around,
@@ -165,6 +166,7 @@ impl FakeMachine {
             stuck_owners: BTreeSet::new(),
             no_local_low: BTreeSet::new(),
             needs_reset: BTreeSet::new(),
+            faults: ProfileFaults::default(),
             next_rid: 1000,
             passwords: 0,
             around: Around,
@@ -407,16 +409,18 @@ impl Machine for FakeMachine {
                 temporary: true,
             });
         }
-        let path = self.profile_path(name);
+        let folder = self.faults.folder(name);
+        let path = self.dir.path().join("Users").join(&folder);
+        self.faults.made(&path);
         if self.no_local_low.contains(name) {
-            self.dir.dir(&format!("Users/{name}/AppData"));
+            self.dir.dir(&format!("Users/{folder}/AppData"));
             self.state.profiles.insert(sid, path.clone());
             return Ok(ProfileDir {
                 path,
                 temporary: false,
             });
         }
-        let local_low = self.dir.dir(&format!("Users/{name}/AppData/LocalLow"));
+        let local_low = self.dir.dir(&format!("Users/{folder}/AppData/LocalLow"));
         if self.self_owned_local_low.contains(name) {
             self.owners.insert(local_low, sid.clone());
         }
@@ -437,7 +441,15 @@ impl Machine for FakeMachine {
 
     fn delete_profile(&mut self, sid: &Sid) -> Result<(), MachineError> {
         self.call(format!("delete_profile {}", rid(sid)))?;
-        self.state.profiles.remove(sid);
+        let name = self
+            .state
+            .accounts
+            .iter()
+            .find(|(_, a)| a.sid == *sid)
+            .map(|(n, _)| n);
+        if let Some(path) = self.state.profiles.remove(sid) {
+            self.faults.deleted(name, path);
+        }
         Ok(())
     }
 
@@ -452,7 +464,7 @@ impl Machine for FakeMachine {
 
     fn exists(&mut self, path: &Path) -> Result<bool, MachineError> {
         self.call(format!("exists {}", folder_name(path)))?;
-        Ok(std::fs::symlink_metadata(path).is_ok())
+        Ok(!self.faults.is_gone(path) && std::fs::symlink_metadata(path).is_ok())
     }
 
     fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError> {

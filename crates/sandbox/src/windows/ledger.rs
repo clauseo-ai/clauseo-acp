@@ -8,11 +8,10 @@
 //! its matter's next launch walks its tree strictly (S15 `PR3b` round 2, N4). Taking entries back
 //! ([`Ledger::take_back`]) marks them `removing` on disk before any removal, so a crash partway
 //! is never read as a launch that wrote them (round 4); [`reconcile`] finishes their removal. It
-//! leaves a
-//! permission entry another entry names: the same entry on the same path, or a Low label on
-//! another name for the same file. A Low label's earlier label is never recorded when it is our
-//! own label, and goes to the entry that shares the label when its own entry is dropped (N7). So
-//! every permission entry written is listed, and no `applied` entry lacks one or its walk.
+//! leaves a permission entry another entry names: the same entry on the same path, or a Low label
+//! on another name for the same file. A Low label's earlier label is never recorded when it is
+//! our own label, and goes to the entry that shares the label when its own entry is dropped (N7).
+//! So every permission entry written is listed, and no `applied` entry lacks one or its walk.
 //!
 //! A forget records the hand-back it owes each pool user of its matter, under the lock and before
 //! any removal, and clears it only once every hand-back walk has succeeded (`owed.rs`, N5). While
@@ -206,11 +205,7 @@ impl Ledger {
 
     /// How many entries are set aside: unread or untrusted. They are kept and never acted on.
     pub fn set_aside_entries(&self) -> usize {
-        self.state
-            .slots
-            .iter()
-            .filter(|slot| matches!(slot, Slot::SetAside(_)))
-            .count()
+        self.state.set_aside_entries()
     }
 
     /// `matter`'s trusted entries, as last read, for removal.
@@ -397,9 +392,7 @@ impl Ledger {
         self.state.names_sid(sid)
     }
 
-    /// Whether a trusted allow ([`Rights::is_allow`]) for `sid` is listed, in any state, or a
-    /// kept item holds it (rights unknown): the reuse check (`PR4c`, R14) holds it back then. A
-    /// sibling deny on matter M keeps its user out of M, grants nothing, and stays on reuse.
+    /// Whether `sid` has a trusted allow or a kept item names it: the reuse check's (`PR4c`).
     pub fn grants_sid(&self, sid: &Sid) -> bool {
         self.state.grants_sid(sid)
     }
