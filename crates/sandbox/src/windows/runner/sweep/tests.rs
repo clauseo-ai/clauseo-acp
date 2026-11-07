@@ -1,4 +1,5 @@
-//! The sweep through a fake process list: who is killed, what fails closed, and the tick.
+//! The sweep through a fake process list: who is killed, what fails closed, and the job's
+//! processes kept only by a sweep given the job.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,6 +44,9 @@ struct Fake {
     killed: Vec<u32>,
     /// A process that starts another each time it is killed.
     forever: Option<u32>,
+    /// Whether this sweep was given the job (the inner's tick and end); without it, nothing is
+    /// in the job.
+    job: bool,
 }
 
 impl Processes for Fake {
@@ -68,7 +72,7 @@ impl Processes for Fake {
         Ok(self.procs.contains_key(&pid).then_some(pid))
     }
     fn in_job(&mut self, process: &u32) -> io::Result<bool> {
-        Ok(self.procs.get(process).is_some_and(|p| p.in_job))
+        Ok(self.job && self.procs.get(process).is_some_and(|p| p.in_job))
     }
     fn kill(&mut self, process: &u32) -> io::Result<()> {
         let pid = process;
@@ -142,7 +146,8 @@ fn only_the_pool_users_processes_outside_the_job_are_killed() {
     );
     fake.procs.insert(12, pool_proc("stray.exe"));
     fake.procs.insert(13, pool_proc("bits-job.exe"));
-    let (got, lines) = run(&mut fake, &[10], Point::BeforeResume);
+    fake.job = true;
+    let (got, lines) = run(&mut fake, &[10], Point::Tick);
     assert_eq!(got, Ok(vec![12, 13]));
     assert_eq!(fake.killed, [12, 13]);
     for pid in [0, 4, 900, 10, 11] {
@@ -151,9 +156,9 @@ fn only_the_pool_users_processes_outside_the_job_are_killed() {
     assert_eq!(
         lines,
         [
-            "clauseo-sandbox-run: sweep (before resume) killed the sandbox user's process 12 \
+            "clauseo-sandbox-run: sweep (mid-session) killed the sandbox user's process 12 \
              (stray.exe)",
-            "clauseo-sandbox-run: sweep (before resume) killed the sandbox user's process 13 \
+            "clauseo-sandbox-run: sweep (mid-session) killed the sandbox user's process 13 \
              (bits-job.exe)",
         ]
     );
@@ -162,7 +167,7 @@ fn only_the_pool_users_processes_outside_the_job_are_killed() {
 #[test]
 fn nothing_of_the_pool_user_is_nothing_to_do() {
     let mut fake = machine();
-    assert_eq!(run(&mut fake, &[], Point::BeforeLogon).0, Ok(vec![]));
+    assert_eq!(run(&mut fake, &[], Point::Start).0, Ok(vec![]));
     assert_eq!(fake.killed, Vec::<u32>::new());
 }
 
@@ -182,14 +187,14 @@ fn entries_without_a_user_are_passed_over_and_the_pool_users_still_fail_closed()
         fake.procs.insert(pid, kernel);
     }
     fake.procs.insert(12, pool_proc("stray.exe"));
-    assert_eq!(run(&mut fake, &[], Point::BeforeLogon).0, Ok(vec![12]));
+    assert_eq!(run(&mut fake, &[], Point::Start).0, Ok(vec![12]));
     for pid in [0, 88, 160, 2100] {
         assert!(fake.procs.contains_key(&pid), "{pid} passed over");
     }
     // Beside them, a pool user's process that can't be opened still fails the launch.
     fake.procs.insert(13, pool_proc("hidden.exe"));
     fake.deny_open.insert(13);
-    let got = run(&mut fake, &[], Point::BeforeResume).0;
+    let got = run(&mut fake, &[], Point::Start).0;
     assert!(
         matches!(&got, Err(SweepError::Open { pid: 13, code, .. }) if code == "5"),
         "{got:?}"
@@ -201,7 +206,7 @@ fn a_process_that_cant_be_opened_or_ended_fails_closed() {
     let mut fake = machine();
     fake.procs.insert(12, pool_proc("stray.exe"));
     fake.deny_open.insert(12);
-    let got = run(&mut fake, &[], Point::BeforeLogon).0;
+    let got = run(&mut fake, &[], Point::Start).0;
     assert!(
         matches!(&got, Err(SweepError::Open { pid: 12, code, .. }) if code == "5"),
         "{got:?}"
@@ -209,7 +214,7 @@ fn a_process_that_cant_be_opened_or_ended_fails_closed() {
     let mut fake = machine();
     fake.procs.insert(12, pool_proc("stray.exe"));
     fake.deny_kill.insert(12, 1);
-    let got = run(&mut fake, &[], Point::BeforeResume).0;
+    let got = run(&mut fake, &[], Point::Start).0;
     assert!(
         matches!(&got, Err(SweepError::Kill { pid: 12, .. })),
         "{got:?}"
@@ -227,7 +232,7 @@ fn a_pid_reused_by_another_user_before_the_open_is_left_alone() {
         in_job: false,
     };
     fake.reused.insert(12, lawyers);
-    assert_eq!(run(&mut fake, &[], Point::BeforeLogon).0, Ok(vec![]));
+    assert_eq!(run(&mut fake, &[], Point::Start).0, Ok(vec![]));
     assert_eq!(fake.killed, Vec::<u32>::new());
     assert!(fake.procs.contains_key(&12));
 }
@@ -241,12 +246,14 @@ fn what_a_killed_process_started_is_killed_in_the_next_round() {
     let mut fake = machine();
     fake.procs.insert(12, pool_proc("hydra.exe"));
     fake.forever = Some(12);
-    let got = run(&mut fake, &[], Point::BeforeLogon).0;
+    let got = run(&mut fake, &[], Point::Start).0;
     assert_eq!(got, Err(SweepError::StillRunning));
 }
 
 #[test]
-fn the_tick_sweeps_each_interval_retries_a_failure_and_stops_at_the_end() {
+fn a_sweep_without_the_job_keeps_only_its_own_pid() {
+    // The inner's first act and the end sweeper: a process marked in the job is killed too,
+    // since nothing but the inner can be in it yet, or the job is gone.
     let mut fake = machine();
     fake.procs.insert(10, pool_proc("inner.exe"));
     fake.procs.insert(
@@ -256,38 +263,19 @@ fn the_tick_sweeps_each_interval_retries_a_failure_and_stops_at_the_end() {
             ..pool_proc("agent.exe")
         },
     );
-    fake.procs.insert(12, pool_proc("wmi-child.exe"));
-    fake.deny_kill.insert(12, 1);
-    let mut waits = Vec::new();
-    let mut lines = Vec::new();
-    // Three intervals pass, then the session ends; a process appears after the end.
-    let mut left = 3;
-    let ended = watch(
-        &mut fake,
-        &sid(POOL),
-        &[10],
-        TICK,
-        |interval| {
-            waits.push(interval);
-            if left == 0 {
-                return Some("ended");
-            }
-            left -= 1;
-            None
-        },
-        &mut |l| lines.push(l.to_owned()),
-    );
-    assert_eq!(ended, "ended");
-    assert_eq!(TICK, Duration::from_secs(30));
-    assert_eq!(waits, [TICK; 4]);
-    // The first tick failed and logged it; the second killed it; the third found nothing.
-    assert_eq!(fake.killed, [12]);
-    assert_eq!(lines.len(), 2, "{lines:?}");
-    assert!(lines[0].starts_with("clauseo-sandbox-run: sweep (mid-session): the sandbox user's"));
+    let (got, lines) = run(&mut fake, &[10], Point::Start);
+    assert_eq!(got, Ok(vec![11]));
     assert_eq!(
-        lines[1],
-        "clauseo-sandbox-run: sweep (mid-session) killed the sandbox user's process 12 \
-         (wmi-child.exe)"
+        lines,
+        [
+            "clauseo-sandbox-run: sweep (before launch) killed the sandbox user's process 11 \
+          (agent.exe)"
+        ]
     );
-    assert!(fake.procs.contains_key(&10) && fake.procs.contains_key(&11));
+    let mut fake = machine();
+    fake.procs.insert(30, pool_proc("sweeper.exe"));
+    fake.procs.insert(31, pool_proc("task.exe"));
+    let (got, lines) = run(&mut fake, &[30], Point::Sweeper);
+    assert_eq!(got, Ok(vec![31]));
+    assert!(lines[0].contains("sweep (end sweeper) killed"), "{lines:?}");
 }

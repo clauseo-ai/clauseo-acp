@@ -1,23 +1,25 @@
-//! The sweep of the pool user's processes (M1): the outer runner kills every process whose token
-//! user is the pool user, except its own inner runner and what is in its kill-on-close job.
+//! The sweep of the pool user's processes (M1): every process whose token user is the pool user
+//! is killed, but the sweeping process itself and, mid-session, what is in this launch's
+//! kill-on-close job. It runs as the pool user, which can always list and open its own
+//! processes; the desktop user can't (`WTSEnumerateProcessesW` lists another user's processes
+//! only to Administrators, and the outer runs unelevated), so the outer sweeps nothing.
 //!
 //! A pool user serves one live session at a time (`pool::assign::busy`), so no process of it
-//! outside this launch's job belongs to a live session. The outer sweeps:
+//! outside this launch's job belongs to a live session. The sweeps:
 //!
-//! - (a) before the pool user's logon ([`Point::BeforeLogon`]);
-//! - (b) once the suspended inner runner is in the job and its process and thread are shut, and
-//!   before it is resumed ([`Point::BeforeResume`]): a process that opened the inner's token in
-//!   the moment between `CreateProcessWithLogonW` and the shut, one the logon set off among them,
-//!   is killed before the inner runs any of its code;
-//! - every [`TICK`] while the session runs ([`Point::Tick`], [`watch`]): a process some Windows
-//!   service started outside the job lives at most that long;
-//! - (c) at session end ([`Point::End`]).
+//! - [`Point::Start`]: the inner runner's first act once resumed (`inner_flow.rs`), before it
+//!   reads the launch or makes anything. Only the inner itself is kept: nothing else can be in
+//!   the job yet (the job is unnamed, its only full handle is the outer's, and the inner has
+//!   started nothing). A failure fails the launch closed (`RunExit::Sweep`).
+//! - [`Point::Tick`]: every [`TICK`] while the agent runs, in the inner, keeping the job's
+//!   processes: one some Windows service started outside the job lives at most that long. A
+//!   failure is logged and tried again at the next tick.
+//! - [`Point::End`]: in the inner, once the agent exited, keeping the job's processes (the outer
+//!   ends the job itself). A failure is logged.
+//! - [`Point::Sweeper`]: the detached end sweeper (`--sweep`, `sweeper.rs`), which keeps
+//!   nothing but itself. A failure is its exit code.
 //!
-//! At (a) and (b) a failure fails the launch closed: a list that can't be read, or a process of
-//! the pool user's that can't be opened, checked against the job or ended. A process the list
-//! gives no user for ([`Owner::None`]) is not the pool user's and is passed over. At a tick and
-//! at (c) a failure is logged and the session goes on; a tick's failure is tried again at the
-//! next tick.
+//! A process whose user this process can't read ([`Owner::None`]) is passed over.
 //!
 //! Each process found is opened first, which pins its pid, and then the list is read again: only
 //! a pid that list still gives the pool user is killed, so a pid reused meanwhile is left alone.
@@ -32,7 +34,7 @@ use crate::windows::sids::Sid;
 #[cfg(windows)]
 pub(super) mod os;
 
-/// How often the outer sweeps while the session runs.
+/// How often the inner sweeps while the agent runs.
 pub(crate) const TICK: Duration = Duration::from_secs(30);
 /// How many rounds one sweep makes: a round that kills something is followed by another, for
 /// what those processes started meanwhile.
@@ -41,23 +43,23 @@ const ROUNDS: usize = 8;
 /// Where the sweep runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Point {
-    /// (a): before the pool user's logon.
-    BeforeLogon,
-    /// (b): the inner runner in the job and shut, before it is resumed.
-    BeforeResume,
-    /// While the session runs, every [`TICK`].
+    /// The inner runner's first act, before it reads the launch.
+    Start,
+    /// While the agent runs, every [`TICK`].
     Tick,
-    /// (c): at session end.
+    /// In the inner, once the agent exited.
     End,
+    /// The detached end sweeper.
+    Sweeper,
 }
 
 impl fmt::Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Point::BeforeLogon => "before logon",
-            Point::BeforeResume => "before resume",
+            Point::Start => "before launch",
             Point::Tick => "mid-session",
             Point::End => "session end",
+            Point::Sweeper => "end sweeper",
         })
     }
 }
@@ -67,10 +69,10 @@ impl fmt::Display for Point {
 pub(crate) enum Owner {
     /// Its token's user.
     User(Sid),
-    /// No user: `WTSEnumerateProcessesW` reads each token in the service, as SYSTEM, and gives
-    /// none only for the kernel's own and pseudo processes (System Idle, System, Registry, Memory
-    /// Compression, Secure System) and protected ones, none of which a pool user can start. Not
-    /// the pool user's, so passed over.
+    /// No user this process can read: it can't open the process with
+    /// `PROCESS_QUERY_LIMITED_INFORMATION`, or its token with `TOKEN_QUERY`. Another user's
+    /// process, a protected one, or the kernel's own; the pool user's own processes open for it
+    /// (their default DACL grants their user full access). Passed over.
     None,
 }
 
@@ -87,11 +89,12 @@ pub(crate) struct Seen {
 pub(crate) trait Processes {
     /// An open process; holding it pins its pid.
     type Process;
-    /// Every process on the machine, with its user.
+    /// Every process on the machine, with its user as far as this process can read it.
     fn list(&mut self) -> io::Result<Vec<Seen>>;
     /// Opens `pid` to check and end it; `None` when no process has that pid any more.
     fn open(&mut self, pid: u32) -> io::Result<Option<Self::Process>>;
-    /// Whether it is in this launch's kill-on-close job.
+    /// Whether it is in this launch's kill-on-close job; always false for a sweep that keeps
+    /// no job's processes.
     fn in_job(&mut self, process: &Self::Process) -> io::Result<bool>;
     /// Ends it, and waits until it has ended.
     fn kill(&mut self, process: &Self::Process) -> io::Result<()>;
@@ -129,8 +132,8 @@ pub(crate) enum SweepError {
     StillRunning,
 }
 
-/// Kills every process of `user` but those in `keep` (pids this runner holds a handle to: its
-/// inner runner) and those in the job, logging each kill at `point`. The pids it killed.
+/// Kills every process of `user` but those in `keep` (this process's own pid) and those in the
+/// job, logging each kill at `point`. The pids it killed.
 pub(crate) fn sweep<P: Processes>(
     calls: &mut P,
     user: &Sid,
@@ -183,29 +186,6 @@ pub(crate) fn sweep<P: Processes>(
         }
     }
     Err(SweepError::StillRunning)
-}
-
-/// Sweeps at [`Point::Tick`] each time `wait(interval)` gives `None`, until it gives the
-/// session's end, which it returns. A tick's failure is logged; the next tick tries again.
-pub(crate) fn watch<P: Processes, T>(
-    calls: &mut P,
-    user: &Sid,
-    keep: &[u32],
-    interval: Duration,
-    mut wait: impl FnMut(Duration) -> Option<T>,
-    log: &mut dyn FnMut(&str),
-) -> T {
-    loop {
-        if let Some(ended) = wait(interval) {
-            return ended;
-        }
-        if let Err(error) = sweep(calls, user, keep, Point::Tick, log) {
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({}): {error}",
-                Point::Tick
-            ));
-        }
-    }
 }
 
 /// The list; one that can't be read fails the sweep.
