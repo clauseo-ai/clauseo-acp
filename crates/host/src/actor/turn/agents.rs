@@ -318,9 +318,8 @@ fn launch(
         Some(env) => env.clone(),
         None => std::env::vars_os().collect(),
     };
-    // Tier C (no jail) leaves the agent's environment alone: none of the session proxy's
-    // variables (`ProxyHandle::env`) go here, and only the browser entry reaches the proxy. The
-    // proxy is advisory there, since nothing enforces it without a jail; R17 PR-D sets them.
+    // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
+    // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
     let spec = agent::launch_spec(
         settings,
         hook,
@@ -329,7 +328,8 @@ fn launch(
         inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
-    )?
+    )
+    .map_err(super::launch_checks::folder::gone_at_spawn)?
     .with_redacted(redacted);
     let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
     let plan_notes = claude

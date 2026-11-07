@@ -178,6 +178,9 @@ mod key_unreadable;
 #[path = "host/keys_loading.rs"]
 mod keys_loading;
 #[cfg(test)]
+#[path = "host/launch_folder.rs"]
+mod launch_folder;
+#[cfg(test)]
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
 #[cfg(test)]

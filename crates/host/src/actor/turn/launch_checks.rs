@@ -286,6 +286,16 @@ pub(super) fn prepare(
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
         }
+        // Before anything is made for the launch: a folder that is gone, or does not answer,
+        // is `matter.folder_missing`, not a spawn that fails in it (`folder.rs`).
+        let there = folder::check(Arc::clone(&clock), matter, stored.clone()).await;
+        if let Err(error) = there {
+            return Input::Turn(TurnInput::Prepared {
+                thread,
+                id,
+                result: Err(error),
+            });
+        }
         // Whether a slot is there for the browser after a wait; without one, it is.
         let slot = match slot_wait {
             Some(slot_wait) => slot_wait.await,
@@ -525,6 +535,7 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId, tree: TreeWatch) {
 mod browser;
 mod egress;
 use paths::Claims;
+pub(super) mod folder;
 pub(super) mod relay;
 mod straggler;
 pub(crate) use straggler::HeldRuns;
