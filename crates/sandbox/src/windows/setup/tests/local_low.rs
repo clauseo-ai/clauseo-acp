@@ -164,3 +164,35 @@ fn a_missing_local_low_fails_at_the_shared_writes_not_the_owners() {
         machine.calls
     );
 }
+
+/// A re-run that keeps a user whose profile has a reparse point on the way to `LocalLow`: the
+/// owner step refuses, naming the part, before any owner read or deny, and nothing is handed
+/// over.
+#[test]
+fn a_kept_users_profile_with_a_reparse_point_fails_at_the_owners_naming_it() {
+    let mut machine = FakeMachine::new("setup-local-low-reparse");
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    machine.changed_profiles.insert("ClauseoSb04".to_owned());
+    machine.calls.clear();
+    let mut acl = FakeAcl::of(&machine);
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    assert_eq!(failure.step, Step::Owners, "{}", failure.cause);
+    assert!(failure.cause.contains("ClauseoSb04"), "{}", failure.cause);
+    assert!(
+        failure
+            .cause
+            .contains("AppData in the sandbox user's profile isn't a plain folder"),
+        "{}",
+        failure.cause
+    );
+    for refused in ["owner_of ClauseoSb04", "give_to_admins ClauseoSb04"] {
+        assert!(!machine.calls.iter().any(|c| c == refused), "{refused}");
+    }
+    let local_low = local_low(&machine, "ClauseoSb04");
+    assert!(
+        !acl.adds
+            .iter()
+            .any(|(path, _)| path.starts_with(&local_low))
+    );
+}

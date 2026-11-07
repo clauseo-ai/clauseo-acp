@@ -97,6 +97,13 @@ impl Object {
         ladder(extra, |access| open_at(&self.handle, name, access, true))
     }
 
+    /// Opens `name` in this folder relative to its handle, as [`Object::open_child`] does, for
+    /// `rights` and its attributes alone (`DELETE`, say, to delete a link itself).
+    pub(in crate::windows) fn open_child_for(&self, name: &[u16], rights: u32) -> io::Result<Self> {
+        let access = rights | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
+        Object::describe(open_at(&self.handle, name, access, true)?, false, false)
+    }
+
     /// Opens `name` in this folder relative to its handle, never following a link, with exactly
     /// `READ_CONTROL | WRITE_DAC` (S15 `PR4i`): what an owner is implied to have, and no more,
     /// so an item whose DACL lets only someone else in still opens for its owner. No
@@ -215,6 +222,11 @@ impl Object {
     /// record, `clean_close/ntfs.rs`).
     pub(in crate::windows) fn handle(&self) -> &Handle {
         &self.handle
+    }
+
+    /// Whether it is a reparse point of any kind.
+    pub(in crate::windows) fn reparse(&self) -> bool {
+        self.tag.is_some()
     }
 
     /// Whether it is a junction, symbolic link or other name surrogate.

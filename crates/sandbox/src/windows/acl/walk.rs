@@ -310,9 +310,13 @@ pub(super) fn hand_back(
     if !object.folder && object.links > 1 {
         return Err(ApplyFailure::LinkedFile);
     }
-    let parent = Object::open_folder(folder)
-        .and_then(|folder| folder.security(READ_ALL))
-        .map_err(io)?;
+    // The folder is read only for what its children inherit, but through itself alone: a
+    // folder whose final path isn't `folder` is `Changed`, never read through.
+    let parent = Object::open_folder(folder).map_err(io)?;
+    if parent.name_surrogate() || !same_path(&parent, folder).map_err(io)? {
+        return Err(ApplyFailure::Changed);
+    }
+    let parent = parent.security(READ_ALL).map_err(io)?;
     settle(token, &object, &parent, &current, mode)?;
     Ok(true)
 }

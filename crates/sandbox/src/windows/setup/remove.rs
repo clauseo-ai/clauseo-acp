@@ -33,7 +33,9 @@
 //! 2. `Removing = 1` written to the record (once; a re-run finds it set);
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
-//!    group, D-B11), its profile, its account with its sign-in screen value;
+//!    group, D-B11), its profile, its account with its sign-in screen value. A reparse point on
+//!    the way to `LocalLow` (`Removal::in_profile`) is logged, and the deny goes with the
+//!    profile, whose delete takes each link in it out itself first;
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
@@ -373,12 +375,24 @@ fn remove_user(
         // A temporary profile's `LocalLow` is not the user's own, and set-up put no deny there.
         if !temporary {
             let local_low = path.join("AppData").join("LocalLow");
-            remove_denies(acl, &record.group, &[local_low]).map_err(|cause| {
+            let deny_failed = |cause: String| {
                 (
                     RemoveStep::LocalLow,
                     format!("{label}'s LocalLow deny: {cause}"),
                 )
-            })?;
+            };
+            match machine.in_profile(path, &local_low) {
+                // A reparse point on the way: the real folder, and its deny, go with the
+                // profile, whose delete takes the link out itself first.
+                Err(MachineError::ProfileChanged(part)) => tracing::warn!(
+                    user = %label,
+                    %part,
+                    "a folder in a sandbox user's profile isn't a plain folder; its LocalLow deny \
+                     goes with the profile"
+                ),
+                Err(error) => return Err(deny_failed(cause_of(&error))),
+                Ok(_) => remove_denies(acl, &record.group, &[local_low]).map_err(deny_failed)?,
+            }
         }
         machine
             .delete_profile(sid, &record.owner)

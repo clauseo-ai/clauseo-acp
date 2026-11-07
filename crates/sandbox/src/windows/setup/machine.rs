@@ -37,6 +37,14 @@ pub enum MachineError {
     /// Anything else; what failed.
     #[error("{0}")]
     Other(String),
+    /// A folder in a pool user's profile (this part of its path) is a junction, a symbolic link
+    /// or another reparse point, or isn't where `ProfileList` puts it: set-up changes nothing
+    /// through it. The set-up can't repair that profile itself.
+    #[error(
+        "{0} in the sandbox user's profile isn't a plain folder, so set-up changed nothing \
+         there: remove the sandbox users, then run set-up again"
+    )]
+    ProfileChanged(String),
 }
 
 /// How the Secondary Logon service (`seclogon`) starts.
@@ -140,12 +148,23 @@ pub trait Machine {
     /// The owner of `path`, read without following a link (a pool user's `LocalLow`, `PR4h`).
     fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError>;
     /// Whether `path` is there, a junction or symbolic link counting as itself (never
-    /// followed): `DeviceSync` and each `LocalLow` are probed before their owners are read.
+    /// followed): `DeviceSync` is probed before its owner is read, and a reset's old profile
+    /// folder after its delete (each `LocalLow` is read by [`Machine::owner_in_profile`]).
     fn exists(&mut self, path: &Path) -> Result<bool, MachineError>;
-    /// Makes `BUILTIN\Administrators` the owner of `path` alone (its owner only, nothing below
-    /// it, never following a link), so no pool user keeps an owner's implied `WRITE_DAC` on a
-    /// folder whose denies protect what is below it.
-    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError>;
+    /// Makes `BUILTIN\Administrators` the owner of `folder` alone (its owner only, nothing
+    /// below it), so no pool user keeps an owner's implied `WRITE_DAC` on a folder whose denies
+    /// protect what is below it. `folder` is reached from the pool user's profile `profile`
+    /// (`ProfileList`'s path) by handle, one part at a time (`acl::profile::open_below`): a
+    /// reparse point on the way is [`MachineError::ProfileChanged`], and nothing is changed.
+    fn give_to_admins(&mut self, profile: &Path, folder: &Path) -> Result<(), MachineError>;
+    /// The owner of `folder`, in the pool user's profile `profile`, read on the handle
+    /// [`Machine::give_to_admins`] would reach it by; `None` when it is missing. A reparse
+    /// point on the way is [`MachineError::ProfileChanged`].
+    fn owner_in_profile(
+        &mut self,
+        profile: &Path,
+        folder: &Path,
+    ) -> Result<Option<Sid>, MachineError>;
     /// The account the set-up process itself runs as (the elevated token's user), which may own
     /// a profile folder it loaded; `None` when it couldn't be read.
     fn own_account(&self) -> Option<&Sid>;

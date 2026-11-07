@@ -302,6 +302,10 @@ fn a_stale_dotted_profile_folder_keeps_the_mark() {
         });
         let folder = machine.dir.path().join("Users").join(stale);
         assert!(cause.contains(&folder.display().to_string()), "{cause}");
+        // How to delete it without following a link in it, and what never to use there.
+        for words in ["rd /s /q", "never use takeown /R or icacls /T"] {
+            assert!(cause.contains(words), "{cause}");
+        }
         assert!(machine.calls.iter().any(|c| c == "folder_names Users"));
         assert!(!machine.calls.iter().any(|c| c == "log_on_once ClauseoSb02"));
     }

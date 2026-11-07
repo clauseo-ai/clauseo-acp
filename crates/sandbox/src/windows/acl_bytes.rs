@@ -68,6 +68,11 @@ pub(crate) const DACL_PROTECTED: u16 = 0x1000;
 pub(crate) const SACL_PROTECTED: u16 = 0x2000;
 /// `SE_SELF_RELATIVE`.
 const SELF_RELATIVE: u16 = 0x8000;
+/// The control a protected DACL is written with through `SetKernelObjectSecurity`, which keeps
+/// the bits as given: protected and auto-inherited, as `SetSecurityInfo` wrote it, and asking
+/// to stay auto-inherited. Without that mark, what is made inside gets no inherited entries.
+pub(crate) const PROTECTED_DACL_CONTROL: u16 =
+    DACL_PROTECTED | DACL_AUTO_INHERITED | DACL_AUTO_INHERIT_REQ;
 
 /// The relative id of a machine's `None` group (`DOMAIN_GROUP_RID_USERS`).
 const NONE_RID: u32 = 513;

@@ -7,7 +7,8 @@
 //! name unique to the run ([`PREFIX`] and six hex digits), and first clears whatever a killed
 //! earlier try of this family left (accounts named `ClauseoSbTL*`, and profiles of such names).
 //! Other test families use other prefixes, so this one never clears their accounts; the profile
-//! reset's (`reset.rs`) is `ClauseoSbTR`.
+//! reset's (`reset.rs`) is `ClauseoSbTR`, and the links in a profile's (`links.rs`)
+//! `ClauseoSbTK`.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -43,6 +44,9 @@ fn gate(test: &str) -> bool {
     false
 }
 
+mod as_user;
+mod links;
+mod links_by_user;
 mod reset;
 
 /// `bytes` random bytes as lowercase hex.

@@ -42,8 +42,13 @@ pub trait Removal {
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
     /// The profile Windows lists for `sid` (`ProfileList`), if any.
     fn profile_of(&mut self, sid: &Sid) -> Result<Option<ProfileDir>, MachineError>;
+    /// Whether `folder` in the profile `profile` is there, reached by handle from the profile
+    /// as `Machine::in_profile` reaches it: a reparse point on the way is
+    /// `MachineError::ProfileChanged`.
+    fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError>;
     /// Deletes `sid`'s profile (`DeleteProfileW`), refusing a SID that can't be a pool user's
-    /// (`owner` is the record's); none is `Ok`.
+    /// (`owner` is the record's); none is `Ok`. Its links go first, each deleted itself
+    /// (`profile::delete_profile`).
     fn delete_profile(&mut self, sid: &Sid, owner: &Sid) -> Result<(), MachineError>;
     /// Deletes the account `name` and its sign-in screen value; either gone already is `Ok`.
     fn delete_user(&mut self, name: &str) -> Result<(), MachineError>;

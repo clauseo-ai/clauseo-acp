@@ -320,10 +320,18 @@ impl Machine for WindowsMachine {
         }
     }
 
-    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError> {
+    fn give_to_admins(&mut self, profile: &Path, folder: &Path) -> Result<(), MachineError> {
         let admins =
             Sid::parse(ADMINISTRATORS).map_err(|error| MachineError::Other(error.to_string()))?;
-        acl::set_owner(path, &admins).map_err(|error| MachineError::Other(error.to_string()))
+        profile::give(profile, folder, &admins)
+    }
+
+    fn owner_in_profile(
+        &mut self,
+        profile: &Path,
+        folder: &Path,
+    ) -> Result<Option<Sid>, MachineError> {
+        profile::owner_in(profile, folder)
     }
 
     fn own_account(&self) -> Option<&Sid> {

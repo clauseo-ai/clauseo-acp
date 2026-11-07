@@ -574,4 +574,5 @@ fn a_clean_hand_back_is_accepted_inherited_entries_aside() {
 }
 
 /// S15 `PR4i`: what `--reclaim` took.
+mod control;
 mod taken;

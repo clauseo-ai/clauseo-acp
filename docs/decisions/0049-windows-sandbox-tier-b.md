@@ -728,6 +728,26 @@ ownership by hand as an administrator.
 fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
 for `--reclaim`.
 
+**Reparse points: elevated code never resolves a path through a reparse point it didn't
+check.** A pool user can make junctions, and with the right, symbolic links, in its own profile
+and in the matter it works in; a mount point is a junction. So every elevated open below a
+profile or a matter is either relative to a checked handle, one part at a time
+(`OBJ_DONT_REPARSE`, each part refused if it is a reparse point), or by path with the final path
+checked against the planned one (`same_path`). A pool user's `AppData\LocalLow` is reached from
+the profile's handle, the profile itself checked against `ProfileList` (`acl/profile.rs`); a
+reparse point on the way stops the set-up at `Owners`, naming the part, and `--remove` lets that
+user's `LocalLow` deny go with the profile. Before `DeleteProfileW`, every link in the profile,
+and every extra name of a file, is deleted itself on its own handle, so the profile service's
+delete meets none. A folder's DACL is written with `SetKernelObjectSecurity`, which never
+propagates to what is already inside, a planted junction included (`private_dir.rs`); the
+permission walk writes each child on its own handle and skips links. Guidance never sends an
+administrator to a recursive tool that follows links (`takeown /R`, `icacls /T`): `rd /s /q`
+deletes a folder's links as links. These opens enable the backup and restore privileges, with
+backup intent, so a folder a pool user shut to administrators can't stop a set-up or a removal.
+They fail closed: a profiles folder reached through a junction (a redirected `C:\Users`), or a
+`ProfileList` path in 8.3 form, isn't the final path, so set-up stops at `Owners` and a removal
+leaves that profile, both naming the part.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

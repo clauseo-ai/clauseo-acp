@@ -93,6 +93,9 @@ pub(super) struct FakeMachine {
     /// The folders (by their call-line name) whose `give_to_admins` succeeds but leaves the
     /// owner as it was.
     pub(super) stuck_owners: BTreeSet<String>,
+    /// Accounts whose profile has a reparse point on the way to `LocalLow` (`AppData`):
+    /// `in_profile` and `give_to_admins` refuse it as `ProfileChanged`.
+    pub(super) changed_profiles: BTreeSet<String>,
     /// Accounts whose logon leaves their profile with no `LocalLow`.
     pub(super) no_local_low: BTreeSet<String>,
     /// The users the owner's `matters.json` marks as owed a profile reset.
@@ -415,16 +418,36 @@ impl Machine for FakeMachine {
             .unwrap_or_else(|| Sid::parse(SYSTEM).unwrap()))
     }
 
+    /// Logged as `exists`, then `owner_of` when it is there: the probe and the read it stands
+    /// for on a profile's folder.
+    fn owner_in_profile(
+        &mut self,
+        profile: &Path,
+        folder: &Path,
+    ) -> Result<Option<Sid>, MachineError> {
+        if self.changed_profiles.contains(&folder_name(profile)) {
+            self.call(format!("exists {}", folder_name(folder)))?;
+            return Err(MachineError::ProfileChanged("AppData".to_owned()));
+        }
+        if !self.exists(folder)? {
+            return Ok(None);
+        }
+        self.owner_of(folder).map(Some)
+    }
+
     fn exists(&mut self, path: &Path) -> Result<bool, MachineError> {
         self.call(format!("exists {}", folder_name(path)))?;
         Ok(!self.faults.is_gone(path) && std::fs::symlink_metadata(path).is_ok())
     }
 
-    fn give_to_admins(&mut self, path: &Path) -> Result<(), MachineError> {
-        self.call(format!("give_to_admins {}", folder_name(path)))?;
-        if !self.stuck_owners.contains(&folder_name(path)) {
+    fn give_to_admins(&mut self, profile: &Path, folder: &Path) -> Result<(), MachineError> {
+        self.call(format!("give_to_admins {}", folder_name(folder)))?;
+        if self.changed_profiles.contains(&folder_name(profile)) {
+            return Err(MachineError::ProfileChanged("AppData".to_owned()));
+        }
+        if !self.stuck_owners.contains(&folder_name(folder)) {
             self.owners
-                .insert(path.to_owned(), Sid::parse(ADMINISTRATORS).unwrap());
+                .insert(folder.to_owned(), Sid::parse(ADMINISTRATORS).unwrap());
         }
         Ok(())
     }
