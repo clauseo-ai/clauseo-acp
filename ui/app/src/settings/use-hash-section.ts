@@ -7,8 +7,15 @@
 // side writes the hash without an event (replaceState) and moves no focus.
 import { useEffect, useRef, useState } from "react";
 
-/** A hash as a section's id: "#connectors" is "connectors". */
-export const hashId = (hash: string): string => hash.replace(/^#/, "");
+/** The hashes that name a section by another id: the wire's SettingsSection calls the Safe workspace "protection" (R17
+ * PR-B1, settings.html#protection), and its section id is "workspace", which its own hash keeps too. */
+const HASH_ALIASES: ReadonlyMap<string, string> = new Map([["protection", "workspace"]]);
+
+/** A hash as a section's id: "#connectors" is "connectors", "#protection" is "workspace". */
+export const hashId = (hash: string): string => {
+  const id = hash.replace(/^#/, "");
+  return HASH_ALIASES.get(id) ?? id;
+};
 
 type Follow = {
   /** The section chosen last, by the side or a hash; undefined opens the first shown. */

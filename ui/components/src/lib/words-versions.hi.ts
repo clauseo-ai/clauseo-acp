@@ -234,12 +234,12 @@ const EDGE = {
     "चालू। Clauseo इस मामले के फ़ोल्डर के भीतर काम करता है और उससे बाहर जाने से पहले पूछता है।",
   "Off since {time} today. Clauseo can reach any file on this computer without asking.":
     "आज {time} बजे से बंद। Clauseo बिना पूछे इस कंप्यूटर की किसी भी फ़ाइल तक पहुँच सकता है।",
-  "Couldn't be set up on this computer. Clauseo can read any file on it and asks before each change.":
-    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है और हर बदलाव से पहले पूछता है।",
-  "Clauseo can read any file on this computer and asks before each change.":
-    "Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है और हर बदलाव से पहले पूछता है।",
-  "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before each change.":
-    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह हर बदलाव से पहले पूछता है।",
+  "Couldn't be set up on this computer. Clauseo can read any file you can open on it, and asks before changing anything outside the matter's folder.":
+    "इस कंप्यूटर पर सेट अप नहीं हो सका। Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Clauseo can read any file you can open on this computer, and asks before changing anything outside the matter's folder.":
+    "Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside the matter's folder.":
+    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। यह मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "Switch off protection": "संरक्षण बंद करें",
   "Switch protection on": "संरक्षण चालू करें",
   "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.":

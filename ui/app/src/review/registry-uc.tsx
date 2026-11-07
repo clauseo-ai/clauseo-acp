@@ -170,7 +170,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-76, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-78, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -230,7 +230,7 @@ export const UC: Entry[] = [
   room(
     "UC-22",
     pw(
-      "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file on this computer, and asks before changing anything outside this matter's folder.",
+      "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
     ),
     "room/np-note",
     note(P.needs),
@@ -238,7 +238,7 @@ export const UC: Entry[] = [
   room(
     "UC-23",
     pw(
-      "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+      "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
     ),
     "room/np-note",
     note(P.refused),
@@ -252,7 +252,7 @@ export const UC: Entry[] = [
   room(
     "UC-25",
     pw(
-      "This computer can't give Clauseo's protection, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
+      "This computer can't give Clauseo's protection, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
     ),
     "room/np-note",
     note(P.cant),
@@ -311,7 +311,7 @@ export const UC: Entry[] = [
   room(
     "UC-38",
     pw(
-      "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
     ),
     "room/np-note",
     note(np({ unsupported: { why: "not_built" } })),
@@ -323,7 +323,7 @@ export const UC: Entry[] = [
   ),
   settings(
     "UC-37",
-    "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.",
+    "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
     held(np({ unsupported: { why: "not_built" } })),
   ),
   room("UC-40", pw("Set up protection?"), "room/protection-confirm", {
@@ -409,5 +409,18 @@ export const UC: Entry[] = [
     "UC-76",
     "Your firm doesn't allow Clauseo to work without asking on this computer.",
     held(P.refused, { unprotected_auto_allowed: false }),
+  ),
+  settings(
+    "UC-77",
+    pw("Checking the Safe workspace."),
+    held(P.b, { in_progress: "check" } as Partial<ProtectionView>),
+  ),
+  room(
+    "UC-78",
+    pw(
+      "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.",
+    ),
+    "room/protection-required",
+    { protection: np({ unsupported: { why: "not_built" } }), over: { required: true } },
   ),
 ];

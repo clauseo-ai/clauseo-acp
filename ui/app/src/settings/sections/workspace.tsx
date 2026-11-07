@@ -59,7 +59,7 @@ function cantKey(cause: Cause): SettingsKey {
   if (why === "windows_arm")
     return "Clauseo's protection isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.";
   if (why === "not_built")
-    return "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.";
+    return "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.";
   return "This computer can't give Clauseo's protection, so Clauseo asks before changing anything outside a matter's folder.";
 }
 

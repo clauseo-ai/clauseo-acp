@@ -46,6 +46,7 @@ type Answer = { resolve: () => void; reject: (e: unknown) => void };
 async function mount(
   protection: FakeProtectionHost | undefined,
   platform: "mac" | "windows" | "linux" = "windows",
+  hash = "#workspace",
 ) {
   const settings = { ui: DEFAULT_UI, locked: [] };
   const transport = new FakeTransport({
@@ -57,7 +58,7 @@ async function mount(
     next: { query: () => ({ settings }) as never },
     ...(protection === undefined ? {} : { protection }),
   });
-  history.replaceState(null, "", "/settings.html#workspace");
+  history.replaceState(null, "", `/settings.html${hash}`);
   store = connectDisplay(transport).store;
   host = document.createElement("div");
   document.body.append(host);
@@ -194,7 +195,7 @@ test.each([
     "why not_built",
     { unsupported: { why: "not_built" } },
     "windows",
-    "This build of Clauseo comes without protection",
+    "This version of Clauseo doesn't have protection yet",
   ],
   ["a newer cause", "some_newer_cause", "windows", "This computer can't give Clauseo's protection"],
 ] as const)("can't, %s: its line, and no act", async (_c, cause, platform, words) => {
@@ -276,6 +277,20 @@ test("Set up again confirms first where it asks an administrator, and a refusal 
   );
   await settle();
   expect(one("protection-failed")?.textContent).toBe(errorWords("en", "sandbox.setup_refused"));
+});
+
+test("#protection opens the Safe workspace, the name the wire gives it", async () => {
+  await mount({ view: () => view(PROT.a) }, "mac", "#protection");
+  expect(document.querySelector("main h2")?.textContent).toBe("Safe workspace");
+  expect(block()).not.toBeNull();
+});
+
+test("a check the view says is in progress shows its own line, not the set-up's", async () => {
+  await mount({
+    view: () => view(PROT.b, { in_progress: "check" } as Partial<ProtectionView>),
+  });
+  expect(one("protection-wait")?.textContent).toBe(pw("en", "Checking the Safe workspace."));
+  expect(one("protection-wait")?.textContent).not.toBe(pw("en", "Setting up the Safe workspace."));
 });
 
 test("a set-up the view says is in progress (after a reload) shows the wait, and protection_view_changed replaces the view", async () => {

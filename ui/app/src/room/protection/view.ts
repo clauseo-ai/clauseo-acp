@@ -24,12 +24,13 @@ export const computerCause = (view: ProtectionView | null | undefined): Cause | 
   view === null || view === undefined ? null : notProtectedCause(view.computer);
 
 /** Whether `retry_protection` brings Windows' administrator prompt, so the "Unknown publisher" confirm comes first
- * (Ruled, 1): R17's `retry_asks_admin` when the view has it, else true when the computer is `needs_set_up` or
- * `set_up_refused`. A full pool's Retry adds room behind the same prompt, so it always asks. */
+ * (Ruled, 1): R17's `retry_asks_admin` when the view has it, and that decides alone. Only an older host, whose view
+ * lacks it, gets the fallback: true for a pool cause (a full pool's Retry adds room behind the same prompt), else
+ * true when the computer is `needs_set_up` or `set_up_refused`. */
 export function asksAdmin(view: ProtectionView | null | undefined, cause?: Cause | null): boolean {
-  if (cause?.group === "pool") return true;
   const field = (view as { retry_asks_admin?: unknown } | null | undefined)?.retry_asks_admin;
   if (typeof field === "boolean") return field;
+  if (cause?.group === "pool") return true;
   const computer = computerCause(view);
   return computer?.name === "needs_set_up" || computer?.name === "set_up_refused";
 }

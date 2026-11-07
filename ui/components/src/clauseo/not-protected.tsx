@@ -18,9 +18,10 @@ export function NotProtectedMark({
   /** Optional: a press explains it (UC's note, from the toolbar); the mark is then a button. */
   onPress?: (() => void) | undefined;
   /** What Not protected means where it isn't protection switched off. When the workspace couldn't
-   * be set up, or Windows was told no, Clauseo falls back to asking before each change, and the caller says so in its
-   * own words: "Clauseo can read any file on this computer and asks before each change." Without it, the sentence about protection switched
-   * off stands. */
+   * be set up, or Windows was told no, Clauseo can read any file the lawyer can open and asks before changing anything
+   * outside the matter's folder, and the caller says so in its own words: "Clauseo can read any file you can open on
+   * this computer, and asks before changing anything outside the matter's folder." Without it, the sentence about
+   * protection switched off stands. */
   meaning?: string;
 }) {
   const w = useToolbarWords();

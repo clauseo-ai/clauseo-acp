@@ -115,23 +115,23 @@
     "by": "design"
   },
   "UC-22": {
-    "en": "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file on this computer, and asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर संरक्षण अभी सेट अप नहीं है। तब तक Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+    "hi": "इस कंप्यूटर पर संरक्षण अभी सेट अप नहीं है। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-23": {
-    "en": "Protection couldn't be set up on this computer, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+    "hi": "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-24": {
@@ -142,13 +142,13 @@
     "by": "design"
   },
   "UC-25": {
-    "en": "This computer can't give Clauseo's protection, so Clauseo can read any file on it. It asks before changing anything outside this matter's folder.",
-    "hi": "यह कंप्यूटर Clauseo का संरक्षण नहीं दे सकता, इसलिए Clauseo इसकी कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This computer can't give Clauseo's protection, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+    "hi": "यह कंप्यूटर Clauseo का संरक्षण नहीं दे सकता, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-26": {
@@ -259,23 +259,23 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-37": {
-    "en": "This build of Clauseo comes without protection, so Clauseo asks before changing anything outside a matter's folder.",
-    "hi": "Clauseo का यह बिल्ड संरक्षण के बिना आता है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.",
+    "hi": "Clauseo के इस संस्करण में अभी संरक्षण नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-38": {
-    "en": "This build of Clauseo comes without protection, so Clauseo can read any file on this computer. It asks before changing anything outside this matter's folder.",
-    "hi": "Clauseo का यह बिल्ड संरक्षण के बिना आता है, इसलिए Clauseo इस कंप्यूटर की कोई भी फ़ाइल पढ़ सकता है। यह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+    "en": "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+    "hi": "Clauseo के इस संस्करण में अभी संरक्षण नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-40": {
@@ -492,6 +492,26 @@
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-06",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-77": {
+    "en": "Checking the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र की जाँच हो रही है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-78": {
+    "en": "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.",
+    "hi": "आपकी फ़र्म को संरक्षण चाहिए, और Clauseo के इस संस्करण में यह अभी नहीं है, इसलिए Clauseo यहाँ जवाब नहीं दे सकता। संरक्षण एक अपडेट में आएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   }
 }
