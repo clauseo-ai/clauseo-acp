@@ -728,6 +728,48 @@ ownership by hand as an administrator.
 fails is refused, named, at the next launch's hand-back before its deny. That refusal records it
 for `--reclaim`.
 
+### The runner (PR5)
+
+`clauseo-sandbox-run.exe` starts each agent; `windows/runner.rs` holds the chain.
+
+- **Two runners.** The host starts the outer runner as the lawyer through `spawn_in_tree`, so its
+  pipes, job and shutdown ladder are the ones every agent has. The outer reads a launch file from
+  `<data_dir>\sandbox\run\` only if the lawyer owns it and only the lawyer, `SYSTEM` and
+  `Administrators` may open it, and removes it. It reads the pool user's password from
+  `secrets.bin` into a buffer wiped as soon as `CreateProcessWithLogonW` (`LOGON_WITH_PROFILE`)
+  returns, and starts itself again, suspended, as the pool user (the inner runner). The inner
+  goes into a job with `KILL_ON_JOB_CLOSE` and no breakaway before it runs; the job's one handle
+  is the outer's, so ending the outer (the host's job does) ends the inner runner and the agent's
+  whole tree. Error 1058 (Secondary Logon disabled) is `SetUpFailed` with set-up's own cause.
+- **The token** is (B) as above, made by the inner runner from its own token with
+  `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
+  (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode` and makes a private
+  desktop for `SYSTEM` and the pool user, labelled Low; the agent inherits only its three pipes.
+- **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
+  agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
+  only, with an explicit protected DACL naming the lawyer and the pool user and nothing else, so
+  another matter's agent gets error 5. Before it sends a byte it checks each client is the inner
+  runner's process, and that process's token user the pool user. The launch goes over `ctl`,
+  never the command line, which `CreateProcessWithLogonW` caps at 1024 characters.
+- **The environment.** `USERPROFILE`, `HOME`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`
+  and `TEMP`/`TMP` point under the state folder (the session's temp folder when the policy has
+  one). A variable that points into the lawyer's profile outside the paths the launch grants is
+  dropped, and so is a `PATH` or `PSModulePath` entry there outside the runtime paths. git uses
+  OpenSSL (`GIT_CONFIG_COUNT=1`, `http.sslBackend=openssl`): Schannel fails under any
+  restricting-SID token. System32's `curl.exe` (`SEC_E_NO_CREDENTIALS`) and PowerShell's web
+  calls fail for the same reason, a known breakage.
+- **The CA bundle.** Codex's rustls loads no roots from the Windows store under the token, so
+  `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` name `<data_dir>\sandbox-ca\roots.pem`: the local
+  machine's and the current user's `Root` stores (group policy and enterprise included), less
+  anything in `Disallowed` and anything not self-issued. It is written once per app start and
+  when the pool changes, atomically, owned by the lawyer, readable by each pool user and writable
+  by none. `SSL_CERT_FILE` makes every OpenSSL tool in the sandbox trust exactly the machine's
+  roots, which is intended. The egress proxy (S16) tunnels TLS and never terminates it, so it has
+  no CA to add.
+- **M3.** Tier B never grants on, links from or points at the lawyer's `~\.codex`: a launch whose
+  paths or `CODEX_HOME` lie in it, or whose credential link is its `auth.json` by file ID, is
+  refused (`codex_reuse_in_policy` before apply, the outer runner again before logon).
+
 ### The network (PR7)
 
 `crates/sandbox/src/windows/wfp`. A pool user's agent reaches `127.0.0.1` on 46100-46199,

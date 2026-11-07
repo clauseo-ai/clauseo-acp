@@ -109,7 +109,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         env,
         folders,
     };
-    let result = serve(&inner, &message, &pipes, &launch);
+    let result = serve(&inner, &message, pipes, &launch);
     // `job` drops when this returns: the inner runner and the agent's tree end with it.
     drop(job);
     result
@@ -120,13 +120,13 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
 fn serve(
     inner: &Process,
     message: &LaunchMessage,
-    pipes: &[ServerPipe],
+    pipes: Vec<ServerPipe>,
     launch: &InnerLaunch,
 ) -> Result<u32, Failure> {
-    let [ctl, stdin, stdout, stderr] = pipes else {
+    let Ok([ctl, stdin, stdout, stderr]) = <[ServerPipe; 4]>::try_from(pipes) else {
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
-    accept(ctl, inner, FIRST_CONNECT)?;
+    accept(&ctl, inner, FIRST_CONNECT)?;
     let user = process_user(inner).map_err(|e| Failure::new(RunExit::Pipe, os("token", &e)))?;
     if user != message.pool_user {
         inner.kill(RunExit::Pipe.code());
@@ -135,23 +135,33 @@ fn serve(
             "the inner runner isn't the pool user",
         ));
     }
-    write_frame(ctl, launch).map_err(|e| Failure::new(RunExit::Pipe, os("ctl write", &e)))?;
-    for pipe in [stdin, stdout, stderr] {
-        accept(pipe, inner, NEXT_CONNECT)?;
-    }
-    match read_frame::<InnerReport>(ctl) {
-        Ok(InnerReport::Started { .. }) => {}
-        Ok(InnerReport::Failed { exit, what }) => {
-            say(&format!("clauseo-sandbox-run: {what}"));
-            return Ok(inner
-                .wait(Some(NEXT_CONNECT))
-                .ok()
-                .flatten()
-                .unwrap_or(exit));
+    write_frame(&ctl, launch).map_err(|e| Failure::new(RunExit::Pipe, os("ctl write", &e)))?;
+    for pipe in [&stdin, &stdout, &stderr] {
+        if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
+            // An inner runner that failed before it opened its pipes said why on `ctl`.
+            return Err(reported(&ctl, inner).unwrap_or(failure));
         }
+    }
+    match read_frame::<InnerReport>(&ctl) {
+        Ok(InnerReport::Started { .. }) => {}
+        Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    Ok(relay(inner, stdin, stdout, stderr))
+    relay(inner, stdin, stdout, stderr)
+}
+
+/// The failure the inner runner reported on `ctl`, if it did.
+fn reported(ctl: &ServerPipe, inner: &Process) -> Option<Failure> {
+    match read_frame::<InnerReport>(ctl) {
+        Ok(InnerReport::Failed { exit, what }) => Some(failed(inner, exit, &what)),
+        Ok(InnerReport::Started { .. }) | Err(_) => None,
+    }
+}
+
+/// The inner runner's own failure: its `RunExit` code when it is one, after it exited.
+fn failed(inner: &Process, exit: u32, what: &str) -> Failure {
+    drop(inner.wait(Some(NEXT_CONNECT)));
+    Failure::new(RunExit::from_code(exit).unwrap_or(RunExit::Spawn), what)
 }
 
 /// Waits for `pipe`'s client and refuses one that isn't the inner runner's process.
@@ -175,36 +185,49 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 }
 
 /// Relays this process's stdin to the agent's and the agent's stdout and stderr to this
-/// process's, until the inner runner exits; its exit code.
-fn relay(inner: &Process, stdin: &ServerPipe, stdout: &ServerPipe, stderr: &ServerPipe) -> u32 {
-    thread::scope(|scope| {
-        // The stdin copy may stay blocked on the host's pipe; the process ends without it.
-        scope.spawn(|| copy(io::stdin().lock(), stdin));
-        let (done, drained) = mpsc::channel();
-        for (from, to) in [(stdout, 1u8), (stderr, 2u8)] {
-            let done = done.clone();
-            scope.spawn(move || {
-                match to {
-                    1 => copy(from, io::stdout().lock()),
-                    _ => copy(from, io::stderr().lock()),
+/// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
+/// closes when this process's stdin ends, so the agent reads the end of its input.
+fn relay(
+    inner: &Process,
+    stdin: ServerPipe,
+    stdout: ServerPipe,
+    stderr: ServerPipe,
+) -> Result<u32, Failure> {
+    let spawned = |what: &io::Error| Failure::new(RunExit::Pipe, os("relay thread", what));
+    // It may stay blocked on the host's pipe; the process ends without it.
+    thread::Builder::new()
+        .spawn(move || {
+            copy(io::stdin().lock(), &stdin);
+            drop(stdin);
+        })
+        .map_err(|e| spawned(&e))?;
+    let (done, drained) = mpsc::channel();
+    for (from, out) in [(stdout, true), (stderr, false)] {
+        let done = done.clone();
+        thread::Builder::new()
+            .spawn(move || {
+                if out {
+                    copy(&from, io::stdout().lock());
+                } else {
+                    copy(&from, io::stderr().lock());
                 }
                 let _sent = done.send(());
-            });
+            })
+            .map_err(|e| spawned(&e))?;
+    }
+    drop(done);
+    let code = inner
+        .wait(None)
+        .ok()
+        .flatten()
+        .unwrap_or(RunExit::Spawn.code());
+    for _ in 0..2 {
+        if drained.recv_timeout(DRAIN).is_err() {
+            break;
         }
-        drop(done);
-        let code = inner
-            .wait(None)
-            .ok()
-            .flatten()
-            .unwrap_or(RunExit::Spawn.code());
-        for _ in 0..2 {
-            if drained.recv_timeout(DRAIN).is_err() {
-                break;
-            }
-        }
-        // The scope would join the copies; leave instead, which ends the job's processes.
-        exit_now(code)
-    })
+    }
+    // A copy may still be blocked on a pipe a descendant holds; leaving ends the job's processes.
+    exit_now(code)
 }
 
 /// Ends this process with `code` now: the copies still blocked on a pipe go with it, and the
