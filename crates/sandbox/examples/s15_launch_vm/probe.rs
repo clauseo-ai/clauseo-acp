@@ -181,6 +181,10 @@ fn job_ui(atom: Option<&str>) {
         "ui-effect desktop-create {}",
         super::win_desk::create_desktop_code()
     ));
+    say(&format!(
+        "ui-effect desktop-create-default-heap {}",
+        super::win_desk::create_desktop_default_heap_code()
+    ));
     match ui::write_failed("clauseo-ui-effect") {
         Ok(()) => say("ui-effect clipboard-write ok"),
         Err(failed) => say(&format!(
@@ -229,6 +233,10 @@ fn ui_control(sa: bool) {
         (true, None) => "no-user".to_owned(),
     };
     say(&format!("ui-control desktop-create {created}"));
+    say(&format!(
+        "ui-control desktop-create-default-heap {}",
+        super::win_desk::create_desktop_default_heap_code()
+    ));
     match ui::write_failed("clauseo-ui-control") {
         Ok(()) => say("ui-control clipboard-write ok"),
         Err(failed) => say(&format!(
