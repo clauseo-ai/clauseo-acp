@@ -389,7 +389,8 @@ fn turn_after_slot_wait(host: &Running, thread: ThreadId, then: impl FnOnce()) {
 /// A session started while every slot is taken and an ended session's removal still runs
 /// waits for that removal and gets the slot it frees, rather than `TooManyBrowsers`. The
 /// removal is held at its start until the next launch waits (on Windows the removal's look at
-/// Chrome's port alone takes longer than a launch).
+/// Chrome's port alone takes longer than a launch). It ends right after the launch registered
+/// its wait, and the host clock never moves: the removal's end alone ends the wait.
 #[test]
 fn a_launch_gets_the_slot_an_ending_session_frees() {
     use clauseo_protocol::{ClauseoTool, ToolAvailability};

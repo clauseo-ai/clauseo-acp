@@ -126,6 +126,12 @@ pub(super) const SLOT_WAIT: Duration = Duration::from_secs(3);
 /// taken and a holder's removal runs: until a holder's removal ends or [`SLOT_WAIT`] has
 /// passed on the host clock. The session then looks at the slots again
 /// (`profile_loads.rs`), so it gets the slot that removal freed.
+///
+/// No removal can end unseen between the look at the slots and the wait: both happen here, in
+/// one actor step (`launch_checks::prepare`, called on the actor), and a removal's end is
+/// `removal::on_run_removed`, also on the actor, which wakes every registered wait. A removal
+/// that ends after this step finds the wait registered, and its wake makes the wait ready at
+/// once, before or after the launch prep first polls it.
 pub(super) fn slot_wait(
     actor: &mut Actor,
     key: SessionKey,
@@ -141,6 +147,22 @@ pub(super) fn slot_wait(
     Some(async move {
         futures::future::select(woken, timer).await;
     })
+}
+
+/// Warns, once per launch (`on_prepared`), when `run`'s prep waited for a slot
+/// ([`slot_wait`]) and every slot is still held: the launch goes on without the browser
+/// (`TooManyBrowsers`). A launch that found no slot and nothing releasing does not wait and
+/// gives no warning.
+pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
+    if run.slot_waited && !actor.wiring.browser_slots.free_for(run.key) {
+        tracing::warn!(
+            matter = %run.key.matter,
+            thread = %run.key.thread,
+            launch = run.key.launch,
+            "a launch went on without the browser: every slot still held after waiting for an \
+             ended session's cleanup"
+        );
+    }
 }
 
 /// What the launch prep does for `agent`'s session `key`, from the actor's state: nothing when
