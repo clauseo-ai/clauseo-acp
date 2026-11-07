@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn binds_loopback() {
-    let listener = bind_loopback().unwrap();
+    let listener = bind_loopback(ListenerFor::TierB).unwrap();
     let address = listener.local_addr().unwrap();
     assert!(address.ip().is_loopback(), "{address}");
     assert_ne!(address.port(), 0);
@@ -41,7 +41,7 @@ fn two_claims_differ_and_each_is_loopback_bindable() {
 fn a_claimed_port_is_never_handed_out_again() {
     let claim = claim_port().unwrap();
     for _ in 0..32 {
-        let listener = bind_loopback().unwrap();
+        let listener = bind_loopback(ListenerFor::TierB).unwrap();
         assert_ne!(listener.local_addr().unwrap().port(), claim.port());
         assert_ne!(claim_port().unwrap().port(), claim.port());
     }
@@ -65,7 +65,7 @@ fn a_bind_that_lands_on_a_claimed_port_is_asked_again() {
 #[cfg(not(windows))]
 #[test]
 fn a_closed_listener_port_is_not_handed_out_again() {
-    let listener = bind_loopback().unwrap();
+    let listener = bind_loopback(ListenerFor::TierB).unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let error = claim_port_at(port).unwrap_err();
@@ -89,7 +89,7 @@ fn a_released_claim_is_not_handed_out_again() {
     }
     // The OS may hand the port back to a bind of port 0; the retired port is asked again.
     for _ in 0..200 {
-        let listener = bind_loopback().unwrap();
+        let listener = bind_loopback(ListenerFor::TierB).unwrap();
         assert_ne!(listener.local_addr().unwrap().port(), port);
     }
 }
@@ -146,7 +146,7 @@ fn claim_at_refuses_a_claimed_port_and_a_listening_one() {
     let claim = claim_port().unwrap();
     let error = claim_port_at(claim.port()).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
-    let listener = bind_loopback().unwrap();
+    let listener = bind_loopback(ListenerFor::TierB).unwrap();
     let port = listener.local_addr().unwrap().port();
     let error = claim_port_at(port).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
@@ -186,7 +186,7 @@ fn claim_at_refuses_a_port_outside_the_tier_b_range() {
 #[test]
 fn a_second_bind_with_reuseaddr_fails() {
     use socket2::{Domain, Protocol, Socket, Type};
-    let listener = bind_loopback().unwrap();
+    let listener = bind_loopback(ListenerFor::TierB).unwrap();
     let address = listener.local_addr().unwrap();
     let other = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).unwrap();
     other.set_reuse_address(true).unwrap();
@@ -252,9 +252,22 @@ fn a_browser_claim_at_refuses_tier_b_ports_and_zero() {
 
 #[test]
 fn every_listener_binds_127_0_0_1_only() {
-    let listener = bind_loopback().unwrap();
+    let listener = bind_loopback(ListenerFor::TierB).unwrap();
     assert_eq!(
         listener.local_addr().unwrap().ip(),
         std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST)
     );
+}
+
+#[test]
+fn a_listener_for_anything_but_tier_b_never_lands_in_the_range() {
+    for _ in 0..64 {
+        let listener = bind_loopback(ListenerFor::Other).unwrap();
+        let address = listener.local_addr().unwrap();
+        assert!(!TIER_B_PORTS.contains(&address.port()), "{address}");
+        assert_eq!(
+            address.ip(),
+            std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST)
+        );
+    }
 }
