@@ -43,6 +43,9 @@ mod checks_ctl;
 #[path = "s15_launch_vm/checks_m3.rs"]
 mod checks_m3;
 #[cfg(windows)]
+#[path = "s15_launch_vm/checks_pool.rs"]
+mod checks_pool;
+#[cfg(windows)]
 #[path = "s15_launch_vm/checks_sec.rs"]
 mod checks_sec;
 #[cfg(windows)]
@@ -63,6 +66,9 @@ mod launch;
 #[cfg(windows)]
 #[path = "s15_launch_vm/manifest.rs"]
 mod manifest;
+#[cfg(windows)]
+#[path = "s15_launch_vm/pool_verdict.rs"]
+mod pool_verdict;
 #[cfg(windows)]
 #[path = "s15_launch_vm/prepare.rs"]
 mod prepare;
@@ -93,6 +99,9 @@ mod win_desk;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_logon.rs"]
 mod win_logon;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_pool.rs"]
+mod win_pool;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
