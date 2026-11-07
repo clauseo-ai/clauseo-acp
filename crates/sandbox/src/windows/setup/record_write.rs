@@ -21,8 +21,9 @@ use windows::core::{HSTRING, PCWSTR};
 use super::MachineError;
 use super::lock::Descriptor;
 use super::record_values::{
-    self, ADMIN_COPY_SHA256, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
-    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR,
+    self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
+    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RawRecord,
+    RegValue, SETUP_VALUES, USER_INSTALL_DIR,
 };
 use crate::windows::pool::MachineRecord;
 use crate::windows::record::{RecordError, read_dword, read_string, read_units};
@@ -69,33 +70,56 @@ pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineErro
     Ok(())
 }
 
-/// Writes `--adopt`'s two values, `AdminCopySha256` (`sha256`, which must be 64 lowercase hex
-/// digits) and `UserInstallDir` (`install_dir`, Unicode), into `HKLM\<key>`, made and secured
-/// as [`write`] does; the set-up's values are left as they are.
-pub(super) fn write_admin_values(
-    key: &str,
-    sha256: &str,
-    install_dir: &std::path::Path,
-) -> Result<(), MachineError> {
-    if !crate::windows::admin_copy::is_sha256_hex(sha256) {
+/// Writes `--adopt`'s values ([`ADMIN_VALUES`]) into `HKLM\<key>`, made and secured as
+/// [`write`] does; the set-up's values are left as they are.
+pub(crate) fn write_admin_values(key: &str, values: &AdminValues) -> Result<(), MachineError> {
+    if !crate::windows::admin_copy::is_sha256_hex(&values.sha256) {
         return Err(MachineError::Other(
             "the admin copy's hash isn't a SHA-256".to_owned(),
         ));
     }
-    let dir = install_dir
+    let dir = values
+        .install_dir
         .to_str()
         .ok_or_else(|| MachineError::Other("the install folder's path isn't Unicode".to_owned()))?;
     let opened = open_secured(key)?;
-    set_value(
-        &opened,
-        ADMIN_COPY_SHA256,
-        &RegValue::Sz(record_values::sz(sha256)),
-    )?;
-    set_value(
-        &opened,
-        USER_INSTALL_DIR,
-        &RegValue::Sz(record_values::sz(dir)),
-    )
+    for (name, text) in [
+        (ADMIN_COPY_SHA256, values.sha256.as_str()),
+        (USER_INSTALL_DIR, dir),
+        (ADMIN_COPY_VERSION, values.version.as_str()),
+        (ADMIN_COPY_OWNER, values.owner.text()),
+    ] {
+        set_value(&opened, name, &RegValue::Sz(record_values::sz(text)))?;
+    }
+    Ok(())
+}
+
+/// The admin copy's owner and version as `HKLM\<key>` records them, each `None` when missing.
+/// An owner that is neither `machine` nor a SID is an error: only an administrator could have
+/// written it.
+pub(crate) fn read_admin(key: &str) -> Result<(Option<CopyOwner>, Option<String>), MachineError> {
+    let texts = read_texts(key, &[ADMIN_COPY_OWNER, ADMIN_COPY_VERSION])?;
+    let [owner, version] = <[Option<String>; 2]>::try_from(texts)
+        .map_err(|_two| MachineError::Other("the record's values".to_owned()))?;
+    let owner = match owner {
+        Some(text) => Some(CopyOwner::parse(&text).ok_or_else(|| {
+            MachineError::Other("the record's AdminCopyOwner is malformed".to_owned())
+        })?),
+        None => None,
+    };
+    Ok((owner, version))
+}
+
+/// The `REG_SZ` values `names` of `HKLM\<key>`, each `None` when missing.
+pub(crate) fn read_texts(key: &str, names: &[&str]) -> Result<Vec<Option<String>>, MachineError> {
+    let subkey = HSTRING::from(key);
+    names
+        .iter()
+        .map(|name| {
+            let name = HSTRING::from(*name);
+            read_string(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
+        })
+        .collect()
 }
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
@@ -145,16 +169,16 @@ fn open_secured(key: &str) -> Result<Key, MachineError> {
 }
 
 /// Deletes the set-up's values (`SETUP_VALUES`) from `HKLM\<key>`, then the key once it holds
-/// no value and no subkey, so `--adopt`'s `AdminCopySha256` and `UserInstallDir` outlive a
-/// rollback or a removal of the set-up. A missing key or value is `Ok`.
+/// no value and no subkey, so `--adopt`'s values (`ADMIN_VALUES`) outlive a rollback or a
+/// removal of the set-up. A missing key or value is `Ok`.
 pub(super) fn delete(key: &str) -> Result<(), MachineError> {
     delete_values(key, &SETUP_VALUES)
 }
 
-/// Deletes `--adopt`'s two values from `HKLM\<key>`, then the key once it is empty, as
-/// [`delete`] does for the set-up's.
-pub(super) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
-    delete_values(key, &[ADMIN_COPY_SHA256, USER_INSTALL_DIR])
+/// Deletes `--adopt`'s values ([`ADMIN_VALUES`]) from `HKLM\<key>`, then the key once it is
+/// empty, as [`delete`] does for the set-up's.
+pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
+    delete_values(key, &ADMIN_VALUES)
 }
 
 /// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it.

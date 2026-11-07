@@ -165,7 +165,11 @@ pub fn outcome(
         }
         // `--adopt`'s own refusals; the app never runs `--adopt`, so a code from it is a failure.
         Some(
-            SetupExit::Failed | SetupExit::Done | SetupExit::NotElevated | SetupExit::NotAdminCopy,
+            SetupExit::Failed
+            | SetupExit::Done
+            | SetupExit::NotElevated
+            | SetupExit::NotAdminCopy
+            | SetupExit::Downgrade,
         )
         | None => {
             format!("Clauseo's set-up program failed (exit {code})")

@@ -17,6 +17,9 @@
 
 use super::machine::MachineError;
 
+pub(crate) mod installer;
+#[cfg(windows)]
+mod process;
 #[cfg(windows)]
 mod token;
 
@@ -87,6 +90,36 @@ impl Owner {
         let token = token::Token::impersonation_of(&process)?;
         let sid = token.user()?;
         Ok(Owner { sid, token })
+    }
+
+    /// The lawyer a per-user `--adopt` sets up: this process's recorded parent (the elevated
+    /// installer) and that one's recorded parent (the unelevated installer), held open while
+    /// they are read, and [`installer::installer_owner`]'s checks on them with `claimed`
+    /// (`--owner-sid`). The owner's token is the unelevated installer's.
+    pub fn of_installer(claimed: &crate::windows::sids::Sid) -> Result<Owner, MachineError> {
+        let own = token::own_created()?;
+        let instance = token::Process::open(parent_to_open(None, token::recorded_parent()?)?)?;
+        let outer = token::Process::open(parent_to_open(None, instance.recorded_parent()?)?)?;
+        let instance_token = token::Token::impersonation_of(&instance)?;
+        let outer_token = token::Token::impersonation_of(&outer)?;
+        let facts = |process: &token::Process, token: &token::Token| {
+            Ok::<_, MachineError>(installer::Facts {
+                created: process.created()?,
+                image: process.image()?,
+                user: token.user()?,
+                elevated: token.elevated()?,
+            })
+        };
+        let sid = installer::installer_owner(
+            own,
+            &facts(&instance, &instance_token)?,
+            &facts(&outer, &outer_token)?,
+            claimed,
+        )?;
+        Ok(Owner {
+            sid,
+            token: outer_token,
+        })
     }
 
     /// This process's own user as the owner: for tests, which have no parent to trust.

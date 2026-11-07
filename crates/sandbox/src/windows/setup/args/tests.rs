@@ -72,10 +72,21 @@ fn each_mode_parses_in_full() {
     let dir = r"C:\Users\l\AppData\Local\Clauseo";
     let data = r"C:\Users\l\AppData\Local\chat.clauseo";
     assert_eq!(
-        parsed(&["--adopt", "--user-install-dir", dir, "--data-dir", data]),
+        parsed(&[
+            "--adopt",
+            "--owner-sid",
+            "S-1-5-21-1-2-3-1001",
+            "--user-install-dir",
+            dir,
+            "--data-dir",
+            data
+        ]),
         Ok(Mode::Adopt {
             user_install_dir: PathBuf::from(dir),
-            data_dir: Some(PathBuf::from(data)),
+            user: Some(AdoptUser {
+                owner_sid: crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap(),
+                data_dir: PathBuf::from(data),
+            }),
         })
     );
     let machine = r"C:\Program Files\Clauseo";
@@ -83,7 +94,7 @@ fn each_mode_parses_in_full() {
         parsed(&["--adopt", "--per-machine", "--user-install-dir", machine]),
         Ok(Mode::Adopt {
             user_install_dir: PathBuf::from(machine),
-            data_dir: None,
+            user: None,
         })
     );
 }
@@ -186,63 +197,47 @@ fn every_bad_form_is_a_usage_error() {
 
 #[test]
 fn every_bad_adopt_is_a_usage_error() {
-    let bad: &[&[&str]] = &[
-        // --adopt takes an install folder and exactly one of --data-dir and --per-machine.
-        &["--adopt"],
-        &["--adopt", "--data-dir", r"C:\d"],
-        &["--adopt", "--user-install-dir", r"C:\i"],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"C:\i",
-            "--per-machine",
-            "--data-dir",
-            r"C:\d",
+    const SID: &str = "S-1-5-21-1-2-3-1001";
+    let user = ["--owner-sid", SID, "--data-dir", r"C:\d"];
+    let dir = ["--user-install-dir", r"C:\i"];
+    let with = |parts: &[&[&str]]| -> Vec<String> {
+        let mut line = vec!["--adopt".to_owned()];
+        line.extend(parts.iter().flat_map(|p| p.iter().map(|s| (*s).to_owned())));
+        line
+    };
+    let bad: Vec<Vec<String>> = vec![
+        // An install folder, and either the lawyer (SID and data folder) or --per-machine.
+        with(&[]),
+        with(&[&user]),
+        with(&[&dir]),
+        with(&[&dir, &["--data-dir", r"C:\d"]]),
+        with(&[&dir, &["--owner-sid", SID]]),
+        with(&[&dir, &user, &["--per-machine"]]),
+        with(&[&dir, &["--per-machine", "--data-dir", r"C:\d"]]),
+        with(&[&dir, &["--per-machine", "--owner-sid", SID]]),
+        with(&[&dir, &user, &["--parent", "1"]]),
+        with(&[&dir, &user, &["--add", "1"]]),
+        with(&[&dir, &["--owner-sid", "lawyer", "--data-dir", r"C:\d"]]),
+        with(&[&dir, &["--owner-sid", SID, "--data-dir", "relative"]]),
+        with(&[&["--user-install-dir", "relative", "--per-machine"]]),
+        with(&[&["--user-install-dir", r"C:\a\..\b", "--per-machine"]]),
+        with(&[&["--user-install-dir", r"\\server\share", "--per-machine"]]),
+        with(&[&dir, &dir, &["--per-machine"]]),
+        // --user-install-dir and --owner-sid belong to --adopt only.
+        vec![
+            "--remove".to_owned(),
+            "--user-install-dir".to_owned(),
+            r"C:\i".to_owned(),
         ],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"C:\i",
-            "--data-dir",
-            r"C:\d",
-            "--parent",
-            "1",
+        vec![
+            "--remove".to_owned(),
+            "--owner-sid".to_owned(),
+            SID.to_owned(),
         ],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"C:\i",
-            "--data-dir",
-            r"C:\d",
-            "--add",
-            "1",
-        ],
-        &["--adopt", "--user-install-dir", "relative", "--per-machine"],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"C:\a\..\b",
-            "--per-machine",
-        ],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"\\server\share",
-            "--per-machine",
-        ],
-        &[
-            "--adopt",
-            "--user-install-dir",
-            r"C:\i",
-            "--user-install-dir",
-            r"C:\j",
-            "--per-machine",
-        ],
-        // --user-install-dir belongs to --adopt only.
-        &["--remove", "--user-install-dir", r"C:\i"],
     ];
-    for line in bad {
-        assert!(parsed(line).is_err(), "{line:?} parsed");
+    for line in &bad {
+        let parts: Vec<&str> = line.iter().map(String::as_str).collect();
+        assert!(parsed(&parts).is_err(), "{line:?} parsed");
     }
 }
 
