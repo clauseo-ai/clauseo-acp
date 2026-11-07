@@ -411,7 +411,11 @@ function RoomFrame({
         {...versions.toolbar}
         plan={null}
         planSlot={
-          <LivePlan agent={agentPlan === undefined ? null : openAgent} agents={talks.agents} />
+          <LivePlan
+            agent={agentPlan === undefined ? null : openAgent}
+            agents={talks.agents}
+            transport={transport}
+          />
         }
         title={title}
         titleLang={open !== null && !scratch ? (langOfText(title) ?? "en") : w.lang}

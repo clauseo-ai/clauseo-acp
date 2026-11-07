@@ -149,7 +149,7 @@ test("while list_matters is on its way, and after it fails, the toolbar has no h
   }
 });
 
-test("the frame has the toolbar with Versions and Undo, the rail slot, the work and the wall, and no search or plan", async () => {
+test("the frame has the toolbar with Versions and Undo, the rail slot, the work and the wall, and no search; no plan line before a view", async () => {
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
   expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
@@ -160,11 +160,11 @@ test("the frame has the toolbar with Versions and Undo, the rail slot, the work 
   // the rail (rail.tsx): New matter at its head, the matter's row, the scratch matter at its foot
   expect(win?.querySelector("nav.room-rail [data-testid='new-matter']")).not.toBeNull();
   expect(win?.querySelectorAll("nav.room-rail [data-testid='matter-row']")).toHaveLength(1);
-  // with a matter open, the Versions and Undo pair (U8); no search and no plan yet
+  // with a matter open, the Versions and Undo pair (U8); no search, and no plan line before a view
+  // names the agent (limits.test.tsx tests the line once one does)
   expect(win?.querySelector(".room-pair")).not.toBeNull();
-  for (const gone of [".room-search", ".room-plan"]) {
-    expect(win?.querySelector(gone), gone).toBeNull();
-  }
+  expect(win?.querySelector(".room-search")).toBeNull();
+  expect(win?.querySelector(".room-plan")).toBeNull();
 });
 
 test("the window draws its own frame: caption buttons off the Mac, painted lights on it, outside the desktop app", async () => {
