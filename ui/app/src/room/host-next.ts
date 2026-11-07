@@ -15,6 +15,7 @@ import type {
   FolderRefId,
   FolderScanned,
   HostError,
+  HostEvent,
   MatterId,
   MatterSource,
   MatterSummary,
@@ -211,7 +212,8 @@ export type MattersChange = Omit<MattersChanged, "matters"> & { matters: MatterI
 /** H4: the app's events, to every window: the matter rows that changed or left, and a matter's threads that changed;
  * the Chrome download's state (browser-install.ts); and the connectors' state (R24, store/connectors.ts), the latest in
  * every catch-up; the case-law hint for a turn (R24), never in a catch-up; and how far the scan of a folder picked
- * in New matter has got (R20a, room/scan/), never logged. */
+ * in New matter has got (R20a, room/scan/), never logged; and a site the unsafe-site list
+ * blocked (0053, store/blocked-sites.ts), never in a catch-up. */
 export type AppEvent =
   | { matters_changed: MattersChange }
   | { threads_changed: ThreadsChanged }
@@ -220,7 +222,12 @@ export type AppEvent =
   | { case_law_hint: CaseLawHint }
   | { folder_scanned: FolderScanned }
   | { protection_changed: ProtectionChanged }
-  | { protection_view_changed: unknown };
+  | { protection_view_changed: unknown }
+  | { site_blocked: SiteBlocked };
+
+/** 0053: a site the unsafe-site list blocked in a turn; re-sent with the same `block_id` and a
+ * higher `count`. */
+export type SiteBlocked = Extract<HostEvent, { site_blocked: unknown }>["site_blocked"];
 
 /** UC: a matter's protection now (decision record 0051), app-wide and in no catch-up. `protection_view_changed` is R17
  * PR-B's whole ProtectionView, not in bindings.ts yet: store/protection.ts reads it defensively. */

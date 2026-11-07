@@ -2,9 +2,10 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { useState } from "react";
 import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
-import { nextHostOf } from "../room/host-next.ts";
+import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
+import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
   ConnectorsState,
@@ -37,6 +38,8 @@ export function SettingsOver({
   setup,
   plans,
   protection,
+  blocklist,
+  matters = [],
 }: {
   section: SectionId;
   lang: Lang;
@@ -53,6 +56,10 @@ export function SettingsOver({
   plans?: SettingsView["plans"];
   /** UC's protection wire; none when left out, and the Safe workspace doesn't show. */
   protection?: FakeProtectionHost;
+  /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
+  blocklist?: FakeBlocklistHost;
+  /** The matters the app feed's first frames list, for the allowed sites' matter names. */
+  matters?: MatterInfo[];
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
@@ -70,9 +77,15 @@ export function SettingsOver({
             };
           throw new Error("not scripted");
         },
-        first: () => (connectors === undefined ? [] : [{ connectors_changed: connectors }]),
+        first: () => [
+          ...(connectors === undefined ? [] : [{ connectors_changed: connectors }]),
+          ...(matters.length === 0
+            ? []
+            : [{ matters_changed: { matters, removed: [], all: true } }]),
+        ],
       },
       ...(protection === undefined ? {} : { protection }),
+      ...(blocklist === undefined ? {} : { blocklist }),
       ...(setup === undefined
         ? {}
         : {

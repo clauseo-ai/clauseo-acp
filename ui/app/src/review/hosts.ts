@@ -23,6 +23,7 @@ import {
   type NextErrorCode,
   type NextHostError,
   type PaperSummary,
+  type SiteBlocked,
 } from "../room/host-next.ts";
 import { detailed, fakeNext, railStates, railThreads } from "../room/fake-next.ts";
 
@@ -99,6 +100,9 @@ export type ThreadState = {
   hint?: boolean;
   /** How read_blob answers, by hash (U17): with the blob's text, never ("pending"), or refused. */
   blobs?: Record<string, { text: string } | "pending" | "refused">;
+  /** The unsafe-site list's notices on the app feed (0053), and the code an allow is refused
+   * with. */
+  blocked?: { sites: SiteBlocked[]; refuse?: ErrorCode };
 };
 
 /** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
@@ -111,6 +115,13 @@ const connectorsNext = (state: ThreadState, connectors: ConnectorsState): FakeNe
       ? [{ case_law_hint: { matter: MATTER.matter, thread: THREAD, turn: TURN } }]
       : []),
   ],
+});
+
+/** The app feed of a state with the unsafe-site list's notices (0053), as the host sent them. */
+const blockedNext = (sites: readonly SiteBlocked[]): FakeNextHost => ({
+  parts: ["app"],
+  query: () => ({ threads: [] }),
+  first: () => sites.map((site) => ({ site_blocked: site })),
 });
 
 const refusal = (code: ErrorCode) => ({
@@ -172,6 +183,9 @@ export function threadHost(state: ThreadState): FakeTransport {
         if (state.refuse !== undefined) throw refusal(state.refuse);
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
+      const refuseAllow = state.blocked?.refuse;
+      if (command.allow_blocked_site !== undefined && refuseAllow !== undefined)
+        throw refusal(refuseAllow);
       if (command.undo_step !== undefined && state.undoRefused !== undefined)
         throw state.undoLocked === undefined
           ? refusal(state.undoRefused)
@@ -218,14 +232,16 @@ export function threadHost(state: ThreadState): FakeTransport {
       ? { next: connectorsNext(state, state.connectors), openSettings: () => {} }
       : state.papers !== undefined || state.papersAnswer !== undefined
         ? { next: papersNext(state) }
-        : state.restart === true
-          ? {
-              next: {
-                parts: ["restart"],
-                query: () => ({ threads: [] }),
-              } satisfies FakeHost["next"],
-            }
-          : {}),
+        : state.blocked !== undefined
+          ? { next: blockedNext(state.blocked.sites) }
+          : state.restart === true
+            ? {
+                next: {
+                  parts: ["restart"],
+                  query: () => ({ threads: [] }),
+                } satisfies FakeHost["next"],
+              }
+            : {}),
   });
   if (state.limits !== undefined) transport.limitsChanged(state.limits);
   if (state.hold === true) transport.answerPermission = () => new Promise<void>(() => {});

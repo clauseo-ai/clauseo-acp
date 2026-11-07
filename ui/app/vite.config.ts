@@ -200,6 +200,8 @@ export const PRELOADED_CHUNKS = [
   // UC: the Not protected note, the set-up confirm and the firm's notice, which take the alert dialog's primitives;
   // UD1's first run takes its Safe workspace step from this chunk too, loaded on its way (note-load.ts)
   "note-chunk",
+  // 0053: the unsafe-site allow's confirm, behind a notice's press (room/thread/site-blocked.tsx)
+  "site-allow-confirm",
 ];
 
 const HELPER = "__vitePreload(() => ";
