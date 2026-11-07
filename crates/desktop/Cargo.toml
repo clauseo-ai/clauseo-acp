@@ -116,13 +116,15 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
 # to see the per-machine installer's uninstall key.
 # The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's
-# entries, WindowsProgramming for GetDriveTypeW's DRIVE_* values, Shell for the known folders.
+# entries, WindowsProgramming for GetDriveTypeW's DRIVE_* values, Shell for the known folders,
+# NetworkManagement_WNet for WNetGetConnectionW, a network drive's server.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Graphics_Gdi",
+  "Win32_NetworkManagement_WNet",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
   "Win32_Storage_FileSystem",

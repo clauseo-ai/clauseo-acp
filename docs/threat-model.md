@@ -67,12 +67,22 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: On Windows, when a known folder its own folder dialog shows sits on a share that does
   not answer (the dialog would block about 21 s), `pick_folder_or_choose` opens an in-app chooser
   instead (`crates/desktop/src/chooser.rs`). The page moves only by indices into listings the
-  desktop made, or to a typed drive or share path (no `..`, `\\?\`, `\\.\`, relative path or
-  alternate stream); network folders only under a share typed in that session. Choosing ends in a
-  native confirm with the full path and Cancel focused, then the bridge's unchanged `pick_folder`
-  issues the ref. Known gap: on such a machine, script in the page can open a session and read up
-  to 300 listings of 2,000 local folder names (no files, hidden, system or link folders) without
-  the lawyer seeing it; names give no access
+  desktop made, or to a typed path: a drive path (no `..`, `\\?\`, `\\.\`, relative path, alternate
+  stream or device name, and through no link, hidden or system folder), or a share only on a server
+  this machine already uses (a mapped drive's or a known folder's; never one with `@` or `%`, a
+  loopback or an administrative `c$` share), so script cannot make the app connect to a server of its choosing.
+  Choosing ends in a native confirm with the full path and Cancel focused, then the bridge's
+  unchanged `pick_folder` issues the ref: script never gets a folder admitted without the lawyer.
+  Known gap: on such a machine, script in the page can, without the lawyer seeing it, open up to 20
+  sessions a run (at most 3 a minute; past that the pick draws the native dialog), each of up to
+  300 listings of 2,000 folder names, and so read local folder names under the drives and home,
+  the user's name under `C:\Users` among them (no files, hidden, system or link folders), and
+  list shares on servers the machine already uses. The CSP keeps fetch, XHR, WebSocket, images
+  and forms on the app's own origins, and `window.open` is denied (wry's default with no
+  new-window handler), but an XSS can still carry those names off the machine by navigating the
+  window to an outside address (no navigation guard: neither window builder sets `on_navigation`,
+  `crates/desktop/src/lib.rs` `open_main_window`) and likely through a `dns-prefetch` link, which
+  no CSP directive covers
 - `built`: Links go through one `open_external`: https or http to a public host (no credentials,
   no localhost, loopback, private or link-local address, no overlong name), or mailto to plain
   `local@domain` addresses with at most a subject and a body, after a native confirm that names the

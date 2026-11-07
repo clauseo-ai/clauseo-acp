@@ -78,7 +78,13 @@ pub(crate) async fn choose_folder(
     let machine = std::sync::Arc::clone(&chooser.machine);
     let outstanding = std::sync::Arc::clone(&chooser.outstanding);
     let checked = path.clone();
-    let check = move || bounded(&outstanding, LIST_WAIT, move || machine.plain_dir(&checked));
+    let check = move || {
+        bounded(&outstanding, LIST_WAIT, move || {
+            machine
+                .entry(&checked)
+                .is_some_and(|entry| entry.dir && !entry.link)
+        })
+    };
     let plain = tauri::async_runtime::spawn_blocking(check).await;
     if !matches!(plain, Ok(Some(true))) {
         return Ok(None);

@@ -1,14 +1,16 @@
-//! The chooser's machine on Windows: the drives (`GetLogicalDrives`, `GetDriveTypeW`), the
-//! known folders read without a check (`KF_FLAG_DONT_VERIFY`, a registry read), a folder's
-//! entries with their attributes and reparse tags in one pass (`FindFirstFileExW`), and the
-//! pre-check's probe (`GetFileAttributesW`). The calls that touch a folder may block on a share
-//! that is down; the chooser runs each on a thread of its own with a time limit.
+//! The chooser's machine on Windows: the drives (`GetLogicalDrives`, `GetDriveTypeW`) and the
+//! servers of the network ones (`WNetGetConnectionW`), the known folders read without a check
+//! (`KF_FLAG_DONT_VERIFY`, a registry read), a folder's entries with their attributes and reparse
+//! tags in one pass (`FindFirstFileExW`), and the pre-check's probe (`GetFileAttributesW`). The
+//! calls that touch a folder may block on a share that is down; the chooser runs each on a thread
+//! of its own with a time limit.
 #![expect(unsafe_code, reason = "FFI to the Windows file and known-folder APIs")]
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt as _;
 
-use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_NO_MORE_FILES};
+use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, NO_ERROR};
+use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
 use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_ATTRIBUTE_SYSTEM, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH, FindClose,
@@ -21,9 +23,10 @@ use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
     FOLDERID_RoamingAppData, FOLDERID_Videos, KF_FLAG_DONT_VERIFY, SHGetKnownFolderPath,
 };
-use windows::core::{GUID, HSTRING};
+use windows::core::{GUID, HSTRING, PWSTR};
 
-use super::listing::{Entry, Machine};
+use super::listing::{Drives, Entry, Machine};
+use super::place::Place;
 use super::stall::KnownFolders;
 
 /// The most entries one read takes from a folder, files included, before it stops.
@@ -44,23 +47,29 @@ const SHOWN: [GUID; 7] = [
 pub(super) struct System;
 
 impl Machine for System {
-    fn drives(&self) -> Vec<char> {
+    fn drives(&self) -> Drives {
         // SAFETY: no arguments; returns a bitmask of the drive letters.
         let mask = unsafe { GetLogicalDrives() };
-        ('A'..='Z')
-            .zip(0..26)
-            .filter(|(_, bit)| mask & (1 << bit) != 0)
-            .filter(|(letter, _)| matches!(drive_type(*letter), DRIVE_FIXED | DRIVE_REMOVABLE))
-            .map(|(letter, _)| letter)
-            .collect()
-    }
-
-    fn remote_drive(&self, letter: char) -> bool {
-        drive_type(letter) == DRIVE_REMOTE
-    }
-
-    fn desktop(&self) -> Option<String> {
-        known_folder(&FOLDERID_Desktop)
+        let mut drives = Drives::default();
+        for (letter, bit) in ('A'..='Z').zip(0..26) {
+            if mask & (1 << bit) == 0 {
+                continue;
+            }
+            match drive_type(letter) {
+                DRIVE_FIXED | DRIVE_REMOVABLE => drives.local.push(letter),
+                DRIVE_REMOTE => {
+                    drives.remote.push(letter);
+                    drives.servers.extend(mapped_server(letter));
+                }
+                _ => {}
+            }
+        }
+        let servers = SHOWN.iter().filter_map(known_folder).filter_map(|path| {
+            Place::from_os(&path).and_then(|place| place.server().map(str::to_owned))
+        });
+        drives.servers.extend(servers);
+        drives.desktop = known_folder(&FOLDERID_Desktop);
+        drives
     }
 
     fn read(&self, folder: &str) -> std::io::Result<Vec<Entry>> {
@@ -92,10 +101,8 @@ impl Machine for System {
                 break;
             }
             // SAFETY: `handle` is the open search, and `data` a valid buffer for the next entry.
-            match unsafe { FindNextFileW(handle, &raw mut data) } {
-                Ok(()) => {}
-                Err(error) if error.code() == ERROR_NO_MORE_FILES.to_hresult() => break,
-                Err(_) => break,
+            if unsafe { FindNextFileW(handle, &raw mut data) }.is_err() {
+                break;
             }
         }
         // SAFETY: `handle` is the search FindFirstFileExW opened, closed once here.
@@ -103,35 +110,61 @@ impl Machine for System {
         Ok(entries)
     }
 
-    fn plain_dir(&self, folder: &str) -> bool {
-        let attributes = attributes(folder);
-        if attributes == INVALID_FILE_ATTRIBUTES || attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-            return false;
+    fn entry(&self, path: &str) -> Option<Entry> {
+        let attributes = attributes(path);
+        if attributes == INVALID_FILE_ATTRIBUTES {
+            return None;
         }
-        if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0 {
-            return true;
+        let mut found = Entry {
+            name: String::new(),
+            dir: attributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0,
+            hidden: attributes & (FILE_ATTRIBUTE_HIDDEN.0 | FILE_ATTRIBUTE_SYSTEM.0) != 0,
+            link: false,
+        };
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            // A reparse point: a link unless its tag says otherwise (a OneDrive placeholder). The
+            // tag comes from a search for the path itself; unread, it counts as a link.
+            let wide = HSTRING::from(path.trim_end_matches('\\'));
+            let mut data = WIN32_FIND_DATAW::default();
+            // SAFETY: as in `read`, for the path itself rather than its contents.
+            let search = unsafe {
+                FindFirstFileExW(
+                    &wide,
+                    FindExInfoBasic,
+                    (&raw mut data).cast(),
+                    FindExSearchNameMatch,
+                    None,
+                    FIND_FIRST_EX_FLAGS::default(),
+                )
+            };
+            found.link = match search {
+                Ok(handle) => {
+                    // SAFETY: `handle` is the search just opened, closed once here.
+                    drop(unsafe { FindClose(handle) });
+                    entry(&data).link
+                }
+                Err(_) => true,
+            };
         }
-        // A reparse point: plain only when its tag is no link (a OneDrive placeholder).
-        let path = HSTRING::from(folder.trim_end_matches('\\'));
-        let mut data = WIN32_FIND_DATAW::default();
-        // SAFETY: as in `read`, for the folder itself rather than its contents.
-        let found = unsafe {
-            FindFirstFileExW(
-                &path,
-                FindExInfoBasic,
-                (&raw mut data).cast(),
-                FindExSearchNameMatch,
-                None,
-                FIND_FIRST_EX_FLAGS::default(),
-            )
-        };
-        let Ok(handle) = found else {
-            return false;
-        };
-        // SAFETY: `handle` is the search just opened, closed once here.
-        drop(unsafe { FindClose(handle) });
-        !entry(&data).link
+        Some(found)
     }
+}
+
+/// The server a network drive is mapped to, from the `\\server\share` `WNetGetConnectionW` reads.
+fn mapped_server(letter: char) -> Option<String> {
+    let local = HSTRING::from(format!("{letter}:"));
+    let mut remote = [0_u16; 1024];
+    let mut length = u32::try_from(remote.len()).ok()?;
+    // SAFETY: `local` is NUL-terminated, `remote` holds `length` UTF-16 units, and the call
+    // writes at most that many, NUL included.
+    let status =
+        unsafe { WNetGetConnectionW(&local, Some(PWSTR(remote.as_mut_ptr())), &raw mut length) };
+    if status != NO_ERROR {
+        return None;
+    }
+    let end = remote.iter().position(|&unit| unit == 0)?;
+    let path = String::from_utf16(remote.get(..end)?).ok()?;
+    Place::from_os(&path).and_then(|place| place.server().map(str::to_owned))
 }
 
 impl KnownFolders for System {
