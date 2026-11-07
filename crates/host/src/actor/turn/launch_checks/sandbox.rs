@@ -7,17 +7,22 @@
 //! The answer comes back as [`TurnInput::Sandboxed`]; the agent then spawns once, through the
 //! launcher the seam gave (one launcher per agent launch: its policy is fixed).
 //!
-//! A refused policy, an error from the seam or no answer in time fails the launch with
-//! `agent.launch_failed` (a shortcut where a protected name should be keeps
-//! `matter.protected_link`), its message naming the kind of failure and never a path; the run
-//! folder is removed on that thread before the answer goes out. An answer nobody waits for any
-//! more (an earlier launch, the actor gone) is taken back on its thread, and during shutdown on
-//! the actor's removal path, so it spawns nothing.
+//! A refused policy or an error from the seam fails the launch with the error's `code()`
+//! (`agent.launch_failed`, `matter.protected_link` or `internal`), no answer in time with
+//! `agent.launch_failed`, the message naming the kind of failure and never a path; the run
+//! folder is removed on that thread before the answer goes out. The prep rides to that thread in
+//! an [`UndoOnDrop`], so a thread that never starts or a panic there takes the run folder back
+//! too. An answer nobody waits for any more (an earlier launch, the actor gone) is taken back on
+//! its thread, and during shutdown on the actor's removal path, so it spawns nothing; the names
+//! it set aside still get their notice.
 //!
-//! The names the seam set aside before the launch (Windows' `before_launch`) give one `Notice`
-//! on the thread, relative to the matter. Once the agent spawned, its launcher and the seam ride
-//! on the thread's run folder ([`SandboxSession`]); when the agent has exited and the run folder
-//! goes, the seam's `after_session` is called once, off the actor, bounded like the removal.
+//! The seam gets the launch's `SessionKey` and those of the matter's other sessions still
+//! running, taken on the actor when the job starts ([`running`]). The names it set aside before
+//! the launch (Windows' `before_launch`) give one `Notice` on the thread, relative to the matter
+//! ([`notice`]). Once the agent spawned, its launcher, its policy and the seam ride on the
+//! thread's run folder ([`SandboxSession`]); when the agent has exited and the run folder goes,
+//! the seam's `after_session` is called once with that policy, off the actor, bounded like the
+//! removal, and what it moved gives one more notice.
 //!
 //! The policy is B2's minimum: the matter folder read-write, the session's `run/<session>/tmp`
 //! as `TMPDIR`, the agent's install folder read and run. R17 PR-C adds the per-agent state
@@ -25,31 +30,29 @@
 //! skills, the browser sidecar and the login files.
 
 use std::fmt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clauseo_process::{Launcher, SpawnOptions};
-use clauseo_protocol::{ErrorCode, MatterId, Notice, NoticeLevel, StreamId, ThreadId};
-use clauseo_sandbox::{Denial, DenialSink, Policy, SetAside};
+use clauseo_protocol::{ErrorCode, MatterId, ThreadId};
+use clauseo_sandbox::{Denial, DenialSink, Policy};
 
 use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::super::agents::{self, Waiting};
-use super::super::out::Out;
-use super::super::{Then, TurnInput, host_stopping, state};
+use super::super::{TurnInput, host_stopping, state};
 use super::{Prepared, Preparing, RunFolders, discard, undo_late};
 use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, off_actor, off_actor_or_undo};
-use crate::config::SandboxLaunchers;
+use crate::config::{SandboxLaunchers, SessionEnd, SessionKey};
 use crate::error::Error;
 use crate::log_file::Cause;
-
-/// The most set-aside names a notice lists; the rest are counted.
-const NAMED: usize = 10;
 
 /// What the seam gave a launch, carried on its [`Prepared`] to the spawn.
 pub(crate) struct Sandboxed {
     /// The launch's own launcher: the agent spawns through it once.
     pub(crate) launcher: Arc<dyn Launcher>,
+    /// The policy the launcher was made with, for the session's `after_session`.
+    policy: Policy,
     /// The names set aside before the launch, relative to the matter.
     moved: Vec<String>,
 }
@@ -62,13 +65,14 @@ impl fmt::Debug for Sandboxed {
     }
 }
 
-/// A spawned agent's jail, on its thread's run folder until the agent has exited: the seam, for
-/// `after_session`, and the launcher, kept alive for exactly that launch (a Seatbelt launcher
-/// owns its denial watcher registration).
+/// A spawned agent's jail, on its thread's run folder until the agent has exited: the seam and
+/// the launch's policy, for `after_session`, and the launcher, kept alive for exactly that
+/// launch (a Seatbelt launcher owns its denial watcher registration).
 #[derive(Clone)]
 pub(crate) struct SandboxSession {
     launchers: Arc<dyn SandboxLaunchers>,
     launcher: Arc<dyn Launcher>,
+    policy: Policy,
 }
 
 impl fmt::Debug for SandboxSession {
@@ -89,7 +93,7 @@ pub(crate) fn launch_policy(
     install: &Path,
 ) -> Result<Policy, clauseo_sandbox::Error> {
     Policy::builder(crate::agent::session_folder(matter), &run.work)
-        .tmpdir(run.root.join("tmp"))
+        .tmpdir(run.tmp())
         .runtime(install)
         .build()
 }
@@ -127,17 +131,34 @@ pub(super) fn start(
         return;
     };
     state.preparing = Some(Box::new(Preparing { id, waiting }));
-    let matter = prepared.run.key.matter;
+    let key = prepared.run.key;
+    let running = running(actor, key);
     let clock = Arc::clone(&actor.clock);
-    let denials: Arc<dyn DenialSink> = Arc::new(LoggedDenials { matter });
+    let denials: Arc<dyn DenialSink> = Arc::new(LoggedDenials { matter: key.matter });
+    let ask = Ask {
+        install,
+        running,
+        opts,
+        denials,
+    };
+    // Taken back if the seam's thread never runs (it failed to start) or unwinds (a panic).
+    let held = UndoOnDrop::new(prepared, undo_prepared as fn(Box<Prepared>));
+    let post = actor.post.clone();
     actor.spawn_post(async move {
         let answered = off_actor_or_undo(
             clock,
-            job(matter),
-            move || Ok(make(&*launchers, prepared, &install, opts, denials)),
-            |late: Result<Box<Prepared>, Error>| {
+            job(key.matter),
+            move || Ok(make(&*launchers, held, ask)),
+            move |late: Result<Box<Prepared>, Error>| {
                 if let Ok(late) = late {
+                    // The names it moved still get their notice; the launch is taken back.
+                    let moved = moved_names(&late);
                     undo_late(*late);
+                    if !moved.is_empty() {
+                        let late = Input::Turn(TurnInput::SetAsideLate { thread, moved });
+                        // The actor may be gone by then; nobody is left to tell.
+                        let _gone = post.try_send(late);
+                    }
                 }
             },
         )
@@ -146,6 +167,77 @@ pub(super) fn start(
         let result = answered.unwrap_or_else(|_unanswered| Err(unanswered()));
         Input::Turn(TurnInput::Sandboxed { thread, id, result })
     });
+}
+
+/// `value`, given to `undo` when dropped unless taken first: the seam's thread holds a launch's
+/// prep in one, so a panic there or a thread that never ran takes its run folder back.
+pub(super) struct UndoOnDrop<T, F: FnOnce(T)> {
+    value: Option<T>,
+    undo: Option<F>,
+}
+
+impl<T, F: FnOnce(T)> UndoOnDrop<T, F> {
+    pub(super) const fn new(value: T, undo: F) -> Self {
+        Self {
+            value: Some(value),
+            undo: Some(undo),
+        }
+    }
+
+    /// The value, still held.
+    pub(super) fn get_mut(&mut self) -> Option<&mut T> {
+        self.value.as_mut()
+    }
+
+    /// The value, handed on: no undo any more.
+    pub(super) fn take(mut self) -> Option<T> {
+        self.value.take()
+    }
+}
+
+impl<T, F: FnOnce(T)> Drop for UndoOnDrop<T, F> {
+    fn drop(&mut self) {
+        if let (Some(value), Some(undo)) = (self.value.take(), self.undo.take()) {
+            undo(value);
+        }
+    }
+}
+
+/// [`undo_late`] for a boxed prep.
+fn undo_prepared(prepared: Box<Prepared>) {
+    undo_late(*prepared);
+}
+
+/// The names a launch's seam moved, taken off its prep.
+fn moved_names(prepared: &Prepared) -> Vec<String> {
+    prepared
+        .sandbox
+        .as_ref()
+        .map(|sandboxed| sandboxed.moved.clone())
+        .unwrap_or_default()
+}
+
+/// The keys of `key`'s matter's other sessions whose agents still run: every other thread of
+/// the matter holding a run folder (from its agent's launch until it ended), sorted.
+fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
+    let mut running: Vec<SessionKey> = actor
+        .threads
+        .values()
+        .filter_map(|entry| entry.turn.run.as_ref())
+        .map(|run| run.key)
+        .filter(|other| other.matter == key.matter && other.thread != key.thread)
+        .collect();
+    running.sort_unstable();
+    running
+}
+
+/// What the seam is asked with besides the launch: the agent's install folder, the matter's
+/// other running sessions, the spawn options and the denial sink.
+struct Ask {
+    install: PathBuf,
+    running: Vec<SessionKey>,
+    opts: SpawnOptions,
+    denials: Arc<dyn DenialSink>,
 }
 
 /// The agent's install folder: the folder of its program (`command`, an absolute path).
@@ -173,63 +265,43 @@ fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
 /// taken back here, before the answer goes out.
 fn make(
     launchers: &dyn SandboxLaunchers,
-    mut prepared: Box<Prepared>,
-    install: &Path,
-    opts: SpawnOptions,
-    denials: Arc<dyn DenialSink>,
+    mut held: UndoOnDrop<Box<Prepared>, fn(Box<Prepared>)>,
+    ask: Ask,
 ) -> Result<Box<Prepared>, Error> {
-    let matter = prepared.run.key.matter;
-    let made = launch_policy(&prepared.stored, &prepared.run, install).and_then(|policy| {
-        let root = policy.matter().to_owned();
-        let launch = launchers.launcher(policy, &matter, opts, denials)?;
-        Ok((root, launch))
+    let Some(prepared) = held.get_mut() else {
+        return Err(unanswered());
+    };
+    let key = prepared.run.key;
+    let matter = key.matter;
+    let made = launch_policy(&prepared.stored, &prepared.run, &ask.install).and_then(|policy| {
+        let launch = launchers.launcher(
+            policy.clone(),
+            &matter,
+            &key,
+            &ask.running,
+            ask.opts,
+            ask.denials,
+        )?;
+        Ok((policy, launch))
     });
     match made {
-        Ok((root, launch)) => {
-            let moved = relative_names(&launch.set_aside, &[&root, &prepared.stored]);
+        Ok((policy, launch)) => {
+            let moved = notice::relative_names(&launch.set_aside, policy.matter());
             prepared.sandbox = Some(Sandboxed {
                 launcher: launch.launcher,
+                policy,
                 moved,
             });
-            Ok(prepared)
+            held.take().ok_or_else(unanswered)
         }
         Err(error) => {
             let kind = kind(&error);
             tracing::warn!(%matter, kind, "the sandbox refused the agent's launch");
-            undo_late(*prepared);
+            // The run folder goes here, on the seam's thread.
+            drop(held);
             Err(refused(&error))
         }
     }
-}
-
-/// The names in `set_aside`, each relative to the first of `roots` it is under; one under none
-/// keeps only its last name, so no absolute path reaches the notice.
-fn relative_names(set_aside: &[SetAside], roots: &[&Path]) -> Vec<String> {
-    set_aside
-        .iter()
-        .filter_map(|moved| {
-            let from = &moved.from;
-            let relative = roots
-                .iter()
-                .find_map(|root| from.strip_prefix(root).ok())
-                .or_else(|| from.is_relative().then_some(from.as_path()));
-            let name = match relative {
-                Some(relative) => relative
-                    .components()
-                    .filter_map(|part| match part {
-                        Component::Normal(name) => Some(name.to_string_lossy()),
-                        Component::Prefix(_)
-                        | Component::RootDir
-                        | Component::CurDir
-                        | Component::ParentDir => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("/"),
-                None => from.file_name()?.to_string_lossy().into_owned(),
-            };
-            (!name.is_empty()).then_some(name)
-        })
-        .collect()
 }
 
 /// The kind of a seam's failure, for the message and the log: never its path.
@@ -250,24 +322,11 @@ fn kind(error: &clauseo_sandbox::Error) -> &'static str {
     }
 }
 
-/// The launch's failure for a seam's error: `agent.launch_failed`, or `matter.protected_link`
-/// for a shortcut where a protected name should be; the message names the kind only.
+/// The launch's failure for a seam's error: the error's own `code()` (`agent.launch_failed`,
+/// `matter.protected_link` or `internal`); the message names the kind only.
 fn refused(error: &clauseo_sandbox::Error) -> Error {
-    let code = match error {
-        clauseo_sandbox::Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
-        clauseo_sandbox::Error::Policy(_)
-        | clauseo_sandbox::Error::Probe(_)
-        | clauseo_sandbox::Error::Launch(_)
-        | clauseo_sandbox::Error::ProxyConfig(_)
-        | clauseo_sandbox::Error::ProxyStart(_)
-        | clauseo_sandbox::Error::FolderUnsupported { .. }
-        | clauseo_sandbox::Error::NeighbourUnfenceable { .. }
-        | clauseo_sandbox::Error::AclApply { .. }
-        | clauseo_sandbox::Error::SetAside { .. }
-        | clauseo_sandbox::Error::CleanClose(_) => ErrorCode::AgentLaunchFailed,
-    };
     Error::refused(
-        code,
+        error.code(),
         format!("The sandbox couldn't start the agent: {}.", kind(error)),
     )
 }
@@ -294,8 +353,11 @@ pub(crate) fn on_sandboxed(
     let preparing = state(actor, thread)
         .and_then(|state| state.preparing.take_if(|preparing| preparing.id == id));
     let Some(preparing) = preparing else {
+        // An answer nobody waits for (a stop, a sign-in change): its names still get their notice.
         if let Ok(stale) = result {
+            let moved = moved_names(&stale);
             discard(actor, thread, stale.run);
+            on_set_aside_late(actor, thread, &moved);
         }
         return;
     };
@@ -313,17 +375,12 @@ pub(crate) fn on_sandboxed(
         .map(|sandboxed| std::mem::take(&mut sandboxed.moved))
         .unwrap_or_default();
     if host_stopping(actor) {
-        if !moved.is_empty() {
-            let moved = moved.len();
-            tracing::info!(%thread, moved, "the sandbox set names aside; the host stops");
-        }
+        on_set_aside_late(actor, thread, &moved);
         discard(actor, thread, prepared.run);
         agents::fail_all(actor, thread, waiting, &Error::Closed);
         return;
     }
-    if !moved.is_empty() {
-        log_notice(actor, thread, &moved);
-    }
+    on_set_aside_late(actor, thread, &moved);
     if let Some(error) = super::super::sign_in::launch_refusal(actor, thread) {
         discard(actor, thread, prepared.run);
         agents::fail_all(actor, thread, waiting, &error);
@@ -336,94 +393,73 @@ pub(crate) fn on_sandboxed(
         .map(|((launchers, _), sandboxed)| SandboxSession {
             launchers,
             launcher: Arc::clone(&sandboxed.launcher),
+            policy: sandboxed.policy.clone(),
         });
     super::launch_prepared(actor, thread, waiting, prepared, session);
 }
 
-/// The notice of the names `moved` (relative to the matter), logged on the thread once its
-/// stream is loaded: at most [`NAMED`] named, the rest counted.
-fn log_notice(actor: &mut Actor, thread: ThreadId, moved: &[String]) {
-    tracing::info!(%thread, moved = moved.len(), "the sandbox set protected names aside");
-    let notice = notice(moved);
-    let stream = StreamId::Thread(thread);
-    actor.with_loaded(
-        stream,
-        Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let logged = loaded.and_then(|()| {
-                let mut out = Out::new(actor, thread, None)?;
-                out.push(actor, notice)?;
-                out.send(actor, Then::Nothing)
-            });
-            if let Err(error) = logged {
-                let error = Cause(&error);
-                tracing::warn!(%thread, %error, "a set-aside notice was not logged");
-            }
-            actor.release(stream);
-        }),
-    );
-}
-
-/// The set-aside notice's text and level. No `NoticeKind` yet (that is a wire change, R17
-/// PR-D/E): the text is the notice.
-fn notice(moved: &[String]) -> Notice {
-    let named = moved
-        .iter()
-        .take(NAMED)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(", ");
-    let more = moved.len().saturating_sub(NAMED);
-    let what = match moved.len() {
-        1 => "a protected item that changed".to_owned(),
-        n => format!("{n} protected items that changed"),
-    };
-    let rest = if more == 0 {
-        String::new()
-    } else {
-        format!(" and {more} more")
-    };
-    Notice {
-        level: NoticeLevel::Warning,
-        text: format!(
-            "Before the agent started, Clauseo moved {what} in this matter to a safe place: \
-             {named}{rest}."
-        ),
-        kind: None,
-    }
-}
-
-/// `run`'s agent has exited: the seam's `after_session` for its matter, once, off the actor,
-/// waited on as a run folder's removal is (it counts as one for shutdown), and the launch's
-/// launcher dropped there after it.
+/// The session `key`'s agent has exited: the seam's `after_session` with the launch's policy,
+/// once, off the actor, waited on as a run folder's removal is (it counts as one for shutdown),
+/// and the launch's launcher dropped there after it. What it moved comes back matter-relative
+/// for [`on_session_ended`].
 pub(super) fn after_session(
     actor: &mut Actor,
     thread: ThreadId,
-    matter: MatterId,
+    key: SessionKey,
     session: SandboxSession,
 ) {
     let clock = Arc::clone(&actor.clock);
-    let job = Job::short("the sandbox's after-session", Some(matter));
+    let job = Job::short("the sandbox's after-session", Some(key.matter));
     actor.work.run_removals += 1;
     actor.spawn_post(async move {
         let done = off_actor(clock, job, move || {
             let SandboxSession {
                 launchers,
                 launcher,
+                policy,
             } = session;
-            launchers.after_session(&matter);
+            let root = policy.matter().to_owned();
+            let moved = launchers.after_session(SessionEnd::new(key.matter, key, policy));
             drop(launcher);
-            Ok(())
+            Ok(notice::relative_names(&moved, &root))
         })
         .await;
-        if let Err(error) = done {
-            tracing::warn!(
-                %thread,
-                error = %Cause(&error),
-                "the sandbox's after-session call did not answer"
-            );
-        }
-        Input::Turn(TurnInput::RunRemoved)
+        let moved = done.unwrap_or_else(|error| {
+            let error = Cause(&error);
+            tracing::warn!(%thread, %error, "the sandbox's after-session call did not answer");
+            Vec::new()
+        });
+        Input::Turn(TurnInput::SessionEnded { thread, moved })
     });
+}
+
+/// Names a launch moved (matter-relative): one notice while the host serves, a count in the log
+/// during shutdown.
+pub(crate) fn on_set_aside_late(actor: &mut Actor, thread: ThreadId, moved: &[String]) {
+    if moved.is_empty() {
+        return;
+    }
+    if host_stopping(actor) {
+        let moved = moved.len();
+        tracing::info!(%thread, moved, "the sandbox set names aside; the host stops");
+        return;
+    }
+    notice::log(actor, thread, moved, notice::When::BeforeLaunch);
+}
+
+/// A session's `after_session` ended: it counts as a removal done, and the names it moved
+/// (matter-relative) give one notice on the thread while the host serves.
+pub(crate) fn on_session_ended(actor: &mut Actor, thread: ThreadId, moved: &[String]) {
+    super::on_run_removed(actor);
+    if moved.is_empty() {
+        return;
+    }
+    if host_stopping(actor) {
+        let moved = moved.len();
+        tracing::info!(%thread, moved, "the sandbox moved names after a session; host stops");
+        return;
+    }
+    notice::log(actor, thread, moved, notice::When::AfterSession);
 }
 
 /// The launch's denial sink until R18's: each denial logged by its matter only, never its path
@@ -439,5 +475,6 @@ impl DenialSink for LoggedDenials {
     }
 }
 
+mod notice;
 #[cfg(test)]
 mod tests;

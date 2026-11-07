@@ -34,7 +34,7 @@ pub use profile_hook::{NoProfile, ProfileHook};
 mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
 mod sandbox;
-pub use sandbox::{Detect, Sandbox, SandboxLaunch, SandboxLaunchers};
+pub use sandbox::{Detect, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd};
 mod session;
 #[cfg(feature = "test-support")]
 pub use session::TestProxy;

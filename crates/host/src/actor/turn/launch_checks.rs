@@ -174,7 +174,8 @@ impl RunFolders {
     /// run folder is taken back. File system calls: off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
-        for folder in [&self.work, &self.browser, &self.notes] {
+        let tmp = self.tmp();
+        for folder in [&self.work, &self.browser, &self.notes, &tmp] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
                 self.remove();
                 return Err(Error::refused(
@@ -196,6 +197,11 @@ impl RunFolders {
             ));
         }
         Ok(())
+    }
+
+    /// The session's own temporary folder, `<run>/tmp`: a jailed agent's `TMPDIR`.
+    pub(crate) fn tmp(&self) -> PathBuf {
+        self.root.join("tmp")
     }
 
     /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
@@ -509,7 +515,7 @@ fn launch_prepared(
 fn discard(actor: &mut Actor, thread: ThreadId, mut run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
     if let Some(session) = run.sandbox.take() {
-        sandbox::after_session(actor, thread, run.key.matter, session);
+        sandbox::after_session(actor, thread, run.key, session);
     }
     let clock = std::sync::Arc::clone(&actor.clock);
     let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
@@ -557,7 +563,7 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 mod browser;
 pub(super) mod relay;
 mod sandbox;
-pub(super) use sandbox::on_sandboxed;
+pub(super) use sandbox::{on_sandboxed, on_session_ended, on_set_aside_late};
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

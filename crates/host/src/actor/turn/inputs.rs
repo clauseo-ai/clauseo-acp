@@ -37,6 +37,17 @@ pub(crate) enum TurnInput {
     },
     /// A run folder's removal off the actor (`launch_checks::discard`) ended.
     RunRemoved,
+    /// A sandboxed session's `after_session` off the actor ended (`launch_checks/sandbox.rs`),
+    /// having moved `moved` (matter-relative names).
+    SessionEnded {
+        thread: ThreadId,
+        moved: Vec<String>,
+    },
+    /// Names a launch's seam moved (matter-relative) whose answer came after the wait.
+    SetAsideLate {
+        thread: ThreadId,
+        moved: Vec<String>,
+    },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
 }
