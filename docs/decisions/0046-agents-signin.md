@@ -114,14 +114,14 @@ its own stderr ring for `ExitReport::stderr_tail`, and S18 never reads it.
   `authMethod`, or `claude.ai` with another provider, gives `SignedOut { found: ClaudeSettings }`.
 - In Clauseo's own folder, `loggedIn: true` is signed in, whatever the `authMethod`.
 - Codex: `login status` exit 0 with its `Logged in using …` line is signed in; a sign-in or a
-  status check is `SignedIn` only once `account/read` then names a `chatgpt` account (a
-  JSON-RPC error, `account: null` or no answer confirms nothing; an API-key, Amazon Bedrock or
-  unknown account is not a ChatGPT sign-in and confirms signed out). Only a sign-in the lawyer
-  started then fails, and it removes the login it ran (`logout`, else the home's `auth.json`
-  directly), so no unmarked file reads as reused later. A status check never sends `Failed`:
-  confirming nothing, it asks once more, then leaves the state exactly as it was (no
-  downgrade, no end of a reuse, never an upgrade) and logs `status_not_confirmed state_kept`;
-  only a positive "not logged in" signs out. Then the stat of the lawyer's login file decides
+  status check is `SignedIn` only once `account/read` then names a `chatgpt` account. Exit 0
+  with no signed-in line, a JSON-RPC error, `account: null`, and an API-key, Amazon Bedrock or
+  unknown account are definite answers: signed out. Only a sign-in the lawyer started then
+  fails, and it removes the login it ran (`logout`, else the home's `auth.json` directly; never
+  while the guard says shared or the lawyer's home folder is unknown), so no unmarked file reads
+  as reused later. A status check never sends `Failed`: a run with no answer at all (killed at
+  its limit, or not started) is asked once more, then the state is left exactly as it was (no
+  downgrade, no end of a reuse, never an upgrade) with `status_not_confirmed state_kept` logged. Then the stat of the lawyer's login file decides
   between reusable and `CodexKeyring`.
 - `account/read`: only a `chatgpt` account gives an email and plan, and only it is a login.
 - `is_sign_in_again(error_text)` is true when the text names `refresh_token_reused`,

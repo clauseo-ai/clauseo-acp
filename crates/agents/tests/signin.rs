@@ -24,6 +24,10 @@ mod codex;
 mod codex_cli;
 
 #[cfg(test)]
+#[path = "signin/codex_status.rs"]
+mod codex_status;
+
+#[cfg(test)]
 #[path = "signin/queued.rs"]
 mod queued;
 

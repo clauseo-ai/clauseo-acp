@@ -55,6 +55,9 @@ const API_KEY_METHOD: &str = "apikey";
 /// The marker `authMethod` for which Codex's `account/read` gives a `ChatGPT` account whose
 /// email is `null` (Codex does not know it).
 const NO_EMAIL_METHOD: &str = "chatgpt-no-email";
+/// The marker `authMethod` for which Codex's `account/read` answers `account: null` while
+/// `login status` still says signed in.
+const NO_ACCOUNT_METHOD: &str = "no-account";
 /// The email every marker and every status reply carries.
 const EMAIL: &str = "test@example.com";
 /// The one code `FAKE_SIGNIN=paste` accepts.

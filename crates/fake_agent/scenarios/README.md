@@ -388,7 +388,8 @@ What each command does:
   `{"account":{"type":"chatgpt","email":"test@example.com","planType":"plus"},"requiresOpenaiAuth":false}`
   when the marker is there, and `{"account":null,"requiresOpenaiAuth":true}` when it is not (signed
   out). A marker whose `authMethod` is `apikey` gives `{"account":{"type":"apiKey"},…}`, and one
-  whose `authMethod` is `chatgpt-no-email` a `ChatGPT` account with `"email":null`. A notification (no `id`) gets no reply. Any other method
+  whose `authMethod` is `chatgpt-no-email` a `ChatGPT` account with `"email":null`; one whose
+  `authMethod` is `no-account` gets the signed-out reply while `login status` still says signed in. A notification (no `id`) gets no reply. Any other method
   gets error `-32601`.
 
 Bad arguments print the mode's usage line on stderr and exit 2.
