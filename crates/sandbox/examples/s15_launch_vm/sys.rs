@@ -86,10 +86,11 @@ pub(crate) fn start(command: &mut Command) -> io::Result<Child> {
     command.spawn()
 }
 
-/// Runs `command` to its end and gives its output (`icacls`, which ends at once).
+/// Runs `command` to its end and gives its output (`icacls`, and the `end-cleanup` probe's
+/// `reg`, `schtasks` and `bitsadmin`, which end at once).
 #[expect(
     clippy::disallowed_methods,
-    reason = "icacls runs to its end in a second"
+    reason = "icacls, reg, schtasks and bitsadmin run to their end in a second"
 )]
 pub(crate) fn output(command: &mut Command) -> io::Result<Output> {
     command.output()
