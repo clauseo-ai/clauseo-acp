@@ -457,6 +457,8 @@ crates/sandbox/src/windows/wfp/engine.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/read.rs - unsafe_code
 crates/sandbox/src/windows/wfp/engine/security.rs - unsafe_code
 crates/sandbox/src/windows/wfp/firewall.rs - unsafe_code
+# S15 PR7's VM harness: the pool user's logon, the (B) token and the probe's start.
+crates/sandbox/examples/s15_wfp_vm/launch.rs - unsafe_code
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
