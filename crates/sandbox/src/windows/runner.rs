@@ -22,6 +22,10 @@
 //!   outer's, so when the host's job ends the outer, the inner runner and the agent's tree end
 //!   with it. A disabled Secondary Logon service (error 1058) is [`RunExit::SecondaryLogon`],
 //!   `SetUpFailed` with its named cause ([`RunExit::no_sandbox`]).
+//! - The outer kills every process of the pool user outside its job (`sweep.rs`): before the
+//!   logon, once the suspended inner runner is in the job and shut but before it resumes, every
+//!   [`TICK`](sweep::TICK) while the session runs, and at its end. A pool user serves one live
+//!   session at a time (`pool::assign::busy`), so none of those processes is another session's.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
 //!   launch on `ctl` only after it checked the client is the inner runner's pid and that pid's
 //!   token user is the pool user; `CreateProcessWithLogonW` caps the command line at 1024
@@ -61,6 +65,10 @@ pub mod paths;
 mod policy;
 #[cfg(windows)]
 mod spawn;
+#[cfg(any(windows, test))]
+mod start;
+#[cfg(any(windows, test))]
+mod sweep;
 
 pub use env::agent_env;
 #[cfg(windows)]
@@ -344,10 +352,13 @@ pub enum RunExit {
     /// The agent exited with a code in the runner's own range, which the outer runner never
     /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
     AgentReserved,
+    /// The sweep of the pool user's processes before the inner runner ran failed (`sweep.rs`):
+    /// one whose user can't be read, or one of the pool user's that can't be opened or ended.
+    Sweep,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 13] = [
+    const ALL: [RunExit; 14] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -361,6 +372,7 @@ impl RunExit {
         RunExit::Token,
         RunExit::Spawn,
         RunExit::AgentReserved,
+        RunExit::Sweep,
     ];
 
     /// The exit code.
@@ -397,7 +409,8 @@ impl RunExit {
             | RunExit::Job
             | RunExit::Token
             | RunExit::Spawn
-            | RunExit::AgentReserved => None,
+            | RunExit::AgentReserved
+            | RunExit::Sweep => None,
         }
     }
 }

@@ -130,7 +130,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # The runner (S15 PR5, src/windows/{runner,token,pipe}): the named pipes (System_Pipes), its
 # private desktop (System_StationsAndDesktops, whose CreateDesktopW needs Graphics_Gdi), the
 # error mode (System_Diagnostics_Debug), the kill-on-close job (System_JobObjects), and the
-# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp).
+# inner runner's own threads, each shut to its agent (System_Diagnostics_ToolHelp), and the sweep
+# of the pool user's processes, listed with their users by WTSEnumerateProcessesW
+# (System_RemoteDesktop).
 [target.'cfg(windows)'.dependencies]
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
