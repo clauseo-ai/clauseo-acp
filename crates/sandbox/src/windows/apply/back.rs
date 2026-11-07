@@ -246,6 +246,11 @@ pub fn forget_matter(
     let taken = take_back(ledger, Some(matter), acl, pick).map_err(failed)?;
     finish(ledger, acl, around, &taken, Some(matter), &reclaim).map_err(Refused::error)?;
     ledger.clear_handbacks(matter).map_err(failed)?;
+    // Its clean-ups for `--reclaim` (S15 `PR4i`) are done with too.
+    if let Err(error) = ledger.clear_reclaims(matter) {
+        let error = error.kind();
+        tracing::warn!(%error, "a forgotten matter's clean-ups owed weren't cleared");
+    }
     Ok(Forgotten {
         removed: taken.removed.len(),
         kept: taken.kept,

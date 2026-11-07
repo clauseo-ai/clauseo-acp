@@ -3,6 +3,7 @@
 use super::*;
 use crate::test_support::TempDir;
 
+mod launch_order;
 mod pool;
 mod reuse;
 mod review;

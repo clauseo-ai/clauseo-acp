@@ -4,12 +4,19 @@
 
 use super::fake::LAWYER;
 use super::*;
+use crate::windows::ledger::Stuck;
 use crate::windows::test_world::registered;
 use crate::windows::writer::Owned;
 
 /// The ledger file's bytes now (`None` when there is none).
 fn ledger_bytes(w: &World) -> Option<Vec<u8>> {
     std::fs::read(ledger_path(&w.at("data"))).ok()
+}
+
+/// The entries a ledger file's `bytes` list (none when there is no file).
+fn entries(bytes: Option<Vec<u8>>) -> serde_json::Value {
+    let read = bytes.map(|b| serde_json::from_slice::<serde_json::Value>(&b).unwrap());
+    read.map_or_else(|| serde_json::json!([]), |file| file["entries"].clone())
 }
 
 /// Matter one's plan with siblings `sib1`, `sib2`, and matter two registered at `other/m2`
@@ -118,7 +125,18 @@ fn each_root_whose_hand_back_fails_refuses_before_anything_is_recorded() {
 
         assert_eq!(refusal(result), (kind, ROOT, Some(path.clone())), "{kind}");
         assert_eq!(acl.owners[&path], owner, "{kind}");
-        assert_eq!(ledger_bytes(&w), before, "{kind}: nothing recorded");
+        // Nothing recorded but the clean-up `--reclaim` owes (S15 `PR4i`).
+        let owed: Vec<_> = ledger
+            .reclaims_owed()
+            .into_iter()
+            .map(|o| (o.path, o.why))
+            .collect();
+        assert_eq!(owed, [(path.clone(), Stuck::PoolOwnedRoot)], "{kind}");
+        assert_eq!(
+            entries(ledger_bytes(&w)),
+            entries(before),
+            "{kind}: no entry"
+        );
         assert_eq!(ledger.entries().count(), 0, "{kind}");
         assert!(acl.aces.is_empty(), "{kind}: nothing written");
     }

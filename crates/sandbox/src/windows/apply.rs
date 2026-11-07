@@ -67,6 +67,7 @@ mod back;
 mod fence;
 mod lift;
 mod roots;
+mod stuck;
 mod walk;
 
 pub use back::{forget_matter, reconcile};
@@ -170,7 +171,10 @@ fn apply_with_pool(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let run = run_plan(ledger, plan, acl, around, &own, pool)?;
+    // A refusal `--reclaim` can lift is recorded for it; a launch that passes clears them.
+    let run = run_plan(ledger, plan, acl, around, &own, pool)
+        .inspect_err(|error| stuck::owe(ledger, plan, error))?;
+    stuck::settled(ledger, plan);
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),
@@ -356,8 +360,12 @@ fn write_all(
             // first, as forget hands it back. Nothing is recorded: the lawyer owning it is where
             // forget leaves it too, and a launch refused later doesn't hand it back to the pool.
             if protected(grant) {
-                let handed = acl.hand_back(grant.path(), &strict.pool);
-                handed.map_err(|f| Refused::new(grant.kind(), f))?;
+                // A refusal names the item, for the lawyer and `--reclaim` (S15 `PR4i`).
+                acl.hand_back(grant.path(), &strict.pool)
+                    .map_err(|failure| Refused {
+                        at: Some(grant.path().to_owned()),
+                        ..Refused::new(grant.kind(), failure)
+                    })?;
             }
             let added = match (grant.kind(), around.credentials()) {
                 (PathKind::CredentialLink, Some(expected)) => acl.add_expecting(grant, &expected),

@@ -406,6 +406,25 @@ built-in plugin, the same for every matter. Run folders and matters created afte
 that session's Claude deny rules; Clauseo's own permission check refuses them when Claude asks
 ([decision 0030](decisions/0030-launch-profile.md), "The data folder fence").
 
+## 9. Windows protection: a matter folder Clauseo can't take back
+
+With Clauseo's Windows protection (tier B), each matter's agent runs as its own local account
+(`ClauseoSb01`, `ClauseoSb02`, and so on). If a matter's folder ends up owned by one of those
+accounts, Clauseo refuses to open the matter and first tries to give the folder back to the
+lawyer. "Set up protection again" (one Windows prompt) takes back items inside the matters
+Clauseo has recorded. A folder outside all of them, such as one an agent made that was then added
+as a new matter, can't be taken back that way. An administrator does it by hand:
+
+1. Open PowerShell as administrator.
+2. Give the folder, the folder only, to the lawyer:
+   `icacls "D:\Matters\Example" /setowner "CONTOSO\jsmith"`
+3. List its entries with `icacls "D:\Matters\Example"`. If an account whose name starts with
+   `ClauseoSb` is listed, remove its entry: `icacls "D:\Matters\Example" /remove "ClauseoSb03"`
+4. Open the matter in Clauseo again.
+
+Don't add `/T` or use `takeown /r`: Clauseo hands back what is inside the folder at its next
+launch, and a recursive change can alter permissions your firm set on the files.
+
 ## Later
 
 Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated

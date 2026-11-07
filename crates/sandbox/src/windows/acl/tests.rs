@@ -16,6 +16,7 @@ mod round2;
 mod round4;
 mod round5;
 mod round8;
+mod taken;
 
 /// The pool user's `Modify` and another pool user's deny, both down the tree.
 fn fence(matter: &Path) -> [Grant; 2] {

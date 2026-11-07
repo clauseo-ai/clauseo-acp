@@ -138,6 +138,13 @@ impl Owner {
         let _as_owner = self.impersonate()?;
         Ok(f())
     }
+
+    /// What the owner's own token gets on a file whose security descriptor (owner, group, DACL
+    /// and label, self-relative) is `descriptor`: what the owner's unelevated hand-back can do
+    /// there. `--reclaim` takes only what the owner can't hand back (S15 `PR4i`).
+    pub fn granted(&self, descriptor: &[u8]) -> Result<u32, MachineError> {
+        self.token.granted(descriptor)
+    }
 }
 
 #[cfg(windows)]

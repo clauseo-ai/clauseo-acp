@@ -35,6 +35,10 @@ pub struct SetupResult {
     /// a later set-up succeeds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked: Option<Blocked>,
+    /// For `--reclaim`, how many items it gave the owner (S15 `PR4i`): the app hands back
+    /// what was taken even when the clean-up failed partway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken: Option<u64>,
 }
 
 impl SetupResult {
@@ -46,12 +50,14 @@ impl SetupResult {
                 step: None,
                 cause: None,
                 blocked: None,
+                taken: None,
             },
             Err(failure) => SetupResult {
                 exit: failure.exit.as_code(),
                 step: Some(failure.step.to_string()),
                 cause: Some(failure.cause.clone()),
                 blocked: failure.blocked(),
+                taken: None,
             },
         }
     }
@@ -63,6 +69,7 @@ impl SetupResult {
             step: Some(step.to_owned()),
             cause: Some(cause.into()),
             blocked: None,
+            taken: None,
         }
     }
 }
