@@ -206,6 +206,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         changed_profiles: BTreeSet::new(),
         no_local_low: BTreeSet::new(),
         needs_reset: BTreeSet::new(),
+        stop_resets: BTreeSet::new(),
         held: BTreeSet::new(),
         held_for: Vec::new(),
         faults: ProfileFaults::default(),

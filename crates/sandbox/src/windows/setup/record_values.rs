@@ -89,9 +89,41 @@ impl CopyOwner {
         Sid::parse(text).ok().map(CopyOwner::User)
     }
 }
-/// The values the set-up owns, which a rollback or `--remove` deletes; the two `--adopt`
+/// `ResetSids` (`REG_MULTI_SZ`, appended to the set-up's values): the pool users the stop task
+/// (`setup::stop`, as SYSTEM) found running, each owed a profile reset before it runs anything
+/// again. Outside [`MachineRecord`]. The next set-up resets each listed user of the pool, even
+/// one a matter holds, once no session is open (`resets.rs`), and takes it off the list.
+pub const RESET_SIDS: &str = "ResetSids";
+/// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 5] = [OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING];
+pub const SETUP_VALUES: [&str; 6] = [
+    OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING, RESET_SIDS,
+];
+
+/// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
+pub fn resets_with(listed: &[Sid], add: &[Sid]) -> Vec<Sid> {
+    let mut all = listed.to_vec();
+    for sid in add {
+        if !all.contains(sid) {
+            all.push(sid.clone());
+        }
+    }
+    all
+}
+
+/// `listed` (`ResetSids` as read) without `done`, the users a set-up has reset.
+pub fn resets_without(listed: &[Sid], done: &[Sid]) -> Vec<Sid> {
+    listed
+        .iter()
+        .filter(|sid| !done.contains(sid))
+        .cloned()
+        .collect()
+}
+
+/// `sids` as a `REG_MULTI_SZ` value, as `PoolSids` and `ResetSids` are written.
+pub fn sids_value(sids: &[Sid]) -> RegValue {
+    RegValue::MultiSz(multi_sz(sids))
+}
 
 /// One registry value's data, as `RegSetValueExW` takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,6 +404,28 @@ mod tests {
         for name in ADMIN_VALUES {
             assert!(!SETUP_VALUES.contains(&name), "{name}");
         }
+        // The stop task's marks go with the set-up's values, so `--remove` deletes them.
+        assert_eq!(RESET_SIDS, "ResetSids");
+        assert!(SETUP_VALUES.contains(&RESET_SIDS));
+    }
+
+    #[test]
+    fn reset_marks_are_added_once_and_taken_off_alone() {
+        let [a, b, c] = ["1001", "1002", "1003"].map(|rid| sid(&format!("S-1-5-21-1-2-3-{rid}")));
+        let listed = resets_with(&[], &[a.clone(), b.clone()]);
+        assert_eq!(listed, [a.clone(), b.clone()]);
+        let listed = resets_with(&listed, &[b.clone(), c.clone(), c.clone()]);
+        assert_eq!(listed, [a.clone(), b.clone(), c.clone()]);
+        assert_eq!(
+            resets_without(&listed, std::slice::from_ref(&b)),
+            [a.clone(), c.clone()]
+        );
+        assert_eq!(resets_without(&listed, &listed), Vec::<Sid>::new());
+        // Written as PoolSids is, and read back by the same reader.
+        let RegValue::MultiSz(units) = sids_value(&listed) else {
+            panic!("a REG_MULTI_SZ");
+        };
+        assert_eq!(pool_sids_from_multi_sz(&units), Ok(vec![a, b, c]));
     }
 
     #[test]

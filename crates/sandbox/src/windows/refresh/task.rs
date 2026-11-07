@@ -1,17 +1,20 @@
-//! The SYSTEM task `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh"), through the Task
-//! Scheduler's COM API (`ITaskService`), never `schtasks` text:
+//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh") and
+//! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
+//! API (`ITaskService`), never `schtasks` text:
 //!
-//! - [`register_refresh_task`], which `--adopt` calls elevated: the task runs as LOCAL SYSTEM,
-//!   starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with
-//!   `--refresh` and nothing else, at the record owner's logon and on demand, needs no network,
-//!   stops after 5 minutes, and never runs twice at once. Its descriptor
-//!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
-//!   Administrators do anything and the owner read and run it, nothing more; the folder
-//!   `\Clauseo` gets the same owner and DACL, made with them or set again when it is there.
-//! - [`unregister_refresh_task`] and [`remove_staging`], which `--remove` calls.
-//! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update:
-//!   it asks the Task Scheduler to run the task (`IRegisteredTask::Run`), which the owner's
-//!   read-and-run entry allows.
+//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS):
+//!   the task runs as LOCAL SYSTEM, starts
+//!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
+//!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record
+//!   owner's logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never
+//!   runs twice at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by
+//!   Administrators and lets SYSTEM and Administrators do anything and the owner read and run
+//!   it, nothing more; the folder `\Clauseo` gets the same owner and DACL, made with them or set
+//!   again when it is there.
+//! - [`unregister_task`] and [`remove_staging`], which `--remove --uninstall` calls.
+//! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
+//!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
+//!   (`IRegisteredTask::Run`), which the owner's read-and-run entry allows.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -27,15 +30,13 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::windows_refresher::{EXE_NAME, SET_ASIDE_NAME, STAGED_NAME, sandbox_dir};
-use super::{EXECUTION_LIMIT, REFRESH_ARG, staging, task_sddl};
+use super::{SystemTask, staging, task_sddl};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
 pub const TASK_FOLDER: &str = "\\Clauseo";
 /// The folder's name under the root, for creating and deleting it.
 const FOLDER_NAME: &str = "Clauseo";
-/// The task's name in it.
-pub const TASK_NAME: &str = "SandboxRefresh";
 /// LOCAL SYSTEM, as the task's principal.
 const SYSTEM: &str = "S-1-5-18";
 
@@ -43,7 +44,7 @@ const SYSTEM: &str = "S-1-5-18";
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskError {
     /// The task isn't registered.
-    #[error("the task {TASK_FOLDER}\\{TASK_NAME} isn't registered")]
+    #[error("the task isn't registered in {TASK_FOLDER}")]
     NotRegistered,
     /// A COM or Task Scheduler call failed.
     #[error("{call} failed ({hresult:#010x})")]
@@ -132,10 +133,11 @@ fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> 
     Ok(folder)
 }
 
-/// Registers (or updates) `\Clauseo\SandboxRefresh` as the module says, for the record owner
-/// `owner_sid`. Elevated: `--adopt` calls it once the admin copy is locked in place, before it
-/// writes the record's admin-copy values (a run before then exits 33, changing nothing).
-pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
+/// Registers (or updates) the task `spec` names as the module says, for the record owner
+/// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
+/// place, before it writes the record's admin-copy values (a refresh before then exits 33,
+/// changing nothing).
+pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     let sddl = task_sddl(owner_sid);
     let _apartment = Apartment::enter()?;
@@ -148,10 +150,8 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
         let info = task.RegistrationInfo().map_err(com("RegistrationInfo"))?;
         info.SetAuthor(&BSTR::from("Clauseo"))
             .map_err(com("SetAuthor"))?;
-        info.SetDescription(&BSTR::from(
-            "Keeps the admin copy of Clauseo's sandbox set-up program current.",
-        ))
-        .map_err(com("SetDescription"))?;
+        info.SetDescription(&BSTR::from(spec.description()))
+            .map_err(com("SetDescription"))?;
         let principal = task.Principal().map_err(com("Principal"))?;
         principal
             .SetUserId(&BSTR::from(SYSTEM))
@@ -169,7 +169,7 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
             .SetRunOnlyIfNetworkAvailable(no)
             .map_err(com("SetRunOnlyIfNetworkAvailable"))?;
         settings
-            .SetExecutionTimeLimit(&BSTR::from(EXECUTION_LIMIT))
+            .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
         settings
             .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
@@ -186,14 +186,16 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
         settings
             .SetEnabled(yes)
             .map_err(com("ITaskSettings::SetEnabled"))?;
-        let trigger = task.Triggers().map_err(com("Triggers"))?;
-        let trigger = trigger
-            .Create(TASK_TRIGGER_LOGON)
-            .map_err(com("ITriggerCollection::Create"))?;
-        let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
-        logon
-            .SetUserId(&BSTR::from(owner_sid.as_str()))
-            .map_err(com("ILogonTrigger::SetUserId"))?;
+        if spec.at_logon() {
+            let trigger = task.Triggers().map_err(com("Triggers"))?;
+            let trigger = trigger
+                .Create(TASK_TRIGGER_LOGON)
+                .map_err(com("ITriggerCollection::Create"))?;
+            let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
+            logon
+                .SetUserId(&BSTR::from(owner_sid.as_str()))
+                .map_err(com("ILogonTrigger::SetUserId"))?;
+        }
         let action = task.Actions().map_err(com("Actions"))?;
         let action = action
             .Create(TASK_ACTION_EXEC)
@@ -203,11 +205,11 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
         // %ProgramFiles%, which only administrators can write, so no one else can plant a prefix.
         exec.SetPath(&BSTR::from(exe.as_os_str().to_string_lossy().as_ref()))
             .map_err(com("IExecAction::SetPath"))?;
-        exec.SetArguments(&BSTR::from(REFRESH_ARG))
+        exec.SetArguments(&BSTR::from(spec.argument()))
             .map_err(com("IExecAction::SetArguments"))?;
         folder
             .RegisterTaskDefinition(
-                &BSTR::from(TASK_NAME),
+                &BSTR::from(spec.name()),
                 &task,
                 TASK_CREATE_OR_UPDATE.0,
                 &VARIANT::from(SYSTEM),
@@ -220,9 +222,9 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// Deletes `\Clauseo\SandboxRefresh`, then the folder `\Clauseo` if nothing else is in it. A
-/// task or folder that isn't there is `Ok`. Elevated: `--remove` calls it.
-pub fn unregister_refresh_task() -> Result<(), TaskError> {
+/// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
+/// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task.
+pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
     // SAFETY: a live service and a BSTR that outlives the call.
@@ -232,7 +234,7 @@ pub fn unregister_refresh_task() -> Result<(), TaskError> {
         Err(error) => return Err(com("ITaskService::GetFolder")(error)),
     };
     // SAFETY: a live folder and a BSTR; flags 0.
-    match unsafe { folder.DeleteTask(&BSTR::from(TASK_NAME), 0) } {
+    match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
         Ok(()) => {}
         Err(error) if missing(&error) => {}
         Err(error) => return Err(com("ITaskFolder::DeleteTask")(error)),
@@ -267,9 +269,33 @@ pub fn remove_staging() -> Result<(), String> {
 /// the record's `AdminCopySha256` (both readable by the lawyer); the task's logon trigger is
 /// the fallback. A run with nothing new to copy ends at once with `Done`.
 pub fn request_admin_refresh() -> Result<(), TaskError> {
+    run_task(SystemTask::Refresh)
+}
+
+/// Asks the Task Scheduler to run `\Clauseo\SandboxStop` now, as whoever calls it (the app,
+/// as the lawyer, unelevated): whether the run was queued. A failure is logged with its cause;
+/// `false` with nothing else to do, as the task is the only way to stop a pool user's process
+/// that refuses the runner. The run stops every process of the pool's users and marks them for
+/// a profile reset (`setup::stop`); its outcome is its exit code (`StopExit`) and its Event Log
+/// line. Blocks on COM calls: call it off the UI thread.
+///
+/// Who calls it (a follow-up, with the runner's sweeps of #649): the runner, when a pool user's
+/// process survived its sweep, and the desktop once at start-up after an unclean session.
+pub fn request_pool_stop() -> bool {
+    match run_task(SystemTask::Stop) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%error, "the sandbox's stop task couldn't be started");
+            false
+        }
+    }
+}
+
+/// Runs `task` now, as whoever calls it, through the owner's read-and-run entry.
+fn run_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
-    let path = format!("{TASK_FOLDER}\\{TASK_NAME}");
+    let path = format!("{TASK_FOLDER}\\{}", task.name());
     // SAFETY: a live service and a BSTR that outlives the call.
     let root =
         unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(com("ITaskService::GetFolder"))?;

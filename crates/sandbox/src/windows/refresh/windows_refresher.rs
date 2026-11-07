@@ -291,7 +291,8 @@ fn write_record_string(name: &str, text: &str) -> Result<(), Failed> {
 
 /// Writes `line` to the Application log as source "Clauseo Sandbox", event 1; an error when
 /// `error`. A log that can't be written is dropped: the exit code still says what happened.
-fn event_log(error: bool, line: &str) {
+/// The stop task (`setup::stop`) logs through it too.
+pub fn event_log(error: bool, line: &str) {
     // SAFETY: the source name is a static NUL-terminated string; the handle, when given, is
     // deregistered below.
     let Ok(source) = (unsafe { RegisterEventSourceW(PCWSTR::null(), EVENT_SOURCE) }) else {

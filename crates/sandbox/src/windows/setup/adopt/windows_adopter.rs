@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Adopter, Records, Target, adopt};
 use crate::windows::admin_copy::{Found, os};
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::exe::run_set_up;
 use crate::windows::setup::lock::{Held, try_lock};
 use crate::windows::setup::outcome::SetupExit;
@@ -117,8 +118,8 @@ impl Adopter for WindowsAdopter {
             .map_err(|error| error.to_string())
     }
 
-    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String> {
-        crate::windows::refresh::register_refresh_task(owner).map_err(|error| error.to_string())
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), String> {
+        crate::windows::refresh::register_task(task, owner).map_err(|error| error.to_string())
     }
 
     fn set_up(&mut self, data_dir: &Path) -> SetupExit {

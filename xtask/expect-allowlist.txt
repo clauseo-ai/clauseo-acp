@@ -496,6 +496,8 @@ crates/sandbox/examples/s15_wfp_vm/ports_rows.rs timed clippy::disallowed_method
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
+# The stop task's process snapshot, OpenProcess and TerminateProcess.
+crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code
