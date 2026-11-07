@@ -14,8 +14,8 @@
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
 use clauseo_protocol::{
-    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, FileRefId, HostError, HostQuery,
-    PermissionRequestId, QueryResult, SetupCommand, StreamId, ThreadId, ViewPosition,
+    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, ErrorCode, FileRefId, HostError,
+    HostQuery, PermissionRequestId, QueryResult, SetupCommand, StreamId, ThreadId, ViewPosition,
 };
 use clauseo_settings::{PlatformDirs as _, SystemDirs};
 use serde::Serialize;
@@ -23,7 +23,9 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
+use crate::chooser::{Chooser, Go, Listing, PickAnswer, Route};
 use crate::counts::{CountsState, UiCount};
+use crate::dialogs::LastPick;
 use crate::frame::Frame;
 use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFile, RevealTarget};
 use crate::picked::PickedFolder;
@@ -31,7 +33,7 @@ use crate::picked::PickedFolder;
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
 #[cfg(test)]
-pub(crate) const COMMANDS: [&str; 16] = [
+pub(crate) const COMMANDS: [&str; 20] = [
     "dispatch",
     "query",
     "open_stream",
@@ -41,6 +43,10 @@ pub(crate) const COMMANDS: [&str; 16] = [
     "ack",
     "answer_permission",
     "pick_folder",
+    "pick_folder_or_choose",
+    "chooser_list",
+    "chooser_choose",
+    "chooser_cancel",
     "display_info",
     "open_external",
     "open_file",
@@ -216,15 +222,113 @@ pub(crate) async fn answer_permission<R: Runtime>(
 pub(crate) async fn pick_folder<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
-    last: State<'_, crate::dialogs::LastPick>,
+    last: State<'_, LastPick>,
+) -> Result<Option<PickedFolder>, HostError> {
+    native_pick(app, &bridge, &last).await
+}
+
+/// [`pick_folder`]'s native dialog.
+async fn native_pick<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: &Bridge,
+    last: &LastPick,
 ) -> Result<Option<PickedFolder>, HostError> {
     let home = SystemDirs.home();
     let start = crate::dialogs::start_folder(last.get().as_deref(), home.as_deref());
     // Windows only: its dialog would otherwise open on Documents, which may sit on a share that
     // is down. Elsewhere the OS's own remembered folder stays.
     let start = if cfg!(windows) { start } else { None };
-    let picker = crate::dialogs::NativePicker::new(app, start, &last);
+    let picker = crate::dialogs::NativePicker::new(app, start, last);
     bridge.pick_folder(&picker, home.as_deref()).await
+}
+
+/// [`pick_folder`], unless Windows' dialog would stall on a known folder whose share is down
+/// (`chooser/stall.rs`, at most 1.5 s to find out; `CLAUSEO_FOLDER_PICKER=app|native` decides
+/// instead): then it opens an in-app chooser session (closing any other) and answers `choose`
+/// with its start points. Never `choose` off Windows.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn pick_folder_or_choose<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: State<'_, Bridge>,
+    last: State<'_, LastPick>,
+    chooser: State<'_, Chooser>,
+    app_data: State<'_, AppData>,
+) -> Result<PickAnswer, HostError> {
+    let setting = std::env::var(crate::chooser::PICKER_VAR).ok();
+    let stalls = chooser.inner().clone();
+    let route = tauri::async_runtime::spawn_blocking(move || {
+        crate::chooser::route(cfg!(windows), setting.as_deref(), || stalls.would_stall())
+    })
+    .await
+    .unwrap_or(Route::Native);
+    if route == Route::Native {
+        return Ok(match native_pick(app, &bridge, &last).await? {
+            Some(folder) => PickAnswer::Picked { folder },
+            None => PickAnswer::Cancelled,
+        });
+    }
+    let opener = chooser.inner().clone();
+    let (last, data) = (last.get(), app_data.0.clone());
+    let start = tauri::async_runtime::spawn_blocking(move || {
+        let mut refused = clauseo_settings::refused_folders(&SystemDirs);
+        refused.push(data);
+        let home = SystemDirs.home();
+        opener.open(
+            home.as_deref(),
+            last.as_deref(),
+            &refused,
+            crate::open::now(),
+        )
+    })
+    .await
+    .map_err(|error| HostError::new(ErrorCode::Internal, format!("no chooser: {error}")))?;
+    Ok(PickAnswer::Choose { start })
+}
+
+/// Goes where `go` says in the chooser session `chooser` and lists the folder there: by a
+/// start point's key, an index into the last listing, up (to a drive or typed share root), a
+/// typed path, or again. At most 2 s: `no_answer` past it. `command.invalid` for an unknown or
+/// closed session, an index or key it did not give, and a typed path it refuses;
+/// `transport.unauthorized` past 300 listings.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn chooser_list(
+    state: State<'_, Chooser>,
+    chooser: u32,
+    go: Go,
+) -> Result<Listing, HostError> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.list(chooser, go, crate::open::now()))
+        .await
+        .map_err(|error| HostError::new(ErrorCode::Internal, format!("no listing: {error}")))?
+}
+
+/// Chooses the folder the chooser session shows, after a native confirm with the full path and
+/// Cancel focused; confirmed, it is registered as `pick_folder` registers a pick and the session
+/// closes. `None` when the lawyer declines or the folder has gone; the session stays open.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn chooser_choose<R: Runtime>(
+    app: AppHandle<R>,
+    bridge: State<'_, Bridge>,
+    last: State<'_, LastPick>,
+    state: State<'_, Chooser>,
+    chooser: u32,
+) -> Result<Option<PickedFolder>, HostError> {
+    let confirm = crate::chooser::NativeFolderConfirm::new(app);
+    let home = SystemDirs.home();
+    crate::chooser::choose_folder(&state, &bridge, &confirm, &last, home.as_deref(), chooser).await
+}
+
+/// Closes the chooser session; `command.invalid` when it is not open.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn chooser_cancel(
+    state: State<'_, Chooser>,
+    chooser: u32,
+) -> Result<(), HostError> {
+    state.close(chooser)
 }
 
 /// The OS the host runs on, this build's release date, and whether it is a test build.
@@ -319,7 +423,7 @@ pub(crate) async fn open_settings<R: Runtime>(
 ) -> Result<(), HostError> {
     crate::settings_window::open_or_focus(&app, section).map_err(|error| {
         HostError::new(
-            clauseo_protocol::ErrorCode::Internal,
+            ErrorCode::Internal,
             format!("the settings window did not open: {error}"),
         )
     })

@@ -64,6 +64,15 @@ converted document. From there they can call any IPC command the page can reach.
   matter's folder or the app data folder ([0026](decisions/0026-open-and-reveal.md))
 - `built` for "always allow", the folder picker and external links: escalations only through
   native dialogs drawn by Rust, never a webview confirm; `designed` for the rest
+- `built`: On Windows, when a known folder its own folder dialog shows sits on a share that does
+  not answer (the dialog would block about 21 s), `pick_folder_or_choose` opens an in-app chooser
+  instead (`crates/desktop/src/chooser.rs`). The page moves only by indices into listings the
+  desktop made, or to a typed drive or share path (no `..`, `\\?\`, `\\.\`, relative path or
+  alternate stream); network folders only under a share typed in that session. Choosing ends in a
+  native confirm with the full path and Cancel focused, then the bridge's unchanged `pick_folder`
+  issues the ref. Known gap: on such a machine, script in the page can open a session and read up
+  to 300 listings of 2,000 local folder names (no files, hidden, system or link folders) without
+  the lawyer seeing it; names give no access
 - `built`: Links go through one `open_external`: https or http to a public host (no credentials,
   no localhost, loopback, private or link-local address, no overlong name), or mailto to plain
   `local@domain` addresses with at most a subject and a body, after a native confirm that names the

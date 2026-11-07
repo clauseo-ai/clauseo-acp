@@ -115,6 +115,8 @@ rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 # SetFileInformationByHandle). Other crates already build the feature.
 # The updater's install kind (src/update/install_kind/windows.rs): Registry for RegOpenKeyExW,
 # to see the per-machine installer's uninstall key.
+# The folder chooser (src/chooser/windows.rs): Storage_FileSystem for the drives and a folder's
+# entries, WindowsProgramming for GetDriveTypeW's DRIVE_* values, Shell for the known folders.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",
@@ -128,6 +130,7 @@ windows = { workspace = true, features = [
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_System_Time",
+  "Win32_System_WindowsProgramming",
   "Win32_UI_Controls",
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",

@@ -114,8 +114,8 @@ impl LastPick {
             .clone()
     }
 
-    /// Records `folder` as the last pick.
-    fn set(&self, folder: PathBuf) {
+    /// Records `folder` as the last pick (the native dialog's, or the chooser's).
+    pub(crate) fn set(&self, folder: PathBuf) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(folder);
     }
 }

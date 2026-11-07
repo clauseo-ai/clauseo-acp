@@ -30,6 +30,10 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             ack,
             answer_permission,
             pick_folder,
+            pick_folder_or_choose,
+            chooser_list,
+            chooser_choose,
+            chooser_cancel,
             display_info,
             open_external,
             open_file,
@@ -52,6 +56,8 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     app.manage(crate::counts::CountsState::default());
     app.manage(crate::open::AppData(std::env::temp_dir()));
     app.manage(crate::open::OpenGates::default());
+    app.manage(crate::dialogs::LastPick::default());
+    app.manage(crate::chooser::Chooser::system());
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
         .unwrap();
