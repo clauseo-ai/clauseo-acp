@@ -391,11 +391,11 @@ fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     let firm = read("../../docs/firm-it.md");
     assert_eq!(
         firm_it_codes(&firm, "What a silent (`/S`) install can return:"),
-        [22, 23, 24, 25]
+        [20, 22, 23, 24, 25]
     );
     assert_eq!(
         firm_it_codes(&firm, "What an interactive install can also return:"),
-        [24]
+        [20, 24]
     );
     // Per user, 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait
     // ran out.

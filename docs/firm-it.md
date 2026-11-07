@@ -59,6 +59,7 @@ What a silent (`/S`) install can return:
 
 | Code | Meaning |
 |---|---|
+| 20 | Per-machine install: installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but Safe workspace's set-up failed or didn't finish (still running after 10 minutes), a failed copy included |
 | 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
@@ -72,6 +73,7 @@ What an interactive install can also return:
 
 | Code | Meaning |
 |---|---|
+| 20 | Installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
 An interactive per-machine install never sets 23: it shows a box when setting up failed, and a
@@ -777,9 +779,11 @@ positive. Without it the protection can't be set up, or removed by the uninstall
   or `/UPDATE` install) never says this, and a copy that couldn't be written is a failed set-up
   (23 under `/S`). A copy missing from the install folder only holds up Clauseo's next refresh of
   the admin copy, which Clauseo reports.
-- **Uninstalling:** if the file is gone and the protection was set up (the key
-  `HKLM\SOFTWARE\Clauseo\Sandbox` exists), the uninstaller says the sandbox's hidden accounts are
-  still on the computer; with `/S` it exits 21 instead. The rest of the uninstall carries on.
+- **Uninstalling:** if the file is gone and someone's protection is still set up (the value
+  `OwnerSid` under `HKLM\SOFTWARE\Clauseo\Sandbox`; the key alone isn't enough), the uninstaller
+  says the sandbox's hidden accounts are still on the computer; with `/S` it exits 21 instead. A
+  per-user uninstall says so only to the Windows user who set it up; a per-machine uninstall says
+  so whoever that was. The rest of the uninstall carries on.
 - **Uninstalling, the copy refused:** before it starts the copy in
   `C:\Program Files\Clauseo\Sandbox`, the uninstaller checks it as Clauseo does: the drive's root,
   `C:\Program Files`, `Clauseo`, `Sandbox` and the file owned by SYSTEM, Administrators or
