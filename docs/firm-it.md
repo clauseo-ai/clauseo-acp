@@ -65,7 +65,8 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   uninstaller waits for it at most 2 minutes, then carries on; the removal finishes on its own, and
   `clauseo-sandbox-setup.exe` may stay in the install folder until it has. If the removal doesn't
   finish (a folder it can't reach, say), the `sandbox` folder and the key stay: reinstall
-  Clauseo, then uninstall it again, and the new removal finishes the job.
+  Clauseo, then uninstall it again, and the new removal finishes the job. If Windows security
+  removed `clauseo-sandbox-setup.exe`, see [section 10](#10-if-windows-security-removed-clauseos-set-up-program).
 
 ### Intune (Win32 app)
 
@@ -502,6 +503,88 @@ as a new matter, can't be taken back that way. An administrator does it by hand:
 
 Don't add `/T` or use `takeown /r`: Clauseo hands back what is inside the folder at its next
 launch, and a recursive change can alter permissions your firm set on the files.
+
+## 10. If Windows security removed Clauseo's set-up program
+
+Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, the program beside `Clauseo.exe`
+that sets up and removes Clauseo's Windows protection (section 1), as it is installed or right
+after it runs. On our test machine it named it `Trojan:Win32/Bearfoos.A!ml`, a false positive.
+Without it, Clauseo can't set up the protection, and uninstalling can't remove it.
+
+- **Installing:** both installers check the file is still there after copying it. If it's gone,
+  the install stays and the installer shows a message; with `/S` it exits 20 instead (below).
+- **Uninstalling:** if the file is gone and the protection was set up (the key
+  `HKLM\SOFTWARE\Clauseo\Sandbox` exists), the uninstaller says the sandbox's hidden accounts are
+  still on the computer; with `/S` it exits 21 instead. The rest of the uninstall carries on.
+
+**Exit codes** of both installers and the uninstaller:
+
+| Code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | Cancelled by the person installing (NSIS) |
+| 2 | Stopped by an error (NSIS) |
+| 20 | `/S` install: installed, but Windows security removed `clauseo-sandbox-setup.exe` |
+| 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
+
+Intune reports 20 as a failed install unless you add it to the app's return codes. `uninstall.exe`
+hands over to a copy of itself and returns 0 at once (section 1), so it reports 21 only when run
+as `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no
+quotes). Run that way it leaves `uninstall.exe` and the folder behind; delete them afterwards.
+
+**Restore the file (preferred).** In Windows Security, open Virus & threat protection, then
+Protection history, find the item that names `clauseo-sandbox-setup.exe` and choose Restore. Or,
+from an elevated prompt, list what was quarantined and restore it by its threat name:
+
+```bat
+"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -ListAll
+"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -Name "Trojan:Win32/Bearfoos.A!ml"
+```
+
+Stop it happening again: exclude the file, for example
+`Add-MpPreference -ExclusionPath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"` (a per-user
+install has it in `%LOCALAPPDATA%\Clauseo`), and report the false positive to Microsoft at
+<https://www.microsoft.com/wdsi/filesubmission>. Then either run the installer again, or, to
+remove the protection, run `clauseo-sandbox-setup.exe --remove --per-machine` from the install
+folder at an elevated prompt (section 1), then uninstall Clauseo.
+
+**Remove the protection by hand**, when the file can't be restored. From an elevated 64-bit
+PowerShell (an Intune script runs 32-bit by default; set "Run script in 64 bit PowerShell Host"):
+
+```powershell
+# The sandbox's accounts are ClauseoSb01 to ClauseoSb32; note their SIDs and the group's first.
+$users = Get-LocalUser | Where-Object Name -match '^ClauseoSb\d\d$'
+$group = Get-LocalGroup -Name ClauseoSandboxUsers -ErrorAction SilentlyContinue
+$users | Select-Object Name, SID; $group | Select-Object Name, SID
+# Stop anything still running as them, then delete their profiles, the accounts and the group.
+Get-Process -IncludeUserName | Where-Object UserName -match '\\ClauseoSb\d\d$' | Stop-Process -Force
+Get-CimInstance Win32_UserProfile |
+  Where-Object { $_.SID -in $users.SID.Value } | Remove-CimInstance
+$users | Remove-LocalUser
+# The values that hide them from the sign-in screen.
+$list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+$users | ForEach-Object { Remove-ItemProperty $list -Name $_.Name -ErrorAction SilentlyContinue }
+# The group's deny on DeviceSync, then the group, then Clauseo's record of the protection.
+if ($group) {
+  icacls "$env:ProgramData\Microsoft\DeviceSync" /remove:d "*$($group.SID.Value)"
+  Remove-LocalGroup -SID $group.SID
+}
+Remove-Item 'HKLM:\SOFTWARE\Clauseo\Sandbox' -Recurse -ErrorAction SilentlyContinue
+```
+
+From a Command Prompt, `net user ClauseoSb01 /delete` (and so on for each account
+`net user` lists) and `net localgroup ClauseoSandboxUsers /delete` delete the accounts and the
+group, but not the profiles, the sign-in screen values or the deny.
+
+Then the lawyer's folders: on each matter folder, the two `icacls` commands under "Intune
+(Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs noted
+above (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing; remove it with
+`icacls "<folder>" /remove "*<SID>"`. If Clauseo stays uninstalled, the lawyer can then delete the
+`sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
+`sandbox\set-aside`: those are files set aside from a matter.
+
+Clauseo adds no firewall rules. Network filters (WFP) come with a later change, and this section
+will then say how to remove them.
 
 ## Later
 
