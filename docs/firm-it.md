@@ -532,53 +532,68 @@ hands over to a copy of itself and returns 0 at once (section 1), so it reports 
 as `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no
 quotes). Run that way it leaves `uninstall.exe` and the folder behind; delete them afterwards.
 
-**Restore the file (preferred).** In Windows Security, open Virus & threat protection, then
-Protection history, find the item that names `clauseo-sandbox-setup.exe` and choose Restore. Or,
-from an elevated prompt, list what was quarantined and restore it by its threat name:
-
-```bat
-"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -ListAll
-"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -Name "Trojan:Win32/Bearfoos.A!ml"
-```
-
-Stop it happening again: exclude the file, for example
-`Add-MpPreference -ExclusionPath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"` (a per-user
-install has it in `%LOCALAPPDATA%\Clauseo`), and report the false positive to Microsoft at
-<https://www.microsoft.com/wdsi/filesubmission>. Then either run the installer again, or, to
-remove the protection, run `clauseo-sandbox-setup.exe --remove --per-machine` from the install
-folder at an elevated prompt (section 1), then uninstall Clauseo.
-
-**Remove the protection by hand**, when the file can't be restored. From an elevated 64-bit
-PowerShell (an Intune script runs 32-bit by default; set "Run script in 64 bit PowerShell Host"):
+**Restore the file (preferred).** First exclude it, so Defender doesn't quarantine it again, from
+an elevated PowerShell. The install folder is `C:\Program Files\Clauseo` for the per-machine
+installer and `%LOCALAPPDATA%\Clauseo` (the installing user's) for the per-user one:
 
 ```powershell
-# The sandbox's accounts are ClauseoSb01 to ClauseoSb32; note their SIDs and the group's first.
-$users = Get-LocalUser | Where-Object Name -match '^ClauseoSb\d\d$'
-$group = Get-LocalGroup -Name ClauseoSandboxUsers -ErrorAction SilentlyContinue
-$users | Select-Object Name, SID; $group | Select-Object Name, SID
-# Stop anything still running as them, then delete their profiles, the accounts and the group.
-Get-Process -IncludeUserName | Where-Object UserName -match '\\ClauseoSb\d\d$' | Stop-Process -Force
-Get-CimInstance Win32_UserProfile |
-  Where-Object { $_.SID -in $users.SID.Value } | Remove-CimInstance
-$users | Remove-LocalUser
-# The values that hide them from the sign-in screen.
-$list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
-$users | ForEach-Object { Remove-ItemProperty $list -Name $_.Name -ErrorAction SilentlyContinue }
-# The group's deny on DeviceSync, then the group, then Clauseo's record of the protection.
-if ($group) {
-  icacls "$env:ProgramData\Microsoft\DeviceSync" /remove:d "*$($group.SID.Value)"
-  Remove-LocalGroup -SID $group.SID
-}
-Remove-Item 'HKLM:\SOFTWARE\Clauseo\Sandbox' -Recurse -ErrorAction SilentlyContinue
+Add-MpPreference -ExclusionPath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
 ```
 
-From a Command Prompt, `net user ClauseoSb01 /delete` (and so on for each account
-`net user` lists) and `net localgroup ClauseoSandboxUsers /delete` delete the accounts and the
-group, but not the profiles, the sign-in screen values or the deny.
+Then restore that file by its path, never by the threat name: a machine-learning name such as
+this one can match another file. In Windows Security, open Virus & threat protection, then
+Protection history, find the item that names `clauseo-sandbox-setup.exe` in the install folder
+and choose Restore. Or, from the same prompt, list what was quarantined and restore the file:
+
+```powershell
+& "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Restore -ListAll
+& "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Restore -FilePath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
+```
+
+Report the false positive to Microsoft at <https://www.microsoft.com/wdsi/filesubmission>. Then
+either run the installer again, or, to remove the protection, run
+`clauseo-sandbox-setup.exe --remove --per-machine` from the install folder at an elevated prompt
+(section 1), then uninstall Clauseo.
+
+**Remove the protection by hand**, when the file can't be restored. From an elevated 64-bit
+PowerShell (an Intune script runs 32-bit by default; set "Run script in 64 bit PowerShell Host").
+The script reads the SIDs from Clauseo's record first, so it also cleans up after accounts or a
+group already deleted by name. Set-up names its accounts `ClauseoSb01` to `ClauseoSb32`, and only
+the numbers it actually created exist.
+
+```powershell
+# Clauseo's record: the sandbox accounts' SIDs (PoolSids) and the group's (GroupSid).
+$key = 'HKLM:\SOFTWARE\Clauseo\Sandbox'
+$record = Get-ItemProperty $key -ErrorAction SilentlyContinue
+$byName = Get-LocalUser | Where-Object Name -match '^ClauseoSb[0-9][0-9]$'
+$sids = @($record.PoolSids) + @($byName.SID.Value) | Where-Object { $_ } | Sort-Object -Unique
+$groupSid = $record.GroupSid
+if (-not $groupSid) {
+  $groupSid = (Get-LocalGroup -Name ClauseoSandboxUsers -ErrorAction SilentlyContinue).SID.Value
+}
+# Keep this list: the matter folders' entries name these SIDs (below).
+"Sandbox account SIDs:"; $sids; "Group SID: $groupSid"
+# Stop anything still running as them, then delete their profiles and the accounts.
+Get-Process -IncludeUserName |
+  Where-Object UserName -match '\\ClauseoSb[0-9][0-9]$' | Stop-Process -Force
+Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -in $sids } | Remove-CimInstance
+$sids | ForEach-Object { Get-LocalUser -SID $_ -ErrorAction SilentlyContinue } | Remove-LocalUser
+# The values that hide them from the sign-in screen.
+$list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+(Get-Item $list -ErrorAction SilentlyContinue).Property |
+  Where-Object { $_ -match '^ClauseoSb[0-9][0-9]$' } |
+  ForEach-Object { Remove-ItemProperty $list -Name $_ }
+# The group's deny on DeviceSync, then the group, then the record.
+if ($groupSid) {
+  icacls "$env:ProgramData\Microsoft\DeviceSync" /remove:d "*$groupSid"
+  Get-LocalGroup -SID $groupSid -ErrorAction SilentlyContinue | Remove-LocalGroup
+}
+Remove-Item $key -Recurse -ErrorAction SilentlyContinue
+```
 
 Then the lawyer's folders: on each matter folder, the two `icacls` commands under "Intune
-(Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs noted
-above (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing; remove it with
+(Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs the script
+listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing; remove it with
 `icacls "<folder>" /remove "*<SID>"`. If Clauseo stays uninstalled, the lawyer can then delete the
 `sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
 `sandbox\set-aside`: those are files set aside from a matter.
