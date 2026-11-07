@@ -222,6 +222,10 @@ mod spike {
         Ok(())
     }
 
+    /// Whether the admin's `AppContainer` child reached out before the filters (row 12's control).
+    static CONTROL_REACHED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
     /// What the rows need.
     struct World {
         desktop: tokens::Desktop,
@@ -334,13 +338,17 @@ mod spike {
         // An AppContainer may not reach loopback at all (loopback isolation), so these go out.
         let lowbox = "derived:lowbox:connect:1.1.1.1:443".to_owned();
         let token = tokens::derive(&w.pool, Derive::Plain, &w.user_sid, None);
-        let (got, pass) = probe(&token, w, exe, &lowbox, "blocked");
+        // Judged only when the control (row 12 before the filters) reached: otherwise an
+        // AppContainer child fails with or without our filters, and the row proves nothing.
+        let control = CONTROL_REACHED.load(std::sync::atomic::Ordering::Relaxed);
+        let expect = if control { "blocked" } else { "measured" };
+        let (got, pass) = probe(&token, w, exe, &lowbox, expect);
         row(
             t,
             11,
             "pool-appcontainer-child",
             "outside",
-            "blocked",
+            expect,
             &got,
             pass,
         );
@@ -380,6 +388,9 @@ mod spike {
         let lowbox = "derived:lowbox:connect:1.1.1.1:443".to_owned();
         let token = tokens::derive(&w.admin, Derive::Plain, &w.admin_sid, None);
         let (got, pass) = probe(&token, w, exe, &lowbox, "reached");
+        if phase == "base:" && pass == Some(true) {
+            CONTROL_REACHED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         row(
             t,
             12,
