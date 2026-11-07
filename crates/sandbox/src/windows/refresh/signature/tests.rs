@@ -7,6 +7,9 @@ use super::*;
 
 const OWN: &str = "1.4.0";
 
+/// Whether a refusal is the one a case expects.
+type Expected = fn(&SignatureError) -> bool;
+
 fn exe() -> Vec<u8> {
     // Past a BLAKE2b block many times over, so the prehash covers more than one block.
     (0..200 * 1024).map(|n: u32| (n % 251) as u8).collect()
@@ -221,4 +224,56 @@ fn a_bad_built_in_key_is_named() {
         verify(&exe, &sig, "not a key"),
         Err(SignatureError::BadKey(_))
     ));
+}
+
+#[test]
+fn the_comment_tauri_signer_writes_for_the_release_verifies_and_near_misses_dont() {
+    // What release.yml's `tauri signer sign --app-version "$VERSION"` writes for the setup exe
+    // (#648), as a fixed string.
+    let key = TestKey::new(0x1122_3344_5566_7788);
+    let exe = exe();
+    let verdict = |comment_text: &str| verify(&exe, &key.sign(&exe, comment_text), &key.public());
+    assert_eq!(
+        verdict("timestamp:1762500000\tfile:clauseo-sandbox-setup.exe\tversion:1.4.0")
+            .map(|signed| signed.version),
+        Ok("1.4.0".to_owned())
+    );
+    let refusals: [(&str, Expected); 7] = [
+        // `=` for `:`: no field is `key:value`.
+        (
+            "timestamp=1762500000\tfile=clauseo-sandbox-setup.exe\tversion=1.4.0",
+            |e| matches!(e, SignatureError::BadComment(_)),
+        ),
+        // Spaces for tabs: one `timestamp` field, so no `file`.
+        (
+            "timestamp:1762500000 file:clauseo-sandbox-setup.exe version:1.4.0",
+            |e| *e == SignatureError::WrongFile,
+        ),
+        // A field missing.
+        ("timestamp:1762500000\tversion:1.4.0", |e| {
+            *e == SignatureError::WrongFile
+        }),
+        (
+            "timestamp:1762500000\tfile:clauseo-sandbox-setup.exe",
+            |e| *e == SignatureError::NoVersion,
+        ),
+        // A field given twice, or a stray one with no `:`.
+        (
+            "timestamp:1762500000\tfile:clauseo-sandbox-setup.exe\tversion:1.4.0\tversion:9.0.0",
+            |e| matches!(e, SignatureError::BadComment(_)),
+        ),
+        (
+            "timestamp:1762500000\tfile:clauseo-sandbox-setup.exe\tversion:1.4.0\textra",
+            |e| matches!(e, SignatureError::BadComment(_)),
+        ),
+        // `file:` with a path: not the bare name.
+        (
+            "timestamp:1762500000\tfile:target/release/clauseo-sandbox-setup.exe\tversion:1.4.0",
+            |e| *e == SignatureError::WrongFile,
+        ),
+    ];
+    for (comment_text, expected) in refusals {
+        let error = verdict(comment_text).expect_err(comment_text);
+        assert!(expected(&error), "{comment_text:?}: {error:?}");
+    }
 }

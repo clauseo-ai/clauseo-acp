@@ -108,6 +108,7 @@ fn a_failed_set_aside_or_securing_keeps_the_old_copy() {
     let key = key();
     for (fail, exit) in [
         ("set_aside", RefreshExit::ReplaceFailed),
+        ("hold", RefreshExit::FolderBusy),
         ("secure_staged", RefreshExit::StagingFailed),
         ("stage", RefreshExit::StagingFailed),
     ] {
@@ -132,4 +133,28 @@ fn a_failed_record_write_exits_its_own_code() {
     assert_eq!(run_fake(&mut fake, &key), RefreshExit::RecordNotWritten);
     assert_eq!(fake.admin_file, Some(new()));
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&old())));
+}
+
+#[test]
+fn the_folder_is_held_before_the_set_aside_and_a_failed_hold_moves_nothing() {
+    let key = key();
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
+    let at = |name| fake.calls.iter().position(|call| *call == name).unwrap();
+    assert!(at("hold") < at("set_aside") && at("place_staged") < at("release"));
+    assert!(at("release") < at("write_version"), "{:?}", fake.calls);
+    assert!(!fake.holding());
+    // Held through a failed move and its restore, then let go.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.fail = Some("place_staged");
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::ReplaceFailed);
+    assert!(fake.calls.contains(&"restore") && !fake.holding());
+    // Someone holds the folder: nothing moves, and the staged copy is discarded.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.fail = Some("hold");
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::FolderBusy);
+    assert_eq!(fake.admin_file, Some(old()));
+    assert_eq!((fake.set_aside.clone(), fake.staged.clone()), (None, None));
+    assert!(!fake.calls.contains(&"set_aside") && !fake.calls.contains(&"place_staged"));
+    assert_eq!(RefreshExit::FolderBusy.as_code(), 43);
 }

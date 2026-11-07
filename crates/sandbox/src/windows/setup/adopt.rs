@@ -23,13 +23,14 @@
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
 //!    (`admin_copy::locked`), else `Failed`;
-//! 6. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
+//! 6. per user, the SYSTEM refresh task (`refresh::register_refresh_task`, PR 3) is registered
+//!    for the lawyer, else `Failed` with no value written, so the launcher's check finds the copy
+//!    missing rather than running it with no task to refresh it (a run before the values exist
+//!    exits 33, changing nothing); a per-machine install doesn't update itself, so it gets no task;
+//! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
 //!    `AdminCopyOwner`. `UserInstallDir` is checked as text only, and stays untrusted (0049);
-//! 7. per user, the SYSTEM refresh task (`refresh::register_refresh_task`, PR 3) is registered
-//!    for the lawyer, else `Failed`; a per-machine install doesn't update itself, so it gets no
-//!    task;
 //! 8. per user, the normal `--set-up` for the lawyer and the data folder runs in this process
 //!    (which also requires the folder to be the lawyer's own), and its exit is `--adopt`'s;
 //!    `--per-machine` sets nobody up (each user's set-up runs later through the app) and exits
@@ -179,6 +180,11 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         Ok(_) => return failed("the admin copy's hash", "not a SHA-256"),
         Err(error) => return failed("the admin copy can't be hashed", &error),
     };
+    if let Target::User { owner_sid, .. } = target
+        && let Err(error) = machine.register_refresh_task(owner_sid)
+    {
+        return failed("the refresh task couldn't be registered", &error);
+    }
     let values = AdminValues {
         sha256,
         install_dir: install_dir.to_path_buf(),
@@ -189,15 +195,7 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         return failed("the record's admin-copy values couldn't be written", &error);
     }
     match target {
-        Target::User {
-            owner_sid,
-            data_dir,
-        } => {
-            if let Err(error) = machine.register_refresh_task(owner_sid) {
-                return failed("the refresh task couldn't be registered", &error);
-            }
-            machine.set_up(data_dir)
-        }
+        Target::User { data_dir, .. } => machine.set_up(data_dir),
         Target::Machine => SetupExit::Done,
     }
 }
