@@ -360,7 +360,8 @@ pub enum RunExit {
     /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
     AgentReserved,
     /// The sweep of the pool user's processes before the inner runner ran failed (`sweep.rs`):
-    /// one whose user can't be read, or one of the pool user's that can't be opened or ended.
+    /// the process list couldn't be read, or a process of the pool user's couldn't be opened,
+    /// checked or ended.
     Sweep,
     /// The runner's DLL search couldn't be kept to System32.
     DllSearch,
