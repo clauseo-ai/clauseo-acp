@@ -10,6 +10,7 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, EndSweep, copy, exit_code, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
+use super::marker::{launch_id, remove_marker, write_marker};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
@@ -74,6 +75,19 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
 fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
+    // The unclean-session marker, before anything runs as the pool user; only a clean end in
+    // `relay` removes it. One that can't be written is said, and the run goes on: the first act
+    // still refuses a launch while an escapee lives.
+    let marker = launch_id(launch_file).and_then(|id| {
+        write_marker(&data_dir, id, &message.pool_user)
+            .inspect_err(|e| {
+                say(&format!(
+                    "clauseo-sandbox-run: {}",
+                    os("the session marker", e)
+                ));
+            })
+            .ok()
+    });
     let desktop =
         current_user_sid().map_err(|e| Failure::new(RunExit::BadLaunch, os("user", &e)))?;
     let exe_text = exe
@@ -100,6 +114,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         cwd,
         kept: Mutex::new(None),
         job: OnceLock::new(),
+        marker,
     }));
     let result = session(&message, &end);
     if result.is_err() {
@@ -343,7 +358,8 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// descendant the agent left in the job ends then, and what it held closes. Then the output has
 /// [`DRAIN`] per stream to finish. On a cancel the exit code is the one the run would have had
 /// without the job's end (`end::exit_code`). A sweep of the session that found an escapee makes
-/// it [`RunExit::Escapee`] (`EndSweep::outcome`), the code it replaces said on stderr.
+/// it [`RunExit::Escapee`] (`EndSweep::outcome`), the code it replaces said on stderr. A clean
+/// end (`EndSweep::clean`) removes the session's unclean-session marker.
 fn relay(
     inner: &Process,
     ctl: ServerPipe,
@@ -402,7 +418,16 @@ fn relay(
         left -= 1;
     }
     tell_status(last.as_ref(), code);
-    end.wait();
+    let swept = end.wait();
+    if let Some(marker) = &end.steps().marker
+        && end.clean(swept, reported.is_some())
+        && let Err(error) = remove_marker(marker)
+    {
+        say(&format!(
+            "clauseo-sandbox-run: {}",
+            os("the session marker's removal", &error)
+        ));
+    }
     if end.escaped() {
         say(&format!(
             "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"

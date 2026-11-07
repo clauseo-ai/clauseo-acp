@@ -40,6 +40,8 @@ pub(super) struct OsSweeper {
     pub(super) kept: Mutex<Option<Process>>,
     /// The launch's kill-on-close job, once `session` made it.
     pub(super) job: OnceLock<Job>,
+    /// The session's unclean-session marker, when it could be written (`marker.rs`).
+    pub(super) marker: Option<PathBuf>,
 }
 
 impl OsSweeper {

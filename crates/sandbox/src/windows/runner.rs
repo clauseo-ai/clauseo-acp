@@ -40,6 +40,8 @@
 //!   once (`end.rs`, `sweeper.rs`): `--sweep`, the same kills with no job kept and the same
 //!   removal, on its own timeout. A job that doesn't empty starts no sweeper. The sweeper is never
 //!   in the outer's job, so the host ending the outer leaves it running.
+//! - The outer writes an unclean-session marker in the run folder once it has read the launch and
+//!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
 //!   launch on `ctl` only after it checked the client is the inner runner's pid and that pid's
 //!   token user is the pool user; `CreateProcessWithLogonW` caps the command line at 1024
@@ -79,6 +81,8 @@ mod inner;
 mod inner_flow;
 #[cfg(any(windows, test))]
 mod leftovers;
+#[cfg(any(windows, test))]
+pub mod marker;
 #[cfg(windows)]
 mod outer;
 pub mod paths;
@@ -95,6 +99,8 @@ mod sweeper;
 pub use env::agent_env;
 #[cfg(windows)]
 pub use inner::run_inner;
+#[cfg(any(windows, test))]
+pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]
 pub use outer::run_outer;
 pub use paths::{WinPath, codex_reuse};
