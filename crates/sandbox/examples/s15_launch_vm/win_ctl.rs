@@ -21,9 +21,9 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, GetLengthSid, GetSecurityDescriptorDacl,
-    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ASSIGN_PRIMARY,
-    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenDefaultDacl,
-    TokenIntegrityLevel,
+    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ADJUST_DEFAULT,
+    TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    TokenDefaultDacl, TokenIntegrityLevel,
 };
 use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::SystemServices::{SE_GROUP_INTEGRITY, SE_GROUP_LOGON_ID};
@@ -101,7 +101,9 @@ pub(crate) fn control_token() -> Result<(Owned, String), String> {
         ));
     };
     let mut base = HANDLE::default();
-    let access = TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY;
+    // `TOKEN_ADJUST_DEFAULT` too: the restricted token takes this handle's rights, and lowering
+    // its integrity and setting its default DACL need that right (harness run 42360372752: 5).
+    let access = TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT;
     // SAFETY: the pseudo-handle needs no closing; `base` is a live out-pointer, owned below.
     unsafe { OpenProcessToken(GetCurrentProcess(), access, &raw mut base) }
         .map_err(|e| gave("OpenProcessToken", &e))?;
@@ -372,4 +374,23 @@ pub(crate) fn run_as(
         code,
         lines: text.lines().map(|l| l.trim_end().to_owned()).collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    /// The control token is built (every `SetTokenInformation` passes), Low, and restricted to the
+    /// harness's user, `RESTRICTED`, `Users` and `Everyone`.
+    #[test]
+    fn the_control_token_is_low_and_restricted() {
+        let (token, user) = super::control_token().unwrap();
+        let facts = super::win::token_facts(token.0).unwrap();
+        assert_eq!(facts.integrity, super::LOW);
+        assert_eq!(facts.user, user);
+        let mut expected = vec![user];
+        expected.extend(super::RESTRICTING.iter().map(|sid| (*sid).to_owned()));
+        let mut got = facts.restricted;
+        got.sort();
+        expected.sort();
+        assert_eq!(got, expected);
+    }
 }
