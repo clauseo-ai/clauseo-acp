@@ -523,16 +523,39 @@
       ${EndIf}
     ${EndIf}
     ; The tool gone (quarantined, say), so nothing was removed: said only when the machine's
-    ; record exists, the protection having been set up. The tool is the admin copy, the only one
-    ; the removal above starts. The record is in the 64-bit view, which this 32-bit uninstaller
-    ; reads only through SetRegView 64; put back after. EnumRegValue sets the error flag when the
-    ; key can't be opened. Under /S no box: a details line and the exit code, which the
-    ; uninstaller only returns when run with _?= (its stub returns at once).
+    ; record names a set-up's owner (OwnerSid), whose hidden accounts are then still there. Not
+    ; the key alone: --adopt --per-machine writes it with nobody set up, and its admin-copy values
+    ; outlive a removal, which deletes OwnerSid. A per-user uninstall says it only to that owner:
+    ; another Windows user's uninstall leaves their set-up alone (CLAUSEO_REMOVE has no
+    ; --per-machine), so it isn't theirs to hear about. The uninstalling user's SID comes from
+    ; its own token (CLAUSEO_OWN_SID, admin_copy.nsh: System::Call, as the removal above uses),
+    ; compared exactly, as the record check does. The per-machine uninstall removes every user's
+    ; set-up, so it says it whoever the owner is. The tool is the admin copy, the only one the
+    ; removal above starts. The record is in the 64-bit view, which this 32-bit uninstaller reads
+    ; only through SetRegView 64; put back after. Under /S no box: a details line and the exit
+    ; code, which the uninstaller only returns when run with _?= (its stub returns at once).
     ${IfNot} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
       SetRegView 64
-      ClearErrors
-      EnumRegValue $R3 HKLM "SOFTWARE\Clauseo\Sandbox" 0
-      ${IfNot} ${Errors}
+      ReadRegStr $R3 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_OWNER_SID}"
+      SetRegView lastused
+      !if "${INSTALLMODE}" == "currentUser"
+        ${If} $R3 != ""
+          ; CLAUSEO_OWN_SID sets $R2 and uses $R4 to $R7; $R5 (removed) is read later.
+          Push $R4
+          Push $R5
+          Push $R6
+          Push $R7
+          !insertmacro CLAUSEO_OWN_SID
+          Pop $R7
+          Pop $R6
+          Pop $R5
+          Pop $R4
+          ${If} $R2 S!= $R3
+            StrCpy $R3 ""
+          ${EndIf}
+        ${EndIf}
+      !endif
+      ${If} $R3 != ""
         DetailPrint "$(removeExeMissing)"
         ${If} ${Silent}
           SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}
@@ -540,7 +563,6 @@
           MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeExeMissing)"
         ${EndIf}
       ${EndIf}
-      SetRegView lastused
     ${EndIf}
 
     ; 2. The data folders, deleted by the app.

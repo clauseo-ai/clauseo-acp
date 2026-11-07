@@ -3,7 +3,8 @@
 //! installers say so (`setupExeRemoved`, exit code 20) only when this run wrote that copy and found
 //! it gone when it tried to start `--adopt` (`CLAUSEO_ADMIN_REMOVED`, 95), never for a run that
 //! wrote nothing or failed to write, and never for the copy in `$INSTDIR`. The uninstaller says so
-//! when it finds its admin copy (the one its removal starts) gone after a set-up. Each code is one
+//! when it finds its admin copy (the one its removal starts) gone while the record names a set-up's
+//! owner: per user only to that owner, per machine whoever it is. Each code is one
 //! `docs/firm-it.md` lists. One test per case the release-build review named.
 
 use super::admin_copy::{ASK, admin_code, assert_run, block, macro_body};
@@ -261,17 +262,16 @@ fn a_passive_install_writes_a_details_line_and_shows_no_box_or_code() {
     assert!(says_removed(&ask[..interactive]).is_empty(), "{ask:?}");
 }
 
-#[test]
-fn the_uninstaller_says_the_protection_stays_when_the_set_up_program_is_gone() {
-    let code = hook_code();
-    let body = preuninstall(&code);
-    let freed = line_with(body, &["System::Free $R6"]);
+/// The uninstaller's check for a missing set-up program: from its `${IfNot} ${FileExists}` of the
+/// admin copy to the matching `${EndIf}`, which the data folders' step follows.
+fn exe_missing(body: &[String]) -> &[String] {
     let check = line_with(body, &["${IfNot} ${FileExists}", ADMIN_EXE]);
     let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
     // After the removal's block (the class key's, the check's and the removal's own ends), before
     // the data folders.
+    assert_eq!(body[check - 5], "System::Free $R6", "{body:?}");
     assert_eq!(
-        body[freed + 1..check],
+        body[check - 4..check],
         [
             "System::Call 'advapi32::RegCloseKey(p R4)'",
             "${EndIf}",
@@ -280,29 +280,149 @@ fn the_uninstaller_says_the_protection_stays_when_the_set_up_program_is_gone() {
         ],
         "{body:?}"
     );
-    let expected = [
-        format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"),
-        "SetRegView 64".to_owned(),
-        "ClearErrors".to_owned(),
-        "EnumRegValue $R3 HKLM \"SOFTWARE\\Clauseo\\Sandbox\" 0".to_owned(),
-        "${IfNot} ${Errors}".to_owned(),
-        "DetailPrint \"$(removeExeMissing)\"".to_owned(),
-        "${If} ${Silent}".to_owned(),
-        "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}".to_owned(),
-        "${Else}".to_owned(),
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(removeExeMissing)\"".to_owned(),
-        "${EndIf}".to_owned(),
-        "${EndIf}".to_owned(),
-        "SetRegView lastused".to_owned(),
-        "${EndIf}".to_owned(),
-    ];
-    assert_eq!(body[check..check + expected.len()], expected, "{body:?}");
-    assert_eq!(check + expected.len(), deletion, "{body:?}");
-    // The key is the set-up's machine record, as the sandbox crate names it.
+    assert_eq!(body[deletion - 1], "${EndIf}", "{body:?}");
+    &body[check..deletion]
+}
+
+/// The message lines, gated on a non-empty `$R3` (the owner's SID, cleared when it isn't said).
+const SAYS_MISSING: [&str; 9] = [
+    "${If} $R3 != \"\"",
+    "DetailPrint \"$(removeExeMissing)\"",
+    "${If} ${Silent}",
+    "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
+    "${Else}",
+    "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(removeExeMissing)\"",
+    "${EndIf}",
+    "${EndIf}",
+    "${EndIf}",
+];
+
+#[test]
+fn the_uninstaller_says_nothing_when_the_key_names_no_owner() {
+    let code = hook_code();
+    let check = exe_missing(preuninstall(&code));
+    // OwnerSid read, not the key tested: --adopt --per-machine writes the key with nobody set up,
+    // and a removal deletes OwnerSid but leaves the admin copy's values.
+    assert_run(
+        check,
+        &[
+            &format!("${{IfNot}} ${{FileExists}} {ADMIN_EXE}"),
+            "SetRegView 64",
+            "ReadRegStr $R3 HKLM \"${CLAUSEO_RECORD_KEY}\" \"${CLAUSEO_RECORD_OWNER_SID}\"",
+            "SetRegView lastused",
+        ],
+    );
+    assert!(
+        check.iter().all(|line| !line.contains("EnumRegValue")),
+        "{check:?}"
+    );
+    // The message only behind a non-empty $R3, at the block's end.
+    assert_eq!(
+        check[check.len() - SAYS_MISSING.len()..],
+        SAYS_MISSING,
+        "{check:?}"
+    );
+    assert_eq!(
+        check
+            .iter()
+            .filter(|line| line.contains("removeExeMissing"))
+            .count(),
+        2
+    );
+    // The key and value are the set-up's, as the sandbox crate names them; a removal deletes
+    // OwnerSid (SETUP_VALUES) and keeps the admin copy's values.
+    let admin = admin_code();
+    line_with(
+        &admin,
+        &["!define CLAUSEO_RECORD_KEY \"SOFTWARE\\Clauseo\\Sandbox\""],
+    );
+    line_with(&admin, &["!define CLAUSEO_RECORD_OWNER_SID \"OwnerSid\""]);
     let record = read("../sandbox/src/windows/setup/record_write.rs");
     assert!(
         record.contains("pub(super) const RECORD_KEY: &str = \"SOFTWARE\\\\Clauseo\\\\Sandbox\";"),
         "record_write.rs"
+    );
+    let values = read("../sandbox/src/windows/setup/record_values.rs");
+    assert!(
+        values.contains("pub const OWNER_SID: &str = \"OwnerSid\";"),
+        "record_values.rs"
+    );
+    assert!(
+        values.contains("pub const SETUP_VALUES: [&str; 5] = [OWNER_SID,"),
+        "record_values.rs"
+    );
+}
+
+/// The per-user comparison: the uninstalling user's SID from its own token against `OwnerSid`.
+const SAME_USER: [&str; 16] = [
+    "!if \"${INSTALLMODE}\" == \"currentUser\"",
+    "${If} $R3 != \"\"",
+    "Push $R4",
+    "Push $R5",
+    "Push $R6",
+    "Push $R7",
+    "!insertmacro CLAUSEO_OWN_SID",
+    "Pop $R7",
+    "Pop $R6",
+    "Pop $R5",
+    "Pop $R4",
+    "${If} $R2 S!= $R3",
+    "StrCpy $R3 \"\"",
+    "${EndIf}",
+    "${EndIf}",
+    "!endif",
+];
+
+#[test]
+fn a_per_user_uninstall_by_the_owner_says_so_with_21() {
+    let code = hook_code();
+    let check = exe_missing(preuninstall(&code));
+    // $R3 keeps OwnerSid when it equals the uninstalling user's SID, then the message and 21.
+    let compare = line_with(check, &["!if \"${INSTALLMODE}\" == \"currentUser\""]);
+    assert_eq!(
+        check[compare..compare + SAME_USER.len()],
+        SAME_USER,
+        "{check:?}"
+    );
+    assert_eq!(
+        check[compare + SAME_USER.len()..],
+        SAYS_MISSING,
+        "{check:?}"
+    );
+    // The SID is this process's own token user, read natively through System::Call.
+    let admin = admin_code();
+    let own = macro_body(&admin, "CLAUSEO_OWN_SID");
+    line_with(own, &["advapi32::OpenProcessToken(p -1, i 8, *p .R4)"]);
+    line_with(own, &["advapi32::ConvertSidToStringSidW"]);
+}
+
+#[test]
+fn a_per_user_uninstall_by_another_user_says_nothing() {
+    let code = hook_code();
+    let check = exe_missing(preuninstall(&code));
+    // Another SID clears $R3, so the message's gate fails; $R5 (the removal's result) is kept.
+    assert_run(check, &["${If} $R2 S!= $R3", "StrCpy $R3 \"\"", "${EndIf}"]);
+    let pushed = line_with(check, &["Push $R5"]);
+    let popped = line_with(check, &["Pop $R5"]);
+    let own = line_with(check, &["!insertmacro CLAUSEO_OWN_SID"]);
+    assert!(pushed < own && own < popped, "{check:?}");
+}
+
+#[test]
+fn a_per_machine_uninstall_with_an_owner_says_so() {
+    let code = hook_code();
+    let check = exe_missing(preuninstall(&code));
+    // The comparison is the currentUser build's only: per machine, the read goes straight to the
+    // message, whoever the owner is.
+    let read_owner = line_with(check, &["ReadRegStr $R3 HKLM"]);
+    assert_eq!(check[read_owner + 1], "SetRegView lastused");
+    assert_eq!(check[read_owner + 2], SAME_USER[0]);
+    let endif = read_owner + 2 + SAME_USER.len() - 1;
+    assert_eq!(check[endif], "!endif");
+    assert_eq!(check[endif + 1..], SAYS_MISSING, "{check:?}");
+    assert_eq!(
+        check.iter().filter(|line| line.starts_with("!if ")).count(),
+        1
     );
 }
 
