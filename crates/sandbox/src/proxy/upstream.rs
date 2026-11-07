@@ -20,6 +20,8 @@
 //! HTTPS proxy of the OS settings are plain HTTP proxies that take `CONNECT`; an `https://`
 //! proxy URL (TLS to the proxy) is refused.
 
+#[cfg(any(windows, test))]
+mod bounded;
 #[cfg(target_os = "macos")]
 mod macos;
 mod parse;
@@ -28,6 +30,8 @@ mod tests;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(any(windows, test))]
+use self::bounded::bounded;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -133,6 +137,34 @@ pub enum Route {
     },
 }
 
+/// An upstream lookup's answer for [`upstream_answer`]: a route, or `Failed` when the OS was
+/// asked and gave no answer (the lookup failed or timed out, or every lookup slot was busy).
+/// The proxy's connections take a failure as [`Route::Direct`]; a caller that keeps an earlier
+/// answer (desktop's refreshed route) keeps it over a failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpstreamAnswer {
+    /// The settings', the environment's or the OS's route, `DIRECT` included.
+    Route(Route),
+    /// No answer from the OS.
+    Failed,
+}
+
+impl From<Route> for UpstreamAnswer {
+    fn from(route: Route) -> Self {
+        UpstreamAnswer::Route(route)
+    }
+}
+
+impl UpstreamAnswer {
+    /// The route a connection takes: a failure goes direct.
+    pub fn route(self) -> Route {
+        match self {
+            UpstreamAnswer::Route(route) => route,
+            UpstreamAnswer::Failed => Route::Direct,
+        }
+    }
+}
+
 /// The host's proxy variables, as [`Lookup`] reads them.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Env {
@@ -165,6 +197,9 @@ impl Env {
 /// The OS lookup of one scheme, host and port: blocking, may run PAC.
 pub(crate) type OsRoute = dyn Fn(Scheme, &str, u16) -> Route + Send + Sync;
 
+/// [`OsRoute`] that may fail: what [`OsLookup`] asks and caches.
+type OsAnswer = dyn Fn(Scheme, &str, u16) -> UpstreamAnswer + Send + Sync;
+
 /// One launch's upstream lookup, shared by its connections.
 pub(crate) struct Lookup {
     source: Source,
@@ -187,7 +222,7 @@ struct System {
 
 /// The OS lookup with its cache.
 struct OsLookup {
-    resolve: Box<OsRoute>,
+    resolve: Box<OsAnswer>,
     clock: Box<dyn Clock>,
     /// Per scheme, normalised host and port: the answer and when it was got.
     cache: Mutex<Cache>,
@@ -199,8 +234,8 @@ struct OsLookup {
 /// A scheme, normalised host and port.
 type Key = (Scheme, String, u16);
 
-/// OS answers per key, with when each was got.
-type Cache = HashMap<Key, (Route, Duration)>;
+/// OS answers per key, with when each was got (a failure too, kept apart from `DIRECT`).
+type Cache = HashMap<Key, (UpstreamAnswer, Duration)>;
 
 /// The OS lookups in flight.
 #[derive(Default)]
@@ -230,11 +265,12 @@ impl Lookup {
         Lookup::with_parts(upstream, Env::from_process(), os_route, SystemClock::new())
     }
 
-    /// [`Lookup::new`] with the environment, the OS lookup and the clock given.
-    pub(crate) fn with_parts(
+    /// [`Lookup::new`] with the environment, the OS lookup (a `Route`, or an
+    /// [`UpstreamAnswer`] that may fail) and the clock given.
+    pub(crate) fn with_parts<A: Into<UpstreamAnswer>>(
         upstream: Upstream,
         env: Env,
-        resolve: impl Fn(Scheme, &str, u16) -> Route + Send + Sync + 'static,
+        resolve: impl Fn(Scheme, &str, u16) -> A + Send + Sync + 'static,
         clock: impl Clock + 'static,
     ) -> Result<Lookup, Error> {
         let source = match upstream {
@@ -247,18 +283,28 @@ impl Lookup {
             })?),
             Upstream::System => Source::System(Box::new(System::new(
                 env,
-                Box::new(resolve),
+                Box::new(
+                    move |scheme: Scheme, host: &str, port: u16| -> UpstreamAnswer {
+                        resolve(scheme, host, port).into()
+                    },
+                ),
                 Box::new(clock),
             ))),
         };
         Ok(Lookup { source })
     }
 
-    /// Blocking (the OS may run PAC): the proxy calls it through `blocking::unblock`.
+    /// Blocking (the OS may run PAC): the proxy calls it through `blocking::unblock`. A failed
+    /// OS lookup goes direct.
     pub(crate) fn route(&self, scheme: Scheme, host: &str, port: u16) -> Route {
+        self.answer(scheme, host, port).route()
+    }
+
+    /// [`Lookup::route`], a failed OS lookup kept apart from `DIRECT`.
+    pub(crate) fn answer(&self, scheme: Scheme, host: &str, port: u16) -> UpstreamAnswer {
         match &self.source {
-            Source::Direct => Route::Direct,
-            Source::Fixed(route) => route.clone(),
+            Source::Direct => Route::Direct.into(),
+            Source::Fixed(route) => route.clone().into(),
             Source::System(system) => system.route(scheme, host, port),
         }
     }
@@ -283,7 +329,7 @@ impl Lookup {
 }
 
 impl System {
-    fn new(env: Env, resolve: Box<OsRoute>, clock: Box<dyn Clock>) -> System {
+    fn new(env: Env, resolve: Box<OsAnswer>, clock: Box<dyn Clock>) -> System {
         let Env {
             https,
             http,
@@ -303,15 +349,15 @@ impl System {
         }
     }
 
-    fn route(&self, scheme: Scheme, host: &str, port: u16) -> Route {
+    fn route(&self, scheme: Scheme, host: &str, port: u16) -> UpstreamAnswer {
         let host = normal_host(host);
         let from_env = match scheme {
             Scheme::Https => &self.https,
             Scheme::Http => &self.http,
         };
         match from_env {
-            Some(_) if self.no_proxy.matches(&host, port) => Route::Direct,
-            Some(route) => route.clone(),
+            Some(_) if self.no_proxy.matches(&host, port) => Route::Direct.into(),
+            Some(route) => route.clone().into(),
             None => self.os.route(scheme, &host, port),
         }
     }
@@ -343,9 +389,10 @@ fn env_route(name: &str, raw: Option<&str>) -> Option<Route> {
 impl OsLookup {
     /// A fresh cached answer, else the OS's, with no lock held while the OS answers. One lookup
     /// runs per key: a second caller waits for the first's answer. At most [`OS_LOOKUPS_MOST`]
-    /// run at once; a miss past that waits up to [`OS_SLOT_WAIT`] for a slot, then goes direct
-    /// for this request, uncached, and the first time in the process says so in the log.
-    fn route(&self, scheme: Scheme, host: &str, port: u16) -> Route {
+    /// run at once; a miss past that waits up to [`OS_SLOT_WAIT`] for a slot, then fails (the
+    /// connection goes direct) for this request, uncached, and the first time in the process says
+    /// so in the log.
+    fn route(&self, scheme: Scheme, host: &str, port: u16) -> UpstreamAnswer {
         let key = (scheme, host.to_owned(), port);
         let mut flights = self.flights();
         let mut slot_waited = false;
@@ -369,7 +416,7 @@ impl OsLookup {
                 if !BUSY_LOGGED.swap(true, Ordering::Relaxed) {
                     tracing::warn!("the OS proxy lookups were all busy; a connection went direct");
                 }
-                return Route::Direct;
+                return UpstreamAnswer::Failed;
             }
             slot_waited = true;
             let busy =
@@ -396,7 +443,7 @@ impl OsLookup {
     }
 
     /// The cached answer for `key` if it is under [`CACHE_FOR`] old.
-    fn fresh(&self, key: &Key) -> Option<Route> {
+    fn fresh(&self, key: &Key) -> Option<UpstreamAnswer> {
         let now = self.clock.now();
         let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         cache
@@ -406,7 +453,7 @@ impl OsLookup {
     }
 
     /// Keeps an answer, within [`CACHE_MAX`].
-    fn store(&self, key: Key, route: Route) {
+    fn store(&self, key: Key, route: UpstreamAnswer) {
         let at = self.clock.now();
         let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         if cache.len() >= CACHE_MAX && !cache.contains_key(&key) {
@@ -439,6 +486,12 @@ impl OsLookup {
 /// (`Error::ProxyConfig`), so the connection fails where the lawyer sees it rather than going
 /// around the proxy the firm requires.
 pub fn upstream_for(upstream: &Upstream, url: &Url) -> Result<Route, Error> {
+    upstream_answer(upstream, url).map(UpstreamAnswer::route)
+}
+
+/// [`upstream_for`], a failed OS lookup (failed, timed out, or no slot) kept apart from an
+/// explicit `DIRECT` as [`UpstreamAnswer::Failed`]. Same cache: a failure is kept 60 s too.
+pub fn upstream_answer(upstream: &Upstream, url: &Url) -> Result<UpstreamAnswer, Error> {
     static SYSTEM: OnceLock<Lookup> = OnceLock::new();
     let made;
     let lookup = if let Upstream::System = upstream {
@@ -454,14 +507,14 @@ pub fn upstream_for(upstream: &Upstream, url: &Url) -> Result<Route, Error> {
         &made
     };
     let Some(host) = url.host_str() else {
-        return Ok(Route::Direct);
+        return Ok(Route::Direct.into());
     };
     let scheme = Scheme::of(url);
     let port = url.port_or_known_default().unwrap_or(match scheme {
         Scheme::Https => 443,
         Scheme::Http => 80,
     });
-    Ok(lookup.route(scheme, host, port))
+    Ok(lookup.answer(scheme, host, port))
 }
 
 /// The `https://host:port/` or `http://host:port/` the OS is asked about, or `None` for a host
@@ -481,19 +534,22 @@ fn target_url(scheme: Scheme, host: &str, port: u16) -> Option<String> {
     url.host_str().is_some().then(|| url.into())
 }
 
-/// An OS answer, or direct when the lookup failed, logged by port only: the host is where the
-/// agent goes, which the log never holds (decision record 0047).
+/// An OS answer, or `Failed` (a connection goes direct) when the lookup failed, logged by port
+/// only: the host is where the agent goes, which the log never holds (decision record 0047).
 #[cfg(any(target_os = "macos", windows, test))]
-fn settle(port: u16, answer: Result<Route, String>) -> Route {
-    answer.unwrap_or_else(|why| {
-        tracing::warn!(port, why, "the OS proxy lookup failed; going direct");
-        Route::Direct
-    })
+fn settle(port: u16, answer: Result<Route, String>) -> UpstreamAnswer {
+    match answer {
+        Ok(route) => route.into(),
+        Err(why) => {
+            tracing::warn!(port, why, "the OS proxy lookup failed; going direct");
+            UpstreamAnswer::Failed
+        }
+    }
 }
 
 /// The OS lookup: `CFNetwork`'s proxies for the target URL.
 #[cfg(target_os = "macos")]
-fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
+fn os_route(scheme: Scheme, host: &str, port: u16) -> UpstreamAnswer {
     let answer = target_url(scheme, host, port)
         .ok_or_else(|| "the host is not a URL host".to_owned())
         .and_then(|target| macos::route(&target));
@@ -504,7 +560,7 @@ fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
 /// [`WINDOWS_LOOKUP_LIMIT`]: WPAD's DHCP and DNS discovery do not all honour `WinHTTP`'s
 /// timeouts.
 #[cfg(windows)]
-fn os_route(scheme: Scheme, host: &str, port: u16) -> Route {
+fn os_route(scheme: Scheme, host: &str, port: u16) -> UpstreamAnswer {
     let answer = target_url(scheme, host, port)
         .ok_or_else(|| "the host is not a URL host".to_owned())
         .and_then(|target| {
@@ -535,55 +591,8 @@ static WINDOWS_LOOKUP_THREADS: std::sync::atomic::AtomicUsize =
 #[cfg(windows)]
 const WINDOWS_LOOKUP_THREADS_MOST: usize = OS_LOOKUPS_MOST;
 
-/// Runs `lookup` on its own thread and waits at most `limit` for it. A lookup still running
-/// then is left to finish on its thread, and its answer is dropped. `threads` counts the
-/// threads alive, those left running included; past `most` no thread starts and the lookup
-/// fails, so hung lookups cannot pile up threads.
-#[cfg(any(windows, test))]
-fn bounded(
-    limit: Duration,
-    threads: &'static std::sync::atomic::AtomicUsize,
-    most: usize,
-    lookup: impl FnOnce() -> Result<Route, String> + Send + 'static,
-) -> Result<Route, String> {
-    use std::sync::atomic::Ordering;
-    threads
-        .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-            (n < most).then_some(n + 1)
-        })
-        .map_err(|_running| format!("{most} lookups are still running"))?;
-    let (answer, answered) = std::sync::mpsc::sync_channel(1);
-    let spawned = std::thread::Builder::new()
-        .name("clauseo-proxy-lookup".to_owned())
-        .spawn(move || {
-            // Gives the slot back when the thread ends, a panicking lookup included.
-            let _slot = Release(threads);
-            let route = lookup();
-            // The waiter may have given up; its answer is then dropped.
-            drop(answer.send(route));
-        });
-    if let Err(error) = spawned {
-        threads.fetch_sub(1, Ordering::SeqCst);
-        return Err(format!("could not start the lookup thread ({error})"));
-    }
-    answered
-        .recv_timeout(limit)
-        .map_err(|_timeout| format!("the lookup took over {} s", limit.as_secs()))?
-}
-
-/// One running lookup thread, counted in `bounded`'s counter until dropped.
-#[cfg(any(windows, test))]
-struct Release(&'static std::sync::atomic::AtomicUsize);
-
-#[cfg(any(windows, test))]
-impl Drop for Release {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
 /// The OS lookup on Linux and others: none, so direct.
 #[cfg(not(any(target_os = "macos", windows)))]
-fn os_route(_scheme: Scheme, _host: &str, _port: u16) -> Route {
-    Route::Direct
+fn os_route(_scheme: Scheme, _host: &str, _port: u16) -> UpstreamAnswer {
+    Route::Direct.into()
 }

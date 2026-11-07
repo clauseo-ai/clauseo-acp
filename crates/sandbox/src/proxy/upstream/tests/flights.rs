@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::Scheme::Https;
-use super::super::{Env, Lookup, OS_LOOKUPS_MOST, Route, Upstream, bounded};
+use super::super::{Env, Lookup, OS_LOOKUPS_MOST, Route, Upstream, UpstreamAnswer, bounded};
 use super::{FakeClock, http};
 
 /// A lookup whose OS answer waits for the test: each call reports its host on `arrived` and
@@ -98,7 +98,7 @@ fn eight_lookups_hold_desktops_five_targets() {
 /// Past eight lookups at once a miss waits for a slot; with none freed in time it goes direct,
 /// uncached.
 #[test]
-fn past_eight_lookups_at_once_a_miss_waits_then_goes_direct_uncached() {
+fn past_eight_lookups_at_once_a_miss_waits_then_fails_uncached() {
     let gated = gated();
     let running: Vec<_> = (0..OS_LOOKUPS_MOST)
         .map(|i| {
@@ -107,8 +107,12 @@ fn past_eight_lookups_at_once_a_miss_waits_then_goes_direct_uncached() {
             handle
         })
         .collect();
-    // It waits up to `OS_SLOT_WAIT` for a slot, then goes direct.
-    assert_eq!(gated.lookup.route(Https, "ninth.test", 443), Route::Direct);
+    // It waits up to `OS_SLOT_WAIT` for a slot, then fails (a connection goes direct), kept
+    // apart from an OS `DIRECT`.
+    assert_eq!(
+        gated.lookup.answer(Https, "ninth.test", 443),
+        UpstreamAnswer::Failed
+    );
     assert_eq!(
         gated.calls.load(Ordering::SeqCst),
         OS_LOOKUPS_MOST,
@@ -120,7 +124,7 @@ fn past_eight_lookups_at_once_a_miss_waits_then_goes_direct_uncached() {
     for handle in running {
         assert_eq!(handle.join().unwrap(), http("os-proxy", 1));
     }
-    // The direct answer was not cached: the next miss asks the OS.
+    // The failure was not cached: the next miss asks the OS.
     gated.release.send(()).unwrap();
     assert_eq!(
         gated.lookup.route(Https, "ninth.test", 443),
