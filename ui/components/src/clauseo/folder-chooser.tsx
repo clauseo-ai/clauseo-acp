@@ -204,7 +204,7 @@ export function FolderChooser({
           <Base.Title className={dialogTitle}>
             <Say>{w.m("Choose the matter's folder")}</Say>
           </Base.Title>
-          <Base.Description className="mt-s1-5 text-small text-muted">
+          <Base.Description className="folder-chooser-note mt-s1-5 text-small text-muted">
             <Say>
               {w.m(
                 "Windows' folder window is slow to open on this computer, so Clauseo shows its own.",

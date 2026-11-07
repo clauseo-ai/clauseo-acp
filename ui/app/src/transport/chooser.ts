@@ -13,6 +13,8 @@ export type ChooserWire = {
   list(go: Go): Promise<Listing>;
   choose(): Promise<PickedFolder | null>;
   cancel(): Promise<void>;
+  /** For the desktop's log alone: when the chooser first rendered and first painted (`performance.now()`). */
+  shown?(renderAt: number, paintAt: number): void;
 };
 
 /** A session the page shows: the session, its calls, and how it ends. */

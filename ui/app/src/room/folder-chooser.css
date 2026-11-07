@@ -86,3 +86,28 @@
     margin-top: var(--s3);
   }
 }
+/* A window shorter still: 640 by 480 on Windows leaves a client area of about 592 by 398. The line on why Clauseo shows
+   its own chooser goes out of sight (a screen reader still reads it with the title) and the gaps tighten, so the folders
+   keep six rows or more there. */
+@media (max-height: 440px) {
+  .folder-chooser {
+    padding-block: var(--s2);
+  }
+  .folder-chooser-note {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .folder-chooser-body {
+    margin-top: var(--s2);
+  }
+  .folder-chooser-typed {
+    margin-top: var(--s2);
+  }
+  .folder-chooser-acts {
+    margin-top: var(--s2);
+  }
+}

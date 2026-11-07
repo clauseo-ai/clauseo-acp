@@ -5,7 +5,7 @@
 // declines leaves the chooser open where it was. A call the desktop refuses (a typed location it doesn't take, a
 // session it closed) says Clauseo can't use the folder, and the chooser stays.
 import { FolderChooser } from "@clauseo/components/clauseo/folder-chooser.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChooserRequest } from "../transport/chooser.ts";
 import type { Go, Listing, StartPoint } from "../transport/protocol.ts";
 import "./folder-chooser.css";
@@ -41,6 +41,18 @@ export function FolderChooserSession({ request }: { request: ChooserRequest }) {
       live.current = false;
     };
   }, []);
+  useLayoutEffect(() => {
+    // rendered and in the page, not yet painted; the frame after it is the first painted with the chooser in it
+    const renderedAt = performance.now();
+    performance.mark("chooser-render");
+    const frame = requestAnimationFrame(() => {
+      setTimeout(() => {
+        performance.mark("chooser-paint");
+        request.wire.shown?.(renderedAt, performance.now());
+      }, 0);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [request]);
 
   /** Lists `where`, busy already. */
   const load = async (where: Go) => {

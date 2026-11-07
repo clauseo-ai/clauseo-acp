@@ -108,6 +108,12 @@ export const commands = {
 	/**  Closes the chooser session; `command.invalid` when it is not open. */
 	chooserCancel: (chooser: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_cancel", { chooser })),
 	/**
+	 *  The page's timing of a chooser it showed, for the log alone (`chooser/trace.rs`): the
+	 *  milliseconds from the click to the desktop's answer, to the chooser's first render and to its
+	 *  first paint, as the page measured them. Always answers ok; logs no path.
+	 */
+	chooserShown: (answerMs: number, renderMs: number, paintMs: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_shown", { answerMs, renderMs, paintMs })),
+	/**
 	 *  The OS the host runs on, this build's release date, whether it is a test build, and its
 	 *  release mode.
 	 */

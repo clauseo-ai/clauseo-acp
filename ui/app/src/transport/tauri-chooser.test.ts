@@ -79,3 +79,46 @@ test("choose hands the session to the page's chooser, whose calls name it, and r
   await expect(t.pickFolder()).resolves.toBeNull();
   expect(picks()).toEqual(["pick_folder_or_choose", "chooser_cancel"]);
 });
+
+test("until the host has started only open_stream waits in the IPC: the launch's queries hold back, the pick goes at once", async () => {
+  let started!: () => void;
+  answers.set("open_stream", () => new Promise<null>((done) => (started = () => done(null))));
+  answers.set("pick_folder_or_choose", () => ({ kind: "cancelled" }));
+  const t = new TauriTransport({ warn: () => {} });
+  const listed = t.query({ list_matters: {} } as never);
+  const counted = t.countUi({ onboarding_step: { step: "welcome_shown" } } as never);
+  const sent = t.dispatch({ command: { forget_matter: { matter: "m" } } } as never);
+  await expect(t.pickFolder()).resolves.toBeNull();
+  await settle();
+  expect(invoked.map((i) => i.command)).toEqual(["open_stream", "pick_folder_or_choose"]);
+
+  started();
+  await Promise.all([listed, counted, sent]);
+  expect(invoked.map((i) => i.command)).toEqual([
+    "open_stream",
+    "pick_folder_or_choose",
+    "query",
+    "count_ui",
+    "dispatch",
+  ]);
+});
+
+test("the chooser's timing goes to the desktop's log, in milliseconds from the click", async () => {
+  answers.set("pick_folder_or_choose", () => ({ kind: "choose", start: { chooser: 3 } }));
+  const t = new TauriTransport({ warn: () => {} });
+  const store = chooserOf(t);
+  const unhost = store.host();
+  const now = vi.spyOn(performance, "now");
+  now.mockReturnValueOnce(1000).mockReturnValueOnce(1040);
+  void t.pickFolder();
+  await settle();
+  store.current()?.wire.shown?.(1100, 1130);
+  expect(invoked.find((i) => i.command === "chooser_shown")?.args).toEqual({
+    answerMs: 40,
+    renderMs: 100,
+    paintMs: 130,
+  });
+  now.mockRestore();
+  store.current()?.cancel();
+  unhost();
+});

@@ -38,6 +38,7 @@ fn with_commands(builder: tauri_specta::Builder<tauri::Wry>) -> tauri_specta::Bu
             chooser_list,
             chooser_choose::<tauri::Wry>,
             chooser_cancel,
+            chooser_shown,
             display_info::<tauri::Wry>,
             open_external::<tauri::Wry>,
             open_file::<tauri::Wry>,
