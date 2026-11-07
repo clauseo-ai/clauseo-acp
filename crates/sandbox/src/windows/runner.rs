@@ -31,8 +31,9 @@
 //!   to Administrators): the inner runner's first act once resumed, before it reads the launch,
 //!   then every [`TICK`](sweep::TICK) while the agent runs and once more when it exited
 //!   (`inner_flow.rs`); the outer gives the inner a query-only handle to the job for that. The
-//!   first act also removes the pool user's scheduled tasks, BITS jobs, `Run`/`RunOnce` values and
-//!   Startup entries (`leftovers.rs`). A pool user serves one live session at a time
+//!   first act also removes the pool user's per-user COM classes, `Run`/`RunOnce` values and
+//!   Startup entries, with no COM; the end sweeper removes those and then, over COM, its scheduled
+//!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
 //!   (`pool::assign::busy`), so none of those processes is another session's.
 //! - The outer's first reaction to any end (the host's stdin ending, the inner exiting, a
 //!   failure) is to start the end sweeper once (`end.rs`, `sweeper.rs`): `--sweep`, the same

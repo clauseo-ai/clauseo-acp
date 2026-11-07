@@ -20,6 +20,7 @@ struct Fake {
 
 fn key(kind: Kind) -> &'static str {
     match kind {
+        Kind::Classes => "classes",
         Kind::Tasks => "tasks",
         Kind::Bits => "bits",
         Kind::RunKeys => "run",
@@ -47,6 +48,8 @@ impl Leftovers for Fake {
 fn full() -> Fake {
     let mut fake = Fake::default();
     fake.items
+        .insert("classes", vec!["CLSID", "Wow6432Node\\CLSID"]);
+    fake.items
         .insert("tasks", vec!["\\Evil\\AtLogon", "\\Updater"]);
     fake.items.insert("bits", vec!["{job-1}"]);
     fake.items
@@ -57,8 +60,14 @@ fn full() -> Fake {
 }
 
 fn run(fake: &mut Fake) -> (bool, Vec<String>) {
+    run_kinds(fake, &Kind::ALL)
+}
+
+fn run_kinds(fake: &mut Fake, kinds: &[Kind]) -> (bool, Vec<String>) {
     let mut lines = Vec::new();
-    let clean = remove_all(fake, "before launch", &mut |l| lines.push(l.to_owned()));
+    let clean = remove_all(fake, kinds, "before launch", &mut |l| {
+        lines.push(l.to_owned());
+    });
     (clean, lines)
 }
 
@@ -70,23 +79,26 @@ fn each_kind_is_listed_and_every_item_deleted() {
     assert_eq!(
         fake.deleted,
         [
-            "\\Evil\\AtLogon",
-            "\\Updater",
-            "{job-1}",
+            "CLSID",
+            "Wow6432Node\\CLSID",
             "Run\\backdoor",
             "RunOnce\\once",
             "evil.lnk",
             "subdir",
-            "x.bat"
+            "x.bat",
+            "\\Evil\\AtLogon",
+            "\\Updater",
+            "{job-1}",
         ]
     );
     assert_eq!(
         lines,
         [
-            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
-            "clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
             "clauseo-sandbox-run: cleanup (before launch): removed 3 Startup folder entries",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
+            "clauseo-sandbox-run: cleanup (before launch): removed 1 BITS jobs",
         ]
     );
 }
@@ -108,22 +120,25 @@ fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
     assert_eq!(
         fake.deleted,
         [
-            "\\Evil\\AtLogon",
-            "\\Updater",
+            "CLSID",
+            "Wow6432Node\\CLSID",
             "Run\\backdoor",
             "RunOnce\\once",
             "subdir",
-            "x.bat"
+            "x.bat",
+            "\\Evil\\AtLogon",
+            "\\Updater",
         ]
     );
     assert_eq!(
         lines,
         [
-            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
-            "clauseo-sandbox-run: cleanup (before launch): the BITS jobs can't be listed (1058)",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 per-user COM class keys",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Run and RunOnce values",
             "clauseo-sandbox-run: cleanup (before launch): removed 2 Startup folder entries, 1 \
              couldn't be (5)",
+            "clauseo-sandbox-run: cleanup (before launch): removed 2 scheduled tasks",
+            "clauseo-sandbox-run: cleanup (before launch): the BITS jobs can't be listed (1058)",
         ]
     );
     for line in &lines {
@@ -133,6 +148,44 @@ fn one_kind_failing_leaves_the_others_and_the_log_names_no_item() {
             assert!(!line.contains(name), "{line} names {name}");
         }
     }
+}
+
+#[test]
+fn the_inner_lists_nothing_over_com() {
+    let mut fake = full();
+    let (clean, lines) = run_kinds(&mut fake, &Kind::LOCAL);
+    assert!(clean);
+    assert!(Kind::LOCAL.iter().all(|kind| !kind.over_com()));
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        !fake.deleted.contains(&"{job-1}") && !fake.deleted.contains(&"\\Updater"),
+        "{:?}",
+        fake.deleted
+    );
+}
+
+#[test]
+fn the_classes_go_first_and_com_waits_for_them() {
+    assert_eq!(Kind::ALL.first(), Some(&Kind::Classes));
+    assert_eq!(Kind::LOCAL.first(), Some(&Kind::Classes));
+    // A class key that can't be deleted keeps the end sweeper off COM.
+    let mut fake = full();
+    fake.deny_delete.insert("CLSID");
+    let (clean, lines) = run(&mut fake);
+    assert!(!clean);
+    assert!(!fake.deleted.contains(&"\\Updater") && !fake.deleted.contains(&"{job-1}"));
+    assert!(fake.deleted.contains(&"x.bat"), "the rest still run");
+    let skipped = lines
+        .iter()
+        .filter(|l| l.contains("weren't listed"))
+        .count();
+    assert_eq!(skipped, 2, "{lines:?}");
+    // So does a class list that fails.
+    let mut fake = full();
+    fake.deny_list.insert("classes");
+    let (clean, _) = run(&mut fake);
+    assert!(!clean);
+    assert!(!fake.deleted.contains(&"{job-1}"));
 }
 
 #[test]

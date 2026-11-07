@@ -20,7 +20,7 @@ use std::time::Duration;
 use super::RunExit;
 use super::inner_flow::at;
 use super::leftovers::os::OsLeftovers;
-use super::leftovers::remove_all;
+use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::Point;
 use super::sweep::os::sweep_own;
@@ -78,7 +78,7 @@ fn sweep_all() -> bool {
         }
     };
     let mut calls = OsLeftovers::new(&token, me);
-    let clean = remove_all(&mut calls, "end sweeper", &mut log);
+    let clean = remove_all(&mut calls, &Kind::ALL, "end sweeper", &mut log);
     swept && clean
 }
 

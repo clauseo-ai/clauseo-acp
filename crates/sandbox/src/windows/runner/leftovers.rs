@@ -1,8 +1,15 @@
-//! What the pool user could leave to start at its next logon, removed (M1): its scheduled tasks,
-//! its BITS jobs, the values under its `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and
-//! `RunOnce`, and every entry of its Startup folder. Run as the pool user, by the inner runner
-//! right after its first-act sweep and by the detached end sweeper (`--sweep`): one code for
-//! both, [`remove_all`].
+//! What the pool user could leave to start at its next logon, or to run in a later runner,
+//! removed (M1): its per-user COM classes, the values under its
+//! `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and `RunOnce`, every entry of its Startup
+//! folder, its scheduled tasks and its BITS jobs. Run as the pool user, by the inner runner right
+//! after its first-act sweep ([`Kind::LOCAL`]: no COM in the inner) and by the detached end sweeper
+//! (`--sweep`, [`Kind::ALL`]): one code for both, [`remove_all`].
+//!
+//! The per-user classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
+//! `Wow6432Node` twins) go first: an in-process server registered there for the Task Scheduler's
+//! class would run in the runner that makes it with the lawyer's logon SID, and a sandbox account
+//! has no per-user class of its own to keep. Tasks and BITS, the two kinds reached over COM, are
+//! skipped when any class key is left.
 //!
 //! Each kind is listed, then each item deleted; one kind failing (its list, or an item) is logged
 //! and the rest still run. The log carries counts and OS codes only, never a name or a content.
@@ -19,6 +26,8 @@ pub(super) mod os;
 /// A kind of leftover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
+    /// The pool user's per-user COM class keys, deleted whole.
+    Classes,
     /// Scheduled tasks whose principal or author is the pool user, in every folder it can read.
     Tasks,
     /// BITS jobs the pool user owns (`EnumJobs(0)`), cancelled.
@@ -30,13 +39,27 @@ pub(crate) enum Kind {
 }
 
 impl Kind {
-    /// Every kind, in the order they are removed.
-    pub(crate) const ALL: [Kind; 4] = [Kind::Tasks, Kind::Bits, Kind::RunKeys, Kind::Startup];
+    /// The end sweeper's kinds, in the order they are removed: the classes before COM starts.
+    pub(crate) const ALL: [Kind; 5] = [
+        Kind::Classes,
+        Kind::RunKeys,
+        Kind::Startup,
+        Kind::Tasks,
+        Kind::Bits,
+    ];
+    /// The inner runner's: none reached over COM.
+    pub(crate) const LOCAL: [Kind; 3] = [Kind::Classes, Kind::RunKeys, Kind::Startup];
+
+    /// Whether the kind is reached over COM.
+    pub(crate) fn over_com(self) -> bool {
+        matches!(self, Kind::Tasks | Kind::Bits)
+    }
 }
 
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Kind::Classes => "per-user COM class keys",
             Kind::Tasks => "scheduled tasks",
             Kind::Bits => "BITS jobs",
             Kind::RunKeys => "Run and RunOnce values",
@@ -55,52 +78,79 @@ pub(crate) trait Leftovers {
     fn delete(&mut self, kind: Kind, item: &Self::Item) -> io::Result<()>;
 }
 
-/// Removes every kind's items, logging each kind's count, at `who` (the inner's first act, or
-/// the end sweeper). Whether every kind was listed and every item deleted.
+/// Removes the items of each of `kinds`, in order, logging each kind's count, at `who` (the
+/// inner's first act, or the end sweeper). A kind reached over COM is skipped once the classes
+/// weren't all removed. Whether every kind was listed and every item deleted.
 pub(crate) fn remove_all<L: Leftovers>(
     calls: &mut L,
+    kinds: &[Kind],
     who: &str,
     log: &mut dyn FnMut(&str),
 ) -> bool {
     let mut clean = true;
-    for kind in Kind::ALL {
-        let items = match calls.list(kind) {
-            Ok(items) => items,
-            Err(error) => {
-                log(&format!(
-                    "clauseo-sandbox-run: cleanup ({who}): the {kind} can't be listed ({})",
-                    code(&error)
-                ));
-                clean = false;
-                continue;
-            }
-        };
-        let mut removed = 0usize;
-        let mut failed: Option<(usize, String)> = None;
-        for item in &items {
-            match calls.delete(kind, item) {
-                Ok(()) => removed += 1,
-                Err(error) => {
-                    let (count, _) = failed.get_or_insert((0, code(&error)));
-                    *count += 1;
-                }
-            }
+    let mut classes_left = false;
+    for &kind in kinds {
+        if kind.over_com() && classes_left {
+            log(&format!(
+                "clauseo-sandbox-run: cleanup ({who}): the {kind} weren't listed: per-user COM \
+                 class keys are left"
+            ));
+            clean = false;
+            continue;
         }
-        match failed {
-            None if removed == 0 => {}
-            None => log(&format!(
-                "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}"
-            )),
-            Some((count, first)) => {
-                clean = false;
-                log(&format!(
-                    "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}, {count} \
-                     couldn't be ({first})"
-                ));
+        let removed = remove_kind(calls, kind, who, log);
+        if kind == Kind::Classes && !removed {
+            classes_left = true;
+        }
+        clean &= removed;
+    }
+    clean
+}
+
+/// Removes one kind's items; whether it was listed and every item deleted.
+fn remove_kind<L: Leftovers>(
+    calls: &mut L,
+    kind: Kind,
+    who: &str,
+    log: &mut dyn FnMut(&str),
+) -> bool {
+    let items = match calls.list(kind) {
+        Ok(items) => items,
+        Err(error) => {
+            log(&format!(
+                "clauseo-sandbox-run: cleanup ({who}): the {kind} can't be listed ({})",
+                code(&error)
+            ));
+            return false;
+        }
+    };
+    let mut removed = 0usize;
+    let mut failed: Option<(usize, String)> = None;
+    for item in &items {
+        match calls.delete(kind, item) {
+            Ok(()) => removed += 1,
+            Err(error) => {
+                let (count, _) = failed.get_or_insert((0, code(&error)));
+                *count += 1;
             }
         }
     }
-    clean
+    match failed {
+        None if removed == 0 => true,
+        None => {
+            log(&format!(
+                "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}"
+            ));
+            true
+        }
+        Some((count, first)) => {
+            log(&format!(
+                "clauseo-sandbox-run: cleanup ({who}): removed {removed} {kind}, {count} \
+                 couldn't be ({first})"
+            ));
+            false
+        }
+    }
 }
 
 /// Whether `named`, a task's principal or author as Task Scheduler gives it, is the pool user:
