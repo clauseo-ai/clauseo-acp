@@ -8,10 +8,12 @@
 //! s15_launch_vm probe <what> ...                             (run inside the sandbox)
 //! ```
 //!
-//! Unattended prints one `PASS <row>`, `FAIL <row>: <why>`, `SKIP <row>: <why>` or
-//! `INFO <row>: <why>` (a positive control failed, so the row proves nothing) line per row, runs
-//! cleanup even when a row fails, and exits 1 when any row (or prepare) failed. Each row
-//! has a hard limit (`--row-timeout`, 120 s by default). Windows only; elsewhere it exits 2.
+//! Each row prints one verdict line: `PASS <row>`, `FAIL <row>: <why>`, `SKIP <row>: <why>` or
+//! `INFO <row>: <why>` (a positive control couldn't run, so the row proves nothing). Unattended
+//! runs cleanup even when a row fails. Every run of rows (`row`, `rows`, `--unattended`) ends
+//! with a `result: green` or `result: red (…)` line and exits 1 when any row is FAIL or INFO, or
+//! when prepare or cleanup failed: an INFO row turns CI red, in step mode too. SKIP doesn't. Each
+//! row has a hard limit (`--row-timeout`, 120 s by default). Windows only; elsewhere it exits 2.
 
 use std::process::ExitCode;
 
@@ -76,6 +78,9 @@ mod ui;
 #[path = "s15_launch_vm/win.rs"]
 mod win;
 #[cfg(windows)]
+#[path = "s15_launch_vm/win_ctl.rs"]
+mod win_ctl;
+#[cfg(windows)]
 #[path = "s15_launch_vm/win_desk.rs"]
 mod win_desk;
 #[cfg(windows)]
@@ -124,8 +129,8 @@ mod harness {
                     false
                 }
             },
-            Step::Row(name) => with_manifest(&opts, |m| rows(&opts, m, &[name.as_str()])),
-            Step::Rows => with_manifest(&opts, |m| rows(&opts, m, &ROWS)),
+            Step::Row(name) => with_manifest(&opts, |m| verdict(&rows(&opts, m, &[name.as_str()]))),
+            Step::Rows => with_manifest(&opts, |m| verdict(&rows(&opts, m, &ROWS))),
             Step::Cleanup => prepare::cleanup(&opts.root),
             Step::Unattended => unattended(&opts),
         };
@@ -153,8 +158,22 @@ mod harness {
         }
     }
 
-    /// Runs `names`; whether none failed. Prints a tally.
-    fn rows(opts: &Opts, manifest: &Manifest, names: &[&str]) -> bool {
+    /// Prints the final line, `result: green` or `result: red (<what>)` naming every FAIL and
+    /// INFO; whether it is green.
+    fn verdict(red: &[String]) -> bool {
+        if red.is_empty() {
+            say("result: green (no row FAIL or INFO)");
+            return true;
+        }
+        say(&format!(
+            "result: red ({}; INFO: a positive control couldn't run, so the row proves nothing)",
+            red.join(", ")
+        ));
+        false
+    }
+
+    /// Runs `names` and prints a tally; what turns the run red: `FAIL <row>` and `INFO <row>`.
+    fn rows(opts: &Opts, manifest: &Manifest, names: &[&str]) -> Vec<String> {
         let mut failed = Vec::new();
         let mut skipped = Vec::new();
         let mut info = Vec::new();
@@ -170,22 +189,24 @@ mod harness {
             "rows: {} run, failed {failed:?}, skipped {skipped:?}, info {info:?}",
             names.len()
         ));
-        failed.is_empty()
+        let red = failed.iter().map(|name| format!("FAIL {name}"));
+        red.chain(info.iter().map(|name| format!("INFO {name}")))
+            .collect()
     }
 
     fn unattended(opts: &Opts) -> bool {
         say("unattended: prepare, every row, cleanup");
-        let ok = match prepare::prepare(opts) {
+        let mut red = match prepare::prepare(opts) {
             Ok(manifest) => rows(opts, &manifest, &ROWS),
             Err(why) => {
                 say(&format!("FAIL prepare: {why}"));
-                false
+                vec!["FAIL prepare".to_owned()]
             }
         };
-        let clean = prepare::cleanup(&opts.root);
-        if !clean {
+        if !prepare::cleanup(&opts.root) {
             say("cleanup: something stayed (above)");
+            red.push("cleanup left something".to_owned());
         }
-        ok && clean
+        verdict(&red)
     }
 }
