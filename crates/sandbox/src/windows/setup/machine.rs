@@ -132,6 +132,11 @@ pub trait Machine {
     fn profile_of(&mut self, sid: &Sid) -> Result<Option<ProfileDir>, MachineError>;
     /// Deletes `sid`'s profile (`DeleteProfileW`).
     fn delete_profile(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// The folder Windows makes new profiles in (`ProfileList\ProfilesDirectory`, expanded):
+    /// `C:\Users`.
+    fn profiles_dir(&mut self) -> Result<PathBuf, MachineError>;
+    /// The names of the entries directly in `dir`, a link listed as itself, never followed.
+    fn folder_names(&mut self, dir: &Path) -> Result<Vec<String>, MachineError>;
     /// The owner of `path`, read without following a link (a pool user's `LocalLow`, `PR4h`).
     fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError>;
     /// Whether `path` is there, a junction or symbolic link counting as itself (never

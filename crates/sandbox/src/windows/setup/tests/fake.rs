@@ -24,6 +24,7 @@ use crate::windows::sids::Reserved;
 
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
+pub(super) use super::fake_more::{Account, State};
 use super::fake_more::{Around, ProfileFaults};
 
 /// The owner's SID, and its account's name.
@@ -51,26 +52,6 @@ pub(super) fn rid(sid: &Sid) -> String {
 /// SIDs as their relative ids, joined with commas.
 pub(super) fn rids(sids: &[Sid]) -> String {
     sids.iter().map(rid).collect::<Vec<_>>().join(",")
-}
-
-/// One local account.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Account {
-    pub(super) sid: Sid,
-    pub(super) password: String,
-    pub(super) groups: BTreeSet<Sid>,
-    pub(super) hidden: bool,
-}
-
-/// What the machine holds, for comparing before and after.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct State {
-    pub(super) accounts: BTreeMap<String, Account>,
-    pub(super) group: Option<Sid>,
-    pub(super) record: Option<MachineRecord>,
-    pub(super) profiles: BTreeMap<Sid, PathBuf>,
-    pub(super) marker: Option<Marker>,
-    pub(super) secrets: BTreeMap<Sid, String>,
 }
 
 /// The machine, in memory.
@@ -409,9 +390,11 @@ impl Machine for FakeMachine {
                 temporary: true,
             });
         }
-        let folder = self.faults.folder(name);
-        let path = self.dir.path().join("Users").join(&folder);
-        self.faults.made(&path);
+        let listed = self.state.profiles.get(&sid).cloned();
+        let path = self
+            .faults
+            .logon_path(&self.dir.path().join("Users"), name, listed);
+        let folder = path.file_name().unwrap().to_string_lossy().into_owned();
         if self.no_local_low.contains(name) {
             self.dir.dir(&format!("Users/{folder}/AppData"));
             self.state.profiles.insert(sid, path.clone());
@@ -451,6 +434,16 @@ impl Machine for FakeMachine {
             self.faults.deleted(name, path);
         }
         Ok(())
+    }
+
+    fn profiles_dir(&mut self) -> Result<PathBuf, MachineError> {
+        self.call("profiles_dir")?;
+        Ok(self.dir.path().join("Users"))
+    }
+
+    fn folder_names(&mut self, dir: &Path) -> Result<Vec<String>, MachineError> {
+        self.call(format!("folder_names {}", folder_name(dir)))?;
+        Ok(self.faults.names_in(dir))
     }
 
     fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError> {

@@ -210,8 +210,13 @@ fn unreadable_marks_fail_the_set_up_before_any_change() {
 }
 
 /// Fails an extend over a pool owing `ClauseoSb02` a reset, after `fault` sets the machine up;
-/// checks the step and that the mark stays, and returns the machine, its calls only the extend's.
-fn failing_reset(test: &str, step: Step, fault: impl FnOnce(&mut FakeMachine)) -> FakeMachine {
+/// checks the step and that the mark stays, and returns the machine, its calls only the extend's,
+/// and the failure's cause.
+fn failing_reset(
+    test: &str,
+    step: Step,
+    fault: impl FnOnce(&mut FakeMachine),
+) -> (FakeMachine, String) {
     let (mut machine, mut acl) = pool_with_a_reset_owed(test, 1002);
     fault(&mut machine);
     let from = machine.calls.len();
@@ -226,48 +231,100 @@ fn failing_reset(test: &str, step: Step, fault: impl FnOnce(&mut FakeMachine)) -
     );
     assert!(machine.needs_reset.contains(&sid(1002)), "the mark stays");
     assert!(!machine.calls.iter().any(|c| c.starts_with("reset_done")));
-    machine
+    (machine, failure.cause)
 }
 
 #[test]
 fn a_reset_must_prove_the_old_profile_is_gone() {
-    // Its folder survives the delete: refused before the password changes or a logon.
-    let machine = failing_reset("setup-reset-stuck", Step::ResetProfile, |machine| {
+    // Its folder survives the delete: refused, named, before the password changes or a logon.
+    let (machine, _) = failing_reset("setup-reset-stuck", Step::ResetProfile, |machine| {
         machine.faults.stuck.insert("ClauseoSb02".to_owned());
     });
-    assert!(
-        !machine
-            .calls
-            .iter()
-            .any(|c| c == "set_password ClauseoSb02")
-    );
-    assert!(!machine.calls.iter().any(|c| c == "log_on_once ClauseoSb02"));
+    let calls = &machine.calls;
+    assert!(!calls.iter().any(|c| c == "set_password ClauseoSb02"));
+    assert!(!calls.iter().any(|c| c == "log_on_once ClauseoSb02"));
 
     // The logon makes it somewhere else: refused; the new password is saved by the rollback.
-    let machine = failing_reset("setup-reset-moved", Step::ResetProfile, |machine| {
+    let (machine, _) = failing_reset("setup-reset-moved", Step::ResetProfile, |machine| {
         machine.faults.moved.insert("ClauseoSb02".to_owned());
     });
     let now = &machine.state.accounts["ClauseoSb02"].password;
     assert_eq!(&machine.state.secrets[&sid(1002)], now);
 
     // Where the profile is can't be read: refused before the delete.
-    let machine = failing_reset("setup-reset-unlisted", Step::ResetProfile, |machine| {
+    let (machine, _) = failing_reset("setup-reset-unlisted", Step::ResetProfile, |machine| {
         machine.fail("profile_of 1002");
     });
     assert!(!machine.calls.iter().any(|c| c == "delete_profile 1002"));
+}
 
-    // ProfileList lists none, and the logon doesn't make the account's own folder: refused.
-    failing_reset("setup-reset-none-moved", Step::ResetProfile, |machine| {
-        machine.state.profiles.remove(&sid(1002));
-        machine.faults.moved.insert("ClauseoSb02".to_owned());
-    });
-    // With none listed, the account's own folder back is a reset.
-    let (mut machine, mut acl) = pool_with_a_reset_owed("setup-reset-none", 1002);
-    machine.state.profiles.remove(&sid(1002));
+/// The re-check's sequence: `ProfileList` lost the entry but `Users\ClauseoSb02` stayed. Run 1
+/// refuses before the logon; run 2, over the `ClauseoSb02.PC` profile a logon would have made
+/// beside it (as the previous code's run 1 did), deletes that, still finds the old folder, and
+/// refuses again. The mark is set after both, and each failure names the folder left.
+#[test]
+fn a_folder_left_beside_the_profile_keeps_the_mark_across_runs() {
+    let (mut machine, mut acl) = pool_with_a_reset_owed("setup-reset-two-runs", 1002);
+    let left = machine.state.profiles.remove(&sid(1002)).unwrap();
+    for run in 1..=2 {
+        if run == 2 {
+            let beside = machine.dir.dir("Users/ClauseoSb02.PC/AppData/LocalLow");
+            let profile = beside.parent().unwrap().parent().unwrap().to_owned();
+            machine.state.profiles.insert(sid(1002), profile);
+        }
+        let from = machine.calls.len();
+        let req = request(&mut machine, 4, Vec::new());
+        let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+        assert_eq!(failure.step, Step::ResetProfile, "run {run}");
+        assert!(
+            failure.cause.contains(&left.display().to_string()),
+            "{}",
+            failure.cause
+        );
+        assert!(
+            machine.needs_reset.contains(&sid(1002)),
+            "run {run}: the mark stays"
+        );
+        let calls = machine.calls_since(from);
+        assert!(
+            !calls.contains(&"log_on_once ClauseoSb02"),
+            "run {run}: {calls:?}"
+        );
+    }
+}
+
+/// A `<name>.*` folder of an earlier profile, in any case, refuses the reset and is named.
+#[test]
+fn a_stale_dotted_profile_folder_keeps_the_mark() {
+    for stale in ["ClauseoSb02.OLD", "CLAUSEOSB02.000"] {
+        let (machine, cause) = failing_reset("setup-reset-dotted", Step::ResetProfile, |machine| {
+            machine.dir.dir(&format!("Users/{stale}"));
+        });
+        let folder = machine.dir.path().join("Users").join(stale);
+        assert!(cause.contains(&folder.display().to_string()), "{cause}");
+        assert!(machine.calls.iter().any(|c| c == "folder_names Users"));
+        assert!(!machine.calls.iter().any(|c| c == "log_on_once ClauseoSb02"));
+    }
+    // A folder that only starts with the name is another account's: no refusal.
+    let (mut machine, mut acl) = pool_with_a_reset_owed("setup-reset-other", 1002);
+    machine.dir.dir("Users/ClauseoSb021");
+    let req = request(&mut machine, 4, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.profiles_reset, Ok(vec![pool_user(2)]));
+}
+
+/// `GetUserProfileDirectoryW` may spell the folder in another case than `ProfileList`: the
+/// same folder all the same.
+#[test]
+fn a_remade_profile_in_another_case_is_the_same_folder() {
+    let (mut machine, mut acl) = pool_with_a_reset_owed("setup-reset-case", 1002);
+    machine.faults.lower.insert("ClauseoSb02".to_owned());
     let req = request(&mut machine, 4, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();
     assert_eq!(report.profiles_reset, Ok(vec![pool_user(2)]));
     assert!(machine.needs_reset.is_empty());
+    let path = machine.state.profiles[&sid(1002)].display().to_string();
+    assert!(path.ends_with("clauseosb02"), "{path}");
 }
 
 #[test]

@@ -8,10 +8,13 @@
 //! registered matters, as the owner, under the lock ([`resets_due`]). Each marked user whose
 //! account exists is reset in `keep_user`: its profile deleted (`Machine::delete_profile`, which
 //! takes the hive with it), a new password, then one logon that makes the profile again from
-//! Default. The reset proves the old profile is gone ([`delete`], [`check_remade`]): its folder
-//! must be gone after the delete, and the logon must give the same folder back. Otherwise a folder
-//! the delete left (a `ProfileList` key gone, the folder not) would stay readable to the same SID
-//! while the logon made `<name>.<computer>` beside it. Step 7's owner check and shared-write
+//! Default. The reset proves no earlier profile is left ([`delete`], [`check_remade`]): before
+//! the logon, the listed folder and every `<profiles folder>\<name>` or `<name>.*` must be
+//! absent, and the logon must make exactly `<profiles folder>\<name>`. Otherwise a folder the
+//! delete left (a `ProfileList` key gone, the folder not) would stay readable to the same SID
+//! while the logon made `<name>.<computer>` beside it, and a later run would take that one for
+//! the profile. Nothing is deleted but through `DeleteProfileW`: an administrator deletes what
+//! the failure names. Step 7's owner check and shared-write
 //! denies then close its new `LocalLow` with every other user's. Only once `secrets.bin` holds
 //! the new password are the marks cleared ([`clear`]). A reset that fails fails the set-up at its
 //! step and leaves the mark, so the user stays held back; a clear that fails is reported and
@@ -67,13 +70,14 @@ pub(super) fn clear(
     }
 }
 
-/// Deletes `user`'s profile for a reset: reads where `ProfileList` says it is, deletes it, and
-/// checks its folder is gone. The folder, or `None` when `ProfileList` had none. Any failure is
-/// at [`Step::ResetProfile`], before the user's password changes.
-pub(super) fn delete(
-    machine: &mut impl Machine,
-    user: &PoolUser,
-) -> Result<Option<PathBuf>, Failed> {
+/// Deletes `user`'s profile for a reset, and proves nothing of an earlier profile is left where
+/// the logon could find it, without deleting anything else (an elevated recursive delete in a
+/// folder the user once wrote risks its links): the folder `ProfileList` listed is gone, and
+/// `<profiles folder>\<name>` and every `<profiles folder>\<name>.*` is absent, compared
+/// without ASCII case. The folder the logon must then make: `<profiles folder>\<name>`. Any
+/// failure is at [`Step::ResetProfile`], before the user's password changes, and names what is
+/// left so an administrator can delete it.
+pub(super) fn delete(machine: &mut impl Machine, user: &PoolUser) -> Result<PathBuf, Failed> {
     let failed = |cause: String| (Step::ResetProfile, format!("{}: {cause}", user.name));
     let old = machine
         .profile_of(&user.sid)
@@ -82,38 +86,67 @@ pub(super) fn delete(
     machine
         .delete_profile(&user.sid)
         .map_err(|error| failed(cause_of(&error)))?;
-    if let Some(old) = &old {
-        let left = machine
-            .exists(old)
+    let mut left = Vec::new();
+    if let Some(old) = old {
+        let there = machine
+            .exists(&old)
             .map_err(|error| failed(cause_of(&error)))?;
-        if left {
-            let what = format!("its profile folder {} is still there", old.display());
-            return Err(failed(what));
+        if there {
+            left.push(old);
         }
     }
-    Ok(old)
+    let dir = machine
+        .profiles_dir()
+        .map_err(|error| failed(format!("the profiles folder: {}", cause_of(&error))))?;
+    let names = machine
+        .folder_names(&dir)
+        .map_err(|error| failed(format!("{}: {}", dir.display(), cause_of(&error))))?;
+    for name in names.iter().filter(|name| of_account(name, &user.name)) {
+        let folder = dir.join(name);
+        if !left.iter().any(|path| same_path(path, &folder)) {
+            left.push(folder);
+        }
+    }
+    if left.is_empty() {
+        return Ok(dir.join(&user.name));
+    }
+    let left: Vec<String> = left.iter().map(|path| path.display().to_string()).collect();
+    Err(failed(format!(
+        "an earlier profile's folder is left ({}): delete it, then run set-up again",
+        left.join("; ")
+    )))
 }
 
-/// After a reset's logon: the profile made again must be `old`'s folder, or, when
-/// `ProfileList` had none, the folder named for the account, which Windows uses only when no
-/// folder by that name is left. Otherwise [`Step::ResetProfile`], and the mark stays.
-pub(super) fn check_remade(user: &PoolUser, old: Option<&Path>, new: &Path) -> Result<(), Failed> {
-    let same = match old {
-        Some(old) => new == old,
-        None => new
-            .file_name()
-            .is_some_and(|leaf| leaf.eq_ignore_ascii_case(&user.name)),
+/// Whether `folder` is a profile folder Windows could make for `account`: its name, or its name
+/// and a `.` suffix (`<name>.<computer>`, `<name>.000`), without ASCII case.
+fn of_account(folder: &str, account: &str) -> bool {
+    let Some(head) = folder.get(..account.len()) else {
+        return false;
     };
-    if same {
+    let rest = folder.get(account.len()..).unwrap_or_default();
+    head.eq_ignore_ascii_case(account) && (rest.is_empty() || rest.starts_with('.'))
+}
+
+/// Whether `a` and `b` are the same path without ASCII case, as NTFS and `ProfileList` (whose
+/// `ProfileImagePath` may differ in case from `GetUserProfileDirectoryW`'s answer) take them.
+fn same_path(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy()
+        .eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+/// After a reset's logon: the profile made again must be `expected`, `<profiles folder>\<name>`
+/// (without ASCII case). Otherwise [`Step::ResetProfile`], and the mark stays.
+pub(super) fn check_remade(user: &PoolUser, expected: &Path, new: &Path) -> Result<(), Failed> {
+    if same_path(expected, new) {
         return Ok(());
     }
-    let was = old.map_or_else(|| user.name.clone(), |old| old.display().to_string());
     Err((
         Step::ResetProfile,
         format!(
-            "{}: the logon made its profile at {}, not at {was}: the old folder may be left",
+            "{}: the logon made its profile at {}, not at {}: an earlier folder may be left",
             user.name,
-            new.display()
+            new.display(),
+            expected.display()
         ),
     ))
 }
