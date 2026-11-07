@@ -323,6 +323,7 @@ impl Compose {
             if known.search == Search::Waiting && !is_running(&state) {
                 known.search = Search::Answer;
             }
+            keep_signed_in_at(known.s18.as_ref(), &mut state);
             known.s18 = Some(state);
         });
     }
@@ -525,6 +526,34 @@ impl Compose {
                 state,
             });
         }
+    }
+}
+
+/// A `SignedIn` that re-confirms the account the last state was already signed in to (same
+/// email, plan and source) keeps that state's `at`: a status check after `auth_required`
+/// reads the local login file, which an expired or revoked token still passes, and a fresh
+/// `at` would show "Signed in again" with nothing done. Another account or source keeps its
+/// new `at`.
+fn keep_signed_in_at(previous: Option<&SigninState>, state: &mut SigninState) {
+    let (
+        Some(SigninState::SignedIn {
+            email: was_email,
+            plan: was_plan,
+            source: was_source,
+            at: was_at,
+        }),
+        SigninState::SignedIn {
+            email,
+            plan,
+            source,
+            at,
+        },
+    ) = (previous, state)
+    else {
+        return;
+    };
+    if was_email == email && was_plan == plan && was_source == source {
+        *at = *was_at;
     }
 }
 
