@@ -12,7 +12,7 @@ use super::RunExit;
 use super::frame::{InnerLaunch, InnerReport, read_frame, write_frame};
 use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
-use super::leftovers::remove_all;
+use super::leftovers::{Kind, remove_all};
 use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
@@ -88,7 +88,7 @@ impl Inner for Calls {
     fn clean(&mut self) {
         let mut lines = Vec::new();
         let mut calls = OsLeftovers::new(&self.token, self.me.clone());
-        remove_all(&mut calls, "before launch", &mut |line| {
+        remove_all(&mut calls, &Kind::LOCAL, "before launch", &mut |line| {
             lines.push(line.to_owned());
         });
         drop(calls);
