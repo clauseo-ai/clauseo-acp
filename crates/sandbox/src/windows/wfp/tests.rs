@@ -13,6 +13,7 @@ use super::spec::{
     allowed_users, checked_ports, denied_users, not_pool_sddl, permit_ports, revocations,
     rule_names, user_sddl,
 };
+use crate::ports::TIER_B_PORTS;
 use crate::test_support::TempDir;
 use crate::windows::sids::Sid;
 use crate::{Error, Loopback, Policy};
@@ -96,7 +97,7 @@ fn each_pool_user_gets_one_static_permit_for_the_range_only() {
                 Condition::Users(vec![sid(user)]),
                 Condition::RemoteV4(Ipv4Addr::LOCALHOST),
                 Condition::Protocol(PROTOCOL_TCP),
-                Condition::RemotePorts(61080, 61179),
+                Condition::RemotePorts(*TIER_B_PORTS.start(), *TIER_B_PORTS.end()),
             ]
         );
     }
@@ -250,7 +251,7 @@ fn the_firewall_rules_except_only_the_range() {
                 "clauseo_sandbox_block_loopback_tcp",
                 Direction::Out,
                 RuleProtocol::Tcp,
-                Some("1-61079,61180-65535")
+                Some("1-46099,46200-65535")
             ),
         ]
     );
@@ -362,19 +363,26 @@ fn policy(dir: &TempDir, ports: &[u16], loopback: Loopback) -> Policy {
 #[test]
 fn a_launch_names_only_ports_in_the_range_and_never_any() {
     let dir = TempDir::new("wfp-permit-ports");
-    let listed = Loopback::Ports(vec![61150, 61091]);
-    let ports = permit_ports(&policy(&dir, &[61090, 61091], listed)).unwrap();
-    assert_eq!(ports, [61090, 61091, 61150]);
-    let none = permit_ports(&policy(&dir, &[61090], Loopback::None)).unwrap();
-    assert_eq!(none, [61090]);
-    let any = permit_ports(&policy(&dir, &[61090], Loopback::Any));
+    let listed = Loopback::Ports(vec![46150, 46191]);
+    let ports = permit_ports(&policy(&dir, &[46190, 46191], listed)).unwrap();
+    assert_eq!(ports, [46150, 46190, 46191]);
+    let none = permit_ports(&policy(&dir, &[46190], Loopback::None)).unwrap();
+    assert_eq!(none, [46190]);
+    let any = permit_ports(&policy(&dir, &[46190], Loopback::Any));
     assert_eq!(any, Err(NetworkGap::LoopbackAny));
-    let outside = permit_ports(&policy(&dir, &[61090], Loopback::Ports(vec![9222])));
+    let outside = permit_ports(&policy(&dir, &[46190], Loopback::Ports(vec![9222])));
     assert_eq!(outside, Err(NetworkGap::PortOutsideRange(9222)));
-    assert_eq!(checked_ports(&[61179, 61080]), Ok(vec![61080, 61179]));
-    assert_eq!(
-        checked_ports(&[61180]),
-        Err(NetworkGap::PortOutsideRange(61180))
+    assert_eq!(checked_ports(&[46199, 46100]), Ok(vec![46100, 46199]));
+    for outside in [46099, 46200, 61080] {
+        assert_eq!(
+            checked_ports(&[outside]),
+            Err(NetworkGap::PortOutsideRange(outside))
+        );
+    }
+    assert!(
+        NetworkGap::PortOutsideRange(1)
+            .to_string()
+            .contains("46100-46199")
     );
     assert_eq!(checked_ports(&[]), Ok(vec![]));
 }

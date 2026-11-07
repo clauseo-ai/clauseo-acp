@@ -38,8 +38,9 @@ pub enum NetworkGap {
     /// off on tier B).
     #[error("the sandbox can't give an agent every loopback port on this computer")]
     LoopbackAny,
-    /// The policy names a loopback port outside 61080-61179, which the firewall blocks.
-    #[error("the sandbox can't permit loopback port {0}, outside 61080-61179")]
+    /// The policy names a loopback port outside 46100-46199 (`TIER_B_PORTS`), which the
+    /// firewall blocks.
+    #[error("the sandbox can't permit loopback port {0}, outside 46100-46199")]
     PortOutsideRange(u16),
     /// WFP couldn't be opened to check (the Base Filtering Engine isn't running, say).
     #[error("the sandbox couldn't check its network filters ({call} failed, error {code:#x})")]
@@ -97,6 +98,7 @@ pub(in crate::windows::wfp) const ERROR_INVALID_OWNER: u32 = 1307;
 
 /// Whether `owner`, the owner of one of set-up's WFP objects, may own it: Administrators or
 /// SYSTEM, never the lawyer, whose implicit owner rights would let them rewrite its DACL.
+#[cfg(any(windows, test))]
 pub(in crate::windows::wfp) fn owner_allowed(owner: &str) -> bool {
     matches!(owner, "S-1-5-32-544" | "S-1-5-18")
 }

@@ -3,9 +3,9 @@
 //! (ours, and any foreign one); the block filters and one static permit per pool user added.
 //! So a re-run or an extend replaces the filters with no moment where a pool user is
 //! unfiltered. Then the owner's read-only grants, and each object's owner read back: it must be
-//! Administrators or SYSTEM ([`owner_allowed`]), or the set-up fails; then the firewall rules, which never fail the
-//! set-up ([`FirewallOutcome`]). Any WFP failure, the Base Filtering Engine down included,
-//! fails it.
+//! Administrators or SYSTEM ([`owner_allowed`]), or the set-up fails; then the firewall rules,
+//! which never fail the set-up ([`FirewallOutcome`]). Any WFP failure, the Base Filtering
+//! Engine down included, fails it.
 
 use super::check::{ERROR_INVALID_OWNER, Kind, OWNER_CHECK, WfpError, classify, owner_allowed};
 use super::engine::{Engine, filters_in, grant, owner_of};
