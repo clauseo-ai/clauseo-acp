@@ -41,6 +41,24 @@ pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::copy(from, to).map(drop)
 }
 
+/// Makes `link` a hard link to the file `target`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the m3-hardlink row links its own fixture into A's state folder"
+)]
+pub(crate) fn hard_link(target: &Path, link: &Path) -> io::Result<()> {
+    std::fs::hard_link(target, link)
+}
+
+/// Makes `link` a symbolic link to the file `target` (unprivileged: developer mode).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the m3-hardlink row's symbolic credential link, to its own fixture"
+)]
+pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}
+
 /// Removes the file `path`.
 #[expect(
     clippy::disallowed_methods,
@@ -62,7 +80,7 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
 /// Starts `command`.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the harness starts the runner, the mock and its probe's child itself"
+    reason = "the harness starts the runner, the mock and its probes' children itself"
 )]
 pub(crate) fn start(command: &mut Command) -> io::Result<Child> {
     command.spawn()

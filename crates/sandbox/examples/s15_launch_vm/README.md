@@ -29,10 +29,35 @@ moves it). Cleanup deletes only the paths listed there, and runs `clauseo-sandbo
 only when prepare ran the set-up.
 
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
-`ca-bundle`, `clipboard`, `atoms`. `clipboard` skips in a session with no clipboard the harness
+`ca-bundle`, `clipboard`, `atoms`, `runners`, `breakaway`, `handles`, `desktop`,
+`pipes-same-matter`, `m3-hardlink`. `clipboard` skips in a session with no clipboard the harness
 can use. `node-pipes` needs `--node`; `codex` needs `--node` and `--codex`, both given to
 prepare, which copies them into `bin\`. Each row has a limit (`--row-timeout`, 120 s by default).
 A row past it fails, and the harness ends every process it started.
+
+The security rows (`checks_sec.rs`, `checks_m3.rs`):
+
+- `runners`: A's agent is refused `PROCESS_ALL_ACCESS`, `PROCESS_VM_READ`,
+  `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION` and the token (`TOKEN_QUERY`,
+  `TOKEN_DUPLICATE`) on its inner runner (its parent pid) and its outer runner (the harness
+  sends that pid on stdin). What `PROCESS_QUERY_LIMITED_INFORMATION` and `SYNCHRONIZE` get is
+  printed as information.
+- `breakaway`: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or its child is still in a job; the
+  child is killed either way.
+- `handles`: the agent's handle table holds exactly the `in`, `out` and `err` runner pipes,
+  never `ctl` (by name; by counting client pipe ends when names don't come back).
+- `desktop`: prints the DACLs of `WinSta0` and `WinSta0\Default`; the agent runs on its own
+  `ClauseoRun-…` window station, can't open `WinSta0` (and if it could, can't open `Default`
+  there after `SetProcessWindowStation`), and `SwitchDesktop` gives 5 under the job's desktop
+  UI limit (without that limit the row fails, `no desktop UI limit`). An ACE for A's pool SID
+  on `Default` prints `ALERT desktop: …` and fails the row. Without the limit, `SwitchDesktop`
+  may switch the session to the agent's empty desktop, so run it on a VM copy only.
+- `pipes-same-matter`: a second agent of A's matter gets 5, not 231, on each of A's pipes.
+- `m3-hardlink`: makes `<root>\m3\profile\.codex\auth.json` (a fixture) and links to it
+  from A's state folder. `codex_link_in_policy` with that stand-in profile refuses the hard
+  link (`LinkedLogin`) and a symbolic link (`ReparseLink`); the outer runs the hard link (it
+  isn't the real `auth.json`) and refuses the symbolic link and a link in the real profile's
+  `.codex` (never made). The symbolic link half skips without developer mode.
 
 ## In CI
 
@@ -46,5 +71,6 @@ exits 1 when prepare or any row failed. The output is the job's artifact.
 
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
-`write <path>`, `job-ui`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`.
-`probe.rs` documents what each prints.
+`write <path>`, `job-ui`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
+`runners`, `breakaway`, `handles`, `desktop`. `probe.rs` and `probe_sec.rs` document what each
+prints.
