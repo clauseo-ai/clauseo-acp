@@ -43,14 +43,11 @@ fn overlaps(range: &RangeInclusive<u16>, (first, last): (u16, u16)) -> bool {
     first <= *range.end() && last >= *range.start()
 }
 
-/// Whether `listener` is this app's: this process (the proxy's and the relay's listeners), or a
-/// process running this process's own program file (another of the app's processes).
-pub fn is_ours(listener: &Listener, own_pid: u32, own_image: Option<&str>) -> bool {
+/// Whether `listener` is this app's: this process's, since the proxy and the relay run in the
+/// host. A program-file match isn't enough: another Windows user's Clauseo, or this program
+/// started suspended and injected into, would pass it.
+pub fn is_ours(listener: &Listener, own_pid: u32) -> bool {
     listener.pid == own_pid
-        || matches!(
-            (listener.image.as_deref(), own_image),
-            (Some(theirs), Some(ours)) if theirs.eq_ignore_ascii_case(ours)
-        )
 }
 
 /// Checks `seen` for tier B: no dynamic range overlapping the range, no port of it reserved,
