@@ -15,12 +15,12 @@ fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn read(relative: &str) -> String {
+pub(super) fn read(relative: &str) -> String {
     std::fs::read_to_string(manifest_dir().join(relative)).unwrap()
 }
 
 /// `hooks.nsh`'s lines, comments and blank lines left out, trimmed.
-fn hook_code() -> Vec<String> {
+pub(super) fn hook_code() -> Vec<String> {
     read("windows/hooks.nsh")
         .lines()
         .map(str::trim)
@@ -30,7 +30,7 @@ fn hook_code() -> Vec<String> {
 }
 
 /// The index of the first code line holding all of `parts`.
-fn line_with(code: &[String], parts: &[&str]) -> usize {
+pub(super) fn line_with(code: &[String], parts: &[&str]) -> usize {
     code.iter()
         .position(|line| parts.iter().all(|part| line.contains(part)))
         .unwrap_or_else(|| panic!("no line in hooks.nsh holds {parts:?}"))

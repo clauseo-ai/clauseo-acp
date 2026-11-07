@@ -30,7 +30,7 @@
     "slots": {
       "$R9": "the data folder",
       "$R8": "the folder it kept",
-      "$COMMONAPPDATA": "C:\\ProgramData"
+      "$APPDATA": "C:\\ProgramData"
     }
   }
 }
