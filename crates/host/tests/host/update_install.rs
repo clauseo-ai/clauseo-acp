@@ -467,9 +467,12 @@ fn a_quit_while_the_marker_is_written_leaves_no_marker_and_no_failure() {
     host.ok(HostCommand::CheckForUpdate {});
     until_ready(&host);
     host.ok(install(InstallWhen::Now));
-    wait("shutdown", host.handle.shutdown()).unwrap();
+    // When the install wins, the host has ended by the time the shutdown reaches it, which
+    // then answers that the host is closed; the exit below says which won.
+    let shutdown = wait("shutdown", host.handle.shutdown());
     match exit_of(host) {
         HostExit::Stopped => {
+            shutdown.unwrap();
             assert_eq!(marker_text(&dir), None);
             let quiet = FakeUpdater::new(&dir, InstallKind::CurrentUser, None, Download::Instant);
             let host = start_updating(&dir, 1, &quiet);
@@ -478,7 +481,12 @@ fn a_quit_while_the_marker_is_written_leaves_no_marker_and_no_failure() {
             host.shutdown();
         }
         // The marker's write won the race and the install began first: that run installs.
-        HostExit::Install(_) => assert_eq!(marker_text(&dir).as_deref(), Some(INSTALLING)),
+        HostExit::Install(_) => {
+            if let Err(error) = &shutdown {
+                assert_eq!(error.message(), "the host is closed", "{error:?}");
+            }
+            assert_eq!(marker_text(&dir).as_deref(), Some(INSTALLING));
+        }
         other => panic!("the host ended {other:?}"),
     }
 }

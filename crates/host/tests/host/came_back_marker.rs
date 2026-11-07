@@ -97,11 +97,12 @@ fn came_back_marker_of_a_failed_import_is_removed_once() {
     host.settle();
     assert!(marker(&folder).exists(), "removed before 10 s");
     host.clock.advance(Duration::from_millis(1));
-    eventually("the marker removed", || !marker(&folder).exists());
-    assert!(
-        !folder.join(".clauseo").exists(),
-        "the empty .clauseo was left"
-    );
+    // The re-check removes the file, then the empty `.clauseo`, on its own thread: wait for
+    // the folder, the last of the two, or the look can fall between them.
+    eventually("the marker and its empty .clauseo removed", || {
+        !folder.join(".clauseo").exists()
+    });
+    assert!(!marker(&folder).exists());
     assert!(folder.join("brief.txt").exists());
 
     // Once only: a marker put back again later stays.
