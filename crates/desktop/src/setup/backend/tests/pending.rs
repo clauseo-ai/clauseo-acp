@@ -13,6 +13,7 @@ use super::fakes::{Rig, command, rig, setup_events};
 use super::{MAIN, claude, codex, missing};
 use crate::bridge::lock;
 use crate::setup::refresh::{SettingsRead, apply_settings};
+use crate::setup::{KeyWrite, SetupBackend};
 use crate::test_support::block_on;
 
 fn install(agent: &AgentId, state: InstallState) -> AgentsEvent {
@@ -294,6 +295,60 @@ fn a_second_press_while_pending_replaces_the_first() {
         Some(Press::SignIn(Method::Console))
     );
     assert_eq!(rig.calls(), [("install", claude()), ("install", claude())]);
+}
+
+/// How many sign-ins the fake `Agents` was asked to start.
+fn sign_ins_started(rig: &Rig) -> usize {
+    rig.calls()
+        .iter()
+        .filter(|(name, _)| *name == "sign_in")
+        .count()
+}
+
+/// S18 says `Ready` before the pump has handled it (the pump writes the entry first): a press
+/// then replaces the kept one rather than starting directly, so only the latest press signs in,
+/// once, and no older press restarts it.
+#[test]
+fn a_press_between_ready_and_the_pump_replaces_the_kept_one() {
+    let rig = rig(true);
+    not_installed(&rig, &claude());
+    press(&rig, "start_sign_in", &claude(), &json!({}));
+    lock(&rig.agents.states).insert(claude(), ready());
+    press(
+        &rig,
+        "start_sign_in",
+        &claude(),
+        &json!({ "console": true }),
+    );
+    assert_eq!(
+        pending(&rig, &claude()),
+        Some(Press::SignIn(Method::Console))
+    );
+    assert_eq!(sign_ins_started(&rig), 0, "nothing started directly");
+    pump(&rig, &claude(), vec![ready()]);
+    assert_eq!(
+        sign_ins_started(&rig),
+        1,
+        "the latest press, once: {:?}",
+        rig.calls()
+    );
+    assert_eq!(pending(&rig, &claude()), None);
+}
+
+/// A `StartSignIn` that went past the join while a press was kept, reaching the backend only
+/// after `Ready` started that press: it joins the running sign-in, with no restart.
+#[test]
+fn a_press_that_skipped_the_join_joins_the_started_press() {
+    let rig = rig(true);
+    not_installed(&rig, &claude());
+    press(&rig, "start_sign_in", &claude(), &json!({}));
+    pump(&rig, &claude(), vec![ready()]);
+    assert_eq!(sign_ins_started(&rig), 1);
+    // The second press as `Setup` sends it once it saw the kept press: past the join.
+    let late = command("start_sign_in", &claude(), &json!({}));
+    let answer = block_on(rig.backend.run(late, KeyWrite::Replace, &rig.events));
+    assert_eq!(answer, Ok(CommandOutcome::Done));
+    assert_eq!(sign_ins_started(&rig), 1, "no restart: {:?}", rig.calls());
 }
 
 /// No start state, policy read, managed agent or firm policy starts an install: only a

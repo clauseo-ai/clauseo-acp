@@ -41,11 +41,17 @@ fn installed(state: Option<&InstallState>) -> bool {
 }
 
 /// A press for `agent` whose checks passed, with the gate held: when the agent is not
-/// installed, keeps `press` (replacing any kept before it), shows `Queued` and starts or
-/// joins the install; `true` then. `false` when the agent is installed, so the caller
-/// starts the sign-in at once.
+/// installed, or a press is still kept for it, keeps `press` (replacing the one kept before
+/// it), shows `Queued` and starts or joins the install; `true` then. `false` when the agent
+/// is installed and nothing is kept, so the caller starts the sign-in at once.
+///
+/// A kept press is replaced even once the install is `Ready`: S18 says `Ready` before the
+/// pump has handled it (it writes the entry first), and a press started directly then would be
+/// restarted by the older press at [`run_press`]. Replaced, the latest is the one that runs
+/// (the install of a ready agent says `Ready` again, which the pump handles too).
 pub(super) fn keep_press(backend: &AgentsBackend, agent: &AgentId, press: Press) -> bool {
-    if installed(backend.agents.state(agent).as_ref()) {
+    let kept = lock(&backend.pending).contains_key(agent);
+    if !kept && installed(backend.agents.state(agent).as_ref()) {
         return false;
     }
     let replaced = lock(&backend.pending)
@@ -55,6 +61,14 @@ pub(super) fn keep_press(backend: &AgentsBackend, agent: &AgentId, press: Press)
     backend.compose.signin(agent, SigninState::Queued);
     backend.agents.install(agent);
     true
+}
+
+/// Whether a `StartSignIn` that went past the sign-in join (`Setup` saw a kept press) finds,
+/// with the gate held, no press kept any more but a sign-in running: [`run_press`] started the
+/// kept one meanwhile, so this press joins it rather than restarting it. Only such a press gets
+/// here with a running state: any other was joined in `Setup`.
+pub(super) fn joins_started(backend: &AgentsBackend, agent: &AgentId) -> bool {
+    !lock(&backend.pending).contains_key(agent) && backend.events.sign_in_running(agent)
 }
 
 /// Drops `agent`'s pending press, if any, for `why` (logged), with the gate held: the

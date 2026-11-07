@@ -152,6 +152,10 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
+                if pending::joins_started(self, &agent) {
+                    tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
+                    return Ok(());
+                }
                 if !pending::keep_press(self, &agent, Press::SignIn(method)) {
                     agents
                         .sign_in(&agent, method)
