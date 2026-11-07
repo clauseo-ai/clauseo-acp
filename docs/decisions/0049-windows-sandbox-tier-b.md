@@ -1070,16 +1070,22 @@ leaves that profile, both naming the part.
     the end sweeper, a process that can't be opened, checked or ended is logged and the sweep
     goes on with the rest; the sweep's next round and the next tick try it again. One that can't
     be opened or ended is also an escapee (below).
-  - **The end sweeper.** The outer's first reaction to any end signal is to end its job
-    (`TerminateJobObject`) and wait until no process is left in it (`ActiveProcesses` of
-    `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 1.5 s, inside the
-    host's 2 s), and only then to start the end sweeper. The signals are the host's stdin ending
-    (the host's cancel ladder closes it, then gives the outer 2 s before it ends the outer's job),
-    the inner exiting, and any failure once the launch is read. A guard does this once a session,
-    and a second signal waits until the first one's start is over. The sweeper's logon opens the
+  - **The end sweeper.** At every session's end the outer ends its job (`TerminateJobObject`)
+    and waits until no process is left in it (`ActiveProcesses` of
+    `JobObjectBasicAccountingInformation` at 0, looked at every 25 ms for up to 400 ms), and only
+    then starts the end sweeper: never while anything in the job is alive. When the inner exits,
+    the agent's output first has up to 2 s per stream to drain, then the job ends, then the output
+    gets 2 s again for what a descendant held. When the host's stdin ends (the host's cancel
+    ladder closes it, then gives the outer 2 s before it ends the outer's job), the outer closes
+    the agent's stdin, so the agent reads the end of its input, and gives it 1.5 s: if the inner
+    exits meanwhile, its code and output are kept and the order is the inner exit's; if not, the
+    job ends then, and the 400 ms emptying wait keeps the whole inside the host's 2 s. (The
+    harness's `whoami` row, whose stdin closes at once, was killed mid-output by a sweeper started
+    at the stdin end.) On a failure once the launch is read the job ends at once. A guard does this
+    once a session, and a second path waits until the first one's start is over. The sweeper's logon opens the
     same gap as the inner's: until the outer's shut, its process, thread and Medium token carry
     the logon's default DACL. With the job empty first, neither the agent nor anything it started
-    in the job is alive in that gap. A job still holding a process after 1.5 s starts no sweeper,
+    in the job is alive in that gap. A job still holding a process after 400 ms starts no sweeper,
     since that process could take a handle in the gap; the outer logs it, and the next launch's
     first act is the backstop. The sweeper is `clauseo-sandbox-run
     --sweep`, started as the pool user with `CreateProcessWithLogonW` and the password the outer
@@ -1127,14 +1133,14 @@ leaves that profile, both naming the part.
   - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. The
     outer's job end gives the inner and the agent the sweeper's kill code (`RUN_EXIT_BASE +
     0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
-    and the inner's exit code is that code, the outer exits as it would have without the job's
-    end: with the agent's own code when the inner reported the agent's exit first, else with
-    `0xC1A0`, the code the host's job end gives (`TERMINATED` in the process crate). On a
-    cancel the agent now ends at the stdin end itself, without reading the end of its input
-    first. The host's shutdown outcome is timed, not read from the code. The inner holds a
-    query-only handle to the job, which keeps the job open, and so its processes running, if
-    the outer dies without ending it; on a cancel the outer ends the job at the stdin end, before
-    the host's job end can kill it.
+    (the agent's 1.5 s ran out) and the inner's exit code is that code, the outer exits as it
+    would have without the job's end: with the agent's own code when the inner reported the
+    agent's exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in
+    the process crate). An agent that finished within its 1.5 s exits with its own code, as on
+    any inner exit. The host's shutdown outcome is timed, not read from the code. The inner holds
+    a query-only handle to the job, which keeps the job open, and so its processes running, if
+    the outer dies without ending it; on a cancel the outer ends the job itself 1.5 s after the
+    stdin end, before the host's job end can kill it.
   - **Escapees.** A process of the pool user's that a sweep can't open, even after the owner's
     `WRITE_DAC` reopen, or can't end is an escapee: it lives outside every job, and no sweep of
     the pool user's own can end it. The inner reports it on `ctl` (`InnerReport::Escapee`: the
@@ -1164,7 +1170,7 @@ leaves that profile, both naming the part.
     user's SID, as the launch file is written: atomically, with the run folder's three entries
     (the lawyer, `SYSTEM`, Administrators) as its own protected DACL and the lawyer its owner, so
     the pool user can neither write nor remove it. It removes it only at a clean end: the inner
-    exited (no cancel, no failure), reported the agent's exit, the end sweeper started and exited
+    exited (no failure, and no cancel whose agent outlived its 1.5 s), reported the agent's exit, the end sweeper started and exited
     0 while the outer waited, and no sweep found an escapee. A crash, a cancel, a failure, a job
     that didn't empty or an escapee leaves it. `runner::unclean_sessions` lists the sessions
     whose marker is left, with their pool users; nothing calls it yet.
@@ -1172,7 +1178,7 @@ leaves that profile, both naming the part.
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task or BITS job stays until
     an end sweeper runs, and each process it starts lives only until a sweep. The residual cases are a cancel that kills the outer inside the 2 s before the
-    sweeper's logon completes, and a job that doesn't empty within 1.5 s. Then no end sweeper runs, and the cleanup waits for the next
+    sweeper's logon completes, and a job that doesn't empty within 400 ms. Then no end sweeper runs, and the cleanup waits for the next
     launch's first act. A task or BITS job that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's
     runs and before the agent exists, and the outer has shut the inner's process and thread by
