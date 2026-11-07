@@ -119,7 +119,7 @@ Developer ID.
 - **English and Hindi in the installer** (stage F, 2026-11-07; the dialog is still English
   only). The installer's `languages` is `["English", "Hindi"]`, English first as NSIS's
   fallback, with no language picker. Tauri 2.12.2 has no Hindi of its own, so
-  `crates/desktop/windows/nsis/Hindi.nsh` is ours: the same 37 keys as `English.nsh` in the same
+  `crates/desktop/windows/nsis/Hindi.nsh` is ours: the same keys as `English.nsh` in the same
   order, which tests hold equal, and a test that fails until every value holds Devanagari (the
   app thread's provisional Hindi replaces the English placeholders). On a Tauri upgrade, copy its
   new template keys into both files. The language is chosen by
