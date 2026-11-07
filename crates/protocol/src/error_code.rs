@@ -125,8 +125,8 @@ error_codes! {
         newer Clauseo.";
     MatterCheckpointFailed = "matter.checkpoint_failed", retryable: true, meaning: "Taking a \
         checkpoint of the matter's files failed.";
-    MatterFolderMissing = "matter.folder_missing", retryable: false, meaning: "The matter's \
-        folder is gone: moved, deleted, or its drive is not mounted.";
+    MatterFolderMissing = "matter.folder_missing", retryable: true, meaning: "The matter's \
+        folder is gone: moved, deleted, or its drive is not mounted or did not answer in time.";
     MatterFolderRefused = "matter.folder_refused", retryable: false, meaning: "The folder may not \
         be a matter: a drive root, the home folder or a system folder.";
     MatterCodexFolder = "matter.codex_folder", retryable: false, meaning: "The matter folder \

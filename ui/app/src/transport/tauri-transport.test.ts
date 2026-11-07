@@ -129,7 +129,7 @@ describe("TauriTransport", () => {
 
   test("a declined confirm and a refused open or reveal reject with the host's error", async () => {
     const declined = { code: "transport.unauthorized", message: "declined", retryable: false };
-    const missing = { code: "matter.folder_missing", message: "gone", retryable: false };
+    const missing = { code: "matter.folder_missing", message: "gone", retryable: true };
     answers.set("open_external", () => Promise.reject(declined));
     answers.set("open_file", () => Promise.reject(missing));
     answers.set("reveal", () => Promise.reject("command reveal not allowed"));

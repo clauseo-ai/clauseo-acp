@@ -357,7 +357,7 @@ test("a refused Show in Finder only goes to the console; the rail stays as it wa
     ...today([A, B]),
     platform: "mac",
     reveal: () => {
-      throw { code: "matter.folder_missing", message: "gone", retryable: false };
+      throw { code: "matter.folder_missing", message: "gone", retryable: true };
     },
   });
   const before = names();
