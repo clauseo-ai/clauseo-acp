@@ -76,6 +76,7 @@ use clauseo_protocol::{
     ProtectionWork,
     RefreshWhy,
     RestoreRequest,
+    SiteTag,
     StopReason,
     StreamHeader,
     StreamId,
@@ -100,9 +101,9 @@ use clauseo_protocol::{
 use entries::{agent_text_entry, every_entry, header_entry};
 use examples::{acp_unsupported_block, every_event};
 use fixtures::{
-    agent, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id, folder_ref_id,
-    matter_id, message_id, path, permission_request_id, raw, round_trips, seq, short, thread_id,
-    title, turn_id, unknown_event, unknown_of, v7,
+    agent, blocked_site_id, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id,
+    folder_ref_id, matter_id, message_id, path, permission_request_id, raw, round_trips, seq,
+    short, thread_id, title, turn_id, unknown_event, unknown_of, v7,
 };
 use fixtures::{blob as sample_blob, envelope as sample_envelope};
 use limits::{account_limits, limits_view};
@@ -462,6 +463,17 @@ mod host_event {
                     false,
                 )
             },
+        };
+        SiteBlocked => site_blocked: HostEvent::SiteBlocked {
+            block_id: blocked_site_id(4),
+            matter: matter_id(1),
+            thread: Some(thread_id(2)),
+            turn: Some(turn_id(3)),
+            host: "login.bank-secure.test".to_owned(),
+            tag: SiteTag::Phishing,
+            list_generated: Timestamp::new(1_794_031_200_000).unwrap(),
+            override_allowed: true,
+            count: 2,
         };
     } }
 }

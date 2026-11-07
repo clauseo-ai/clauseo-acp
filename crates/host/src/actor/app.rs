@@ -174,6 +174,10 @@ pub(super) fn subscribe(actor: &mut Actor, principal: &Principal, reply: Reply<A
 /// Sends `event` to every app subscriber, serialised once. An event that does not serialise
 /// is a host bug: it is logged and goes to nobody.
 pub(crate) fn publish(actor: &mut Actor, event: &HostEvent) {
+    if let HostEvent::SettingsChanged(_) = event {
+        // The block list's next round reads the settings as they are now.
+        crate::blocklist::refresh(actor);
+    }
     if actor.app_subs.is_empty() {
         return;
     }

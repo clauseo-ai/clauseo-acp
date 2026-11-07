@@ -21,6 +21,7 @@ use futures::executor::{LocalPool, LocalSpawner};
 use futures::future::{AbortHandle, Abortable};
 use futures::task::LocalSpawnExt;
 
+use crate::blocklist;
 use crate::clock::{Clock, Now};
 use crate::config::{HostConfig, ProfileHook};
 use crate::encode::Encoder;
@@ -33,6 +34,7 @@ use crate::snapshot::SnapshotWorker;
 
 mod app;
 mod app_lists;
+mod blocked;
 mod browser_install;
 mod commands;
 mod connectors;
@@ -167,6 +169,11 @@ pub(crate) struct Actor {
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,
     /// The app subscribers, in the order they came.
     pub(crate) app_subs: Vec<app::AppSub>,
+    /// The sites the egress proxy refused, per thread, for the running turn (`blocked.rs`).
+    /// Boxed, so the host thread's close future stays under clippy's `large_futures` limit.
+    pub(crate) blocked: Box<blocked::Blocks>,
+    /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
+    pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
     /// The rail's triage: streams it holds loaded and the snooze timer (`triage.rs`).
@@ -256,7 +263,7 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    (first, config): (protection::Observed, HostConfig),
+    (first, mut config): (protection::Observed, HostConfig),
     requests: async_channel::Receiver<Request>,
     (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
@@ -264,6 +271,7 @@ fn run(
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
+    let blocklist = blocklist::take(&mut config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open((config, first), spawner, post, ready.clone()).await {
             Ok(actor) => actor,
@@ -273,6 +281,11 @@ fn run(
             }
         };
         startup::begin_startup(&mut actor);
+        // Stops when this block ends, however it ends (`blocklist.rs`).
+        let _blocklist = blocklist.and_then(|start| {
+            actor.blocklist = Some(start.live.clone());
+            blocklist::start(start)
+        });
         let exit = main_loop::main_loop(&mut actor, requests, internal).await;
         let fail_close = update::fails_close(&actor);
         let close = |actor| async move {
@@ -286,12 +299,13 @@ fn run(
         };
         match exit {
             Exit::Shutdown(replies) => {
-                let closed = close(actor).await;
+                // Boxed: the close future is over clippy's `large_futures` limit on Windows.
+                let closed = Box::pin(close(actor)).await;
                 Ok(Some((closed, replies, None)))
             }
             Exit::Install(downloaded, replies) => {
                 let files = update::exit_files(&mut actor);
-                let closed = close(actor).await;
+                let closed = Box::pin(close(actor)).await;
                 if closed.is_err() {
                     // No install then (`HostExit::Stopped`): nor its marker.
                     files.clear_marker().await;

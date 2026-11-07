@@ -49,13 +49,13 @@ pub use crate::actor::turn::PackRequest;
 /// How to start a host. The data folder is `Effective::data_dir()`.
 #[non_exhaustive]
 pub struct HostConfig {
-    effective: Effective,
+    pub(crate) effective: Effective,
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
     documents: Option<crate::actor::documents::Later>,
     home_folder: Option<PathBuf>,
-    clock: Arc<dyn Clock>,
+    pub(crate) clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
     managed_mcp: PathBuf,
@@ -64,7 +64,7 @@ pub struct HostConfig {
     folder_check: crate::agent::folder_support::CheckSource,
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
-    wiring: LaunchWiring,
+    pub(crate) wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
     scratch: crate::actor::scratch::Seams,
     folder_probes: crate::actor::FolderProbes,

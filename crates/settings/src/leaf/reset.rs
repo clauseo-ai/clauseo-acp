@@ -4,8 +4,8 @@
 use super::{SECURITY_KEYS, agent_id};
 use crate::plans::plan_id;
 use crate::schema::{
-    Density, FontSize, Language, Lite, Motion, PrivacySettings, SandboxSettings, Settings,
-    SkillsExtra, Theme, ToolsSettings, UpdateMode,
+    Density, FontSize, Language, Lite, Motion, NetworkSettings, PrivacySettings, SandboxSettings,
+    Settings, SkillsExtra, Theme, ToolsSettings, UpdateMode,
 };
 
 /// Locks each security key `key` names at its refused value: `mcp.servers` empty, each
@@ -13,9 +13,12 @@ use crate::schema::{
 /// plan at all (`plans.`), `skills.extra` `off`, `skills.allow_scripts` `false`,
 /// `skills.curated` empty, `sandbox.required` `false` (its default: `allow_unprotected_auto`
 /// `false` carries the fail-closed, decision record 0051), `sandbox.allow_unprotected_auto`
-/// `false`, `network.upstream_proxy` unset (the OS's proxy), and `network.ca_certs` and
-/// `network.allowed_domains` empty. Kept apart from [`reset`], which restores the default, since a
-/// security key's default can be on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in
+/// `false`, `network.upstream_proxy` unset (the OS's proxy), `network.ca_certs` and
+/// `network.allowed_domains` empty, `network.allow_unsafe_site_override` `false`, and
+/// `network.unsafe_site_list_updates` `true`, its default: an unreadable policy must not stop
+/// protection updates (0053).
+/// Kept apart from [`reset`], which restores the default, since a security key's default can be
+/// on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in
 /// `.` (`tools.`, `install.`) that names every security key under it. A single `plans.<id>`
 /// names none: [`reset`] drops that one plan.
 /// Returns whether `key` named any security key; when it did not, nothing changes.
@@ -46,10 +49,27 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "network.upstream_proxy" => settings.network.upstream_proxy = None,
             "network.ca_certs" => settings.network.ca_certs.clear(),
             "network.allowed_domains" => settings.network.allowed_domains.clear(),
+            "network.allow_unsafe_site_override" => {
+                settings.network.allow_unsafe_site_override = false;
+            }
+            "network.unsafe_site_list_updates" => {
+                settings.network.unsafe_site_list_updates =
+                    NetworkSettings::default().unsafe_site_list_updates;
+            }
             other => unreachable!("security key {other} has no refused value"),
         }
     }
     any
+}
+
+/// How [`refuse`] leaves the security key `key`, in a warning: "on" for block list updates
+/// (locked at their default, 0053), "off" for every other.
+pub(crate) fn locked_word(key: &str) -> &'static str {
+    if key == "network.unsafe_site_list_updates" {
+        "on"
+    } else {
+        "off"
+    }
 }
 
 /// Puts the setting `key` back to its default (`sandbox.allow_unprotected_auto` to `false`,
@@ -86,6 +106,14 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "network.upstream_proxy" => settings.network.upstream_proxy = None,
         "network.ca_certs" => settings.network.ca_certs.clear(),
         "network.allowed_domains" => settings.network.allowed_domains.clear(),
+        "network.allow_unsafe_site_override" => {
+            settings.network.allow_unsafe_site_override =
+                NetworkSettings::default().allow_unsafe_site_override;
+        }
+        "network.unsafe_site_list_updates" => {
+            settings.network.unsafe_site_list_updates =
+                NetworkSettings::default().unsafe_site_list_updates;
+        }
         _ => {
             if let Some(id) = agent_id(key) {
                 settings.agents.remove(id);

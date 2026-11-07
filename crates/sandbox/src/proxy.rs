@@ -9,7 +9,8 @@
 //!
 //! Each request passes these checks in order: the head, the token (agent listener only), the
 //! form and scheme (405, `Scheme`; 400 when there is no host to name), the silent list (403, no
-//! denial), the port (403, `Port`), an IP literal that is not public or a `localhost` name
+//! denial), the block list (403, `Blocked`, by name or IP literal, no DNS; it beats every
+//! allowlist entry), the port (403, `Port`), an IP literal that is not public or a `localhost` name
 //! (403, `PrivateAddress`; no allowlist entry lets one through), the allowlist (403,
 //! `NotAllowed`), the route, the address check (403, `PrivateAddress`: every resolved address
 //! on a direct connection; through an upstream, an IP literal, or a name's local answers when
@@ -60,6 +61,11 @@ pub struct ProxyConfig {
     pub allow: Allowlist,
     /// Hosts refused with no denial and no card (stage E's S27).
     pub silent: Allowlist,
+    /// The unsafe-site block list (ADR 0053), shared with the host's updater: each request
+    /// reads the list in use then, so an update reaches the next request and closes nothing.
+    /// Hosts on it are refused with `Denial::Blocked` whatever the allowlist says. Unloaded,
+    /// nothing is blocked.
+    pub block: Arc<clauseo_blocklist::Current>,
     /// Straight out, a fixed proxy, or the system's.
     pub upstream: Upstream,
     /// The launch's sink. The proxy puts S14's rate cap in front of it.
@@ -82,8 +88,8 @@ pub struct ProxyConfig {
 }
 
 impl ProxyConfig {
-    /// A config with no record callback, no browser listener, and its agent listener outside
-    /// tier B's range ([`ListenerFor::Other`]).
+    /// A config with no record callback, no browser listener, an unloaded block list, and its
+    /// agent listener outside tier B's range ([`ListenerFor::Other`]).
     pub fn new(
         allow: Allowlist,
         silent: Allowlist,
@@ -93,6 +99,7 @@ impl ProxyConfig {
         ProxyConfig {
             allow,
             silent,
+            block: Arc::default(),
             upstream,
             denials,
             record: None,
@@ -150,6 +157,8 @@ pub enum Verdict {
     UpstreamAuth,
     /// DNS, the connect or the upstream failed: 502 or 504.
     Failed,
+    /// On the block list: refused with `Denial::Blocked`.
+    Blocked,
 }
 
 /// One request, as [`ProxyConfig::record`] gets it.
@@ -282,10 +291,14 @@ pub(crate) fn start_with(
     } else {
         (None, None)
     };
+    if config.block.first_unloaded_notice() {
+        tracing::warn!("egress: the block list is not loaded; no site is blocked");
+    }
     let shared = Arc::new(Shared::new(config.allow));
     let parts = server::Parts {
         shared: Arc::clone(&shared),
         silent: config.silent,
+        block: config.block,
         token: token.clone(),
         denials: config.denials,
         clock: SharedClock(options.clock),

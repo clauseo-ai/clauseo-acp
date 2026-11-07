@@ -310,6 +310,8 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     // 0051: Settings' protection section and the room both show the sandbox.
     let protection_changed = r#"{"protection_changed":{}}"#;
     let protection_view_changed = r#"{"protection_view_changed":{}}"#;
+    // 0053: the blocked-site notice is the room's, in `main` only.
+    let site_blocked = r#"{"site_blocked":{}}"#;
     let carries = |label: &str, feed, json| pump::AppEvents::of(label).carries(feed, json);
     for (feed, json) in [
         (Feed::App, settings_changed),
@@ -320,6 +322,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
         (Feed::App, case_law_hint),
         (Feed::App, protection_changed),
         (Feed::App, protection_view_changed),
+        (Feed::App, site_blocked),
         (Feed::Limits, limits),
     ] {
         assert!(carries(MAIN, feed, json), "main: {json}");
@@ -328,6 +331,7 @@ fn main_carries_every_feed_event_settings_its_own_and_the_limits_another_label_n
     assert!(carries(SETTINGS, Feed::App, settings_changed));
     assert!(carries(SETTINGS, Feed::App, connectors_changed));
     assert!(!carries(SETTINGS, Feed::App, case_law_hint));
+    assert!(!carries(SETTINGS, Feed::App, site_blocked));
     assert!(carries(SETTINGS, Feed::App, update_changed));
     assert!(carries(SETTINGS, Feed::App, protection_changed));
     assert!(carries(SETTINGS, Feed::App, protection_view_changed));

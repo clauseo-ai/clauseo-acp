@@ -70,6 +70,8 @@ pub(crate) struct LaunchWiring {
     /// The sessions whose removal ran past [`Self::tree_wait`]: their proxy, relay and claims,
     /// held until the host stops (`launch_checks::straggler`).
     pub(crate) held: HeldRuns,
+    /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch.
+    pub(crate) blocklist: Option<crate::blocklist::BlockListSeams>,
 }
 
 impl Default for LaunchWiring {
@@ -93,6 +95,7 @@ impl Default for LaunchWiring {
             tree_wait_hook: None,
             removal_thread_fails: false,
             held: HeldRuns::default(),
+            blocklist: None,
         }
     }
 }

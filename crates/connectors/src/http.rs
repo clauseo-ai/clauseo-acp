@@ -82,13 +82,18 @@ pub(crate) fn agent(config: &Config) -> Result<Agent, Error> {
     agent_via(config, &config.proxy)
 }
 
-/// The agent for `config` through `proxy`.
-fn agent_via(config: &Config, proxy: &ProxyChoice) -> Result<Agent, Error> {
-    let tls = TlsConfig::builder()
+/// rustls with the `ring` provider and the OS trust store: every agent's TLS.
+pub(crate) fn tls() -> TlsConfig {
+    TlsConfig::builder()
         .provider(TlsProvider::Rustls)
         .root_certs(RootCerts::PlatformVerifier)
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
+        .build()
+}
+
+/// The agent for `config` through `proxy`.
+fn agent_via(config: &Config, proxy: &ProxyChoice) -> Result<Agent, Error> {
+    let tls = tls();
     let proxy = match proxy {
         ProxyChoice::Env => Proxy::try_from_env(),
         ProxyChoice::Fixed(url) => match Proxy::new(url.as_str()) {
@@ -243,7 +248,7 @@ pub(crate) fn send(
 }
 
 /// A ureq error by kind only: some of ureq's messages repeat the URL.
-fn describe(err: &ureq::Error) -> String {
+pub(crate) fn describe(err: &ureq::Error) -> String {
     match err {
         ureq::Error::Timeout(_) => "timed out",
         ureq::Error::HostNotFound => "host not found",

@@ -1,5 +1,7 @@
 //! The proxy thread: the executor, the two accept loops, the rate cap's tick, and each request's
 //! checks up to the connect.
+//!
+//! The next split: the block check (`Ctx::blocked`) into `proxy/server/blocked.rs`.
 
 mod route;
 
@@ -22,7 +24,7 @@ use crate::proxy::head::{self, Head, HeadError, ParseError, Request, within};
 use crate::proxy::load::{Load, PendingSlot, SocketSlot};
 use crate::proxy::net::Network;
 use crate::proxy::relay::{Idle, Stream, linger};
-use crate::proxy::target::{Kind, Target, classify};
+use crate::proxy::target::{Kind, Target, classify, host_headers};
 use crate::proxy::token::Token;
 use crate::proxy::upstream::{Lookup, Route};
 use crate::proxy::{
@@ -40,6 +42,7 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 pub(crate) struct Parts {
     pub(crate) shared: Arc<Shared>,
     pub(crate) silent: Allowlist,
+    pub(crate) block: Arc<clauseo_blocklist::Current>,
     pub(crate) token: Token,
     pub(crate) denials: Arc<dyn DenialSink>,
     pub(crate) clock: SharedClock,
@@ -53,6 +56,7 @@ pub(crate) struct Parts {
 pub(crate) struct Ctx {
     pub(crate) shared: Arc<Shared>,
     silent: Allowlist,
+    block: Arc<clauseo_blocklist::Current>,
     token: Token,
     sink: CappedSink<Arc<dyn DenialSink>, SharedClock>,
     pub(crate) net: Arc<dyn Network>,
@@ -83,6 +87,7 @@ pub(crate) fn run(
     let ctx = Rc::new(Ctx {
         shared: parts.shared,
         silent: parts.silent,
+        block: parts.block,
         token: parts.token,
         sink: CappedSink::with_clock(parts.denials, parts.clock),
         net: parts.net,
@@ -251,8 +256,8 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
     }
     match ctx.check(&request, exchange) {
         Ok(target) => ctx.carry(client, request, head, target, exchange).await,
-        Err(status) => {
-            ctx.answer(client, exchange, status, exchange.verdict, "")
+        Err((status, extra)) => {
+            ctx.answer(client, exchange, status, exchange.verdict, &extra)
                 .await;
         }
     }
@@ -260,10 +265,10 @@ async fn handle(ctx: &Ctx, client: &Stream, exchange: &mut Exchange, pending: Pe
 }
 
 impl Ctx {
-    /// The checks that need no network: form and scheme, the silent list, port, a private IP
-    /// literal or `localhost` name, and the allowlist. Fills the exchange's host, port and
-    /// verdict; `Err` is the status to answer.
-    fn check(&self, request: &Request, exchange: &mut Exchange) -> Result<Target, u16> {
+    /// The checks that need no network: form and scheme, the silent list, the block list, port,
+    /// a private IP literal or `localhost` name, and the allowlist. Fills the exchange's host,
+    /// port and verdict; `Err` is the status to answer and its extra header lines.
+    fn check(&self, request: &Request, exchange: &mut Exchange) -> Result<Target, (u16, String)> {
         let target = classify(request).map_err(|refusal| {
             exchange.host.clone_from(&refusal.host);
             exchange.port = refusal.port;
@@ -271,14 +276,17 @@ impl Ctx {
                 Some(why) => self.refuse(exchange, why, false),
                 None => exchange.verdict = Verdict::BadRequest,
             }
-            refusal.status
+            (refusal.status, String::new())
         })?;
         exchange.host = target.name.text();
         exchange.port = target.port;
         if self.silent.contains_name(&target.name) {
             exchange.verdict = Verdict::Silent;
             tracing::info!(host = %target.name, "egress: refused (silent list)");
-            return Err(403);
+            return Err((403, String::new()));
+        }
+        if let Some(extra) = self.blocked(request, &target, exchange) {
+            return Err((403, extra));
         }
         let required = if matches!(target.kind, Kind::Connect) {
             443
@@ -287,17 +295,17 @@ impl Ctx {
         };
         if target.port != required {
             self.refuse(exchange, HostRefusal::Port, false);
-            return Err(403);
+            return Err((403, String::new()));
         }
         // Before the allowlist, so no entry can let a private literal or `localhost` through.
         if target.name.is_private() {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
-            return Err(403);
+            return Err((403, String::new()));
         }
         if !self.shared.live().allow.contains_name(&target.name) {
             let shared = target.name.is_shared_hosting();
             self.refuse(exchange, HostRefusal::NotAllowed, shared);
-            return Err(403);
+            return Err((403, String::new()));
         }
         Ok(target)
     }
@@ -442,6 +450,54 @@ impl Ctx {
             self.refuse(exchange, HostRefusal::PrivateAddress, false);
             Err(())
         }
+    }
+
+    /// The block list: PR 2's hook, where the lawyer's "Allow this site" override will be
+    /// checked, before the list. Asks the list in use for the target's host and, for plain
+    /// http, each `Host` header's host, as `Name::parse` read them (case folded, one trailing
+    /// dot dropped, an IDN as punycode); an IP literal is matched exactly. No DNS, so a listed
+    /// name is refused before it is resolved. `Some` is the 403's extra header line (none for
+    /// a CONNECT), with the denial sent.
+    fn blocked(
+        &self,
+        request: &Request,
+        target: &Target,
+        exchange: &mut Exchange,
+    ) -> Option<String> {
+        // Taken once: the request keeps this list whatever an update swaps in meanwhile.
+        let list = self.block.get();
+        // Nothing loaded: nothing blocked.
+        let generated = list.generated()?;
+        // A `Host` header naming a listed host is refused too. A value that names no host is
+        // skipped, which is harmless: the proxy rewrites `Host` from the URL before it forwards.
+        let headers = match target.kind {
+            Kind::Connect => Vec::new(),
+            Kind::Http { .. } => host_headers(request),
+        };
+        let (name, hit) = std::iter::once(&target.name)
+            .chain(&headers)
+            .find_map(|name| {
+                let hit = match name {
+                    Name::Domain(domain) => list.lookup(domain),
+                    Name::Ip(ip) => list.lookup_ip(*ip),
+                };
+                hit.map(|hit| (name, hit))
+            })?;
+        exchange.verdict = Verdict::Blocked;
+        exchange.why = None;
+        let host = name.text();
+        tracing::info!(%host, port = exchange.port, "egress: refused (block list)");
+        self.sink.denied(Denial::Blocked {
+            host,
+            port: exchange.port,
+            listed: hit.listed.to_owned(),
+            tag: hit.tag,
+            generated,
+        });
+        Some(match target.kind {
+            Kind::Connect => String::new(),
+            Kind::Http { .. } => format!("Clauseo-Blocked: {}\r\n", hit.tag.word()),
+        })
     }
 
     /// Reports a refusal: the denial through the capped sink, and a log line by host only.

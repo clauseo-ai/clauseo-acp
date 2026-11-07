@@ -57,6 +57,8 @@ rfd.workspace = true
 serde = { workspace = true, features = ["derive"] }
 # The session host and what starting it takes: settings, the launcher, the boundary types.
 clauseo-host = { path = "../host" }
+# The block list in use, created here and shared by the host's updater and the proxy (ADR 0053).
+clauseo-blocklist = { path = "../blocklist" }
 clauseo-protocol = { path = "../protocol" }
 clauseo-settings = { path = "../settings" }
 clauseo-process = { path = "../process" }

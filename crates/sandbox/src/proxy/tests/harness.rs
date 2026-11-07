@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_io::Async;
 use base64::Engine;
+use clauseo_blocklist::Current;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
@@ -190,6 +191,8 @@ impl Clock for TestClock {
 pub(crate) struct Setup {
     pub(crate) allow: Vec<&'static str>,
     pub(crate) silent: Vec<&'static str>,
+    /// The block list in use (unloaded by default).
+    pub(crate) block: Arc<Current>,
     pub(crate) upstream: Upstream,
     pub(crate) limits: Limits,
     /// For `Upstream::System`: the host's proxy variables; the OS answers direct.
@@ -213,6 +216,7 @@ impl Default for Setup {
         Setup {
             allow: Vec::new(),
             silent: Vec::new(),
+            block: Arc::new(Current::default()),
             upstream: Upstream::Direct,
             limits: Limits::default(),
             env: None,
@@ -262,6 +266,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
     let config = ProxyConfig {
         allow: list(&setup.allow),
         silent: list(&setup.silent),
+        block: setup.block,
         upstream: setup.upstream,
         denials: Arc::clone(&sink) as Arc<dyn DenialSink>,
         record: Some(Arc::new(move |exchange: &Exchange| {

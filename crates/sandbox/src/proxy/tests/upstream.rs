@@ -210,6 +210,7 @@ fn debug_of_a_config_never_shows_the_upstream_password_or_path() {
     let config = ProxyConfig {
         allow: crate::Allowlist::default(),
         silent: crate::Allowlist::default(),
+        block: std::sync::Arc::default(),
         upstream: Upstream::Fixed(
             url::Url::parse("http://user:pw-secret@proxy.test:8080/p?q").unwrap(),
         ),
@@ -238,6 +239,7 @@ fn a_fixed_upstream_must_be_a_bare_http_url() {
         let config = ProxyConfig {
             allow: crate::Allowlist::default(),
             silent: crate::Allowlist::default(),
+            block: std::sync::Arc::default(),
             upstream: Upstream::Fixed(url::Url::parse(bad).unwrap()),
             denials: std::sync::Arc::new(super::harness::Sink::default()),
             record: None,

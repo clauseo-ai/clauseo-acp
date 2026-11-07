@@ -127,7 +127,8 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }
             | HostEvent::ProtectionChanged { .. }
-            | HostEvent::ProtectionViewChanged { .. }) => panic!("unexpected {other:?}"),
+            | HostEvent::ProtectionViewChanged { .. }
+            | HostEvent::SiteBlocked { .. }) => panic!("unexpected {other:?}"),
         }
     }
 }

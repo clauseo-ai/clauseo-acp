@@ -109,6 +109,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let config = ProxyConfig {
         allow: args.allow,
         silent: Allowlist::default(),
+        // No list loaded: the proxy logs once that nothing is blocked.
+        block: Arc::new(clauseo_blocklist::Current::default()),
         upstream: args.upstream.map_or(Upstream::System, Upstream::Fixed),
         denials: Arc::new(StderrSink),
         record: Some(Arc::new(record)),

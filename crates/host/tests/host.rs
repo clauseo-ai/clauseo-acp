@@ -319,6 +319,9 @@ mod settings_entries;
 #[path = "host/sign_in_hold.rs"]
 mod sign_in_hold;
 #[cfg(test)]
+#[path = "host/site_blocked.rs"]
+mod site_blocked;
+#[cfg(test)]
 #[path = "host/skill_packs.rs"]
 mod skill_packs;
 #[cfg(test)]

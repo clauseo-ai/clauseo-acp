@@ -20,6 +20,8 @@ test-support = []
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
+# The unsafe-site block list the egress proxy refuses (ADR 0053): parsed and verified by the host.
+clauseo-blocklist = { path = "../blocklist" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 # Denials print as JSON lines in the examples and travel to `host` (R18).

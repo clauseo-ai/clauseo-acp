@@ -148,6 +148,8 @@ pub(crate) fn proxy_config(
     ProxyConfig {
         allow: builtin.union(hosts(SEED_SITES.iter().copied())),
         silent: hosts(DENY_HOSTS.iter().map(|deny| deny.host)),
+        // Unloaded: the block list (0053) reaches the session's proxy in R17 PR-D's wiring.
+        block: Arc::default(),
         upstream: Upstream::System,
         denials,
         record: None,

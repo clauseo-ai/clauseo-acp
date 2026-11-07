@@ -99,12 +99,12 @@ impl Effective {
     /// `tools` and `privacy` key `false`, `update.mode` `none`, each `install` key unset, no
     /// plan at all, `skills.extra` `off`, `skills.allow_scripts` `false`, `skills.curated`
     /// empty, `sandbox.required` and `sandbox.allow_unprotected_auto` `false`, each `network`
-    /// key unset or empty), with a warning, since its value is unknown (2026-11-02, R21; 0036;
-    /// R23; 0048; 0040; 0051). A `settings.json` value for a key only a policy sets
-    /// (`skills.curated`, `network.allowed_domains`) is ignored with a warning. A plan a
-    /// stronger source set stands. A policy `true` for a `privacy` key is ignored with a warning
-    /// and locks nothing: a policy can only turn those off (0036). A policy may set
-    /// `update.mode` to any value, and it locks.
+    /// key unset, empty or `false` but `unsafe_site_list_updates` `true`), with a warning, since
+    /// its value is unknown (2026-11-02, R21; 0036; R23; 0048; 0040; 0051; 0053). A
+    /// `settings.json` value for a key only a policy sets (`skills.curated`, two `network` keys) is
+    /// ignored with a warning. A plan a stronger source set stands. A policy `true` for a `privacy`
+    /// key is ignored with a warning and locks nothing: a policy can only turn those off (0036). A
+    /// policy may set `update.mode` to any value, and it locks.
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -555,6 +555,8 @@ fn lock_security_keys(
     let mut keys = Vec::new();
     for key in leaf::SECURITY_KEYS {
         if lock_and_apply(Leaf::Refused(key.to_owned()), settings, locked) {
+            let word = leaf::locked_word(key);
+            let message = format!("the policy source could not be read, so this is locked {word}");
             keys.push(key);
             warnings.push(Warning {
                 origin: Origin::Store {
@@ -562,8 +564,7 @@ fn lock_security_keys(
                 },
                 kind: WarningKind::InvalidValue {
                     key: key.to_owned(),
-                    message: "the policy source could not be read, so this is locked off"
-                        .to_owned(),
+                    message,
                 },
             });
         }

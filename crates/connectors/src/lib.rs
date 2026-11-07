@@ -13,6 +13,9 @@
 //!   every `https://data.clauseo.chat` URL maps onto that origin, keeping its path.
 //! - A pay link leaves the crate only as a [`PayUrl`], which only our own `/pay/` URLs parse to.
 //! - Time comes from [`Clock`]; waits are [`CancelFlag::wait_timeout`].
+//! - [`HttpsClient`] lends the same client (rustls, `ring`, the OS trust store, the timeouts)
+//!   to another crate for plain GETs of public files (the host's block list): no credential, no
+//!   redirect followed, the body capped by the caller, the proxy the caller's route names.
 //!
 //! The `test-support` feature adds the fake connector ([`fake`]), [`MemoryStore`],
 //! [`ManualClock`] and `Origin::Fake`.
@@ -26,6 +29,7 @@ mod credential;
 mod de;
 mod error;
 mod http;
+mod https_client;
 mod known;
 mod mcp;
 mod net;
@@ -53,6 +57,7 @@ pub use connectors::ListenerLoad;
 pub use connectors::{ConnectorHandle, Connectors};
 pub use credential::{CredentialKind, CredentialStatus, SignOutReport};
 pub use error::{AuthError, Error, SignInError, StoreError};
+pub use https_client::{Got, HttpsClient};
 #[cfg(feature = "local")]
 pub use known::LOCAL_ORIGIN;
 pub use known::{CASE_LAW, CLIENT_ID, KEYCHAIN_SERVICE, KNOWN, KnownConnector, PRICING_URL, known};
