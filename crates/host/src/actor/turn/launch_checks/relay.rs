@@ -22,6 +22,7 @@
 //! run folder, and the file with it, is removed; the relay itself stops when the last
 //! [`RunFolders`] clone drops in `discard`, after the agent's tree was killed.
 
+use clauseo_sandbox::ports::ListenerFor;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -176,8 +177,10 @@ fn open_relay(relays: &Relays, run: &RunFolders) -> Result<CaseLawRelay, &'stati
     if run.relay_token.to_str().is_none() {
         return Err("the token file's path is not UTF-8");
     }
-    let listener =
-        clauseo_sandbox::ports::bind_loopback().map_err(|_no_port| "no loopback port bound")?;
+    // Tier C: the host runs no tier-B launch yet. R17 PR-E passes `ListenerFor::TierB` for a
+    // tier-B launch, whose agent reaches only tier B's range (S15 PR7).
+    let listener = clauseo_sandbox::ports::bind_loopback(ListenerFor::Other)
+        .map_err(|_no_port| "no loopback port bound")?;
     let (session, token) = relays
         .open(run.key, listener)
         .map_err(|_not_open| "the relay did not open")?;
