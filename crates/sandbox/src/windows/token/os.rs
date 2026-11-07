@@ -89,7 +89,7 @@ impl LocalDescriptor {
     }
 
     /// Its DACL, valid while `self` lives.
-    fn dacl(&self) -> io::Result<*mut ACL> {
+    pub(in crate::windows) fn dacl(&self) -> io::Result<*mut ACL> {
         let mut present = BOOL(0);
         let mut dacl: *mut ACL = null_mut();
         let mut defaulted = BOOL(0);
