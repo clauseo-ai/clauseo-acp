@@ -21,9 +21,9 @@ fn listener(port: u16, pid: u32, image: Option<&str>) -> Listener {
     }
 }
 
-/// This app: process 100, running Clauseo.exe.
+/// This app: process 100.
 fn ours(listener: &Listener) -> bool {
-    is_ours(listener, 100, Some(r"C:\Program Files\Clauseo\Clauseo.exe"))
+    is_ours(listener, 100)
 }
 
 #[test]
@@ -85,17 +85,29 @@ fn an_excluded_port_in_the_range_refuses() {
 }
 
 #[test]
-fn a_listener_in_the_range_must_be_this_app_s() {
-    let app = r"c:\program files\clauseo\CLAUSEO.EXE";
+fn a_listener_in_the_range_must_be_this_process_s() {
+    let app = r"C:\Program Files\Clauseo\Clauseo.exe";
     let fine = PortsSeen {
         listeners: vec![
             listener(46_100, 100, None),
-            listener(46_101, 200, Some(app)),
+            listener(46_101, 100, Some(app)),
             listener(9_222, 300, Some(r"C:\Chrome\chrome.exe")),
         ],
         ..default_range()
     };
     assert_eq!(ports_usable(&fine, ours), Ok(()));
+    // Another process running Clauseo's own program (another user's Clauseo, or an injected one).
+    let other_clauseo = PortsSeen {
+        listeners: vec![listener(46_102, 200, Some(app))],
+        ..default_range()
+    };
+    assert_eq!(
+        ports_usable(&other_clauseo, ours),
+        Err(NetworkGap::ForeignListener {
+            port: 46_102,
+            program: app.to_owned()
+        })
+    );
     let chrome = PortsSeen {
         listeners: vec![listener(46_120, 300, Some(r"C:\Chrome\chrome.exe"))],
         ..default_range()
