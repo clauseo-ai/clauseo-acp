@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use clauseo_protocol::AgentId;
-use clauseo_sandbox::{Denial, DenialSink as _, HostRefusal, ProxyConfig, Upstream};
+use clauseo_sandbox::ports::{ListenerFor, TIER_B_PORTS};
+use clauseo_sandbox::{Denial, DenialSink as _, HostRefusal, ProxyConfig, Upstream, start_proxy};
 
 use super::{CountDenials, proxy_config};
 
@@ -22,6 +23,19 @@ fn the_browser_listener_follows_the_launch() {
     let denials = || Arc::new(CountDenials::default());
     assert!(proxy_config(&agent("claude-acp"), denials(), true).browser);
     assert!(!proxy_config(&agent("claude-acp"), denials(), false).browser);
+}
+
+/// A session's proxy is a tier-C launch's until R17 PR-E passes `ListenerFor::TierB` for a
+/// tier-B one: its agent listener, and its browser listener, stay outside `TIER_B_PORTS`, where
+/// every pool user's static permit reaches (S15 PR7).
+#[test]
+fn the_session_proxy_listens_outside_the_tier_b_ports() {
+    let config = config("claude-acp");
+    assert_eq!(config.listener, ListenerFor::Other);
+    let proxy = start_proxy(config).unwrap();
+    assert!(!TIER_B_PORTS.contains(&proxy.port()), "{}", proxy.port());
+    let browser = proxy.browser_port().unwrap();
+    assert!(!TIER_B_PORTS.contains(&browser), "{browser}");
 }
 
 /// Claude's session reaches its API and the seed sites; Chrome's background hosts are silent;
