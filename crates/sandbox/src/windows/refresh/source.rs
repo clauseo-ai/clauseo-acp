@@ -1,9 +1,11 @@
 //! The refresh's reads of a file by its path, for the files under Program Files the refresh owns
 //! (the staged copy, the admin copy), and the handle checks `walk.rs` uses on the install
 //! folder's files: opened with `FILE_FLAG_OPEN_REPARSE_POINT`, so a link at the name is opened as
-//! itself and refused, never followed; then a regular disk file with one link and no more bytes
-//! than its cap, all checked on the handle the bytes are read from. The open shares only
-//! reading, so no one writes the file while it is read.
+//! itself and refused by its tag, never followed, and with `FILE_FLAG_BACKUP_SEMANTICS`, so a
+//! directory junction or a folder at the name opens too (without it the open fails, access
+//! denied, before the handle can say what it is); then a regular disk file with one link and no
+//! more bytes than its cap, all checked on the handle the bytes are read from. The open shares
+//! only reading, so no one writes the file while it is read.
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, ReadFile and the handle's file information"
@@ -16,9 +18,10 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_FLAG_SEQUENTIAL_SCAN, FILE_SHARE_READ, FILE_TYPE_DISK, FileAttributeTagInfo,
-    GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType, OPEN_EXISTING, ReadFile,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_SEQUENTIAL_SCAN, FILE_SHARE_READ, FILE_TYPE_DISK,
+    FileAttributeTagInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType,
+    OPEN_EXISTING, ReadFile,
 };
 use windows::core::HSTRING;
 
@@ -59,9 +62,15 @@ pub(super) fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, SourceError>
     read_all(&file, cap)
 }
 
-/// `path` opened for reading, sharing only reading, a reparse point opened as itself.
+/// `path` opened for reading, sharing only reading, a reparse point opened as itself and a
+/// folder opened as one, for [`checked`] to refuse by what the handle says.
 fn open(path: &Path) -> Result<Handle, SourceError> {
     let name = HSTRING::from(path.as_os_str());
+    // Without `FILE_FLAG_BACKUP_SEMANTICS`, CreateFileW opens a non-directory only, and a
+    // junction at the name (a directory) fails with access denied, not refused by its tag. The
+    // flag only lets a directory open here: it overrides an access check only for a token with
+    // `SeBackupPrivilege` enabled, and the refresh never enables it (`refresh::run`, its own
+    // mode of the exe, enables no privilege). The access asked for stays reading.
     // SAFETY: `name` is NUL-terminated and outlives the call; no security attributes or
     // template are passed. The handle is owned by `Handle` at once.
     let opened = unsafe {
@@ -71,7 +80,7 @@ fn open(path: &Path) -> Result<Handle, SourceError> {
             FILE_SHARE_READ,
             None,
             OPEN_EXISTING,
-            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_SEQUENTIAL_SCAN,
             None,
         )
     };

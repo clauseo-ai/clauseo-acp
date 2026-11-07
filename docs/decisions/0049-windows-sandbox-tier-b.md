@@ -1176,8 +1176,10 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
 4. opens the drive's root, then each folder of the path relative to its parent's handle
    (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and `FILE_OPEN_REPARSE_POINT`),
    refusing a reparse point at every level. It then opens `clauseo-sandbox-setup.exe` and its
-   `.sig` relative to the last folder, and refuses a reparse point, anything but a regular file, a
-   second hard link, or more than 16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
+   `.sig` relative to the last folder, as whatever is there (no `FILE_NON_DIRECTORY_FILE`, so a
+   directory junction opens as itself and is refused by its tag rather than denied at the open),
+   and refuses a reparse point, anything but a regular file, a second hard link, or more than
+   16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
    SYSTEM never writes or deletes anything in the folder;
 5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
