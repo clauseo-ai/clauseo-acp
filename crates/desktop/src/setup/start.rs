@@ -50,6 +50,7 @@ use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions}
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::StreamExt as _;
+use futures::channel::mpsc::UnboundedReceiver;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
 
@@ -59,7 +60,9 @@ use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
 use super::identity::{GateSlot, Identities};
-use super::keys::{FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot, KeysLoaded};
+use super::keys::{
+    FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes, KeySlot, KeysLoaded,
+};
 use super::login_check::ReusedLogins;
 use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
@@ -443,9 +446,19 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     load_done.finish();
     // Set once, here: the host's launch gate checks from now on.
     let _set = gate.set(Arc::clone(&backend));
-    let follower = Arc::clone(&backend);
-    let reread = side.reread;
-    let mut notes = side.notes.take();
+    follow_host(&backend, side.reread, side.notes.take());
+    futures::executor::block_on(backend.pump(source));
+}
+
+/// The `clauseo-setup-host` thread: the start's lift, then the follows of the settings, the keys'
+/// notes, the identity asks, the splits and the leaves, started again after a panic. With no
+/// thread, the lift runs here and nothing is followed.
+fn follow_host(
+    backend: &Arc<AgentsBackend>,
+    reread: Box<dyn Fn() -> Effective + Send>,
+    mut notes: Option<UnboundedReceiver<KeyNote>>,
+) {
+    let follower = Arc::clone(backend);
     let mut asks = backend.wiring.identity.take_asks();
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
@@ -472,9 +485,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
-        futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
+        futures::executor::block_on(lift_at_start(backend, FIRST_ROUTE_WAIT));
     }
-    futures::executor::block_on(backend.pump(source));
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and

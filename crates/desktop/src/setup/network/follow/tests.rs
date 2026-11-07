@@ -110,17 +110,17 @@ impl SetupAgents for Networks {
     fn install_tries(&self, _agent: &AgentId) -> Option<u32> {
         None
     }
-    fn shutdown(&self, _wait: std::time::Duration) -> bool {
-        true
-    }
-    fn set_network(&self, network: clauseo_agents::Network) {
-        lock(&self.0).push(network);
-    }
     fn read_account(&self, _agent: &AgentId) -> clauseo_agents::AccountFuture {
         Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
     }
     fn read_account_refreshed(&self, _agent: &AgentId) -> clauseo_agents::AccountFuture {
         Box::pin(std::future::ready(clauseo_agents::AccountRead::Failed))
+    }
+    fn shutdown(&self, _wait: std::time::Duration) -> bool {
+        true
+    }
+    fn set_network(&self, network: clauseo_agents::Network) {
+        lock(&self.0).push(network);
     }
 }
 

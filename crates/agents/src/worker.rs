@@ -28,13 +28,14 @@ use futures::channel::oneshot;
 
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
-use crate::install::{self, Job};
-use crate::log::{InstallLog, redact};
+use crate::install;
+use crate::log::InstallLog;
 use crate::signin::account::{AccountFuture, AccountRead, ReadOrder};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
 
+mod install_job;
 mod shared;
 mod signin;
 
@@ -528,7 +529,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 return;
             }
         }
-        self.start_job(agent);
+        install_job::start(self, agent);
     }
 
     fn pause(&self, agent: &AgentId) {
@@ -566,59 +567,6 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             self.system_proxy =
                 futures::executor::block_on(sysproxy::system_proxy(&*self.launcher, &*self.timer));
         }
-        self.start_job(agent);
-    }
-
-    /// Stops the running job (pausing another agent's), then starts `agent`'s on its own
-    /// thread; that thread waits for the job lock before it works.
-    fn start_job(&self, agent: &AgentId) {
-        let ticket = {
-            let mut inner = self.shared.lock();
-            if inner.closed {
-                return;
-            }
-            inner.stop_current(&self.shared.events, Some(agent));
-            inner.next_job += 1;
-            let ticket = Ticket {
-                job: inner.next_job,
-                agent: agent.clone(),
-                cancel: Arc::new(Cancel::new()),
-            };
-            inner.current = Some(ticket.clone());
-            ticket
-        };
-        let job = Job {
-            ticket: ticket.clone(),
-            config: self.config.clone(),
-            network: Arc::clone(&self.network),
-            launcher: Arc::clone(&self.launcher),
-            timer: Arc::clone(&self.timer),
-            shared: Arc::clone(&self.shared),
-            turn: Arc::clone(&self.job_lock),
-            system_proxy: self.system_proxy.clone(),
-            data_lock: Mutex::new(None),
-        };
-        let spawned = self
-            .shared
-            .spawn_job(format!("clauseo-install-{agent}"), move || {
-                install::run(&job);
-            });
-        if let Err(err) = spawned {
-            let mut log = InstallLog::new(agent);
-            let detail = format!("the install could not start: {err}");
-            log.push(redact(&detail, &self.config.data_dir));
-            log.push(format!(
-                "result: {} after 0 tries",
-                FailureKind::Failed.word()
-            ));
-            let failure = Failure {
-                kind: FailureKind::Failed,
-                need_mb: None,
-                free_mb: None,
-                log,
-            };
-            self.shared
-                .emit_job(&ticket, InstallState::Failed(failure), None, true);
-        }
+        install_job::start(self, agent);
     }
 }
