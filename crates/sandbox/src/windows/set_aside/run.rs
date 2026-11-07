@@ -81,6 +81,18 @@ pub(super) trait Volume {
         name: &OsStr,
         to: &Path,
     ) -> Result<(), SetAsideFailure>;
+
+    /// Removes the folder `parts` below `sandbox` when it is empty, then each folder above it
+    /// while that is empty, never one of the first `kept` parts (`set-aside` and the matter's
+    /// folder): a restore's emptied pass folder and the `within` folders in it. Each opened as
+    /// for [`Volume::move_back`], refused if a link, and deleted only on its own handle, which
+    /// fails for a folder holding anything; that, or a folder gone, ends it.
+    fn remove_emptied(
+        &self,
+        sandbox: &Path,
+        parts: &[OsString],
+        kept: usize,
+    ) -> Result<(), SetAsideFailure>;
 }
 
 /// Why a pass failed, and the item it failed on, when it was one (N11).
@@ -247,6 +259,13 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     )?;
     tracing::info!(reason = ?found.reason, "a set-aside item was restored");
     place.write_manifest(&manifest)?;
+    // Only now, with the manifest listing the item no more, the folders it leaves empty go, so a
+    // crash never leaves a manifest naming a folder that is gone. One left (not empty, or not
+    // removed) only means the uninstaller keeps the set-aside; it never fails the restore.
+    let parts = place.parts(&found.folder, &found.within);
+    if let Err(failure) = volume.remove_emptied(&place.sandbox, &parts, 2) {
+        tracing::warn!(%failure, "a restore's emptied set-aside folder stays");
+    }
     // The item is back and listed no more, so a failure here doesn't undo the restore; the
     // next launch's apply hands a pool user's protected item back before its deny anyway.
     hand_over(volume, &found.from, "a restored item");

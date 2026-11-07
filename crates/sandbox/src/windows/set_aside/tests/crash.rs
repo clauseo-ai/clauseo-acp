@@ -59,6 +59,15 @@ impl<V: Volume> Volume for Stopping<V> {
         self.inner.file_id(path)
     }
 
+    fn remove_emptied(
+        &self,
+        sandbox: &Path,
+        parts: &[OsString],
+        kept: usize,
+    ) -> Result<(), SetAsideFailure> {
+        self.inner.remove_emptied(sandbox, parts, kept)
+    }
+
     fn owner(&self, path: &Path) -> io::Result<String> {
         self.inner.owner(path)
     }

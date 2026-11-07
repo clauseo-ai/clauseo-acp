@@ -12,6 +12,7 @@ use super::{Checked, Entry, Reason, SetAsideFailure};
 use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
 
+mod bookkeeping;
 mod crash;
 mod fast;
 mod links;

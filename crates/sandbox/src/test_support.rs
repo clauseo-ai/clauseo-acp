@@ -75,6 +75,14 @@ impl TempDir {
     }
 }
 
+/// Sets the read-only attribute on the file `path`.
+#[cfg(windows)]
+pub(crate) fn set_read_only(path: &Path) {
+    let mut permissions = std::fs::metadata(path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(path, permissions).unwrap();
+}
+
 /// Sets the permission bits of `path` to `mode`.
 #[cfg(unix)]
 pub(crate) fn set_mode(path: &Path, mode: u32) {
