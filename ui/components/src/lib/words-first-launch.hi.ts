@@ -103,8 +103,8 @@ export const HI = {
     "इस कंप्यूटर पर Claude Code आपकी अपनी Claude सेटिंग्स से साइन इन करता है, जिन्हें Clauseo आपके मामलों से दूर रखता है।",
   "Codex on this computer keeps its sign-in where Clauseo can't share it.":
     "इस कंप्यूटर पर Codex अपना साइन इन ऐसी जगह रखता है जहाँ से Clauseo उसे साझा नहीं कर सकता।",
-  "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.":
-    "Windows पर Clauseo का सुरक्षित कार्यक्षेत्र अभी Claude Code का साइन इन साझा नहीं कर सकता।",
+  "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.":
+    "Clauseo का सुरक्षित कार्यक्षेत्र अभी Windows पर Claude Code का साइन-इन साझा नहीं कर सकता।",
   "{app} on this computer is signed out, so Clauseo stopped using its sign-in.":
     "इस कंप्यूटर पर {app} से साइन आउट हो गया है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
   "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.":
@@ -140,9 +140,9 @@ export const HI = {
   "Clauseo is still switching accounts. Try again in a moment.":
     "Clauseo अभी खाता बदल रहा है। थोड़ी देर में फिर से प्रयास करें।",
 
-  // UC: the Safe workspace step, the design's own words with its Hindi (UC-10, UC-13, UC-16)
-  "Windows asks once for permission to set up the Safe workspace.":
-    "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
+  // UC: the Safe workspace step, the design's own words with its Hindi (UC-13, UC-16); design B's
+  // installer sets the Safe workspace up, so UC-10's line about Windows asking at the app's first
+  // run is gone
   "Not now": "अभी नहीं",
   Settings: "सेटिंग्स",
 } satisfies Hindi<string>;

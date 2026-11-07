@@ -47,7 +47,7 @@ export function edgeDialogWords(lang: Lang, ask: EdgeAsk) {
   const v = (key: VersionKey, slots?: Slots) => vt(lang, key, slots);
   if (ask.kind === "off") {
     return {
-      title: v("Switch off protection for {matter}?", { matter: ask.matter }),
+      title: v("Switch off the Safe workspace for {matter}?", { matter: ask.matter }),
       lines: [
         v(
           "If you switch it off, Clauseo can read and change any file on this computer while it works on this matter, without asking.",
@@ -59,7 +59,7 @@ export function edgeDialogWords(lang: Lang, ask: EdgeAsk) {
       foot: v("You can switch it back on from the line under the question box."),
       remember: null,
       confirm: v("Switch off"),
-      cancel: v("Keep protection"),
+      cancel: v("Keep the Safe workspace"),
       primary: "cancel" as const,
     };
   }

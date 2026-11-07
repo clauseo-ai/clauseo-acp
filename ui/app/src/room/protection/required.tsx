@@ -1,8 +1,11 @@
-// UC: the firm requires protection (ProtectionView.required) and the open matter has none: the composer's send is held
-// (room.tsx's context) and this notice says why in its notice slot, saving the host's round trip; U10's error line
-// stays the fallback. Where the set-up would fix it (needs_set_up, set_up_refused), "Set up protection" goes through the
-// set-up confirm; a full pool says R17 PR-E's sandbox.pool_full words; a build without protection says it comes in
-// an update (not_built); every other cause says sandbox.required's.
+// UC: the firm requires protection (ProtectionView.required) and the open matter has none: the
+// composer's send is held (room.tsx's context) and this notice says why in its notice slot, saving
+// the host's round trip; U10's error line stays the fallback. Where a set-up with no Windows prompt
+// would fix it (needs_set_up, set_up_refused), "Set up the Safe workspace" sends it. Where the
+// repair is the installer (design B, blocked.ts's needsInstaller), the notice says so and asks IT
+// to install Clauseo again: a firm install's repair, with no button. A full pool says R17 PR-E's
+// sandbox.pool_full words; a build without the Safe workspace says it comes in an update
+// (not_built); every other cause says sandbox.required's, then a block's own line.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -16,6 +19,7 @@ import type { ProtectionStore } from "../../store/protection.ts";
 import { useProtection } from "../../store/protection-run.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
+import { blockLine, needsInstaller, repairLine } from "./blocked.ts";
 import { retryProtection } from "./commands.ts";
 import { whyOf } from "./detail.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
@@ -36,8 +40,10 @@ export function RequiredNotice({
     cause,
     () => void retryProtection(transport, store),
   );
-  const fixable = cause.name === "needs_set_up" || cause.name === "set_up_refused";
+  const repair = needsInstaller(state.view, cause);
+  const fixable = !repair && (cause.name === "needs_set_up" || cause.name === "set_up_refused");
   const notBuilt = whyOf(cause) === "not_built";
+  const block = repair ? null : blockLine(lang, cause);
   const waiting = fixable ? waitingWords(lang, state, cause) : null;
   const failed = fixable ? failedWords(lang, state) : null;
   return (
@@ -49,21 +55,31 @@ export function RequiredNotice({
     >
       <p>
         <Say>
-          {fixable
+          {repair
             ? pw(
                 lang,
-                "Your firm requires protection on this computer. Set it up once, then ask here.",
+                "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
               )
-            : cause.group === "pool"
-              ? protectionErrorWords(lang, POOL_FULL_CODE)
-              : notBuilt
-                ? pw(
-                    lang,
-                    "Your firm requires protection, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. Protection comes in an update.",
-                  )
-                : errorWords(lang, "sandbox.required")}
+            : fixable
+              ? pw(
+                  lang,
+                  "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.",
+                )
+              : cause.group === "pool"
+                ? protectionErrorWords(lang, POOL_FULL_CODE)
+                : notBuilt
+                  ? pw(
+                      lang,
+                      "Your firm requires the Safe workspace, and this version of Clauseo doesn't have it yet, so Clauseo can't answer here. The Safe workspace comes in an update.",
+                    )
+                  : errorWords(lang, "sandbox.required")}
         </Say>
       </p>
+      {(repair || block !== null) && (
+        <p data-testid={repair ? "protection-repair" : "protection-block"}>
+          <Say>{(repair ? repairLine(lang, state.view) : block) ?? ""}</Say>
+        </p>
+      )}
       {fixable &&
         (waiting !== null ? (
           <p className="room-required-wait" data-testid="protection-wait">
@@ -71,7 +87,7 @@ export function RequiredNotice({
           </p>
         ) : (
           <Button kind="tone" size="small" onClick={press} data-testid="protection-setup">
-            <span className="deva-nudge">{pw(lang, "Set up protection")}</span>
+            <span className="deva-nudge">{pw(lang, "Set up the Safe workspace")}</span>
           </Button>
         ))}
       {failed !== null && (

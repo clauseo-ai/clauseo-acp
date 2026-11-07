@@ -173,15 +173,16 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional: the item's path joins it once PR6 carries it as a field
   "matter.protected_link":
     "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.",
-  // provisional (app track, Rohan's batch review): the sandbox's four (decision record 0051)
+  // provisional (app track, Rohan's batch review): the sandbox's four (decision record 0051), in
+  // design B's "Safe workspace" words
   "sandbox.setup_refused":
-    "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
+    "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
   "sandbox.setup_failed":
-    "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
+    "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
   "sandbox.setup_required":
-    "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.",
+    "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
   "sandbox.required":
-    "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

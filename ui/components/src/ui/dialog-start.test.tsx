@@ -57,17 +57,19 @@ test("an act that can't be undone leaves the starting focus on the safe choice",
     <AlertDialog open>
       <AlertDialogPopup
         undoable={false}
-        title="Switch off protection?"
+        title="Switch off the Safe workspace?"
         actions={
           <>
-            <AlertDialogClose render={<Button kind="tone" />}>Keep protection</AlertDialogClose>
+            <AlertDialogClose render={<Button kind="tone" />}>
+              Keep the Safe workspace
+            </AlertDialogClose>
             <Button kind="quiet">Switch off</Button>
           </>
         }
       />
     </AlertDialog>,
   );
-  expect(document.activeElement?.textContent).toBe("Keep protection");
+  expect(document.activeElement?.textContent).toBe("Keep the Safe workspace");
 });
 
 test("the starting focus is found inside the dialog's own plane, never in another plane on the page", () => {

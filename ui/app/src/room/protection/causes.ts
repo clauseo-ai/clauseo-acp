@@ -1,8 +1,10 @@
-// UC: what a Protection says, as the room's line, the marks and the firm's hold read it, in the room's first load. The
-// wire's NotProtectedCause is open (a newer Clauseo's cause decodes as a plain string), and R17 PR-B and PR-E add
-// shapes bindings.ts doesn't have yet: `unsupported { why }`, and a named cause inside `set_up_failed` for Windows
-// error 1385. A cause is read here only for its name and group; what it carries (the pool's counts, the why, the
-// named cause) is detail.ts's, outside the first load.
+// UC: what a Protection says, as the room's line, the marks and the firm's hold read it, in the
+// room's first load. The wire's NotProtectedCause is open (a newer Clauseo's cause decodes as a
+// plain string), and R17 PR-B and PR-E add shapes bindings.ts doesn't have yet: `unsupported { why
+// }`, a named cause inside `set_up_failed` for Windows error 1385, `blocked { reason }` and
+// `other_account`. A cause is read here only for its name and group; what it carries (the pool's
+// counts, the why, the named cause, the reason) is detail.ts's and blocked.ts's, outside the first
+// load.
 import type { NotProtectedCause, Protection } from "../../transport/protocol.ts";
 
 /** The cause groups (UC, Screens): set-up (Try again offered), can't (no retry), the pool, and switched off. */
@@ -16,7 +18,9 @@ export type CauseName =
   | "unsupported"
   | "unknown"
   | "pool_full"
-  | "switched_off";
+  | "switched_off"
+  | "blocked"
+  | "other_account";
 
 /** One cause, decoded: its name and group, and the wire's value for detail.ts. */
 export type Cause = { name: CauseName; group: CauseGroup; raw: unknown };
@@ -28,6 +32,11 @@ const GROUP: Partial<Record<string, CauseGroup>> = {
   unsupported: "cant",
   pool_full: "pool",
   switched_off: "off",
+  // R17 PR-E appends these two (TODO(R17 PR-E): drop this note once bindings.ts has them):
+  // something on this computer stops the Safe workspace (blocked { reason }), or another Windows
+  // account owns it; neither offers Try again, and blocked.ts says each in words
+  blocked: "cant",
+  other_account: "cant",
 };
 
 /** A NotProtectedCause decoded; any shape this version doesn't know reads as can't (UC, Decided here). */

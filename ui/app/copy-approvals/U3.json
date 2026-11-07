@@ -298,23 +298,23 @@
   "U3-err-matter.folder_missing": {
     "en": "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.",
     "hi": "इस मामले के फ़ोल्डर तक पहुँचा नहीं जा सकता। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव या नेटवर्क जुड़ा न हो।",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)",
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
     "note": "Widened from U3-41 (approved 2026-11-02) for a network folder that doesn't answer in time, which now also gives matter.folder_missing (#617)"
   },
   "U3-err-matter.folder_not_a_matter": {
     "en": "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
     "hi": "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review)",
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
     "note": "Split from matter.folder_missing: the folder is there but its .clauseo/matter.json is missing, unreadable or another matter's"
   },
   "U3-err-matter.folder_refused": {
@@ -767,43 +767,43 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-sandbox.setup_refused": {
-    "en": "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
-    "hi": "संरक्षण सेट अप नहीं हुआ, क्योंकि Windows को अनुमति नहीं मिली। फिर से प्रयास करें, और Windows के पूछने पर Yes चुनें।",
+    "en": "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
+    "hi": "Windows को अनुमति नहीं मिली, इसलिए सुरक्षित कार्यक्षेत्र तैयार नहीं हुआ। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.setup_failed": {
-    "en": "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
-    "hi": "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका। फिर से प्रयास करें। बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसे दिखवाएँ।",
+    "en": "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.setup_required": {
-    "en": "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.",
-    "hi": "यहाँ उत्तर देने से पहले Clauseo को इस कंप्यूटर पर एक बार संरक्षण सेट अप करना होगा। इसे सेट अप करें, फिर दोबारा पूछें। आपका प्रश्न रखा गया है।",
+    "en": "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
+    "hi": "जब तक इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता। आपका प्रश्न रखा गया है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.required": {
-    "en": "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
-    "hi": "आपकी फ़र्म संरक्षण अनिवार्य करती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+    "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   }
 }

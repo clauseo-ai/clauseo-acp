@@ -1,12 +1,16 @@
-// @vitest-environment happy-dom
-// UC's Safe workspace step in the first run, over a FakeTransport with the setup and protection wires: no step when the
-// computer is protected or the protection query is refused, so the first read starts at once; the Windows screen for
-// needs_set_up, which is itself the confirm; "Not now", a refusal and a failure each count as the step's outcome, the
-// room's line then says Not protected with Try again, and UD2's first read starts after it, once; where R17 says the
-// set-up asks no administrator, it is sent once on entering, with the wait.
+// @vitest-environment happy-dom UC's Safe workspace step in the first run, over a FakeTransport
+// with the setup and protection wires. Design B: the installer sets the Safe workspace up, so a
+// computer protected when the app first opens, or a refused protection query, has no step, and the
+// first read starts at once. The app never raises Windows' prompt for the set-up: where it would
+// (an older host's needs_set_up) or the installer's set-up didn't happen (admin_copy_missing), the
+// step is the repair, with "Get the installer" on a personal install. Where a set-up with no prompt
+// fixes it, it is sent once on entering, with the wait. "Not now", a refusal and a failure each
+// count as the step's outcome, the room's line then says Not protected, and UD2's first read starts
+// after it, once.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
+import { APP_VERSION } from "../../settings/version.ts";
+import { installerPage } from "../protection/installer.ts";
 import { tbt } from "@clauseo/components/lib/words-toolbar.ts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -27,7 +31,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { fakeNext } from "../fake-next.ts";
 import { forgetMarksForTests, MARKS_KEY } from "../first-read/marks.ts";
-import { PROT, view } from "../protection/fixtures.ts";
+import { NO_PROMPT, PROT, view } from "../protection/fixtures.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
 import { stubFonts } from "../thread/testing.ts";
@@ -162,28 +166,72 @@ test.each([
   expect(reads(t)).toBe(1);
 });
 
-test("needs_set_up on Windows: the Windows screen, which is the confirm; the first read waits", async () => {
+test("set up at install (design B): protected when the app first opens, so no step, no command and no prompt", async () => {
+  const s = scripted(PROT.b, { set_up_at: 1_762_400_000_000 } as Partial<ProtectionView>);
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()).toBeNull();
+  expect(byId("protection-setup")).toBeNull();
+  expect(t.protectionCommands()).toEqual([]);
+  expect(reads(t)).toBe(1);
+});
+
+test("admin_copy_missing: the repair's words and Get the installer, no command; the first read waits for Not now", async () => {
+  const s = scripted(PROT.missing);
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair")?.textContent).toBe(
+    `${pw("en", "The Safe workspace wasn't set up when Clauseo was installed.")} ${pw(
+      "en",
+      "Run the Clauseo installer again to set up the Safe workspace.",
+    )}`,
+  );
+  expect(byId("protection-setup")).toBeNull();
+  expect(reads(t)).toBe(0);
+  await press(byId("protection-installer"));
+  await settle();
+  expect(t.only("open_external")).toEqual([
+    { call: "open_external", url: installerPage(APP_VERSION) },
+  ]);
+  expect(t.protectionCommands()).toEqual([]);
+  await press(byId("workspace-not-now"));
+  for (let i = 0; i < 3; i += 1) await settle();
+  expect(step()?.dataset["state"]).toBe("off");
+  expect(byId("workspace-retry")).toBeNull();
+  expect(t.protectionCommands()).toEqual([]);
+  expect(reads(t)).toBe(1);
+});
+
+test("admin_copy_missing on a firm install: ask IT to install Clauseo again, with no button", async () => {
+  const s = scripted(PROT.missing, { unprotected_auto_allowed: false });
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair")?.textContent).toContain(
+    pw("en", "Ask your IT team to install Clauseo again."),
+  );
+  expect(byId("protection-installer")).toBeNull();
+  expect(t.protectionCommands()).toEqual([]);
+});
+
+test("needs_set_up whose set-up would bring Windows' prompt (an older host): the repair, never the prompt", async () => {
   const s = scripted(PROT.needs);
   const t = await mount(s.host);
   await signInNow(t);
-  expect(step()?.dataset["state"]).toBe("ask");
-  expect(step()?.textContent).toContain(
-    fl("en", "Windows asks once for permission to set up the Safe workspace."),
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair")?.textContent).toBe(
+    pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
   );
-  expect(step()?.textContent).toContain("It will say the publisher is unknown");
+  expect(step()?.textContent).not.toContain("the publisher is unknown");
+  expect(byId("protection-setup")).toBeNull();
   expect(t.protectionCommands()).toEqual([]);
   expect(reads(t)).toBe(0);
-  await press(byId("protection-setup"));
-  await settle();
-  expect(t.protectionCommands()).toEqual(["retry_protection"]);
-  expect(step()?.dataset["state"]).toBe("waiting");
-  expect(byId("protection-wait")?.textContent).toBe(
-    pw("en", "Choose Yes in the window Windows shows."),
-  );
-  expect(reads(t)).toBe(0);
-  s.state.computer = PROT.b;
-  await act(async () => s.answers[0]!.resolve());
-  for (let i = 0; i < 3; i += 1) await settle();
+});
+
+test("any other block: no step; the room's line and note say it", async () => {
+  const t = await mount({ view: () => view(PROT.policy) });
+  await signInNow(t);
   expect(step()).toBeNull();
   expect(reads(t)).toBe(1);
 });
@@ -198,7 +246,7 @@ test("Settings on the Not protected line opens the window at #protection", async
   expect(t.only("open_settings")).toEqual([{ call: "open_settings", section: "protection" }]);
 });
 
-test("Not now is an outcome: the line says Not protected in Claude's words, with Try again, and the first read starts once", async () => {
+test("Not now is an outcome: the line says Not protected in Claude's words, and the first read starts once", async () => {
   const s = scripted(PROT.needs);
   const t = await mount(s.host);
   await signInNow(t);
@@ -211,20 +259,17 @@ test("Not now is an outcome: the line says Not protected in Claude's words, with
   );
   expect(byId("protection-failed")).toBeNull();
   expect(reads(t)).toBe(1);
-  // Try again goes back to the Windows screen; the first read isn't started again
-  await press(byId("workspace-retry"));
-  await settle();
-  expect(step()?.dataset["state"]).toBe("ask");
-  expect(reads(t)).toBe(1);
+  // the repair is the installer, so there is no Try again
+  expect(byId("workspace-retry")).toBeNull();
 });
 
 test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
   "a %s answer is an outcome: its words on the line, and the first read starts once",
   async (code) => {
-    const s = scripted(PROT.needs);
+    const s = scripted(PROT.needs, NO_PROMPT);
     const t = await mount(s.host);
     await signInNow(t);
-    await press(byId("protection-setup"));
+    expect(t.protectionCommands()).toEqual(["retry_protection"]);
     s.state.computer = code === "sandbox.setup_refused" ? PROT.refused : PROT.failed;
     await act(async () => s.answers[0]!.reject({ code, message: "no", retryable: true }));
     for (let i = 0; i < 3; i += 1) await settle();
@@ -233,11 +278,17 @@ test.each(["sandbox.setup_refused", "sandbox.setup_failed"])(
     expect(reads(t)).toBe(1);
     await signInNow(t);
     expect(reads(t)).toBe(1);
+    // Try again sends the set-up once more, with no prompt, and the step is its wait
+    await press(byId("workspace-retry"));
+    await settle();
+    expect(t.protectionCommands()).toEqual(["retry_protection", "retry_protection"]);
+    expect(step()?.dataset["state"]).toBe("wait");
+    expect(reads(t)).toBe(1);
   },
 );
 
 test("where R17 says the set-up asks no administrator, it is sent once on entering, with the wait", async () => {
-  const s = scripted(PROT.needs, { retry_asks_admin: false } as Partial<ProtectionView>);
+  const s = scripted(PROT.needs, NO_PROMPT);
   const t = await mount(s.host);
   await signInNow(t);
   expect(t.protectionCommands()).toEqual(["retry_protection"]);
