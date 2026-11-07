@@ -841,10 +841,15 @@ for `--reclaim`.
     have opened in the gap is the inner's own, as the pool user it already is. A process that
     opened the inner in the gap, or one this logon set off, is dead before the launch is read.
   - **Cleanup.** Right after the first-act sweep, still before the launch, the inner removes
-    what the pool user could have left to start at a logon: scheduled tasks whose principal or
-    author is the pool user, in every folder it can read; its BITS jobs, cancelled; every value of
-    its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder. The
-    Startup folder must lie in the pool user's profile. It is reached one name at a time relative
+    what the pool user could have left to start at a logon or to run in a later runner: its
+    per-user COM classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
+    `Wow6432Node` twins, deleted whole: a sandbox account has none of its own, and one registered
+    for a class a runner makes would run in that runner with the lawyer's logon SID); every value
+    of its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder.
+    The inner makes no COM call. The end sweeper removes the same three, then, over COM (MTA) and
+    only when no class key is left, scheduled tasks whose principal or author is the pool user,
+    in every folder it can read, and its BITS jobs, cancelled. The Startup folder must lie in the
+    pool user's profile. It is reached one name at a time relative
     to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
     so a link is deleted and never what it names. Each kind is logged by count alone, with no
     names or contents. A kind that fails is logged and the rest still run; the launch goes on.
@@ -893,8 +898,9 @@ for `--reclaim`.
     exit first, else with `0xC1A0`, the code the host's job end gives (`TERMINATED` in the
     process crate). The host's shutdown outcome is timed, not read from the code.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
-    logon: the end sweeper removed it, and if it didn't run, the first act removes it before the
-    launch is read. The residual case is a cancel that kills the outer inside the 2 s before the
+    logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
+    `Run` values and Startup entries before the launch is read. A task or BITS job stays until
+    an end sweeper runs, and each process it starts lives only until a sweep. The residual case is a cancel that kills the outer inside the 2 s before the
     sweeper's logon completes. Then no end sweeper runs, and the cleanup waits for the next
     launch's first act. A task or BITS job that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's
