@@ -12,7 +12,15 @@ code departs from the brief.
 ## Decision
 
 - **One proxy per launch, two listeners** on `127.0.0.1` sharing one list and one sink
-  (`start_proxy`, `ProxyHandle::port` and `browser_port`). Both bind through
+  (`start_proxy`, `ProxyHandle::port` and `browser_port`). The browser listener takes no
+  token, so it is bound only when `ProxyConfig::browser` is set (false from `ProxyConfig::new`),
+  which the host sets from whether the session has the browser, not from `Loopback` (which
+  also carries non-browser ports such as the case-law relay's); otherwise `browser_port` is
+  `None` (added 2026-11-07: tier B, which has no browser (D10), permits every pool user the
+  whole Windows loopback range, so a token-free listener there would let one matter's agent
+  send traffic under another's list).
+  agent-browser and Chrome reach it as `http://127.0.0.1:<port>`, which carries no
+  credential (`--proxy-server` takes none), so it still asks for no token. Both bind through
   `sandbox::ports::bind_loopback`: port 0 on macOS and Linux; on Windows a free port in 61080 to
   61179 from a random offset, with `SO_EXCLUSIVEADDRUSE` set before each bind (`socket2` makes the
   socket; `setsockopt` from `windows`' `Win32_Networking_WinSock`). Stage E's connector relay

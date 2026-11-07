@@ -169,12 +169,13 @@ lawyer's documents somewhere.
 **What stops them.**
 
 - `designed`: The sandbox allows no network except Clauseo's local proxy; raw sockets are refused
-- `built`: One proxy per agent launch on two loopback listeners. It carries CONNECT to port 443
-  and plain `http://` to port 80 of a host on the launch's allowlist, and refuses every other
-  form, scheme and port; `designed`: the allowlists measured per agent and login kind (G8b)
+- `built`: One proxy per agent launch on one or two loopback listeners. It carries CONNECT to
+  port 443 and plain `http://` to port 80 of a host on the launch's allowlist, and refuses every
+  other form, scheme and port; `designed`: the allowlists measured per agent and login kind (G8b)
 - `built`: The agent listener takes only its launch's token (32 random bytes, compared in
-  constant time, never logged or sent upstream); the browser listener takes no token and is held
-  to its matter by the jail's port rule
+  constant time, never logged or sent upstream); the browser listener takes no token, is bound
+  only for a launch with the browser (never on tier B), and is held to its matter by the jail's
+  port rule
 - `built`: Loopback ports for the browser are claimed per session (`ports::claim_port`, and
   `claim_port_at` for agent-browser's Windows daemon port) in a process-wide registry, so no two
   launches of this host get the same port. On macOS and Linux a port is retired once its claim

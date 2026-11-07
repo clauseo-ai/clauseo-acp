@@ -73,7 +73,7 @@ struct Reach {
 pub(crate) fn run(
     parts: Parts,
     agent: &Async<TcpListener>,
-    browser: &Async<TcpListener>,
+    browser: Option<&Async<TcpListener>>,
     stopped: oneshot::Receiver<()>,
 ) {
     let ctx = Rc::new(Ctx {
@@ -92,7 +92,12 @@ pub(crate) fn run(
     async_io::block_on(executor.run(async {
         let work = join3(
             accept(&executor, &ctx, agent, Listener::Agent),
-            accept(&executor, &ctx, browser, Listener::Browser),
+            async {
+                match browser {
+                    Some(browser) => accept(&executor, &ctx, browser, Listener::Browser).await,
+                    None => std::future::pending().await,
+                }
+            },
             ticks(&ctx),
         );
         select(pin!(work), stopped).await;

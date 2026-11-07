@@ -212,7 +212,7 @@ fn env_points_at_the_agent_listener_and_debug_hides_the_token() {
     let debug = format!("{:?}", rig.handle);
     assert!(!debug.contains(&token), "{debug}");
     assert!(debug.contains("<redacted>"), "{debug}");
-    assert_ne!(rig.handle.port(), rig.handle.browser_port());
+    assert_ne!(Some(rig.handle.port()), rig.handle.browser_port());
 }
 
 /// Reads until the proxy closes: nothing, whether the close came as an end or a reset.
