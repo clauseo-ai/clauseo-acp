@@ -49,7 +49,8 @@ const INSUFFICIENT_BUFFER: u32 = 122;
 
 /// Checks tier B's ports on this machine ([`ports_usable`]): Windows' dynamic range and its
 /// excluded ports always, and with `launch` every listener in the range too, which must be this
-/// process's or run this process's program. Fails closed when the machine can't be read.
+/// process's (its pid; the proxy and the relay run in the host). Fails closed when the machine
+/// can't be read.
 pub fn check_ports(launch: bool) -> Result<(), NetworkGap> {
     let dynamic = dynamic_ranges()?;
     // The listeners first, then the test binds, then the listeners again for any port that

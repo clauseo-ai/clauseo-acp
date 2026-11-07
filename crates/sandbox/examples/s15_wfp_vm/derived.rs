@@ -118,8 +118,31 @@ pub(crate) fn icmp(ip: &str) -> Got {
     }
 }
 
+/// Why the last derived child didn't start, for the probe's log.
+static LAST_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Why the last derived child of this process didn't start, if one didn't.
+pub(crate) fn last_error() -> Option<String> {
+    LAST_ERROR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// Runs `exe probe <inner>` as a child under the token `how` names; the child's exit code.
+/// Why it didn't start is kept for [`last_error`].
 pub(crate) fn run(exe: &Path, how: &str, inner: &str) -> Result<u32, String> {
+    let ran = start(exe, how, inner);
+    if let Err(why) = &ran {
+        *LAST_ERROR
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{how}: {why}"));
+    }
+    ran
+}
+
+/// [`run`]'s child.
+fn start(exe: &Path, how: &str, inner: &str) -> Result<u32, String> {
     let quoted = format!("\"{}\" \"probe\" \"{inner}\"", exe.display());
     let mut line: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
     match how {
