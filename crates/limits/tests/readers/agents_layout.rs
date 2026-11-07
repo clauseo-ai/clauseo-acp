@@ -61,13 +61,7 @@ fn limits_finds_both_adapters_and_the_claude_sdk_in_an_agents_install() {
         )
     );
     Setup::file(&claude_script, "");
-    Setup::file(
-        &under(
-            &claude_folder,
-            "node_modules/@anthropic-ai/claude-agent-sdk/package.json",
-        ),
-        "{}",
-    );
+    Setup::sdk(&claude_folder);
     Setup::file(&codex_script, "");
     let codex_js = under(&codex_folder, "node_modules/@openai/codex/bin/codex.js");
     Setup::file(&codex_js, "");
