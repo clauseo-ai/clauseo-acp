@@ -54,12 +54,52 @@ pub enum NetworkGap {
     /// deletes it.
     #[error("a network filter set-up didn't write is in the sandbox's sublayer: {0}")]
     ForeignFilter(String),
+    /// Windows' TCP dynamic port range (first and last port) overlaps `ports::TIER_B_PORTS`, so
+    /// the OS can hand those ports to any program.
+    #[error(
+        "Windows' dynamic port range ({first}-{last}) overlaps the sandbox's ports 46100-46199: \
+         IT can move it back to its default with \
+         `netsh int ipv4 set dynamicport tcp start=49152 num=16384`"
+    )]
+    DynamicPortsOverlap {
+        /// Its first port.
+        first: u16,
+        /// Its last port.
+        last: u16,
+    },
+    /// A port of `ports::TIER_B_PORTS` that Windows refuses to bind: an excluded port range.
+    #[error(
+        "port {0} of the sandbox's ports 46100-46199 is reserved on this computer (Hyper-V, WSL \
+         and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
+         protocol=tcp`)"
+    )]
+    PortsReserved(u16),
+    /// A TCP listener in `ports::TIER_B_PORTS` that isn't this app's: its port and its program.
+    #[error(
+        "another program ({program}) listens on port {port}, inside the sandbox's ports \
+         46100-46199, where a sandboxed agent could reach it"
+    )]
+    ForeignListener {
+        /// Its port.
+        port: u16,
+        /// Its program file, or its process id.
+        program: String,
+    },
+    /// The machine's ports couldn't be read, so the launch or set-up fails closed.
+    #[error("the sandbox couldn't check its ports ({call} failed, error {code:#x})")]
+    PortsUnchecked {
+        /// The call, as Windows names it.
+        call: &'static str,
+        /// Its result code.
+        code: u32,
+    },
 }
 
 impl NetworkGap {
     /// Whether running set-up again fixes it (`sandbox.setup_required`): set-up's objects are
     /// missing, changed, unreadable, joined by a foreign filter, or don't cover the pool user.
-    /// The rest are the launch's own failures (`agent.launch_failed`).
+    /// The rest are the launch's own failures (`agent.launch_failed`), the machine's ports
+    /// included: running set-up again doesn't change them.
     pub fn needs_setup(&self) -> bool {
         matches!(
             self,

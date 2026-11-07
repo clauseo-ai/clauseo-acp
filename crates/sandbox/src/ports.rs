@@ -191,6 +191,35 @@ pub fn claim_port_at(port: u16) -> io::Result<PortClaim> {
     claim_at_with(port, imp::bind_port)
 }
 
+/// The ports of [`TIER_B_PORTS`] Windows refuses to bind on `127.0.0.1` or `::1`
+/// (`PermissionDenied`, `WSAEACCES`): an excluded port range (Hyper-V, WSL and Docker reserve
+/// them). Ports in `listening`, which a listener holds, and ports this process holds are
+/// skipped; each test bind closes at once. Windows publishes no call that lists the excluded
+/// ranges (`netsh int ipv4 show excludedportrange` reads the TCP/IP stack's private store), and
+/// the documented reservation calls, `CreatePersistentTcpPortReservation` and
+/// `LookupPersistentTcpPortReservation`, only make or look up one exact range, so a bind is the
+/// test.
+#[cfg(windows)]
+pub(crate) fn refused_ports(listening: &BTreeSet<u16>) -> Vec<u16> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    let held = Held::lock();
+    let refused = |port: u16| {
+        [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ]
+        .into_iter()
+        .any(|ip| {
+            matches!(TcpListener::bind((ip, port)),
+                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
+        })
+    };
+    TIER_B_PORTS
+        .filter(|port| !listening.contains(port) && !held.contains(*port))
+        .filter(|port| refused(*port))
+        .collect()
+}
+
 /// How many binds may land on a held or tier-B port before a browser claim gives up.
 const BROWSER_TRIES: usize = 64;
 
