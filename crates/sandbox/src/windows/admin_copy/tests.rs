@@ -104,6 +104,7 @@ fn a_planted_change_right_at_any_level_is_unsafe() {
         (exe(), Found::File),
     ];
     let rights = [
+        WRITE_ATTRIBUTES,
         WRITE_DATA,
         APPEND_DATA,
         DELETE_CHILD,
@@ -296,4 +297,87 @@ fn hashes_are_64_lowercase_hex_digits() {
     assert!(is_sha256_hex(HASH));
     assert!(!is_sha256_hex(&HASH.to_uppercase()));
     assert!(!is_sha256_hex(HASH.get(..63).unwrap()));
+}
+
+#[test]
+fn anything_beside_the_copy_but_its_signature_and_staging_is_unsafe() {
+    let mut fake = Fake::ready();
+    for name in ["clauseo-sandbox-setup.exe.sig", "staging", "STAGING"] {
+        fake.set(&sandbox().join(name), Found::File, locked_dacl(false));
+    }
+    assert!(passes(check(&fake)), "the expected entries");
+    for stray in [
+        "version.dll",
+        "clauseo-sandbox-setup.exe.123.delete",
+        "staging2",
+    ] {
+        let mut fake = Fake::ready();
+        fake.set(&sandbox().join(stray), Found::File, locked_dacl(false));
+        assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "{stray}");
+    }
+}
+
+#[test]
+fn a_pool_another_user_owns_is_another_account_before_any_copy_check() {
+    let mut fake = Fake::ready();
+    fake.another = true;
+    fake.recorded = None;
+    assert_eq!(check_launchable(&fake), Err(Blocked::OtherAccount));
+    assert!(fake.asked.borrow().is_empty(), "nothing else is read");
+    let fake = Fake::ready();
+    assert!(passes(check_launchable(&fake)));
+}
+
+#[test]
+fn a_version_is_not_older_unless_it_sorts_below() {
+    for (recorded, candidate) in [
+        ("1.2.3", "1.2.3"),
+        ("1.2.3", "1.2.4"),
+        ("1.2.3", "1.10.0"),
+        ("1.2", "1.2.0"),
+        ("1.2.3-beta.1", "1.2.3"),
+        ("1.2.3-alpha", "1.2.3-alpha.1"),
+        ("1.2.3-alpha.2", "1.2.3-alpha.10"),
+        ("1.2.3-2", "1.2.3-alpha"),
+        ("1.2.3+build.1", "1.2.3"),
+        ("0.0.0", APP_VERSION),
+    ] {
+        assert!(
+            version_not_older(recorded, candidate),
+            "{recorded} -> {candidate}"
+        );
+    }
+    for (recorded, candidate) in [
+        ("1.2.4", "1.2.3"),
+        ("2.0.0", "1.99.99"),
+        ("1.2.3", "1.2.3-rc.1"),
+        ("1.2.3-beta", "1.2.3-alpha"),
+        ("1.2.3", "v1.2.3"),
+        ("garbage", "1.2.3"),
+        ("1.2.3", ""),
+        ("1.2.3.4.5", "9.0.0"),
+        ("1.2.3-", "1.2.3"),
+    ] {
+        assert!(
+            !version_not_older(recorded, candidate),
+            "{recorded} -> {candidate}"
+        );
+    }
+}
+
+#[test]
+fn the_copy_goes_only_with_the_install_that_placed_it() {
+    let lawyer = crate::windows::sids::Sid::parse(LAWYER).unwrap();
+    let other = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1002").unwrap();
+    let mine = CopyOwner::User(lawyer.clone());
+    let machine = CopyOwner::Machine;
+    assert!(copy_removable(false, Some(&machine), true, None));
+    assert!(copy_removable(false, Some(&mine), false, Some(&lawyer)));
+    // Another kind, another user, a pool still owned, or no owner recorded: it stays.
+    assert!(!copy_removable(false, Some(&machine), false, Some(&lawyer)));
+    assert!(!copy_removable(false, Some(&mine), true, Some(&lawyer)));
+    assert!(!copy_removable(false, Some(&mine), false, Some(&other)));
+    assert!(!copy_removable(false, Some(&mine), false, None));
+    assert!(!copy_removable(true, Some(&machine), true, None));
+    assert!(!copy_removable(false, None, true, None));
 }

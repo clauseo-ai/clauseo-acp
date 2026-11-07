@@ -46,35 +46,44 @@ pub(crate) fn remove_admin_copy(record_key: &str) -> Result<(), MachineError> {
             ));
         }
     }
-    let running = std::env::current_exe().ok();
     let exe = admin_copy::admin_exe(&program_files);
-    let is_running = running
-        .as_deref()
-        .is_some_and(|running| same_path(running, &exe));
-    for entry in std::fs::read_dir(&dir).map_err(|e| other(&e))? {
-        let path = entry.map_err(|e| other(&e))?.path();
-        if is_running && same_path(&path, &exe) {
+    let running = std::env::current_exe().is_ok_and(|running| same_path(&running, &exe));
+    let app = program_files.join(admin_copy::ADMIN_DIR[0]);
+    clear(&dir, &exe, running, &app, &mut delete_at_restart).map_err(|e| other(&e))
+}
+
+/// Deletes everything in the admin folder `dir`, then `dir`. When the copy `exe` is the
+/// running exe (`running`), it is renamed in place to [`parked_name`] instead, and `schedule`
+/// is given that name, `dir` and `app` (`%ProgramFiles%\Clauseo`), in that order, to delete
+/// at restart. A link inside is deleted as itself, never followed.
+pub(super) fn clear(
+    dir: &Path,
+    exe: &Path,
+    running: bool,
+    app: &Path,
+    schedule: &mut dyn FnMut(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if running && same_path(&path, exe) {
             continue;
         }
-        // `remove_dir_all` deletes a link inside, never what it points at.
-        match os::found(&path).map_err(|e| other(&e))? {
-            Found::Folder => std::fs::remove_dir_all(&path),
-            Found::File | Found::Link => std::fs::remove_file(&path),
-            Found::Missing => Ok(()),
+        match os::found(&path)? {
+            Found::Folder => std::fs::remove_dir_all(&path)?,
+            Found::File => std::fs::remove_file(&path)?,
+            Found::Link => {
+                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
+            }
+            Found::Missing => {}
         }
-        .map_err(|e| other(&e))?;
     }
-    if !is_running {
-        return std::fs::remove_dir(&dir).map_err(|e| other(&e));
+    if !running {
+        return std::fs::remove_dir(dir);
     }
-    let parked = parked_name(&exe, std::process::id());
-    std::fs::rename(&exe, &parked).map_err(|e| other(&e))?;
-    for path in [
-        parked.as_path(),
-        dir.as_path(),
-        &program_files.join(admin_copy::ADMIN_DIR[0]),
-    ] {
-        delete_at_restart(path).map_err(|e| other(&e))?;
+    let parked = parked_name(exe, std::process::id());
+    std::fs::rename(exe, &parked)?;
+    for path in [parked.as_path(), dir, app] {
+        schedule(path)?;
     }
     Ok(())
 }
@@ -92,7 +101,7 @@ pub(crate) fn remove_refresh_task() -> Result<(), MachineError> {
 }
 
 /// The name the running copy is renamed to in its own folder: one nothing starts.
-fn parked_name(exe: &Path, pid: u32) -> PathBuf {
+pub(super) fn parked_name(exe: &Path, pid: u32) -> PathBuf {
     let mut name = exe.as_os_str().to_owned();
     name.push(format!(".{pid}.delete"));
     PathBuf::from(name)
@@ -116,3 +125,6 @@ fn delete_at_restart(path: &Path) -> io::Result<()> {
 fn other(error: &io::Error) -> MachineError {
     MachineError::Other(error.to_string())
 }
+
+#[cfg(test)]
+mod tests;

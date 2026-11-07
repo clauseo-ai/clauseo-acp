@@ -15,9 +15,10 @@ use crate::windows::ledger::{EntryState, Ledger};
 use crate::windows::set_aside;
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
-/// `apply`. First the set-up program's admin copy passes `admin_copy::check`, or the launch is
-/// refused with [`Error::Blocked`] (`AdminCopyMissing`, `AdminCopyChanged` or
-/// `AdminCopyUnsafe`) and nothing is read or removed: without a copy only administrators can
+/// `apply`. First the pool is this user's and the set-up program's admin copy passes
+/// `admin_copy::check_launchable`, or the launch is refused with [`Error::Blocked`]
+/// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged` or `AdminCopyUnsafe`) and nothing
+/// is read or removed: without a copy only administrators can
 /// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
@@ -44,7 +45,7 @@ pub(crate) fn check_launch_with(
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
-    admin_copy::check(admin).map_err(Error::Blocked)?;
+    admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);

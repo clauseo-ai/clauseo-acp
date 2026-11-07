@@ -5,7 +5,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::os::{self, lock_down};
+use super::os::{self, WindowsAdminCopy, lock_down, lock_down_tree};
 use super::*;
 use crate::test_support::TempDir;
 use crate::windows::test_acl::elevated_tests_enabled;
@@ -39,6 +39,14 @@ impl AdminCopyFs for Rooted {
 
     fn recorded_sha256(&self) -> io::Result<Option<String>> {
         Ok(self.recorded.clone())
+    }
+
+    fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {
+        WindowsAdminCopy.entries(dir)
+    }
+
+    fn another_owner(&self) -> io::Result<bool> {
+        Ok(false)
     }
 }
 
@@ -122,8 +130,14 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
     let planted = os::security(sandbox).unwrap();
     assert!(!locked(&planted, true) && !level_safe(&planted));
     assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
-    // Locked again, a changed copy is changed.
-    lock_down(sandbox, true).unwrap();
+    // A stray beside the copy refuses; the lock-down deletes it and locks what stays.
+    let stray = dir.file(r"pf\Clauseo\Sandbox\version.dll", "planted");
+    assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
+    lock_down_tree(sandbox, &exe).unwrap();
+    assert_eq!(os::found(&stray).unwrap(), Found::Missing);
+    assert!(locked(&os::security(sandbox).unwrap(), true));
+    assert!(check(&fs).is_ok());
+    // A changed copy is changed.
     dir.file(
         r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe",
         "MZ another",

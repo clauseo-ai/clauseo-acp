@@ -106,6 +106,26 @@ pub enum Error {
 }
 
 impl Error {
+    /// The [`Blocked`](crate::Blocked) cause's serde name for [`Error::Blocked`]
+    /// (`Blocked::name`), `None` for every other error: path-free and without `Display`'s
+    /// words, for the host to put in the protocol's `NotProtectedCause::Blocked`.
+    pub fn cause(&self) -> Option<&'static str> {
+        match self {
+            Error::Blocked(blocked) => Some(blocked.name()),
+            Error::Policy(_)
+            | Error::Probe(_)
+            | Error::Launch(_)
+            | Error::ProxyConfig(_)
+            | Error::ProxyStart(_)
+            | Error::FolderUnsupported { .. }
+            | Error::NeighbourUnfenceable { .. }
+            | Error::AclApply { .. }
+            | Error::SetAside { .. }
+            | Error::CleanClose(_)
+            | Error::ProtectedLink { .. } => None,
+        }
+    }
+
     /// The code a client sees. A refused policy stops the launch, so it is a failed launch, as
     /// a launch error is, and so are the proxy's errors and a folder tier B can't prepare (the
     /// caller falls back to the tier it can get); a failed probe is unexpected, so it is
@@ -132,6 +152,33 @@ impl Error {
 mod tests {
     use super::*;
 
+    /// Every cause's name, listed: a new `Blocked` variant must be added to `Blocked::ALL` and
+    /// here, and its name must be the one serde writes.
+    #[test]
+    fn every_blocked_cause_has_its_serde_name() {
+        let names: Vec<&str> = crate::Blocked::ALL.iter().map(|b| b.name()).collect();
+        assert_eq!(
+            names,
+            [
+                "logon_right",
+                "policy",
+                "admin_copy_missing",
+                "admin_copy_changed",
+                "admin_copy_unsafe",
+                "other_account",
+            ]
+        );
+        for blocked in crate::Blocked::ALL {
+            let serde = serde_json::to_string(&blocked).unwrap();
+            assert_eq!(serde, format!("\"{}\"", blocked.name()));
+            assert_eq!(
+                Error::Blocked(blocked).cause(),
+                Some(blocked.name()),
+                "{blocked:?}"
+            );
+        }
+    }
+
     #[test]
     fn codes_match_protocol() {
         let launch = Error::Launch(clauseo_process::Error::InvalidSpec("relative".to_owned()));
@@ -150,7 +197,10 @@ mod tests {
             folder.to_string(),
             "the sandbox can't prepare the state folder: it is on a network drive"
         );
+        assert_eq!(folder.cause(), None);
+        assert_eq!(launch.cause(), None);
         let changed = Error::Blocked(crate::Blocked::AdminCopyChanged);
+        assert_eq!(changed.cause(), Some("admin_copy_changed"));
         assert_eq!(changed.code(), ErrorCode::SandboxBlocked);
         assert!(
             !changed.code().is_retryable(),

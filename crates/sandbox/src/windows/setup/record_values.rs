@@ -28,8 +28,67 @@ pub const REMOVING: &str = "Removing";
 /// `AdminCopySha256` (`REG_SZ`): the admin copy's SHA-256, 64 lowercase hex digits, written by
 /// `--adopt` (`windows::admin_copy`), not by the set-up, and outside [`MachineRecord`].
 pub const ADMIN_COPY_SHA256: &str = "AdminCopySha256";
-/// `UserInstallDir` (`REG_SZ`): the install folder `--adopt` was given, absolute.
+/// `UserInstallDir` (`REG_SZ`): the install folder `--adopt` was given, absolute. Untrusted:
+/// the lawyer can re-point a folder on its way through a junction at any time.
 pub const USER_INSTALL_DIR: &str = "UserInstallDir";
+/// `AdminCopyVersion` (`REG_SZ`): the admin copy's version, the app's (`tauri.conf.json`'s
+/// `version`, the exe's `FileVersion`). `--adopt` refuses to place an older copy.
+pub const ADMIN_COPY_VERSION: &str = "AdminCopyVersion";
+/// `AdminCopyOwner` (`REG_SZ`): whose install placed the admin copy, as [`CopyOwner::text`]
+/// writes it: [`MACHINE_OWNER`] for a per-machine install, else the lawyer's SID in its string
+/// form (`S-1-5-21-...`, as `ConvertSidToStringSidW` gives it). The installer reads it before
+/// it overwrites the copy.
+pub const ADMIN_COPY_OWNER: &str = "AdminCopyOwner";
+/// [`ADMIN_COPY_OWNER`]'s text for a per-machine install.
+pub const MACHINE_OWNER: &str = "machine";
+/// The values `--adopt` writes and `--remove` deletes with the admin copy.
+pub const ADMIN_VALUES: [&str; 4] = [
+    ADMIN_COPY_SHA256,
+    USER_INSTALL_DIR,
+    ADMIN_COPY_VERSION,
+    ADMIN_COPY_OWNER,
+];
+
+/// What `--adopt` records of the admin copy ([`ADMIN_VALUES`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminValues {
+    /// `AdminCopySha256`: 64 lowercase hex digits.
+    pub sha256: String,
+    /// `UserInstallDir`.
+    pub install_dir: PathBuf,
+    /// `AdminCopyVersion`.
+    pub version: String,
+    /// `AdminCopyOwner`.
+    pub owner: CopyOwner,
+}
+
+/// Whose install placed the admin copy (`AdminCopyOwner`): one owner at a time, as D5 has one
+/// pool owner, and a per-machine install counts as an owner of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CopyOwner {
+    /// A per-machine install.
+    Machine,
+    /// A per-user install by this lawyer.
+    User(Sid),
+}
+
+impl CopyOwner {
+    /// The value's text.
+    pub fn text(&self) -> &str {
+        match self {
+            CopyOwner::Machine => MACHINE_OWNER,
+            CopyOwner::User(sid) => sid.as_str(),
+        }
+    }
+
+    /// The owner `text` names; `None` when it is neither [`MACHINE_OWNER`] nor a SID.
+    pub fn parse(text: &str) -> Option<CopyOwner> {
+        if text == MACHINE_OWNER {
+            return Some(CopyOwner::Machine);
+        }
+        Sid::parse(text).ok().map(CopyOwner::User)
+    }
+}
 /// The values the set-up owns, which a rollback or `--remove` deletes; the two `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
 pub const SETUP_VALUES: [&str; 5] = [OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING];
@@ -285,6 +344,34 @@ mod tests {
             decode(repeated),
             Err(RecordValueError::Malformed("PoolSids"))
         );
+    }
+
+    /// The installer (PR 1) reads these names and forms before it overwrites the admin copy; its
+    /// own test pins the same strings against this file.
+    #[test]
+    fn the_admin_copy_values_keep_their_names_and_forms() {
+        assert_eq!(
+            ADMIN_VALUES,
+            [
+                "AdminCopySha256",
+                "UserInstallDir",
+                "AdminCopyVersion",
+                "AdminCopyOwner"
+            ]
+        );
+        assert_eq!(OWNER_SID, "OwnerSid");
+        assert_eq!(CopyOwner::Machine.text(), "machine");
+        let lawyer = CopyOwner::User(sid("S-1-5-21-1-2-3-1001"));
+        assert_eq!(lawyer.text(), "S-1-5-21-1-2-3-1001");
+        for owner in [CopyOwner::Machine, lawyer] {
+            assert_eq!(CopyOwner::parse(owner.text()), Some(owner));
+        }
+        for bad in ["Machine", "", "lawyer", "machine "] {
+            assert_eq!(CopyOwner::parse(bad), None, "{bad}");
+        }
+        for name in ADMIN_VALUES {
+            assert!(!SETUP_VALUES.contains(&name), "{name}");
+        }
     }
 
     #[test]
