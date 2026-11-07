@@ -124,7 +124,12 @@ fn as_the_owner_every_matter_is_forgotten_as_the_owner_then_the_record_goes() {
         .map(|(line, _)| line.as_str())
         .collect();
     assert_eq!(as_owner, ["matters/m1 1001", "matters/m1/.git 1002"]);
-    assert_eq!(acl.removes.iter().filter(|(_, acting)| !acting).count(), 9);
+    // Two shared denies per pool user's LocalLow, and DeviceSync's.
+    let shared = 2 * MIN_FREE_AFTER_RUN + 1;
+    assert_eq!(
+        acl.removes.iter().filter(|(_, acting)| !acting).count(),
+        shared
+    );
     let ledger = Machine::ledger(&mut machine.m, &named()).unwrap();
     assert_eq!(ledger.entries().count(), 0);
     assert_eq!(ledger.set_aside_entries(), 0);
@@ -154,7 +159,11 @@ fn as_the_owner_a_removal_that_fails_keeps_the_ledger_the_group_and_the_record()
     );
     let record = machine.m.state.record.clone().unwrap();
     assert!(record.removing);
-    assert_eq!(record.pool.len(), 4, "the ledger's pool SIDs stay trusted");
+    assert_eq!(
+        record.pool.len(),
+        MIN_FREE_AFTER_RUN,
+        "the ledger's pool SIDs stay trusted"
+    );
     assert!(machine.m.state.group.is_some());
     let ledger = Machine::ledger(&mut machine.m, &record.pool).unwrap();
     assert!(ledger.entries().count() > 0);

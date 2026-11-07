@@ -8,8 +8,8 @@ use super::remove_fake::{Change, ParentToken, RemoveAcl, Remover};
 use super::*;
 use crate::windows::setup::remove::{acting_token, per_machine_allowed};
 
-/// A machine a fresh set-up gave four pool users (the group 1000, the users 1001 to 1004),
-/// for `invoker`, and its writer.
+/// A machine a fresh set-up gave [`MIN_FREE_AFTER_RUN`] pool users (the group 1000, the users
+/// 1001 to 1008), for `invoker`, and its writer.
 pub(super) fn pool(test: &str, invoker: Option<Sid>) -> (Remover, RemoveAcl) {
     let mut machine = FakeMachine::new(test);
     let mut acl = FakeAcl::default();
@@ -24,18 +24,20 @@ fn other() -> Sid {
     Sid::parse(OTHER_OWNER).unwrap()
 }
 
-/// The calls of a full removal of [`pool`]'s four users by its owner, with no ledger, in order.
+/// The calls of a full removal of [`pool`]'s eight users by its owner, with no ledger, in order.
 fn full_removal() -> Vec<String> {
+    let users = 1..=MIN_FREE_AFTER_RUN;
+    let strays: Vec<String> = users.clone().map(|n| format!("100{n}")).collect();
     let mut lines: Vec<String> = [
         "read_record",
         "lock 60000",
         "read_record",
         "write_record removing",
-        "stop_strays 1001,1002,1003,1004",
     ]
     .map(str::to_owned)
     .to_vec();
-    for n in 1..=4 {
+    lines.push(format!("stop_strays {}", strays.join(",")));
+    for n in users {
         let local_low = format!("Users/ClauseoSb0{n}/AppData/LocalLow");
         lines.extend([
             format!("account_name 100{n}"),
@@ -84,8 +86,8 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
     let Removed::All(report) = removed else {
         panic!("{removed:?}");
     };
-    assert_eq!(report.profiles, 4);
-    assert_eq!(report.accounts, 4);
+    assert_eq!(report.profiles, MIN_FREE_AFTER_RUN);
+    assert_eq!(report.accounts, MIN_FREE_AFTER_RUN);
     assert!(report.group);
     assert_eq!(report.ledger, LedgerWork::Nothing);
     assert_all_gone(&machine, &acl);
@@ -345,7 +347,7 @@ fn a_per_machine_removal_takes_the_whole_pool_off_whoever_asks() {
         let Removed::All(report) = removed else {
             panic!("{removed:?}");
         };
-        assert_eq!((report.profiles, report.accounts), (4, 4));
+        assert_eq!((report.profiles, report.accounts), (8, 8));
         // No one to act as: the ledger is read as this process, and nothing ran as the owner.
         assert_eq!(report.ledger, LedgerWork::Nothing);
         assert!(!machine.acted, "{invoker:?}");
