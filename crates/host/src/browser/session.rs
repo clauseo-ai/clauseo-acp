@@ -193,7 +193,7 @@ const NAME_LETTERS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 const NAME_LEN: usize = 16;
 
 /// Every port [`daemon_port_of`] gives: [`DAEMON_PORT_BASE`] plus `0..DAEMON_PORT_SPAN`.
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 const DAEMON_PORTS: std::ops::RangeInclusive<u16> =
     DAEMON_PORT_BASE..=DAEMON_PORT_BASE + (DAEMON_PORT_SPAN - 1);
 
