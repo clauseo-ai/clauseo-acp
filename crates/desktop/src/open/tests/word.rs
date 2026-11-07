@@ -29,7 +29,7 @@ fn a_long_word_document_opens_through_its_short_folder_in_protected_view() {
     let (folder, brief) = long_document(&scratch, "Brief of the claimant.docx");
     let host = host(&folder, &brief);
     let short = PathBuf::from("/SHORT~1");
-    let opener = FakeOpener(Mutex::default(), Some(short.clone()));
+    let opener = Arc::new(FakeOpener(Mutex::default(), Some(short.clone())));
     let opened = file(&host, &opener, host.file).unwrap();
     assert_eq!(
         opened,
@@ -51,10 +51,19 @@ fn a_long_word_document_without_short_names_is_refused_and_opens_nothing() {
     let scratch = Scratch::new("open-word-refused", &[]);
     let (folder, brief) = long_document(&scratch, "Brief.DOCX");
     let host = host(&folder, &brief);
-    let opener = FakeOpener::default();
+    let opener = Arc::new(FakeOpener::default());
     let clock = Clock::new();
     let gate = gate::Gate::default();
-    let run = || block_on(open_file(&host, &opener, &gate, &|| clock.now(), host.file));
+    let run = || {
+        block_on(open_file(
+            &host,
+            &opener,
+            &gate,
+            &|| clock.now(),
+            FOLDER_WAIT,
+            host.file,
+        ))
+    };
     let refused = run().unwrap_err();
     assert_eq!(refused.code(), ErrorCode::MatterDocumentPathTooLong);
     assert!(!refused.code().is_retryable());
@@ -67,6 +76,7 @@ fn a_long_word_document_without_short_names_is_refused_and_opens_nothing() {
         &opener,
         &gate,
         &|| clock.now(),
+        FOLDER_WAIT,
         short_host.file,
     ))
     .unwrap();
@@ -78,7 +88,10 @@ fn a_long_document_of_another_type_opens_as_it_is() {
     let scratch = Scratch::new("open-word-other", &[]);
     let (folder, report) = long_document(&scratch, "Report.pdf");
     let host = host(&folder, &report);
-    let opener = FakeOpener(Mutex::default(), Some(PathBuf::from("/SHORT~1")));
+    let opener = Arc::new(FakeOpener(
+        Mutex::default(),
+        Some(PathBuf::from("/SHORT~1")),
+    ));
     let opened = file(&host, &opener, host.file).unwrap();
     assert_eq!(opened, OpenedFile::default());
     assert_eq!(
@@ -95,7 +108,10 @@ fn a_short_word_document_opens_as_it_is() {
     let scratch = Scratch::new("open-word-plain", &[]);
     let (folder, brief, _) = matter_folder(&scratch);
     let host = host(&folder, &brief);
-    let opener = FakeOpener(Mutex::default(), Some(PathBuf::from("/SHORT~1")));
+    let opener = Arc::new(FakeOpener(
+        Mutex::default(),
+        Some(PathBuf::from("/SHORT~1")),
+    ));
     assert_eq!(
         file(&host, &opener, host.file).unwrap(),
         OpenedFile::default()
