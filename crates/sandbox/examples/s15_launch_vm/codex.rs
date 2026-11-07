@@ -2,7 +2,8 @@
 //! the codex package.
 //!
 //! The mock (`mock-responses.mjs`, copied from the MXC spike) runs as the harness user on a
-//! loopback port; `<state A>\codex-home\config.toml` points codex at it; `codex exec` runs
+//! loopback port in `TIER_B_PORTS`, the only ones tier B's WFP filters let A reach (S15 PR7);
+//! `<state A>\codex-home\config.toml` points codex at it; `codex exec` runs
 //! through the runner as A with full access (tier B's choice, D3 (c)), under `probe stdin-null`
 //! (its stdin on `NUL`: it reads stdin to the end before it starts, while the runner's stdin
 //! stays open until the agent has exited, as a host's does until it ends the session). The mock
@@ -13,6 +14,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use clauseo_sandbox::ports::{ListenerFor, bind_loopback};
 
 use super::checks_ctl::Live;
 use super::launch::{Spec, deadline, launch, pool_of, run_command, summary, text};
@@ -105,10 +108,11 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, S
     }
     let log = m.logs().join("codex-mock.jsonl");
     drop(remove_file(&log));
+    let want = tier_b_port()?;
     let mut command = Command::new(node);
     command
         .arg(m.root.join(MOCK_FILE))
-        .arg("port=0")
+        .arg(format!("port={want}"))
         .arg(format!("matter={}", text(&matter)))
         .arg(format!("log={}", text(&log)))
         .arg(format!("probe={}", text(&m.harness_exe())))
@@ -235,6 +239,18 @@ fn job_ui(ctx: &Ctx<'_>, job_file: &Path, atom: &str) -> Result<String, String> 
     let limits = super::checks_ui::ui_limits(ctx, &lines, skip, false)?;
     super::checks_ui::atom_info(ctx, &lines, atom);
     Ok(limits)
+}
+
+/// A free port in `TIER_B_PORTS`, found by binding it, then left for the mock to bind: tier B's
+/// WFP filters let A reach no other loopback port.
+fn tier_b_port() -> Result<u16, String> {
+    let free = bind_loopback(ListenerFor::TierB).map_err(|e| format!("no tier-B port: {e}"))?;
+    let port = free
+        .local_addr()
+        .map_err(|e| format!("the tier-B port: {e}"))?
+        .port();
+    drop(free);
+    Ok(port)
 }
 
 /// The port in the mock's `listening` line.
