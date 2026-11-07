@@ -44,12 +44,39 @@ const SCAN_JOB: Job = Job {
 };
 
 /// The scan for Scratch's folder: given the default matters folder, the first of `Scratch`,
-/// `Scratch 2`, ... that does not exist. [`os_scan`], or a stand-in in tests.
+/// `Scratch 2`, ... that does not exist. [`free_folder`], or a stand-in in tests.
 pub(crate) type Scan = Arc<dyn Fn(&Path) -> Option<PathBuf> + Send + Sync>;
 
-/// The scan the host runs.
-pub(crate) fn os_scan() -> Scan {
-    Arc::new(free_folder)
+/// The Scratch matter's seams in `HostConfig`: the scan, and (tests) whether shutdown waits for
+/// it ([`ScratchWait::stop_held`]).
+pub(crate) struct Seams {
+    /// [`free_folder`], or a test's stand-in.
+    pub(crate) scan: Scan,
+    /// See [`ScratchWait::stop_held`].
+    #[cfg(test)]
+    pub(crate) stop_held: Option<std::sync::mpsc::Sender<()>>,
+}
+
+impl Seams {
+    /// The scan, and start-up's wait for Scratch with its test seam.
+    pub(crate) fn split(self) -> (Scan, ScratchWait) {
+        let wait = ScratchWait {
+            #[cfg(test)]
+            stop_held: self.stop_held,
+            ..ScratchWait::default()
+        };
+        (self.scan, wait)
+    }
+}
+
+impl Default for Seams {
+    fn default() -> Self {
+        Self {
+            scan: Arc::new(free_folder),
+            #[cfg(test)]
+            stop_held: None,
+        }
+    }
 }
 
 /// The first folder of `<base>/Scratch`, `Scratch 2`, ... that does not exist.
@@ -79,6 +106,10 @@ pub(crate) struct ScratchWait {
     waited: bool,
     /// The [`READY_WAIT`] timer.
     timer: Option<AbortHandle>,
+    /// Tests: shutdown waits for the scan too, and says so here each time it does, so a test
+    /// can answer the scan while the host stops (`HostConfig::with_scratch_stop_held`).
+    #[cfg(test)]
+    pub(crate) stop_held: Option<std::sync::mpsc::Sender<()>>,
 }
 
 /// Starts the scan for the Scratch matter's folder, and the [`READY_WAIT`] timer. With no
@@ -165,9 +196,28 @@ fn holds_start(actor: &Actor) -> bool {
 pub(super) fn holds(actor: &Actor) -> bool {
     match actor.phase {
         HostPhase::Starting(_) => !actor.scratch_wait.waited && holds_start(actor),
-        HostPhase::Stopping(_) => actor.scratch.is_some(),
+        HostPhase::Stopping(_) => actor.scratch.is_some() || stop_held(actor),
         HostPhase::Serving => false,
     }
+}
+
+/// Tests: whether shutdown waits for a scan still running (`ScratchWait::stop_held`).
+#[cfg(test)]
+fn stop_held(actor: &Actor) -> bool {
+    let wait = &actor.scratch_wait;
+    match &wait.stop_held {
+        Some(told) if wait.scanning => {
+            let _gone = told.send(());
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Shutdown never waits for the scan.
+#[cfg(not(test))]
+const fn stop_held(_: &Actor) -> bool {
+    false
 }
 
 /// Ready went out: the [`READY_WAIT`] timer is disarmed.

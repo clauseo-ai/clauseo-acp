@@ -32,6 +32,7 @@ pub(super) async fn open(
 ) -> Result<Actor, Error> {
     let parts = config.into_parts();
     let data_dir = parts.effective.data_dir().to_path_buf();
+    let (scratch_scan, scratch_wait) = parts.scratch.split();
     write::create_dir_all(&data_dir).map_err(|error| Error::Store(error.into()))?;
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
@@ -123,8 +124,8 @@ pub(super) async fn open(
         work: Work::default(),
         phase: HostPhase::Starting(ready),
         scratch: None,
-        scratch_wait: super::scratch::ScratchWait::default(),
-        scratch_scan: parts.scratch_scan,
+        scratch_wait,
+        scratch_scan,
         made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,
