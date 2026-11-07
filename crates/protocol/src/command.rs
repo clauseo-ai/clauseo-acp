@@ -16,22 +16,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, CheckpointId, ClientName, CommandId, Date, Delivery,
-    ElicitationId, ElicitationResponse, FieldChange, FileDecision, FolderRefId, MatterId,
-    MessageId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock, RestoreScope,
-    ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
+    CommandId, Date, Delivery, ElicitationId, ElicitationResponse, FieldChange, FileDecision,
+    FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock,
+    RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
 };
 #[cfg(doc)]
 use crate::{FileChoice, RawPayload};
 use crate::{InstallWhen, UpdateMode};
 
 mod connectors;
+mod outcome;
 mod validate;
 
 pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
+pub use outcome::CommandOutcome;
 pub use validate::{
-    MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES, MAX_PATH_LIST_BYTES,
-    MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, ValidatedCommand,
+    MAX_ALLOWED_HOST_BYTES, MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES,
+    MAX_PATH_LIST_BYTES, MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES,
+    ValidatedCommand,
 };
 
 /// Most turns queued in one thread. A `SendPrompt` that would queue one more is refused with
@@ -547,45 +550,30 @@ pub enum HostCommand {
     /// `RetryProtection` is. No receipt. `command.invalid` with no set-up, or while a set-up
     /// runs. JSON: `{"remove_sandbox_setup": {}}`.
     RemoveSandboxSetup {},
-}
-
-/// What a command did. The host's receipt stores it, so a repeated `command_id` returns the same
-/// outcome. The queue commands, `RestartAgent`, `SetUiSettings`, `SetToolSettings`,
-/// `SetPrivacySettings`, `FirstAct`, `UpdateMatter`, `OpenMatter`, `ForgetMatter`, `RefreshLimits`,
-/// `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
-/// `InstallBrowser`, `CancelBrowserInstall`, the four update commands and the connector commands
-/// answer `Done`; the last store no receipt, as the two browser commands do not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum CommandOutcome {
-    /// Done; nothing new to name.
-    Done,
-    /// The matter was made.
-    MatterCreated {
-        /// The new matter.
-        matter: MatterId,
+    /// Allow the site a `HostEvent::SiteBlocked` notice named, although the unsafe-site block
+    /// list names it (decision record 0053, PR 2): the exact host the notice named, for the
+    /// notice's matter (`Matter`) or every matter (`Always`). Running agents get it at their
+    /// next request. A `block_id` the host no longer keeps (it keeps each thread's latest 64
+    /// notices) is `blocklist.notice_expired`; while `network.allow_unsafe_site_override` is
+    /// off, `blocklist.override_off`. Answers `Done`, with no receipt. Only the main window
+    /// sends it. JSON: `{"allow_blocked_site": {"block_id": "…", "scope": "matter"}}`.
+    AllowBlockedSite {
+        /// The notice's id.
+        block_id: BlockedSiteId,
+        /// How far the allow reaches.
+        scope: AllowScope,
     },
-    /// The thread was made.
-    ThreadCreated {
-        /// The new thread.
-        thread: ThreadId,
-    },
-    /// The prompt was taken (queued, sent now or steered).
-    PromptAccepted {
-        /// The turn that answers it (for a steer, until a `SteerResolved` says otherwise).
-        turn: TurnId,
-        /// The prompt's message.
-        message: MessageId,
-    },
-    /// The step was undone.
-    StepUndone {
-        /// The checkpoint the undo wrote.
-        checkpoint: CheckpointId,
-    },
-    /// The version was restored.
-    VersionRestored {
-        /// The checkpoint the restore wrote.
-        checkpoint: CheckpointId,
+    /// Take an allow back: the block list refuses `host` again at the next request. `matter`
+    /// names the matter of a `Matter` allow and is left out for `Always`. Taking back an allow
+    /// that is not there does nothing. Answers `Done`, with no receipt; allowed whatever the
+    /// policy says. The main and settings windows send it.
+    RevokeAllowedSite {
+        /// The host, exactly as `HostQuery::AllowedSites` lists it.
+        host: String,
+        /// The allow's scope.
+        scope: AllowScope,
+        /// The allow's matter, for `Matter`; left out for `Always`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        matter: Option<MatterId>,
     },
 }

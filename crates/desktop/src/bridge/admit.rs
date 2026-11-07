@@ -15,6 +15,10 @@
 //! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
 //! main window's protection notice. Neither carries a field, and the host holds each answer
 //! until the set-up (with its administrator prompt) ends.
+//! Of the unsafe-site override's two (0053, PR 2), `main` sends
+//! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
+//! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
+//! agent shows or runs, may lift a block.
 
 use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
@@ -45,13 +49,15 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::CheckForUpdate {}
             // Protection (0051): retrying the set-up, or removing it.
             | HostCommand::RetryProtection {}
-            | HostCommand::RemoveSandboxSetup {} => Ok(()),
+            | HostCommand::RemoveSandboxSetup {}
+            // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
+            | HostCommand::RevokeAllowedSite { .. } => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
-                 check_for_update, retry_protection, remove_sandbox_setup and the connector \
-                 commands",
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site \
+                 and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -113,7 +119,11 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::CheckForUpdate {}
         // 0051: the protection notice's "Set up" and the removal; no field to check.
         | HostCommand::RetryProtection {}
-        | HostCommand::RemoveSandboxSetup {} => Ok(()),
+        | HostCommand::RemoveSandboxSetup {}
+        // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
+        // The host allows only the host of a notice it sent, and refuses while policy forbids.
+        | HostCommand::AllowBlockedSite { .. }
+        | HostCommand::RevokeAllowedSite { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

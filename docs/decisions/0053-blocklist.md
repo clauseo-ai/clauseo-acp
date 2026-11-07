@@ -19,8 +19,8 @@ with the trusted comment `clauseo-blocklist v1 generated=<RFC 3339 UTC> entries=
 real list has 391,962 entries (391,961 `p`, 1 `m`); the spec allows 2,000,000 entries and
 64 MiB.
 
-This is PR 1 of 2. PR 2 adds the lawyer's "Allow this site" override and its UI; its design is
-below so that PR 2 is mechanical.
+PR 1 built the list and its enforcement; PR 2 built the lawyer's "Allow this site" override at
+the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
 
 ## Decision
 
@@ -75,8 +75,10 @@ below so that PR 2 is mechanical.
   key that locks at true so an unreadable policy file never stops updates) lets a firm that
   blocks GitHub turn the fetch off. Then the host makes no request at all and enforces the stored
   copy or the bundled snapshot, whichever is newer; the block list stays on. Each round reads
-  the settings the actor last published (`Live`), so a change, a policy reload's included,
-  applies from the next round.
+  the settings the actor last published (`Live`), so a settings change the actor publishes
+  (`SettingsChanged`) applies from the next round. The policy file is read only when Clauseo
+  starts, so a policy change takes effect at the next start; a future runtime reload would
+  publish `SettingsChanged` and need nothing more here.
 - **Clock checks:** a list whose `generated` is more than a day ahead of the host's clock is
   refused when fetched and set aside when loaded at start, stored copy and bundled snapshot alike
   (a mistaken future date would otherwise freeze updates). A list in use more than 3
@@ -147,7 +149,8 @@ below so that PR 2 is mechanical.
 - A listed host gets 403 in the proxy's usual short answer; plain http's carries
   `Clauseo-Blocked: malware` or `phishing`. A CONNECT is refused with the plain 403, as the other
   refusals are. The agent sees an ordinary refusal.
-- PR 2's override is checked in the proxy's one method that asks the list, before the list.
+- PR 2's override is checked in the proxy's one method that asks the list, before the list
+  (below).
 
 ### The report and the lawyer's notice
 
@@ -176,23 +179,82 @@ below so that PR 2 is mechanical.
   on the block list thread, not on the start-up path), and a release built without the snapshot.
   Signature checking stays in the host; the proxy only receives a parsed list.
 
-### PR 2: the lawyer's override (designed here, built there)
+### PR 2: the lawyer's override (built)
 
 - **Commands:** `HostCommand::AllowBlockedSite { block_id, scope }` and
-  `HostCommand::RevokeAllowedSite { host, scope }`, with `scope` either `Matter` (the block's
-  matter) or `Always`; and
-  `HostQuery::AllowedSites`, answering the allowed sites with their scope, for Settings.
-- **Who may send them:** only the UI's principal. The desktop bridge admits them from the main
-  window (`AllowBlockedSite`) and the settings window (`RevokeAllowedSite`, the query) and from
-  nowhere else; the host refuses them from any other origin (an agent's tool call, the MCP
-  sidecar's broker, a future transport) with `command.invalid`. PR 2 tests each refusal.
-- **Policy:** refused with a new error code when `network.allow_unsafe_site_override` is false,
-  and `SiteBlocked.override_allowed` already tells the window not to offer it.
-- **Storage:** matter-scoped allows with the matter's remembered sites; `Always` in the host's
-  state, not in `settings.json`, so a firm policy file cannot be bypassed by editing settings.
-- **Logging:** each allow and revoke is logged by host, scope and matter.
-- **Enforcement:** the proxy's list-asking method consults the session's allowed set first; an
-  allowed host then goes through the port, private-address and allowlist checks as any host does.
+  `HostCommand::RevokeAllowedSite { host, scope, matter }`, with `scope` either `Matter` or
+  `Always` (`AllowScope`) and `matter` named exactly for `Matter`; and
+  `HostQuery::AllowedSites`, answering `QueryResult::AllowedSites`: each site's `host`,
+  `scope`, `matter` (for `Matter`) and `allowed_at`, `Always` first. Both commands answer
+  `Done` with no receipt.
+- **What an allow covers:** the exact host the notice named, as the proxy printed it, never a
+  host under it. The host keeps the notices it sent (`block_id` to host and matter,
+  `actor/allowed.rs`), each thread's latest 64 and 1024 in all; an allow names one by
+  `block_id`, so a client cannot pick the host, and an id the host no longer keeps (or never
+  sent) is `blocklist.notice_expired` (0003).
+- **Who may send them:** the commands reach the host only through `HostHandle::dispatch`,
+  which the desktop bridge alone calls; it admits by window label (`bridge/admit.rs`, 0019):
+  `AllowBlockedSite` from `main`, `RevokeAllowedSite` and the query from `main` and
+  `settings`, nothing from any other label (another window or a webview), with
+  `command.invalid`. No agent, tool call or MCP sidecar has a path to a host command, and the
+  `block_id` reaches app subscribers only. `bridge/tests/allowed_sites.rs` tests each window.
+- **Policy:** while `network.allow_unsafe_site_override` is false, `AllowBlockedSite` is
+  refused with `blocklist.override_off` (0003) and no stored allow is honoured: every view is
+  empty, and nothing is deleted. Revoking and listing work either way.
+- **Storage:** both scopes in the host's own `<data_dir>/blocklist/allowed.json`
+  (`{"v":1,"always":{host: ms},"matters":{id: {host: ms}}}`), written whole through
+  `write::replace_private_file`, never in `settings.json`, with the stored list's discipline
+  (`blocklist/disk.rs`): leftover temp files swept first, the folder synced after. Read at
+  start, capped at 1 MiB and 10,000 allows (the rest ignored, logged); a damaged or larger file
+  counts as no allows (logged). The writes run on the actor thread, fsync included, as
+  `connectors/hints.json`'s do: a small file, written only on the lawyer's act.
+- **Enforcement:** `ProxyConfig::allowed` (`clauseo_blocklist::Allowed`, empty by default) is
+  asked in `Ctx::blocked` (`proxy/server/blocked.rs`) before the list, by each name the
+  request carries; an allowed name skips the list only, and still meets the silent list, the
+  port, the private-address rule and the allowlist. `clauseo_host::AllowedSites::for_matter`
+  gives a launch the live view for its matter (its `Matter` allows and every `Always` one),
+  which the actor swaps after each allow, revoke and `SettingsChanged`, so a change reaches a
+  running proxy at its next request. The desktop keeps the shared `AllowedSites` as
+  `AllowedSitesInUse` beside `BlockListInUse`; R17 PR-D passes
+  `allowed.for_matter(<launch's matter>)` to `ProxyConfig::allowed`.
+- **Logging:** each allow and revoke logs one info line: the host, the scope and the matter id.
+
+#### PR 2 decisions
+
+- **Both scopes in one host file.** No per-matter memory of sites exists yet; the host's
+  per-matter state outside the store is a data-folder file keyed by matter id
+  (`connectors/hints.json`), so `Matter` allows follow it, beside `Always` ones.
+- **`RevokeAllowedSite` names the matter** of a `Matter` allow (`matter`, required for
+  `Matter` and refused for `Always`), since one host can be allowed in several matters.
+- **The code is `blocklist.override_off`,** not `settings.locked`: the key may be off by policy
+  or in `settings.json`, and the window needs to tell this refusal apart.
+- **An allow is written before it takes effect** (a failed write is `store.io` and allows
+  nothing); **a revoke takes effect first** (a failed write is `store.io`, and the site stays
+  blocked until a restart reads the old file), so a disk failure never leaves a site allowed
+  that the lawyer took back in this run.
+- **A revoke always writes the file,** even when memory no longer holds the allow, so retrying
+  a revoke whose write failed saves it and the allow does not come back at the next start.
+- **Allowing again keeps the first `allowed_at`;** revoking what is not there answers `Done`.
+- **The agent's fence denies `blocklist/`** (`agent/data_fence.rs`'s `DENIED` for Claude,
+  `agent/codex_fence.rs`'s `DATA_DENIED` for Codex) whether or not it exists at the launch, so
+  no agent reads or edits the stored list or the lawyer's allows.
+- **Notices are kept per thread** (the latest 64 of each, 1024 in all), so an agent looping in
+  one thread cannot push out another thread's notice before the lawyer acts on it; none is
+  dropped when its turn or session ends. An expired one is `blocklist.notice_expired`, which
+  the window words as "open the site again".
+- **A forgotten matter's allows are kept,** as its import brings the matter back.
+- **The views follow every `SettingsChanged` the actor publishes** (the same hook as the
+  updater's `Live`), so a settings change applies at the next request after it. The policy file
+  and `settings.json` are read only when Clauseo starts, and no command writes
+  `network.allow_unsafe_site_override`, so a change to it takes effect at the next start; a
+  future runtime reload would publish `SettingsChanged` and needs nothing more here.
+- **A revoke closes the open tunnels and forwards to a host the list still names,** as the
+  allowlist's revoke does: `Allowed::set` tells its watchers the hosts it removed, and the
+  proxy aborts each tunnel or forwarded request to one that is not allowed again and still
+  listed. A request that passed the list before the revoke and opens its tunnel after it is
+  refused as listed (the proxy compares `Allowed::generation` under its tunnel lock). An
+  allow is stored as `Name::text` prints the host, an IPv6 address without brackets. A list
+  update still closes nothing.
 
 ## Consequences
 

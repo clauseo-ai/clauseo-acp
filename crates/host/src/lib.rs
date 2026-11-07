@@ -33,6 +33,12 @@
 //!   Each round reads the settings as the actor last saw them (`network.unsafe_site_list_updates`
 //!   off skips the fetch; `network.upstream_proxy` routes it); [`block_list_is_stale`] says
 //!   whether the list in use is over 3 days old.
+//! - The lawyer's "Allow this site" (0053, PR 2; `actor/allowed.rs`): `AllowBlockedSite`
+//!   allows the exact host of a `SiteBlocked` notice the host keeps (each thread's latest 64),
+//!   for its matter or always; `RevokeAllowedSite` and `AllowedSites` take back and list. Stored in
+//!   `<data folder>/blocklist/allowed.json`, never in the settings; [`AllowedSites`] gives each
+//!   launch's proxy a live per-matter view, empty while `network.allow_unsafe_site_override`
+//!   is off.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
 //!   activity, `ForgetMatter` (which deletes nothing; an import of the folder brings the matter
@@ -260,7 +266,7 @@ pub use agent::login_link::{
 };
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
-pub use blocklist::{BlockListSeams, BlockListUpdate, block_list_is_stale};
+pub use blocklist::{AllowedSites, BlockListSeams, BlockListUpdate, block_list_is_stale};
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;

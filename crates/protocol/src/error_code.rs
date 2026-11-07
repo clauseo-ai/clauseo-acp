@@ -249,6 +249,12 @@ error_codes! {
     SandboxBlocked = "sandbox.blocked", retryable: false, meaning: "A Windows setting or \
         security tool blocks the sandbox (its set-up program is missing or was blocked, say), so \
         no agent was started; whoever looks after this computer can fix it.";
+    BlocklistOverrideOff = "blocklist.override_off", retryable: false, meaning: "Allowing a \
+        site on Clauseo's unsafe-site list is turned off (network.allow_unsafe_site_override is \
+        false, usually by the firm's policy), so nothing was allowed.";
+    BlocklistNoticeExpired = "blocklist.notice_expired", retryable: false, meaning: "The \
+        blocked-site notice an allow names is one the host no longer keeps (too old, or from \
+        before a restart), so nothing was allowed: allow the site from a new notice.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

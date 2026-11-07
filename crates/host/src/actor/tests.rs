@@ -75,7 +75,8 @@ fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
         | QueryResult::FolderSupport(_)
         | QueryResult::SkillPacks(_)
         | QueryResult::Update(_)
-        | QueryResult::Protection(_)) => panic!("not matters: {other:?}"),
+        | QueryResult::Protection(_)
+        | QueryResult::AllowedSites(_)) => panic!("not matters: {other:?}"),
     }
 }
 

@@ -139,6 +139,10 @@ export const HI = {
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
   "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.":
     "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र का इस्तेमाल नहीं कर सकता: कोई Windows सेटिंग या सुरक्षा सॉफ़्टवेयर इसे रोक रहा है, इसलिए कुछ भी शुरू नहीं हुआ। क्या करना है, यह सेटिंग्स › सुरक्षित कार्यक्षेत्र में बताया गया है।",
+  "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.":
+    "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+  "This notice has expired. Open the site again, then allow it from the new notice.":
+    "यह सूचना अब पुरानी हो चुकी है। वेबसाइट फिर से खोलें, फिर नई सूचना से उसे अनुमति दें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

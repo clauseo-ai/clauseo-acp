@@ -193,6 +193,8 @@ pub(crate) struct Setup {
     pub(crate) silent: Vec<&'static str>,
     /// The block list in use (unloaded by default).
     pub(crate) block: Arc<Current>,
+    /// The hosts allowed despite the list (none by default).
+    pub(crate) allowed: Arc<clauseo_blocklist::Allowed>,
     pub(crate) upstream: Upstream,
     pub(crate) limits: Limits,
     /// For `Upstream::System`: the host's proxy variables; the OS answers direct.
@@ -217,6 +219,7 @@ impl Default for Setup {
             allow: Vec::new(),
             silent: Vec::new(),
             block: Arc::new(Current::default()),
+            allowed: Arc::default(),
             upstream: Upstream::Direct,
             limits: Limits::default(),
             env: None,
@@ -267,6 +270,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
         allow: list(&setup.allow),
         silent: list(&setup.silent),
         block: setup.block,
+        allowed: setup.allowed,
         upstream: setup.upstream,
         denials: Arc::clone(&sink) as Arc<dyn DenialSink>,
         record: Some(Arc::new(move |exchange: &Exchange| {

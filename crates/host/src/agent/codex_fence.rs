@@ -85,14 +85,16 @@ const CODEX_HOME_DENIED: [&str; 4] = [
 
 /// The folders under `<data>` no Codex shell needs that no `Locations` accessor names: the
 /// skill packs' sources, the matters' store, the counts, the Windows sandbox's ledger, the
-/// limits reader's state and the browser's config.
-const DATA_DENIED: [&str; 6] = [
+/// limits reader's state, the browser's config, and the block list's store and the lawyer's
+/// allowed sites.
+const DATA_DENIED: [&str; 7] = [
     "skill-packs",
     "matters",
     "counts",
     "sandbox",
     "limits",
     "browser",
+    "blocklist",
 ];
 
 /// Under `<data>/agents`: the shared runtime, downloads, npm cache and sign-in shim, and the npm

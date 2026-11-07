@@ -177,6 +177,8 @@ pub(crate) fn publish(actor: &mut Actor, event: &HostEvent) {
     if let HostEvent::SettingsChanged(_) = event {
         // The block list's next round reads the settings as they are now.
         crate::blocklist::refresh(actor);
+        // The allowed sites follow `network.allow_unsafe_site_override` (PR 2).
+        super::allowed::refresh(actor);
     }
     if actor.app_subs.is_empty() {
         return;

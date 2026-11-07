@@ -134,6 +134,7 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
         allow: Allowlist::exact("example.com")?,
         silent: Allowlist::default(),
         block: Arc::default(),
+        allowed: Arc::default(),
         upstream: Upstream::System,
         denials: Arc::new(Quiet),
         record: None,

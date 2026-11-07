@@ -1,5 +1,6 @@
 //! The settings the updater reads each round, shared with the actor, which puts the effective
-//! settings in on every settings change (`actor/app.rs`'s `publish` of `SettingsChanged`).
+//! settings in on every settings change (`actor/app.rs`'s `publish` of `SettingsChanged`). The
+//! policy file is read only at start, so a policy change reaches it at the next start.
 
 use std::sync::{Arc, PoisonError, RwLock};
 

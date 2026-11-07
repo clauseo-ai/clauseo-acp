@@ -43,8 +43,8 @@ fn missing(result: &io::Result<Vec<u8>>) -> bool {
     matches!(result, Err(error) if error.kind() == io::ErrorKind::NotFound)
 }
 
-/// Reads `path`, failing when it holds more than `cap` bytes.
-fn read_capped(path: &Path, cap: u64) -> io::Result<Vec<u8>> {
+/// Reads `path`, failing (`InvalidData`) when it holds more than `cap` bytes.
+pub(super) fn read_capped(path: &Path, cap: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)?
         .take(cap.saturating_add(1))

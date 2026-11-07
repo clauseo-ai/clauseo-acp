@@ -47,6 +47,7 @@ pub(super) async fn open(
     #[cfg(unix)]
     crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
     let heads = store.heads().await?;
+    let allowed = Box::new(super::allowed::AllowState::new(parts.effective.data_dir()));
     let tails = store.tail_times().await?.into_iter().collect();
     let Registry {
         matters,
@@ -111,6 +112,7 @@ pub(super) async fn open(
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
         blocked: Box::default(),
+        allowed,
         blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),
         triage: super::triage::Triage::new(),

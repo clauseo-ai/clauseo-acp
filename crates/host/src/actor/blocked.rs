@@ -169,6 +169,10 @@ pub(super) fn site_blocked(actor: &mut Actor, session: SessionKey, site: Blocked
             return;
         }
     };
+    // An allow names the notice by its id (`allowed.rs`); a re-sent one is kept once.
+    actor
+        .allowed
+        .noticed(block_id, &site.host, session.matter, thread);
     let event = HostEvent::SiteBlocked {
         block_id,
         matter: session.matter,

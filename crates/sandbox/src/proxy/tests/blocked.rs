@@ -34,7 +34,7 @@ fn list(made: &str, entries: &[&str]) -> BlockList {
     parse_plain(text.as_bytes(), header).unwrap()
 }
 
-fn current() -> Arc<Current> {
+pub(super) fn current() -> Arc<Current> {
     Arc::new(Current::new(list(MADE, ENTRIES)))
 }
 
@@ -54,7 +54,7 @@ fn block_rig(allow: &[&'static str], silent: &[&'static str]) -> Rig {
     rig
 }
 
-fn blocked(host: &str, port: u16, listed: &str, tag: Tag) -> Denial {
+pub(super) fn blocked(host: &str, port: u16, listed: &str, tag: Tag) -> Denial {
     blocked_at(host, port, listed, tag, MADE)
 }
 
@@ -77,7 +77,7 @@ fn connect_head(rig: &Rig, target: &str) -> String {
 }
 
 /// Neither DNS nor a connect happened.
-fn no_network(rig: &Rig) {
+pub(super) fn no_network(rig: &Rig) {
     assert_eq!(rig.net.resolved(), Vec::<String>::new());
     assert_eq!(rig.net.dialled(), Vec::new());
 }
