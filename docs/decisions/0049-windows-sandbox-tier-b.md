@@ -415,6 +415,10 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   or empty nothing is handed over and that is logged; the item stays listed, and PR4c's reuse
   hold keeps its owner from serving another matter. A lawyer's own item keeps its permissions
   as they were. A hand-back that fails is logged and leaves the item set aside.
+- **The per-machine uninstaller's copy of itself in the user's `%TEMP%`**, started elevated
+  before any script can act ("Admin copy", "Also open"): same-user code can swap it between the
+  copy and the start. The installers' own plug-ins load from an administrators-only folder
+  (`safe_temp.nsh`); the uninstaller's don't yet. Owner: stage F's uninstaller decision.
 
 ### Accepted risk: two hijacked agents at once
 
@@ -567,12 +571,45 @@ started elevated, by the app or by the uninstall hook.
   one step (`schtasks`, an HKCU `Run` key, WMI `Win32_Process.Create`), so any same-user code,
   a tier-C agent's included, can race. A same-user process can also fake that window and so block
   the elevated step: a denial of service only, accepted.
+- **Plug-ins load from an administrators-only folder.** NSIS extracts every plug-in DLL into
+  `$PLUGINSDIR`, which its first plug-in call makes inside `$TEMP`: for an elevated split-token
+  administrator, the user's own `%TEMP%` (HKCU `Environment` picks it). NSIS locks that plug-in
+  folder itself, but the user's code can rename it inside its writable parent and put its own
+  folder and DLL at the name before the elevated load. So the first thing every elevated path does
+  (`safe_temp.nsh`, `CLAUSEO_SAFE_PLUGINSDIR`): the per-machine installer at the top of `.onInit`
+  (template block `admin-section`, before `SetContext`'s `${RunningX64}`, the language picker and
+  `SemverCompare`), and the per-user elevated step once it has its switch, though it loads no
+  plug-in. It makes a folder named by `GetTempFileName` under
+  `%ProgramFiles%\Clauseo\installer-temp` (`$PROGRAMFILES64`, from HKLM), sets owner
+  Administrators and a protected DACL (Administrators and SYSTEM full) with `icacls`, checking
+  both exit codes, then sets `$PLUGINSDIR` and `$TEMP` to it. NSIS skips its own plug-in folder
+  when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and deletes `$PLUGINSDIR`, and only
+  it, at exit (`Main.c:470-489`). The per-machine installer also points the environment's `TEMP`
+  and `TMP` there, so what it starts elevated (the WebView2 bootstrapper, `--adopt`, the old
+  uninstaller its reinstall page runs in place) uses it too. The folder can't be checked as ours
+  without a plug-in; it is ours because only administrators can create anything under Program
+  Files, so no one else could have made it or a link on its path first. Any failure stops before
+  anything loads: the per-machine installer exits 25 (a box unless `/S`), the per-user step 99. It
+  runs on every per-machine run, SYSTEM's (Intune) included: plain NSIS can't read its token, and
+  the environment it could read (`USERNAME`, `TEMP`) is the user's to set, so it can't tell SYSTEM
+  from a lawyer, and for SYSTEM the folder is harmless. `$WINDIR\SystemTemp` would serve SYSTEM
+  but isn't on every supported Windows, so Program Files is used everywhere.
 - **Also open: the NSIS stub's own `%TEMP%` work.** Before `.onInit`, so before any script
   runs, the stub creates the `%TEMP%` folder, which comes from the user's environment (HKCU
   `Environment`'s `TEMP` picks the path), makes one `nsX????.tmp` in it and deletes it (NSIS 3.11
-  `Main.c:71-80`, `:259-284`). Elevated, that gives an admin-owned empty folder at a path the user's code chose,
-  and a one-shot race on the delete. No way to run code through it is known; the per-machine
-  installer had the same exposure, and the script can't prevent it.
+  `Main.c:71-80`, `:259-284`). Elevated, that gives an admin-owned empty folder at a path the
+  user's code chose, and a one-shot race on the delete. No way to run code through it is known;
+  the per-machine installer had the same exposure, and the script can't prevent it.
+- **Also open: the per-machine uninstaller runs a copy of itself from `%TEMP%`.** Started from
+  Apps & Features, its `UninstallString` is the template's `"<install folder>\uninstall.exe"`,
+  with no `_?=`. The elevated stub then, before any script, makes `%TEMP%\~nsu<n>.tmp` (locked to
+  Administrators, but inside the user's folder), copies itself there as `Un.exe` and starts that
+  copy elevated with `_?=` (NSIS 3.11 `Main.c:322-420`, makensis `build.cpp:2329-2330`); the copy's
+  `un.onInit` then loads `nsis_tauri_utils` and System from its own `$PLUGINSDIR` in `%TEMP%`.
+  The user's code can rename the `~nsu` folder between the copy and the start, so what runs
+  elevated is theirs; no `un.onInit` code can come first. The installer's reinstall page runs the
+  old uninstaller in place (`_?=`), so it isn't affected. The fix (`_?=` in `UninstallString` with
+  the uninstaller deleted at restart, or a relaunch from the administrators-only folder) is open.
 - Keeping the copy current after an app update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)

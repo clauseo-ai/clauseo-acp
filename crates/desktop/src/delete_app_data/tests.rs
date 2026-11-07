@@ -9,6 +9,7 @@ mod admin_copy_contract;
 mod admin_copy_hook;
 mod make;
 mod nsis_names;
+mod safe_temp;
 mod sandbox_link;
 mod set_aside;
 mod setup_exe_missing;

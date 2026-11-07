@@ -35,7 +35,9 @@
 ;
 ; The per-machine installer is elevated already: its NSIS_HOOK_POSTINSTALL writes the copy to the
 ; same folder, whatever $INSTDIR is, and runs `--adopt --per-machine` (CLAUSEO_ADMIN_COPY_MACHINE)
-; every time, updates included. Its box shows only interactively, never under /S, /P or /UPDATE.
+; every time, updates included, unless Clauseo's main window is there (exit 24, any mode). Its box
+; shows only interactively, never under /S, /P or /UPDATE. It loads its plug-ins from its own
+; folder under Program Files, made first in .onInit (CLAUSEO_MACHINE_START, safe_temp.nsh).
 
 ; The private arguments; the folder the copy goes to ($PROGRAMFILES64 is the 64-bit Program
 ; Files from this 32-bit installer, the folder --adopt reads from FOLDERID_ProgramFiles); and this
@@ -91,14 +93,18 @@
 ; (CLAUSEO_ADMIN_TIMED_OUT), so the set-up didn't finish.
 !define CLAUSEO_EXIT_ADMIN_COPY_SKIPPED 22
 !define CLAUSEO_EXIT_ADMIN_COPY_FAILED 23
-; Only interactively (a /S per-user install exits 22 before it looks): 24, the per-user install
-; found Clauseo running and didn't set Safe workspace up.
+; 24: the install found Clauseo running and didn't set Safe workspace up. Per user only
+; interactively (a /S per-user install exits 22 before it looks); per machine in every mode. 25,
+; the per-machine installer couldn't make its temporary folder, is CLAUSEO_EXIT_TEMP_FAILED
+; (safe_temp.nsh).
 !define CLAUSEO_EXIT_APP_RUNNING 24
 ; 1 once a wait for the set-up timed out (outcome 7, or CLAUSEO_ADMIN_TIMED_OUT per machine): the
 ; finish page then unticks and hides its "Run Clauseo" box (CLAUSEO_FINISH_SHOW).
 Var ClauseoAdminTimedOut
 
-; The elevated instance's branch, which the template inserts first in .onInit.
+; The elevated installers' protected temporary folder, made first in each elevated path, and the
+; elevated instance's branch, which the template inserts first in .onInit.
+!include "${__FILEDIR__}\safe_temp.nsh"
 !include "${__FILEDIR__}\admin_elevated.nsh"
 
 ; Writes the set-up program from this installer's payload into CLAUSEO_ADMIN_DIR; the error flag
@@ -147,7 +153,8 @@ Var ClauseoAdminTimedOut
 
 ; The per-machine installer's: CLAUSEO_ADMIN_EXTRACT, then `--adopt ARGS` started directly
 ; (CreateProcessW, no window, in the admin folder, which SetOutPath made current) and waited for
-; up to CLAUSEO_ADMIN_WAIT_MS. Plug-ins are the template's own there. $R8: the exit code,
+; up to CLAUSEO_ADMIN_WAIT_MS. Plug-ins are the template's own there, loaded from the run's own
+; folder under Program Files (safe_temp.nsh). $R8: the exit code,
 ; CLAUSEO_ADMIN_TIMED_OUT past the wait (it finishes by itself), or CLAUSEO_ADMIN_NOT_RUN. A
 ; 32-bit STARTUPINFOW is 68 bytes (cb first), a PROCESS_INFORMATION 16 (hProcess, hThread, ...).
 ; Uses $1, $2, $R5, $R7 and $R9.
@@ -441,8 +448,9 @@ Var ClauseoAdminTimedOut
 ; The per-machine installer's admin copy (header), every run. The copy goes to CLAUSEO_ADMIN_DIR
 ; whatever $INSTDIR is; --adopt takes any $INSTDIR that only SYSTEM, Administrators or
 ; TrustedInstaller can change. A box only interactively: never under /S (exit 23, also when the
-; wait ends first), /P or /UPDATE. A newer copy already there stays, with a details line. Keeps
-; $0 to $4 and $R1; uses $R5, $R7, $R8 and $R9, which NSIS_HOOK_POSTINSTALL keeps.
+; wait ends first), /P or /UPDATE. A newer copy already there stays, with a details line. Clauseo
+; running touches nothing (exit 24 in every mode). Keeps $0 to $4 and $R1; uses $R5, $R7, $R8 and
+; $R9, which NSIS_HOOK_POSTINSTALL keeps.
 !macro CLAUSEO_ADMIN_COPY_MACHINE
   Push $0
   Push $1
@@ -450,18 +458,33 @@ Var ClauseoAdminTimedOut
   Push $3
   Push $4
   Push $R1
-  !insertmacro CLAUSEO_RECORD_CHECK ""
-  ${If} $R1 = 1
-    ; Another user's per-user install placed the copy: --adopt would refuse (2), and the copy stays.
-    StrCpy $R8 ${CLAUSEO_ADOPT_OTHER_ACCOUNT}
-    !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
-  ${ElseIf} $R1 = 2
-    DetailPrint "$(adminCopyNewerKept)"
+  ; Clauseo running in this session (its main window, hidden or minimised included): nothing
+  ; written, exit 24, a box only interactively. In every mode, /S included: SYSTEM's run (Intune,
+  ; session 0) sees no user's window, which is harmless; a lawyer's own /S run is refused. A
+  ; correctness guard, not a security boundary, as in the per-user installer.
+  FindWindow $R5 "${CLAUSEO_MAIN_WINDOW_CLASS}"
+  ${If} $R5 <> 0
+    DetailPrint "$(adminCopyAppRunning)"
+    SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}
+    ${IfNot} ${Silent}
+    ${AndIf} $PassiveMode <> 1
+    ${AndIf} $UpdateMode <> 1
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(adminCopyAppRunning)"
+    ${EndIf}
   ${Else}
-    DetailPrint "$(adminCopyWorking)"
-    !insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir "$INSTDIR"'
-    SetOutPath "$INSTDIR"
-    !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
+    !insertmacro CLAUSEO_RECORD_CHECK ""
+    ${If} $R1 = 1
+      ; Another user's per-user install placed the copy: --adopt would refuse (2); the copy stays.
+      StrCpy $R8 ${CLAUSEO_ADOPT_OTHER_ACCOUNT}
+      !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
+    ${ElseIf} $R1 = 2
+      DetailPrint "$(adminCopyNewerKept)"
+    ${Else}
+      DetailPrint "$(adminCopyWorking)"
+      !insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir "$INSTDIR"'
+      SetOutPath "$INSTDIR"
+      !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
+    ${EndIf}
   ${EndIf}
   Pop $R1
   Pop $4

@@ -2,9 +2,10 @@
 //! tauri-cli 2.12.2's own plus a known list of named blocks: `no-solid` (no /SOLID, so nothing is
 //! unpacked into %TEMP%), `finish-show` and `finish-show-function` (the finish page hides "Run
 //! Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs the
-//! elevated branch of `admin_elevated.nsh`; that branch loads no plug-in, calls no function and
-//! reads nothing the lawyer can write before it extracts. Clauseo's main window class is the one
-//! the branch looks for.
+//! elevated branch of `admin_elevated.nsh` and the per-machine installer's start
+//! (`safe_temp.nsh`, tested in `safe_temp.rs`); that branch loads no plug-in, calls no function
+//! and reads nothing the lawyer can write before it extracts. Clauseo's main window class is the
+//! one the branch looks for.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -55,19 +56,19 @@ const BLOCKS: [Block; 4] = [
     },
 ];
 
-const TEMPLATE: &str = "windows/nsis/installer.nsi";
+pub(super) const TEMPLATE: &str = "windows/nsis/installer.nsi";
 
 /// A block found in the template: its name, the index in the kept lines where it stood, and its
 /// lines (trimmed, markers left out).
-struct Found {
-    name: String,
-    at: usize,
-    lines: Vec<String>,
+pub(super) struct Found {
+    pub(super) name: String,
+    pub(super) at: usize,
+    pub(super) lines: Vec<String>,
 }
 
 /// The template's blocks, and its lines with every block taken out. Panics on an unclosed or
 /// mismatched marker.
-fn split_blocks(text: &str) -> (Vec<Found>, Vec<String>) {
+pub(super) fn split_blocks(text: &str) -> (Vec<Found>, Vec<String>) {
     let mut blocks = Vec::new();
     let mut kept: Vec<String> = Vec::new();
     let mut open: Option<Found> = None;
@@ -97,7 +98,7 @@ fn split_blocks(text: &str) -> (Vec<Found>, Vec<String>) {
 }
 
 /// The block named `name`.
-fn block_named<'a>(blocks: &'a [Found], name: &str) -> &'a Found {
+pub(super) fn block_named<'a>(blocks: &'a [Found], name: &str) -> &'a Found {
     blocks
         .iter()
         .find(|block| block.name == name)
@@ -147,7 +148,7 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
 }
 
 /// The code lines of the block named `name`, comments and blank lines left out.
-fn block_code<'a>(blocks: &'a [Found], name: &str) -> Vec<&'a str> {
+pub(super) fn block_code<'a>(blocks: &'a [Found], name: &str) -> Vec<&'a str> {
     block_named(blocks, name)
         .lines
         .iter()
@@ -228,6 +229,9 @@ fn the_admin_section_block_only_inserts_the_elevated_branch_first_in_on_init() {
             "!ifmacrodef CLAUSEO_ELEVATED_BRANCH",
             "!insertmacro CLAUSEO_ELEVATED_BRANCH",
             "!endif",
+            "!ifmacrodef CLAUSEO_MACHINE_START",
+            "!insertmacro CLAUSEO_MACHINE_START",
+            "!endif",
         ]
     );
     // First in .onInit: the marker is the line right after `Function .onInit`.
@@ -241,7 +245,7 @@ fn the_admin_section_block_only_inserts_the_elevated_branch_first_in_on_init() {
 }
 
 /// The macros `name` inserts, itself included, through every `!insertmacro` in `code`.
-fn reached<'a>(code: &'a [String], name: &str) -> Vec<(String, &'a [String])> {
+pub(super) fn reached<'a>(code: &'a [String], name: &str) -> Vec<(String, &'a [String])> {
     let mut seen = BTreeSet::new();
     let mut todo = vec![name.to_owned()];
     let mut out = Vec::new();
@@ -285,7 +289,7 @@ const REFUSED: [&str; 18] = [
 ];
 
 /// The first of `REFUSED` that `line` holds.
-fn refused_word(line: &str) -> Option<&'static str> {
+pub(super) fn refused_word(line: &str) -> Option<&'static str> {
     REFUSED.into_iter().find(|word| line.contains(word))
 }
 
@@ -319,9 +323,16 @@ fn the_elevated_branch_loads_no_plug_in_calls_no_function_and_reads_nothing_the_
         "CLAUSEO_NEWER_THAN_THIS",
         "CLAUSEO_TAKE_NUMBER",
         "CLAUSEO_ADMIN_COPY",
+        "CLAUSEO_SAFE_PLUGINSDIR",
     ] {
         assert!(names.contains(expected), "{expected}: {names:?}");
     }
+    // The one place $PLUGINSDIR and $TEMP may appear: the folder's macro setting them, which
+    // writes them and reads nothing from them.
+    let sets = [
+        "UnsafeStrCpy $PLUGINSDIR \"$0\"",
+        "UnsafeStrCpy $TEMP \"$0\"",
+    ];
     // LogicLib's words, which expand to plain jumps; anything else in ${...} is a define.
     let logic = [
         "If", "IfNot", "ElseIf", "Else", "EndIf", "AndIf", "OrIf", "Do", "Loop", "ExitDo", "Errors",
@@ -329,6 +340,9 @@ fn the_elevated_branch_loads_no_plug_in_calls_no_function_and_reads_nothing_the_
     for (name, body) in &macros {
         for line in *body {
             assert!(!line.starts_with("Call "), "{name}: {line}");
+            if name == "CLAUSEO_SAFE_PLUGINSDIR" && sets.contains(&line.as_str()) {
+                continue;
+            }
             if let Some(word) = refused_word(line) {
                 panic!("{name}: {word} in {line}");
             }
@@ -361,6 +375,7 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
             "SetErrorLevel ${CLAUSEO_ADMIN_APP_RUNNING}",
             "Quit",
             "${EndIf}",
+            "!insertmacro CLAUSEO_SAFE_PLUGINSDIR",
             "!insertmacro CLAUSEO_CHECK_SID $R2",
             "StrCpy $R4 \"\"",
             "${If} $R0 = 1",

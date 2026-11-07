@@ -19,9 +19,11 @@ pub(super) fn code_of(relative: &str) -> Vec<String> {
         .collect()
 }
 
-/// The code lines of `admin_copy.nsh` and then `admin_elevated.nsh`, which it includes.
+/// The code lines of `admin_copy.nsh`, then `safe_temp.nsh` and `admin_elevated.nsh`, which it
+/// includes.
 pub(super) fn admin_code() -> Vec<String> {
     let mut code = code_of("windows/admin_copy.nsh");
+    code.extend(code_of("windows/safe_temp.nsh"));
     code.extend(code_of("windows/admin_elevated.nsh"));
     code
 }
@@ -189,7 +191,8 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
     assert_eq!(opened, closed, "{machine:?}");
     let admin = admin_code();
     let body = macro_body(&admin, "CLAUSEO_ADMIN_COPY_MACHINE");
-    // The record first: another user's copy stays (failed), a newer copy stays (a line).
+    // Clauseo running first (nothing written, exit 24), then the record: another user's copy
+    // stays (failed), a newer copy stays (a line).
     let expected = [
         "Push $0",
         "Push $1",
@@ -197,6 +200,16 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "Push $3",
         "Push $4",
         "Push $R1",
+        "FindWindow $R5 \"${CLAUSEO_MAIN_WINDOW_CLASS}\"",
+        "${If} $R5 <> 0",
+        "DetailPrint \"$(adminCopyAppRunning)\"",
+        "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
+        "${IfNot} ${Silent}",
+        "${AndIf} $PassiveMode <> 1",
+        "${AndIf} $UpdateMode <> 1",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+        "${EndIf}",
+        "${Else}",
         "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
         "${If} $R1 = 1",
         "StrCpy $R8 ${CLAUSEO_ADOPT_OTHER_ACCOUNT}",
@@ -208,6 +221,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "!insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir \"$INSTDIR\"'",
         "SetOutPath \"$INSTDIR\"",
         "!insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS",
+        "${EndIf}",
         "${EndIf}",
         "Pop $R1",
         "Pop $4",
@@ -366,17 +380,39 @@ fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     let firm = read("../../docs/firm-it.md");
     assert_eq!(
         firm_it_codes(&firm, "What a silent (`/S`) install can return:"),
-        [22, 23]
+        [22, 23, 24, 25]
     );
     assert_eq!(
         firm_it_codes(&firm, "What an interactive install can also return:"),
         [24]
     );
-    // 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait ran out.
+    // Per user, 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait
+    // ran out.
     let ask = macro_body(&code, ASK);
     let silent = line_with(ask, &["${ElseIf} ${Silent}"]);
     let interactive = silent + line_with(&ask[silent..], &["${Else}"]);
     assert!(interactive < line_with(ask, &["SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}"]));
+    // Per machine, 24 in every mode: set before the box's mode test, not inside it.
+    let machine = macro_body(&code, "CLAUSEO_ADMIN_COPY_MACHINE");
+    assert_run(
+        machine,
+        &[
+            "${If} $R5 <> 0",
+            "DetailPrint \"$(adminCopyAppRunning)\"",
+            "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
+            "${IfNot} ${Silent}",
+        ],
+    );
+    // 25 in every mode, the box skipped under /S by /SD.
+    let temp = macro_body(&code, "CLAUSEO_SAFE_PLUGINSDIR");
+    assert_run(
+        temp,
+        &[
+            "!if \"${INSTALLMODE}\" == \"perMachine\"",
+            "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",
+        ],
+    );
     let says = macro_body(&code, "CLAUSEO_ADMIN_COPY_MACHINE_SAYS");
     assert_run(
         says,
