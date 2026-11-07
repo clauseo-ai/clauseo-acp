@@ -86,7 +86,8 @@ pub(super) trait Volume {
     /// while that is empty, never one of the first `kept` parts (`set-aside` and the matter's
     /// folder): a restore's emptied pass folder and the `within` folders in it. Each opened as
     /// for [`Volume::move_back`], refused if a link, and deleted only on its own handle, which
-    /// fails for a folder holding anything; that, or a folder gone, ends it.
+    /// fails for a folder holding anything; that, or a folder gone, ends it. The restore counts
+    /// in `kept` every folder that is itself an item still listed ([`kept_levels`]).
     fn remove_emptied(
         &self,
         sandbox: &Path,
@@ -262,14 +263,43 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     // Only now, with the manifest listing the item no more, the folders it leaves empty go, so a
     // crash never leaves a manifest naming a folder that is gone. One left (not empty, or not
     // removed) only means the uninstaller keeps the set-aside; it never fails the restore.
+    // Never a folder that is itself an item still listed (a move reuses a folder already there):
+    // the removal stops below the deepest such folder on the way.
     let parts = place.parts(&found.folder, &found.within);
-    if let Err(failure) = volume.remove_emptied(&place.sandbox, &parts, 2) {
+    let listed: Vec<Vec<OsString>> = manifest
+        .entries
+        .iter()
+        .chain(&manifest.intents)
+        .map(|item| {
+            let mut path = place.parts(&item.folder, &item.within);
+            path.push(item.name.clone());
+            path
+        })
+        .collect();
+    let kept = kept_levels(&parts, &listed, 2);
+    if let Err(failure) = volume.remove_emptied(&place.sandbox, &parts, kept) {
         tracing::warn!(%failure, "a restore's emptied set-aside folder stays");
     }
     // The item is back and listed no more, so a failure here doesn't undo the restore; the
     // next launch's apply hands a pool user's protected item back before its deny anyway.
     hand_over(volume, &found.from, "a restored item");
     Ok(())
+}
+
+/// How many leading folders of `parts` a restore's removal must keep: at least `kept`, and every
+/// folder down to the deepest one that is the path of an item in `listed` (parts compared
+/// ignoring ASCII case, as NTFS matches names).
+pub(super) fn kept_levels(parts: &[OsString], listed: &[Vec<OsString>], kept: usize) -> usize {
+    let same = |a: &[OsString], b: &[OsString]| {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.eq_ignore_ascii_case(y))
+    };
+    (kept + 1..=parts.len())
+        .rev()
+        .find(|end| {
+            let folder = parts.get(..*end).unwrap_or_default();
+            listed.iter().any(|item| same(folder, item))
+        })
+        .unwrap_or(kept)
 }
 
 /// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.
