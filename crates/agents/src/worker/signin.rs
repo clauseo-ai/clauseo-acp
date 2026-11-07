@@ -21,7 +21,7 @@ use crate::state::{AgentsEvent, Installed};
 
 mod account;
 
-pub(super) use self::account::{reserve_read, start_account};
+pub(super) use self::account::{answer_of, cancel_of, reserve_read, start_account};
 
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
 #[derive(Debug)]

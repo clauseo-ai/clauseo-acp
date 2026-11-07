@@ -723,31 +723,61 @@ changes (`setup/identity.rs`).
   `identity.json` reads as a first run. Sessions will be denied writes to `<data_dir>/agents/`
   once the sandbox's enforcement lands (S14/S15, 0051 PR-D/E); today it is not enforced at
   launch (`clauseo_sandbox`'s `detect.rs` reports `NotBuilt`), so see the known gap below.
-- *Refresh-on-check (Codex).* A Codex check's `account/read` sends `refreshToken: true`
-  (`Agents::read_account_refreshed`; the same one request, no other round trip) so Codex
-  refreshes the tokens with `OpenAI` before it names the account. Desktop keeps the last
-  confirmed stamp of `auth.json` (metadata only) and forces only on the first check since
-  start or when the stamp is not the confirmed one; an unchanged stamp reads as before. After a
-  forced check that confirms the account, the stamp after the read is the confirmed one, so
-  Codex's own rewrite of the file forces nothing (the change still gets one plain check). A
-  login file last written under 60 s ago (a session's own refresh) is read plain now, and one
-  forced re-check is due at its last write plus 60 s; plain again, with nothing more due, if the
-  file changed by then. A forced read with no answer (offline, a timeout, a proxy down) falls
-  back to the plain read, which decides as before, and one forced re-check is due 60 s later: a
-  network blip refuses nothing. Only a definite answer refuses: another account
-  (`signin.account_changed`), or a refresh refused or naming no account
-  (`agent.identity_unknown`). One forced refresh runs at a time in the whole process; a second
-  check of the same home takes the first one's answer. Logs use fixed words ("identity: forced
-  refresh", "identity: refresh skipped, login just changed", "identity: forced refresh had no
-  answer; unforced check used"). Claude's checks force nothing.
+- *Refresh-on-check (Codex).* A Codex check's `account/read` may send `refreshToken: true`
+  (`Agents::read_account_refreshed`; the same one request) so Codex refreshes the tokens with
+  `OpenAI` first. Codex 0.162.1 answers that read from the stored `id_token` whatever the
+  refresh did (`get_account` ignores its outcome), but every refresh that succeeds rewrites
+  `auth.json` in place (6/6 in stage B). Desktop keeps the last confirmed stamp of `auth.json`
+  (metadata only, never the contents); any other stamp is *pending*, and only a forced read
+  confirms it, never a plain one.
+  - *Confirmed* takes both: the stamp advanced during the forced read (another stamp just after
+    the reply than just before the request), no later than the reply (its last write and, on
+    Unix, its ctime, against the system clock as the reply came, so a write after the reply is
+    not taken for the rewrite); then one plain `account/read` of the rewritten file names the
+    recorded account. That stamp is the confirmed one, so Codex's own rewrite forces nothing
+    (the change still gets one plain check). Another account there is `signin.account_changed`,
+    the agents stopped: the one definite refusal of a forced read.
+  - *Unconfirmed, never refused:* a forced read that rewrote nothing (the refresh refused or
+    skipped), had no answer, timed out, or got any JSON-RPC error but the one below. Its own
+    answer (with no rewrite) or the plain fallback (otherwise) decides this launch as a plain
+    read does: the same account lets it go, another is a change, no answer is unknown. The stamp
+    stays pending and nothing else changes.
+  - *Codex's refused login.* The one JSON-RPC error mapped as an answer, by
+    `codex::identity::rpc_error_kind` for forced and plain reads alike: `-32603` whose message
+    starts "workspace routing discovery unauthorized" (0.162.1's `workspace_routing.rs:64`) is
+    `AccountRead::Refused`, unknown (`agent.identity_unknown`), never a change and no teardown.
+    Every other error is no answer, never no account: an offline app-server answers `-32603`
+    "workspace routing discovery failed" (`workspace_routing.rs:62`) to forced and plain reads.
+  - *When it forces.* While pending, at most one forced refresh per 60 s, counted from Clauseo's
+    last: a check forces once 60 s have passed since it (at once if they have), however often
+    the file is written, and reads plain inside the minute; a look asks for the forced check
+    when it is due. A forced read that did not confirm (or Codex's refused login) is tried again
+    with a backoff of 30 s, 1 min, 2 min, 5 min, then every 5 min, never sooner than 60 s after
+    the last force. The first check since start forces.
+  - *One 40 s bound per check.* The forced read gets 25 s of it, then is given up and its future
+    dropped, which cancels the read and kills its app-server's tree (a stalled network hangs it
+    past 150 s); the plain read after it gets what is left.
+  - One forced refresh runs at a time in the whole process; a second check of the same home
+    takes the first one's answer. Logs use fixed words with the agent id ("identity: forced
+    refresh", "identity: forced refresh rewrote the login; reading it", "identity: forced
+    refresh rewrote nothing; not confirmed", "identity: forced refresh had no answer; unforced
+    check used", "identity: forced refresh refused the login", "identity: login confirmed by a
+    forced refresh", "identity: refresh held; login pending a forced check", "identity: forced
+    refresh to be tried again"). Claude's checks force nothing.
 - **Known gap (R17).** The code is public, so assume an attacker knows the check.
   - *Token-only swap: closed for Codex by refresh-on-check.* Codex's plain `account/read` reads
     the email from the stored `id_token` without contacting the server, so swapping the access
     and refresh tokens under the old `id_token` would pass a plain read until Codex's next
     refresh (which the file's `last_refresh` lets an attacker put off by days). A check of a
-    changed login file forces the refresh, so `OpenAI` answers for the tokens. What is left: a
-    check that the 60 s guard holds off reads plain, and its forced re-check comes a minute
-    later; a forced read with no answer is decided on the plain read until its one retry.
+    changed login file forces the refresh, and only a rewrite whose file then names the
+    recorded account confirms it. What is left: a launch inside the 60 s between forced
+    refreshes, or while forcing is unconfirmed (offline, a refresh Codex refused or skipped), is
+    decided on a plain read until a forced one confirms; and a write that lands during a forced
+    read, before its reply, can pass for Codex's rewrite (its file's plain read still has to
+    name the recorded account). Codex 0.162.1 discards the forced refresh's outcome, so a
+    refused or revoked refresh isn't reported; a revoked login shows up only when a turn fails
+    with `agent.auth_required` (#611's re-check path), or once `account/read` itself answers
+    "workspace routing discovery unauthorized".
     Claude is presumed open: its status email likely comes from `.claude.json`, which a swap
     doesn't touch.
   - *The data folder, until the sandbox is enforced.* Until S14/S15's enforcement lands (0051
@@ -759,7 +789,8 @@ changes (`setup/identity.rs`).
   - *A firm-managed agent isn't identity-checked:* it still uses Clauseo's shared login home,
     so an in-place swap goes undetected for it.
   - *Windows `ChangeTime`.* It can be set through `SetFileInformationByHandle`, so a write
-    with all its times restored, and the same length, can go unseen on Windows.
+    with all its times restored, and the same length, can go unseen on Windows, and a write
+    after a forced read's reply can be dated back to pass for its rewrite.
   - *The window of a sign-in.* The record trusts the account the sign-in's confirming status
     read names. Launches are refused once the login files move during the sign-in, so no new
     session starts on a written login; what remains is a write by a session already running (or
@@ -768,7 +799,7 @@ changes (`setup/identity.rs`).
   - *Refresh races.* Codex 0.162.1 takes no lock across processes for a `ChatGPT` login
     (`refresh_lock` is an in-process semaphore, `FileAuthStorage` takes none), so a forced
     refresh at the very moment a session refreshes would send the same refresh token twice
-    (`refresh_token_reused`). The 60 s guard and the one forced refresh at a time in Clauseo
+    (`refresh_token_reused`). The 60 s rate and the one forced refresh at a time in Clauseo
     narrow this; nothing closes it.
   - *The release confirmation.* Stage B's proof forced 3 refreshes under two live sessions in
     two matters sharing a hard-linked `auth.json` (6/6 turns, no `refresh_token_reused`; each

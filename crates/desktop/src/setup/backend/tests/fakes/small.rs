@@ -1,7 +1,8 @@
 //! The small fakes: the usage counts, the confirms, the opener, and the account reads.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use clauseo_agents::{AccountFuture, AccountHash, AccountRead};
@@ -71,6 +72,22 @@ pub(in crate::setup::backend) struct FakeAccounts {
     forced_reads: Mutex<BTreeMap<AgentId, AccountRead>>,
     /// Forced reads running now, and the most that ran at once.
     pub(in crate::setup::backend) running: Arc<Mutex<(usize, usize)>>,
+    /// What a forced read of each agent does as it starts, as Codex's refresh rewrites
+    /// `auth.json` before it answers.
+    on_forced: Mutex<BTreeMap<AgentId, Arc<dyn Fn() + Send + Sync>>>,
+    /// The agents whose forced reads never answer (a stalled network).
+    hung: Mutex<BTreeSet<AgentId>>,
+    /// Hung forced reads dropped unanswered: what kills the real read's app-server.
+    pub(in crate::setup::backend) dropped: Arc<AtomicUsize>,
+}
+
+/// Counts its drop.
+struct Dropped(Arc<AtomicUsize>);
+
+impl Drop for Dropped {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 impl FakeAccounts {
@@ -98,6 +115,20 @@ impl FakeAccounts {
         lock(&self.forced_reads).insert(agent.clone(), read);
     }
 
+    /// `agent`'s forced reads run `then` as they start, before they answer.
+    pub(in crate::setup::backend) fn on_forced(
+        &self,
+        agent: &AgentId,
+        then: impl Fn() + Send + Sync + 'static,
+    ) {
+        lock(&self.on_forced).insert(agent.clone(), Arc::new(then));
+    }
+
+    /// `agent`'s forced reads never answer from now on.
+    pub(in crate::setup::backend) fn hang_forced(&self, agent: &AgentId) {
+        lock(&self.hung).insert(agent.clone());
+    }
+
     /// How many of `agent`'s reads so far were forced, and how many were plain.
     pub(in crate::setup::backend) fn forced_and_plain(&self, agent: &AgentId) -> (usize, usize) {
         let forced = lock(&self.forced);
@@ -112,6 +143,8 @@ impl FakeAccounts {
         lock(&self.held).clear();
         lock(&self.forced_reads).clear();
         lock(&self.forced).clear();
+        lock(&self.on_forced).clear();
+        lock(&self.hung).clear();
     }
 
     /// Whether reads never answer.
@@ -123,6 +156,19 @@ impl FakeAccounts {
         lock(&self.forced).push((agent.clone(), forced));
         if *lock(&self.stalled) {
             return Box::pin(futures::future::pending());
+        }
+        if forced {
+            let then = lock(&self.on_forced).get(agent).cloned();
+            if let Some(then) = then {
+                then();
+            }
+            if lock(&self.hung).contains(agent) {
+                let dropped = Dropped(Arc::clone(&self.dropped));
+                return Box::pin(async move {
+                    let _dropped = dropped;
+                    futures::future::pending().await
+                });
+            }
         }
         let special = forced
             .then(|| lock(&self.forced_reads).get(agent).cloned())

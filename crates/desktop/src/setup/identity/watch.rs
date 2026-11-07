@@ -237,6 +237,7 @@ fn refresh_due(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> bool 
 /// not be told tried again (`setup/refusal.rs`), each look's refusal set, and the agents due a
 /// check, which the caller runs.
 async fn looks(backend: &AgentsBackend, now: Duration) -> Vec<AgentId> {
+    backend.wiring.identity.refresh.saw(now);
     let unsynced: Vec<AgentId> = lock(&backend.wiring.unsynced).iter().cloned().collect();
     for agent in &unsynced {
         refusal::sync(backend, agent).await;

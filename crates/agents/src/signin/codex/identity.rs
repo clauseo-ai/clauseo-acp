@@ -68,29 +68,70 @@ pub(crate) async fn read_as<T: Timer + Send + Sync>(
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> AccountRead {
-    read_with(job, cancel, kind, cwd, false).await
+    match account(job, cancel, kind, cwd, false).await {
+        Some(Ok(answered)) => answered_as(&answered),
+        Some(Err(clauseo_codex_appserver::Error::Rpc { .. })) => AccountRead::NoAccount,
+        Some(Err(_)) | None => AccountRead::NoAnswer,
+    }
 }
 
-/// [`read_as`], with `refreshToken: true` when `refresh` (R17's forced refresh: Codex
-/// refreshes the tokens with `OpenAI` before it answers, in the same request). A refresh the
-/// server refuses (an auth error, `refresh_token_reused`) comes back as a JSON-RPC error:
-/// [`AccountRead::NoAccount`], a definite answer; no answer stays [`AccountRead::NoAnswer`].
-pub(crate) async fn read_with<T: Timer + Send + Sync>(
+/// What the identity check's `account/read` said (`signin/account.rs`, R17), forced or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Checked {
+    /// An answer, or none: as [`read_as`] reads it, but a JSON-RPC error is
+    /// [`AccountRead::NoAnswer`] unless [`rpc_error_kind`] says refused.
+    Read(AccountRead),
+    /// Codex said the login's tokens are refused ([`UNAUTHORIZED`]): a definite auth refusal.
+    Refused,
+}
+
+/// The start of the JSON-RPC error message Codex 0.162.1 gives when `account/read`'s workspace
+/// routing discovery is refused by `OpenAI` (a revoked or refused login), code `-32603`:
+/// `codex-rs`' `workspace_routing.rs:64` (`"workspace routing discovery unauthorized (401)"`).
+pub(crate) const UNAUTHORIZED: &str = "workspace routing discovery unauthorized";
+
+/// Codex's JSON-RPC internal error code, which both of `workspace_routing.rs`' errors carry.
+const INTERNAL_ERROR: i64 = -32603;
+
+/// The identity check's `account/read` with `kind`'s environment and store argument, in `cwd`,
+/// with `refreshToken: true` when `refresh` (R17's forced refresh: Codex refreshes the tokens
+/// with `OpenAI` before it answers, in the same request; 0.162.1 then answers from the stored
+/// `id_token` whatever the refresh's outcome). A JSON-RPC error is [`rpc_error_kind`]'s.
+pub(crate) async fn read_checked<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
     refresh: bool,
-) -> AccountRead {
-    let answered = match account(job, cancel, kind, cwd, refresh).await {
-        Some(Ok(answered)) => answered,
-        Some(Err(clauseo_codex_appserver::Error::Rpc { .. })) => return AccountRead::NoAccount,
-        Some(Err(_)) | None => return AccountRead::NoAnswer,
-    };
+) -> Checked {
+    match account(job, cancel, kind, cwd, refresh).await {
+        Some(Ok(answered)) => Checked::Read(answered_as(&answered)),
+        Some(Err(clauseo_codex_appserver::Error::Rpc { code, message })) => {
+            rpc_error_kind(code, &message)
+        }
+        Some(Err(_)) | None => Checked::Read(AccountRead::NoAnswer),
+    }
+}
+
+/// What a JSON-RPC error to the identity check's `account/read` (forced or not) says: the one
+/// mapping. Codex 0.162.1's `-32603` [`UNAUTHORIZED`] (`workspace_routing.rs:64`) is a refused
+/// login; everything else is no answer, never `NoAccount`: its `-32603` `"workspace routing
+/// discovery failed"` (`workspace_routing.rs:62`) is what an offline app-server gives, forced
+/// or not, and any other error tells nothing either. The message is never logged or kept.
+pub(crate) fn rpc_error_kind(code: i64, message: &str) -> Checked {
+    if code == INTERNAL_ERROR && message.starts_with(UNAUTHORIZED) {
+        Checked::Refused
+    } else {
+        Checked::Read(AccountRead::NoAnswer)
+    }
+}
+
+/// An answer's account: none, a `ChatGPT` one, or another kind.
+fn answered_as(answered: &GetAccountResponse) -> AccountRead {
     if answered.account.is_none() {
         return AccountRead::NoAccount;
     }
-    codex_identity(&answered).map_or(AccountRead::NotChatgpt, AccountRead::Chatgpt)
+    codex_identity(answered).map_or(AccountRead::NotChatgpt, AccountRead::Chatgpt)
 }
 
 /// The arguments after `codex.js`: the store argument, the overrides, then `app-server`.
@@ -154,3 +195,6 @@ async fn account<T: Timer + Send + Sync>(
     drop(handle);
     answered
 }
+
+#[cfg(test)]
+mod tests;

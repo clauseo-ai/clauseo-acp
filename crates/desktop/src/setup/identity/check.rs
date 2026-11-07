@@ -13,7 +13,7 @@ use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::{AgentId, AgentKind};
 use futures::future::{Either, select};
 
-use super::refresh::{Plan, RETRY_AFTER, Refresh, modified};
+use super::refresh::{Ended, Plan, forced_share};
 use super::watch::{stamp, stamps};
 use super::{Judged, Stamp, Ticket, Verdict, Window};
 use crate::bridge::lock;
@@ -215,14 +215,21 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
         return identity.verdict(agent);
     };
     refusal::sync(backend, agent).await;
-    let (read, forced) = read_account(backend, agent, begun).await;
+    let read = read_account(backend, agent, begun).await;
     let now = backend.compose.monotonic();
-    let verdict = settle(backend, agent, &read, Some(ticket), now);
+    let verdict = settle(backend, agent, read.account(), Some(ticket), now);
     tracing::info!(%agent, kind = verdict.kind(), "identity check");
-    if forced {
-        let after = codex_login(backend, agent).map_or(Stamp::Missing, |path| stamp(&path));
-        let confirmed = verdict == Verdict::Same;
-        identity.refresh.forced_ended(agent, confirmed, after);
+    let ended = match read {
+        Read::Plain(_) => None,
+        Read::Missed(_) => Some(Ended::Missed),
+        Read::Rewritten(_, after) if verdict == Verdict::Same => {
+            tracing::info!(%agent, "identity: login confirmed by a forced refresh");
+            Some(Ended::Confirmed(after))
+        }
+        Read::Rewritten(..) => Some(Ended::Unconfirmed),
+    };
+    if let Some(ended) = ended {
+        identity.refresh.forced_ended(agent, ended, now);
     }
     if verdict == Verdict::Changed {
         account_changed(backend, agent).await;
@@ -232,59 +239,82 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
     verdict
 }
 
-/// `agent`'s account, each read bounded by [`super::CHECK_BOUND`] (`Failed` past it), and
-/// whether it came from a forced refresh (`refresh.rs`): for Codex with refresh-on-check on,
-/// a read with `refreshToken: true` when its plan says so, one at a time in the process; one
-/// with no answer falls back to the plain read, and one forced re-check is due later.
-async fn read_account(
-    backend: &AgentsBackend,
-    agent: &AgentId,
-    now: Duration,
-) -> (AccountRead, bool) {
+/// How a check read the account (`refresh.rs`).
+enum Read {
+    /// Without a refresh.
+    Plain(AccountRead),
+    /// A forced read that confirmed nothing, and the read that decides this launch: its own
+    /// answer when it rewrote nothing, the plain fallback after no answer, or a refused login.
+    Missed(AccountRead),
+    /// A forced read that rewrote the login file to this stamp, and the plain read of it.
+    Rewritten(AccountRead, Stamp),
+}
+
+impl Read {
+    fn account(&self) -> &AccountRead {
+        match self {
+            Read::Plain(read) | Read::Missed(read) | Read::Rewritten(read, _) => read,
+        }
+    }
+}
+
+/// `agent`'s account, all its reads within one [`super::CHECK_BOUND`] (`Failed` past it): for
+/// Codex with refresh-on-check on, a read with `refreshToken: true` when its plan says so (one
+/// at a time in the process, given up at its share of the bound, which kills its run), then one
+/// plain read of the file if Codex rewrote it, or the plain fallback after no answer.
+async fn read_account(backend: &AgentsBackend, agent: &AgentId, now: Duration) -> Read {
     let identity = &backend.wiring.identity;
     let refresh = &identity.refresh;
+    let budget = std::pin::pin!(AsyncIoTimer.after(identity.bound));
     let login = codex_login(backend, agent).filter(|_| refresh.on);
-    let Some(login) = login else {
-        return (
-            bounded(backend.agents.read_account(agent), identity.bound).await,
-            false,
-        );
-    };
-    let before = stamp(&login);
-    let plan = refresh.plan(agent, before, modified(&login), backend.compose.wall(), now);
-    let Plan::Forced { retry } = plan else {
-        return (
-            bounded(backend.agents.read_account(agent), identity.bound).await,
-            false,
-        );
+    let forced = login.filter(|login| refresh.plan(agent, stamp(login), now) == Plan::Forced);
+    let Some(login) = forced else {
+        let read = within(backend.agents.read_account(agent), budget).await;
+        return Read::Plain(read.unwrap_or(AccountRead::Failed));
     };
     tracing::info!(%agent, "identity: forced refresh");
     let agents = Arc::clone(&backend.agents);
     let who = agent.clone();
-    let flight = refresh.forced(agent, move || agents.read_account_refreshed(&who));
-    let read = bounded(flight, identity.bound).await;
-    if !Refresh::no_answer(&read) {
-        return (read, true);
+    let flight = refresh.forced(agent, login, move || agents.read_account_refreshed(&who));
+    let share = AsyncIoTimer.after(forced_share(identity.bound));
+    let rewritten = match within(flight, share).await {
+        Some(reply) if reply.read == AccountRead::Refused => {
+            tracing::info!(%agent, "identity: forced refresh refused the login");
+            return Read::Missed(AccountRead::Refused);
+        }
+        Some(reply) if reply.read != AccountRead::Failed && reply.rewrote() => {
+            tracing::info!(%agent, "identity: forced refresh rewrote the login; reading it");
+            Some(reply.after)
+        }
+        Some(reply) if reply.read != AccountRead::Failed => {
+            tracing::info!(%agent, "identity: forced refresh rewrote nothing; not confirmed");
+            return Read::Missed(reply.read);
+        }
+        answered => {
+            if answered.is_none() {
+                // Given up at its share: the next caller starts another, and once the last
+                // one lets go the read is dropped, which kills its run.
+                refresh.abandon(agent);
+            }
+            tracing::info!(%agent, "identity: forced refresh had no answer; unforced check used");
+            None
+        }
+    };
+    let read = within(backend.agents.read_account(agent), budget).await;
+    let read = read.unwrap_or(AccountRead::Failed);
+    match rewritten {
+        Some(after) => Read::Rewritten(read, after),
+        None => Read::Missed(read),
     }
-    refresh.abandon(agent);
-    tracing::info!(%agent, "identity: forced refresh had no answer; unforced check used");
-    if retry {
-        let at = backend.compose.monotonic().saturating_add(RETRY_AFTER);
-        refresh.retry_at(agent, before, at);
-    }
-    (
-        bounded(backend.agents.read_account(agent), identity.bound).await,
-        false,
-    )
 }
 
-/// `read`'s answer, or `Failed` once `bound` passes first.
-async fn bounded(read: impl Future<Output = AccountRead>, bound: Duration) -> AccountRead {
+/// `read`'s answer, or `None` once `bound` ends first.
+async fn within<T>(read: impl Future<Output = T>, bound: impl Future<Output = ()>) -> Option<T> {
     let read = std::pin::pin!(read);
-    let bound = std::pin::pin!(AsyncIoTimer.after(bound));
+    let bound = std::pin::pin!(bound);
     match select(read, bound).await {
-        Either::Left((read, _)) => read,
-        Either::Right(((), _)) => AccountRead::Failed,
+        Either::Left((read, _)) => Some(read),
+        Either::Right(((), _)) => None,
     }
 }
 
@@ -346,8 +376,8 @@ fn settle(
             if entry.verdict != Verdict::Changed {
                 entry.verdict = verdict;
             }
-            // Only a status that failed or timed out is tried again on the timer.
-            entry.again = matches!(read, AccountRead::Failed);
+            // Only a status that failed, timed out or was refused is tried again on the timer.
+            entry.again = matches!(read, AccountRead::Failed | AccountRead::Refused);
             entry.checked_at = Some(now);
             entry.verdict
         }),
