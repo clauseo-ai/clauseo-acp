@@ -26,6 +26,11 @@ pub(in crate::windows) const RECLAIM: [&str; 3] = [
     "SeBackupPrivilege",
 ];
 
+/// What an elevated open below a pool user's profile enables, with backup intent on each open,
+/// so a folder the pool user shut to administrators is still reached (`acl/profile.rs`).
+pub(in crate::windows) const BACKUP_RESTORE: [&str; 2] =
+    ["SeBackupPrivilege", "SeRestorePrivilege"];
+
 /// Privileges enabled for as long as this lives.
 #[derive(Debug)]
 pub(in crate::windows) struct Privileges {

@@ -125,13 +125,6 @@ pub(crate) fn symlink_file_at(link: &Path, target: &Path) {
     std::os::windows::fs::symlink_file(target, link).unwrap();
 }
 
-/// A hard link at the absolute path `link` to the existing file `original`; the error when
-/// they are on two volumes.
-#[cfg(windows)]
-pub(crate) fn hard_link_at(link: &Path, original: &Path) -> std::io::Result<()> {
-    std::fs::hard_link(original, link)
-}
-
 /// Removes the file at `path`.
 pub(crate) fn remove(path: &Path) {
     std::fs::remove_file(path).unwrap();

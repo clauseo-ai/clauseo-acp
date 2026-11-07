@@ -44,7 +44,9 @@ fn gate(test: &str) -> bool {
     false
 }
 
+mod as_user;
 mod links;
+mod links_by_user;
 mod reset;
 
 /// `bytes` random bytes as lowercase hex.

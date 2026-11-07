@@ -28,7 +28,6 @@ use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
-use crate::windows::acl::profile::Below;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
@@ -324,15 +323,15 @@ impl Machine for WindowsMachine {
     fn give_to_admins(&mut self, profile: &Path, folder: &Path) -> Result<(), MachineError> {
         let admins =
             Sid::parse(ADMINISTRATORS).map_err(|error| MachineError::Other(error.to_string()))?;
-        acl::profile::set_owner_below(profile, folder, &admins).map_err(profile::below_error)
+        profile::give(profile, folder, &admins)
     }
 
-    fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError> {
-        match acl::profile::open_below(profile, folder) {
-            Ok(_) => Ok(true),
-            Err(Below::Missing) => Ok(false),
-            Err(other) => Err(profile::below_error(other)),
-        }
+    fn owner_in_profile(
+        &mut self,
+        profile: &Path,
+        folder: &Path,
+    ) -> Result<Option<Sid>, MachineError> {
+        profile::owner_in(profile, folder)
     }
 
     fn own_account(&self) -> Option<&Sid> {

@@ -456,6 +456,7 @@ crates/sandbox/src/windows/setup/logon.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon/tests/reset.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon/tests/reset.rs leave_marker clippy::disallowed_methods
 crates/sandbox/src/windows/setup/logon/tests/reset.rs wait clippy::disallowed_methods
+crates/sandbox/src/windows/setup/logon/tests/as_user.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon/tests/links.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon/tests/links.rs wait clippy::disallowed_methods
 crates/sandbox/src/windows/setup/preflight.rs - unsafe_code

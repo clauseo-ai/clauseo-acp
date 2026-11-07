@@ -27,12 +27,13 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// Before step 7: the folders whose denies protect what is below them, which an owner could
 /// undo through its implied `WRITE_DAC` (each pool user's `AppData\LocalLow`, whose deny for the
 /// group is inherited and whose `OWNER RIGHTS` deny is inherit-only). A fresh profile's
-/// `LocalLow` can be owned by whichever account loaded it, so each folder's owner is read, and
-/// one that isn't `SYSTEM`, `Administrators` or the set-up's own account (a pool user, say) is
-/// handed to `Administrators` (`Machine::give_to_admins`) and read again. Still anyone else's,
-/// or unreadable, fails at [`Step::Owners`] naming the folder, before any deny is written. A
-/// missing folder is skipped here: step 7's deny on it fails at [`Step::SharedWrites`], which
-/// names it as missing.
+/// `LocalLow` can be owned by whichever account loaded it, so each folder's owner is read on
+/// the handle that reaches it from its profile (`Machine::owner_in_profile`), and one that isn't
+/// `SYSTEM`, `Administrators` or the set-up's own account (a pool user, say) is handed to
+/// `Administrators` (`Machine::give_to_admins`) and read again the same way. Still anyone
+/// else's, or unreadable, fails at [`Step::Owners`] naming the folder, before any deny is
+/// written. A missing folder is skipped here: step 7's deny on it fails at
+/// [`Step::SharedWrites`], which names it as missing.
 pub(super) fn own_protected(
     machine: &mut impl Machine,
     folders: &[(PathBuf, PathBuf)],
@@ -40,15 +41,12 @@ pub(super) fn own_protected(
     let failed =
         |folder: &Path, why: String| (Step::Owners, format!("{}: {why}", folder.display()));
     for (profile, folder) in folders {
-        let there = machine
-            .in_profile(profile, folder)
-            .map_err(|error| failed(folder, cause_of(&error)))?;
-        if !there {
-            continue;
-        }
         let owner = machine
-            .owner_of(folder)
+            .owner_in_profile(profile, folder)
             .map_err(|error| failed(folder, cause_of(&error)))?;
+        let Some(owner) = owner else {
+            continue;
+        };
         if allowed_owner(machine, &owner) {
             continue;
         }
@@ -59,8 +57,9 @@ pub(super) fn own_protected(
             )
         })?;
         let now = machine
-            .owner_of(folder)
-            .map_err(|error| failed(folder, cause_of(&error)))?;
+            .owner_in_profile(profile, folder)
+            .map_err(|error| failed(folder, cause_of(&error)))?
+            .ok_or_else(|| failed(folder, "it went missing".to_owned()))?;
         if !allowed_owner(machine, &now) {
             return Err(failed(
                 folder,
