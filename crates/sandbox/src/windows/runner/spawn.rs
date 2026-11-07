@@ -24,9 +24,11 @@ use windows::Win32::System::JobObjects::{
     JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
     JOB_OBJECT_UILIMIT_EXITWINDOWS, JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES,
     JOB_OBJECT_UILIMIT_READCLIPBOARD, JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS,
-    JOB_OBJECT_UILIMIT_WRITECLIPBOARD, JOBOBJECT_BASIC_UI_RESTRICTIONS,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicUIRestrictions,
-    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
+    JOB_OBJECT_UILIMIT_WRITECLIPBOARD, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectBasicUIRestrictions,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject,
 };
 use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories, SetDllDirectoryW,
@@ -105,6 +107,18 @@ impl Process {
 // SAFETY: the handles are kernel handles any thread may use; the end sweeper's is kept behind a
 // mutex for the outer's last wait.
 unsafe impl Send for Process {}
+
+/// The launch's kill-on-close job, held where every end path reaches it (the outer's end
+/// sweeper's steps), on the stdin relay's thread too.
+pub(super) struct Job(pub(super) Handle);
+
+// SAFETY: a job handle is a kernel handle any thread may use; it is closed once, when its owner
+// drops at this process's exit.
+unsafe impl Send for Job {}
+// SAFETY: as above; the calls made through a shared one (`TerminateJobObject`,
+// `QueryInformationJobObject`, `AssignProcessToJobObject`, `DuplicateHandle`) may run on two
+// threads at once.
+unsafe impl Sync for Job {}
 
 /// The outer's call: starts `exe <args>` (`--inner <base>`, or `--sweep`) as the pool user
 /// `name` (on this computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool
@@ -218,6 +232,25 @@ pub(super) fn kill_on_close_job() -> io::Result<Handle> {
 pub(super) fn end_job(job: &Handle, code: u32) {
     // SAFETY: the job is live; a failure (nothing left in it) leaves nothing to do.
     drop(unsafe { TerminateJobObject(job.0, code) });
+}
+
+/// How many processes are still in `job` (`JobObjectBasicAccountingInformation`'s
+/// `ActiveProcesses`): a process ended by [`end_job`] counts until it has exited.
+pub(super) fn active_processes(job: &Handle) -> io::Result<u32> {
+    let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+    // SAFETY: the job is live with every right (this process made it); `info` is the structure
+    // the class names, writable for its size; the returned length isn't needed.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job.0),
+            JobObjectBasicAccountingInformation,
+            (&raw mut info).cast::<c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>()).unwrap_or(0),
+            None,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok(info.ActiveProcesses)
 }
 
 /// Keeps this process's later DLL loads to System32 and takes the current folder out of the
