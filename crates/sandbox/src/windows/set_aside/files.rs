@@ -33,9 +33,10 @@ use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Entry;
+use super::SET_ASIDE_BOOKKEEPING;
 use super::names::{Links, Names, keyed};
 #[cfg(any(windows, test))]
-use super::{SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
+use super::{SET_ASIDE_DIR, SetAsideFailure};
 #[cfg(any(windows, test))]
 use crate::windows::matters::SANDBOX_DIR;
 #[cfg(any(windows, test))]
@@ -45,8 +46,8 @@ use crate::windows::write;
 const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 #[cfg(any(windows, test))]
 const MANIFEST_FILE: &str = SET_ASIDE_BOOKKEEPING[2];
-#[cfg(any(windows, test))]
-const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
+/// The matter's lock file: every read and write of the record or the manifest holds it.
+pub(super) const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
 /// The version both files are written in and the only one read.
 const VERSION: u32 = 1;
 
@@ -200,14 +201,17 @@ impl Place {
     }
 
     /// Makes (or checks) the sandbox folder, `set-aside` and the matter's folder in turn, then
-    /// takes the matter's lock, which is held until the file is dropped.
+    /// takes the matter's lock, which is held until the file is dropped. Under the lock, the temp
+    /// files a crash left in the folder are cleared ([`clear_temps`]).
     pub(super) fn lock(&self) -> Result<File, SetAsideFailure> {
         write::make_sandbox_dir(&self.sandbox).map_err(|e| io_failure(&e))?;
         write::make_sandbox_dir(&self.sandbox.join(SET_ASIDE_DIR)).map_err(|e| io_failure(&e))?;
         write::make_sandbox_dir(&self.base).map_err(|e| io_failure(&e))?;
         let lock = self.base.join(LOCK_FILE);
         write::check_owned_file(&lock).map_err(|e| io_failure(&e))?;
-        write::lock_exclusive(&lock).map_err(|e| io_failure(&e))
+        let held = write::lock_exclusive(&lock).map_err(|e| io_failure(&e))?;
+        clear_temps(&self.base);
+        Ok(held)
     }
 
     /// The record, or `None` when there is none. One that can't be read, or of another
@@ -248,6 +252,45 @@ impl Place {
     pub(super) fn write_manifest(&self, manifest: &Manifest) -> Result<(), SetAsideFailure> {
         save(&self.base.join(MANIFEST_FILE), manifest)
     }
+}
+
+/// Removes the temp files a crash left in `base` (the matter's folder) beside the record and the
+/// manifest: each name is exactly the temp `write::write_atomic` gives (`write::is_atomic_temp`).
+/// Called under the lock, which every writer holds while it writes its temp, so a live write's
+/// temp is never removed. Nothing else is touched: another name, a folder, a link, or a file with
+/// another hard link stays. A failure is logged and left: the next lock tries again, and no
+/// reader ever opens a temp.
+#[cfg(any(windows, test))]
+fn clear_temps(base: &Path) {
+    let targets = [OsStr::new(RECORD_FILE), OsStr::new(MANIFEST_FILE)];
+    #[cfg(windows)]
+    let cleared = super::ntfs::remove_temps(base, &targets);
+    #[cfg(not(windows))]
+    let cleared = remove_temps_by_path(base, &targets);
+    if let Err(error) = cleared {
+        tracing::warn!(%error, "a set-aside temp file could not be cleared");
+    }
+}
+
+/// The stand-in for [`clear_temps`] off Windows: each name in `base` that is a temp of one of
+/// `targets`, removed by `write::remove_owned_file`, which refuses a link, a folder or a second
+/// hard link (those stay).
+#[cfg(all(test, not(windows)))]
+fn remove_temps_by_path(base: &Path, targets: &[&OsStr]) -> Result<(), SetAsideFailure> {
+    for entry in std::fs::read_dir(base).map_err(|e| io_failure(&e))? {
+        let entry = entry.map_err(|e| io_failure(&e))?;
+        let name = entry.file_name();
+        if !targets
+            .iter()
+            .any(|target| write::is_atomic_temp(target, &name))
+        {
+            continue;
+        }
+        if let Err(error) = write::remove_owned_file(&entry.path()) {
+            tracing::debug!(%error, "a set-aside temp file stays");
+        }
+    }
+    Ok(())
 }
 
 /// The file at `path`, checked first; `None` when it is missing.

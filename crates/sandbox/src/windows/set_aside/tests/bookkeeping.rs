@@ -4,10 +4,15 @@
 //! passes and the deletion are NTFS's, elsewhere the stand-ins'.
 
 use std::ffi::OsStr;
+use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::super::Entry;
-use super::super::bookkeeping::{SetAsideBookkeeping, forget_bookkeeping};
+use super::super::SetAsideFailure;
+use super::super::bookkeeping::{
+    SetAsideBookkeeping, forget_bookkeeping, forget_bookkeeping_within,
+};
 use super::super::files::Place;
 use super::super::forget_set_aside_bookkeeping;
 use super::super::run::kept_levels;
@@ -117,6 +122,28 @@ fn an_empty_folder_item_on_a_siblings_way_survives_the_siblings_restore() {
     assert_eq!(
         forget_bookkeeping(&data, &matter_one()),
         Ok(SetAsideBookkeeping::Left)
+    );
+}
+
+#[test]
+fn forget_refuses_a_lock_still_held_and_leaves_the_record_as_it_was() {
+    let (_w, root, data) = world("aside-forget-held");
+    before(&root, &data, launch()).unwrap();
+    after(&root, &data, exit()).unwrap();
+    let folder = matter_folder(&data);
+    let record = std::fs::read(folder.join("record.json")).unwrap();
+    // Another holder of the matter's lock, as a writer is while it works.
+    let held = crate::windows::write::lock_exclusive(&folder.join("set-aside.lock")).unwrap();
+    assert_eq!(
+        forget_bookkeeping_within(&data, &matter_one(), Duration::from_millis(100)),
+        Err(SetAsideFailure::Io(io::ErrorKind::WouldBlock))
+    );
+    assert_eq!(names(&folder), ["record.json", "set-aside.lock"]);
+    assert_eq!(std::fs::read(folder.join("record.json")).unwrap(), record);
+    drop(held);
+    assert_eq!(
+        forget_bookkeeping(&data, &matter_one()),
+        Ok(SetAsideBookkeeping::Gone)
     );
 }
 
