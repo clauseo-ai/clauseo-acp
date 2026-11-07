@@ -7,9 +7,11 @@
 //! missing, every field written again on each run so a re-run or an extend leaves it current,
 //! and its `LocalUserAuthorizedList` read back to check every pool user is named.
 //!
-//! The firewall is the second layer; WFP's filters enforce without it. So nothing here fails the
-//! set-up: when Group Policy keeps local rules from taking effect, or a rule can't be written,
-//! the outcome says so ([`FirewallOutcome::Ineffective`]) and set-up goes on.
+//! The firewall is the second layer; WFP's filters, which set-up wrote first and which fail the
+//! set-up when they fail, are the boundary. So nothing here fails the set-up: Group Policy
+//! ignoring local rules, the firewall service stopped, Windows Firewall turned off (another
+//! firewall product), or a failed call, each is named in the outcome
+//! ([`FirewallOutcome::Ineffective`], [`FirewallTrouble`]) and set-up goes on.
 
 #![expect(unsafe_code, reason = "FFI to the Windows Firewall COM interfaces")]
 
@@ -17,15 +19,16 @@ use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_OK, VARIANT_TRUE};
 use windows::Win32::NetworkManagement::WindowsFirewall::{
     INetFwPolicy2, INetFwRule3, INetFwRules, NET_FW_ACTION_BLOCK, NET_FW_IP_PROTOCOL_ANY,
     NET_FW_IP_PROTOCOL_TCP, NET_FW_IP_PROTOCOL_UDP, NET_FW_MODIFY_STATE, NET_FW_MODIFY_STATE_OK,
-    NET_FW_PROFILE2_ALL, NET_FW_RULE_DIR_IN, NET_FW_RULE_DIR_OUT, NetFwPolicy2, NetFwRule,
+    NET_FW_PROFILE2_ALL, NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC,
+    NET_FW_RULE_DIR_IN, NET_FW_RULE_DIR_OUT, NetFwPolicy2, NetFwRule,
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
 };
-use windows::core::{BSTR, Interface};
+use windows::core::{BSTR, HRESULT, Interface};
 
-use super::spec::{Direction, FIREWALL_UNDER_POLICY, FirewallOutcome, RuleProtocol, RuleSpec};
+use super::spec::{Direction, FirewallOutcome, FirewallTrouble, RuleProtocol, RuleSpec};
 
 /// COM initialised on this thread for the firewall calls; uninitialised on drop when this
 /// initialised it (a thread already in another apartment keeps it).
@@ -34,11 +37,14 @@ struct Apartment {
 }
 
 impl Apartment {
-    fn enter() -> Result<Apartment, String> {
+    fn enter() -> Result<Apartment, FirewallTrouble> {
         // SAFETY: no reserved pointer; balanced by Drop when it succeeds.
         let result = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         if result.is_err() && result != RPC_E_CHANGED_MODE {
-            return Err(format!("CoInitializeEx failed ({result:?})"));
+            return Err(FirewallTrouble::from_call(
+                "CoInitializeEx",
+                hresult(result),
+            ));
         }
         Ok(Apartment {
             ours: result.is_ok(),
@@ -55,66 +61,106 @@ impl Drop for Apartment {
     }
 }
 
-/// The firewall's rule list, with COM held for it.
-fn policy() -> Result<(Apartment, INetFwPolicy2), String> {
+/// An HRESULT as `u32`.
+fn hresult(result: HRESULT) -> u32 {
+    u32::from_ne_bytes(result.0.to_ne_bytes())
+}
+
+/// A failed call `what` as its trouble.
+fn trouble(what: &str, error: &windows::core::Error) -> FirewallTrouble {
+    FirewallTrouble::from_call(what, hresult(error.code()))
+}
+
+/// The firewall's policy, with COM held for it.
+fn policy() -> Result<(Apartment, INetFwPolicy2), FirewallTrouble> {
     let apartment = Apartment::enter()?;
     // SAFETY: COM is initialised on this thread; the class and interface are the firewall's.
     let policy: INetFwPolicy2 =
         unsafe { CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER) }
-            .map_err(|error| format!("the firewall's policy can't be opened ({error})"))?;
+            .map_err(|error| trouble("opening the firewall's policy", &error))?;
     Ok((apartment, policy))
 }
 
-/// Writes every rule of `rules`. `Applied` when each is written and local rules take effect in
-/// every current profile; else why not.
+/// Writes every rule of `rules`. `Applied` when each is written, Windows Firewall is on and local
+/// rules take effect in every current profile; else each cause, named
+/// ([`FirewallTrouble::words`]). Never an error: WFP's filters are the boundary.
 pub(super) fn ensure(rules: &[RuleSpec]) -> FirewallOutcome {
     let (_apartment, policy) = match policy() {
         Ok(opened) => opened,
-        Err(why) => return FirewallOutcome::Ineffective(why),
+        Err(trouble) => return FirewallOutcome::Ineffective(trouble.words()),
     };
-    let mut why = Vec::new();
-    if let Err(policy_why) = local_rules_apply(&policy) {
-        why.push(policy_why);
+    let mut troubles = Vec::new();
+    if let Err(off) = turned_on(&policy) {
+        troubles.push(off);
+    }
+    if let Err(ignored) = local_rules_apply(&policy) {
+        troubles.push(ignored);
     }
     // SAFETY: `policy` is a live firewall policy on this thread.
     match unsafe { policy.Rules() } {
         Ok(list) => {
             for rule in rules {
-                if let Err(rule_why) = ensure_rule(&list, rule) {
-                    why.push(format!("{}: {rule_why}", rule.name));
+                if let Err(failed) = ensure_rule(&list, rule) {
+                    troubles.push(failed);
                 }
             }
         }
-        Err(error) => why.push(format!("the firewall's rules can't be read ({error})")),
+        Err(error) => troubles.push(trouble("reading the firewall's rules", &error)),
     }
-    if why.is_empty() {
+    troubles.dedup();
+    if troubles.is_empty() {
         FirewallOutcome::Applied
     } else {
-        FirewallOutcome::Ineffective(why.join("; "))
+        let words: Vec<String> = troubles.iter().map(FirewallTrouble::words).collect();
+        FirewallOutcome::Ineffective(words.join("; "))
     }
 }
 
 /// Removes each rule named in `names` that is there; why for the first that can't be removed.
 pub(super) fn remove(names: &[String]) -> Result<(), String> {
-    let (_apartment, policy) = policy()?;
+    let (_apartment, policy) = policy().map_err(|trouble| trouble.words())?;
     // SAFETY: `policy` is a live firewall policy on this thread.
     let list = unsafe { policy.Rules() }
-        .map_err(|error| format!("the firewall's rules can't be read ({error})"))?;
+        .map_err(|error| trouble("reading the firewall's rules", &error).words())?;
     for name in names {
         let name = BSTR::from(name.as_str());
         // SAFETY: `list` is live; `name` is a BSTR for the calls.
         if unsafe { list.Item(&name) }.is_ok() {
             // SAFETY: as above.
             unsafe { list.Remove(&name) }
-                .map_err(|error| format!("the firewall rule {name} can't be removed ({error})"))?;
+                .map_err(|error| trouble(&format!("removing {name}"), &error).words())?;
         }
     }
     Ok(())
 }
 
-/// `Ok` when local rules take effect in every current profile; why not otherwise (Group Policy
-/// ignores them, or answers for only some profiles).
-fn local_rules_apply(policy: &INetFwPolicy2) -> Result<(), String> {
+/// `Ok` when Windows Firewall is on for every current network profile;
+/// [`FirewallTrouble::TurnedOff`] when not (another firewall product may own it).
+fn turned_on(policy: &INetFwPolicy2) -> Result<(), FirewallTrouble> {
+    // SAFETY: `policy` is a live firewall policy on this thread.
+    let current = unsafe { policy.CurrentProfileTypes() }
+        .map_err(|error| trouble("CurrentProfileTypes", &error))?;
+    for profile in [
+        NET_FW_PROFILE2_DOMAIN,
+        NET_FW_PROFILE2_PRIVATE,
+        NET_FW_PROFILE2_PUBLIC,
+    ] {
+        if current & profile.0 == 0 {
+            continue;
+        }
+        // SAFETY: as above.
+        let on = unsafe { policy.get_FirewallEnabled(profile) }
+            .map_err(|error| trouble("FirewallEnabled", &error))?;
+        if on != VARIANT_TRUE {
+            return Err(FirewallTrouble::TurnedOff);
+        }
+    }
+    Ok(())
+}
+
+/// `Ok` when local rules take effect in every current profile; Group Policy's answer otherwise
+/// (it ignores them, or answers for only some profiles).
+fn local_rules_apply(policy: &INetFwPolicy2) -> Result<(), FirewallTrouble> {
     let mut state = NET_FW_MODIFY_STATE::default();
     // The wrapper drops `S_FALSE` (an answer for only some profiles), so the call goes through
     // the vtable, as Codex's does.
@@ -125,20 +171,26 @@ fn local_rules_apply(policy: &INetFwPolicy2) -> Result<(), String> {
             &raw mut state,
         )
     };
+    if result.is_err() {
+        return Err(FirewallTrouble::from_call(
+            "LocalPolicyModifyState",
+            hresult(result),
+        ));
+    }
     if result == S_OK && state == NET_FW_MODIFY_STATE_OK {
         Ok(())
     } else {
-        Err(format!(
-            "{FIREWALL_UNDER_POLICY} (LocalPolicyModifyState {result:?}, state {})",
+        Err(FirewallTrouble::GroupPolicy(format!(
+            "LocalPolicyModifyState {result:?}, state {}",
             state.0
-        ))
+        )))
     }
 }
 
 /// Finds or makes `spec`'s rule and writes every field, then checks its users.
-fn ensure_rule(list: &INetFwRules, spec: &RuleSpec) -> Result<(), String> {
+fn ensure_rule(list: &INetFwRules, spec: &RuleSpec) -> Result<(), FirewallTrouble> {
     let name = BSTR::from(spec.name.as_str());
-    let com = |what: &str, error: windows::core::Error| format!("{what} failed ({error})");
+    let com = |what: &str, error: windows::core::Error| trouble(what, &error);
     // SAFETY: `list` is live; `name` is a BSTR for the call.
     let rule: INetFwRule3 = if let Ok(found) = unsafe { list.Item(&name) } {
         found.cast().map_err(|e| com("reading the rule", e))?
@@ -168,14 +220,17 @@ fn ensure_rule(list: &INetFwRules, spec: &RuleSpec) -> Result<(), String> {
         .skip(1)
         .filter_map(|ace| ace.split(')').next());
     if let Some(missing) = wanted.into_iter().find(|sid| !users.contains(sid)) {
-        return Err(format!("its users read back as {users}, without {missing}"));
+        return Err(FirewallTrouble::RuleUsers {
+            rule: spec.name.clone(),
+            missing: missing.to_owned(),
+        });
     }
     Ok(())
 }
 
 /// Writes every field of `spec` to `rule`: protocol before ports, which only TCP and UDP take.
-fn configure(rule: &INetFwRule3, spec: &RuleSpec) -> Result<(), String> {
-    let com = |what: &str, error: windows::core::Error| format!("{what} failed ({error})");
+fn configure(rule: &INetFwRule3, spec: &RuleSpec) -> Result<(), FirewallTrouble> {
+    let com = |what: &str, error: windows::core::Error| trouble(what, &error);
     let protocol = match spec.protocol {
         RuleProtocol::Any => NET_FW_IP_PROTOCOL_ANY,
         RuleProtocol::Tcp => NET_FW_IP_PROTOCOL_TCP,
