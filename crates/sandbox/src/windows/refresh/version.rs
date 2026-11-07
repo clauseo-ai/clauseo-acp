@@ -10,39 +10,9 @@
 //! fourth part is no version. Versions are ordered by semver precedence: a prerelease sorts
 //! below its release, and build metadata doesn't count. Anything unreadable refuses the run.
 
-use std::cmp::Ordering;
-
-use semver::Version;
-
-/// `text` as a version, as the module says; `None` when it isn't one.
-pub fn parse(text: &str) -> Option<Version> {
-    let text = text.trim();
-    let text = text.strip_prefix('v').unwrap_or(text);
-    if let Ok(version) = Version::parse(text) {
-        return Some(version);
-    }
-    let parts: Vec<&str> = text.split('.').collect();
-    let number = |part: &str| {
-        let digits = !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
-        digits.then(|| part.parse::<u64>().ok()).flatten()
-    };
-    match parts.as_slice() {
-        [x, y, z, "0"] => Some(Version::new(number(x)?, number(y)?, number(z)?)),
-        _ => None,
-    }
-}
-
-/// How `candidate` orders against `recorded` by semver precedence; `None` when either can't be
-/// read.
-pub fn compare(recorded: &str, candidate: &str) -> Option<Ordering> {
-    Some(parse(candidate)?.cmp_precedence(&parse(recorded)?))
-}
-
-/// Whether `candidate` is not older than `recorded` by semver precedence: `1.4.0-beta.1` is
-/// older than `1.4.0`, `1.4.0` and `1.4.0.0` are the same. `false` when either can't be read.
-pub fn version_not_older(recorded: &str, candidate: &str) -> bool {
-    compare(recorded, candidate).is_some_and(Ordering::is_ge)
-}
+pub use crate::windows::admin_copy::{
+    compare_versions as compare, parse_version as parse, version_not_older,
+};
 
 /// Whether the `FILEVERSION` `file` is the signed version `signed`: its first three parts are
 /// the semver core, and its fourth is 0. A prerelease's `FILEVERSION` is its core's.

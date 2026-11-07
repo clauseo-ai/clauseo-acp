@@ -335,7 +335,8 @@ fn a_version_is_not_older_unless_it_sorts_below() {
         ("1.2.3", "1.2.3"),
         ("1.2.3", "1.2.4"),
         ("1.2.3", "1.10.0"),
-        ("1.2", "1.2.0"),
+        ("1.2.3", "v1.2.3"),
+        ("1.2.3.0", "1.2.3"),
         ("1.2.3-beta.1", "1.2.3"),
         ("1.2.3-alpha", "1.2.3-alpha.1"),
         ("1.2.3-alpha.2", "1.2.3-alpha.10"),
@@ -353,7 +354,8 @@ fn a_version_is_not_older_unless_it_sorts_below() {
         ("2.0.0", "1.99.99"),
         ("1.2.3", "1.2.3-rc.1"),
         ("1.2.3-beta", "1.2.3-alpha"),
-        ("1.2.3", "v1.2.3"),
+        ("1.2", "1.2.0"),
+        ("1.2.3.4", "9.0.0"),
         ("garbage", "1.2.3"),
         ("1.2.3", ""),
         ("1.2.3.4.5", "9.0.0"),
@@ -364,6 +366,19 @@ fn a_version_is_not_older_unless_it_sorts_below() {
             "{recorded} -> {candidate}"
         );
     }
+}
+
+#[test]
+fn adopt_records_the_version_in_the_form_the_refresh_writes() {
+    // The refresh (PR 3) records the signed version, `X.Y.Z` or `X.Y.Z-pre` as release.yml
+    // signs tauri.conf.json's `version`; --adopt records that same `version`, as it is.
+    let parsed = parse_version(APP_VERSION).expect("tauri.conf.json's version is semver");
+    assert_eq!(parsed.to_string(), APP_VERSION);
+    assert!(parsed.build.is_empty(), "{APP_VERSION}");
+    assert_eq!(
+        compare_versions(APP_VERSION, APP_VERSION),
+        Some(std::cmp::Ordering::Equal)
+    );
 }
 
 #[test]

@@ -57,7 +57,7 @@ mod tests;
 mod version;
 
 pub use security_block::launch_recorded;
-pub use version::version_not_older;
+pub use version::{compare_versions, parse_version, version_not_older};
 
 /// The admin copy's folder under `%ProgramFiles%`, one part at a time.
 pub const ADMIN_DIR: [&str; 2] = ["Clauseo", "Sandbox"];

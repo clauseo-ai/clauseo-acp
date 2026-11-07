@@ -1,72 +1,37 @@
 //! The version order `--adopt` and the refresh task (PR 3) compare admin copies by.
 
-/// Whether `candidate` is no older than `recorded`, both versions as `tauri.conf.json` writes
-/// them (`1.2.3`, `1.2.3-beta.1`; build metadata after `+` ignored): `--adopt` and the refresh
-/// task (PR 3) never replace a copy with an older one. The numeric parts compare first, up to
-/// four (a missing one is 0); with equal parts a release beats a pre-release, and two
-/// pre-releases compare part by part as semver does (numbers below words). A version that
-/// doesn't parse is never "not older": the safe side.
+/// `text` as a version: semver, with a leading `v` dropped; a four-part `X.Y.Z.0` (the
+/// `FILEVERSION` form, which a record may hold) reads as the release `X.Y.Z`, and a non-zero
+/// fourth part is no version. `--adopt` records [`APP_VERSION`](super::APP_VERSION)
+/// (`tauri.conf.json`'s `version`) and the refresh task (PR 3) the signed version, both read
+/// this way.
+pub fn parse_version(text: &str) -> Option<semver::Version> {
+    let text = text.trim();
+    let text = text.strip_prefix('v').unwrap_or(text);
+    if let Ok(version) = semver::Version::parse(text) {
+        return Some(version);
+    }
+    let parts: Vec<&str> = text.split('.').collect();
+    let number = |part: &str| {
+        let digits = !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+        digits.then(|| part.parse::<u64>().ok()).flatten()
+    };
+    match parts.as_slice() {
+        [x, y, z, "0"] => Some(semver::Version::new(number(x)?, number(y)?, number(z)?)),
+        _ => None,
+    }
+}
+
+/// How `candidate` orders against `recorded` by semver precedence; `None` when either can't be
+/// read ([`parse_version`]).
+pub fn compare_versions(recorded: &str, candidate: &str) -> Option<std::cmp::Ordering> {
+    Some(parse_version(candidate)?.cmp_precedence(&parse_version(recorded)?))
+}
+
+/// Whether `candidate` is no older than `recorded` by semver precedence: `--adopt` and the
+/// refresh task (PR 3) never replace a copy with an older one. `1.4.0-beta.1` is older than
+/// `1.4.0`, `1.4.0` and `1.4.0.0` are the same, and build metadata doesn't count. A version
+/// that doesn't parse is never "not older": the safe side.
 pub fn version_not_older(recorded: &str, candidate: &str) -> bool {
-    match (Version::parse(recorded), Version::parse(candidate)) {
-        (Some(recorded), Some(candidate)) => candidate >= recorded,
-        _ => false,
-    }
-}
-
-/// A version as [`version_not_older`] compares it.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Version {
-    core: [u64; 4],
-    /// `true` for a release, so it sorts above any pre-release of the same core.
-    release: bool,
-    pre: Vec<PreId>,
-}
-
-/// One dot-separated pre-release identifier; numbers sort below words.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum PreId {
-    Number(u64),
-    Word(String),
-}
-
-impl Version {
-    fn parse(text: &str) -> Option<Version> {
-        let text = text.split('+').next().unwrap_or_default();
-        let (core_text, pre_text) = match text.split_once('-') {
-            Some((core, pre)) => (core, Some(pre)),
-            None => (text, None),
-        };
-        let parts: Vec<u64> = core_text
-            .split('.')
-            .map(|part| {
-                part.bytes()
-                    .all(|b| b.is_ascii_digit())
-                    .then(|| part.parse().ok())
-                    .flatten()
-            })
-            .collect::<Option<_>>()?;
-        if parts.is_empty() || parts.len() > 4 {
-            return None;
-        }
-        let mut core = [0; 4];
-        for (slot, part) in core.iter_mut().zip(parts) {
-            *slot = part;
-        }
-        let pre = match pre_text {
-            Some(pre) => pre
-                .split('.')
-                .map(|id| match id.parse() {
-                    _ if id.is_empty() => None,
-                    Ok(n) if id.bytes().all(|b| b.is_ascii_digit()) => Some(PreId::Number(n)),
-                    _ => Some(PreId::Word(id.to_owned())),
-                })
-                .collect::<Option<Vec<_>>>()?,
-            None => Vec::new(),
-        };
-        Some(Version {
-            core,
-            release: pre_text.is_none(),
-            pre,
-        })
-    }
+    compare_versions(recorded, candidate).is_some_and(std::cmp::Ordering::is_ge)
 }

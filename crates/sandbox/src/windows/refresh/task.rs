@@ -246,7 +246,7 @@ pub fn unregister_refresh_task() -> Result<(), TaskError> {
 /// Deletes the refresh's staging folder (its two known files, then the folder, which is left
 /// when anything else is in it). One that isn't there is `Ok`. Elevated: `--remove` calls it.
 pub fn remove_staging() -> Result<(), String> {
-    let staging_dir = sandbox_dir()?.join("staging");
+    let staging_dir = sandbox_dir()?.join(crate::windows::admin_copy::STAGING);
     for name in [STAGED_NAME, SET_ASIDE_NAME] {
         staging::delete(&staging_dir.join(name))?;
     }
