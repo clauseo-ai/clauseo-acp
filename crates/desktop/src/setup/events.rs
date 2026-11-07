@@ -110,7 +110,6 @@ impl SetupEvents {
     }
 
     /// Whether `agent`'s latest sign-in state is a running one.
-    #[cfg(test)]
     pub(crate) fn sign_in_running(&self, agent: &AgentId) -> bool {
         lock(&self.state)
             .agents
