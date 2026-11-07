@@ -6,15 +6,15 @@
 //!
 //! The build is reproducible at the release's build path (the repo's `target/`): rebuilding the
 //! release commit there gives the same exe, so a hash Microsoft has cleared stays cleared.
-//! `/Brepro` puts a hash of the image where the link time would go. `/DEBUG:NONE`, after the
-//! `/DEBUG` rustc always passes on msvc, writes no PDB and no debug directory: lld's PDB GUID is
-//! a hash of the PDB, and the PDB holds the paths of rustc's randomly named temp dir
-//! (`deps/rustcXXXXXX/symbols.o`, the `.natvis` files), so two builds at the same path gave two
-//! GUIDs, two `/Brepro` stamps and nothing else different (CI run 42362946949). So this exe
-//! ships without a `.pdb`. A different target dir would still give a different exe: RUSTFLAGS'
-//! remaps (`.github/scripts/sidecars.mjs`) miss the host's proc macros and build scripts under
-//! `--target`. `.github/workflows/setup-exe-repro.yml` builds the exe twice, from clean, in
-//! that one target dir, and compares them.
+//! `/Brepro` puts a hash of the image where the link time would go, and in a `REPRO` entry of the
+//! debug directory. `/DEBUG:NONE`, after the `/DEBUG` rustc always passes on msvc, writes no PDB
+//! and no `CODEVIEW` entry naming one: lld's PDB GUID is a hash of the PDB, and the PDB holds the
+//! paths of rustc's randomly named temp dir (`deps/rustcXXXXXX/symbols.o`, the `.natvis` files),
+//! so two builds at the same path gave two GUIDs, two `/Brepro` stamps and nothing else
+//! different (CI run 42362946949). So this exe ships without a `.pdb`. A different target dir
+//! would still give a different exe: RUSTFLAGS' remaps (`.github/scripts/sidecars.mjs`) miss the
+//! host's proc macros and build scripts under `--target`. `.github/workflows/setup-exe-repro.yml`
+//! builds the exe twice, from clean, in that one target dir, and compares them.
 //!
 //! The setup exe's version information, on `*-windows-msvc` and for that binary only: a
 //! `VERSIONINFO` resource written into `OUT_DIR` as `.rc` text and compiled by `embed-resource`
