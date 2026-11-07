@@ -121,6 +121,8 @@ pub(crate) struct Fake {
     pub(crate) another: bool,
     /// Whether the record's owners can't be read.
     pub(crate) owner_unreadable: bool,
+    /// This user's `SecurityBlockedAt` mark: whether it is there.
+    pub(crate) security_mark: std::cell::Cell<bool>,
     /// Every path asked about, in order.
     pub(crate) asked: RefCell<Vec<PathBuf>>,
     /// What a launch did, in order: `held` when the copy is hashed through a held handle,
@@ -148,6 +150,7 @@ impl Fake {
             recorded: Some(HASH.to_owned()),
             another: false,
             owner_unreadable: false,
+            security_mark: std::cell::Cell::new(false),
             asked: RefCell::new(Vec::new()),
             events: Rc::new(RefCell::new(Vec::new())),
         };
@@ -215,6 +218,15 @@ impl AdminCopyFs for Fake {
             return Err(io::Error::other("the record can't be read"));
         }
         Ok(self.another)
+    }
+
+    fn security_blocked(&self) -> io::Result<bool> {
+        Ok(self.security_mark.get())
+    }
+
+    fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
+        self.security_mark.set(blocked);
+        Ok(())
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {

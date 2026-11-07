@@ -5,7 +5,8 @@ use super::*;
 use crate::test_support::TempDir;
 use crate::windows::setup::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
-    ERROR_LOGON_TYPE_NOT_GRANTED, LOGON_NOT_GRANTED, Step, launch_error,
+    ERROR_LOGON_TYPE_NOT_GRANTED, ERROR_VIRUS_DELETED, ERROR_VIRUS_INFECTED, LOGON_NOT_GRANTED,
+    Step, launch_code, launch_error,
 };
 use crate::{Blocked, SetupState};
 
@@ -194,6 +195,40 @@ fn the_launch_errors_map_as_d_b4_says() {
         panic!("2 is a failure");
     };
     assert!(other.contains("error 2"), "{other}");
+    // Windows security refusing or removing the admin copy as it starts.
+    for blocked in [ERROR_VIRUS_INFECTED, ERROR_VIRUS_DELETED] {
+        assert_eq!(
+            launch_error(blocked),
+            SetupError::Blocked(Blocked::ToolMissing),
+            "{blocked}"
+        );
+    }
+}
+
+#[test]
+fn only_a_win32_hresult_is_read_as_its_win32_code() {
+    // `HRESULT_FROM_WIN32` of 225 and 226, and the plain codes, read as themselves.
+    for (hresult, code) in [
+        (0x8007_00E1_u32, 225),
+        (0x8007_00E2, 226),
+        (0x8007_04C7, 1223),
+        (225, 225),
+    ] {
+        assert_eq!(launch_code(hresult.cast_signed()), code, "{hresult:#x}");
+    }
+    assert_eq!(
+        launch_error(launch_code(0x8007_00E2_u32.cast_signed())),
+        SetupError::Blocked(Blocked::ToolMissing)
+    );
+    // Another facility's failure whose low bits are 225 or 2 is kept whole: never a block.
+    for hresult in [0x8004_00E1_u32, 0x8000_4002, 0x8000_4003] {
+        let code = launch_code(hresult.cast_signed());
+        assert_eq!(code, hresult, "{hresult:#x}");
+        assert!(
+            matches!(launch_error(code), SetupError::Failed(_)),
+            "{hresult:#x}"
+        );
+    }
 }
 
 #[test]
@@ -208,7 +243,12 @@ fn each_block_names_the_setting_for_it_and_no_path_or_sid() {
         policy.contains("policy") && policy.contains("clauseo-sandbox-setup.exe"),
         "{policy}"
     );
-    for words in [logon, policy] {
+    let blocked = Blocked::ToolMissing.to_string();
+    assert!(
+        blocked.contains("Windows security") && blocked.contains("clauseo-sandbox-setup.exe"),
+        "{blocked}"
+    );
+    for words in [logon, policy, blocked] {
         assert!(
             words.contains("whoever looks after this computer"),
             "{words}"

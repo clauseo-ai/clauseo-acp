@@ -44,15 +44,19 @@ mod chain_tests;
 pub(crate) mod fake;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(windows)]
+pub(crate) mod mark_os;
 #[cfg(test)]
 #[cfg(windows)]
 mod ntfs_tests;
 #[cfg(windows)]
 pub(crate) mod os;
+mod security_block;
 #[cfg(test)]
 mod tests;
 mod version;
 
+pub use security_block::launch_recorded;
 pub use version::version_not_older;
 
 /// The admin copy's folder under `%ProgramFiles%`, one part at a time.
@@ -165,6 +169,10 @@ pub trait AdminCopyFs {
     /// Whether the record names another Windows user than this process's as the pool's owner
     /// (`OwnerSid`) or as the admin copy's (`AdminCopyOwner`, which an in-app removal keeps).
     fn another_owner(&self) -> io::Result<bool>;
+    /// Whether this user's `SecurityBlockedAt` mark is there (`security_block`).
+    fn security_blocked(&self) -> io::Result<bool>;
+    /// Records the mark (`true`, at the time now) or deletes it (`false`).
+    fn set_security_blocked(&self, blocked: bool) -> io::Result<()>;
 }
 
 /// What keeps a hashed admin copy unchanged ([`AdminCopyFs::sha256_held`]): on Windows the
@@ -260,7 +268,7 @@ fn checked<H>(
     let exe = admin_exe(&program_files);
     if !matches!(fs.found(&exe), Ok(Found::File)) {
         tracing::warn!("the set-up program's admin copy isn't there as a regular file");
-        return Err(Blocked::AdminCopyMissing);
+        return Err(security_block::missing(fs));
     }
     let recorded = match fs.recorded_sha256() {
         Ok(Some(recorded)) => recorded,
@@ -290,7 +298,10 @@ fn checked<H>(
         return Err(Blocked::AdminCopyChanged);
     }
     match hash(&exe) {
-        Ok((actual, held)) if actual == recorded => Ok((exe, held)),
+        Ok((actual, held)) if actual == recorded => {
+            security_block::verified(fs);
+            Ok((exe, held))
+        }
         Ok(_) => {
             tracing::warn!("the admin copy's SHA-256 isn't the recorded one");
             Err(Blocked::AdminCopyChanged)
@@ -534,7 +545,10 @@ pub fn protection_state(
     let stale = matches!(
         combined,
         SetupState::Blocked(
-            Blocked::AdminCopyMissing | Blocked::AdminCopyChanged | Blocked::AdminCopyUnsafe
+            Blocked::AdminCopyMissing
+                | Blocked::AdminCopyChanged
+                | Blocked::AdminCopyUnsafe
+                | Blocked::ToolMissing
         )
     );
     let state = if stale { marker } else { combined };

@@ -67,6 +67,14 @@ impl AdminCopyFs for Rooted {
     fn another_owner(&self) -> io::Result<bool> {
         Ok(false)
     }
+
+    fn security_blocked(&self) -> io::Result<bool> {
+        Ok(false)
+    }
+
+    fn set_security_blocked(&self, _blocked: bool) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Whether the DACL in `bytes` has an allow entry for Users with a change right.

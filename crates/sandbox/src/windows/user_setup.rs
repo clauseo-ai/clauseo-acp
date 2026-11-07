@@ -17,7 +17,9 @@
 //! own processes can write. It runs
 //! hidden, with no error box from the shell (`SEE_MASK_FLAG_NO_UI`), and the wait has no limit:
 //! R17 calls `run` off the actor thread. A prompt declined (1223) is [`SetupError::Refused`];
-//! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, and a 1385 from
+//! a policy blocking the exe (1260) is [`SetupError::Blocked`], named for IT, as is Windows
+//! security refusing or removing the copy as it starts (225 or 226, `Blocked::ToolMissing`,
+//! remembered so a copy it removed isn't then reported as never installed), and a 1385 from
 //! the launch (the approving account's sign-in) a failure saying so (`launch_error`). Once the
 //! exe ends, its exit code and `setup-result.json` say how ([`result_file::outcome`]): its
 //! 1385 (a sandbox user's logon right) is [`SetupError::Blocked`] too, and a data folder not
@@ -46,7 +48,7 @@ use windows::core::{PCWSTR, w};
 
 use super::NtfsAcl;
 use super::admin_copy::os::{StateAdminCopy, WindowsAdminCopy};
-use super::admin_copy::{launch_checked, protection_state};
+use super::admin_copy::{launch_recorded, protection_state};
 use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
@@ -56,9 +58,9 @@ use super::record::{sandbox_group_sid, sandbox_pool_sids};
 use super::setup::SetupExit;
 use super::setup::args::quote;
 use super::setup::around::Around;
-use super::setup::launch_error;
 use super::setup::result_file::{self, SetupResult};
 use super::setup::taken_file;
+use super::setup::{launch_code, launch_error};
 use super::sids::{Reserved, Sid};
 use crate::{SandboxSetup, SetupError, SetupState};
 
@@ -347,9 +349,10 @@ fn shell_info(file: &[u16], parameters: &[u16], class: HKEY) -> SHELLEXECUTEINFO
 /// Starts the admin copy with `params` as the module says, once it passes
 /// `admin_copy::launch_checked` (else [`SetupError::Blocked`], nothing started), its hashed
 /// handle held until the start returns; waits for it, and gives its exit code. A launch that
-/// fails is `launch_error` of its code.
+/// fails is `launch_error` of its code; a 225 or 226 (`Blocked::ToolMissing`) is remembered
+/// for this user, and a start that succeeds forgets it (`admin_copy::launch_recorded`).
 fn launch(params: &str) -> Result<u32, SetupError> {
-    launch_checked(&WindowsAdminCopy, |exe| start(exe, params)).map_err(SetupError::Blocked)?
+    launch_recorded(&WindowsAdminCopy, |exe| start(exe, params))
 }
 
 /// Starts `exe`, which [`launch`] checked, with `params`, waits for it and gives its exit code.
@@ -363,8 +366,7 @@ fn start(exe: &Path, params: &str) -> Result<u32, SetupError> {
     // returns is owned by `Process` at once.
     let started = unsafe { ShellExecuteExW(&raw mut info) };
     if let Err(error) = started {
-        let code = u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX);
-        return Err(launch_error(code));
+        return Err(launch_error(launch_code(error.code().0)));
     }
     if info.hProcess.is_invalid() {
         return Err(SetupError::Failed(

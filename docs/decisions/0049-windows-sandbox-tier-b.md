@@ -533,6 +533,23 @@ started elevated, by the app or by the uninstall hook.
   verb up in `HKLM\SOFTWARE\Classes\exefile` alone, passed as the class key
   (`SEE_MASK_CLASSKEY`), never in `HKCU\Software\Classes`, which the lawyer's processes can
   write.
+- **Windows security blocking the copy is `ToolMissing`.** When the elevated start fails with
+  `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED` (226), Windows security (Defender, which
+  has flagged the set-up program as a false positive) refused the copy and may have deleted it:
+  `Blocked::ToolMissing` (`tool_missing`), `sandbox.blocked`. Only a Win32 `HRESULT`
+  (`0x8007xxxx`) or a plain Win32 code is read for its code (`launch_code`); any other
+  `HRESULT` is a failure naming it, never a small code such as 226. Every other start failure
+  maps as before. A copy missing before the start stays `AdminCopyMissing`, except that the
+  start also records `SecurityBlockedAt` (a `REG_QWORD` `FILETIME` in
+  `HKCU\Software\Clauseo\Sandbox`): while it is there, a copy that isn't there as a regular file
+  is `ToolMissing` in the launch check, the start and the state, since after a 226 the copy is
+  gone and "get the installer" would only have Windows security remove the reinstalled copy
+  again. A start that succeeds, or a copy found and verified (hash the recorded one), deletes the
+  value. It is per user and trusted for nothing but which message to show: it can only turn
+  `AdminCopyMissing` into `ToolMissing`, and both refuse. Whoever wires `check_launch` or
+  `UserSetup` (R17 PR-E, PR6) treats `Error::Blocked`, `ToolMissing` included, as a refusal,
+  never a fallback to a weaker tier, and tests that. The check of the exes beside the app this
+  cause first had (`bundled`, before design B) is gone: nothing starts the copy beside the app.
 - **The state shows the repair first.** `UserSetup::state` checks the copy before the marker
   and record: missing (or no recorded hash), changed or unsafe is `SetupState::Blocked` with that
   cause, at the first open after a declined or silent install; `Needed` only with a verified

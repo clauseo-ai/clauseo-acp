@@ -99,18 +99,23 @@ pub enum Blocked {
     /// or set-up by a second user (`windows::admin_copy::check_owner`), and `--adopt`'s exit 2,
     /// which changes nothing.
     OtherAccount,
+    /// Windows security refused or removed the set-up program's admin copy when the app
+    /// started it: `ShellExecuteExW` gave `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED`
+    /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
+    ToolMissing,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, and the test of the names lists this.
-    pub const ALL: [Blocked; 6] = [
+    pub const ALL: [Blocked; 7] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
         Blocked::AdminCopyChanged,
         Blocked::AdminCopyUnsafe,
         Blocked::OtherAccount,
+        Blocked::ToolMissing,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -123,6 +128,7 @@ impl Blocked {
             Blocked::AdminCopyChanged => "admin_copy_changed",
             Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
             Blocked::OtherAccount => "other_account",
+            Blocked::ToolMissing => "tool_missing",
         }
     }
 }
@@ -154,6 +160,11 @@ impl std::fmt::Display for Blocked {
             Blocked::OtherAccount => {
                 "Clauseo's protection is set up for another account on this computer; whoever \
                  looks after this computer can remove it there first"
+            }
+            Blocked::ToolMissing => {
+                "Windows security blocked or removed clauseo-sandbox-setup.exe, Clauseo's set-up \
+                 program, when Clauseo started it; whoever looks after this computer can allow it \
+                 and re-run the Clauseo installer"
             }
         })
     }

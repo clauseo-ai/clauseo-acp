@@ -75,6 +75,18 @@ impl AdminCopyFs for WindowsAdminCopy {
         admin_copy_sha256().map_err(io::Error::other)
     }
 
+    fn security_blocked(&self) -> io::Result<bool> {
+        super::mark_os::read()
+    }
+
+    fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
+        if blocked {
+            super::mark_os::record()
+        } else {
+            super::mark_os::delete()
+        }
+    }
+
     fn another_owner(&self) -> io::Result<bool> {
         let me = current_user_sid()?;
         let pool = sandbox_owner_sid().map_err(io::Error::other)?;
@@ -188,6 +200,14 @@ impl AdminCopyFs for StateAdminCopy {
 
     fn another_owner(&self) -> io::Result<bool> {
         WindowsAdminCopy.another_owner()
+    }
+
+    fn security_blocked(&self) -> io::Result<bool> {
+        WindowsAdminCopy.security_blocked()
+    }
+
+    fn set_security_blocked(&self, blocked: bool) -> io::Result<()> {
+        WindowsAdminCopy.set_security_blocked(blocked)
     }
 }
 
