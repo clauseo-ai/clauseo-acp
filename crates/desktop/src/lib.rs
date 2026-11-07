@@ -23,7 +23,8 @@
 //!   at once with `128 + signo`); and macOS's own quit (the app menu's Quit,
 //!   the Dock, logout, shutdown), which reaches only `RunEvent::Exit`, synchronously there within
 //!   `EXIT_STOP_WAIT` (13 s). Windows needs none of this: the Job Object's kill-on-close ends
-//!   each agent's tree when the process dies, however it dies. SIGKILL or a crash leaves the
+//!   each agent's tree when the process dies, however it dies, so a logoff or shutdown
+//!   (`WM_ENDSESSION`) waits at most `SESSION_END_WAIT`, 3.5 s. SIGKILL or a crash leaves the
 //!   agents' groups running on Unix. Every quit hides the windows as it starts: on
 //!   `ExitRequested` after `prevent_exit` and the window state's save on the main thread (never
 //!   from another thread), then the stopper starts; `RunEvent::Exit` after the plugin's own
