@@ -98,14 +98,15 @@ mod spike {
         let t = tag();
         let user = format!("S15Spk{t}");
         let group = format!("S15SpkG{t}");
-        let password = format!("Aa1!{t}{}", tag());
+        // 12 characters: `net user` asks to confirm a password over 14, and `/Y` answers it anyway.
+        let password = format!("Aa1!{t}");
         tokens::net(&["localgroup", &group, "/add"])?;
         let mut cleanup = Cleanup {
             user: user.clone(),
             group: group.clone(),
             owner: None,
         };
-        tokens::net(&["user", &user, &password, "/add"])?;
+        tokens::net(&["user", &user, &password, "/add", "/Y"])?;
         tokens::net(&["localgroup", &group, &user, "/add"])?;
         let (kind, pool) = tokens::logon(&user, &password)?;
         say(&format!("LOGON {kind}"));
