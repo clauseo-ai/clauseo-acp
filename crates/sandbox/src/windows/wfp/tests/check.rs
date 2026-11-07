@@ -17,7 +17,7 @@ use crate::windows::sids::Sid;
 type Failure = (&'static str, u32);
 
 /// `spec` as WFP would hold it after set-up wrote it.
-fn as_written(ns: &Namespace, spec: &FilterSpec) -> FoundFilter {
+pub(super) fn as_written(ns: &Namespace, spec: &FilterSpec) -> FoundFilter {
     let dacl = |sddl: String| sddl.replacen("O:SYG:SY", "", 1);
     let conditions = spec
         .conditions

@@ -132,6 +132,37 @@ pub(in crate::windows::wfp) fn grant(
     check(SET_SECURITY, code, &[])
 }
 
+/// A security descriptor converted from SDDL, freed on drop.
+pub(in crate::windows::wfp) struct Descriptor(pub(super) PSECURITY_DESCRIPTOR);
+
+impl Descriptor {
+    /// `sddl` as a descriptor.
+    pub(in crate::windows::wfp) fn from_sddl(sddl: &str) -> Result<Descriptor, WfpError> {
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: a live string and out-pointer; freed by Drop.
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                &HSTRING::from(sddl),
+                SDDL_REVISION_1,
+                &raw mut sd,
+                None,
+            )
+        }
+        .map_err(|error| WfpError {
+            call: "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+            code: code_of(error.code()),
+        })?;
+        Ok(Descriptor(sd))
+    }
+}
+
+impl Drop for Descriptor {
+    fn drop(&mut self) {
+        // SAFETY: from the conversion (LocalAlloc), freed once, here.
+        unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
+    }
+}
+
 /// Replaces `object`'s DACL in `ns` with `sddl`'s, with no read first: the call needs only
 /// `WRITE_DAC`, so the owner probe's refusal comes from that right alone.
 pub(in crate::windows::wfp) fn set_dacl(
@@ -142,20 +173,8 @@ pub(in crate::windows::wfp) fn set_dacl(
 ) -> Result<(), WfpError> {
     let (kind, key) = kind_and_key(ns, object);
     let key = key.as_ref().map(ptr::from_ref);
-    let mut sd = PSECURITY_DESCRIPTOR::default();
-    // SAFETY: a live string and out-pointer; freed below.
-    unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            &HSTRING::from(sddl),
-            SDDL_REVISION_1,
-            &raw mut sd,
-            None,
-        )
-    }
-    .map_err(|error| WfpError {
-        call: "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-        code: code_of(error.code()),
-    })?;
+    let descriptor = Descriptor::from_sddl(sddl)?;
+    let sd = descriptor.0;
     let (mut present, mut defaulted) = (windows::core::BOOL(0), windows::core::BOOL(0));
     let mut acl: *mut ACL = ptr::null_mut();
     // SAFETY: `sd` is valid; the out-pointers are live; `acl` points into `sd`.
@@ -181,8 +200,7 @@ pub(in crate::windows::wfp) fn set_dacl(
             }
         }
     });
-    // SAFETY: from the conversion, freed once.
-    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    drop(descriptor);
     check(SET_SECURITY, code, &[])
 }
 

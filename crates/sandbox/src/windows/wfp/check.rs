@@ -155,10 +155,12 @@ impl WfpError {
     /// call and its code. Each fails the set-up: WFP is the boundary.
     pub fn cause(&self) -> String {
         if self.call == OWNER_CHECK && self.code == ERROR_INVALID_OWNER {
-            "Clauseo's network filters were created owned by the signed-in user, not \
-             Administrators, so that user could change them: IT should set the policy \
-             \"System objects: Default owner for objects created by members of the \
-             Administrators group\" back to Administrators group, then run Clauseo's set-up again"
+            "Clauseo's network filters came out owned by an account other than Administrators \
+             or SYSTEM, though set-up asks for Administrators, so that account could change \
+             them: IT should check the policy \"System objects: Default owner for objects \
+             created by members of the Administrators group\" and that nothing else on this \
+             computer manages Windows Filtering Platform permissions, then run Clauseo's set-up \
+             again"
                 .to_owned()
         } else if BFE_DOWN.contains(&self.code) {
             format!(
