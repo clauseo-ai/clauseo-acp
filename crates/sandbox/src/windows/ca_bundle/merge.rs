@@ -1,16 +1,16 @@
 //! A firm's CA files merged into the machine's bundle (S15 PR5): when a launch carries a firm CA
-//! (`LaunchMessage::firm_ca`, or the host's own `SSL_CERT_FILE`), its certificates are appended
-//! to the machine roots, each once, so codex and OpenSSL tools trust the firm's TLS-inspecting
-//! proxy as well as the machine's roots. The machine roots keep the export's filter (Disallowed,
-//! self-issued, store limits); a firm's certificates are the firm's choice and are taken as they
-//! are, only parsed. Pure, so its tests run on every OS.
+//! (`LaunchMessage::firm_ca`, which R17 fills from `network.ca_certs`), its certificates are
+//! appended to the machine roots, each once, so codex and OpenSSL tools trust the firm's
+//! TLS-inspecting proxy as well as the machine's roots. A firm certificate must be a CA's (basic
+//! constraints `cA`) and in no `Disallowed` store (by DER or public key); the machine roots keep
+//! the export's own filter. Pure, so its tests run on every OS.
 
 use std::collections::BTreeSet;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
-use super::{der, pem_block};
+use super::{der, is_disallowed, pem_block};
 
 /// The PEM block markers.
 const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
@@ -25,12 +25,22 @@ pub struct Merged {
     pub firm_kept: usize,
     /// Firm certificates (or whole files) that didn't parse as a certificate, left out.
     pub firm_unparsable: usize,
+    /// Firm certificates also in `Disallowed` (by DER or public key), left out.
+    pub firm_disallowed: usize,
+    /// Firm certificates that aren't a CA's (no basic constraints `cA`), left out.
+    pub firm_not_ca: usize,
 }
 
 /// The machine bundle `machine` (PEM, as `ensure` wrote it) with the certificates of each firm
 /// file in `firm` (PEM with one or more `CERTIFICATE` blocks, or one DER certificate) appended:
-/// in file order, each certificate once, none already in the machine bundle.
-pub fn merge(machine: &[u8], firm: &[Vec<u8>]) -> Merged {
+/// in file order, each certificate once, none already in the machine bundle, none in
+/// `disallowed` (DER certificates, matched by DER or public key) and only CA certificates.
+pub fn merge(machine: &[u8], firm: &[Vec<u8>], disallowed: &[Vec<u8>]) -> Merged {
+    let banned_der: BTreeSet<&[u8]> = disallowed.iter().map(Vec::as_slice).collect();
+    let banned_spki: BTreeSet<&[u8]> = disallowed
+        .iter()
+        .filter_map(|cert| der::certificate(cert).map(|parts| parts.spki))
+        .collect();
     let mut seen: BTreeSet<Vec<u8>> = BTreeSet::new();
     let mut out = Merged::default();
     for cert in certificates(machine).0 {
@@ -42,7 +52,14 @@ pub fn merge(machine: &[u8], firm: &[Vec<u8>]) -> Merged {
         let (certs, unparsable) = certificates(file);
         out.firm_unparsable += unparsable;
         for cert in certs {
-            if seen.insert(cert.clone()) {
+            let spki = der::certificate(&cert)
+                .map(|parts| parts.spki)
+                .unwrap_or_default();
+            if is_disallowed(&cert, spki, &banned_der, &banned_spki) {
+                out.firm_disallowed += 1;
+            } else if !der::is_ca(&cert) {
+                out.firm_not_ca += 1;
+            } else if seen.insert(cert.clone()) {
                 out.pem.push_str(&pem_block(&cert));
                 out.firm_kept += 1;
             }

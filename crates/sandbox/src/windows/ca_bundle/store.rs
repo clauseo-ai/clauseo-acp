@@ -279,6 +279,18 @@ fn export() -> io::Result<Filtered> {
     Ok(export_from(&roots, &disallowed))
 }
 
+/// Every certificate in the `Disallowed` stores at each of [`LOCATIONS`], as DER: what a firm's
+/// CA files are checked against before they are merged (`merge`).
+pub fn disallowed() -> io::Result<Vec<Vec<u8>>> {
+    let mut out = Vec::new();
+    for location in LOCATIONS {
+        if let Some(store) = Store::open_system("Disallowed", location)? {
+            out.extend(store.certificates());
+        }
+    }
+    Ok(out)
+}
+
 /// What was written for one data folder.
 struct Cached {
     desktop: Sid,

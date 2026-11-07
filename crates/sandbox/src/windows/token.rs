@@ -148,6 +148,12 @@ pub fn desktop_sddl(pool_user: &Sid, matter: Option<&Sid>) -> String {
     format!("D:(A;;GA;;;SY)(A;;GA;;;{pool_user}){matter}S:(ML;;NW;;;LW)")
 }
 
+/// The agent's window station's descriptor: as [`desktop_sddl`], `SYSTEM` and the pool user
+/// (and the matter SID when the launch restricts with one), labelled Low.
+pub fn station_sddl(pool_user: &Sid, matter: Option<&Sid>) -> String {
+    desktop_sddl(pool_user, matter)
+}
+
 /// Whether `sid` is a logon SID: `S-1-5-5-X-Y`.
 pub fn is_logon_sid(sid: &Sid) -> bool {
     let parts: Vec<&str> = sid.as_str().split('-').collect();

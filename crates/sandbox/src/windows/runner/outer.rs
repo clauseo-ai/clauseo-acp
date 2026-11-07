@@ -1,21 +1,13 @@
 //! The outer runner (Windows): the desktop user's half, started by the host through
 //! `spawn_in_tree` with `--launch <file>`. See `runner.rs` for the whole chain.
-#![expect(unsafe_code, reason = "FFI to the profile folder and token calls")]
 
 use std::io::{self, Write as _};
-use std::os::windows::fs::MetadataExt as _;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Security::TOKEN_QUERY;
-use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-use windows::Win32::System::Threading::OpenProcessToken;
-use windows::Win32::UI::Shell::GetUserProfileDirectoryW;
-use windows::core::PWSTR;
-
+use super::desktop::AgentDesktop;
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{
@@ -23,13 +15,14 @@ use super::spawn::{
     system_folder,
 };
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
-use crate::windows::acl::object::{Handle, Object, os_error};
+use crate::windows::acl::object::Handle;
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
-use crate::windows::record::{current_user_sid, user_of};
+use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
-use crate::windows::token::os::own_token;
+use crate::windows::token::os::{own_token, profile_folder};
+use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
 
 /// How long the inner runner has to connect `ctl`: its logon, which makes the pool user's
@@ -82,17 +75,36 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         .collect::<io::Result<Vec<_>>>()
         .map_err(|e| Failure::new(RunExit::Pipe, os("CreateNamedPipeW", &e)))?;
     let job = kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?;
+    // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
+    // launch's alone, and a SID the pool doesn't hold is a bad launch.
     let password = secret_for(&data_dir, &message.pool_user).map_err(|error| match error {
         SecretError::NoSecret { .. } => Failure::new(RunExit::NoSecret, super::PASSWORD_LOST),
+        SecretError::Io(_) => Failure::new(RunExit::Logon, error.to_string()),
+        SecretError::NotInPool { .. } => Failure::new(RunExit::BadLaunch, error.to_string()),
         other @ (SecretError::Newer { .. }
         | SecretError::Malformed(_)
-        | SecretError::Io(_)
-        | SecretError::Dpapi { .. }
-        | SecretError::NotInPool { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
+        | SecretError::Dpapi { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
     })?;
     let exe_text = exe
         .to_str()
         .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's path isn't UTF-8"))?;
+    // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
+    // desktop UI limit: no process in it may make or switch desktops. They live as long as this
+    // process.
+    let station_name = format!(
+        "ClauseoRun-{}",
+        set.base()
+            .strip_prefix(crate::windows::pipe::PIPE_PREFIX)
+            .and_then(|hex| hex.get(..16))
+            .unwrap_or("desktop")
+    );
+    let matter = message.matter_sid.as_ref();
+    let agent_desktop = AgentDesktop::create(
+        &station_name,
+        &station_sddl(&message.pool_user, matter),
+        &desktop_sddl(&message.pool_user, matter),
+    )
+    .map_err(|e| Failure::new(RunExit::Token, os("the agent's window station", &e)))?;
     // The inner runner starts in System32, a folder its Low agent can't write (no DLL planted in
     // its current folder), and gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
@@ -115,6 +127,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         cwd: message.cwd.clone(),
         env,
         folders,
+        desktop: agent_desktop.path.clone(),
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
@@ -138,7 +151,9 @@ fn serve(
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
     accept(&ctl, inner, FIRST_CONNECT)?;
-    let user = process_user(inner).map_err(|e| Failure::new(RunExit::Pipe, os("token", &e)))?;
+    let user = inner
+        .user()
+        .map_err(|e| Failure::new(RunExit::Pipe, os("token", &e)))?;
     if user != message.pool_user {
         inner.kill(RunExit::Pipe.code());
         return Err(Failure::new(
@@ -156,16 +171,22 @@ fn serve(
     match read_frame::<InnerReport>(&ctl) {
         Ok(InnerReport::Started { .. }) => {}
         Ok(InnerReport::Failed { exit, what }) => return Err(failed(inner, exit, &what)),
+        Ok(InnerReport::Exited { .. }) => {
+            return Err(Failure::new(
+                RunExit::Pipe,
+                "the inner runner skipped its start report",
+            ));
+        }
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    relay(inner, job, stdin, stdout, stderr)
+    relay(inner, job, &ctl, stdin, stdout, stderr)
 }
 
 /// The failure the inner runner reported on `ctl`, if it did.
 fn reported(ctl: &ServerPipe, inner: &Process) -> Option<Failure> {
     match read_frame::<InnerReport>(ctl) {
         Ok(InnerReport::Failed { exit, what }) => Some(failed(inner, exit, &what)),
-        Ok(InnerReport::Started { .. }) | Err(_) => None,
+        Ok(InnerReport::Started { .. } | InnerReport::Exited { .. }) | Err(_) => None,
     }
 }
 
@@ -203,6 +224,7 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 fn relay(
     inner: &Process,
     job: &Handle,
+    ctl: &ServerPipe,
     stdin: ServerPipe,
     stdout: ServerPipe,
     stderr: ServerPipe,
@@ -246,7 +268,26 @@ fn relay(
             left -= 1;
         }
     }
+    tell_status(ctl, code);
     exit_now(code)
+}
+
+/// One line on stderr when the run ended at a Windows status (`0xC0000000` and up), naming
+/// which process ended so: the agent (its `Exited` report came on `ctl`) or the inner runner.
+/// `0xC0000142` (`STATUS_DLL_INIT_FAILED`) at start means a DLL, user32 most often, couldn't
+/// start in it: a window station or desktop its token can't open.
+fn tell_status(ctl: &ServerPipe, code: u32) {
+    let which = match read_frame::<InnerReport>(ctl) {
+        Ok(InnerReport::Exited { code: agent }) if agent >= 0xC000_0000 => {
+            format!("the agent ended at Windows status 0x{agent:08X}")
+        }
+        Ok(InnerReport::Exited { .. }) => return,
+        _ if code >= 0xC000_0000 => {
+            format!("the inner runner ended at Windows status 0x{code:08X}")
+        }
+        _ => return,
+    };
+    say(&format!("clauseo-sandbox-run: {which}"));
 }
 
 /// Ends this process with `code` now: the copies still blocked on a pipe go with it, and the
@@ -345,38 +386,11 @@ fn refuse_codex_reuse(message: &LaunchMessage, profile: &WinPath) -> Result<(), 
     paths.extend(message.firm_ca.iter().map(|p| ("firm_ca", p.as_str())));
     let refused = |reason: CodexReuse| Failure::new(RunExit::CodexReuse, reason.to_string());
     codex_reuse(profile, paths, &message.env).map_err(refused)?;
-    let Some(link) = &message.credential_link else {
-        return Ok(());
-    };
-    // A link that is a reparse point (a symbolic link) would carry another file ID than what it
-    // points at; the credential link must be a hard link (R17), so refuse one.
-    match std::fs::symlink_metadata(link) {
-        Ok(found) if found.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 => {
-            return Err(refused(CodexReuse::LinkedLogin));
+    match &message.credential_link {
+        Some(link) => {
+            super::policy::credential_link_check(Path::new(link), profile).map_err(refused)
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(Failure::new(
-                RunExit::CodexReuse,
-                os("credential link check", &error),
-            ));
-        }
-    }
-    let auth = profile.join(".codex").join("auth.json").display();
-    let id = |path: &str| match Object::open(Path::new(path)) {
-        Ok(object) => object.file_id().map(Some),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    };
-    let checked = id(&auth).and_then(|auth| Ok((auth, id(link)?)));
-    match checked {
-        Ok((Some(auth), Some(link))) if auth == link => Err(refused(CodexReuse::LinkedLogin)),
-        Ok(_) => Ok(()),
-        Err(error) => Err(Failure::new(
-            RunExit::CodexReuse,
-            os("credential link check", &error),
-        )),
+        None => Ok(()),
     }
 }
 
@@ -393,33 +407,9 @@ fn logon_failure(code: u32) -> Failure {
     }
 }
 
-/// The user of `process`'s token.
-fn process_user(process: &Process) -> io::Result<crate::windows::sids::Sid> {
-    let mut token = HANDLE::default();
-    // SAFETY: the process handle has every right (it came from the logon call); `token` is a
-    // live out-pointer, owned by `Handle` once written.
-    unsafe { OpenProcessToken(process.handle.0, TOKEN_QUERY, &raw mut token) }
-        .map_err(|e| os_error(&e))?;
-    let token = Handle(token);
-    let text = user_of(token.0)?;
-    crate::windows::sids::Sid::parse(&text)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-}
-
 /// This user's profile folder, from its token (never from `USERPROFILE`).
 fn own_profile() -> io::Result<WinPath> {
-    let token = own_token()?;
-    let mut buffer = vec![0u16; 1024];
-    let mut len = u32::try_from(buffer.len()).map_err(io::Error::other)?;
-    // SAFETY: the token is live; `buffer` is writable for `len` units.
-    unsafe { GetUserProfileDirectoryW(token.0, Some(PWSTR(buffer.as_mut_ptr())), &raw mut len) }
-        .map_err(|e| os_error(&e))?;
-    let end = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    let text =
-        String::from_utf16(buffer.get(..end).unwrap_or_default()).map_err(io::Error::other)?;
+    let text = profile_folder(&own_token()?)?;
     WinPath::parse(&text)
         .ok_or_else(|| io::Error::other("the profile folder isn't a full local path"))
 }

@@ -11,42 +11,36 @@ use std::io;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows::Win32::Security::SECURITY_ATTRIBUTES;
+use windows::Win32::Security::TOKEN_QUERY;
 use windows::Win32::System::Diagnostics::Debug::{
     SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
 };
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
-    JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
-    JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
-    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, SetInformationJobObject,
-    TerminateJobObject,
+    JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
+    JOB_OBJECT_UILIMIT_EXITWINDOWS, JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES,
+    JOB_OBJECT_UILIMIT_READCLIPBOARD, JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS,
+    JOB_OBJECT_UILIMIT_WRITECLIPBOARD, JOBOBJECT_BASIC_UI_RESTRICTIONS,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicUIRestrictions,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories, SetDllDirectoryW,
-};
-use windows::Win32::System::StationsAndDesktops::{
-    CloseDesktop, CreateDesktopW, DESKTOP_CONTROL_FLAGS, HDESK,
 };
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
     GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION,
-    ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
-    TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
 use crate::windows::acl::object::{Handle, os_error};
-use crate::windows::token::os::LocalDescriptor;
 
-/// `GENERIC_ALL`, the access the runner asks for on its own desktop.
-const GENERIC_ALL: u32 = 0x1000_0000;
 /// `SW_HIDE`.
 const SW_HIDE: u16 = 0;
 
@@ -83,6 +77,16 @@ impl Process {
         // SAFETY: the process handle is live; `code` is a live out-pointer.
         unsafe { GetExitCodeProcess(self.handle.0, &raw mut code) }.map_err(|e| os_error(&e))?;
         Ok(Some(code))
+    }
+
+    /// The user of its token.
+    pub(super) fn user(&self) -> io::Result<crate::windows::sids::Sid> {
+        let mut token = HANDLE::default();
+        // SAFETY: the process handle has every right (it came from the logon call); `token` is
+        // a live out-pointer, owned by `Handle` once written.
+        unsafe { OpenProcessToken(self.handle.0, TOKEN_QUERY, &raw mut token) }
+            .map_err(|e| os_error(&e))?;
+        crate::windows::token::os::user(&Handle(token))
     }
 
     /// Ends it with `code`; one already gone is fine.
@@ -143,10 +147,11 @@ pub(super) fn log_on(
     }
 }
 
-/// The job's UI limits: `WinSta0`, not the desktop, owns the clipboard and the global atom
-/// table, so the private desktop alone doesn't keep the agent from the lawyer's clipboard or
-/// atoms (Chromium's sandbox sets the same limits). Not `DESKTOP`: the inner runner makes its
-/// private desktop after it joins the job.
+/// The job's UI limits, as Chromium's sandbox sets them. `WinSta0`, not the desktop, owns the
+/// clipboard and the global atom table, so the private desktop alone doesn't keep the agent from
+/// the lawyer's clipboard or atoms. `DESKTOP`: no process in the job makes or switches desktops,
+/// so the agent can't make its own desktop the one the lawyer sees; the outer runner makes the
+/// agent's desktop before the inner runner joins the job.
 pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
     JOB_OBJECT_UILIMIT_READCLIPBOARD.0
         | JOB_OBJECT_UILIMIT_WRITECLIPBOARD.0
@@ -154,7 +159,8 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
         | JOB_OBJECT_UILIMIT_HANDLES.0
         | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS.0
         | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS.0
-        | JOB_OBJECT_UILIMIT_EXITWINDOWS.0,
+        | JOB_OBJECT_UILIMIT_EXITWINDOWS.0
+        | JOB_OBJECT_UILIMIT_DESKTOP.0,
 );
 
 /// A job whose last handle closing ends every process in it, with no breakaway allowed and
@@ -239,49 +245,6 @@ pub(super) fn quiet_errors() {
     unsafe {
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX)
     };
-}
-
-/// The inner runner's private desktop on its window station, closed on drop.
-pub(super) struct Desktop {
-    handle: HDESK,
-    /// `WinSta0\<name>`, for the agent's `lpDesktop`.
-    pub(super) path: String,
-}
-
-impl Desktop {
-    /// Makes the desktop `name` with the descriptor `sddl` (`token::desktop_sddl`).
-    pub(super) fn create(name: &str, sddl: &str) -> io::Result<Desktop> {
-        let descriptor = LocalDescriptor::new(sddl)?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
-            lpSecurityDescriptor: descriptor.0.0,
-            bInheritHandle: false.into(),
-        };
-        // SAFETY: the name is a live HSTRING and `attributes` with its descriptor outlives the
-        // call; the desktop is closed by `Drop`.
-        let handle = unsafe {
-            CreateDesktopW(
-                &HSTRING::from(name),
-                PCWSTR::null(),
-                None,
-                DESKTOP_CONTROL_FLAGS::default(),
-                GENERIC_ALL,
-                Some(&raw const attributes),
-            )
-        }
-        .map_err(|e| os_error(&e))?;
-        Ok(Desktop {
-            handle,
-            path: format!(r"WinSta0\{name}"),
-        })
-    }
-}
-
-impl Drop for Desktop {
-    fn drop(&mut self) {
-        // SAFETY: the desktop came from CreateDesktopW and is closed once, here.
-        drop(unsafe { CloseDesktop(self.handle) });
-    }
 }
 
 /// What the agent is started with.

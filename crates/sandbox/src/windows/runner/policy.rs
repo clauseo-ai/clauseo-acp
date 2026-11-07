@@ -99,3 +99,53 @@ pub fn codex_reuse_in_policy(
         .collect();
     codex_reuse(profile, texts.iter().map(|t| ("granted", t.as_str())), &[])
 }
+
+/// M3's whole check before any entry is applied (for the launcher, PR6 and R17, and the outer
+/// runner again before logon): [`codex_reuse_in_policy`]'s text check, then the policy's
+/// credential link refused if it is a reparse point or if it is `<profile>\.codex\auth.json`
+/// by file ID (a hard link to it), since a grant on it would change that file's own DACL.
+#[cfg(windows)]
+pub fn codex_link_in_policy(
+    policy: &crate::Policy,
+    profile: &WinPath,
+) -> Result<(), paths::CodexReuse> {
+    codex_reuse_in_policy(policy, profile)?;
+    match policy.credential_link() {
+        Some(link) => credential_link_check(link, profile),
+        None => Ok(()),
+    }
+}
+
+/// The credential link `link` refused if it is a reparse point, or the same file (volume and
+/// file ID) as `<profile>\.codex\auth.json`. A link or an `auth.json` that isn't there passes;
+/// one that can't be opened or read is refused.
+#[cfg(windows)]
+pub(super) fn credential_link_check(
+    link: &Path,
+    profile: &WinPath,
+) -> Result<(), paths::CodexReuse> {
+    use std::io;
+    use std::os::windows::fs::MetadataExt as _;
+
+    use paths::CodexReuse;
+
+    /// `FILE_ATTRIBUTE_REPARSE_POINT`.
+    const REPARSE: u32 = 0x400;
+    match std::fs::symlink_metadata(link) {
+        Ok(found) if found.file_attributes() & REPARSE != 0 => return Err(CodexReuse::ReparseLink),
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CodexReuse::Unchecked(error.kind())),
+    }
+    let auth = PathBuf::from(profile.join(".codex").join("auth.json").display());
+    let id = |path: &Path| match crate::windows::acl::object::Object::open(path) {
+        Ok(object) => object.file_id().map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    };
+    match (id(&auth), id(link)) {
+        (Ok(Some(auth)), Ok(Some(link))) if auth == link => Err(CodexReuse::LinkedLogin),
+        (Ok(_), Ok(_)) => Ok(()),
+        (Err(error), _) | (_, Err(error)) => Err(CodexReuse::Unchecked(error.kind())),
+    }
+}

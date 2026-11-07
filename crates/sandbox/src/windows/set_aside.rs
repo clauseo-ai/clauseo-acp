@@ -123,6 +123,8 @@ mod moves;
 mod names;
 #[cfg(windows)]
 mod ntfs;
+#[cfg(windows)]
+pub(in crate::windows) use ntfs::make_folders;
 #[cfg(any(windows, test))]
 mod run;
 #[cfg(any(windows, test))]

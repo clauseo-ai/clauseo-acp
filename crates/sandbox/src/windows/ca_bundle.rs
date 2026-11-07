@@ -43,7 +43,7 @@ mod store;
 
 pub use merge::{Merged, merge, merged_name};
 #[cfg(windows)]
-pub use store::{Bundle, ensure, ensure_with, write_merged};
+pub use store::{Bundle, disallowed, ensure, ensure_with, write_merged};
 
 /// The bundle's folder in the data folder.
 pub const CA_DIR: &str = "sandbox-ca";
