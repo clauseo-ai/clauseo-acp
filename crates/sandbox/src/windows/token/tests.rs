@@ -141,3 +141,33 @@ fn the_agents_window_station_names_only_system_and_the_pool_user_at_low() {
         assert!(!sddl.contains(absent), "{absent} in {sddl}");
     }
 }
+
+#[test]
+fn the_inner_runners_own_objects_name_no_pool_user() {
+    let desktop = sid(DESKTOP);
+    for sddl in [
+        runner_process_sddl(&desktop),
+        runner_thread_sddl(&desktop),
+        runner_token_sddl(&desktop),
+        runner_default_dacl(&desktop),
+    ] {
+        assert!(sddl.contains(DESKTOP) && sddl.contains(";;;SY)"), "{sddl}");
+        for absent in [POOL, LOGON, ";WD)", ";BU)", ";RC)"] {
+            assert!(!sddl.contains(absent), "{absent} in {sddl}");
+        }
+    }
+    assert_eq!(
+        runner_process_sddl(&desktop),
+        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)")
+    );
+    assert!(runner_token_sddl(&desktop).ends_with("(A;;RC;;;OW)"));
+}
+
+#[test]
+fn the_agents_own_token_names_the_pool_user() {
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
+    assert_eq!(
+        spec.token_dacl,
+        format!("D:P(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x8;;;{DESKTOP})")
+    );
+}

@@ -974,10 +974,15 @@ leaves that profile, both naming the part.
 - **The token** is (B) as above, made by the inner runner from its own token with
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
-  only its three pipes. The agent runs as the inner runner's own user, so before it starts the
-  inner runner gives its own process, thread and primary token a protected DACL naming `SYSTEM`
-  and the lawyer alone, with `OWNER RIGHTS` held to `READ_CONTROL`: the agent can't open its
-  Medium, unrestricted token (the harness's `runners` row first found query and duplicate open).
+  only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
+  shut to it: the outer gives the inner's process and first thread a protected DACL naming
+  `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to `READ_CONTROL`, while the inner is
+  still suspended; the inner, first thing after reading the launch, does the same for its primary
+  token and every thread it has, and drops the pool user from its default DACL so a thread the
+  system starts in it later is shut too. No agent of the pool user, the new one or one already
+  running, opens its Medium, unrestricted token (the harness's `runners` row first found query
+  and duplicate open). The agent's own token gets an explicit DACL naming the pool user. Both
+  runner exes are GUI-subsystem, so neither gets a console host.
   It makes the agent's profile folders part by part relative to each
   parent's handle, never through a link.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
