@@ -1087,16 +1087,24 @@ leaves that profile, both naming the part.
     service starts it as its own child, outside the caller's jobs, in a job of the service's own,
     so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
     every process of the pool user but itself that was created before it was (`GetProcessTimes`
-    against its own start), with no job exemption because the session is ending, then makes the
-    same cleanup, all on its own 60 s limit. It logs to its stderr, which
+    against its own start), or that a process it killed started, with no job exemption because
+    the session is ending. It makes that sweep twice, both passes before the cleanup, and then
+    makes the same cleanup, all on its own 60 s limit. It logs to its stderr, which
     the outer relays while it lives; on a cancel nobody reads it. Its exit code says whether
     everything went, and the outer logs a failure if it is still alive to see it. It writes no
     result file. The run folder admits only the lawyer, `SYSTEM` and Administrators, and a file
     the pool user could write there would be writable by its other processes too.
   - **The end sweeper and a next session.** The sweeper may still run when a next launch for the
     same pool user starts. Its creation-time cutoff leaves the next session's inner and agent
-    alone, since they start later; a process an escaped one starts after the sweeper started is
-    killed by the next session's first act or tick. The other way round, the next inner's first
+    alone, since they start later, from the next outer and inner. The cutoff alone would also
+    spare a child that a process the sweeper killed started after the sweeper did, so a process
+    created after the sweeper is still killed when the snapshot's parent pid names a process
+    this sweep killed and it was created after that one. Each killed process stays open until
+    the sweep is over, so its pid isn't reused meanwhile, and a process that had the pid earlier
+    was created before it. Each pass already lists again after any round that killed something;
+    the second pass, which keeps what the first killed, takes what got past the first pass's last
+    listing. A process an escaped one starts after the sweeper started, or one a service starts
+    for it, is killed by the next session's first act or tick. The other way round, the next inner's first
     act kills a sweeper still running, a pool-user process outside its job. Nothing is lost: that
     inner makes the same cleanup itself. For either to open the other, the runners' process DACL
     (the inner's and the sweeper's, not their threads or token) grants the lawyer's logon SID
