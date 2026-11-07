@@ -9,6 +9,7 @@ use super::engine::{Engine, Entry, dacl_of};
 use super::spec::{Namespace, NetworkSetup, Object};
 use super::{check_launch_in, install, remove};
 use crate::Error;
+use crate::ports::TIER_B_PORTS;
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_dacl::elevated;
@@ -113,8 +114,17 @@ fn elevated_install_extend_check_and_remove() {
     assert_eq!(checked(&a), Ok(()));
     install(&ns, &setup(&[a.clone(), b, c.clone()])).unwrap();
     assert_eq!(checked(&c), Ok(()));
-    check_launch_in(&ns, &a, &[61090, 61091]).unwrap();
-    match check_launch_in(&ns, &fake(4009), &[61090]) {
+    // Ports from the range the launch check takes, so only the filters decide.
+    let first = *TIER_B_PORTS.start();
+    check_launch_in(&ns, &a, &[first, first + 1]).unwrap();
+    let outside = *TIER_B_PORTS.end() + 1;
+    match check_launch_in(&ns, &a, &[first, outside]) {
+        Err(Error::NetworkUnfiltered {
+            cause: NetworkGap::PortOutsideRange(port),
+        }) if port == outside => {}
+        other => panic!("port {outside}, outside the range, got {other:?}"),
+    }
+    match check_launch_in(&ns, &fake(4009), &[first]) {
         Err(Error::NetworkUnfiltered {
             cause: NetworkGap::PoolUserNotCovered,
         }) => {}
