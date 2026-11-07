@@ -212,6 +212,14 @@ fn the_exe_has_aslr_with_high_entropy_and_dep() {
     }
 }
 
+/// No PDB, so no debug directory: its GUID would hash rustc's random temp paths (`build.rs`).
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_exe_has_no_debug_directory() {
+    // IMAGE_DIRECTORY_ENTRY_DEBUG is index 6.
+    assert_eq!(Pe::read().directory(6), 0, "/DEBUG:NONE reached the link");
+}
+
 /// The imports that load after `main` has kept the DLL search to System32 (`build.rs`).
 #[cfg(all(windows, target_env = "msvc"))]
 const DELAYED: [&str; 2] = ["netapi32.dll", "userenv.dll"];
