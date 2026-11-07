@@ -125,6 +125,27 @@ fn a_firewall_failure_doesnt_stop_the_removal() {
 }
 
 #[test]
+fn a_stray_that_wont_stop_keeps_the_network_on_and_ends_at_strays() {
+    let (mut machine, mut acl) = pool("remove-stray", Some(owner()));
+    machine.strays_left = 1;
+    let failure = remove(&mut machine, &mut acl, false).unwrap_err();
+    assert_eq!(failure.step, RemoveStep::Strays);
+    assert_eq!(failure.exit, SetupExit::RemovedPartly);
+    assert!(failure.cause.contains("wouldn't stop"), "{}", failure.cause);
+    let lines = machine.lines();
+    assert!(
+        !lines.iter().any(|line| line == "remove_network"),
+        "{lines:?}"
+    );
+    // The record stays, so the next run retries, and finishes once the stray is gone.
+    assert!(machine.m.state.record.is_some());
+    machine.strays_left = 0;
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+    assert_all_gone(&machine, &acl);
+}
+
+#[test]
 fn the_network_goes_only_after_every_account() {
     let lines = full_removal();
     let network = lines
