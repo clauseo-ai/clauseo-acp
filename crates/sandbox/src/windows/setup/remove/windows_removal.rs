@@ -213,6 +213,12 @@ impl Removal for WindowsRemoval {
 
     fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<(), MachineError> {
         let stopped = processes::stop_pool_processes(pool, owner)?;
+        if !stopped.ended.is_empty() {
+            tracing::warn!(
+                count = stopped.ended.len(),
+                "processes of the sandbox users were stopped"
+            );
+        }
         if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() {
             tracing::warn!(
                 failed = stopped.failed.len(),
