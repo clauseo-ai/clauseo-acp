@@ -239,6 +239,8 @@ pub(crate) enum Input {
     FolderStates(Vec<(MatterId, String, clauseo_protocol::FolderState)>),
     /// A folder scan's thread or throttle timer.
     Scan(super::scan::ScanInput),
+    /// The Scratch matter's folder scan answered, or start-up's wait for it ended.
+    Scratch(super::scratch::ScratchInput),
     /// Where the Chrome for Testing download stands, from its thread.
     BrowserInstall(clauseo_protocol::BrowserInstallState),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
@@ -273,6 +275,7 @@ impl std::fmt::Debug for Input {
             Self::Limits(_) => "Limits",
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
+            Self::Scratch(_) => "Scratch",
             Self::BrowserInstall(_) => "BrowserInstall",
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",

@@ -75,8 +75,9 @@ pub enum KnownFolder {
     /// parent.
     LocalAppData,
     /// The user's Documents folder, wherever Known Folder Move put it: new matters go in it.
-    /// Windows may not give it (a redirect to a share it cannot reach, a deleted folder); then
-    /// there is no default matters folder, and nothing else needs it.
+    /// Windows may not give it (a redirect to a share it cannot reach, a deleted folder, a share
+    /// that does not answer within 2 s); then there is no default matters folder, and nothing
+    /// else needs it. Looked up once per process.
     Documents,
     /// `%SystemRoot%`.
     Windows,
@@ -172,8 +173,9 @@ impl Locations {
     /// matter's name.
     ///
     /// `None` when the Documents folder is needed and the OS gives none (issue #365): Windows
-    /// cannot resolve it (a redirect to a share it cannot reach, a deleted folder), or macOS or
-    /// Linux has no home. Then New matter asks for a folder. Only the data folder is essential.
+    /// cannot resolve it (a redirect to a share it cannot reach, a deleted folder), the folder
+    /// does not answer within 2 s (a share that is down), or macOS or Linux has no home.
+    /// Then New matter asks for a folder. Only the data folder is essential.
     pub fn default_matters_dir(&self) -> Option<&Path> {
         self.default_matters_dir.as_deref()
     }

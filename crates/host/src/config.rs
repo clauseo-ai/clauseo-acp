@@ -91,6 +91,7 @@ pub struct HostConfig {
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
+    scratch_scan: crate::actor::scratch::Scan,
     counts: Option<Counts>,
     search: SearchSeams,
     update: UpdateSeams,
@@ -115,6 +116,7 @@ pub(crate) struct ConfigParts {
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
     pub(crate) scan_walk: crate::actor::scan::Walk,
+    pub(crate) scratch_scan: crate::actor::scratch::Scan,
     /// The usage counts a caller set; `None` counts nothing.
     pub(crate) counts: Option<Counts>,
     /// The search thread's test seams.
@@ -163,6 +165,7 @@ impl HostConfig {
             limits_reader: None,
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
+            scratch_scan: crate::actor::scratch::os_scan(),
             counts: None,
             search: SearchSeams::default(),
             update: UpdateSeams {
@@ -432,6 +435,14 @@ impl HostConfig {
         self
     }
 
+    /// The scan the Scratch matter's folder is found by at start-up instead of
+    /// `scratch::free_folder`, for tests that hold it.
+    #[cfg(test)]
+    pub(crate) fn with_scratch_scan(mut self, scan: crate::actor::scratch::Scan) -> Self {
+        self.scratch_scan = scan;
+        self
+    }
+
     /// The capacity of the commit channel to the search thread (default 1,024), for tests
     /// that make it lag and catch up from the store.
     #[cfg(feature = "test-support")]
@@ -561,6 +572,7 @@ impl HostConfig {
             limits_reader: self.limits_reader,
             wiring: self.wiring,
             scan_walk: self.scan_walk,
+            scratch_scan: self.scratch_scan,
             counts: self.counts,
             search: self.search,
             update: self.update,

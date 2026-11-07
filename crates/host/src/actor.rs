@@ -51,6 +51,7 @@ mod rail;
 mod relocate;
 mod requests;
 pub(crate) mod scan;
+pub(crate) mod scratch;
 mod seen;
 mod settings;
 mod shutdown;
@@ -188,6 +189,10 @@ pub(crate) struct Actor {
     pub(crate) phase: HostPhase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
+    /// The Scratch matter's folder scan and how long start-up waits for it (`scratch.rs`).
+    pub(crate) scratch_wait: scratch::ScratchWait,
+    /// The scan for the Scratch matter's folder: `scratch::free_folder`, or a test's stand-in.
+    pub(crate) scratch_scan: scratch::Scan,
     /// The workers of matters made on disk whose commit has not returned, and of those being
     /// discarded because it failed (`matters/made.rs`), by matter.
     pub(crate) made: BTreeMap<MatterId, matters::Made>,
@@ -453,6 +458,7 @@ impl Actor {
             Input::SnoozeWake { generation } => triage::on_wake(self, generation),
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
+            Input::Scratch(input) => scratch::on_input(self, input),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
@@ -471,17 +477,15 @@ impl Actor {
             || turn::busy(self)
             || browser_install::busy(self)
             || update::busy(self)
+            || scratch::holds(self)
         {
             return None;
         }
         match std::mem::replace(&mut self.phase, HostPhase::Serving) {
             HostPhase::Starting(ready) => {
-                if self.scratch.is_some() {
-                    self.phase = HostPhase::Starting(ready);
-                    return None;
-                }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
+                scratch::serving(self);
                 update::serving(self);
                 counting::app_opened(self);
                 None
