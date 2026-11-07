@@ -7,7 +7,8 @@ use super::super::check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, check_setup, classify,
 };
 use super::super::spec::{
-    Action, Condition, FilterSpec, Match, Namespace, PERMIT_BASE, not_pool_sddl, user_sddl,
+    Action, Condition, FilterSpec, Match, Namespace, PERMIT_BASE, SUBLAYER_WEIGHT, not_pool_sddl,
+    permit_filter, user_sddl,
 };
 use super::{group, setup, sid};
 use crate::windows::sids::Sid;
@@ -16,7 +17,7 @@ use crate::windows::sids::Sid;
 type Failure = (&'static str, u32);
 
 /// `spec` as WFP would hold it after set-up wrote it.
-fn as_written(spec: &FilterSpec) -> FoundFilter {
+fn as_written(ns: &Namespace, spec: &FilterSpec) -> FoundFilter {
     let dacl = |sddl: String| sddl.replacen("O:SYG:SY", "", 1);
     let conditions = spec
         .conditions
@@ -44,6 +45,8 @@ fn as_written(spec: &FilterSpec) -> FoundFilter {
         action: Some(spec.action),
         weight: Some(spec.weight),
         flags: spec.flags(),
+        other_flags: 0,
+        provider: Some(ns.provider),
         conditions,
     }
 }
@@ -51,7 +54,7 @@ fn as_written(spec: &FilterSpec) -> FoundFilter {
 /// WFP in memory: the provider, the sublayer and our sublayer's filters by key.
 struct FakeWfp {
     provider: bool,
-    sublayer: bool,
+    sublayer: Option<u16>,
     filters: BTreeMap<u128, FoundFilter>,
     fail: Option<Failure>,
 }
@@ -62,11 +65,11 @@ impl FakeWfp {
         let filters = setup(pool)
             .filters(ns)
             .iter()
-            .map(|spec| (spec.key, as_written(spec)))
+            .map(|spec| (spec.key, as_written(ns, spec)))
             .collect();
         FakeWfp {
             provider: true,
-            sublayer: true,
+            sublayer: Some(SUBLAYER_WEIGHT),
             filters,
             fail: None,
         }
@@ -82,7 +85,7 @@ impl SetupReader for FakeWfp {
         self.fail.map_or(Ok(self.provider), Err)
     }
 
-    fn sublayer(&mut self, _key: u128) -> Result<bool, Failure> {
+    fn sublayer(&mut self, _key: u128) -> Result<Option<u16>, Failure> {
         Ok(self.sublayer)
     }
 
@@ -125,8 +128,6 @@ type Change = fn(&mut FakeWfp, u128, u128);
 #[test]
 fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
     let ns = Namespace::production();
-    let first = ns.filter_key(0);
-    let permit = ns.filter_key(PERMIT_BASE);
     let connect = || NetworkGap::FilterMissing("Clauseo sandbox block_connect_v4".to_owned());
     let foreign = |name: &str| NetworkGap::ForeignFilter(name.to_owned());
     let cases: Vec<(&str, Change, NetworkGap)> = vec![
@@ -137,7 +138,7 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
         ),
         (
             "no sublayer",
-            |w, _, _| w.sublayer = false,
+            |w, _, _| w.sublayer = None,
             NetworkGap::NotSetUp,
         ),
         (
@@ -225,16 +226,60 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
             foreign("Stray"),
         ),
     ];
+    refuses_each(&ns, cases);
+}
+
+/// Applies each change to a fresh set-up and checks it refuses with its gap.
+fn refuses_each(ns: &Namespace, cases: Vec<(&str, Change, NetworkGap)>) {
+    let (first, permit) = (ns.filter_key(0), ns.filter_key(PERMIT_BASE));
     for (what, change, gap) in cases {
-        let mut wfp = FakeWfp::installed(&ns, &[2001]);
+        let mut wfp = FakeWfp::installed(ns, &[2001]);
         change(&mut wfp, first, permit);
         assert_eq!(
-            check_setup(&ns, &sid(2001), &mut wfp),
+            check_setup(ns, &sid(2001), &mut wfp),
             Err(gap.clone()),
             "{what}"
         );
         assert!(gap.needs_setup(), "{what}");
     }
+}
+
+#[test]
+fn a_disabled_or_moved_filter_a_reweighted_sublayer_or_an_outside_permit_refuses() {
+    let ns = Namespace::production();
+    let foreign = |name: &str| NetworkGap::ForeignFilter(name.to_owned());
+    let cases: Vec<(&str, Change, NetworkGap)> = vec![
+        (
+            "the sublayer at another weight",
+            |w, _, _| w.sublayer = Some(1),
+            NetworkGap::FilterMissing("Clauseo sandbox sublayer".to_owned()),
+        ),
+        (
+            "a block disabled",
+            |w, f, _| w.filter(f).other_flags = 0x20,
+            foreign("Clauseo sandbox block_connect_v4"),
+        ),
+        (
+            "a block under another provider",
+            |w, f, _| w.filter(f).provider = Some(7),
+            foreign("Clauseo sandbox block_connect_v4"),
+        ),
+        (
+            "a block with no provider",
+            |w, f, _| w.filter(f).provider = None,
+            foreign("Clauseo sandbox block_connect_v4"),
+        ),
+        (
+            "a permit for a user outside the pool",
+            |w, _, _| {
+                let ns = Namespace::production();
+                let spec = permit_filter(&ns, 1, &sid(2999));
+                w.filters.insert(spec.key, as_written(&ns, &spec));
+            },
+            foreign("Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2999"),
+        ),
+    ];
+    refuses_each(&ns, cases);
 }
 
 #[test]
@@ -255,7 +300,7 @@ fn a_block_denying_a_well_known_sid_is_foreign() {
     let mut wfp = FakeWfp::installed(&ns, &[2001]);
     let everyone = Sid::parse("S-1-5-32-545").unwrap();
     let spec = &setup(&[2001]).filters(&ns)[0];
-    let mut odd = as_written(spec);
+    let mut odd = as_written(&ns, spec);
     odd.conditions[0] = FoundCondition::Users {
         matching: Match::NotEqual,
         sddl: not_pool_sddl(&group(), &[everyone]).replacen("O:SYG:SY", "", 1),

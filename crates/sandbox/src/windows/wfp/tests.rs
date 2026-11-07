@@ -5,7 +5,7 @@
 
 use std::net::Ipv4Addr;
 
-use super::check::{NetworkGap, WfpError};
+use super::check::{ERROR_INVALID_OWNER, NetworkGap, OWNER_CHECK, WfpError, owner_allowed};
 use super::spec::{
     ACTRL_ENUM, ACTRL_READ, Action, BLOCK_WEIGHT, Condition, Direction, FIREWALL_UNDER_POLICY,
     FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object, PERMIT_BASE,
@@ -463,4 +463,28 @@ fn the_base_filtering_engine_down_is_named() {
         code: 5,
     };
     assert_eq!(other.cause(), "FwpmFilterAdd0 failed (error 0x5)");
+    let owned = WfpError {
+        call: OWNER_CHECK,
+        code: ERROR_INVALID_OWNER,
+    };
+    assert!(
+        owned.cause().contains("Default owner for objects"),
+        "{}",
+        owned.cause()
+    );
+}
+
+#[test]
+fn only_administrators_or_system_may_own_our_objects() {
+    assert!(owner_allowed("S-1-5-32-544"));
+    assert!(owner_allowed("S-1-5-18"));
+    for other in [
+        "S-1-5-21-11-22-33-1001",
+        "S-1-1-0",
+        "S-1-5-32-545",
+        "S-1-3-4",
+        "",
+    ] {
+        assert!(!owner_allowed(other), "{other}");
+    }
 }
