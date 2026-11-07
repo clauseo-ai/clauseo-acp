@@ -89,11 +89,12 @@ pub(super) fn on_request(actor: &mut Actor, request: Request) {
             principal,
             file,
             reply,
-        } => {
-            let located = authorize(&principal, Access::LocateFile)
-                .and_then(|()| locate::locate_file(actor, file));
-            let _gone = reply.send(located);
-        }
+        } => match authorize(&principal, Access::LocateFile) {
+            Ok(()) => locate::locate_file(actor, file, reply),
+            Err(error) => {
+                let _gone = reply.send(Err(error));
+            }
+        },
         Request::MatterFolder {
             principal,
             matter,
