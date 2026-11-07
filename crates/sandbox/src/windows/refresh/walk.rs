@@ -3,7 +3,10 @@
 //! drive's root is opened, then each folder of `UserInstallDir` relative to its parent's handle
 //! (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and `FILE_OPEN_REPARSE_POINT`), each
 //! refused if a reparse point, then the exe and the `.sig` relative to the last folder's handle,
-//! each checked on its own handle (`source::checked`) and read from it. Every open asks for
+//! each checked on its own handle (`source::checked`) and read from it. A file's open takes
+//! neither `FILE_DIRECTORY_FILE` nor `FILE_NON_DIRECTORY_FILE`, so a directory junction (or a
+//! folder) at its name opens as itself and is refused by its tag (or as not a file), rather than
+//! failing with access denied. Every open asks for
 //! reading alone; SYSTEM never writes or deletes in the folder.
 #![expect(unsafe_code, reason = "FFI to CreateFileW and NtCreateFile")]
 
@@ -13,8 +16,8 @@ use std::path::{Component, Path, Prefix};
 
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
-    FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
-    FILE_SEQUENTIAL_ONLY, FILE_SYNCHRONOUS_IO_NONALERT, NtCreateFile,
+    FILE_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SEQUENTIAL_ONLY,
+    FILE_SYNCHRONOUS_IO_NONALERT, NtCreateFile,
 };
 use windows::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, HANDLE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE,
@@ -109,13 +112,16 @@ fn open_root(letter: char) -> Result<Handle, SourceError> {
 enum Kind {
     /// A folder, for traversal.
     Folder,
-    /// A file, for reading, shared for reading only.
+    /// A file, for reading, shared for reading only. Opened whatever it is, a folder or a
+    /// directory junction included, for `source::checked` to refuse anything but a file.
     File,
 }
 
 /// `name` (one path part) in `parent`, relative to its handle: `OBJ_DONT_REPARSE` fails the
 /// open on any reparse point met, and `FILE_OPEN_REPARSE_POINT` opens one at the name itself
-/// rather than what it names, which the caller then refuses.
+/// rather than what it names, which the caller then refuses. A [`Kind::File`] open names no
+/// kind: `FILE_NON_DIRECTORY_FILE` would fail a directory junction at the name with access
+/// denied (`STATUS_FILE_IS_A_DIRECTORY`) before its tag could be read.
 fn open_at(parent: &Handle, name: &OsStr, kind: Kind) -> Result<Handle, SourceError> {
     let units: Vec<u16> = name.encode_wide().collect();
     let bytes = u16::try_from(units.len() * 2).map_err(|_too_long| SourceError::NotRegular)?;
@@ -140,7 +146,7 @@ fn open_at(parent: &Handle, name: &OsStr, kind: Kind) -> Result<Handle, SourceEr
         Kind::File => (
             FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             FILE_SHARE_READ,
-            FILE_NON_DIRECTORY_FILE | FILE_SEQUENTIAL_ONLY,
+            FILE_SEQUENTIAL_ONLY,
         ),
     };
     let mut handle = HANDLE::default();

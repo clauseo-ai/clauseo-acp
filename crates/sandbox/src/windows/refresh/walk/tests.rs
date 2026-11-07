@@ -1,6 +1,6 @@
 //! The install folder's walk on a real NTFS volume: a plain chain is read; a junction at a
 //! middle folder, at the last folder, or at either file's name is refused, never followed; a
-//! second hard link is refused; and nothing in the folder changes.
+//! folder at a file's name or a second hard link is refused; and nothing in the folder changes.
 
 use super::*;
 use crate::test_support::TempDir;
@@ -78,6 +78,18 @@ fn a_junction_at_a_file_name_or_a_second_link_is_refused() {
     assert_eq!(
         read_sources(&folder),
         Err((SourceFile::Sig, SourceError::Linked(2)))
+    );
+}
+
+#[test]
+fn a_folder_at_a_file_name_is_refused_as_not_a_file() {
+    let dir = TempDir::new("refresh-walk-folder");
+    let _exe = dir.dir(r"install\clauseo-sandbox-setup.exe");
+    let _sig = dir.file(r"install\clauseo-sandbox-setup.exe.sig", "sig");
+    let folder = dunce::canonicalize(dir.path().join("install")).unwrap();
+    assert_eq!(
+        read_sources(&folder),
+        Err((SourceFile::Exe, SourceError::NotRegular))
     );
 }
 

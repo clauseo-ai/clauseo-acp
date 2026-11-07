@@ -1,5 +1,6 @@
-//! The user folder's reads on a real NTFS volume: a junction at the exe's name, a second hard
-//! link, an oversize file and a missing one are each refused by name; a plain file is read.
+//! The user folder's reads on a real NTFS volume: a junction or a folder at the exe's name, a
+//! second hard link, an oversize file and a missing one are each refused by name; a plain file
+//! is read.
 
 use super::*;
 use crate::test_support::TempDir;
@@ -50,5 +51,6 @@ fn an_oversize_or_missing_file_is_refused() {
 fn a_folder_at_the_name_is_refused() {
     let dir = TempDir::new("refresh-source-folder");
     let folder = dir.dir("clauseo-sandbox-setup.exe");
-    assert!(read_capped(&folder, 4096).is_err());
+    // Opened as a folder (backup semantics) and refused as one, not denied at the open.
+    assert_eq!(read_capped(&folder, 4096), Err(SourceError::NotRegular));
 }
