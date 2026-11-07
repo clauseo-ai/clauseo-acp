@@ -34,6 +34,7 @@ use std::time::{Duration, SystemTime};
 
 use clauseo_process::{Launcher, Timer};
 
+use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
 use crate::signin::env::{EnvInputs, RunKind, Shim, Vendor, run_env};
 use crate::signin::marker::{self, LoginSource};
@@ -146,10 +147,12 @@ pub(crate) fn run<T: Timer + Send + Sync>(
                 ..
             })
         )
-        && job.shared.signin.is_job(&job.ticket)
+        && (job.shared.signin.is_job(&job.ticket) || stopped_for_quit(&job.ticket.cancel))
     {
         // "written … when Clauseo's sign-in ends". A failed write leaves no marker, which for
-        // Codex reads as reused while the home holds a login file: the safe side.
+        // Codex reads as reused while the home holds a login file: the safe side. The quit takes
+        // every job's slot as it starts, so a login confirmed during it is recorded too: it is a
+        // confirmed login of Clauseo's own, and unrecorded it would read as reused next time.
         drop(marker::write_source(
             &job.config.data_dir,
             &job.ticket.agent,
@@ -162,6 +165,12 @@ pub(crate) fn run<T: Timer + Send + Sync>(
         }
         None => job.shared.signin.end_job(&job.ticket),
     }
+}
+
+/// Whether the job was stopped by the app's quit and not killed: its confirmed sign-in still
+/// counts, though the job is no longer the agent's.
+fn stopped_for_quit(cancel: &Cancel) -> bool {
+    cancel.how() == Some(Stop::Quit) && !cancel.is_killed()
 }
 
 /// A script's file name for the log (`codex.js`, `index.js`): one of the two known names, so

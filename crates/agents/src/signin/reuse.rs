@@ -220,6 +220,11 @@ pub(crate) fn remove_empty_home_login(
     true
 }
 
+/// Whether a stat finds a login file in `codex_home` (Clauseo's own home): never an open.
+pub(crate) fn home_login_present(codex_home: &Path) -> bool {
+    std::fs::symlink_metadata(home_file(codex_home)).is_ok()
+}
+
 /// Detection's stat: whether the lawyer's login file is there ("a stat (never an open) of
 /// `~/.codex/auth.json`: present is a file-mode login, reusable; absent is a keyring or
 /// Windows secrets login"). On Windows `symlink_metadata` opens a handle with access 0, which

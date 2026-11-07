@@ -317,15 +317,16 @@ impl<T: Timer> Winding<'_, T> {
         if self.cancel.is_killed() || self.on_stop.how == Stopping::Kill {
             return (Ended::Cancelled, true);
         }
+        let mut killed = pin!(self.cancel.killed());
         if let Stopping::Cancel { port } = self.on_stop.how {
-            let mut ours = self.tree.snapshot().pids().unwrap_or_default();
-            ours.push(self.root);
-            if stopping::owner::owns_listener(self.launcher, self.timer, port, &ours).await {
-                stopping::send_cancel(port);
+            // The owner check and the request are raced against the stop at once, so neither
+            // delays the kill at the bound.
+            let asked = pin!(self.ask_cancel(port));
+            if let Either::Right(_) = select(asked, killed.as_mut()).await {
+                return self.killed_at_bound();
             }
         }
         let grace = self.cancel.how().and_then(crate::cancel::Stop::grace);
-        let killed = pin!(self.cancel.killed());
         let graced = pin!(async {
             match grace {
                 Some(grace) => self.timer.after(grace).await,
@@ -337,10 +338,38 @@ impl<T: Timer> Winding<'_, T> {
                 Stopping::Wait => (Ended::Exited(code), false),
                 Stopping::Kill | Stopping::Cancel { .. } => (Ended::Cancelled, false),
             },
-            Either::Right(_) => {
-                let why = self.cancel.how().map_or("stop", crate::cancel::Stop::word);
-                tracing::warn!("{why}: {} killed at the bound", self.on_stop.what);
-                (Ended::Cancelled, true)
+            Either::Right(_) => self.killed_at_bound(),
+        }
+    }
+
+    /// The run is killed past its stop's bound: logged by its kind alone.
+    fn killed_at_bound(&self) -> (Ended, bool) {
+        let why = self.cancel.how().map_or("stop", crate::cancel::Stop::word);
+        tracing::warn!("{why}: {} killed at the bound", self.on_stop.what);
+        (Ended::Cancelled, true)
+    }
+
+    /// Codex's browser login's graceful end: `GET /cancel` on `port` when the login's own tree
+    /// owns the listener. The request blocks (about 1 s per step at most), so it runs on a thread
+    /// of its own and this waits for it; a run killed meanwhile leaves the thread to end by
+    /// itself.
+    async fn ask_cancel(&self, port: u16) {
+        let mut ours = self.tree.snapshot().pids().unwrap_or_default();
+        ours.push(self.root);
+        if !stopping::owner::owns_listener(self.launcher, self.timer, port, &ours).await {
+            return;
+        }
+        let (sent, done) = futures::channel::oneshot::channel::<()>();
+        let spawned = std::thread::Builder::new()
+            .name("clauseo-codex-cancel".to_owned())
+            .spawn(move || {
+                stopping::send_cancel(port);
+                sent.send(()).unwrap_or_default();
+            });
+        if spawned.is_ok() {
+            // Dropped unsent only if the thread panicked: nothing more to wait for then.
+            match done.await {
+                Ok(()) | Err(_) => {}
             }
         }
     }

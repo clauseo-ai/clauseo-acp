@@ -95,6 +95,10 @@ pub enum SigninError {
     /// `stop_using_login` on Clauseo's own login, which `sign_out` signs out.
     #[error("{0}'s login is Clauseo's own, not a reused one")]
     NotReused(AgentId),
+    /// A Codex login would replace Clauseo's own login (`codex login` signs it out first), and
+    /// the caller did not pass the lawyer's confirmed switch (`Agents::sign_in_switching`).
+    #[error("{0} is signed in with Clauseo's own login; a new sign-in needs the lawyer's yes")]
+    OwnLoginPresent(AgentId),
 }
 
 /// Something the sign-in did that R20 writes to its log: `AgentsEvent::SigninNote`. No email,

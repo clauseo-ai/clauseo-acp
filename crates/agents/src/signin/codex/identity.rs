@@ -157,17 +157,31 @@ async fn account<T: Timer + Send + Sync>(
     let mut limit = pin!(job.timer.after(spec.limit).fuse());
     let answered = {
         let mut talk = pin!(talk.fuse());
-        let mut cancelled = pin!(cancel.cancelled().fuse());
-        futures::select! {
-            answered = talk => answered,
-            () = errs => None,
-            () = cancelled => None,
-            () = limit => {
-                drop(handle);
-                stopping::after_kill(APP_SERVER_STOP, &env, lawyer.as_deref(), &job.ticket.agent);
-                return None;
+        // The lawyer's Cancel ends the talk at once; during the quit an answer on its way is
+        // still taken (a confirmation that lands then is recorded), until the kill at the bound.
+        let mut cancelled = pin!(
+            async {
+                cancel.cancelled().await;
+                if cancel.how() == Some(Stop::Quit) {
+                    futures::future::pending::<()>().await;
+                }
             }
-        }
+            .fuse()
+        );
+        let mut killed = pin!(cancel.killed().fuse());
+        let killed_now = futures::select! {
+            answered = talk => Some(answered),
+            () = errs => Some(None),
+            () = cancelled => Some(None),
+            () = killed => None,
+            () = limit => None,
+        };
+        let Some(answered) = killed_now else {
+            drop(handle);
+            stopping::after_kill(APP_SERVER_STOP, &env, lawyer.as_deref(), &job.ticket.agent);
+            return None;
+        };
+        answered
     };
     // The talk is gone: close stdin, then wait for the exit.
     drop(stdin.clone().close().await);
