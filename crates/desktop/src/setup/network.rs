@@ -244,7 +244,8 @@ fn os_answer(answer: Result<UpstreamAnswer, clauseo_sandbox::Error>) -> OsAnswer
             OsAnswer::Proxy(format!("http://{host}:{port}"))
         }
         Ok(UpstreamAnswer::Route(Route::Direct)) => OsAnswer::Direct,
-        Ok(UpstreamAnswer::Failed) | Err(_) => OsAnswer::Unknown,
+        // A failure of any kind, and a refused lookup.
+        _ => OsAnswer::Unknown,
     }
 }
 
@@ -531,7 +532,7 @@ pub(crate) fn shown(proxy: &str) -> String {
 mod ask;
 mod follow;
 
-pub(crate) use ask::{Answered, KEEP_FOR, Known, OsAnswer, ask_all};
+pub(crate) use ask::{Answered, KEEP_FOR, Known, OsAnswer, Probe, Probed, Reach, ask_all, reach};
 mod launch;
 
 pub(crate) use launch::with_loopback;

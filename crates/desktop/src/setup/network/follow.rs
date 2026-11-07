@@ -22,13 +22,17 @@
 //!
 //! A resolve that asks the OS about the same hosts as the last route (a refresh, or a settings
 //! change that leaves them as they were: an entry's variables or a CA file, say) never turns a
-//! proxy into direct on a transient failure: a lookup that failed, timed out, found no free slot
-//! or ran past the budget is no answer, and keeps the last route's answer for that target, for
-//! up to 10 minutes from when a real lookup last gave it ([`KEEP_FOR`]); only the OS saying
-//! `DIRECT` takes the proxy away sooner. In a first route, or one asking about other
-//! hosts, no answer goes direct. A lookup that lands late
-//! makes the route again with its answer, unless another route was made since. The thread ends
-//! once the [`NetworkFollow`] and its refreshers are gone.
+//! proxy that still answers into direct on a transient failure: a lookup that failed, timed out,
+//! found no free slot or ran past the budget is no answer, and keeps the last route's answer for
+//! that target, for up to 10 minutes from when a real lookup last gave it ([`KEEP_FOR`]). Before
+//! a proxy is kept, it is probed (its host resolved and a TCP connect, nothing sent, at most
+//! 1 s, within the budget): one that does not answer is not kept, so a laptop whose VPN
+//! dropped (its PAC on an internal server failing with it) goes direct at once. One `DIRECT`
+//! over a proxy that still answers keeps the proxy for that resolve (a WPAD that failed once
+//! reads as "no proxy here"); the next `DIRECT`, or one over a proxy that does not answer, takes
+//! it away. In a first route, or one asking about other hosts, no answer goes direct. A lookup
+//! that lands late makes the route again with its answer, unless another route was made since.
+//! The thread ends once the [`NetworkFollow`] and its refreshers are gone.
 
 use std::pin::pin;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -43,8 +47,8 @@ use futures::future::{Either, Shared, select};
 use url::Url;
 
 use super::{
-    Answered, KEEP_FOR, Known, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup,
-    ProxyEnv, ask_all, os_targets, resolve,
+    Answered, KEEP_FOR, Known, NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, Probe,
+    Probed, ProxyEnv, Reach, ask_all, os_targets, reach, resolve,
 };
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
@@ -88,6 +92,8 @@ struct LateRoute {
     base: Known,
     /// The lookups past the budget that answered.
     landed: Answered,
+    /// The proxies the resolve probed.
+    probed: Probed,
 }
 
 /// When the last route was made, and from what read.
@@ -117,10 +123,11 @@ impl Freshness {
         }
     }
 
-    /// `fresh` answers got now over the last route's ([`Known::merge`]).
-    fn merge(&self, fresh: Answered) -> Known {
+    /// `fresh` answers got now over the last route's, with the proxies `probed`
+    /// ([`Known::merge`]).
+    fn merge(&self, fresh: Answered, probed: &Probed) -> Known {
         self.answers
-            .merge(fresh, self.clock.monotonic(), self.keep_for)
+            .merge(fresh, self.clock.monotonic(), self.keep_for, probed)
     }
 
     /// Notes a route made from `facts` and `answers` now.
@@ -238,17 +245,16 @@ struct Resolver {
     os_fallback: bool,
     /// [`OS_LOOKUP_BUDGET`], shorter in tests.
     budget: Duration,
+    /// Whether a proxy that may be kept still takes a connection ([`reach`], faked in tests).
+    reach: Arc<Reach>,
 }
 
 impl Resolver {
     /// The route for `facts` and the answers behind it, the OS asked about every target at once
-    /// within the budget, its answers put over the last route's by `merge`.
-    fn resolve(
-        &self,
-        facts: &NetworkFacts,
-        merge: impl FnOnce(Answered) -> Known,
-    ) -> (NetworkRoute, Known) {
-        self.resolve_late(facts, merge, |_late| {})
+    /// within the budget, its answers put over the last route's in `fresh`
+    /// ([`Freshness::merge`]), the proxies that may be kept probed when needed.
+    fn resolve(&self, facts: &NetworkFacts, fresh: &Freshness) -> (NetworkRoute, Known) {
+        self.resolve_late(facts, fresh, |_late| {})
     }
 
     /// [`Resolver::resolve`]; lookups still running past the budget are handed to `late` with
@@ -256,21 +262,26 @@ impl Resolver {
     fn resolve_late(
         &self,
         facts: &NetworkFacts,
-        merge: impl FnOnce(Answered) -> Known,
+        fresh: &Freshness,
         late: impl FnOnce(Box<dyn FnOnce() -> LateRoute + Send>),
     ) -> (NetworkRoute, Known) {
         let env = (self.env)();
         let targets = os_targets(facts, &env, self.os_fallback);
-        let answers = ask_all(targets, &self.os, self.budget);
-        let known = merge(answers.got);
+        let probe = Probe {
+            keepable: fresh.answers.keepable(&targets),
+            reach: Arc::clone(&self.reach),
+        };
+        let answers = ask_all(targets, &self.os, self.budget, probe);
+        let known = fresh.merge(answers.got, &answers.probed);
         let route = route_from(facts, &env, self.os_fallback, &known.answers);
         if let Some(running) = answers.late {
-            let (facts, base) = (facts.clone(), known.clone());
+            let (facts, base, probed) = (facts.clone(), known.clone(), answers.probed);
             late(Box::new(move || LateRoute {
                 landed: running.collect(LATE_WAIT),
                 facts,
                 env,
                 base,
+                probed,
             }));
         }
         (route, known)
@@ -318,7 +329,7 @@ impl Follower {
         os: impl Fn(&Url) -> Option<String> + Send + Sync + 'static,
         os_fallback: bool,
     ) -> Self {
-        let mut follower = Self::unbound(slot, env, os, os_fallback);
+        let mut follower = Self::unbound(slot, env, os, os_fallback).reach(|_proxy| true);
         follower.agents = Some(agents);
         follower
     }
@@ -337,6 +348,7 @@ impl Follower {
                 os: Arc::new(move |target: &Url| -> OsAnswer { os(target).into() }),
                 os_fallback,
                 budget: OS_LOOKUP_BUDGET,
+                reach: Arc::new(reach),
             },
             slot,
             agents: None,
@@ -352,6 +364,13 @@ impl Follower {
     #[cfg(test)]
     pub(crate) fn lookup_budget(mut self, budget: Duration) -> Self {
         self.resolver.budget = budget;
+        self
+    }
+
+    /// With `reach` instead of a real probe of a proxy (tests).
+    #[cfg(test)]
+    pub(crate) fn reach(mut self, reach: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
+        self.resolver.reach = Arc::new(reach);
         self
     }
 
@@ -378,7 +397,7 @@ impl Follower {
 
     /// Resolves `facts` and hands the route on ([`Follower::hand`]).
     pub(crate) fn take(&mut self, facts: &NetworkFacts) {
-        let (route, known) = self.resolver.resolve(facts, |got| self.fresh.merge(got));
+        let (route, known) = self.resolver.resolve(facts, &self.fresh);
         self.fresh.resolved(facts.clone(), known);
         self.hand(route);
     }
@@ -548,18 +567,16 @@ fn serve(
         }
         if let Some(facts) = newest.or_else(|| fresh.stale().cloned()) {
             let made = fresh.made + 1;
-            let (route, answers) = resolver.resolve_late(
-                &facts,
-                |got| fresh.merge(got),
-                |collect| {
-                    watch_late(collect, made, send);
-                },
-            );
+            let (route, answers) = resolver.resolve_late(&facts, &fresh, |collect| {
+                watch_late(collect, made, send);
+            });
             fresh.resolved(facts, answers);
             lock(follower).hand(route);
         } else if let Some((_, late)) = late.filter(|(made, _)| *made == fresh.made) {
             // No route made since they were asked: the route again with their answers, no lookup.
-            let known = late.base.landed(late.landed, fresh.clock.monotonic());
+            let known = late
+                .base
+                .landed(late.landed, fresh.clock.monotonic(), &late.probed);
             let route = route_from(&late.facts, &late.env, resolver.os_fallback, &known.answers);
             fresh.answers = known;
             lock(follower).hand(route);

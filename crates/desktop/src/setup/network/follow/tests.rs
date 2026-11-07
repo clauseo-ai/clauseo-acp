@@ -12,7 +12,7 @@ use clauseo_protocol::AgentId;
 use url::Url;
 
 use super::super::{
-    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, ProxyEnv, ask_all,
+    NetworkFacts, NetworkRoute, NetworkSlot, OsAnswer, OsLookup, Probe, ProxyEnv, ask_all,
 };
 use super::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, OS_LOOKUP_BUDGET, follow};
 use crate::bridge::lock;
@@ -281,7 +281,7 @@ fn five_slow_lookups_take_about_one_lookups_time() {
         "d.example",
         "e.example",
     ];
-    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5)).got;
+    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5), Probe::none()).got;
     let took = since(asked);
     assert_eq!(answers.len(), 5);
     assert!(
@@ -302,7 +302,13 @@ fn a_lookup_past_the_budget_has_no_answer_and_the_rest_are_kept() {
     let os = slow_os(Duration::ZERO, Duration::from_secs(3));
     let asked = SystemClock.monotonic();
     let budget = Duration::from_millis(300);
-    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget).got;
+    let answers = ask_all(
+        targets(&["slow.example", "fast.example"]),
+        &os,
+        budget,
+        Probe::none(),
+    )
+    .got;
     let took = since(asked);
     assert!(took >= budget && took < Duration::from_secs(2), "{took:?}");
     let fast = Url::parse("https://fast.example/").unwrap();
@@ -330,7 +336,8 @@ fn the_start_never_waits_on_the_lookups_and_agents_bound_later_get_the_route() {
         ProxyEnv::default,
         move |target: &Url| os(target),
         true,
-    );
+    )
+    .reach(|_proxy| true);
     let network = follow(follower, started);
     network.update(facts());
     assert!(
@@ -387,6 +394,7 @@ const NEW_PROXY: &str = "http://vpn-proxy.firm.example:3128";
 fn followed(os: &Switchable, fresh_for: Duration) -> (NetworkFollow, SetupHook) {
     let slot = NetworkSlot::default();
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .reach(|_proxy| true)
         .fresh_for(fresh_for);
     let network = follow(follower, SystemClock.monotonic());
     network.update(facts());
@@ -452,6 +460,7 @@ fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
     };
     let slot = NetworkSlot::default();
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true)
+        .reach(|_proxy| true)
         .lookup_budget(Duration::from_millis(200));
     let network = follow(follower, SystemClock.monotonic());
     network.update(facts());
@@ -483,3 +492,4 @@ fn a_lookup_past_the_budget_reaches_the_route_once_it_answers() {
 }
 
 mod keep;
+mod reach;
