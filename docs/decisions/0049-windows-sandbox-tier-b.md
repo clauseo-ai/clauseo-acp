@@ -1134,15 +1134,20 @@ The elevated exe runs only from its admin copy,
 elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and
 only from an exe the updater key signed.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService`
-(`register_task`, `SystemTask::Refresh`). It runs as LOCAL SYSTEM. Its one action is the admin
-copy's path, resolved from `FOLDERID_ProgramFiles`, with `--refresh` and no other argument. It
-starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and
-never runs twice at once. The task and its folder carry
-`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so
-the owner can read and run the task but can't change or delete it. The folder gets that owner and
-DACL when it is made, and again on each registration if it was already there. The app asks for a
-run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). Only
+**The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService` (`register_task`,
+`SystemTask::Refresh`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path, resolved
+from `FOLDERID_ProgramFiles` and quoted (it has a space), with `--refresh` and no other argument. It
+starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and never
+runs twice at once. The task and its folder carry
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so the owner can read and run the task but
+can't change or delete it. MS-TSCH asks execute access (`FX`, `FILE_GENERIC_EXECUTE`) of
+`SchRpcStop`, so the owner can also end a running task, and "read or execute access" of `SchRpcRun`.
+Whether read alone starts a task isn't documented and hasn't been tried on Windows, so `FX` stays
+(see "Misuse" under the stop). The folder gets that owner and DACL when it is made. A folder already
+there is kept, and given them again, only when its owner is Administrators or SYSTEM, which only an
+administrator can set. Anyone else's (a standard user may be able to make `\Clauseo` first) is
+deleted with every task and folder in it, then made again (`task_folder::prepare`). The app asks for
+a run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). Only
 `--remove --uninstall` deletes the task and the staging folder ("Two removals"); plain
 `--remove` keeps them with the copy. `--adopt` registers the task before it writes the record's
 admin-copy values, so a failed registration leaves no valid record: `--adopt` exits 3, and the
@@ -1275,16 +1280,35 @@ admin copy.
 3. holds every listed SID to the pool-user check before a profile delete (`check_pool_sid`):
    a local account of this machine, not built in, not SYSTEM, not the owner, named
    `ClauseoSbNN`. One that fails stops nothing;
-4. takes a Toolhelp snapshot, opens each process with
-   `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`, reads its token user, and
-   terminates it through that same handle when the user is exactly one of the pool's SIDs. It
-   never stops this process, pid 0 or 4, or a process whose user it can't read. Then a second
-   pass, for what started meanwhile or didn't end;
-5. adds each pool user it found running to the record's `ResetSids` (`REG_MULTI_SZ`, a value
-   appended to the set-up's, deleted with them by `--remove`), under the set-up lock with a
-   30 s wait.
+4. passes over the processes until one pass finds none of the pool's. Each pass takes a Toolhelp
+   snapshot and opens each process with `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE` (and
+   `PROCESS_SUSPEND_RESUME | READ_CONTROL` where it can). Once every handle is open it reads the
+   kernel's process list (`WTSEnumerateProcessesExW`, level 1), which gives an administrator each
+   process's SID whatever the token's DACL says; a pid can't be reused while a handle to it is open,
+   so each entry is the process its handle is on. A pool user owns its token and can drop SYSTEM
+   from the token's DACL (`SeDebugPrivilege` passes the process's DACL, not the token's), so the
+   token's user is only a cross-check: when it differs from the list's, the process's user is
+   unknown. With no list entry, the token's user counts, then the process object's owner, which a
+   standard user can't set to another account. A process whose user no source gives is never stopped
+   but counts as unknown, unless it also can't be opened with `PROCESS_TERMINATE` (a protected
+   process; one a pool user started would still be named by the list); pid 0 and 4 and this process
+   are never looked at. The pass suspends every pool user's process it found (`NtSuspendProcess`),
+   then terminates each through its handle, so a parent can't start another between two
+   terminations. Nothing resumes a process: it is terminated next, and one that won't end stays
+   suspended, a pool user's, until the reset. The passes stop after 60 s, inside the task's 2
+   minutes with the lock's 30 s after them; what the last pass still finds then is left;
+5. cancels every BITS job a pool user owns (`EnumJobs(BG_JOB_ENUM_ALL_USERS)`, each job's
+   `GetOwner`), at the impersonate level on the manager, the enumerator and each job, as the
+   runner's end sweeper does. A pool user's BITS job can't run (the runner's test shows it, #649)
+   but stays queued; the user's own sweeper can't cancel it once the user is logged off
+   (`ERROR_NOT_LOGGED_ON`, 1245), which is what `request_pool_stop` is called for. This step
+   runs even when no process was found. Other users' jobs are left alone;
+6. adds each pool user it found running, or owning a job, to the record's `ResetSids`
+   (`REG_MULTI_SZ`, a value appended to the set-up's, deleted with them by `--remove`), under
+   the set-up lock with a 30 s wait.
 
-It logs one Event Log line with counts only. Its exit codes follow the refresh's (`StopExit`):
+It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
+cancelled and not). Its exit codes follow the refresh's (`StopExit`):
 
 | Code | Meaning |
 |---|---|
@@ -1292,7 +1316,7 @@ It logs one Event Log line with counts only. Its exit codes follow the refresh's
 | 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
 | 46 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
-| 48 | a pool user's process was still there after the second pass, or a snapshot failed |
+| 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
 | 49 | the processes were stopped, but their users couldn't be added to `ResetSids` |
 
 **The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
@@ -1305,7 +1329,10 @@ user from its matter's next launch comes with the runner's wiring (#649).
 
 **Misuse.** The owner's read-and-run entry lets any code running as the lawyer start the task.
 All it can do is stop the sandboxed agents and mark their users for a reset, which is no more
-than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else.
+than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else. The
+execute right also lets that code end a running stop or refresh (`SchRpcStop`). An ended stop
+leaves a pool user's process running, as not asking for the stop would. An ended refresh is
+picked up by the next one, which clears what an earlier one left in staging.
 
 **Speed.** The launch path doesn't change. The task runs only when a sweep saw a pool user's
 process it couldn't stop, or once at Clauseo's start after an unclean session
