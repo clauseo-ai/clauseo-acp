@@ -80,8 +80,28 @@ fn a_failed_process_list_leaves_only_the_token_or_a_pool_owner_to_name_a_process
         let (exit, fake) = run(vec![unread]);
         assert_eq!(exit, StopExit::NotStopped, "can_stop {can_stop}");
         assert_eq!(StopExit::NotStopped.as_code(), 48);
-        assert!(fake.logged[0].1.contains("1 unknown"), "{:?}", fake.logged);
+        let line = &fake.logged[0].1;
+        assert!(
+            line.contains("1 unknown (the process list couldn't be read)"),
+            "{line}"
+        );
     }
+}
+
+#[test]
+fn the_log_line_names_a_failed_process_list_only_when_it_failed() {
+    let unread = process(54, None, None, None);
+    let (_, fake) = run(vec![unread.clone()]);
+    let line = &fake.logged[0].1;
+    assert!(line.contains("1 unknown, "), "{line}");
+    assert!(!line.contains("process list"), "{line}");
+    let failed = Process {
+        list_failed: true,
+        ..unread
+    };
+    let (_, fake) = run(vec![failed]);
+    let line = &fake.logged[0].1;
+    assert!(line.contains("the process list couldn't be read"), "{line}");
 }
 
 #[test]

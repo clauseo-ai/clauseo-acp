@@ -274,6 +274,8 @@ struct Passes {
     left: usize,
     /// Processes whose user the last snapshot couldn't read.
     unknown: usize,
+    /// A snapshot's process list (`WTSEnumerateProcessesExW`) couldn't be read.
+    list_failed: bool,
     /// The users of `found` added to `ResetSids`.
     marked: BTreeSet<Sid>,
     /// Why a mark failed; once set, no more are tried.
@@ -314,9 +316,15 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     let mut passes = Passes::default();
     let ran = run_passes(fs, &pool.users, &mut passes);
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
+    // Without the list, a process no token names is unknown: the line says why.
+    let list = if passes.list_failed {
+        " (the process list couldn't be read)"
+    } else {
+        ""
+    };
     let counts = format!(
-        "{} pool users, {} found running, {} processes stopped in {} passes, {} left, {} unknown, \
-         {} BITS jobs cancelled, {} not",
+        "{} pool users, {} found running, {} processes stopped in {} passes, {} left, \
+         {} unknown{list}, {} BITS jobs cancelled, {} not",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,
@@ -377,6 +385,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
             .snapshot()
             .map_err(|why| format!("a process snapshot failed: {why}"))?;
         passes.taken += 1;
+        passes.list_failed |= seen.iter().any(|process| process.list_failed);
         let own = fs.own_pid();
         let picked = pick(&seen, pool, own);
         passes.unknown = picked.unknown;

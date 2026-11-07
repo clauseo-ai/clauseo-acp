@@ -1320,9 +1320,10 @@ admin copy.
    the set-up lock with a 30 s wait. Each user is added as soon as a pass or the BITS step finds
    it, so a run the task's limit kills has still marked every user it saw. Once the lock stays
    held or a write fails, no more users are tried (49), so the wait comes once at most.
+   Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run.
 
 It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
-cancelled and not). Its exit codes follow the refresh's (`StopExit`):
+cancelled and not), and says so when a pass couldn't read the process list. Its exit codes follow the refresh's (`StopExit`):
 
 | Code | Meaning |
 |---|---|
