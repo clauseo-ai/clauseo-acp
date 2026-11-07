@@ -283,10 +283,10 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
-    let local_lows: Vec<PathBuf> = users
+    let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
-        .map(|(_, profile)| profile.join("AppData").join("LocalLow"))
+        .map(|(_, profile)| (profile.clone(), profile.join("AppData").join("LocalLow")))
         .collect();
     own_protected(machine, &local_lows)?;
     let shared = shared_writes(machine, acl, &group, &users.profiles, run)?;

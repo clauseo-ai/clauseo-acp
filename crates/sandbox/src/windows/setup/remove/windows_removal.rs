@@ -258,6 +258,14 @@ impl Removal for WindowsRemoval {
         profile::profile_of(sid)
     }
 
+    fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError> {
+        match crate::windows::acl::profile::open_below(profile, folder) {
+            Ok(_) => Ok(true),
+            Err(crate::windows::acl::profile::Below::Missing) => Ok(false),
+            Err(other) => Err(profile::below_error(other)),
+        }
+    }
+
     fn delete_profile(&mut self, sid: &Sid, owner: &Sid) -> Result<(), MachineError> {
         profile::delete_profile(sid, owner)
     }

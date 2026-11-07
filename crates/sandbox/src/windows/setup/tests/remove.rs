@@ -108,6 +108,27 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
     );
 }
 
+/// A user whose profile has a reparse point on the way to `LocalLow` doesn't stop the removal:
+/// its deny goes with the profile, which is deleted, and every other step runs as usual.
+#[test]
+fn a_profile_with_a_reparse_point_is_deleted_without_its_deny_and_the_removal_finishes() {
+    let (mut machine, mut acl) = pool("remove-reparse", Some(owner()));
+    machine.m.changed_profiles.insert("ClauseoSb03".to_owned());
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    let skipped = "Users/ClauseoSb03/AppData/LocalLow";
+    let expected: Vec<String> = full_removal()
+        .into_iter()
+        .filter(|line| !line.ends_with(skipped) && !line.contains(&format!("{skipped} ")))
+        .collect();
+    assert_eq!(machine.lines(), expected);
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    assert_eq!(report.profiles, MIN_FREE_AFTER_RUN);
+    assert_eq!(report.accounts, MIN_FREE_AFTER_RUN);
+    assert!(machine.m.state.profiles.is_empty());
+}
+
 #[test]
 fn a_firewall_failure_doesnt_stop_the_removal() {
     let (mut machine, mut acl) = pool("remove-firewall", Some(owner()));
