@@ -202,22 +202,52 @@ Var ClauseoAdminTimedOut
 ; (OWNER given), AdminCopyOwner or OwnerSid is there and isn't OWNER exactly ("machine" included);
 ; per machine (OWNER ""), AdminCopyOwner is there and isn't "machine" (OwnerSid, a user's set-up,
 ; is normal there). 2: the admin copy is from a newer build than this installer
-; (CLAUSEO_NEWER_THAN_THIS), so an older installer never puts an older copy back. A value that is
-; missing or can't be read checks nothing; --adopt checks again. Plain NSIS, no plug-in or
-; library function, as the elevated branch needs. Uses $R5, $R7, $R8 and $0 to $4.
+; (CLAUSEO_NEWER_THAN_THIS), so an older installer never puts an older copy back. 3: the record
+; holds a value this check reads (AdminCopyOwner, OwnerSid or AdminCopyVersion, found by name
+; among the key's values, compared as Windows compares names) that ReadRegStr can't read as text
+; (another type, too long) or that is empty. --adopt fails on such a record too (its read errs:
+; exit 3), so it is refused as a failed set-up, before anything is written. A value that is
+; missing checks nothing: the first install has no record, and a per-machine set-up or a removal
+; leaves no OwnerSid; --adopt checks again. Plain NSIS, no plug-in or library function, as the
+; elevated branch needs. Uses $R5, $R7, $R8 and $0 to $4.
 !macro CLAUSEO_RECORD_CHECK OWNER
   StrCpy $R1 0
-  ReadRegStr $R5 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_COPY_OWNER}"
-  ${If} $R5 != ""
-    ${If} "${OWNER}" == ""
-      ${If} $R5 S!= "${CLAUSEO_RECORD_MACHINE}"
+  ; The values by index until EnumRegValue fails (no key, or no more values). The key's default
+  ; value enumerates with an empty name, so an empty name doesn't end the walk.
+  StrCpy $0 0
+  ${Do}
+    ClearErrors
+    EnumRegValue $1 HKLM "${CLAUSEO_RECORD_KEY}" $0
+    ${If} ${Errors}
+      ${ExitDo}
+    ${EndIf}
+    ${If} $1 == "${CLAUSEO_RECORD_COPY_OWNER}"
+    ${OrIf} $1 == "${CLAUSEO_RECORD_OWNER_SID}"
+    ${OrIf} $1 == "${CLAUSEO_RECORD_VERSION}"
+      ClearErrors
+      ReadRegStr $R5 HKLM "${CLAUSEO_RECORD_KEY}" "$1"
+      ${If} ${Errors}
+      ${OrIf} $R5 == ""
+        StrCpy $R1 3
+        ${ExitDo}
+      ${EndIf}
+    ${EndIf}
+    IntOp $0 $0 + 1
+  ${Loop}
+  ${If} $R1 = 0
+    ReadRegStr $R5 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_COPY_OWNER}"
+    ${If} $R5 != ""
+      ${If} "${OWNER}" == ""
+        ${If} $R5 S!= "${CLAUSEO_RECORD_MACHINE}"
+          StrCpy $R1 1
+        ${EndIf}
+      ${ElseIf} $R5 S!= "${OWNER}"
         StrCpy $R1 1
       ${EndIf}
-    ${ElseIf} $R5 S!= "${OWNER}"
-      StrCpy $R1 1
     ${EndIf}
   ${EndIf}
-  ${If} "${OWNER}" != ""
+  ${If} $R1 = 0
+  ${AndIf} "${OWNER}" != ""
     ReadRegStr $R5 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_OWNER_SID}"
     ${If} $R5 != ""
     ${AndIf} $R5 S!= "${OWNER}"
@@ -501,6 +531,10 @@ Var ClauseoAdminTimedOut
       !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
     ${ElseIf} $R1 = 2
       DetailPrint "$(adminCopyNewerKept)"
+    ${ElseIf} $R1 = 3
+      ; A record value it can't read: --adopt would fail (3); nothing written, a failed set-up.
+      StrCpy $R8 ${CLAUSEO_ADOPT_FAILED}
+      !insertmacro CLAUSEO_ADMIN_COPY_MACHINE_SAYS
     ${Else}
       DetailPrint "$(adminCopyWorking)"
       !insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '--per-machine --user-install-dir "$INSTDIR"'

@@ -427,6 +427,8 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
             "IntOp $R8 ${CLAUSEO_ADMIN_EXIT_BASE} + ${CLAUSEO_ADOPT_OTHER_ACCOUNT}",
             "${ElseIf} $R1 = 2",
             "StrCpy $R8 ${CLAUSEO_ADMIN_NEWER_KEPT}",
+            "${ElseIf} $R1 = 3",
+            "IntOp $R8 ${CLAUSEO_ADMIN_EXIT_BASE} + ${CLAUSEO_ADOPT_FAILED}",
             "${Else}",
             "!insertmacro CLAUSEO_ADMIN_COPY '--owner-sid $R2 --user-install-dir \"$INSTDIR\" \
              --data-dir \"$R3\"'",
