@@ -4,6 +4,8 @@
 //! one line. Its PE load configuration keeps direct static imports to System32
 //! (`DependentLoadFlags` = `LOAD_LIBRARY_SEARCH_SYSTEM32`, `/DEPENDENTLOADFLAG:0x800`), and
 //! the imports whose own imports aren't `KnownDLLs` are delay-loaded (`build.rs`, ADR 0049).
+//! Its `VERSIONINFO` names it, and its one `RT_MANIFEST` is the linker's, `setup.manifest`'s
+//! supported Windows versions merged in.
 
 // Used by the msvc tests and the off-Windows one; windows-gnu builds neither.
 #[cfg(any(not(windows), target_env = "msvc"))]
@@ -128,6 +130,43 @@ mod pe {
                 at += size;
             }
         }
+
+        /// The data of every resource of type `id` (`RT_VERSION` 16, `RT_MANIFEST` 24), under
+        /// each of its names and languages. The resource directory is data directory 2: a tree
+        /// of `IMAGE_RESOURCE_DIRECTORY` tables (16 bytes, then 8-byte entries), each entry's
+        /// offset from the tree's start, its top bit set for a subtable; a leaf is an
+        /// `IMAGE_RESOURCE_DATA_ENTRY`, its data's RVA and size.
+        pub(crate) fn resources(&self, id: usize) -> Vec<Vec<u8>> {
+            let rva = self.directory(2);
+            if rva == 0 {
+                return Vec::new();
+            }
+            let root = self.offset(rva);
+            let entries = |table: usize| {
+                let count = self.u16_at(table + 12) + self.u16_at(table + 14);
+                (0..count).map(move |n| (self.u32_at(table + 16 + n * 8), table + 16 + n * 8))
+            };
+            let below = |entry: usize| self.u32_at(entry + 4);
+            let mut leaves = Vec::new();
+            let mut tables: Vec<usize> = entries(root)
+                .filter(|&(name, _)| name == id)
+                .map(|(_, entry)| below(entry))
+                .collect();
+            while let Some(next) = tables.pop() {
+                if next & 0x8000_0000 == 0 {
+                    leaves.push(root + next);
+                    continue;
+                }
+                tables.extend(entries(root + (next & 0x7FFF_FFFF)).map(|(_, e)| below(e)));
+            }
+            leaves
+                .into_iter()
+                .map(|leaf| {
+                    let at = self.offset(self.u32_at(leaf));
+                    self.bytes[at..at + self.u32_at(leaf + 4)].to_vec()
+                })
+                .collect()
+        }
     }
 }
 
@@ -225,6 +264,64 @@ fn imports_that_import_beyond_the_known_dlls_are_delay_loaded() {
         "new import(s) {unvetted:?}: a DLL loaded before main whose own imports aren't all \
          KnownDLLs would be searched for beside the elevated exe. Check its imports; delay-load \
          it in build.rs, or add it to SAFE_BEFORE_MAIN if they are all KnownDLLs."
+    );
+}
+
+/// The value of `key` in a `VERSIONINFO`'s UTF-16 strings: the key, its NUL, padding NULs to a
+/// 4-byte boundary, then the value up to its NUL.
+#[cfg(all(windows, target_env = "msvc"))]
+fn version_string(version: &[u8], key: &str) -> Option<String> {
+    let units: Vec<u16> = version
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&pair| u16::from_le_bytes(pair))
+        .collect();
+    let needle: Vec<u16> = key.encode_utf16().chain([0]).collect();
+    let at = units.windows(needle.len()).position(|w| w == needle)? + needle.len();
+    let value: Vec<u16> = units[at..]
+        .iter()
+        .skip_while(|&&unit| unit == 0)
+        .take_while(|&&unit| unit != 0)
+        .copied()
+        .collect();
+    String::from_utf16(&value).ok()
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_exe_carries_version_information_and_one_manifest() {
+    let pe = Pe::read();
+    let versions = pe.resources(16);
+    assert_eq!(versions.len(), 1, "one VERSIONINFO (build.rs)");
+    let version = &versions[0];
+    assert_eq!(
+        version_string(version, "FileDescription").as_deref(),
+        Some("Clauseo sandbox set-up")
+    );
+    assert_eq!(
+        version_string(version, "ProductName").as_deref(),
+        Some("Clauseo")
+    );
+    assert_eq!(
+        version_string(version, "OriginalFilename").as_deref(),
+        Some("clauseo-sandbox-setup.exe")
+    );
+    let manifests = pe.resources(24);
+    assert_eq!(
+        manifests.len(),
+        1,
+        "the linker's manifest only, none from the .rc"
+    );
+    let manifest = String::from_utf8_lossy(&manifests[0]);
+    assert!(
+        manifest.contains("level='requireAdministrator'")
+            || manifest.contains("level=\"requireAdministrator\""),
+        "{manifest}"
+    );
+    assert!(
+        manifest.contains("{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"),
+        "setup.manifest's Windows 10 and 11 supportedOS: {manifest}"
     );
 }
 
