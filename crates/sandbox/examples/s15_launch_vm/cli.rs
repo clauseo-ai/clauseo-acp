@@ -6,8 +6,12 @@
 //! s15_launch_vm probe <what> ...          (what the runner starts inside the sandbox)
 //! options: --root <dir> --data-dir <dir> --node <node.exe> --codex <package dir or codex.exe>
 //!          --runner <clauseo-sandbox-run.exe> --setup <clauseo-sandbox-setup.exe>
-//!          --row-timeout <seconds>
+//!          --row-timeout <seconds> --interactive-desktop
 //! ```
+//!
+//! `--interactive-desktop` (rows, a row, or unattended, in a console or RDP session, not session
+//! 0): `node-pipes` needs each UI effect (desktop create, `SwitchDesktop`, clipboard write)
+//! carried by a control and refused to the agent, else it fails (`gate.rs`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,6 +50,8 @@ pub(crate) struct Opts {
     pub(crate) setup: Option<PathBuf>,
     /// The hard limit on each row, and on the set-up.
     pub(crate) row_timeout: Duration,
+    /// `--interactive-desktop`: the strict UI gate for `node-pipes`.
+    pub(crate) interactive_desktop: bool,
 }
 
 /// The default harness root.
@@ -56,7 +62,7 @@ const DEFAULT_ROW_TIMEOUT: u64 = 120;
 /// The usage line.
 pub(crate) const USAGE: &str = "usage: s15_launch_vm prepare|rows|cleanup|row <name> | \
      --unattended [--root D] [--data-dir D] [--node P] [--codex P] [--runner P] [--setup P] \
-     [--row-timeout S] | probe <what> ...";
+     [--row-timeout S] [--interactive-desktop] | probe <what> ...";
 
 /// Parses the arguments after the program's name (not `probe`).
 pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
@@ -70,6 +76,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
         runner: None,
         setup: None,
         row_timeout: Duration::from_secs(DEFAULT_ROW_TIMEOUT),
+        interactive_desktop: false,
     };
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -80,6 +87,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
         };
         match arg.as_str() {
             "--unattended" => set(&mut step, Step::Unattended)?,
+            "--interactive-desktop" => opts.interactive_desktop = true,
             "--root" => opts.root = PathBuf::from(value(arg)?),
             "--data-dir" => opts.data_dir = Some(PathBuf::from(value(arg)?)),
             "--node" => opts.node = Some(PathBuf::from(value(arg)?)),

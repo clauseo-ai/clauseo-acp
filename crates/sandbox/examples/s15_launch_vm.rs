@@ -5,6 +5,7 @@
 //! ```text
 //! s15_launch_vm prepare|rows|cleanup|row <name> [options]   (step mode, the VM)
 //! s15_launch_vm --unattended [options]                       (CI: prepare, every row, cleanup)
+//! s15_launch_vm row node-pipes --interactive-desktop          (a desktop session: strict UI gate)
 //! s15_launch_vm probe <what> ...                             (run inside the sandbox)
 //! ```
 //!
@@ -54,6 +55,9 @@ mod cli;
 #[path = "s15_launch_vm/codex.rs"]
 mod codex;
 #[cfg(windows)]
+#[path = "s15_launch_vm/gate.rs"]
+mod gate;
+#[cfg(windows)]
 #[path = "s15_launch_vm/launch.rs"]
 mod launch;
 #[cfg(windows)]
@@ -92,6 +96,9 @@ mod win_logon;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_sec.rs"]
 mod win_sec;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_switch.rs"]
+mod win_switch;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win_thread.rs"]
 mod win_thread;
@@ -184,7 +191,7 @@ mod harness {
         let mut skipped = Vec::new();
         let mut info = Vec::new();
         for name in names {
-            match run_row(name, manifest, opts.row_timeout) {
+            match run_row(name, manifest, opts.row_timeout, opts.interactive_desktop) {
                 Outcome::Pass(_) => {}
                 Outcome::Fail(_) => failed.push(*name),
                 Outcome::Skip(_) => skipped.push(*name),

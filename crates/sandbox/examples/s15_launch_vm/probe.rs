@@ -9,24 +9,29 @@
 //! - `spawn-child`: starts `probe wait`, prints `pid <self>` and `child <pid>`, then waits.
 //! - `echo`: `echo <line>` for each stdin line; exits 0 at end of input.
 //! - `exit <n>`: exits `n` (decimal, or hex with `0x`; any 32-bit code).
-//! - `job-ui [atom]`: `ui-limits <hex>`, the UI limits of the innermost job it runs in; then
-//!   the limits' effect: `ui-effect desktop-create <code>` (`CreateDesktopW` on its own window
-//!   station, 0 when it made one, closed at once) and `ui-effect clipboard-write ok` or
-//!   `ui-effect clipboard-write failed <call> <code>` (the call that failed, `GetLastError`);
-//!   with `atom`, `ui-info atom <name> <n>` (`GlobalFindAtomW`, 0 when none). `token` prints
-//!   all but the atom line too.
+//! - `job-ui [atom]`: `ui-limits <hex>`, the UI limits of the innermost job it runs in, and
+//!   `ui-effect station <name>`, its own window station; then the limits' effects:
+//!   `ui-effect desktop-create <code>` (`CreateDesktopW` on its own window station, 0 when it
+//!   made one, closed at once), `ui-effect switch-desktop <code>` (`SwitchDesktop` to a desktop
+//!   it made, then straight back, `win_switch.rs`; `create-failed <code>` when the create
+//!   failed; `ui-effect switch-desktop-back <code>` when it switched) and `ui-effect
+//!   clipboard-write ok` or `ui-effect clipboard-write failed <call> <code>` (the call that
+//!   failed, `GetLastError`); with `atom`, `ui-info atom <name> <n>` (`GlobalFindAtomW`, 0 when
+//!   none). `token` prints all but the atom line too.
 //! - `ui-control [sa]`: the harness's positive control, started under one of the control
 //!   tokens on the control station's `Default` desktop, outside the runner's job: `ui-control
 //!   station <name>`, `ui-control user <sid>`, `ui-control integrity <sid>`, `ui-control
 //!   restricted <n>`, `ui-control ui-limits <hex>` (information), `ui-control desktop-sa
-//!   default|explicit`, then `ui-control desktop-create <code>` and `ui-control clipboard-write
-//!   ok` or `ui-control clipboard-write failed <call> <code>`, the same two calls as `job-ui`'s
-//!   effect. With `sa`, `CreateDesktopW` gets explicit `SECURITY_ATTRIBUTES` whose DACL names
-//!   the token's user and `SYSTEM`.
-//! - `ui-relay <desktop> <desktop user> <ms>`: the control's closest variant, started by the
-//!   harness as a pool user: makes the agent's token from its own as the inner runner does and
-//!   starts `probe ui-control` with it on `<desktop>`, waiting up to `<ms>`; prints the
-//!   child's lines, then `ui-relay exit <code or None>`, or `ui-relay error <why>`.
+//!   default|explicit`, then `ui-control desktop-create <code>`, `ui-control switch-desktop
+//!   <code>` and `ui-control clipboard-write ok` or `ui-control clipboard-write failed <call>
+//!   <code>`, the same calls as `job-ui`'s effects. With `sa`, `CreateDesktopW` gets explicit
+//!   `SECURITY_ATTRIBUTES` whose DACL names the token's user and `SYSTEM`.
+//! - `ui-relay <desktop> <desktop user> <ms>`: the control's variants (a) and (g), started by
+//!   the harness as a pool user on a control station (`<desktop>` is that station's for (a), the
+//!   agent's own `ClauseoRun-<hex>\Default` for (g)): makes the agent's token from its own as
+//!   the inner runner does and starts `probe ui-control` with it on `<desktop>`, waiting up to
+//!   `<ms>`; prints the child's lines, then `ui-relay exit <code or None>`, or `ui-relay error
+//!   <why>`.
 //! - `clipboard-read`: `clipboard-read ok <text>` or `clipboard-read error <why>`.
 //! - `clipboard-write <text>`: `clipboard-write ok` or `clipboard-write error <why>`.
 //! - `find-atom <name>`: `atom <n>`, 0 when `GlobalFindAtomW` finds none.
@@ -177,6 +182,10 @@ fn job_ui(atom: Option<&str>) {
         Ok(limits) => say(&format!("ui-limits {limits:#x}")),
         Err(error) => say(&format!("ui-limits error {}", code(&error))),
     }
+    match super::win_desk::own_station_name() {
+        Ok(name) => say(&format!("ui-effect station {name}")),
+        Err(code) => say(&format!("ui-effect station error {code}")),
+    }
     say(&format!(
         "ui-effect desktop-create {}",
         super::win_desk::create_desktop_code()
@@ -185,6 +194,7 @@ fn job_ui(atom: Option<&str>) {
         "ui-effect desktop-create-default-heap {}",
         super::win_desk::create_desktop_default_heap_code()
     ));
+    switch("ui-effect");
     match ui::write_failed("clauseo-ui-effect") {
         Ok(()) => say("ui-effect clipboard-write ok"),
         Err(failed) => say(&format!(
@@ -197,7 +207,17 @@ fn job_ui(atom: Option<&str>) {
     }
 }
 
-/// The positive control's two calls, as `job_ui` makes them, and what tells its token and
+/// `SwitchDesktop` to a new desktop and back (`win_switch.rs`), as `<prefix> switch-desktop
+/// <code>` and, when it switched, `<prefix> switch-desktop-back <code>`.
+fn switch(prefix: &str) {
+    let switched = super::win_switch::switch_desktop();
+    say(&format!("{prefix} switch-desktop {}", switched.code));
+    if let Some(back) = switched.back {
+        say(&format!("{prefix} switch-desktop-back {back}"));
+    }
+}
+
+/// The positive control's calls, as `job_ui` makes them, and what tells its token and
 /// station apart (information for the harness, which checks the shape). With `sa`,
 /// `CreateDesktopW` gets a DACL of the token's user and `SYSTEM`.
 fn ui_control(sa: bool) {
@@ -237,6 +257,7 @@ fn ui_control(sa: bool) {
         "ui-control desktop-create-default-heap {}",
         super::win_desk::create_desktop_default_heap_code()
     ));
+    switch("ui-control");
     match ui::write_failed("clauseo-ui-control") {
         Ok(()) => say("ui-control clipboard-write ok"),
         Err(failed) => say(&format!(
