@@ -78,6 +78,9 @@ An interactive per-machine install never sets 23: it shows a box when setting up
 line in its details list when it was still running. It shows a box with 24 and 25 too, but not
 with 25 under `/P` or `/UPDATE`.
 
+A passive (`/P`) install shows no box and sets no exit code for Safe workspace's outcomes, except
+the per-machine installer's 24, which every mode sets.
+
 What a per-machine uninstall can also return, in any mode (a box unless `/S`; for 25, unless `/P`
 or `/UPDATE` too):
 
