@@ -395,10 +395,7 @@ fn start_host<R: Runtime>(
         let refusals = setup_read.launch_refusals();
         let keys = setup::KeySlot::default();
         let key_notes = Arc::new(setup::KeyNotes::new());
-        let launch_retry = key_notes.retry_hook();
-        // The identity check's stat at each launch (R17); answers once setup's backend is up.
-        let gate_slot = setup::GateSlot::default();
-        let launch_gate = setup::launch_gate(&gate_slot);
+        let gate_slot = setup::GateSlot::default(); // R17's launch gate, once setup is up
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
         let network: setup::NetworkSlot =
             Arc::new(std::sync::RwLock::new(setup_read.network_at_start()));
@@ -421,8 +418,8 @@ fn start_host<R: Runtime>(
             plans: Arc::clone(&plans),
             network: Arc::clone(&network),
             reread: Box::new(move || load_effective(&reread_at)),
-            notes: key_notes,
-            gate: gate_slot,
+            notes: Arc::clone(&key_notes),
+            gate: Arc::clone(&gate_slot),
         };
         if let Err(err) = setup::spawn(setup_read, setup_parts, side) {
             tracing::warn!(%err, "no setup thread: setup commands answer internal");
@@ -437,8 +434,8 @@ fn start_host<R: Runtime>(
                 reused,
             )))
             .with_sign_in_again(clauseo_agents::is_sign_in_again)
-            .with_launch_retry(launch_retry)
-            .with_launch_gate(launch_gate)
+            .with_launch_retry(key_notes.retry_hook())
+            .with_launch_gate(setup::launch_gate(&gate_slot))
             .with_limits_reader(readers);
         let config = refusals.into_iter().fold(config, |config, (agent, code)| {
             config.with_launch_refused(agent, code)
