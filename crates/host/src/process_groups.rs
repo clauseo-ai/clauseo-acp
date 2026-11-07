@@ -4,28 +4,42 @@
 //! that session's proxy and relay ports, which a later session may bind again.
 //!
 //! So each agent launch records its group (Unix): `<data>/process-groups/<matter>-<thread>-
-//! <launch>.json`, `{"v":1,"pgid":…,"leader_start":…,"boot":…}`, written atomically (0600) on
-//! the host thread right after the child exists ([`Recorder::write`]), and removed once the
-//! session's removal has seen the tree gone ([`remove`]). Not in the run folder: a jailed agent
-//! can write there, and a forged record could name another of the lawyer's groups. No jail
-//! profile grants this folder, and Claude's data-folder fence denies it.
+//! <launch>-<host pid>.json`, `{"v":2,"pgid":…,"leader_start":…,"sid":…,"boot":…}`, written
+//! atomically (0600) on the host thread in the step that started the process, whether the launch
+//! then succeeded or failed ([`Recorder::write`]), and removed once the session's removal has
+//! seen the tree gone ([`remove`]). Not in the run folder: a jailed agent can write there, and a
+//! forged record could name another of the lawyer's groups. No jail profile grants this folder,
+//! and Claude's data-folder fence denies it.
 //!
-//! At the next start, before the actor serves (so before any launch claims a port), [`start`]
-//! ends each recorded group that is provably the same group, then deletes the record:
+//! At the next start, once the store's lock is held and before the actor serves (so before any
+//! launch claims a port), [`start`] ends each recorded group that is provably the same group,
+//! then deletes the record; anything it cannot prove is left alone:
 //!
 //! - another boot: nothing (pids start again at each boot);
-//! - a process whose pid is the group's id: ended only when its start is the recorded leader's;
-//!   any other start means the id was free and given again, so the old group is gone;
-//! - no such process, but members of the group: a group id is not given again while a member
-//!   lives, so the group is the original, and it is ended. A member that started before the
-//!   recorded leader cannot be its descendant: then the group is not signalled as a whole, only
-//!   its later members one by one, and the earlier ones are counted in the log;
+//! - a process holds the group's id (`kill(pgid, 0)` is not `ESRCH`; a zombie or another
+//!   user's counts): the group is ended only when that process's start (a zombie's too, on
+//!   Linux) is the recorded leader's. Another start means the id was given again; an unreadable
+//!   one is unprovable. Both are left alone;
+//! - no process holds it, but members of the group run: ended only when every member is in the
+//!   recorded session, that session is not the group's own id, and no member started before the
+//!   recorded leader. The agent is started with `process_group(0)`, never `setsid`, so its tree
+//!   stays in the host's session; a group that took the id later (a `setsid` or double-fork
+//!   daemon, a terminal's job, whose leader then exited) is in another session or has older
+//!   members. Otherwise, or when the listing fails or may be cut short, the whole group is left;
 //! - neither: nothing to do.
 //!
-//! Each kill is SIGKILL, then up to 500 ms for the group to empty; the sweep waits at most 2 s in
-//! all and leaves the records it did not reach for the next start. A record that is a link, has
-//! another link (`nlink > 1`), is not this user's, or does not parse is deleted unread and
-//! counted. The log holds counts only, never a pid, path or command line.
+//! Each kill is SIGKILL, then up to 500 ms for the group to empty; the sweep takes at most 2 s on
+//! the host's clock and leaves the records it did not reach for the next start. A record that is
+//! a link, has another link (`nlink > 1`), is not this user's, is of another version (no `sid`)
+//! or does not parse is deleted unread and counted. The log holds counts only, never a pid, path
+//! or command line.
+//!
+//! Residuals: a descendant that left the group (`setsid`, `setpgid`) is the jail's to contain; a
+//! launch whose record write failed is not swept; between the leader's start check and `killpg`
+//! the group could empty and its id be taken again (a pid wrap within microseconds, inherent to
+//! `killpg`); and a restart in another pid namespace (Flatpak, a container) or with a
+//! `hidepid` `/proc` sees other pids or unreadable ones: those records end nothing, as their
+//! leaders and members read as gone, reused or unsure.
 //!
 //! Windows records nothing: the agent's Job Object (`KILL_ON_JOB_CLOSE`) ends its tree when the
 //! desktop's process dies.
@@ -42,8 +56,15 @@ const FOLDER: &str = "process-groups";
 
 /// The record of `key`'s launch under `data`. A path only.
 pub(crate) fn record_path(data: &Path, key: SessionKey) -> PathBuf {
-    data.join(FOLDER)
-        .join(format!("{}-{}-{}.json", key.matter, key.thread, key.launch))
+    // The host's pid too: launch ids start again at 1 in each run, and a record an earlier run
+    // left (not reached by its sweep) must not be replaced.
+    data.join(FOLDER).join(format!(
+        "{}-{}-{}-{}.json",
+        key.matter,
+        key.thread,
+        key.launch,
+        std::process::id()
+    ))
 }
 
 /// Writes launches' records: knows this boot's stamp, read once at start. With none (Windows,
@@ -55,13 +76,13 @@ pub(crate) struct Recorder {
 }
 
 /// The start-up sweep on `data` (Unix; Windows does nothing), then the records' folder made
-/// (0700) for this run's launches. Blocking, at most about 2 s of waits: run on the starting
+/// (0700) for this run's launches. Blocking, at most about 2 s on `clock`: run on the starting
 /// thread before the actor serves.
-pub(crate) fn start(data: &Path) -> Recorder {
+pub(crate) fn start(data: &Path, clock: &dyn crate::clock::Clock) -> Recorder {
     #[cfg(unix)]
     {
         let folder = data.join(FOLDER);
-        let boot = sweep::sweep(&folder);
+        let boot = sweep::sweep(&folder, clock);
         if let Err(error) = crate::write::create_private_dirs_under(data, &folder) {
             tracing::warn!(
                 kind = ?error.kind(),
@@ -72,7 +93,7 @@ pub(crate) fn start(data: &Path) -> Recorder {
     }
     #[cfg(not(unix))]
     {
-        let _ = data;
+        let _ = (data, clock);
         Recorder::default()
     }
 }
@@ -88,15 +109,21 @@ impl Recorder {
             let Some(boot) = &self.boot else {
                 return;
             };
-            let (Ok(pgid), Some(start)) = (i32::try_from(pid), clauseo_process::start_stamp(pid))
-            else {
-                tracing::warn!("the agent's start was not read; its group is not recorded");
+            let (Ok(pgid), Some(start), Some(sid)) = (
+                i32::try_from(pid),
+                clauseo_process::start_stamp(pid),
+                clauseo_process::session_id(pid),
+            ) else {
+                tracing::warn!(
+                    "the agent's start or session was not read; its group is not recorded"
+                );
                 return;
             };
             let record = serde_json::json!({
-                "v": 1,
+                "v": sweep::VERSION,
                 "pgid": pgid,
                 "leader_start": start.encode(),
+                "sid": sid,
                 "boot": boot,
             });
             if let Err(error) =

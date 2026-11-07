@@ -188,6 +188,13 @@ fn a_straggler_past_the_cap_holds_the_proxy_and_folder_until_the_host_stops() {
         "closed at stop, not removed"
     );
     assert!(folder.exists(), "the next start's sweep takes it");
+    let records = std::fs::read_dir(dir.data_dir().join("process-groups"))
+        .unwrap()
+        .count();
+    assert_eq!(
+        records, 1,
+        "a run held past the cap keeps its process-group record"
+    );
     group::reap(helper);
 }
 

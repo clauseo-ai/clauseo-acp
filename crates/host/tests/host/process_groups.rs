@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::{EgressProxy, SessionKey};
-use clauseo_process::{Member, boot_stamp, group_members, kill_member, start_stamp};
+use clauseo_process::{Member, boot_stamp, group_members, kill_member, session_id, start_stamp};
 use serde_json::json;
 
 use crate::egress::claude_then;
@@ -45,9 +45,20 @@ fn names(dir: &Dir) -> Vec<String> {
     names
 }
 
-/// A record's text.
+/// A record's text, with this test process's session as the agent's.
 fn record(pgid: u32, leader_start: &str, boot: &str) -> String {
-    json!({"v": 1, "pgid": pgid, "leader_start": leader_start, "boot": boot}).to_string()
+    record_in(pgid, leader_start, sid(), boot)
+}
+
+/// A record's text naming session `sid`.
+fn record_in(pgid: u32, leader_start: &str, sid: u32, boot: &str) -> String {
+    json!({"v": 2, "pgid": pgid, "leader_start": leader_start, "sid": sid, "boot": boot})
+        .to_string()
+}
+
+/// This test process's session: the one a host's agents (`process_group(0)`) stay in.
+fn sid() -> u32 {
+    session_id(std::process::id()).expect("this process's session")
 }
 
 /// Writes `text` at `<records>/<name>`, 0600.
@@ -90,15 +101,31 @@ impl Mine {
     /// its leader then killed and reaped, so the group is left with its two sleepers and no
     /// leader. Answers the group's id and the leader's start.
     fn leaderless_group(&mut self) -> (u32, clauseo_process::StartStamp) {
-        let mut shell = Command::new("sh")
+        let mut command = Command::new("sh");
+        command
             .args(["-c", "sleep 600 & sleep 600"])
-            .process_group(0)
-            .spawn()
-            .unwrap();
+            .process_group(0);
+        self.orphaned(command)
+    }
+
+    /// The same group made the way a daemon makes one: `setsid sh -c …` (`setsid` is no
+    /// group leader here, so it makes the session in place and runs the shell as its leader), the
+    /// shell then killed. Its sleepers are left in a session and group of their own.
+    fn daemon_group(&mut self) -> (u32, clauseo_process::StartStamp) {
+        let mut command = Command::new("setsid");
+        command.args(["sh", "-c", "sleep 600 & sleep 600"]);
+        self.orphaned(command)
+    }
+
+    /// Starts `command` (a shell leading a group, starting two sleepers in it), then kills and
+    /// reaps the shell. Answers the group's id and the shell's start.
+    fn orphaned(&mut self, mut command: Command) -> (u32, clauseo_process::StartStamp) {
+        let mut shell = command.spawn().unwrap();
         let pgid = shell.id();
-        let start = start_stamp(pgid).unwrap();
+        let mut start = None;
         let mut members = Vec::new();
         for _ in 0..200 {
+            start = start.or_else(|| start_stamp(pgid));
             members = group_members(pgid).unwrap();
             if members.len() == 3 {
                 break;
@@ -116,7 +143,7 @@ impl Mine {
             2,
             "its sleepers live on"
         );
-        (pgid, start)
+        (pgid, start.unwrap())
     }
 
     /// Whether the child `pid` the test started still runs (it is reaped if it has exited).
@@ -254,7 +281,14 @@ fn a_launch_records_its_group_and_the_removal_deletes_it() {
     turn(&host, thread);
     let written = only_record(&dir);
     let pgid = u32::try_from(written["pgid"].as_i64().unwrap()).unwrap();
-    assert_eq!(written["v"], 1);
+    assert_eq!(written["v"], 2);
+    assert_eq!(
+        written["sid"],
+        sid(),
+        "the agent stays in the host's session"
+    );
+    let suffix = format!("-{}.json", std::process::id());
+    assert!(names(&dir)[0].ends_with(&suffix), "{:?}", names(&dir));
     assert_eq!(written["boot"], boot().as_str());
     assert_eq!(
         start_stamp(pgid).map(clauseo_process::StartStamp::encode),
@@ -329,4 +363,145 @@ fn the_sweep_runs_before_the_first_launch_claims_a_port() {
     turn(&host, thread);
     assert_eq!(*log.lock().unwrap(), ["open, survivor gone"]);
     host.shutdown();
+}
+
+/// A group that took a recorded id later, made the way a daemon makes one (`setsid`, its leader
+/// then exited), its members started after the recorded leader: in another session, so it is
+/// not the agent's, and it lives on. The record is deleted.
+#[test]
+fn a_setsid_group_that_took_the_id_later_survives() {
+    let dir = Dir::new("pg_setsid", &[]);
+    let mut mine = Mine::default();
+    let earlier = start_stamp(std::process::id()).unwrap();
+    let (pgid, _) = mine.daemon_group();
+    let members = group_members(pgid).unwrap();
+    assert!(
+        members
+            .iter()
+            .all(|m| m.start >= earlier && m.session == pgid)
+    );
+    plant(
+        &dir,
+        "m-t-8.json",
+        &record(pgid, &earlier.encode(), &boot()),
+    );
+    let host = dir.start(0);
+    assert_eq!(group_members(pgid).unwrap(), members, "untouched");
+    assert_eq!(names(&dir), Vec::<String>::new());
+    host.shutdown();
+}
+
+/// A leader-less group in the agent's session with a member older than the recorded leader:
+/// not the agent's tree, so the whole group is left alone.
+#[test]
+fn a_group_with_a_member_older_than_the_leader_is_left_whole() {
+    let dir = Dir::new("pg_older", &[]);
+    let mut mine = Mine::default();
+    let (pgid, _) = mine.leaderless_group();
+    let members = group_members(pgid).unwrap();
+    let newest = members.iter().map(|m| m.start).max().unwrap();
+    let later = clauseo_process::StartStamp::decode(&(newest.encode() + "0")).unwrap();
+    plant(&dir, "m-t-9.json", &record(pgid, &later.encode(), &boot()));
+    let host = dir.start(0);
+    assert_eq!(
+        group_members(pgid).unwrap(),
+        members,
+        "every member lives on"
+    );
+    assert_eq!(names(&dir), Vec::<String>::new());
+    host.shutdown();
+}
+
+/// A record whose session is not the members' (the agent's recorded session differs) leaves a
+/// leader-less group alone, as does one from an earlier build without a session, which is
+/// deleted unread.
+#[test]
+fn another_session_or_an_old_record_ends_nothing() {
+    let dir = Dir::new("pg_session", &[]);
+    let mut mine = Mine::default();
+    let (pgid, start) = mine.leaderless_group();
+    let elsewhere = sid() + 1;
+    plant(
+        &dir,
+        "m-t-10.json",
+        &record_in(pgid, &start.encode(), elsewhere, &boot()),
+    );
+    let old = json!({"v": 1, "pgid": pgid, "leader_start": start.encode(), "boot": boot()});
+    plant(&dir, "m-t-11.json", &old.to_string());
+    let host = dir.start(0);
+    assert_eq!(group_members(pgid).unwrap().len(), 2, "the group lives on");
+    assert_eq!(names(&dir), Vec::<String>::new());
+    host.shutdown();
+}
+
+/// A second start on a folder another host holds fails with `store.locked` before its sweep:
+/// a live host's records are never acted on.
+#[test]
+fn a_second_start_on_a_held_folder_kills_nothing() {
+    let dir = Dir::new("pg_locked", &[]);
+    let host = dir.start(0);
+    let mut mine = Mine::default();
+    let (pid, start) = mine.sleeper();
+    plant(&dir, "m-t-12.json", &record(pid, &start.encode(), &boot()));
+    let clock = Dir::clock(1);
+    let second = clauseo_host::Host::start(dir.config(1, &clock));
+    let error = second.expect_err("the folder is held");
+    assert_eq!(error.code(), clauseo_protocol::ErrorCode::StoreLocked);
+    assert!(mine.running(pid), "the live host's agent stand-in lives on");
+    assert_eq!(names(&dir), ["m-t-12.json"], "its record stays");
+    host.shutdown();
+}
+
+/// A Codex launch records its group too.
+#[test]
+fn a_codex_launch_records_its_group() {
+    let dir = crate::codex::codex_dir("pg_codex", "codex-handshake");
+    let host = dir.start(0);
+    let (_, thread, _) =
+        crate::support::matter_with_thread(&dir, &host, "m", &[], crate::codex::CODEX);
+    let mut events = host.events(clauseo_protocol::StreamId::Thread(thread));
+    crate::codex::run_turn(&host, &mut events, thread);
+    let written = only_record(&dir);
+    let pgid = u32::try_from(written["pgid"].as_i64().unwrap()).unwrap();
+    assert_eq!(
+        start_stamp(pgid).map(clauseo_process::StartStamp::encode),
+        written["leader_start"].as_str().map(str::to_owned)
+    );
+    host.shutdown();
+    assert_eq!(names(&dir), Vec::<String>::new());
+}
+
+/// A record that cannot be written (the folder replaced by a file) still launches the agent,
+/// and the warning names only the error's kind, never a path.
+#[test]
+fn a_failed_record_write_still_launches_and_logs_only_the_kind() {
+    let lines = Arc::new(Mutex::new(Vec::new()));
+    // nextest runs each test in its own process, so this default is this test's alone.
+    let _set =
+        tracing::subscriber::set_global_default(crate::login_check::Keep(Arc::clone(&lines)));
+    let dir = Dir::new("pg_write_fails", &[]);
+    claude_then(&dir, &json!([]), &[]);
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
+    std::fs::remove_dir(records(&dir)).unwrap();
+    std::fs::write(records(&dir), b"not a folder").unwrap();
+    let folder = dir.folder("m", &[]);
+    let matter = host.create_matter("m", &folder);
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    host.shutdown();
+    let lines = lines.lock().unwrap();
+    let warning = lines
+        .iter()
+        .find(|line| line.contains("process group was not recorded"))
+        .expect("the failed write is logged");
+    assert!(warning.contains("kind="), "{warning}");
+    let data = dir.data().display().to_string();
+    assert!(
+        lines
+            .iter()
+            .filter(|line| line.contains("process group") || line.contains("process-group record"))
+            .all(|line| !line.contains(&data)),
+        "no process-group line names the data folder"
+    );
 }

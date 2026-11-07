@@ -2,13 +2,13 @@
 //! tree, `proc_pidinfo(PROC_PIDTBSDINFO)` gives each process's parent, group, start and state,
 //! and `proc_pidpath` its executable. `proc_listallpids` lists every process, for the processes
 //! with a given executable name and their starts (`named`), and `proc_listpgrppids` the
-//! members of a process group (`members`); `sysctl kern.boottime` stamps the boot (`boot`).
+//! members of a process group (`members`); `sysctl kern.bootsessionuuid` stamps the boot (`boot`).
 //! Each libproc call has one wrapper here, with its `unsafe` block and the reason it is sound;
 //! nothing else in the crate calls libproc.
 #![expect(
     unsafe_code,
     reason = "FFI to libproc (proc_listchildpids, proc_listallpids, proc_listpgrppids, \
-              proc_pidinfo, proc_pidpath) and sysctlbyname (kern.boottime)"
+              proc_pidinfo, proc_pidpath) and sysctlbyname (kern.bootsessionuuid)"
 )]
 
 use std::ffi::{OsStr, c_int, c_void};
@@ -37,6 +37,8 @@ const MAX_CHILDREN: usize = 65_536;
 const FIRST_PIDS: usize = 1_024;
 /// The most processes [`named`] reads; a system with more fails the listing.
 const MAX_PIDS: usize = 1 << 20;
+/// Room for `kern.bootsessionuuid`: a 36-character UUID and its NUL, with spare.
+const BOOT_ID_ROOM: usize = 64;
 
 /// What `proc_pidinfo(PROC_PIDTBSDINFO)` says about a process.
 #[derive(Debug, Clone, Copy)]
@@ -90,12 +92,27 @@ pub(super) fn list(root: u32, root_start: u64) -> Option<Vec<Proc>> {
     Some(found)
 }
 
-/// The running members of process group `group`, each with its start: libproc's
+/// The start of process `pid` whether or not it has exited; `None` when it cannot be read
+/// (gone, or another user's: `PROC_PIDTBSDINFO` answers EPERM for those).
+pub(super) fn start_any(pid: u32) -> Option<u64> {
+    info(pid).map(|info| info.start)
+}
+
+/// The session id of process `pid` (`getsid`); `None` when it is gone or the call fails.
+pub(super) fn session_of(pid: u32) -> Option<u32> {
+    let pid = i32::try_from(pid).ok()?;
+    let session = nix::unistd::getsid(Some(Pid::from_raw(pid))).ok()?;
+    u32::try_from(session.as_raw()).ok()
+}
+
+/// The running members of process group `group`, each with its start and session: libproc's
 /// `proc_listpgrppids` (`proc_listpids(PROC_PGRP_ONLY, group)`), each pid read again by
-/// `PROC_PIDTBSDINFO` and kept only when it still runs in `group`. `None` when the listing
-/// fails (-1), or for a group out of range; a count of 0 reads as no members, as xnu answers a
-/// failed system call with 0 (see [`children`]).
-pub(super) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
+/// `PROC_PIDTBSDINFO` and kept only when it still runs in `group`, and its session by
+/// `getsid`. `None` when the listing fails, a member's session cannot be read, the group is
+/// out of range, or the group holds more than [`MAX_CHILDREN`] pids (a cut list would hide
+/// members, so the caller cannot tell). A count of 0 reads as no members: libproc answers a
+/// failed system call with 0, never -1 (see [`children`]).
+pub(super) fn members(group: u32) -> Option<Vec<(u32, u64, u32)>> {
     let raw = c_int::try_from(group).ok()?;
     let mut room = FIRST_CHILDREN;
     loop {
@@ -104,53 +121,60 @@ pub(super) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
         // SAFETY: `pids` is a live, zeroed buffer of exactly `bytes` bytes that this call may
         // fill with pids and nothing else; the kernel writes at most `bytes` bytes into it.
         // The return counts pids (xnu libsyscall/wrappers/libproc/libproc.c's
-        // `proc_listpgrppids` divides `proc_listpids`' byte count by `sizeof(int)`) or is -1
-        // on failure, which `usize::try_from` below refuses; a count is used only capped at the
-        // buffer's length, so no read passes it.
+        // `proc_listpgrppids` divides `proc_listpids`' byte count by `sizeof(int)`); a failed
+        // call answers 0, and any negative value is refused by `usize::try_from` below. A count
+        // is used only capped at the buffer's length, so no read passes it.
         let count = unsafe { libc::proc_listpgrppids(raw, pids.as_mut_ptr().cast(), bytes) };
         let count = usize::try_from(count).ok()?;
-        if count < room || room >= MAX_CHILDREN {
-            pids.truncate(count.min(room));
-            return Some(
-                pids.into_iter()
-                    .filter_map(|pid| u32::try_from(pid).ok().filter(|&pid| pid != 0))
-                    .filter_map(|pid| {
-                        info(pid)
-                            .filter(|info| !info.exited && info.group == group)
-                            .map(|info| (pid, info.start))
-                    })
-                    .collect(),
-            );
+        if count < room {
+            pids.truncate(count);
+            let mut found = Vec::new();
+            for pid in pids.into_iter().filter_map(|pid| u32::try_from(pid).ok()) {
+                if pid == 0 {
+                    continue;
+                }
+                let Some(info) = info(pid).filter(|info| !info.exited && info.group == group)
+                else {
+                    continue;
+                };
+                found.push((pid, info.start, session_of(pid)?));
+            }
+            return Some(found);
+        }
+        if room >= MAX_CHILDREN {
+            return None;
         }
         room *= 2;
     }
 }
 
-/// This boot's stamp: `sysctl kern.boottime` as `<seconds>.<microseconds>`; `None` when the
-/// call fails or answers short.
+/// This boot's stamp: `sysctl kern.bootsessionuuid`, a UUID string the kernel sets once per
+/// boot (`kern.boottime` moves when the wall clock is stepped). `None` when the call fails,
+/// the answer does not fit the buffer (a truncated id is no id), or it is empty or not UTF-8.
 pub(super) fn boot() -> Option<String> {
-    let mut time = std::mem::MaybeUninit::<libc::timeval>::zeroed();
-    let mut size: libc::size_t = size_of::<libc::timeval>();
-    // SAFETY: the name is a NUL-terminated C string literal; `time` is a live, zeroed buffer of
-    // exactly `size` bytes, the size of the `timeval` that `kern.boottime` answers, and the
-    // call writes at most `size` bytes into it and the byte count into `size`. No new value
-    // is set (null, 0). Anything but 0 with `size` unchanged is refused before `time` is read.
+    let mut buffer = [0_u8; BOOT_ID_ROOM];
+    let mut size: libc::size_t = buffer.len();
+    // SAFETY: the name is a NUL-terminated C string literal; `buffer` is a live, zeroed buffer
+    // of exactly `size` bytes, and the call writes at most `size` bytes into it (failing with
+    // ENOMEM, not writing past it, when the value is longer) and the byte count, NUL included,
+    // into `size`. No new value is set (null, 0). A non-zero answer is refused before the buffer
+    // is read, and `size` is capped at the buffer's length before slicing.
     let answer = unsafe {
         libc::sysctlbyname(
-            c"kern.boottime".as_ptr(),
-            time.as_mut_ptr().cast::<c_void>(),
+            c"kern.bootsessionuuid".as_ptr(),
+            buffer.as_mut_ptr().cast::<c_void>(),
             &raw mut size,
             std::ptr::null_mut(),
             0,
         )
     };
-    if answer != 0 || size != size_of::<libc::timeval>() {
+    if answer != 0 || size > buffer.len() {
         return None;
     }
-    // SAFETY: the call above wrote the whole struct (`size` bytes), and it was zeroed before,
-    // so every field is initialised; `timeval` is two integers.
-    let time = unsafe { time.assume_init() };
-    Some(format!("{}.{:06}", time.tv_sec, time.tv_usec))
+    let written = buffer.get(..size)?;
+    let text = written.split(|&byte| byte == 0).next()?;
+    let id = std::str::from_utf8(text).ok()?.trim();
+    (!id.is_empty()).then(|| id.to_owned())
 }
 
 /// The pids whose parent is `parent`; `None` when the call answers -1 (its failure), or for a

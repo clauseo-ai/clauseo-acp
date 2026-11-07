@@ -2,13 +2,14 @@ use super::{Stat, parse_stat};
 
 #[test]
 fn stat_fields_are_read_after_the_last_parenthesis() {
-    let line = "4242 (a (weird) name) S 17 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 \
+    let line = "4242 (a (weird) name) S 17 4242 4343 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 \
                 987654 1000 50 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0";
     assert_eq!(
         parse_stat(line),
         Some(Stat {
             parent: 17,
             group: 4242,
+            session: 4343,
             start: 987_654,
             exited: false,
         })

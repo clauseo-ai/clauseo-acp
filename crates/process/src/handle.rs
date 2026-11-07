@@ -199,6 +199,12 @@ impl TreeWatch {
     pub fn gone(&self) -> bool {
         self.0.gone()
     }
+
+    /// The agent's process group id, its own pid (Unix; Windows's tree is a Job Object).
+    #[cfg(unix)]
+    pub fn group(&self) -> u32 {
+        self.0.group()
+    }
 }
 
 /// An escalation step of the ladder.

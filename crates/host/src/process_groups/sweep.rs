@@ -5,17 +5,24 @@ use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 use std::time::Duration;
 
-use clauseo_process::{Member, StartStamp, boot_stamp, group_members, kill_group, kill_member};
+use clauseo_process::{
+    Member, Presence, StartStamp, boot_stamp, group_members, kill_group, kill_member, presence,
+};
 use serde::Deserialize;
 
+use crate::clock::Clock;
 use crate::log_file::LIFECYCLE;
 
-/// The most the sweep waits in all; the records it did not reach stay for the next start.
+/// The most the sweep takes in all, on the host's clock; the records it did not reach stay for
+/// the next start.
 const BUDGET: Duration = Duration::from_secs(2);
 /// How long one ended group gets to empty.
 const EMPTY_WAIT: Duration = Duration::from_millis(500);
 /// How often an ended group is listed again meanwhile.
 const POLL: Duration = Duration::from_millis(25);
+/// The record format's version; a record of any other, or without a field of this one (an
+/// earlier build's, with no `sid`), is unusable and deleted unswept.
+pub(super) const VERSION: u32 = 2;
 /// The most bytes a record may hold; a real one is about 120.
 const MAX_RECORD: u64 = 4096;
 
@@ -26,14 +33,16 @@ struct Record {
     v: u32,
     pgid: i32,
     leader_start: String,
+    sid: u32,
     boot: String,
 }
 
-/// A record read and checked: its group (above 1) and its leader's start.
+/// A record read and checked: its group (above 1), its leader's start and session.
 #[derive(Debug)]
 struct Checked {
     pgid: u32,
     leader_start: StartStamp,
+    sid: u32,
     boot: String,
 }
 
@@ -44,9 +53,13 @@ struct Tally {
     found: usize,
     /// Groups signalled.
     ended: usize,
-    /// Records whose group id now leads another process.
+    /// Records whose group is provably not the recorded one: its id leads another process, or a
+    /// member is in another session or older than the leader.
     reused: usize,
-    /// Members still running after a group's wait, and members spared as older than the leader.
+    /// Records whose group could not be proved either way (a leader there but unreadable, a
+    /// listing that failed, a recorded session that is the group's own): left alone.
+    unsure: usize,
+    /// Members still running after a group's wait.
     left: usize,
     /// Records refused unread (a link, another link, another owner, too big, unparsable).
     refused: usize,
@@ -56,30 +69,36 @@ struct Tally {
     not_reached: usize,
 }
 
-/// The time the sweep may still wait.
-struct Budget(Duration);
+/// The sweep's deadline on the host's clock (`Clock::now().mono`). The waits themselves are
+/// `recv_timeout`s; with a `ManualClock` the deadline never passes, and each group's wait is
+/// still bounded by its poll count.
+struct Deadline<'a> {
+    clock: &'a dyn Clock,
+    at: Duration,
+}
 
-impl Budget {
-    /// Waits `wait` (less when the budget has less); false once nothing is left.
-    fn pause(&mut self, wait: Duration) -> bool {
-        let wait = wait.min(self.0);
+impl Deadline<'_> {
+    /// Whether the deadline has passed.
+    fn passed(&self) -> bool {
+        self.clock.now().mono >= self.at
+    }
+
+    /// Waits [`POLL`] (less when the deadline is nearer); false once it has passed.
+    fn pause(&self) -> bool {
+        let left = self.at.saturating_sub(self.clock.now().mono);
+        let wait = POLL.min(left);
         if wait.is_zero() {
             return false;
         }
         let (_keep, never) = std::sync::mpsc::channel::<()>();
         let _timed_out = never.recv_timeout(wait);
-        self.0 = self.0.saturating_sub(wait);
         true
-    }
-
-    fn spent(&self) -> bool {
-        self.0.is_zero()
     }
 }
 
-/// Sweeps the records in `folder`, and answers this boot's stamp (`None` when it cannot be
+/// Sweeps/ the records in `folder`, and answers this boot's stamp (`None` when it cannot be
 /// read: then no record is acted on, and all stay).
-pub(super) fn sweep(folder: &Path) -> Option<String> {
+pub(super) fn sweep(folder: &Path, clock: &dyn Clock) -> Option<String> {
     let boot = boot_stamp();
     match std::fs::symlink_metadata(folder) {
         Err(_) => return boot,
@@ -98,9 +117,12 @@ pub(super) fn sweep(folder: &Path) -> Option<String> {
         return Some(now);
     };
     let mut tally = Tally::default();
-    let mut budget = Budget(BUDGET);
+    let deadline = Deadline {
+        clock,
+        at: clock.now().mono.saturating_add(BUDGET),
+    };
     for entry in entries.flatten() {
-        if budget.spent() {
+        if deadline.passed() {
             tally.not_reached += 1;
             continue;
         }
@@ -110,7 +132,7 @@ pub(super) fn sweep(folder: &Path) -> Option<String> {
             Some(record) if record.boot != now => tally.other_boot += 1,
             Some(record) => {
                 tally.found += 1;
-                end(&record, &mut tally, &mut budget);
+                end(&record, &mut tally, &deadline);
             }
         }
         super::remove(&path);
@@ -121,6 +143,7 @@ pub(super) fn sweep(folder: &Path) -> Option<String> {
             found = tally.found,
             ended = tally.ended,
             reused = tally.reused,
+            unsure = tally.unsure,
             left = tally.left,
             refused = tally.refused,
             other_boot = tally.other_boot,
@@ -132,57 +155,85 @@ pub(super) fn sweep(folder: &Path) -> Option<String> {
 }
 
 /// Ends `record`'s group if it is provably the recorded one (`process_groups.rs`'s rule).
-fn end(record: &Checked, tally: &mut Tally, budget: &mut Budget) {
+fn end(record: &Checked, tally: &mut Tally, deadline: &Deadline<'_>) {
     let pgid = record.pgid;
-    match clauseo_process::start_stamp(pgid) {
-        Some(start) if start == record.leader_start => {
-            // The agent itself: its group, and the agent too in case it left the group.
+    match presence(pgid) {
+        Presence::There(Some(start)) if start == record.leader_start => {
+            // The agent itself (running, or a zombie): its group, and the agent too in case it
+            // left the group.
             kill_group(pgid);
-            kill_member(&Member { pid: pgid, start });
+            kill_member(&Member {
+                pid: pgid,
+                start,
+                session: record.sid,
+            });
             tally.ended += 1;
-            tally.left += wait_empty(pgid, record.leader_start, budget);
+            tally.left += wait_empty(pgid, record.leader_start, deadline);
         }
-        Some(_) => tally.reused += 1,
-        None => {
-            let Some(members) = group_members(pgid) else {
-                tracing::warn!("a recorded group's members were not listed; it is left");
-                return;
-            };
-            if members.is_empty() {
-                return;
-            }
-            let earlier = members
-                .iter()
-                .filter(|member| member.start < record.leader_start)
-                .count();
-            if earlier == 0 {
+        Presence::There(Some(_)) => tally.reused += 1,
+        // A process holds the id but its start is unreadable (another user's): unprovable.
+        Presence::There(None) => tally.unsure += 1,
+        Presence::Gone => match leaderless(record) {
+            Leaderless::Empty => {}
+            Leaderless::Ours => {
                 kill_group(pgid);
-            } else {
-                // Not the agent's descendants: the group is not signalled whole.
-                tracing::warn!(
-                    earlier,
-                    "a recorded group holds processes older than its leader; they are spared"
-                );
-                for member in members.iter().filter(|m| m.start >= record.leader_start) {
-                    kill_member(member);
-                }
-                tally.left += earlier;
+                tally.ended += 1;
+                tally.left += wait_empty(pgid, record.leader_start, deadline);
             }
-            tally.ended += 1;
-            tally.left += wait_empty(pgid, record.leader_start, budget);
-        }
+            Leaderless::Reused => tally.reused += 1,
+            Leaderless::Unsure => tally.unsure += 1,
+        },
     }
 }
 
-/// Waits up to [`EMPTY_WAIT`] (within `budget`) for group `pgid` to hold no running member that
-/// started at or after `leader_start`; answers how many still do.
-fn wait_empty(pgid: u32, leader_start: StartStamp, budget: &mut Budget) -> usize {
+/// What a recorded group with no leader is.
+enum Leaderless {
+    /// No member runs.
+    Empty,
+    /// Provably the agent's: every member is in the agent's recorded session (which is not the
+    /// group's own, so no member made a session of it with `setsid`) and none started before
+    /// the agent.
+    Ours,
+    /// Provably another: a member is in another session, or started before the agent.
+    Reused,
+    /// The listing failed or may be cut short, or the recorded session is the group's id.
+    Unsure,
+}
+
+/// Reads `record`'s leader-less group. An id is not given again while a member of its group
+/// lives, but once the agent's group emptied a later process may take the id, `setsid` or
+/// `setpgid(0, 0)`, and exit, leaving a group of its own children: such a group is in another
+/// session (a `setsid` daemon's own, or a terminal's), since the agent never left the host's
+/// session (`process_group(0)`, not `setsid`), or its members started before the agent.
+fn leaderless(record: &Checked) -> Leaderless {
+    let Some(members) = group_members(record.pgid) else {
+        return Leaderless::Unsure;
+    };
+    if members.is_empty() {
+        return Leaderless::Empty;
+    }
+    if record.sid == record.pgid {
+        return Leaderless::Unsure;
+    }
+    let foreign = members
+        .iter()
+        .any(|member| member.session != record.sid || member.start < record.leader_start);
+    if foreign {
+        Leaderless::Reused
+    } else {
+        Leaderless::Ours
+    }
+}
+
+/// Waits up to [`EMPTY_WAIT`] (and within `deadline`) for group `pgid` to hold no running
+/// member that started at or after `leader_start`; answers how many still do.
+fn wait_empty(pgid: u32, leader_start: StartStamp, deadline: &Deadline<'_>) -> usize {
     let mut waited = Duration::ZERO;
     loop {
         let left = group_members(pgid).map_or(0, |members| {
             members.iter().filter(|m| m.start >= leader_start).count()
         });
-        if left == 0 || waited >= EMPTY_WAIT || !budget.pause(POLL) {
+        if left == 0 || waited >= EMPTY_WAIT || !deadline.pause() {
             if left > 0 {
                 tracing::warn!(left, "an ended group did not empty in time");
             }
@@ -240,9 +291,10 @@ fn read(path: &Path) -> Option<Checked> {
     let pgid = u32::try_from(record.pgid).ok().filter(|&pgid| pgid > 1);
     let start = StartStamp::decode(&record.leader_start);
     match (record.v, pgid, start) {
-        (1, Some(pgid), Some(leader_start)) => Some(Checked {
+        (VERSION, Some(pgid), Some(leader_start)) => Some(Checked {
             pgid,
             leader_start,
+            sid: record.sid,
             boot: record.boot,
         }),
         _ => refuse("format"),

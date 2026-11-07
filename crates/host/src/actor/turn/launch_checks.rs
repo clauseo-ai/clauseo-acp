@@ -508,12 +508,17 @@ pub(super) fn on_prepared(
     }
     let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
     let pid = state(actor, thread).and_then(|state| Some(state.agent.as_ref()?.link.pid()));
-    if let Some(pid) = pid {
-        // The agent's group, recorded in this actor step, the one its process started in.
-        actor
-            .turn_path
-            .process_groups
-            .write(&run.process_group, pid);
+    // The agent's group, recorded in this actor step, the one its process started in; a
+    // process that started and then failed its launch is recorded too.
+    #[cfg(unix)]
+    let group = pid.or_else(|| failed_tree.as_ref().map(TreeWatch::group));
+    #[cfg(not(unix))]
+    let group = pid;
+    if let Some(group) = group {
+        let recorder = &actor.turn_path.process_groups;
+        recorder.write(&run.process_group, group);
+    }
+    if pid.is_some() {
         packs::hold_notice(actor, thread, packs_skipped);
     } else {
         if let Some(state) = state(actor, thread) {

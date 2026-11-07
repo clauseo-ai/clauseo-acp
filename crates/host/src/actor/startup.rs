@@ -39,7 +39,7 @@ pub(super) async fn open(
     let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
     // With the store's lock held (a second host on this folder has failed by now), and before
     // the actor serves, so before any launch claims a port: the groups a crashed run left.
-    let process_groups = crate::process_groups::start(&data_dir);
+    let process_groups = crate::process_groups::start(&data_dir, parts.clock.as_ref());
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,

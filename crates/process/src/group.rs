@@ -2,8 +2,9 @@
 //! process (Unix): what `host` records at each agent launch and checks at its next start, to
 //! end an agent's group a crashed desktop left behind (decision record 0051). A pid is unique
 //! only with its start, and a start only within one boot, so a record holds the group's id, its
-//! leader's [`StartStamp`] and the [`boot_stamp`]. [`group_members`] lists who is in a group
-//! now, each with its start; [`kill_group`] and [`kill_member`] end them.
+//! leader's [`StartStamp`], its [`session_id`] and the [`boot_stamp`]. [`presence`] says
+//! whether the leader exists and with which start, [`group_members`] lists who is in a group
+//! now, each with its start and session; [`kill_group`] and [`kill_member`] end them.
 //!
 //! Windows has none of this: the agent's Job Object ends its tree when the desktop's process
 //! dies, whatever way it dies (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`).
@@ -42,13 +43,43 @@ impl fmt::Display for StartStamp {
     }
 }
 
-/// One running member of a process group, with its start.
+/// One running member of a process group, with its start and session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Member {
     /// Its pid.
     pub pid: u32,
     /// Its start.
     pub start: StartStamp,
+    /// Its session id.
+    pub session: u32,
+}
+
+/// Whether a process with a given pid exists ([`presence`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    /// No process has the pid: `kill(pid, 0)` answers `ESRCH`.
+    Gone,
+    /// A process has it (running, a zombie, or another user's), with its start when that could
+    /// be read (on Linux a zombie's too; never another user's on macOS).
+    There(Option<StartStamp>),
+}
+
+/// Whether process `pid` exists, and its start when readable. The start is read first, then
+/// existence, so a process that exits between the two reads as gone, never as there with
+/// another process's start.
+pub fn presence(pid: u32) -> Presence {
+    let start = os::start_any(pid).map(StartStamp);
+    match start {
+        Some(start) => Presence::There(Some(start)),
+        None if os::exists(pid) => Presence::There(None),
+        None => Presence::Gone,
+    }
+}
+
+/// The session id of process `pid` (Linux: `/proc/<pid>/stat` field 6; macOS: `getsid`);
+/// `None` when it cannot be read, or on another Unix.
+pub fn session_id(pid: u32) -> Option<u32> {
+    os::session_of(pid)
 }
 
 /// The start of running process `pid`; `None` when it is gone, has exited (a zombie), cannot be
@@ -64,17 +95,19 @@ pub fn boot_stamp() -> Option<String> {
     os::boot()
 }
 
-/// The running members of process group `pgid` (a zombie is none), each with its start; an
-/// empty list when none runs. `None` when the listing failed, or on another Unix. Blocking: on
+/// The running members of process group `pgid` (a zombie is none), each with its start and
+/// session; an empty list when none runs. `None` when the listing failed or may be incomplete,
+/// or on another Unix. Blocking: on
 /// Linux it reads `/proc/<pid>/stat` of every process (field 5, `pgrp`); on macOS it is
 /// `proc_listpids(PROC_PGRP_ONLY, pgid)` and one read per member.
 pub fn group_members(pgid: u32) -> Option<Vec<Member>> {
     Some(
         os::members(pgid)?
             .into_iter()
-            .map(|(pid, start)| Member {
+            .map(|(pid, start, session)| Member {
                 pid,
                 start: StartStamp(start),
+                session,
             })
             .collect(),
     )
@@ -89,7 +122,7 @@ pub fn kill_group(pgid: u32) -> bool {
 }
 
 /// SIGKILL to `member` if its pid still runs with its start, read again just before; never pid
-/// 0 or 1, nor this process. Returns whether the signal went.
+/// 0 or 1, this process, or the leader of this process's own group. Returns whether it went.
 pub fn kill_member(member: &Member) -> bool {
     os::kill_started(member.pid, member.start.0)
 }

@@ -10,7 +10,10 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use super::{Member, StartStamp, boot_stamp, group_members, kill_group, kill_member, start_stamp};
+use super::{
+    Member, Presence, StartStamp, boot_stamp, group_members, kill_group, kill_member, presence,
+    session_id, start_stamp,
+};
 
 /// `sleep 600` in the process group `group` (0: a new group it leads).
 fn sleeper(group: i32) -> Child {
@@ -100,6 +103,7 @@ fn kills_refuse_group_zero_one_this_group_and_a_wrong_start() {
     let start = start_stamp(child.id()).unwrap();
     let wrong = Member {
         pid: child.id(),
+        session: 0,
         start: StartStamp(start.0 + 1),
     };
     assert!(
@@ -109,8 +113,48 @@ fn kills_refuse_group_zero_one_this_group_and_a_wrong_start() {
     assert_eq!(start_stamp(child.id()), Some(start), "still running");
     let right = Member {
         pid: child.id(),
+        session: 0,
         start,
     };
     assert!(kill_member(&right));
     end(child);
+}
+
+#[test]
+fn members_carry_their_session_and_presence_tells_a_zombie_from_a_gone_pid() {
+    let me = std::process::id();
+    let ours = session_id(me).expect("this process's session");
+    let mut child = sleeper(0);
+    let pid = child.id();
+    let start = start_stamp(pid).unwrap();
+    assert_eq!(
+        session_id(pid),
+        Some(ours),
+        "process_group(0) keeps the session"
+    );
+    assert!(
+        group_members(pid)
+            .unwrap()
+            .iter()
+            .all(|member| member.session == ours)
+    );
+    assert_eq!(presence(pid), Presence::There(Some(start)));
+    // Killed but not reaped: a zombie still holds its pid, and on Linux its start reads.
+    child.kill().unwrap();
+    while start_stamp(pid).is_some() {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        presence(pid),
+        Presence::There(Some(start)),
+        "a zombie is there"
+    );
+    #[cfg(target_os = "macos")]
+    assert!(
+        matches!(presence(pid), Presence::There(_)),
+        "a zombie is there"
+    );
+    child.wait().unwrap();
+    assert_eq!(presence(pid), Presence::Gone, "reaped, the pid is free");
 }

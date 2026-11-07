@@ -57,9 +57,10 @@
 //!   parent pid.
 //! - [`processes_named`] (macOS and Windows): the starts of the running processes with a name,
 //!   or `None` when that is unknown. It blocks, and signals nothing.
-//! - [`start_stamp`], [`boot_stamp`] and [`group_members`] (Unix): a pid's [`StartStamp`]
-//!   (opaque text through [`StartStamp::encode`]), the boot's stamp, and a group's running
-//!   [`Member`]s, each blocking and signalling nothing; [`kill_group`] (SIGKILL to a group,
+//! - [`start_stamp`], [`presence`], [`session_id`], [`boot_stamp`] and [`group_members`]
+//!   (Unix): a pid's [`StartStamp`] (opaque text through [`StartStamp::encode`]), whether it
+//!   exists ([`Presence`]), its session, the boot's stamp, and a group's running [`Member`]s,
+//!   each blocking and signalling nothing; [`kill_group`] (SIGKILL to a group,
 //!   never 0, 1 or this process's own) and [`kill_member`] (SIGKILL to a pid still running with
 //!   its listed start).
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
@@ -121,7 +122,8 @@ pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
 #[cfg(unix)]
 pub use group::{
-    Member, StartStamp, boot_stamp, group_members, kill_group, kill_member, start_stamp,
+    Member, Presence, StartStamp, boot_stamp, group_members, kill_group, kill_member, presence,
+    session_id, start_stamp,
 };
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{

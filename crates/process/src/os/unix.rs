@@ -91,6 +91,11 @@ impl Watch {
     pub(crate) fn gone(&self) -> bool {
         matches!(killpg(self.group, None), Err(Errno::ESRCH))
     }
+
+    /// The group's id: the agent's pid.
+    pub(crate) fn group(&self) -> u32 {
+        self.group.as_raw().unsigned_abs()
+    }
 }
 
 /// Where a listing of the agent's descendants starts: the agent's pid and its start, read while
@@ -178,9 +183,9 @@ pub(crate) fn started_before_now(pid: u32) -> bool {
         .is_some_and(|(start, now)| start < now)
 }
 
-/// The running members of process group `group`, each with its start; another Unix lists
-/// none (`None`).
-pub(crate) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
+/// The running members of process group `group`, each with its start and session; another
+/// Unix lists none (`None`).
+pub(crate) fn members(group: u32) -> Option<Vec<(u32, u64, u32)>> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     return listing::members(group);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -211,16 +216,52 @@ pub(crate) fn kill_group(group: u32) -> bool {
     killpg(Pid::from_raw(raw), Signal::SIGKILL).is_ok()
 }
 
-/// SIGKILL to process `pid` if it still runs with the start `start`. Never pid 0 or 1, nor
-/// this process. Returns whether it went.
+/// SIGKILL to process `pid` if it still runs with the start `start`. Never pid 0 or 1, this
+/// process, or the leader of this process's own group. Returns whether it went.
 pub(crate) fn kill_started(pid: u32, start: u64) -> bool {
     let Ok(raw) = i32::try_from(pid) else {
         return false;
     };
-    if raw <= 1 || pid == std::process::id() || start_of(pid) != Some(start) {
+    if raw <= 1
+        || pid == std::process::id()
+        || nix::unistd::getpgrp().as_raw() == raw
+        || start_of(pid) != Some(start)
+    {
         return false;
     }
     kill(Pid::from_raw(raw), Signal::SIGKILL).is_ok()
+}
+
+/// Whether a process `pid` exists, a zombie or another user's included: `kill(pid, 0)` answers
+/// anything but `ESRCH`. Pid 0 and those out of range never exist here.
+pub(crate) fn exists(pid: u32) -> bool {
+    i32::try_from(pid)
+        .ok()
+        .filter(|&raw| raw > 0)
+        .is_some_and(|raw| kill(Pid::from_raw(raw), None) != Err(Errno::ESRCH))
+}
+
+/// The start of process `pid` whether or not it has exited (Linux reads a zombie's too);
+/// `None` when unreadable, or on another Unix.
+pub(crate) fn start_any(pid: u32) -> Option<u64> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return listing::start_any(pid);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        drop(pid);
+        None
+    }
+}
+
+/// The session id of process `pid`; `None` when unreadable, or on another Unix.
+pub(crate) fn session_of(pid: u32) -> Option<u32> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return listing::session_of(pid);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        drop(pid);
+        None
+    }
 }
 
 /// The start of running process `pid`, `None` when it is gone or has exited.
