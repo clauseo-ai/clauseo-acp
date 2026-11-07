@@ -19,6 +19,7 @@ fn step_of(call: &str) -> Step {
         "log_on_once" => Step::LogOn,
         "exists" | "owner_of" | "give_to_admins" => Step::Owners,
         "program_data" => Step::SharedWrites,
+        "network" => Step::Network,
         "protect_for_owner" => Step::Secrets,
         "write_marker" => Step::Marker,
         other => panic!("no step for {other}"),

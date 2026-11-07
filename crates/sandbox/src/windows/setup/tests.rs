@@ -1,6 +1,7 @@
 //! The set-up engine against [`fake::FakeMachine`] and [`fake::FakeAcl`], on every OS: the
 //! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), the
-//! extend and re-run (`extend.rs`), and the profile resets they owe (`resets.rs`).
+//! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`), and the network
+//! step (`network.rs`, S15 PR7).
 
 use std::path::PathBuf;
 
@@ -14,6 +15,7 @@ mod fake;
 mod fake_acl;
 mod fake_more;
 mod local_low;
+mod network;
 mod owner;
 mod registered;
 mod remains;
@@ -87,6 +89,7 @@ fn fresh_calls() -> Vec<String> {
             "program_data",
             "exists DeviceSync",
             "owner_of DeviceSync",
+            "network 1001,1002,1003,1004",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",

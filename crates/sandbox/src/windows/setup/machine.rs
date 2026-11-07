@@ -13,6 +13,7 @@ use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::sids::Sid;
+use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
 /// A pool user's password: wiped from memory when dropped.
 pub type Password = Zeroizing<String>;
@@ -185,6 +186,10 @@ pub trait Machine {
     fn journal_size(&mut self, volume: &Path) -> Result<Option<u64>, MachineError>;
     /// Creates or enlarges `volume`'s change journal to `max` bytes, growing by `delta`.
     fn grow_journal(&mut self, volume: &Path, max: u64, delta: u64) -> Result<(), MachineError>;
+    /// Set-up's network step (S15 PR7, `wfp::install`), elevated, not as the owner: the WFP
+    /// provider, sublayer and block filters covering `setup`'s whole pool, the owner's grants,
+    /// and the firewall rules. A WFP failure is the error; the firewall's is in the report.
+    fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError>;
     /// Writes `<data_dir>\sandbox\secrets.bin` as the owner, protected for the owner: each of
     /// `secrets`, and for every other SID of `pool` the blob the file holds now (an extend
     /// leaves the existing users' passwords as they are).

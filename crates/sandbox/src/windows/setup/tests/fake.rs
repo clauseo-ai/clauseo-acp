@@ -21,6 +21,7 @@ use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
 use crate::windows::sids::Reserved;
+use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
@@ -100,7 +101,7 @@ pub(super) struct FakeMachine {
     pub(super) faults: ProfileFaults,
     next_rid: u32,
     passwords: u32,
-    around: Around,
+    pub(super) around: Around,
 }
 
 impl FakeMachine {
@@ -150,7 +151,7 @@ impl FakeMachine {
             faults: ProfileFaults::default(),
             next_rid: 1000,
             passwords: 0,
-            around: Around,
+            around: Around::default(),
         }
     }
 
@@ -545,6 +546,11 @@ impl Machine for FakeMachine {
         self.call(format!("grow_journal {}", volume.display()))?;
         self.journals.insert(volume.to_owned(), Some(max));
         Ok(())
+    }
+
+    fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
+        self.call(format!("network {}", rids(setup.pool())))?;
+        Ok(self.around.network(setup))
     }
 
     fn protect_for_owner(

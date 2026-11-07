@@ -20,6 +20,7 @@ use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
 };
 use crate::windows::test_acl::elevated_tests_enabled;
+use crate::windows::wfp::{self, Namespace};
 
 /// This family's record key.
 const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestSetup";
@@ -71,6 +72,8 @@ fn sweep() {
         drop(accounts::delete_group(&name));
     }
     drop(record_write::delete(TEST_KEY));
+    // The set-up's network step (S15 PR7) wrote in its own test namespace.
+    drop(wfp::remove(&Namespace::numbered_test(1), Some(&me)));
 }
 
 /// Sweeps when dropped, so a failed assertion still cleans up.
@@ -101,6 +104,7 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
         mutex,
         users: users.clone(),
         journals: false,
+        wfp: Namespace::numbered_test(1),
     };
     let dir = TempDir::new("setup-exe-elevated");
     let owner = Owner::of_this_process().unwrap();

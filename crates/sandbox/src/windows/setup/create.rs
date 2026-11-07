@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
-use super::late_steps::{fence, journals, own_protected, refuse_pool_owner, registered};
+use super::late_steps::{fence, journals, network, own_protected, refuse_pool_owner, registered};
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
     LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, cause_of,
@@ -288,6 +288,7 @@ fn change(
         Some((applied, skipped)) => (Some(applied), skipped),
         None => (None, Vec::new()),
     };
+    let network = network(machine, &req.owner, &live)?;
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
@@ -317,6 +318,7 @@ fn change(
         fenced,
         fence_skipped,
         journals,
+        network,
     })
 }
 
