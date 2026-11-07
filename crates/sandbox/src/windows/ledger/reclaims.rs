@@ -16,6 +16,7 @@
 //! What `--reclaim` does with a path is bounded on its own (K1): the owner, and only the owner,
 //! of what a pool user owns.
 
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 
@@ -28,7 +29,7 @@ use super::file::State;
 use crate::windows::writer::FileId;
 
 /// Why a launch left an item for the elevated clean-up. Variants are appended from here on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stuck {
     /// A root the plan denies on that a pool user owns, whose hand-back lacked a right.
@@ -45,7 +46,7 @@ pub enum Stuck {
 }
 
 /// One clean-up owed: `path`, which `matter`'s launch refused for `why`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ReclaimOwed {
     /// The matter whose launch refused.
@@ -141,8 +142,10 @@ pub(super) fn clear(state: &mut State, matter: MatterId) -> bool {
     state.reclaims.len() != before
 }
 
-/// Removes from `state` each trusted clean-up owed equal to one of `done`; whether any was.
+/// Removes from `state` each trusted clean-up owed equal to one of `done`; whether any was. One
+/// pass, each looked up in a set.
 fn clear_these(state: &mut State, done: &[ReclaimOwed]) -> bool {
+    let done: HashSet<&ReclaimOwed> = done.iter().collect();
     let before = state.reclaims.len();
     state
         .reclaims
@@ -161,9 +164,17 @@ pub fn owe_taken(ledger: &mut Ledger, taken: &[(MatterId, PathBuf, FileId)]) -> 
         owed.push(one);
     }
     ledger.update(true, |state| {
+        // Each looked up in a set of what is listed: one pass however many there are.
+        let mut listed_now: HashSet<ReclaimOwed> = listed(state).cloned().collect();
         let mut added = false;
         for one in owed {
-            added |= owe(state, one);
+            if listed_now.insert(one.clone()) {
+                let extra = Map::new();
+                state
+                    .reclaims
+                    .push(ReclaimSlot::Known(KnownReclaim { owed: one, extra }));
+                added = true;
+            }
         }
         Ok((added, ()))
     })
@@ -172,7 +183,8 @@ pub fn owe_taken(ledger: &mut Ledger, taken: &[(MatterId, PathBuf, FileId)]) -> 
 /// Clears from `ledger` under the lock exactly the clean-ups owed in `done` (the hand-back's
 /// [`Stuck::Taken`] items once it refused nothing); with none of them listed, touches nothing.
 pub fn clear_taken(ledger: &mut Ledger, done: &[ReclaimOwed]) -> io::Result<()> {
-    if !listed(&ledger.state).any(|owed| done.contains(owed)) {
+    let wanted: HashSet<&ReclaimOwed> = done.iter().collect();
+    if !listed(&ledger.state).any(|owed| wanted.contains(owed)) {
         return Ok(());
     }
     ledger.update(false, |state| Ok((clear_these(state, done), ())))

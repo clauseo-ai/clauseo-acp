@@ -430,7 +430,7 @@ impl AclWriter for Hands {
         let entry = (root.to_owned(), others.to_vec(), keep.to_vec(), whole);
         self.strips.push(entry);
         self.denies
-            .push((denies.taken.to_vec(), denies.kept.to_vec()));
+            .push((denies.taken.items(), denies.kept.to_vec()));
         Ok(Walked::default())
     }
 }
@@ -461,7 +461,7 @@ fn the_lawyers_hand_back_goes_over_each_target_and_lists_a_refusal() {
     };
     let pool = [Sid::parse(USER_SID).unwrap()];
 
-    let done = hand_back_targets(&mut acl, &targets, &pool, &DenyStrip::default());
+    let done = hand_back_targets(&mut acl, &targets, &pool, &DenyStrip::none());
 
     assert_eq!(acl.roots, [abs("a"), abs("b"), abs("c")]);
     assert_eq!(
@@ -498,7 +498,7 @@ fn the_matters_own_pool_user_and_our_own_allows_are_kept() {
         &mut acl,
         &targets,
         &[own, other.clone()],
-        &DenyStrip::default(),
+        &DenyStrip::none(),
     );
 
     assert_eq!(done.done, 1);

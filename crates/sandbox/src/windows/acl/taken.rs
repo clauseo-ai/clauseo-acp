@@ -26,7 +26,7 @@ use super::walk::{Refused, inherit};
 use super::{READ_ALL, dacl_info, same_path};
 use crate::windows::acl_bytes::{Descriptor, TakenWrite, sid_bytes, stripped, taken_write};
 use crate::windows::acl_plan::{Sid, in_folder};
-use crate::windows::writer::{ApplyFailure, FileId, Owned, Walked};
+use crate::windows::writer::{ApplyFailure, FileId, Owned, TakenIndex, Walked};
 
 /// Who strips, and where denies go too.
 pub(super) struct Lawyer<'a> {
@@ -37,7 +37,14 @@ pub(super) struct Lawyer<'a> {
     pub(super) mine: &'a [Vec<u8>],
     /// The items `--reclaim` took, the only ones that lose denies
     /// ([`DenyStrip::taken`](crate::windows::writer::DenyStrip::taken)).
-    pub(super) taken: &'a [(PathBuf, FileId)],
+    pub(super) taken: &'a TakenIndex,
+}
+
+/// The SIDs whose denies one item loses: explicit ones (a taken item), and inherited copies
+/// its folder no longer gives (a taken item, or anything below a taken folder).
+struct Denied<'a> {
+    explicit: &'a [Vec<u8>],
+    stale: &'a [Vec<u8>],
 }
 
 /// The strip at `root` and, when `whole`, below it, as the writer's method says. `others` as
@@ -77,13 +84,26 @@ pub(super) fn strip(
         }
         Err(_denied) => return Err(at(ApplyFailure::ChildShut)),
     };
+    // The root's file ID from its folder's listing too, when it is listed as taken.
+    let wide = PathBuf::from(OsString::from_wide(&path));
+    let listed_id = if lawyer.taken.ids(&wide).is_empty() {
+        None
+    } else {
+        Object::open_folder(above)
+            .and_then(|folder| folder.children())
+            .ok()
+            .and_then(|all| all.into_iter().find(|c| c.name == name).map(|c| c.id))
+    };
     let above = parent.security(READ_ALL).map_err(io)?;
     let item = Item {
         object: &top,
         path: &path,
         above: &above,
+        folder: &parent,
+        listed: listed_id,
+        refresh: false,
     };
-    one(token, &item, others, lawyer, keep, &mut seen).map_err(at)?;
+    let taken = one(token, &item, others, lawyer, keep, &mut seen).map_err(at)?;
     if !whole || !top.folder {
         return Ok(seen);
     }
@@ -91,8 +111,10 @@ pub(super) fn strip(
         seen.skipped += 1;
         return Ok(seen);
     };
-    let mut stack = vec![(listed, path)];
-    while let Some((folder, path)) = stack.pop() {
+    // Each folder with whether it lies at or below a taken folder: what is below one has its
+    // inherited copies of the agent's denies worked out again, as nothing propagated them away.
+    let mut stack = vec![(listed, path, taken)];
+    while let Some((folder, path, refresh)) = stack.pop() {
         let shut = |at: &[u16]| (ApplyFailure::ChildShut, Some(at.to_vec()));
         if folder.normalized().map_err(io)? != path {
             return Err((ApplyFailure::Changed, Some(path)));
@@ -119,12 +141,15 @@ pub(super) fn strip(
                 object: &object,
                 path: &at,
                 above: &above,
+                folder: &folder,
+                listed: Some(child.id),
+                refresh,
             };
-            one(token, &item, others, lawyer, keep, &mut seen)
+            let taken = one(token, &item, others, lawyer, keep, &mut seen)
                 .map_err(|f| (f, Some(at.clone())))?;
             if object.folder {
                 match listable(&folder, &child.name, &at) {
-                    Ok(Some(listed)) => stack.push((listed, at)),
+                    Ok(Some(listed)) => stack.push((listed, at, refresh || taken)),
                     Ok(None) => seen.skipped += 1,
                     Err(failure) => return Err((failure, Some(at))),
                 }
@@ -155,38 +180,70 @@ fn listable(folder: &Object, name: &[u16], path: &[u16]) -> Result<Option<Object
     Ok(Some(listed))
 }
 
-/// An item opened with its owner's rights alone, its final path, and its folder's descriptor
-/// (what it inherits from).
+/// An item opened with its owner's rights alone, its final path, its folder's descriptor (what
+/// it inherits from) and handle, the 64-bit file ID its folder's listing gave it, and whether
+/// it lies below a taken folder.
 struct Item<'a> {
     object: &'a Object,
     path: &'a [u16],
     above: &'a [u8],
+    folder: &'a Object,
+    listed: Option<u64>,
+    refresh: bool,
 }
 
 impl Lawyer<'_> {
-    /// The SIDs whose denies `object` (at the final path `at`) loses: [`Lawyer::mine`] when it
-    /// is an item `--reclaim` took, by its path (without case, as `in_folder` compares) and its
-    /// file ID both; else none, and it keeps every deny. A file ID that can't be read counts as
-    /// another file's: the item keeps its denies, as it did before they were ever stripped.
-    fn denied(&self, object: &Object, at: &Path) -> &[Vec<u8>] {
-        let named = self
-            .taken
-            .iter()
-            .filter(|(path, _)| in_folder(at, path) && in_folder(path, at));
-        let ids: Vec<FileId> = named.map(|(_, id)| *id).collect();
-        if ids.is_empty() {
-            return &[];
-        }
-        let Ok((volume, id)) = object.file_id() else {
-            tracing::warn!("a taken item's file ID can't be read; its denies stay");
-            return &[];
+    /// The SIDs whose denies `item` (at the final path `at`) loses. A taken item, matched by its
+    /// path (as `in_folder` compares) and its file ID both, loses [`Lawyer::mine`]'s, explicit
+    /// and stale inherited copies; anything below a taken folder only its stale inherited copies;
+    /// anything else none. The ID is the item's own (`FileIdInfo`), or else its folder's listing
+    /// (64 bits, NTFS's form of the 128-bit one, on its folder's volume). A listed path whose ID
+    /// can't be read by either way is refused, never passed over: its record stays.
+    fn denied(&self, item: &Item<'_>, at: &Path) -> Result<Denied<'_>, ApplyFailure> {
+        let below = Denied {
+            explicit: &[],
+            stale: if item.refresh { self.mine } else { &[] },
         };
-        let taken = ids.iter().any(|f| f.volume == volume && f.id == id);
-        if taken { self.mine } else { &[] }
+        let ids = self.taken.ids(at);
+        if ids.is_empty() {
+            return Ok(below);
+        }
+        let taken = if let Ok((volume, id)) = item.object.file_id() {
+            ids.iter().any(|f| f.volume == volume && f.id == id)
+        } else {
+            let refused = ApplyFailure::Io(io::ErrorKind::PermissionDenied);
+            let listed = item.listed.ok_or(refused)?;
+            // A 128-bit ID (ReFS) has no 64-bit form to compare with: refused.
+            if ids.iter().all(|f| f.id[8..] != [0; 8]) {
+                return Err(refused);
+            }
+            let volume = item
+                .folder
+                .file_id()
+                .map_err(|e| ApplyFailure::Io(e.kind()))?
+                .0;
+            ids.iter()
+                .any(|f| f.volume == volume && listed_is(f, listed))
+        };
+        Ok(if taken {
+            Denied {
+                explicit: self.mine,
+                stale: self.mine,
+            }
+        } else {
+            below
+        })
     }
 }
 
-/// One item: its one write when it needs one ([`taken_write`]), then read back.
+/// Whether `file`'s 128-bit ID is `listed`, a 64-bit one from a folder's listing: NTFS's 128-bit
+/// ID is its 64-bit one, little-endian, then zeros.
+fn listed_is(file: &FileId, listed: u64) -> bool {
+    file.id[..8] == listed.to_le_bytes() && file.id[8..] == [0; 8]
+}
+
+/// One item: its one write when it needs one ([`taken_write`]), then read back. Whether it is
+/// an item `--reclaim` took.
 fn one(
     token: &Handle,
     item: &Item<'_>,
@@ -194,13 +251,13 @@ fn one(
     lawyer: &Lawyer<'_>,
     keep: &[(PathBuf, Sid)],
     seen: &mut Walked,
-) -> Result<(), ApplyFailure> {
+) -> Result<bool, ApplyFailure> {
     let io = |e: io::Error| ApplyFailure::Io(e.kind());
     let object = item.object;
     seen.visited += 1;
     if !object.folder && object.links > 1 {
         seen.skipped += 1;
-        return Ok(());
+        return Ok(false);
     }
     // Our own allows on this path (the ledger's) stay whoever they name.
     let named = PathBuf::from(OsString::from_wide(item.path));
@@ -215,11 +272,14 @@ fn one(
         .cloned()
         .collect();
     let others = others.as_slice();
-    let (me, mine) = (lawyer.me, lawyer.denied(object, &named));
+    let (me, denied) = (lawyer.me, lawyer.denied(item, &named)?);
+    let taken = !denied.explicit.is_empty();
     let current = object.security(READ_ALL).map_err(io)?;
     let mut worked = |base: &[u8]| inherit(token, item.above, base, object.folder);
-    let Some(write) = taken_write(&current, others, me, mine, &mut worked).map_err(io)? else {
-        return Ok(());
+    let mine = denied.explicit;
+    let found = taken_write(&current, others, me, mine, denied.stale, &mut worked);
+    let Some(write) = found.map_err(io)? else {
+        return Ok(taken);
     };
     let (info, new, inheriting) = match write {
         TakenWrite::Stripped(new) => {
@@ -242,5 +302,5 @@ fn one(
     }
     seen.written += 1;
     seen.repaired += 1;
-    Ok(())
+    Ok(taken)
 }

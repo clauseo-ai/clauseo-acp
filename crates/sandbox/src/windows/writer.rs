@@ -2,11 +2,12 @@
 //! report and why one fails. `NtfsAcl` (`acl.rs`) is the Windows writer; `apply` drives it,
 //! and its tests use a fake.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::acl_plan::{Grant, Sid};
+use super::acl_plan::{Grant, Sid, verbatim};
 use super::ledger::RecordedFile;
 
 /// How far a walk goes below its root.
@@ -101,7 +102,7 @@ pub struct Label {
 
 /// A file's identity: its volume's serial number and its 128-bit file ID (`FILE_ID_INFO`). The
 /// same ID means the same file, whatever name it is opened by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct FileId {
     /// The volume's serial number.
     pub volume: u64,
@@ -324,8 +325,10 @@ pub trait AclWriter {
     /// item `denies` lists as taken (its final path and file ID both match) also loses its
     /// explicit denies for the desktop user, a group of its token (enabled or deny-only),
     /// `OWNER RIGHTS`, `CREATOR OWNER` or `CREATOR GROUP`, but never one naming a SID
-    /// `denies` keeps (the pool users and the pool group: our fence). A file with more than one
-    /// link is left as it is. An item left with a protected DACL and no explicit entry (only the
+    /// `denies` keeps (the pool users and the pool group: our fence); a listed path whose file ID
+    /// can't be read, from its handle or its folder's listing, is refused, so its record stays.
+    /// Below a taken folder, an inherited copy of such a deny its folder no longer gives goes
+    /// too. A file with more than one link is left as it is. An item left with a protected DACL and no explicit entry (only the
     /// agent's protection can have made it) is unprotected and takes its folder's inherited
     /// entries, and so is one whose inherited entries still allow one of `others` (or, when
     /// taken, deny one of those SIDs); in one write, worked out after the strip. Each item is
@@ -349,10 +352,73 @@ pub trait AclWriter {
 /// items `--reclaim` took, each by its final path and file ID, as its result reported them and
 /// the ledger keeps them; and the SIDs whose denies stay whoever owns the item, the machine
 /// record's pool users and pool group.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct DenyStrip<'a> {
     /// The items taken.
-    pub taken: &'a [(PathBuf, FileId)],
+    pub taken: &'a TakenIndex,
     /// The SIDs whose denies are kept.
     pub kept: &'a [Sid],
+}
+
+impl DenyStrip<'static> {
+    /// Nothing taken, nothing kept: no deny goes anywhere.
+    pub fn none() -> DenyStrip<'static> {
+        static EMPTY: std::sync::OnceLock<TakenIndex> = std::sync::OnceLock::new();
+        DenyStrip {
+            taken: EMPTY.get_or_init(TakenIndex::default),
+            kept: &[],
+        }
+    }
+}
+
+/// The items `--reclaim` took, keyed by their path as `in_folder` compares two paths (in the
+/// verbatim form, without ASCII case): built once per hand-back, so each item the strip walks is
+/// looked up in constant time, never by a scan of the list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TakenIndex {
+    by_path: HashMap<Vec<u8>, Vec<(PathBuf, FileId)>>,
+}
+
+impl TakenIndex {
+    /// The index of `items` (path and file ID each); one listed twice counts once.
+    pub fn new(items: impl IntoIterator<Item = (PathBuf, FileId)>) -> TakenIndex {
+        let mut by_path: HashMap<Vec<u8>, Vec<(PathBuf, FileId)>> = HashMap::new();
+        for (path, file) in items {
+            let listed = by_path.entry(path_key(&path)).or_default();
+            if !listed.iter().any(|(_, f)| *f == file) {
+                listed.push((path, file));
+            }
+        }
+        TakenIndex { by_path }
+    }
+
+    /// The file IDs listed at `path`, as `in_folder` compares paths; none when it isn't listed.
+    pub fn ids(&self, path: &Path) -> Vec<FileId> {
+        let listed = self.by_path.get(&path_key(path));
+        listed.map_or_else(Vec::new, |l| l.iter().map(|(_, f)| *f).collect())
+    }
+
+    /// Whether nothing is listed.
+    pub fn is_empty(&self) -> bool {
+        self.by_path.is_empty()
+    }
+
+    /// Every item listed, by path then file ID.
+    pub fn items(&self) -> Vec<(PathBuf, FileId)> {
+        let mut all: Vec<(PathBuf, FileId)> = self.by_path.values().flatten().cloned().collect();
+        all.sort_by(|a, b| (&a.0, a.1.volume, a.1.id).cmp(&(&b.0, b.1.volume, b.1.id)));
+        all
+    }
+}
+
+/// `path`'s key in a [`TakenIndex`]: its verbatim form's parts, ASCII lower case, joined by `\`;
+/// two paths have one key exactly when `in_folder` holds each in the other.
+fn path_key(path: &Path) -> Vec<u8> {
+    let whole = verbatim(path);
+    let mut key = Vec::new();
+    for part in whole.components() {
+        key.extend(part.as_os_str().as_encoded_bytes().to_ascii_lowercase());
+        key.push(b'\\');
+    }
+    key
 }

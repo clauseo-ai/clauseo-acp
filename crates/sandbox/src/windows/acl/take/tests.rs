@@ -122,3 +122,36 @@ fn a_short_name_or_another_case_resolves_to_the_final_path() {
         None => eprintln!("this volume makes no 8.3 names; the short-name case is skipped"),
     }
 }
+
+/// The exe's recording, with no privilege needed for a file the test owns: an object whose DACL
+/// holds an `OWNER RIGHTS` entry loses that entry alone, every other entry and the protection
+/// staying; one given its owner is kept by its final path and file ID, for the result.
+#[test]
+fn an_object_taken_is_listed_and_loses_only_its_owner_rights_entries() {
+    let dir = TempDir::new("take-record");
+    let me = current_user_sid().unwrap();
+    let file = dunce::canonicalize(dir.file("matter/ow.txt", "x")).unwrap();
+    protect_with(&file, &format!("D:P(D;;WO;;;OW)(A;;FA;;;{me})(A;;FR;;;WD)")).unwrap();
+    let granted = |_: &[u8]| Ok(0);
+    let mut tree = NtfsOwners::new(&granted);
+
+    let node = tree.open_root(&file).unwrap();
+    tree.drop_owner_rights(&node).unwrap();
+    // Opened again: with the OWNER RIGHTS deny gone, the owner write is allowed.
+    let node = tree.open_root(&file).unwrap();
+    tree.set_owner(&node, &me).unwrap();
+
+    let left = crate::windows::test_acl::entries(&file);
+    let sids: Vec<&str> = left.iter().map(|e| e.3.as_str()).collect();
+    assert_eq!(
+        sids,
+        [me.as_str(), "S-1-1-0"],
+        "only OWNER RIGHTS' entry went"
+    );
+    assert!(crate::windows::test_acl::protected(&file));
+    let object = Object::open(&file).unwrap();
+    let (volume, id) = object.file_id().unwrap();
+    let at = PathBuf::from(OsString::from_wide(&object.normalized().unwrap()));
+    assert_eq!(tree.drain_taken(), [(at, FileId { volume, id })]);
+    assert_eq!(tree.drain_taken(), [], "drained once");
+}
