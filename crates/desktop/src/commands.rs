@@ -48,6 +48,7 @@ pub(crate) const COMMANDS: [&str; 22] = [
     "chooser_list",
     "chooser_choose",
     "chooser_cancel",
+    "chooser_shown",
     "display_info",
     "open_external",
     "open_file",
@@ -298,6 +299,8 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
     chooser: State<'_, Chooser>,
     app_data: State<'_, AppData>,
 ) -> Result<PickAnswer, HostError> {
+    let clicked = crate::open::now();
+    crate::chooser::trace::step("click received", clicked, "");
     // The e2e build's folder comes first, as `NativePicker::pick` gives it: no check, no session.
     #[cfg(feature = "e2e")]
     let fixed = crate::e2e::matter_dir();
@@ -318,19 +321,19 @@ pub(crate) async fn pick_folder_or_choose<R: Runtime>(
     if let (Route::Fixed, Some(folder)) = (route, fixed) {
         return crate::chooser::pick_fixed(&bridge, folder, SystemDirs.home().as_deref()).await;
     }
+    crate::chooser::trace::step("route decided", clicked, &format!("{route:?}"));
     if route == Route::Chooser {
-        let opener = chooser.inner().clone();
-        let (last_pick, data) = (last.get(), app_data.0.clone());
-        let start = tauri::async_runtime::spawn_blocking(move || {
+        let data = app_data.0.clone();
+        // Home and the refused folders ask Windows for known folders, which may wait on a share:
+        // read on the session's own thread, so the answer goes back at once.
+        let asked = move || {
             let mut refused = clauseo_settings::refused_folders(&SystemDirs);
             refused.push(data);
-            let home = SystemDirs.home();
-            let now = crate::open::now();
-            opener.open(home.as_deref(), last_pick.as_deref(), &refused, now)
-        })
-        .await
-        .map_err(|error| HostError::new(ErrorCode::Internal, format!("no chooser: {error}")))?;
-        if let Some(start) = start {
+            (SystemDirs.home(), refused)
+        };
+        let now = crate::open::now();
+        if let Some(start) = chooser.open_asking(asked, last.get().as_deref(), now) {
+            crate::chooser::trace::step("session opened", clicked, "");
             return Ok(PickAnswer::Choose { start });
         }
     }
@@ -350,9 +353,33 @@ pub(crate) async fn chooser_starts(
     chooser: u32,
 ) -> Result<Vec<StartPoint>, HostError> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.starts(chooser, crate::open::now()))
-        .await
-        .map_err(|error| HostError::new(ErrorCode::Internal, format!("no starts: {error}")))?
+    let asked = crate::open::now();
+    let starts =
+        tauri::async_runtime::spawn_blocking(move || state.starts(chooser, crate::open::now()))
+            .await
+            .map_err(|error| HostError::new(ErrorCode::Internal, format!("no starts: {error}")))?;
+    crate::chooser::trace::step("starts answered", asked, "");
+    starts
+}
+
+/// The page's timing of a chooser it showed, for the log alone (`chooser/trace.rs`): the
+/// milliseconds from the click to the desktop's answer, to the chooser's first render and to its
+/// first paint, as the page measured them. Always answers ok; logs no path.
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub(crate) async fn chooser_shown(
+    answer_ms: u32,
+    render_ms: u32,
+    paint_ms: u32,
+) -> Result<(), HostError> {
+    tracing::info!(
+        at_ms = crate::chooser::trace::at_ms(),
+        answer_ms,
+        render_ms,
+        paint_ms,
+        "folder chooser: the page showed it"
+    );
+    Ok(())
 }
 
 /// Goes where `go` says in the chooser session `chooser` and lists the folder there: by a

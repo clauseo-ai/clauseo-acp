@@ -200,6 +200,15 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
     return this.#opened;
   }
 
+  /** Sends a call that waits for the host's start in the desktop anyway once the channel is open, which is once the
+   * host has started: until then only `open_stream` holds a request. WebView2 lets the page hold six requests to the
+   * IPC at once, and the launch's queries waiting for a slow start (a Documents folder on a share that is down) took
+   * them all, so the folder picker's calls queued behind them for seconds. A failed open lets the call go on, to fail
+   * as it would have. */
+  #afterOpen<T>(send: () => Promise<T>): Promise<T> {
+    return this.#open().then(send, send);
+  }
+
   /** Subscribes the channel to the app-wide events, once per open channel; after a failed attempt the next listener
    * (or the next open) tries again. */
   #subscribeApp(): Promise<void> {
@@ -286,10 +295,10 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
 
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     for (const listener of this.#dispatched) listener(command);
-    return call(commands.dispatch(command));
+    return this.#afterOpen(() => call(commands.dispatch(command)));
   }
   query(query: HostQuery): Promise<QueryResult> {
-    return call(commands.query(query));
+    return this.#afterOpen(() => call(commands.query(query)));
   }
   async answerPermission(
     thread: ThreadId,
@@ -301,11 +310,18 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   /** The native folder dialog, or Clauseo's own chooser where Windows' would stall (chooser.ts): either way the
    * folder picked, or null. */
   async pickFolder(): Promise<PickedFolder | null> {
+    const clicked = performance.now();
     const answer = await call(commands.pickFolderOrChoose());
     if (answer.kind === "picked") return answer.folder;
     if (answer.kind === "cancelled") return null;
+    const answered = performance.now();
     const session = answer.start.chooser;
+    const ms = (at: number) => Math.max(0, Math.min(Math.round(at - clicked), 2 ** 31));
     return chooserOf(this).run(answer.start, {
+      // the desktop logs the page's timing with its own (chooser/trace.rs); a failure only loses the line
+      shown: (renderAt, paintAt) => {
+        commands.chooserShown(ms(answered), ms(renderAt), ms(paintAt)).catch(() => {});
+      },
       starts: () => call(commands.chooserStarts(session)),
       list: (go) => call(commands.chooserList(session, go)),
       choose: () => call(commands.chooserChoose(session)),
@@ -387,7 +403,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
   /** Counts one event only the webview sees (S21's `count_ui`). */
   async countUi(event: UiCount): Promise<void> {
-    await call(commands.countUi(event));
+    await this.#afterOpen(() => call(commands.countUi(event)));
   }
 }
 

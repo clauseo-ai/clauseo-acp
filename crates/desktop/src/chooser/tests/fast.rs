@@ -172,3 +172,48 @@ fn the_app_starts_the_pre_check_only_where_a_pick_asks_it() {
     assert!(!asks_precheck(false, false, None));
     assert!(!asks_precheck(true, true, None));
 }
+
+/// Home and the refused folders ask Windows for known folders, which may wait on a share: the
+/// session opens without them, and its start points and listings wait for them on its thread.
+#[test]
+fn home_and_the_refused_folders_are_read_after_the_session_opens() {
+    let (chooser, _release) = super::fake_chooser(r"C:\Users\rmehra\Desktop");
+    let asked_on = Arc::new(Mutex::new(None));
+    let on = Arc::clone(&asked_on);
+    let clicked = crate::open::now();
+    let start = chooser
+        .open_asking(
+            move || {
+                *on.lock().unwrap() = std::thread::current().name().map(str::to_owned);
+                sleep(Duration::from_millis(500));
+                let work = std::path::PathBuf::from(format!(r"{HOME}\Work"));
+                (Some(std::path::PathBuf::from(HOME)), vec![work])
+            },
+            None,
+            clicked,
+        )
+        .expect("the chooser opens");
+    let opened = clicked.elapsed();
+    assert!(opened < Duration::from_millis(200), "{opened:?}");
+
+    let starts = chooser.starts(start.chooser, crate::open::now()).unwrap();
+    let landed = clicked.elapsed();
+    assert!(landed >= about(Duration::from_millis(500)), "{landed:?}");
+    let home = starts.iter().find(|p| p.kind == StartKind::Home).unwrap();
+    assert_eq!(
+        asked_on.lock().unwrap().as_deref(),
+        Some("clauseo-chooser-read")
+    );
+    let listing = chooser
+        .list(
+            start.chooser,
+            Go::Start { key: home.key },
+            crate::open::now(),
+        )
+        .unwrap();
+    let ListState::Folders { items, .. } = listing.state else {
+        panic!("{:?}", listing.state);
+    };
+    let refused: Vec<(&str, bool)> = items.iter().map(|i| (i.name.as_str(), i.refused)).collect();
+    assert_eq!(refused, [("Desktop", false), ("Work", true)]);
+}

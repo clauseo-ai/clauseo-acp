@@ -92,14 +92,21 @@ impl HostStart {
 }
 
 /// Runs `run` (in the app, `Host::start` with the effective settings) on a thread named
-/// `clauseo-host-start`, its outcome going into `start`'s cell.
+/// `clauseo-host-start`, its outcome going into `start`'s cell. Logs when it ended, by the
+/// chooser's clock (`chooser/trace.rs`): until then every bridge call waits.
 pub(crate) fn start_on_thread(
     start: HostStart,
     run: impl FnOnce() -> Result<(HostHandle, HostJoin), HostError> + Send + 'static,
 ) -> std::io::Result<()> {
     let thread = std::thread::Builder::new()
         .name("clauseo-host-start".to_owned())
-        .spawn(move || start.finish(run()))?;
+        .spawn(move || {
+            let began = crate::open::now();
+            let started = run();
+            let how = if started.is_ok() { "started" } else { "failed" };
+            crate::chooser::trace::mark("host start ended", began, how);
+            start.finish(started);
+        })?;
     // Not joined: the cell carries what it did.
     drop(thread);
     Ok(())

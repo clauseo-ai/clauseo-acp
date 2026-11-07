@@ -189,6 +189,8 @@ fn context<R: Runtime>() -> tauri::Context<R> {
 
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
+    // The clock of the timing lines in host.log (chooser/trace.rs).
+    chooser::trace::launch();
     // On Windows, no window without a WebView2 runtime that can draw it (webview2.rs).
     if webview2::stops_start() {
         return Ok(());
@@ -256,6 +258,7 @@ pub fn run() -> tauri::Result<()> {
             commands::chooser_list,
             commands::chooser_choose,
             commands::chooser_cancel,
+            commands::chooser_shown,
             commands::display_info,
             commands::open_external,
             commands::open_file,
@@ -355,10 +358,13 @@ fn start_host<R: Runtime>(
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
     host_start::start_on_thread(start, move || {
+        let began = open::now();
         let locations = locations.with_documents(&SystemDirs, &SystemEnv);
+        chooser::trace::mark("host start: Documents looked up", began, "");
         let profile = DesktopProfile::build(&locations)
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
+        chooser::trace::mark("host start: launch profile built", began, "");
         let effective = load_effective(&locations);
         let setup_read = setup::SetupStart::read(&effective, &locations);
         // The host starts refusing launches until the keys load, and those policy blocks.

@@ -37,6 +37,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             chooser_list,
             chooser_choose,
             chooser_cancel,
+            chooser_shown,
             display_info,
             open_external,
             open_file,

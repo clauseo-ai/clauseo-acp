@@ -6,9 +6,10 @@
 //! `pick_folder` (`choose.rs`), so admission is unchanged.
 //!
 //! Nothing waits between the click and the window: the pre-check starts with the app
-//! ([`Chooser::warm`]) and its answer is kept for the run, and a session opens at once; its drives
-//! and the servers in use are read once on a thread as it opens, under `listing::DRIVES_WAIT`,
-//! and its start points and listings wait for that read (`pending.rs`).
+//! ([`Chooser::warm`]) and its answer is kept for the run, and a session opens at once; its drives,
+//! the servers in use, home and the refused folders are read once on a thread as it opens, under
+//! `listing::DRIVES_WAIT`, and its start points and listings wait for that read (`pending.rs`).
+//! Each step logs one timing line (`trace.rs`).
 //!
 //! Limits: at most [`SESSIONS_MAX`] sessions a run and [`SESSIONS_PER_MINUTE`] a minute (past
 //! that the pick draws the native dialog), one at a time (a new one closes the old), at most
@@ -23,9 +24,11 @@ mod choose;
 mod listing;
 mod pending;
 mod place;
+mod ready;
 mod stall;
 #[cfg(test)]
 mod tests;
+pub(crate) mod trace;
 #[cfg(windows)]
 mod windows;
 mod wire;
@@ -39,9 +42,10 @@ use std::time::{Duration, Instant};
 use clauseo_protocol::{ErrorCode, HostError};
 
 pub(crate) use choose::{NativeFolderConfirm, choose_folder, pick_fixed};
-use listing::{DRIVES_WAIT, Drives, LIST_WAIT, Machine, bounded, folders, on_network};
+use listing::{DRIVES_WAIT, LIST_WAIT, Machine, bounded, folders, on_network};
 use pending::{HAND_IN, Pending};
 use place::Place;
+use ready::{Read, Ready, ready_from};
 use stall::asks_precheck;
 use stall::{KnownFolders, PROBE_WAIT, Probes};
 pub(crate) use stall::{PICKER_VAR, Route, route};
@@ -81,26 +85,19 @@ pub(crate) struct Chooser {
 /// The live session.
 struct Session {
     id: u32,
-    /// The drives read, on its way from when the session opened (`DRIVES_WAIT`).
-    drives: Arc<Pending<Drives>>,
-    /// Home and the last pick as the OS gave them; start points once the drives landed.
-    asked: (Option<PathBuf>, Option<PathBuf>),
-    /// What the drives decide, once they landed.
+    /// The machine's read, on its way from when the session opened (`DRIVES_WAIT`).
+    read: Arc<Pending<Read>>,
+    /// When it opened, for the timing lines.
+    opened: Instant,
+    /// The last pick as the OS gave it; a start point once the read landed.
+    last_pick: Option<PathBuf>,
+    /// What the read decides, once it landed.
     ready: Option<Ready>,
-    refused: Vec<Place>,
     current: Option<Place>,
     listing: Vec<Item>,
     network_root: Option<Place>,
     listings: u32,
     used: Instant,
-}
-
-/// A session's drives, and the start points and home they leave.
-#[derive(Clone)]
-struct Ready {
-    drives: Drives,
-    starts: Vec<(StartKind, Place)>,
-    home: Option<Place>,
 }
 
 impl Chooser {
@@ -169,19 +166,31 @@ impl Chooser {
     /// minutes. "Answers" may go stale (a share gone down since), so it is checked again, which
     /// takes milliseconds while the servers answer, and the new answer kept.
     pub(crate) fn would_stall(&self) -> bool {
+        let asked = crate::open::now();
         let Some((pending, fresh)) = self.precheck_started() else {
             return false;
         };
-        if !fresh && pending.now() == Some(false) {
+        let landed = pending.now();
+        let (stalls, how) = if !fresh && landed == Some(false) {
             let Some(known) = self.known.as_ref() else {
                 return false;
             };
             let again = self.probes.would_stall(known, PROBE_WAIT);
             *lock(&self.precheck) = Some(Pending::landed(again));
-            return again;
-        }
-        // The work ends within PROBE_WAIT of its start; past that and the hand-in, it stalls.
-        pending.get(PROBE_WAIT + HAND_IN).unwrap_or(true)
+            (again, "checked again")
+        } else {
+            // The work ends within PROBE_WAIT of its start; past that and the hand-in, it stalls.
+            let stalls = pending.get(PROBE_WAIT + HAND_IN).unwrap_or(true);
+            let how = match (fresh, landed) {
+                (true, _) => "fresh",
+                (false, Some(_)) => "cached",
+                (false, None) => "on its way",
+            };
+            (stalls, how)
+        };
+        let answer = if stalls { "stalls" } else { "answers" };
+        trace::step("pre-check answered", asked, &format!("{answer}, {how}"));
+        stalls
     }
 
     /// Whether a session may open at `now`: fewer than [`SESSIONS_MAX`] this run and than
@@ -190,15 +199,28 @@ impl Chooser {
         room(&lock(&self.opened), now)
     }
 
-    /// Opens a session, closing any other, unless [`Chooser::may_open`] says no (`None`: draw
-    /// the native dialog). Waits on nothing: its drives and servers are read once, on a thread,
-    /// at most `DRIVES_WAIT` (none past it), and [`Chooser::starts`] and [`Chooser::list`]
-    /// wait for them. `refused` is marked in listings.
+    /// [`Chooser::open_asking`] with home and the refused folders given.
+    #[cfg(test)]
     pub(crate) fn open(
         &self,
         home: Option<&Path>,
         last_pick: Option<&Path>,
         refused: &[PathBuf],
+        now: Instant,
+    ) -> Option<ChooserStart> {
+        let asked = (home.map(Path::to_owned), refused.to_vec());
+        self.open_asking(move || asked, last_pick, now)
+    }
+
+    /// Opens a session, closing any other, unless [`Chooser::may_open`] says no (`None`: draw
+    /// the native dialog). Waits on nothing: its drives and servers, and home and the folders
+    /// marked refused in listings (`asked`, which asks Windows for known folders), are read once,
+    /// on a thread, at most `DRIVES_WAIT` (none past it), and [`Chooser::starts`] and
+    /// [`Chooser::list`] wait for them.
+    pub(crate) fn open_asking(
+        &self,
+        asked: impl FnOnce() -> (Option<PathBuf>, Vec<PathBuf>) + Send + 'static,
+        last_pick: Option<&Path>,
         now: Instant,
     ) -> Option<ChooserStart> {
         {
@@ -209,20 +231,37 @@ impl Chooser {
             opened.push(now);
         }
         let (machine, outstanding) = (Arc::clone(&self.machine), Arc::clone(&self.outstanding));
-        let drives = Pending::start("clauseo-chooser-drives", Drives::default(), move || {
-            bounded(&outstanding, DRIVES_WAIT, move || machine.drives()).unwrap_or_default()
+        let opened = crate::open::now();
+        let read = Pending::start("clauseo-chooser-drives", Read::default(), move || {
+            // Home and the refused folders on a thread beside the drives', in the same bound.
+            let counted = Arc::clone(&outstanding);
+            let asked = Pending::start("clauseo-chooser-home", None, move || {
+                bounded(&counted, DRIVES_WAIT, asked)
+            });
+            let drives = bounded(&outstanding, DRIVES_WAIT, move || machine.drives());
+            let left = (opened + DRIVES_WAIT).saturating_duration_since(crate::open::now());
+            let (home, refused) = asked.get(left + HAND_IN).flatten().unwrap_or_default();
+            let how = match &drives {
+                Some(drives) => format!("{} local drives", drives.local.len()),
+                None => "no answer".to_owned(),
+            };
+            trace::step("drives done", opened, &how);
+            Read {
+                drives: drives.unwrap_or_default(),
+                home,
+                refused: refused
+                    .iter()
+                    .filter_map(|path| path.to_str().and_then(Place::from_os))
+                    .collect(),
+            }
         });
         let id = u32::try_from(RandomState::new().hash_one(now) & u64::from(u32::MAX)).unwrap_or(1);
-        let refused = refused
-            .iter()
-            .filter_map(|path| path.to_str().and_then(Place::from_os))
-            .collect();
         *lock(&self.session) = Some(Session {
             id,
-            drives,
-            asked: (home.map(Path::to_owned), last_pick.map(Path::to_owned)),
+            read,
+            opened,
+            last_pick: last_pick.map(Path::to_owned),
             ready: None,
-            refused,
             current: None,
             listing: Vec::new(),
             network_root: None,
@@ -256,22 +295,22 @@ impl Chooser {
     /// Session `chooser`'s drives and what they decide, waiting for the drives when they have
     /// not landed; the session's lock is not held meanwhile.
     fn ready(&self, chooser: u32, now: Instant) -> Result<Ready, HostError> {
-        let drives = {
+        let read = {
             let mut guard = lock(&self.session);
             let session = live(&mut guard, chooser, now)?;
             if let Some(ready) = &session.ready {
                 return Ok(ready.clone());
             }
-            Arc::clone(&session.drives)
+            Arc::clone(&session.read)
         };
-        // The read itself ends within DRIVES_WAIT; past that and the hand-in, no drives.
-        let drives = drives.get(DRIVES_WAIT + HAND_IN).unwrap_or_default();
+        // The read itself ends within DRIVES_WAIT; past that and the hand-in, nothing read.
+        let read = read.get(DRIVES_WAIT + HAND_IN).unwrap_or_default();
         let mut guard = lock(&self.session);
         let session = live(&mut guard, chooser, now)?;
-        let asked = &session.asked;
+        let last_pick = session.last_pick.as_deref();
         let ready = session
             .ready
-            .get_or_insert_with(|| ready_from(drives, asked.0.as_deref(), asked.1.as_deref()));
+            .get_or_insert_with(|| ready_from(read, last_pick));
         Ok(ready.clone())
     }
 
@@ -320,7 +359,7 @@ impl Chooser {
             };
             let target = target.ok_or_else(|| invalid("no such folder in this chooser"))?;
             let start = ready.starts.iter().any(|(_, start)| start.same(&target));
-            let refused = session.refused.clone();
+            let refused = ready.refused.clone();
             if !start && refused.iter().any(|no| no.same(&target)) {
                 return Ok(not_allowed(here.as_ref(), home.as_ref()));
             }
@@ -382,6 +421,14 @@ impl Chooser {
             _ => Vec::new(),
         };
         session.current = Some(target.clone());
+        if session.listings == 1 {
+            let how = match &state {
+                ListState::Folders { .. } => "folders",
+                ListState::NoAnswer => "no answer",
+                _ => "other",
+            };
+            trace::step("first listing done", session.opened, how);
+        }
         Ok(shown_as(&target, home.as_ref(), state))
     }
 
@@ -406,48 +453,6 @@ impl Chooser {
             }
             _ => Err(invalid("no such folder chooser")),
         }
-    }
-}
-
-/// What `drives` decide for a session: home when local, and the start points: the local drives,
-/// then home, the Desktop and the folder above `last_pick`, each only when local.
-fn ready_from(drives: Drives, home: Option<&Path>, last_pick: Option<&Path>) -> Ready {
-    let local = |path: Option<&Path>| {
-        path.and_then(Path::to_str)
-            .and_then(Place::from_os)
-            .filter(|place| !on_network(&drives, place))
-    };
-    let home = local(home);
-    let mut starts: Vec<(StartKind, Place)> = drives
-        .local
-        .iter()
-        .copied()
-        .filter_map(Place::drive)
-        .map(|drive| (StartKind::Drive, drive))
-        .collect();
-    let named = [
-        (StartKind::Home, home.clone()),
-        (
-            StartKind::Desktop,
-            local(drives.desktop.as_deref().map(Path::new)),
-        ),
-        // The folder above the last pick, as `dialogs::start_folder` opens the native dialog.
-        (
-            StartKind::LastPick,
-            local(last_pick)
-                .filter(|pick| !pick.parts().is_empty())
-                .map(|pick| pick.up()),
-        ),
-    ];
-    starts.extend(
-        named
-            .into_iter()
-            .filter_map(|(kind, place)| Some((kind, place?))),
-    );
-    Ready {
-        drives,
-        starts,
-        home,
     }
 }
 
@@ -536,8 +541,8 @@ struct NoMachine;
 
 #[cfg(not(windows))]
 impl Machine for NoMachine {
-    fn drives(&self) -> Drives {
-        Drives::default()
+    fn drives(&self) -> listing::Drives {
+        listing::Drives::default()
     }
     fn read(&self, _folder: &str) -> std::io::Result<Vec<Entry>> {
         Err(std::io::ErrorKind::Unsupported.into())
