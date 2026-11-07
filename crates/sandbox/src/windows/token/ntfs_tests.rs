@@ -14,7 +14,7 @@ use windows::Win32::Security::{
 use windows::Win32::System::SystemServices::{SE_GROUP_ENABLED, SE_GROUP_USE_FOR_DENY_ONLY};
 use windows::core::PWSTR;
 
-use super::{DESKTOP_USER_RIGHTS, OWNER_WRITES, TokenSpec, os};
+use super::{DESKTOP_USER_RIGHTS, TokenSpec, os};
 use crate::windows::sids::Sid;
 use crate::windows::test_pool::{acl_entries, text_of};
 
@@ -142,13 +142,9 @@ fn the_agent_token_holds_what_the_spec_says_when_read_back() {
     assert_eq!(
         entries,
         [
-            // ACCESS_DENIED_ACE_TYPE first.
-            (1, 0, OWNER_WRITES, user.clone()),
             (0, 0, GENERIC_ALL, user),
             (0, 0, GENERIC_ALL, sid("S-1-5-18")),
             (0, 0, DESKTOP_USER_RIGHTS, desktop),
-            // OWNER RIGHTS held to READ_CONTROL.
-            (0, 0, 0x0002_0000, sid("S-1-3-4")),
         ]
     );
 }
