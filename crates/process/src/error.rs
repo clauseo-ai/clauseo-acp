@@ -9,11 +9,18 @@ use clauseo_protocol::ErrorCode;
 /// [`ExitReport`](crate::ExitReport), not an error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The launch spec breaks a rule of [`LaunchSpec::new`](crate::LaunchSpec::new).
+    /// The launch spec breaks a rule of [`LaunchSpec::new`](crate::LaunchSpec::new). The text
+    /// names the rule, never the path.
     #[error("invalid launch spec: {0}")]
     InvalidSpec(String),
-    /// The OS could not start the program.
-    #[error("could not start {}: {source}", program.display())]
+    /// The spec's working folder is not there, or is not a folder
+    /// ([`LaunchSpec::new`](crate::LaunchSpec::new)). Kept apart from [`Error::InvalidSpec`] so a
+    /// caller can say the folder is gone (the host: `matter.folder_missing`). No path.
+    #[error("invalid launch spec: the working folder is not there, or is not a folder")]
+    NoWorkingFolder,
+    /// The OS could not start the program. The text names the program's file name, never its
+    /// folder (which can hold the user's name).
+    #[error("could not start {}: {source}", file_name(program))]
     Spawn {
         /// The program the spec named.
         program: PathBuf,
@@ -38,11 +45,21 @@ impl Error {
     /// The code a client sees. Every error here is a failed launch.
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::InvalidSpec(_) | Error::Spawn { .. } | Error::Os { .. } | Error::Closing => {
-                ErrorCode::AgentLaunchFailed
-            }
+            Error::InvalidSpec(_)
+            | Error::NoWorkingFolder
+            | Error::Spawn { .. }
+            | Error::Os { .. }
+            | Error::Closing => ErrorCode::AgentLaunchFailed,
         }
     }
+}
+
+/// `program`'s file name, for [`Error::Spawn`]'s text: never the folders above it.
+fn file_name(program: &std::path::Path) -> String {
+    program.file_name().map_or_else(
+        || "the program".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 #[cfg(test)]
