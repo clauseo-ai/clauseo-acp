@@ -134,10 +134,18 @@ fn exit_with(code: u32) -> ExitCode {
     std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()))
 }
 
+/// The UI limits of the innermost job it is in, and their effect: a clipboard write, which the
+/// runner's job refuses. A process node starts sits in libuv's own job inside the runner's,
+/// whose limits read as none; the runner's still bind it (nested jobs' limits combine), and the
+/// write's refusal shows they do.
 fn job_ui() {
     match win::job_ui_limits() {
         Ok(limits) => say(&format!("ui-limits {limits:#x}")),
         Err(error) => say(&format!("ui-limits error {}", code(&error))),
+    }
+    match ui::write_text("clauseo-ui-effect") {
+        Ok(()) => say("ui-effect clipboard-write ok"),
+        Err(why) => say(&format!("ui-effect clipboard-write refused {why}")),
     }
 }
 

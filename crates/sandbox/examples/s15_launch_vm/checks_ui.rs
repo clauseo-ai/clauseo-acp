@@ -18,8 +18,27 @@ fn random() -> Result<String, String> {
     }))
 }
 
-/// Checks the `ui-limits <hex>` line among `lines` holds every limit in [`UI_LIMITS`].
+/// Checks the UI limits bind the probe that printed `lines`: its `ui-limits <hex>` line holds
+/// every limit in [`UI_LIMITS`] (it sits in the runner's job itself), or, when that innermost job
+/// is another's (libuv's, inside the runner's), its `ui-effect clipboard-write refused` line
+/// shows the runner's limits still apply.
 pub(crate) fn ui_limits(lines: &[String]) -> Result<String, String> {
+    let refused = lines
+        .iter()
+        .any(|l| l.starts_with("ui-effect clipboard-write refused"));
+    match direct_limits(lines) {
+        Ok(found) => Ok(found),
+        Err(_) if refused => Ok(
+            "the innermost job is another's (libuv's), and its clipboard write \
+                                was refused: the runner's UI limits bind it"
+                .to_owned(),
+        ),
+        Err(why) => Err(format!("{why}, and its clipboard write wasn't refused")),
+    }
+}
+
+/// [`ui_limits`]'s first test: the innermost job's own limits.
+fn direct_limits(lines: &[String]) -> Result<String, String> {
     let line = lines
         .iter()
         .find_map(|l| l.strip_prefix("ui-limits "))

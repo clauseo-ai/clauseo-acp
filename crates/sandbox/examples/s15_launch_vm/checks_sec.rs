@@ -9,7 +9,7 @@ use std::time::Duration;
 use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
-use super::launch::{Running, Spec, deadline, launch, pool_of};
+use super::launch::{Running, Spec, deadline, launch, pool_of, run_command};
 use super::probe_sec::{PIPE_OBJECT_PREFIX, REFUSED, TOKEN_RIGHTS};
 use super::rows::Ctx;
 use super::sys::say;
@@ -24,11 +24,43 @@ const NO_SUCH_PROCESS: &str = "87";
 /// The `runners` row: A's agent is refused every right in [`REFUSED`] and [`TOKEN_RIGHTS`] on
 /// its inner runner (its parent) and on its outer runner (the process the harness started).
 pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
+    reach(ctx, &[])
+}
+
+/// The `lawyer-processes` row: the same against the lawyer's processes: the outer runner, the
+/// host (the harness itself, standing in for Clauseo.exe, which starts the outer runner) and the
+/// proxy (a process the harness starts as the lawyer, standing in for the egress proxy's).
+pub(crate) fn lawyer_processes(ctx: &Ctx<'_>) -> Result<String, String> {
+    let stand_in = ctx.manifest.harness_exe();
+    let mut proxy = run_command(std::process::Command::new(&stand_in).args(["probe", "wait"]))?;
+    let host = std::process::id();
+    ctx.note(&format!(
+        "host stand-in: this harness ({host}); proxy stand-in: `probe wait` as the lawyer ({})",
+        proxy.pid()
+    ));
+    let result = reach(ctx, &[("host", host), ("proxy", proxy.pid())]);
+    proxy.kill();
+    result
+}
+
+/// Starts A's `probe runners`, hands it the outer runner and `extra` targets, and checks every
+/// right in [`REFUSED`] and [`TOKEN_RIGHTS`] was refused on each.
+fn reach(ctx: &Ctx<'_>, extra: &[(&str, u32)]) -> Result<String, String> {
     let (mut a, agent) = started(ctx, "A", &["runners"])?;
     let outer = a.pid();
     let until = deadline(ctx.limit);
     let parent = a.line_after("parent ", until);
-    a.send(&format!("outer {outer}\n"))?;
+    let mut targets = vec![("outer", outer)];
+    targets.extend_from_slice(extra);
+    let mut lines = String::new();
+    for (role, pid) in &targets {
+        lines.push_str(role);
+        lines.push(' ');
+        lines.push_str(&pid.to_string());
+        lines.push('\n');
+    }
+    lines.push_str("end\n");
+    a.send(&lines)?;
     let done = a.finish(until)?;
     for line in done.stdout.iter().chain(&done.stderr) {
         ctx.note(&format!("A: {line}"));
@@ -44,9 +76,12 @@ pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
     ctx.note(&format!(
         "agent {agent}, its inner runner {inner}, the outer runner {outer}"
     ));
+    if extra.is_empty() {
+        targets.insert(0, ("inner", inner));
+    }
     let mut bad = Vec::new();
     let mut seen = 0usize;
-    for (role, pid) in [("inner", inner), ("outer", outer)] {
+    for (role, pid) in &targets {
         for (right, _) in REFUSED.iter().chain(&TOKEN_RIGHTS) {
             let key = format!("runner {role} {right}");
             let code = values(&done.stdout, &key)
@@ -55,6 +90,12 @@ pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
                 .map(str::to_owned);
             match code.as_deref() {
                 None => bad.push(format!("{role} {right}: no line")),
+                Some("0") if *right == "PROCESS_QUERY_LIMITED_INFORMATION" && *role != "inner" => {
+                    bad.push(format!(
+                        "{role} ({pid}) {right}: GRANTED by the lawyer's default DACL (report \
+                         it; not fixed here)"
+                    ));
+                }
                 Some("0") => bad.push(format!("{role} ({pid}) {right}: OPENED")),
                 Some(NO_SUCH_PROCESS) => bad.push(format!(
                     "{role} ({pid}) {right}: 87, no such process (the check proves nothing)"
@@ -66,15 +107,19 @@ pub(crate) fn runners(ctx: &Ctx<'_>) -> Result<String, String> {
             .iter()
             .filter(|l| l.starts_with(role))
         {
-            ctx.note(&format!("information, may be granted: {line}"));
+            ctx.note(&format!("information: {line}"));
         }
     }
     if !bad.is_empty() {
-        return Err(format!("the agent reached a runner: {bad:?}"));
+        return Err(format!("the agent reached a process: {bad:?}"));
     }
+    let names: Vec<String> = targets
+        .iter()
+        .map(|(role, pid)| format!("{role} ({pid})"))
+        .collect();
     Ok(format!(
-        "all {seen} opens of the inner ({inner}) and outer ({outer}) runners and their tokens \
-         were refused"
+        "all {seen} opens were refused, processes and tokens, on {}",
+        names.join(", ")
     ))
 }
 
