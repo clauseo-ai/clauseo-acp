@@ -15,6 +15,8 @@
 )]
 
 use std::collections::BTreeSet;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
@@ -29,13 +31,12 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    QueryFullProcessImageNameW,
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows::Win32::System::Variant::{VARIANT, VT_I2, VT_I4, VT_UI2, VariantClear};
 use windows::Win32::System::Wmi::{
-    IWbemClassObject, IWbemLocator, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
-    WBEM_INFINITE, WbemLocator,
+    IWbemClassObject, IWbemLocator, WBEM_FLAG_CONNECT_USE_MAX_WAIT, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WbemLocator,
 };
 use windows::core::{BSTR, HRESULT, PCWSTR, PWSTR, w};
 
@@ -50,18 +51,34 @@ const INSUFFICIENT_BUFFER: u32 = 122;
 /// excluded ports always, and with `launch` every listener in the range too, which must be this
 /// process's or run this process's program. Fails closed when the machine can't be read.
 pub fn check_ports(launch: bool) -> Result<(), NetworkGap> {
-    let listeners = listeners()?;
-    let listening: BTreeSet<u16> = listeners.iter().map(|listener| listener.port).collect();
+    let dynamic = dynamic_ranges()?;
+    // The listeners first, then the test binds, then the listeners again for any port that
+    // refused a bind: a listener that came up in between is named as one, not as a reservation.
+    let mut found = listeners()?;
+    let listening: BTreeSet<u16> = found.iter().map(|listener| listener.port).collect();
+    let mut reserved = refused_ports(&listening);
+    if !reserved.is_empty() {
+        found = listeners()?;
+        reserved.retain(|port| !found.iter().any(|listener| listener.port == *port));
+    }
     let seen = PortsSeen {
-        dynamic: dynamic_ranges()?,
-        reserved: refused_ports(&listening),
-        listeners: if launch { listeners } else { Vec::new() },
+        dynamic,
+        reserved,
+        listeners: if launch { found } else { Vec::new() },
     };
-    // SAFETY: the pseudo-handle of this process needs no closing.
-    let own_image = image_of(unsafe { GetCurrentProcess() });
-    ports_usable(&seen, |listener| {
-        is_ours(listener, std::process::id(), own_image.as_deref())
-    })
+    ports_usable(&seen, |listener| is_ours(listener, std::process::id()))
+}
+
+/// How long the whole WMI read may take before the check fails closed.
+const WMI_LIMIT: Duration = Duration::from_secs(5);
+
+/// The longest one `IEnumWbemClassObject::Next` call may wait, in milliseconds.
+const NEXT_LIMIT_MS: i32 = 4_000;
+
+/// Windows' TCP dynamic port ranges as WMI reports them, every `MSFT_NetTCPSetting`'s, for
+/// the VM rows.
+pub fn dynamic_port_ranges() -> Result<Vec<(u16, u16)>, NetworkGap> {
+    dynamic_ranges()
 }
 
 /// `result` as a Win32 or HRESULT code.
@@ -75,21 +92,33 @@ fn unchecked(call: &'static str, code: u32) -> NetworkGap {
 }
 
 /// Every setting's dynamic range, read on a thread of its own in COM's multithreaded
-/// apartment, so the caller's thread (the host's, any apartment) is left as it is.
+/// apartment, so the caller's thread (the host's, any apartment) is left as it is. The read
+/// gets [`WMI_LIMIT`]; past it the check fails closed and the thread is left to finish.
 fn dynamic_ranges() -> Result<Vec<(u16, u16)>, NetworkGap> {
-    let read = std::thread::spawn(|| {
-        // SAFETY: this new thread enters COM once and leaves it below.
-        let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        if entered.is_err() {
-            return Err(unchecked("CoInitializeEx", code(entered)));
-        }
-        let ranges = query_dynamic_ranges();
-        // SAFETY: balances this thread's successful CoInitializeEx.
-        unsafe { CoUninitialize() };
-        ranges
-    });
-    read.join()
-        .unwrap_or(Err(unchecked("the port check's WMI thread", 0)))
+    let (send, receive) = mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("clauseo-port-check".to_owned())
+        .spawn(move || drop(send.send(read_in_com())));
+    if spawned.is_err() {
+        return Err(unchecked("the port check's WMI thread", 0));
+    }
+    match receive.recv_timeout(WMI_LIMIT) {
+        Ok(ranges) => ranges,
+        Err(_) => Err(unchecked("WMI (no answer within 5 s)", 0)),
+    }
+}
+
+/// [`query_dynamic_ranges`] inside COM's multithreaded apartment on this thread.
+fn read_in_com() -> Result<Vec<(u16, u16)>, NetworkGap> {
+    // SAFETY: this new thread enters COM once and leaves it below.
+    let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    if entered.is_err() {
+        return Err(unchecked("CoInitializeEx", code(entered)));
+    }
+    let ranges = query_dynamic_ranges();
+    // SAFETY: balances this thread's successful CoInitializeEx.
+    unsafe { CoUninitialize() };
+    ranges
 }
 
 /// [`dynamic_ranges`] on a thread that has entered COM.
@@ -107,7 +136,8 @@ fn query_dynamic_ranges() -> Result<Vec<(u16, u16)>, NetworkGap> {
             &empty,
             &empty,
             &empty,
-            0,
+            // Bounded by Windows (two minutes at most); WMI_LIMIT bounds the whole read.
+            WBEM_FLAG_CONNECT_USE_MAX_WAIT.0,
             &empty,
             None,
         )
@@ -145,9 +175,16 @@ fn query_dynamic_ranges() -> Result<Vec<(u16, u16)>, NetworkGap> {
         let mut row = [None];
         let mut returned = 0u32;
         // SAFETY: one live slot and a live count.
-        let next = unsafe { rows.Next(WBEM_INFINITE, &mut row, &raw mut returned) };
+        let next = unsafe { rows.Next(NEXT_LIMIT_MS, &mut row, &raw mut returned) };
         if next.is_err() {
             return Err(unchecked("IEnumWbemClassObject::Next", code(next)));
+        }
+        // WBEM_S_TIMEDOUT: no row within the limit.
+        if next.0 == 0x0004_0004 {
+            return Err(unchecked(
+                "IEnumWbemClassObject::Next (timed out)",
+                code(next),
+            ));
         }
         let [Some(row)] = row else { break };
         let start = number(&row, w!("DynamicPortRangeStartPort"))?;
