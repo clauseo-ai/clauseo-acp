@@ -173,10 +173,10 @@ pub(crate) fn sweep_stale(root: Option<&Path>) {
 
 /// The first port agent-browser's Windows daemon port can be (`connection.rs`).
 #[cfg(any(windows, test))]
-const DAEMON_PORT_BASE: u32 = 49_152;
+const DAEMON_PORT_BASE: u16 = 49_152;
 /// How many ports above [`DAEMON_PORT_BASE`] the hash can land on.
 #[cfg(any(windows, test))]
-const DAEMON_PORT_SPAN: u32 = 16_383;
+const DAEMON_PORT_SPAN: u16 = 16_383;
 /// How many names [`search_name`] draws before it gives up (sized when the port had to land in
 /// a 100-port range, about once in 164 draws; now almost every draw's port is claimable).
 #[cfg(any(windows, test))]
@@ -188,9 +188,10 @@ const NAME_LETTERS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 #[cfg(any(windows, test))]
 const NAME_LEN: usize = 16;
 
-/// Every port [`daemon_port_of`] gives: `49152 + 0..16383`.
+/// Every port [`daemon_port_of`] gives: [`DAEMON_PORT_BASE`] plus `0..DAEMON_PORT_SPAN`.
 #[cfg(windows)]
-const DAEMON_PORTS: std::ops::RangeInclusive<u16> = 49_152..=65_534;
+const DAEMON_PORTS: std::ops::RangeInclusive<u16> =
+    DAEMON_PORT_BASE..=DAEMON_PORT_BASE + (DAEMON_PORT_SPAN - 1);
 
 /// agent-browser's Windows daemon port for the session `name` (v0.41.1 `connection.rs`
 /// `get_port_for_session`, with no namespace): `h = 0`; for each character
@@ -203,8 +204,8 @@ pub(crate) fn daemon_port_of(name: &str) -> u16 {
         let code = i32::try_from(u32::from(c)).unwrap_or(i32::MAX);
         hash = (hash << 5).wrapping_sub(hash).wrapping_add(code);
     }
-    let offset = hash.unsigned_abs() % DAEMON_PORT_SPAN;
-    u16::try_from(DAEMON_PORT_BASE + offset).unwrap_or(u16::MAX)
+    let offset = hash.unsigned_abs() % u32::from(DAEMON_PORT_SPAN);
+    u16::try_from(u32::from(DAEMON_PORT_BASE) + offset).unwrap_or(u16::MAX)
 }
 
 /// Draws names with `draw` until one's [`daemon_port_of`] is in `range` and `claim` claims
