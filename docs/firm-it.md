@@ -186,28 +186,88 @@ Remove-Item -Path $key -ErrorAction SilentlyContinue
 ```
 
 Then check, in the same window, that each item is gone. Every number is 0 and both other values
-are `False`. `Folders` counts what is left in `C:\Users` under a pool user's exact name, since a
-profile whose folder was held open can lose its entry and keep its folder:
+are `False`. `Folders` counts the folders left in `C:\Users` under a pool user's exact name, with or without
+the `.<COMPUTER>` or `.000` Windows may add, since a profile whose folder was held open can lose
+its entry and keep its folder:
 
 ```powershell
-[pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch $pool }).Count; Key = Test-Path $key }
+[pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' }).Count; Key = Test-Path $key }
 ```
 
 If a profile is still there, a process still holds it: restart the computer and paste the block
-again. A second run skips what is gone. If `Profiles` is 0 but `Folders` isn't, the folder outlived
-its profile and stays even after a restart. Delete it by hand after a restart: take ownership for
-Administrators, give Administrators (by SID, so any language works) full control, then delete it,
-with the exact name in place of `ClauseoSb01`:
+again. A second run skips what is gone. If the group is still there, it has members or isn't the
+one the key named, and `--remove` would leave it too: look at it before you delete it.
 
-```cmd
-takeown /F "C:\Users\ClauseoSb01" /A /R /D Y
-icacls "C:\Users\ClauseoSb01" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C
-rmdir /S /Q "C:\Users\ClauseoSb01"
+If `Profiles` is 0 but `Folders` isn't, the folder outlived its profile and stays even after a
+restart. Windows may have named it `ClauseoSb01`, `ClauseoSb01.<COMPUTER>` or `ClauseoSb01.000`.
+After a restart, paste the block below into an elevated PowerShell. It is for a leftover sandbox
+profile folder only: it finds each folder in `C:\Users` named exactly as a pool user's profile
+(never another account that starts with `ClauseoSb`), and deletes what is inside it one name at a
+time, then the folder. It uses the backup and restore rights an administrator already has, so it
+changes no owner and no permission: a folder a sandboxed program wrote can hold links and hard links
+to files elsewhere, and changing permissions through them would change those files too. A link is
+deleted as a link, never followed, and a file with other hard links keeps its attributes. It names
+anything it couldn't delete. Run without elevation, it stops with "Run this in an elevated
+PowerShell."
+
+```powershell
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class Priv {
+  [StructLayout(LayoutKind.Sequential, Pack = 4)] struct TP { public int Count; public long Luid; public int Attr; }
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, int access, out IntPtr t);
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool LookupPrivilegeValue(string s, string n, out long l);
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(IntPtr t, bool d, ref TP n, int l, IntPtr p, IntPtr r);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  public static bool Enable(string name) {
+    IntPtr t; if (!OpenProcessToken(GetCurrentProcess(), 0x28, out t)) return false;
+    TP tp = new TP(); tp.Count = 1; tp.Attr = 2; if (!LookupPrivilegeValue(null, name, out tp.Luid)) return false;
+    return AdjustTokenPrivileges(t, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero) && Marshal.GetLastWin32Error() == 0;
+  }
+}
+'@
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class Del {
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateFileW(string n, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetFileInformationByHandle(IntPtr h, int cls, ref uint info, uint size);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  // Removes one name (a file, an empty directory or a link itself), never following a link and never changing attributes.
+  public static void Remove(string path) {
+    IntPtr h = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000, IntPtr.Zero);
+    if (h == new IntPtr(-1)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    try { uint flags = 0x1 | 0x2 | 0x10; if (!SetFileInformationByHandle(h, 21, ref flags, 4)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }
+    finally { CloseHandle(h); }
+  }
+}
+'@
+if (-not ([Priv]::Enable('SeBackupPrivilege') -and [Priv]::Enable('SeRestorePrivilege'))) { throw 'Run this in an elevated PowerShell.' }
+$skipped = New-Object System.Collections.Generic.List[string]
+function Remove-Leftover([string]$Dir) {
+    foreach ($e in @([IO.Directory]::EnumerateFileSystemEntries($Dir))) {
+        $a = [IO.File]::GetAttributes($e)
+        try {
+            if ($a -band [IO.FileAttributes]::ReparsePoint) {
+                [Del]::Remove($e)
+            } elseif ($a -band [IO.FileAttributes]::Directory) {
+                Remove-Leftover $e
+            } else {
+                [Del]::Remove($e)
+            }
+        } catch { $skipped.Add("$($e): $($_.Exception.Message)") }
+    }
+    [Del]::Remove($Dir)
+}
+foreach ($Root in @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Force |
+        Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        ForEach-Object { $_.FullName })) {
+    try { Remove-Leftover $Root } catch { $skipped.Add("$($Root): $($_.Exception.Message)") }
+    if (Test-Path -LiteralPath $Root) { $skipped | ForEach-Object { "not deleted: $_" }; throw "$Root is still there" } else { "$Root is gone" }
+}
 ```
 
-`/D Y` is the answer in English Windows; another language may need its own letter. Never use a
-wildcard here: other accounts' folders can start with `ClauseoSb` too. If the group is still there, it has members or isn't the
-one the key named, and `--remove` would leave it too: look at it before you delete it.
+Never use `takeown /R`, `icacls /T` or `robocopy /MIR` on these folders: they follow links, or
+rewrite files shared through hard links.
 
 Each pool user's `AppData\LocalLow` deny goes with its profile. The matter folders aren't covered
 here: clear the entries and low integrity labels Clauseo left on each one with the two `icacls`
