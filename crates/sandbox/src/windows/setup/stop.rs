@@ -43,7 +43,18 @@
 //!    kills has marked every user it saw. A pass that finds a process of unknown user marks every
 //!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
 //!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
-//!    at most.
+//!    at most;
+//! 7. only then, on a run that will end 0, writes `StopCompleted` (when, a `FILETIME`) and
+//!    `StopLeft` (0) into the record under the set-up lock (`record_values::STOP_COMPLETED`).
+//!    A run the task's end kills, or one that ends non-zero, never writes them and leaves an
+//!    earlier pair as it is; a write that fails, or a lock that stays held, is 49.
+//!
+//! The owner may end the task: it holds read and execute on it (`FRFX`, `refresh::task_sddl`),
+//! since starting a task needs execute (CI run 42416074600), and execute ends one too. So an
+//! ended stop must never pass for a finished one: only `StopCompleted` says the pool is clear.
+//! The logon refusal (F4) and the unclean-session marker are to clear on it alone; that wiring
+//! lands in the follow-up PR. Ending a stop is denial of service only, which code running as
+//! the owner could do to its own sessions anyway.
 //!
 //! The reset itself isn't done here: it sets a new password, which only the owner's
 //! `secrets.bin` may hold (DPAPI, as the owner), and its open-session check and its `LocalLow`
@@ -75,7 +86,8 @@ mod windows_tests;
 /// [`RefreshExit`]: crate::windows::refresh::RefreshExit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopExit {
-    /// 0: every pool user's process found was stopped (or none ran), and those users are marked.
+    /// 0: every pool user's process found was stopped (or none ran), those users are marked, and
+    /// `StopCompleted` is written (with a pool recorded; with none there is nothing to clear).
     Done,
     /// 45: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was stopped.
     NotAllowed,
@@ -89,8 +101,8 @@ pub enum StopExit {
     /// be read), a process snapshot or the BITS list couldn't be taken, or the BITS list reached
     /// [`JOBS_CAP`].
     NotStopped,
-    /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids` (the
-    /// set-up lock stayed held, or the write failed).
+    /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids`, or
+    /// `StopCompleted` couldn't be written (the set-up lock stayed held, or the write failed).
     NotMarked,
 }
 
@@ -265,6 +277,8 @@ pub trait Stopper {
     fn unlock(&mut self);
     /// Adds `users` to the record's `ResetSids`, keeping what it lists.
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
+    /// Writes the record's `StopCompleted` (now) and `StopLeft` (0), under the set-up lock.
+    fn record_completed(&mut self) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -373,6 +387,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     if let Some(why) = passes.mark_failed {
         return Err((StopExit::NotMarked, format!("{counts}; {why}")));
     }
+    completed(fs).map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
     let retried = passes.retried;
     Ok(format!(
         "the sandbox's stop: {counts}; {} users marked for a profile reset ({retried} retried)",
@@ -502,4 +517,20 @@ fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
         Ok(()) => passes.marked.extend(new),
         Err(why) => passes.mark_failed = Some(format!("not every user was marked: {why}")),
     }
+}
+
+/// Step 7: `StopCompleted` and `StopLeft` written under the set-up lock, once everything
+/// before has passed. The lock's wait may come a second time here only when a set-up took the
+/// lock after the marks; a run the task's limit ends meanwhile writes nothing.
+fn completed(fs: &mut impl Stopper) -> Result<(), String> {
+    let written = match fs.lock() {
+        Ok(true) => {
+            let written = fs.record_completed();
+            fs.unlock();
+            written
+        }
+        Ok(false) => Err("the set-up lock stayed held".to_owned()),
+        Err(why) => Err(why),
+    };
+    written.map_err(|why| format!("StopCompleted wasn't written: {why}"))
 }

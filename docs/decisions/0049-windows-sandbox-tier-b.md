@@ -559,7 +559,7 @@ started elevated, by the app or by the uninstall hook.
   between calls; the launch and the elevated start hash it every time.
 - **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
   rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
-  `DataDir`, `Removing`, `ResetSids`), but the copy, its four values and the SYSTEM tasks
+  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopLeft`), but the copy, its four values and the SYSTEM tasks
   (refresh and stop) stay, so a later
   in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
   one-owner rule: the same lawyer sets up again, another user is `OtherAccount`. The
@@ -1330,19 +1330,34 @@ admin copy.
    process of unknown user marks every pool user at once, since it may be any of theirs (the
    run still ends at 48). Once the lock stays
    held or a write fails, no more users are tried (49), so the wait comes once at most.
-   Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run.
+   Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run;
+7. only on a run that will end 0 (every pool user's process gone, every pool BITS job cancelled,
+   `ResetSids` written), writes `StopCompleted` (`REG_QWORD`, the `FILETIME` it completed)
+   and `StopLeft` (`REG_DWORD`, 0) into the record, under the set-up lock. Both are set-up
+   values outside the record proper, deleted with the record by `--remove`. A run that is ended,
+   interrupted by the task's limit, or exits non-zero never writes them and leaves an earlier
+   pair as it is; a write that fails, or a lock that stays held, is 49. A run with no pool
+   recorded has nothing to clear and writes nothing.
+
+**Only `StopCompleted` counts.** The owner holds execute access on the task, which Run needs
+(CI run 42416074600) and which also ends a task, so code running as the lawyer can end a stop
+mid-pass. An ended stop can't pass for a finished one: the F4 logon refusal and the
+unclean-session marker clear only on `StopCompleted`, never on the task's end or its exit
+code. That wiring lands in the follow-up PR with the runner (#649); this
+PR writes the value. Ending a stop is denial of service only: the pool users stay refused until a
+stop completes.
 
 It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
 cancelled and not), and says so when a pass couldn't read the process list. Its exit codes follow the refresh's (`StopExit`):
 
 | Code | Meaning |
 |---|---|
-| 0 | every pool user's process found was stopped (or none ran), and those users are marked |
+| 0 | every pool user's process found was stopped (or none ran), those users are marked, and `StopCompleted` is written |
 | 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
 | 46 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
 | 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
-| 49 | the processes were stopped, but their users couldn't be added to `ResetSids` |
+| 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopCompleted` couldn't be written |
 
 **The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
 only the owner's `secrets.bin` may hold (DPAPI, as the owner). Its open-session check and its

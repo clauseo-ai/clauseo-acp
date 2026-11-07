@@ -21,7 +21,7 @@ use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFO_EXW, WTSEnumerateProcessesExW, WTSFreeMemoryExW,
     WTSTypeProcessInfoLevel1,
 };
-use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::System::SystemInformation::{GetSystemTimeAsFileTime, GetTickCount64};
 use windows::Win32::System::Threading::{
     GetCurrentProcessId, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, Sleep, TerminateProcess,
@@ -205,6 +205,13 @@ impl Stopper for WindowsStopper {
 
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed> {
         record_write::add_reset_sids(RECORD_KEY, users).map_err(|error| error.to_string())
+    }
+
+    fn record_completed(&mut self) -> Result<(), Failed> {
+        // SAFETY: GetSystemTimeAsFileTime only reads the clock.
+        let now = unsafe { GetSystemTimeAsFileTime() };
+        let at = u64::from(now.dwHighDateTime) << 32 | u64::from(now.dwLowDateTime);
+        record_write::write_stop_completed(RECORD_KEY, at).map_err(|error| error.to_string())
     }
 
     fn log(&mut self, error: bool, line: &str) {

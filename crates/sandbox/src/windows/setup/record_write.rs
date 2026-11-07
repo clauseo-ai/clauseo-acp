@@ -12,9 +12,9 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY,
-    REG_CREATE_KEY_DISPOSITION, REG_DWORD, REG_MULTI_SZ, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
-    REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteValueW,
-    RegOpenKeyExW, RegQueryInfoKeyW, RegSetKeySecurity, RegSetValueExW,
+    REG_CREATE_KEY_DISPOSITION, REG_DWORD, REG_MULTI_SZ, REG_OPTION_NON_VOLATILE, REG_QWORD,
+    REG_SAM_FLAGS, REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW,
+    RegDeleteValueW, RegOpenKeyExW, RegQueryInfoKeyW, RegSetKeySecurity, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -23,7 +23,8 @@ use super::lock::Descriptor;
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
     CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
-    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without, sids_value,
+    RawRecord, RegValue, SETUP_VALUES, STOP_COMPLETED, STOP_LEFT, USER_INSTALL_DIR, resets_with,
+    resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_string, read_units};
@@ -150,6 +151,15 @@ pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineErro
         return Ok(());
     }
     set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&all))
+}
+
+/// Writes the stop's completion: `StopCompleted` as `at` (a `FILETIME`) and `StopLeft` as 0
+/// ([`STOP_COMPLETED`]), the key made and secured as [`write`] does. The stop task calls it as
+/// SYSTEM, under the set-up lock, only on a run that ends 0.
+pub(crate) fn write_stop_completed(key: &str, at: u64) -> Result<(), MachineError> {
+    let opened = open_secured(key)?;
+    set_value(&opened, STOP_COMPLETED, &RegValue::Qword(at))?;
+    set_value(&opened, STOP_LEFT, &RegValue::Dword(0))
 }
 
 /// Takes `done`, the users a set-up has reset, off the record's `ResetSids`, deleting the value
@@ -291,6 +301,7 @@ pub(super) fn set_value(opened: &Key, name: &str, value: &RegValue) -> Result<()
         RegValue::Sz(_) => REG_SZ,
         RegValue::MultiSz(_) => REG_MULTI_SZ,
         RegValue::Dword(_) => REG_DWORD,
+        RegValue::Qword(_) => REG_QWORD,
     };
     let data = record_values::bytes(value);
     let name = HSTRING::from(name);

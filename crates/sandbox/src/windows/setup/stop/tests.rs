@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+mod completed;
 mod jobs;
 mod users;
 
@@ -27,6 +28,8 @@ enum Marks {
     LockBusy,
     /// The write fails.
     WriteFails,
+    /// The marks are written, but `StopCompleted`'s write fails.
+    CompletionFails,
 }
 
 /// The fake: the record, the processes each snapshot sees, and everything done, in order.
@@ -59,6 +62,11 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
+    /// The record's `StopLeft` once `StopCompleted` is written, with each write counted.
+    completed: Option<(u32, usize)>,
+    /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
+    /// (or its time limit) kills the process.
+    end_at: Option<u32>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -85,6 +93,8 @@ impl Fake {
             marks: Marks::Written,
             held: false,
             resets: Vec::new(),
+            completed: None,
+            end_at: None,
             done: Vec::new(),
             logged: Vec::new(),
         }
@@ -162,6 +172,7 @@ impl Stopper for Fake {
 
     fn terminate(&mut self, pid: u32, wait: Duration) -> Result<(), Failed> {
         self.waits.push(wait);
+        assert_ne!(self.end_at, Some(pid), "the task was ended");
         if self.hang.contains(&pid) {
             self.now += wait;
             return Err("it hadn't exited when the wait ran out".to_owned());
@@ -218,6 +229,17 @@ impl Stopper for Fake {
         Ok(())
     }
 
+    fn record_completed(&mut self) -> Result<(), Failed> {
+        assert!(self.held, "written under the set-up lock");
+        if self.marks == Marks::CompletionFails {
+            return Err("RegSetValueExW failed (5)".to_owned());
+        }
+        let writes = self.completed.map_or(0, |(_, writes)| writes);
+        self.completed = Some((0, writes + 1));
+        self.done.push("completed".to_owned());
+        Ok(())
+    }
+
     fn log(&mut self, error: bool, line: &str) {
         self.logged.push((error, line.to_owned()));
     }
@@ -261,6 +283,7 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
         "stop 16",
         "snapshot",
         "jobs",
+        "completed",
     ];
     assert_eq!(fake.done, suspend_then_stop);
     assert_eq!(fake.resets, [sid(1010), sid(1011)], "1012 wasn't running");
@@ -357,6 +380,7 @@ fn each_user_is_marked_when_first_found_before_its_processes_are_stopped() {
         "snapshot",
         "jobs",
         "cancel 0",
+        "completed",
     ];
     assert_eq!(fake.done, order);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
@@ -408,13 +432,20 @@ fn users_that_cant_be_marked_are_their_own_exit_after_the_stop() {
 }
 
 #[test]
-fn nothing_running_takes_no_lock_and_marks_no_one() {
+fn nothing_running_marks_no_one_and_takes_the_lock_only_to_record_the_completion() {
     let mut fake = Fake::new(&[1010]);
-    fake.marks = Marks::LockBusy;
     fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(fake.stopped(), Vec::<u32>::new());
+    assert_eq!(fake.done, ["snapshot", "jobs", "completed"]);
+    assert_eq!(fake.resets, Vec::<Sid>::new());
+    // With the lock held throughout, the completion can't be written: 49, not 0.
+    let mut fake = Fake::new(&[1010]);
+    fake.marks = Marks::LockBusy;
+    fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
+    assert_eq!(stop(&mut fake), StopExit::NotMarked);
     assert_eq!(fake.done, ["snapshot", "jobs"]);
+    assert_eq!(fake.completed, None);
 }
 
 #[test]
