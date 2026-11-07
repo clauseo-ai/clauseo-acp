@@ -31,11 +31,13 @@
 //!
 //! 1. the record read again under the lock, and who acts decided again from it;
 //! 2. `Removing = 1` written to the record (once; a re-run finds it set);
-//! 3. every process running as a pool SID stopped (D-B13), then the network filters and
-//!    firewall rules removed with the owner's read grant (S15 PR7, `wfp::remove`): no pool
-//!    process is left to run unfiltered;
+//! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
 //!    group, D-B11), its profile, its account with its sign-in screen value;
+//!    Then, only once every pool account is gone, the network filters, the owner's read grant
+//!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
+//!    process that won't stop, which must not run unfiltered while a user's removal fails. A
+//!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
@@ -96,6 +98,9 @@ pub struct RemoveReport {
     pub ledger: LedgerWork,
     /// Whether the group was deleted (`false`: it was gone already).
     pub group: bool,
+    /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
+    /// since the WFP filters (the enforcing layer) went (S15 PR7).
+    pub firewall: Option<String>,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -325,12 +330,12 @@ fn steps(
     machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
-    machine
-        .remove_network(&record.owner)
-        .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
+    report.firewall = machine
+        .remove_network(&record.owner)
+        .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     let program_data = machine
         .program_data()
         .map_err(|e| (RemoveStep::DeviceSync, cause_of(&e)))?;
