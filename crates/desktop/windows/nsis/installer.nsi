@@ -499,10 +499,15 @@ Function .onInit
   ; >>> clauseo: admin-section
   ; Clauseo's change to tauri-cli 2.12.2's template (decision 0035, "Stock installer pages"): the
   ; per-user installer's elevated instance (/CLAUSEO_ADMIN_SECTION) does its one job here and
-  ; quits, before any plug-in, page or section (crates/desktop/windows/admin_elevated.nsh). Without
-  ; the switch, or without hooks.nsh (builds other than the release), it does nothing.
+  ; quits, before any plug-in, page or section (crates/desktop/windows/admin_elevated.nsh). The
+  ; per-machine installer first makes its protected temporary folder, before its first plug-in
+  ; (safe_temp.nsh). Without the switch, or without hooks.nsh (builds other than the release),
+  ; the first does nothing; the second runs only in the per-machine installer.
   !ifmacrodef CLAUSEO_ELEVATED_BRANCH
     !insertmacro CLAUSEO_ELEVATED_BRANCH
+  !endif
+  !ifmacrodef CLAUSEO_MACHINE_START
+    !insertmacro CLAUSEO_MACHINE_START
   !endif
   ; <<< clauseo: admin-section
   ${GetOptions} $CMDLINE "/P" $PassiveMode

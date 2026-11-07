@@ -57,9 +57,12 @@ What a silent (`/S`) install can return:
 |---|---|
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but Safe workspace's set-up failed, or hadn't finished after 10 minutes |
+| 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
+| 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
 
 A 23 after a 10-minute wait means the set-up may still be running; the Safe workspace section of
-Clauseo's Settings shows whether it finished.
+Clauseo's Settings shows whether it finished. A `/S` run as SYSTEM (Intune) runs in session 0,
+which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
 
 What an interactive install can also return:
 
@@ -68,7 +71,12 @@ What an interactive install can also return:
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
 An interactive per-machine install never sets 23: it shows a box when setting up failed, and a
-line in its details list when it was still running.
+line in its details list when it was still running. It shows a box with 24 and 25 too.
+
+The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
+plug-ins included, in a new folder under `C:\Program Files\Clauseo\installer-temp`, which only
+Administrators and SYSTEM can open, and delete it when they finish. The empty `installer-temp`
+folder stays.
 
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.

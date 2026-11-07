@@ -8,6 +8,7 @@ mod admin_copy_ask;
 mod admin_copy_contract;
 mod admin_copy_hook;
 mod make;
+mod safe_temp;
 mod sandbox_link;
 mod set_aside;
 mod sources;

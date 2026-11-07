@@ -198,7 +198,7 @@ fn english_file() -> String {
 }
 
 #[test]
-fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_19_once_each() {
+fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_20_once_each() {
     // Tauri's 27, the six lines windows/hooks.nsh shows after the app deletes its data or about
     // S15's removal (deleteAppDataFailed, deleteAppDataKept, deleteAppDataKeptFailed,
     // deleteAppDataFailedUnnamed, removeStillRunning and removeSkippedSilent), which tests there
@@ -206,13 +206,14 @@ fn the_installer_english_file_holds_tauris_27_messages_and_clauseos_19_once_each
     // policyFolderFailed), and its eleven about the admin copy (adminCopyAsk, adminCopyWorking,
     // adminCopyDone, adminCopyDeclined, adminCopyFailed, adminCopyOtherAccount,
     // adminCopyMachineFailed, adminCopyNewerKept, adminCopyAppRunning, adminCopyStillRunning and
-    // adminCopySkippedSilent).
+    // adminCopySkippedSilent), and the per-machine installer's one about its temporary folder
+    // (installTempFailed).
     let strings = lang_strings(&english_file());
-    assert_eq!(strings.len(), 46);
+    assert_eq!(strings.len(), 47);
     let mut keys: Vec<&str> = strings.iter().map(|(key, _)| key.as_str()).collect();
     keys.sort_unstable();
     keys.dedup();
-    assert_eq!(keys.len(), 46);
+    assert_eq!(keys.len(), 47);
     assert!(
         strings
             .iter()
