@@ -1,10 +1,10 @@
 //! The outer runner's start of the inner runner, in `start.rs`'s order: the logon, the token
-//! user's check, the job, the job handle given to the inner, the shut, the resume.
+//! user's check, the job, the shut, the resume. The inner gets no handle to the job.
 
 use zeroize::Zeroizing;
 
 use super::super::RunExit;
-use super::super::spawn::{Process, assign, give_job, log_on, resume};
+use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
 use super::{Failure, logon_failure, os};
 use crate::windows::acl::object::Handle;
@@ -24,8 +24,6 @@ pub(super) struct Start<'a> {
     pub(super) base: &'a str,
     pub(super) cwd: &'a str,
     pub(super) job: &'a Handle,
-    /// The job handle's value in the inner, once given.
-    pub(super) given: Option<u64>,
 }
 
 impl Steps for Start<'_> {
@@ -58,15 +56,8 @@ impl Steps for Start<'_> {
     }
 
     fn assign(&mut self, inner: &Process) -> Result<(), Failure> {
-        assign(self.job, inner)
+        assign(self.job, inner.handle.0)
             .map_err(|e| Failure::new(RunExit::Job, os("AssignProcessToJobObject", &e)))
-    }
-
-    fn give_job(&mut self, inner: &Process) -> Result<(), Failure> {
-        let value = give_job(self.job, inner)
-            .map_err(|e| Failure::new(RunExit::Job, os("DuplicateHandle", &e)))?;
-        self.given = Some(value);
-        Ok(())
     }
 
     /// Shuts the inner runner's process and first thread to its agent (the same pool user)

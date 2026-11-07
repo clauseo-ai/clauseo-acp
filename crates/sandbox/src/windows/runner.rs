@@ -30,7 +30,7 @@
 //!   which alone can see them all (`WTSEnumerateProcessesW` lists another user's processes only
 //!   to Administrators): the inner runner's first act once resumed, before it reads the launch,
 //!   then every [`TICK`](sweep::TICK) while the agent runs and once more when it exited
-//!   (`inner_flow.rs`); the outer gives the inner a query-only handle to the job for that. The
+//!   (`inner_flow.rs`); the inner reads its own job's pid list for that, with no handle. The
 //!   first act also removes the pool user's per-user COM classes, `Run`/`RunOnce` values and
 //!   Startup entries, with no COM; the end sweeper removes those and then, over COM, its scheduled
 //!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
@@ -539,6 +539,9 @@ fn is_batch(program: &str) -> bool {
     extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
+#[cfg(test)]
+#[cfg(windows)]
+mod job_tests;
 #[cfg(test)]
 #[cfg(windows)]
 mod ntfs_tests;

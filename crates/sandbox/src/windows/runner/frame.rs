@@ -37,10 +37,6 @@ pub struct InnerLaunch {
     pub folder_base: String,
     /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
     pub desktop: String,
-    /// The value, in the inner runner, of the handle to this launch's kill-on-close job the
-    /// outer duplicated into it before resuming it (`JOB_OBJECT_QUERY` alone): the job whose
-    /// processes the inner's tick and end sweeps keep.
-    pub job: u64,
 }
 
 impl std::fmt::Debug for InnerLaunch {

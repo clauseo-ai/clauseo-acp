@@ -13,7 +13,8 @@
 //!    never starts. The backstop for an end sweeper that never ran. Its failure is logged;
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
-//!    once more when it exited ([`Point::End`]), both keeping the job's processes; a failure there
+//!    once more when it exited ([`Point::End`]), both keeping its own job's processes, which it
+//!    asks for by pid list with no handle to the job (`sweep.rs`); a failure there
 //!    is logged, and a tick's is tried again at the next. An escapee there is reported on `ctl`
 //!    ([`InnerReport::Escapee`]), which makes the outer exit [`RunExit::Escapee`]; the run goes
 //!    on.
@@ -33,13 +34,12 @@ pub(crate) type Failure = (RunExit, String);
 
 /// The inner's calls; Windows' are `inner.rs`'s.
 pub(crate) trait Inner {
-    /// The handle to the launch's job the outer gave this runner.
-    type Job;
     /// The running agent.
     type Agent;
-    /// Sweeps this user's processes at `point`, keeping this process and, with `job`, the job's;
-    /// each kill goes to [`Inner::log`].
-    fn sweep(&mut self, point: Point, job: Option<&Self::Job>) -> Result<(), SweepError>;
+    /// Sweeps this user's processes at `point`, keeping this process and, past the first act,
+    /// its job's; each kill goes to [`Inner::log`]. It is given nothing of the job: this runner
+    /// holds no handle to it.
+    fn sweep(&mut self, point: Point) -> Result<(), SweepError>;
     /// Removes the leftovers (`leftovers::remove_all`), logging their counts.
     fn clean(&mut self);
     /// A line for the outer: held until `ctl` is open, then sent on it.
@@ -49,8 +49,8 @@ pub(crate) trait Inner {
     fn tell(&mut self, report: InnerReport);
     /// Opens `ctl` and sends the lines held so far.
     fn connect(&mut self) -> Result<(), RunExit>;
-    /// Reads the launch and shuts this runner to the agent; the job handle it names.
-    fn read_launch(&mut self) -> Result<Self::Job, Failure>;
+    /// Reads the launch and shuts this runner to the agent.
+    fn read_launch(&mut self) -> Result<(), Failure>;
     /// Makes the agent's token and folders and starts it.
     fn start(&mut self) -> Result<Self::Agent, Failure>;
     /// The agent's pid.
@@ -66,7 +66,7 @@ pub(crate) trait Inner {
 /// The inner runner's run after its token is shut; its exit code: the agent's, or a
 /// [`RunExit`] code.
 pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
-    let swept = inner.sweep(Point::Start, None);
+    let swept = inner.sweep(Point::Start);
     match &swept {
         Ok(()) => inner.clean(),
         Err(error) => escaped(inner, Point::Start, error),
@@ -79,10 +79,9 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
     if let Err(error) = swept {
         return failed(inner, (start_exit(&error), at(Point::Start, &error)));
     }
-    let job = match inner.read_launch() {
-        Ok(job) => job,
-        Err(failure) => return failed(inner, failure),
-    };
+    if let Err(failure) = inner.read_launch() {
+        return failed(inner, failure);
+    }
     let agent = match inner.start() {
         Ok(agent) => agent,
         Err(failure) => return failed(inner, failure),
@@ -95,12 +94,12 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
         if let Some(code) = inner.wait(&agent, TICK) {
             break code;
         }
-        if let Err(error) = inner.sweep(Point::Tick, Some(&job)) {
+        if let Err(error) = inner.sweep(Point::Tick) {
             inner.log(&format!("clauseo-sandbox-run: {}", at(Point::Tick, &error)));
             escaped(inner, Point::Tick, &error);
         }
     };
-    if let Err(error) = inner.sweep(Point::End, Some(&job)) {
+    if let Err(error) = inner.sweep(Point::End) {
         inner.log(&format!("clauseo-sandbox-run: {}", at(Point::End, &error)));
         escaped(inner, Point::End, &error);
     }

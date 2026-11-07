@@ -1,6 +1,6 @@
 //! The inner runner's order through a recording fake: the first-act sweep and cleanup before the
-//! launch, the fail-closed sweep, the job kept by the later sweeps, the tick, and the escapee
-//! reports at each point.
+//! launch, the fail-closed sweep, the sweeps given no job handle, a job list that can't be read,
+//! the tick, and the escapee reports at each point.
 
 use super::*;
 
@@ -10,6 +10,8 @@ struct Record {
     done: Vec<String>,
     /// Sweeps at these points fail.
     fail_sweep: Vec<Point>,
+    /// Sweeps at these points can't read their job's pid list.
+    job_list_fails: Vec<Point>,
     /// Sweeps at these points find a process they can't end.
     escape_sweep: Vec<Point>,
     /// Reports told, and whether `ctl` was open when they were.
@@ -51,12 +53,14 @@ fn escapee_report(point: &str) -> InnerReport {
 }
 
 impl Inner for Record {
-    type Job = u64;
     type Agent = u32;
-    fn sweep(&mut self, point: Point, job: Option<&u64>) -> Result<(), SweepError> {
-        self.done.push(format!("sweep {point} job {job:?}"));
+    fn sweep(&mut self, point: Point) -> Result<(), SweepError> {
+        self.done.push(format!("sweep {point}"));
         if self.fail_sweep.contains(&point) {
             return Err(ERROR);
+        }
+        if self.job_list_fails.contains(&point) {
+            return Err(SweepError::JobList("6".to_owned()));
         }
         if self.escape_sweep.contains(&point) {
             return Err(escapee(point));
@@ -81,12 +85,12 @@ impl Inner for Record {
         self.open = true;
         Ok(())
     }
-    fn read_launch(&mut self) -> Result<u64, Failure> {
+    fn read_launch(&mut self) -> Result<(), Failure> {
         self.done.push("read launch".to_owned());
         if self.fail == Some("read") {
             return Err((RunExit::Pipe, "ctl read failed (109)".to_owned()));
         }
-        Ok(0x1a4)
+        Ok(())
     }
     fn start(&mut self) -> Result<u32, Failure> {
         self.done.push("start agent".to_owned());
@@ -125,18 +129,18 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
     assert_eq!(
         record.done,
         [
-            "sweep before launch job None",
+            "sweep before launch",
             "clean",
             "connect",
             "read launch",
             "start agent",
             "report Started { pid: 77 }",
             "wait 30s",
-            "sweep mid-session job Some(420)",
+            "sweep mid-session",
             "wait 30s",
-            "sweep mid-session job Some(420)",
+            "sweep mid-session",
             "wait 30s",
-            "sweep session end job Some(420)",
+            "sweep session end",
             "report Exited { code: 3 }",
         ]
     );
@@ -156,7 +160,7 @@ fn a_failed_first_act_sweep_exits_sweep_and_starts_no_agent() {
     assert_eq!(
         record.done,
         [
-            "sweep before launch job None".to_owned(),
+            "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(
                 "report Failed {{ exit: {}, what: {what:?} }}",
@@ -247,7 +251,7 @@ fn an_escapee_at_the_first_act_is_reported_before_ctl_opens_and_exits_escapee() 
     assert_eq!(
         record.done,
         [
-            "sweep before launch job None".to_owned(),
+            "sweep before launch".to_owned(),
             "connect".to_owned(),
             format!(
                 "report Failed {{ exit: {}, what: {what:?} }}",
@@ -299,4 +303,39 @@ fn an_escapee_at_a_tick_or_the_end_is_reported_on_ctl_and_the_run_goes_on() {
     };
     assert_eq!(run(&mut record), 3);
     assert_eq!(record.told, Vec::new());
+}
+
+#[test]
+fn a_job_list_that_cant_be_read_fails_the_first_act_closed_and_a_tick_tries_again() {
+    // The first act: Sweep, no agent, and no escapee told.
+    let mut record = Record {
+        job_list_fails: vec![Point::Start],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Sweep.code());
+    let what = "sweep (before launch): the job's process list failed (6)";
+    assert_eq!(
+        record.done.last().unwrap(),
+        &format!(
+            "report Failed {{ exit: {}, what: {what:?} }}",
+            RunExit::Sweep.code()
+        )
+    );
+    assert!(!record.done.iter().any(|step| step == "start agent"));
+    assert_eq!(record.told, Vec::new());
+    // A tick: logged, tried again at the next, and the run goes on.
+    let mut record = Record {
+        waits_left: 2,
+        job_list_fails: vec![Point::Tick],
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), 3);
+    let failed: Vec<&str> = record
+        .lines
+        .iter()
+        .map(|(line, _)| line.as_str())
+        .filter(|line| line.contains("the job's process list failed (6)"))
+        .collect();
+    assert_eq!(failed.len(), 2, "{failed:?}");
+    assert_eq!(record.done.last().unwrap(), "report Exited { code: 3 }");
 }
