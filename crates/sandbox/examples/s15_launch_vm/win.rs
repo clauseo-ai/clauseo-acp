@@ -1,5 +1,6 @@
 //! The Win32 calls the harness and its probes make: the token's parts, `OpenProcess`, `CreateFileW`
-//! on a pipe or a file, the pipe listing, an account's name, a file's owner, and a wait for a pid
+//! on a pipe or a file, the pipe listing, an account's name, a file's or a process's owner, and a
+//! wait for a pid
 //! to end. Each gives a plain value or the Win32 error code, never a panic.
 #![expect(
     unsafe_code,
@@ -14,7 +15,8 @@ use windows::Win32::Foundation::{
     WAIT_OBJECT_0,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSidToSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+    ConvertSidToStringSidW, ConvertStringSidToSidW, GetNamedSecurityInfoW, GetSecurityInfo,
+    SE_FILE_OBJECT, SE_KERNEL_OBJECT,
 };
 use windows::Win32::Security::{
     GetTokenInformation, LookupAccountSidW, LookupPrivilegeNameW, OWNER_SECURITY_INFORMATION,
@@ -24,7 +26,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, FindClose,
-    FindFirstFileW, FindNextFileW, OPEN_EXISTING, WIN32_FIND_DATAW,
+    FindFirstFileW, FindNextFileW, OPEN_EXISTING, READ_CONTROL, WIN32_FIND_DATAW,
 };
 use windows::Win32::System::JobObjects::{
     JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
@@ -367,6 +369,40 @@ pub(crate) fn file_owner(path: &str) -> io::Result<String> {
     }
     let text = sid_text(owner);
     // SAFETY: allocated by GetNamedSecurityInfoW with LocalAlloc, freed once.
+    unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    text
+}
+
+/// The owner SID of the process `pid`, opened with `PROCESS_QUERY_LIMITED_INFORMATION` and
+/// `READ_CONTROL` (`GetSecurityInfo`); the Win32 code when it can't be read.
+pub(crate) fn process_owner(pid: u32) -> Result<String, u32> {
+    let access = PROCESS_ACCESS_RIGHTS(PROCESS_QUERY_LIMITED_INFORMATION.0 | READ_CONTROL.0);
+    // SAFETY: plain call; the handle is closed by `Owned`.
+    let handle = match unsafe { OpenProcess(access, false, pid) } {
+        Ok(handle) => Owned(handle),
+        Err(error) => return Err(code_of(&error)),
+    };
+    let mut owner = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: the handle is open with READ_CONTROL; both out-pointers are live; `owner` points
+    // into the descriptor, freed after the owner is read.
+    let code = unsafe {
+        GetSecurityInfo(
+            handle.0,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&raw mut owner),
+            None,
+            None,
+            None,
+            Some(&raw mut descriptor),
+        )
+    };
+    if code.0 != 0 {
+        return Err(code.0);
+    }
+    let text = sid_text(owner).map_err(|e| e.raw_os_error().map_or(0, i32::cast_unsigned));
+    // SAFETY: allocated by GetSecurityInfo with LocalAlloc, freed once.
     unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
     text
 }

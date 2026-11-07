@@ -65,6 +65,18 @@ Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-c
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
 process it started.
 
+`job` (`checks::job`, owner rule in `token_verdict::owners`): A's agent runs `probe spawn-child`
+(it starts `probe wait` as its child). While both run, the harness, elevated with
+`SeDebugPrivilege` enabled when it can be, opens the inner runner (the agent's parent pid), the
+agent and the child with `PROCESS_QUERY_LIMITED_INFORMATION | READ_CONTROL` and reads each
+owner SID with `GetSecurityInfo(OWNER_SECURITY_INFORMATION)`: `--stop` knows a pool user's
+process by its owner and kills no process another SID owns, so all three must be owned by A's
+pool SID. The outer runner's owner (the desktop user's) is read the same way and noted as
+information. Then it kills the outer and waits up to 10 s for the agent and the child to end.
+FAIL names each of the three whose owner isn't the pool SID (with that owner) or couldn't be
+read (with the code), or a process still running 10 s after the kill; PASS otherwise, carrying
+the outer's owner.
+
 A row's agent keeps its stdin open until it has ended by itself (`Running::finish`): the host
 closes stdin only to end a session, and the runner ends the job 1 s after that. Only the agents
 that end at their stdin's end have it closed (`Running::end`: `probe hold`, and `stdio`'s `probe

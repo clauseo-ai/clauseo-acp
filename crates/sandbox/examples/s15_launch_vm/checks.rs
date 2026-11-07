@@ -13,6 +13,7 @@ use super::checks_ctl::Live;
 use super::checks_ui::{atom_info, ui_limits, with_atom};
 use super::launch::{Finished, Running, Spec, deadline, describe, launch, pool_of, summary, text};
 use super::manifest::Manifest;
+use super::pool_verdict::Verdict;
 use super::rows::Ctx;
 use super::sys::now;
 use super::win;
@@ -323,13 +324,19 @@ pub(crate) fn pipes_as(ctx: &Ctx<'_>, which: &str) -> Result<String, String> {
     ))
 }
 
-/// Row 5: killing the outer ends the agent and its child.
+/// Row 5: the inner runner, the agent and its child are owned by A's pool SID, and killing the
+/// outer ends the agent and its child.
 pub(crate) fn job(ctx: &Ctx<'_>) -> Result<String, String> {
+    let pool = pool_of(ctx.manifest, "A")?;
     let (mut a, pid) = started(ctx, "A", &["spawn-child"])?;
     let child = a
         .line_after("child ", deadline(ctx.limit))
         .and_then(|c| c.trim().parse::<u32>().ok())
         .ok_or_else(|| format!("no child pid: {:?} {:?}", a.stdout, a.stderr))?;
+    let owned = owner_lines(pid, child, a.pid());
+    for line in &owned {
+        ctx.note(&format!("harness: {line}"));
+    }
     ctx.note(&format!(
         "agent {pid}, its child {child}; ending the outer runner {}",
         a.pid()
@@ -349,10 +356,48 @@ pub(crate) fn job(ctx: &Ctx<'_>) -> Result<String, String> {
             Err(code) => return Err(format!("OpenProcess(SYNCHRONIZE) on {p} gave {code}")),
         }
     }
+    let owners = match super::token_verdict::owners(&pool.sid, &owned) {
+        Verdict::Fail(why) => return Err(why),
+        Verdict::Pass(note) | Verdict::Info(note) => note,
+    };
     Ok(format!(
-        "killing the outer ended the tree: {}",
+        "{owners}; killing the outer ended the tree: {}",
         gone.join(", ")
     ))
+}
+
+/// The owner SID of the inner runner (the agent's parent), the agent, its child and the outer,
+/// each opened with `PROCESS_QUERY_LIMITED_INFORMATION | READ_CONTROL` by the elevated harness
+/// (`win::process_owner`, `SeDebugPrivilege` enabled when it can be): `owner <role> <pid>
+/// <sid>`, `owner <role> <pid> error <code>`, or `owner inner none` when the agent's parent
+/// isn't in the snapshot.
+fn owner_lines(agent: u32, child: u32, outer: u32) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Err(why) = super::win_pool::enable_debug_privilege() {
+        lines.push(format!("owner-note SeDebugPrivilege not enabled: {why}"));
+    }
+    let inner = super::win_thread::processes().ok().and_then(|all| {
+        all.iter()
+            .find(|p| p.pid == agent)
+            .map(|p| p.parent)
+            .filter(|parent| *parent != 0 && *parent != outer)
+    });
+    if inner.is_none() {
+        lines.push("owner inner none".to_owned());
+    }
+    let roles = [
+        ("inner", inner),
+        ("agent", Some(agent)),
+        ("child", Some(child)),
+    ];
+    for (role, pid) in roles.into_iter().chain([("outer", Some(outer))]) {
+        let Some(pid) = pid else { continue };
+        lines.push(match win::process_owner(pid) {
+            Ok(sid) => format!("owner {role} {pid} {sid}"),
+            Err(code) => format!("owner {role} {pid} error {code}"),
+        });
+    }
+    lines
 }
 
 /// Row 6: stdin lines come back, and closing stdin ends the agent with 0.
