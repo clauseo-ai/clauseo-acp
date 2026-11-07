@@ -196,6 +196,8 @@ pub(crate) struct Setup {
     pub(crate) env: Option<Env>,
     /// For `Upstream::System`: the OS lookup (direct when `None`).
     pub(crate) os: Option<Box<OsRoute>>,
+    /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
+    pub(crate) browser: bool,
 }
 
 impl Default for Setup {
@@ -207,6 +209,7 @@ impl Default for Setup {
             limits: Limits::default(),
             env: None,
             os: None,
+            browser: true,
         }
     }
 }
@@ -254,6 +257,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
             kept.kept.lock().unwrap().push(exchange.clone());
             kept.added.notify_all();
         })),
+        browser: setup.browser,
     };
     let options = Options {
         clock: Arc::clone(&clock) as Arc<dyn Clock>,
@@ -311,7 +315,7 @@ impl Rig {
     }
 
     pub(crate) fn browser(&self) -> TcpStream {
-        client(self.handle.browser_port())
+        client(self.handle.browser_port().expect("a browser listener"))
     }
 
     /// Sends a CONNECT with the token on the agent listener; the stream and the status.

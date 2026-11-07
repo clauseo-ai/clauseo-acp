@@ -112,6 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         upstream: args.upstream.map_or(Upstream::System, Upstream::Fixed),
         denials: Arc::new(StderrSink),
         record: Some(Arc::new(record)),
+        browser: true,
     };
     let handle = start_proxy(config)?;
     let token = handle
