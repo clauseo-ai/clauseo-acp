@@ -234,6 +234,29 @@ stale install folders runs only with the lock held, and is skipped without it. T
 and the bundle must be absolute paths; a relative one fails the install with a line naming the
 setting, and start-up neither cleans nor reads anything under a relative data folder.
 
+**When an install starts: only at first use.** Nothing downloads until the lawyer chooses an
+agent or signs in to it. There is no first-run install: a fresh computer, with nothing installed
+and nothing managed, shows each agent's card with its size (`Missing { download_bytes }`) and
+fetches nothing. Desktop starts an install from three presses only, and nothing else calls
+`Agents::install` or `Agents::retry`:
+1. `InstallAgent`, the lawyer choosing a card. It asks no confirm: the card showed the size.
+2. `RetryAgentInstall` on a failed, waiting or paused install.
+3. A sign-in (`StartSignIn`, `UseDeviceCode`, `UseDifferentAccount`) on an agent not installed.
+   It starts or joins the install and is kept as a pending press (the agent, the method and
+   Claude's console flag), shown `Queued`; the command answers `Done`. At the install's
+   `Ready` it runs through the same gate and checks as a direct press, checked then, so a key,
+   an endpoint or a policy set meanwhile refuses it as usual. `Waiting` keeps it; `Failed`,
+   `Paused` or `Managed` drops it (a fresh press is needed), as does `CancelSignIn`, which
+   leaves the install running, and a key or an endpoint taking over. A second press replaces
+   the first. It is memory only: nothing of it outlives a quit. S18's own queue (a sign-in
+   waits `Queued` until the install is `Ready`) still serves the sign-in host's wait; desktop
+   hands S18 no sign-in for an agent not installed, since S18 would keep it through a failure
+   and run it with no new check.
+
+A policy that pre-selects or requires agents, a policy reload, a settings change, a managed
+agent and an update start no install either: the agent waits for first use. A firm's bundle or
+mirror install works as before, from the same first use.
+
 **Firm IT mode.**
 1. An id in `managed` (policy sets `agents.<id>`) is IT's runtime. Nothing is installed for it
    and it reports `Managed`.
@@ -290,7 +313,7 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    the password of every proxy variable in a run's environment, as written and percent-decoded, a
    URL with no scheme included, as `[redacted]`. The log names the source (`policy`, `setting`,
    `env`, `os` or `none`) with each proxy's scheme, host and port only. An install, retry or
-   sign-in pressed before the OS's first answer lands, and first run's install, waits for it (at
+   sign-in pressed before the OS's first answer lands waits for it (at
    most until 5 s after the setup's start), so its first try never goes direct, and the start's
    `agent.keys_loading` launch refusal stays until then too, so no agent launched at start goes
    direct. Known limits, until the sandbox's local forwarder (S16) carries the agents' own traffic:
@@ -330,6 +353,11 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
   lock's `integrity` lets `npm ci --offline` read the checked tarballs in place with the same
   integrity check, proved by an install test that swaps a tarball after the download's check and
   sees `EINTEGRITY`.
+
+- 2026-11-07: no install before first use. The first-run install of Claude (desktop's pump,
+  once every agent had its first state with none installed or managed) is gone, and so is
+  `InstallAgent`'s native confirm; a sign-in pressed before the install starts it and waits
+  for its `Ready` (see "When an install starts").
 
 ## Status
 
