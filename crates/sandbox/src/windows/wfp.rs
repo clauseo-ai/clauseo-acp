@@ -1,5 +1,7 @@
-//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 46100-46199 (`ports::TIER_B_PORTS`), where its
-//! launch's egress proxy and listed ports are, and nothing else.
+//! Tier B's network (S15 PR7): a pool user's agent reaches `127.0.0.1` on 46100-46199
+//! (`ports::TIER_B_PORTS`), where its launch's egress proxy and listed ports are, and nothing
+//! else. Set-up and each launch check the machine's dynamic and excluded port ranges against
+//! it, and each launch the listeners in it ([`check_ports`]).
 //!
 //! - **Set-up** (elevated, the setup exe's network step, [`install`]): Clauseo's WFP provider and
 //!   sublayer; block filters that catch every token holding a pool user's or the pool group's
