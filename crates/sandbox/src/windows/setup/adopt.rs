@@ -11,6 +11,10 @@
 //! 3. per user, the lawyer: `--owner-sid`, as the unelevated installer named it, must be that
 //!    process's token user, found one hop past D-B2's parent (`owner/installer.rs`), else
 //!    `Failed`; the elevated account's own user and profile are never used;
+//! 3. the set-up lock (`setup::lock`, the named mutex the set-up, `--remove` and the refresh
+//!    take), tried without waiting, else [`SetupExit::LockHeld`]; held from here through step 7,
+//!    so a refresh never swaps the copy between its hash and the record's write, and given back
+//!    before step 8, whose set-up takes it again;
 //! 3. one owner, of one kind (D5): per user, a pool owned by another SID (`OwnerSid`) or an
 //!    admin copy another install placed (`AdminCopyOwner`: another SID, or `machine`); per
 //!    machine, an admin copy a per-user install placed. Either is [`SetupExit::OtherOwner`] with
@@ -90,6 +94,10 @@ pub trait Adopter {
     fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), String>;
     /// The SHA-256 of `exe`, 64 lowercase hex digits; a reparse point refused.
     fn sha256(&mut self, exe: &Path) -> Result<String, String>;
+    /// Tries the set-up lock without waiting: `Ok(false)` while another holds it.
+    fn lock(&mut self) -> Result<bool, String>;
+    /// Gives the set-up lock back.
+    fn unlock(&mut self);
     /// Writes the record's admin-copy values.
     fn write_values(&mut self, values: &AdminValues) -> Result<(), String>;
     /// Registers (or updates) the SYSTEM refresh task `\Clauseo\SandboxRefresh` for the record
@@ -142,21 +150,45 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
     {
         return failed("the lawyer can't be confirmed", &error);
     }
-    if let Err(exit) = check_records(machine, &owner) {
+    match machine.lock() {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::error!("--adopt: a set-up, removal or refresh holds the set-up lock");
+            return SetupExit::LockHeld;
+        }
+        Err(error) => return failed("the set-up lock can't be taken", &error),
+    }
+    let placed = place(machine, install_dir, target, &program_files, &exe, owner);
+    machine.unlock();
+    if let Err(exit) = placed {
         return exit;
     }
+    match target {
+        Target::User { data_dir, .. } => machine.set_up(data_dir),
+        Target::Machine => SetupExit::Done,
+    }
+}
+
+/// Steps 3 (the records) to 7, with the set-up lock held.
+fn place(
+    machine: &mut dyn Adopter,
+    install_dir: &Path,
+    target: &Target,
+    program_files: &Path,
+    exe: &Path,
+    owner: CopyOwner,
+) -> Result<(), SetupExit> {
+    check_records(machine, &owner)?;
     let allowed = match target {
         Target::User {
             owner_sid,
             data_dir,
-        } => match user_profile(machine, owner_sid) {
-            Ok(profile) => {
-                inside(install_dir, &profile)
-                    && inside(data_dir, &profile)
-                    && machine.found(install_dir) == Found::Folder
-            }
-            Err(exit) => return exit,
-        },
+        } => {
+            let profile = user_profile(machine, owner_sid)?;
+            inside(install_dir, &profile)
+                && inside(data_dir, &profile)
+                && machine.found(install_dir) == Found::Folder
+        }
         Target::Machine => {
             machine.found(install_dir) == Found::Folder
                 && machine
@@ -166,24 +198,24 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
     };
     if !allowed {
         tracing::error!(
-            per_machine,
+            per_machine = *target == Target::Machine,
             "--adopt's folders aren't the lawyer's (or an administrators-only install folder)"
         );
-        return SetupExit::Usage;
+        return Err(SetupExit::Usage);
     }
-    let dir = admin_copy::admin_dir(&program_files);
-    if let Err(error) = machine.lock_down(&dir, &exe) {
-        return failed("the admin folder couldn't be locked down", &error);
+    let dir = admin_copy::admin_dir(program_files);
+    if let Err(error) = machine.lock_down(&dir, exe) {
+        return Err(failed("the admin folder couldn't be locked down", &error));
     }
-    let sha256 = match machine.sha256(&exe) {
+    let sha256 = match machine.sha256(exe) {
         Ok(sha256) if admin_copy::is_sha256_hex(&sha256) => sha256,
-        Ok(_) => return failed("the admin copy's hash", "not a SHA-256"),
-        Err(error) => return failed("the admin copy can't be hashed", &error),
+        Ok(_) => return Err(failed("the admin copy's hash", "not a SHA-256")),
+        Err(error) => return Err(failed("the admin copy can't be hashed", &error)),
     };
     if let Target::User { owner_sid, .. } = target
         && let Err(error) = machine.register_refresh_task(owner_sid)
     {
-        return failed("the refresh task couldn't be registered", &error);
+        return Err(failed("the refresh task couldn't be registered", &error));
     }
     let values = AdminValues {
         sha256,
@@ -192,12 +224,12 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         owner,
     };
     if let Err(error) = machine.write_values(&values) {
-        return failed("the record's admin-copy values couldn't be written", &error);
+        return Err(failed(
+            "the record's admin-copy values couldn't be written",
+            &error,
+        ));
     }
-    match target {
-        Target::User { data_dir, .. } => machine.set_up(data_dir),
-        Target::Machine => SetupExit::Done,
-    }
+    Ok(())
 }
 
 /// Logs `what` and `error`, and gives [`SetupExit::Failed`].

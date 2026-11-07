@@ -30,6 +30,10 @@ struct Fake {
     changes: Vec<String>,
     /// The `AdminCopySha256` the record holds, as `write_values` leaves it.
     recorded: Option<String>,
+    /// Another holds the set-up lock.
+    lock_busy: bool,
+    /// `--adopt` holds the set-up lock now.
+    held: bool,
     /// The refresh task's registration fails.
     task_fails: bool,
     set_up_exit: SetupExit,
@@ -58,6 +62,8 @@ impl Fake {
             security: locked_dacl(true),
             changes: Vec::new(),
             recorded: None,
+            lock_busy: false,
+            held: false,
             task_fails: false,
             set_up_exit: SetupExit::Done,
         }
@@ -122,18 +128,34 @@ impl Adopter for Fake {
         Ok(self.security.clone())
     }
 
+    fn lock(&mut self) -> Result<bool, String> {
+        assert!(!self.held, "taken once");
+        self.held = !self.lock_busy;
+        Ok(self.held)
+    }
+
+    fn unlock(&mut self) {
+        self.held = false;
+    }
+
     fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), String> {
+        assert!(
+            self.held,
+            "the admin folder changes only under the set-up lock"
+        );
         assert!(same_path(exe, Path::new(ADMIN_EXE)), "{}", exe.display());
         self.changes.push(format!("lock {}", dir.display()));
         Ok(())
     }
 
     fn sha256(&mut self, exe: &Path) -> Result<String, String> {
+        assert!(self.held, "hashed under the set-up lock");
         assert!(same_path(exe, Path::new(ADMIN_EXE)), "{}", exe.display());
         Ok(HASH.to_owned())
     }
 
     fn write_values(&mut self, values: &AdminValues) -> Result<(), String> {
+        assert!(self.held, "written under the lock the hash was read under");
         self.changes.push(format!(
             "record {} {} {} {}",
             values.sha256,
@@ -154,6 +176,7 @@ impl Adopter for Fake {
     }
 
     fn set_up(&mut self, data_dir: &Path) -> SetupExit {
+        assert!(!self.held, "given back before the set-up takes it");
         self.changes.push(format!("set-up {}", data_dir.display()));
         self.set_up_exit
     }
@@ -473,4 +496,34 @@ fn a_newer_recorded_copy_is_left_as_it_is() {
             SetupExit::Done
         );
     }
+}
+
+#[test]
+fn the_set_up_lock_spans_the_hash_and_the_record_and_a_held_one_changes_nothing() {
+    // The fake asserts the lock is held at lock_down, sha256 and write_values, and given back
+    // before set_up.
+    for target in [user(), Target::Machine] {
+        let install = if target == Target::Machine {
+            MACHINE
+        } else {
+            INSTALL
+        };
+        let mut fake = Fake::new();
+        assert_eq!(
+            adopt(&mut fake, Path::new(install), &target),
+            SetupExit::Done
+        );
+        assert!(!fake.held);
+        let mut fake = Fake::new();
+        fake.lock_busy = true;
+        refused(&mut fake, install, &target, SetupExit::LockHeld, "busy");
+    }
+    // A refusal under the lock gives it back too.
+    let mut fake = Fake::new();
+    fake.task_fails = true;
+    assert_eq!(
+        adopt(&mut fake, Path::new(INSTALL), &user()),
+        SetupExit::Failed
+    );
+    assert!(!fake.held);
 }

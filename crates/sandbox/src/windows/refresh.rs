@@ -7,7 +7,10 @@
 //! through [`Refresher`], which `windows_refresher.rs` implements and the tests fake. It:
 //!
 //! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path;
-//! 2. refuses a build whose updater key is the placeholder, before reading anything;
+//! 2. refuses a build whose updater key is the placeholder, before reading anything; then tries
+//!    the set-up lock (`setup::lock`'s named mutex, which `--adopt`, the set-up and `--remove`
+//!    take) without waiting and holds it to the end of the run, so `--adopt` never hashes or
+//!    records the copy while a refresh reads the record or swaps the copy; held, it exits 44;
 //! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `AdminCopyOwner`, `UserInstallDir`
 //!    (a plain local path, which must lie inside the owner's profile as `ProfileList` names it,
 //!    a temporary profile counting as none; for a `machine` owner, a folder only SYSTEM,
@@ -162,6 +165,9 @@ pub enum RefreshExit {
     WrongMachine,
     /// 43: the admin folder couldn't be held for the renames (someone holds it); nothing moved.
     FolderBusy,
+    /// 44: the set-up lock is held (an `--adopt`, set-up or removal is running), or can't be
+    /// taken; nothing was read or changed.
+    LockHeld,
 }
 
 impl RefreshExit {
@@ -181,6 +187,7 @@ impl RefreshExit {
             RefreshExit::OutsideProfile => 41,
             RefreshExit::WrongMachine => 42,
             RefreshExit::FolderBusy => 43,
+            RefreshExit::LockHeld => 44,
         }
     }
 }
@@ -260,6 +267,11 @@ pub trait Refresher {
     fn current_exe(&mut self) -> Result<PathBuf, Failed>;
     /// The admin copy's path: `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe`.
     fn admin_copy(&mut self) -> Result<PathBuf, Failed>;
+    /// Tries the set-up lock without waiting and keeps it until [`Refresher::unlock`]:
+    /// `Ok(false)` while another holds it.
+    fn lock(&mut self) -> Result<bool, Failed>;
+    /// Gives the set-up lock back, if held.
+    fn unlock(&mut self);
     /// The record's values; a missing key or value is `None`.
     fn record(&mut self) -> Result<RefreshRecord, Failed>;
     /// `owner`'s profile folder (`ProfileList`'s `ProfileImagePath`); `None` when it has none.
@@ -335,6 +347,19 @@ fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refus
             SignatureError::PlaceholderKey.to_string(),
         ));
     }
+    let busy = |why: String| (RefreshExit::LockHeld, why);
+    if !fs.lock().map_err(busy)? {
+        return Err(busy(
+            "a set-up, removal or --adopt holds the set-up lock".to_owned(),
+        ));
+    }
+    let locked = locked_steps(fs, trust);
+    fs.unlock();
+    locked
+}
+
+/// Steps 3 to 9, with the set-up lock held.
+fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
     let record = fs.record().map_err(|why| (RefreshExit::NoRecord, why))?;
     let checked = checked(fs, record)?;
     if let Err(why) = fs.clear_leftovers() {
