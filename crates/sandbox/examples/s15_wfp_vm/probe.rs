@@ -102,6 +102,7 @@ fn reach(exe: &std::path::Path, text: &str) -> Got {
             got(UdpSocket::bind("0.0.0.0:0").and_then(|s| s.send_to(b"s15", to)))
         }),
         "icmp" => derived::icmp(rest),
+        "anon" => derived::anonymous(rest),
         "resolve" => got((rest, 443).to_socket_addrs()),
         "proxy" => rest
             .split_once(':')

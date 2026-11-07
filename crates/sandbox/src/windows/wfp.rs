@@ -51,7 +51,7 @@ pub use check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, WfpError, check_setup, classify,
 };
 #[cfg(windows)]
-pub use grant_probe::{GrantProbe, probe_owner_grants};
+pub use grant_probe::{GrantProbe, foreign_test_filter, probe_owner_grants};
 #[cfg(windows)]
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
