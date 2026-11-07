@@ -491,7 +491,7 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         || super::found::is_reused(job)
         || home_shares_lawyers_login(job);
     if job.script().is_none() {
-        let gone = !reused && remove_own_login(job).await;
+        let gone = !reused && remove_own_login(job, &Cancel::new()).await;
         drop(files);
         return Some(if gone {
             SigninState::SignedOut { found: None }

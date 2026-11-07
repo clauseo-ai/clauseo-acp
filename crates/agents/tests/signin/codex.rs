@@ -389,6 +389,10 @@ fn paste_code_to_codex_is_refused() {
             method: Method::ClaudeAi,
         })
     );
+    // The grace is armed only by a login that started: one cancelled before it starts never runs.
+    eventually("the login started", || {
+        !fx.codex_runs(&["login"]).is_empty()
+    });
     agents.cancel_sign_in(&codex()).unwrap();
     fx.timer.fire(CANCEL_GRACE);
     assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));

@@ -10,8 +10,10 @@ use std::time::Duration;
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 
+use super::Ticket;
 use super::stop::{JobEnd, Stopped};
-use super::{Ticket, Worker};
+use super::switch::{self, Switch};
+use super::thread::Worker;
 use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
 use crate::signin::env::Vendor;
@@ -34,6 +36,8 @@ pub(crate) struct SigninHub {
     /// replaced either finished (and undid) its link before that job's guard looks, or sees it
     /// was replaced and links nothing; and no link is made while a replaced login still runs.
     codex_files: futures::lock::Mutex<()>,
+    /// Where Clauseo keeps each agent's `login-source` record.
+    data_dir: PathBuf,
 }
 
 /// An agent the snapshot has and Clauseo signs in to.
@@ -102,7 +106,21 @@ impl SigninHub {
             inner: Mutex::new(Inner::default()),
             events,
             codex_files: futures::lock::Mutex::new(()),
+            data_dir: config.data_dir.clone(),
         }
+    }
+
+    /// [`switch::replaces_own_login`] for `agent`.
+    pub(super) fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        self.agents.get(agent).is_some_and(|known| {
+            let home = known.home.as_deref();
+            switch::replaces_own_login(&self.data_dir, agent, known.vendor, home)
+        })
+    }
+
+    /// Refuses a Codex login over Clauseo's own login unless `switch` is the lawyer's yes.
+    fn guard_switch(&self, agent: &AgentId, switch: Switch) -> Result<(), SigninError> {
+        switch::guard(switch, self.replaces_own_login(agent), agent)
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -115,6 +133,7 @@ impl SigninHub {
         agent: &AgentId,
         method: Method,
         installed: Option<Installed>,
+        switch: Switch,
     ) -> Result<Option<SigninStart>, SigninError> {
         let vendor = self.vendor(agent)?;
         let fits = matches!(
@@ -128,6 +147,7 @@ impl SigninHub {
                 method,
             });
         }
+        self.guard_switch(agent, switch)?;
         self.reserve(agent, vendor, Task::SignIn(method), installed)
     }
 
@@ -158,6 +178,7 @@ impl SigninHub {
                 method: Method::Browser,
             });
         }
+        self.guard_switch(agent, Switch::Refuse)?;
         self.reserve(agent, vendor, Task::TryAgain, installed)
     }
 
@@ -200,11 +221,13 @@ impl SigninHub {
         &self,
         agent: &AgentId,
         installed: Option<Installed>,
+        switch: Switch,
     ) -> Result<Option<SigninStart>, SigninError> {
         let vendor = self.vendor(agent)?;
         if self.source(agent) == Some(Source::Reused) {
             return Err(SigninError::Reused(agent.clone()));
         }
+        self.guard_switch(agent, switch)?;
         self.reserve(agent, vendor, Task::UseDifferent, installed)
     }
 

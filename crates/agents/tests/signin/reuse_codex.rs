@@ -267,7 +267,12 @@ fn a_codex_login_logout_or_authenticate_is_refused_while_the_files_share_an_id()
         // R20's `authenticate` asks the public guard.
         assert!(codex_login_shared(&home(&fx), &fx.user_home()));
         let (agents, events) = start(&fx);
-        agents.sign_in(&codex(), Method::Browser).unwrap();
+        // Under `own` the switch guard refuses first; past it, the shared-file guard still holds.
+        let refused = Err(SigninError::OwnLoginPresent(codex()));
+        if own {
+            assert_eq!(agents.sign_in(&codex(), Method::Browser), refused);
+        }
+        agents.sign_in_switching(&codex(), Method::Browser).unwrap();
         assert_eq!(
             events.state(),
             SigninState::Failed {
