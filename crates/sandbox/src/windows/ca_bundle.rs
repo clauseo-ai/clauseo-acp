@@ -2,7 +2,8 @@
 //!
 //! Codex verifies TLS with rustls, which reads the Windows certificate store; under the restricted
 //! token it loads no roots from it. So the app exports the machine's roots once per start to
-//! `<data_dir>\sandbox-ca\roots.pem` ([`path`]) and the runner names that file.
+//! `<data_dir>\sandbox-ca\machine-<16 hex>.pem` ([`machine_name`], `Bundle::path`) and the
+//! runner names that file.
 //!
 //! - The export (Windows, `store.rs`): the `Root` and `Disallowed` stores, opened read-only, at
 //!   the local machine, its group policy and enterprise locations, and the current user and its
@@ -20,7 +21,10 @@
 //!   (`private_dir::create`, else repaired by `private_dir::protect`); the file written beside its
 //!   final name with its own descriptor ([`file_sddl`]: owned by the desktop user, full access for
 //!   it and `SYSTEM`, read for each pool user, no mandatory label, so a Low token may read it),
-//!   then renamed over it.
+//!   then renamed to it. The name hashes the bytes and the pool, so a new export never renames
+//!   over a file an agent holds open; a file already there with the same bytes is used as it
+//!   is, and one that can't be read or differs is passed over for a numbered name. Older
+//!   machine bundles are then removed, best-effort; one still open stays.
 //! - The cache (Windows, `ensure`): once per process, and again when the pool's SIDs change or the
 //!   file is gone.
 //!
@@ -41,16 +45,18 @@ mod merge;
 #[cfg(windows)]
 mod store;
 
-pub use merge::{Merged, merge, merged_name};
+pub use merge::{Merged, machine_name, merge, merged_name};
 #[cfg(windows)]
 pub use store::{Bundle, disallowed, ensure, ensure_with, write_merged};
 
 /// The bundle's folder in the data folder.
 pub const CA_DIR: &str = "sandbox-ca";
-/// The bundle's file name in [`CA_DIR`].
+/// The fixed bundle name earlier builds wrote in [`CA_DIR`]; each export now writes its own name
+/// ([`machine_name`]) and removes this one when it can.
 pub const CA_FILE: &str = "roots.pem";
 
-/// `<data_dir>\sandbox-ca\roots.pem`.
+/// `<data_dir>\sandbox-ca\roots.pem`, the fixed name of earlier builds. Not what a launch names:
+/// that is `Bundle::path`.
 pub fn path(data_dir: &Path) -> PathBuf {
     data_dir.join(CA_DIR).join(CA_FILE)
 }

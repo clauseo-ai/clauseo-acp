@@ -14,8 +14,9 @@
 //!   and passed down.
 //! - **One instance each**, made with `FILE_FLAG_FIRST_PIPE_INSTANCE` (so a squatter that made
 //!   the name first fails the launch rather than receive it) and `PIPE_REJECT_REMOTE_CLIENTS`.
-//!   The outer checks every client is the inner runner's pid, and on `ctl` that the pid's token
-//!   user is the pool user, before it sends or relays a byte (`runner::outer`).
+//!   The outer checks every client is the inner runner's pid before it sends or relays a byte;
+//!   that pid's token user was checked to be the pool user earlier, right after logon and
+//!   before the inner runner ran (`runner::outer`).
 //! - `ctl` carries the launch to the inner runner and its report back, as frames
 //!   (`runner::frame`); `in`, `out` and `err` are the agent's stdin, stdout and stderr.
 //!

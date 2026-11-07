@@ -38,7 +38,10 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::core::{BOOL, PCWSTR};
 
-use super::{CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth};
+use super::{
+    CA_DIR, CA_FILE, Filtered, SERVER_AUTH, file_sddl, filter_roots, lists_server_auth,
+    machine_name,
+};
 use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 
@@ -54,7 +57,7 @@ const LOCATIONS: [u32; 5] = [
 /// The bundle as written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bundle {
-    /// `<data_dir>\sandbox-ca\roots.pem`.
+    /// `<data_dir>\sandbox-ca\machine-<16 hex>.pem` ([`machine_name`]): what the launch names.
     pub path: PathBuf,
     /// The roots it holds.
     pub kept: usize,
@@ -365,23 +368,80 @@ fn timed<T>(run: impl FnOnce() -> io::Result<T>) -> io::Result<(T, u64)> {
     Ok((value, ms))
 }
 
-/// Writes `pem` to [`path`] of `data_dir`: the folder made or repaired with the sandbox
-/// folder's protected DACL, a new file beside the final name made with [`file_sddl`]'s
-/// descriptor, written and flushed, then renamed over the final name. A failure removes only
-/// that new file. Errors name the step, never the path (it is in the user's profile).
+/// Writes `pem` to its own file in `data_dir`'s bundle folder, named by [`machine_name`]: the
+/// folder made or repaired with the sandbox folder's protected DACL, a new file beside the final
+/// name made with [`file_sddl`]'s descriptor, written and flushed, then renamed to that name. A
+/// file already there with these bytes is used as it is, so a reader holding it open never
+/// blocks the export; one that can't be read (an agent holds it unshared) or holds other bytes
+/// is passed over for the same name numbered, `machine-<16 hex>-<n>.pem`. Then the older
+/// machine bundles (and the fixed `roots.pem` of earlier builds) are removed, best-effort: one
+/// in use stays for the next export. A failure removes only the new file. Errors name the step,
+/// never the path (it is in the user's profile).
 pub(super) fn write_bundle(
     data_dir: &Path,
     desktop: &Sid,
     pool: &[Sid],
     pem: &[u8],
 ) -> io::Result<PathBuf> {
-    write_named(data_dir, CA_FILE, desktop, pool, pem)
+    let first = machine_name(pem, pool);
+    let stem = first.strip_suffix(".pem").unwrap_or(&first);
+    for n in 0..NAMES {
+        let name = if n == 0 {
+            first.clone()
+        } else {
+            format!("{stem}-{n}.pem")
+        };
+        let target = data_dir.join(CA_DIR).join(&name);
+        let path = match std::fs::symlink_metadata(&target) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                write_named(data_dir, &name, desktop, pool, pem)?
+            }
+            Ok(_) if holds(&target, pem) => target,
+            _ => continue,
+        };
+        remove_stale(&data_dir.join(CA_DIR), &name);
+        return Ok(path);
+    }
+    Err(io::Error::other("the CA bundle has no free name"))
+}
+
+/// The names [`write_bundle`] tries for one bundle: its own, then numbered.
+const NAMES: usize = 8;
+
+/// Whether `path` is a file itself (not a link) whose bytes are `pem`.
+fn holds(path: &Path, pem: &[u8]) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file())
+        && std::fs::read(path).is_ok_and(|bytes| bytes == pem)
+}
+
+/// Removes, best-effort, each machine bundle in `folder` but `keep`, and `roots.pem`. One open
+/// without delete sharing (an agent reading it) fails to delete and stays for the next export;
+/// the merged bundles (`roots-*.pem`) are left alone.
+fn remove_stale(folder: &Path, keep: &str) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let machine = name.starts_with("machine-")
+            && Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pem"));
+        if name != keep && (machine || name == CA_FILE) {
+            // SAFETY: the name is NUL-terminated and lives for the call. `DeleteFileW` removes a
+            // link itself, never what it names; a failure leaves the file for the next export.
+            drop(unsafe { DeleteFileW(PCWSTR(wide(&entry.path()).as_ptr())) });
+        }
+    }
 }
 
 /// Writes a machine bundle merged with a firm's certificates (`merge`) beside the machine
 /// bundle, as [`merged_name`](super::merged_name) names it, with the same descriptor and the
-/// same atomic write; a file of that name already there is the same bundle for the same pool,
-/// so it is used as it is. Its path.
+/// same atomic write; a file of that name already there (itself, not a link) holding these
+/// bytes is the same bundle for the same pool, so it is used as it is. Its path.
 pub fn write_merged(
     data_dir: &Path,
     desktop: &Sid,
@@ -390,13 +450,14 @@ pub fn write_merged(
 ) -> io::Result<PathBuf> {
     let name = super::merged_name(pem, pool);
     let target = data_dir.join(CA_DIR).join(&name);
-    if target.is_file() {
+    if holds(&target, pem.as_bytes()) {
         return Ok(target);
     }
     write_named(data_dir, &name, desktop, pool, pem.as_bytes())
 }
 
-/// [`write_bundle`] for the file `name` in the bundle's folder.
+/// Writes `pem` to the file `name` in the bundle's folder, as [`write_bundle`] says, renamed
+/// over what is there.
 fn write_named(
     data_dir: &Path,
     name: &str,

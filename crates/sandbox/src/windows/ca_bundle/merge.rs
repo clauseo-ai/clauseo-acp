@@ -72,15 +72,27 @@ pub fn merge(machine: &[u8], firm: &[Vec<u8>], disallowed: &[Vec<u8>]) -> Merged
 /// `roots-<16 hex>.pem`, from an FNV-1a hash of both, so one bundle serves every launch with
 /// the same firm files and pool, and a grown pool gets a new file naming every pool user.
 pub fn merged_name(pem: &str, pool: &[super::Sid]) -> String {
+    format!("roots-{:016x}.pem", name_hash(pem.as_bytes(), pool))
+}
+
+/// The machine bundle's file name for `pem` and the pool `pool`: `machine-<16 hex>.pem`, hashed
+/// as [`merged_name`] is. Each export with other roots or another pool gets a new name, so an
+/// agent holding the last file open never blocks it (review L1).
+pub fn machine_name(pem: &[u8], pool: &[super::Sid]) -> String {
+    format!("machine-{:016x}.pem", name_hash(pem, pool))
+}
+
+/// FNV-1a over `pem` and the pool's SIDs, sorted, each once, joined by commas.
+fn name_hash(pem: &[u8], pool: &[super::Sid]) -> u64 {
     let mut sids: Vec<&str> = pool.iter().map(super::Sid::as_str).collect();
     sids.sort_unstable();
     sids.dedup();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in pem.bytes().chain(sids.join(",").bytes()) {
+    for byte in pem.iter().copied().chain(sids.join(",").bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("roots-{hash:016x}.pem")
+    hash
 }
 
 /// The certificates in `file` that parse, and how many blocks (or the whole file) didn't.

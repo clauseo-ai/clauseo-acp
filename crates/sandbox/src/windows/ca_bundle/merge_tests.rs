@@ -1,6 +1,6 @@
 //! A firm's CA files merged into the machine bundle.
 
-use super::merge::{merge, merged_name};
+use super::merge::{machine_name, merge, merged_name};
 use super::tests::{INTERMEDIATE, OTHER, ROOT, der_of, pem_of};
 use crate::windows::sids::Sid;
 
@@ -96,6 +96,30 @@ fn the_merged_name_follows_the_bundle_and_the_pool() {
     );
     assert_ne!(name, merged_name("pem2", &pool));
     assert_ne!(name, merged_name("pem", &pool[..1]));
+}
+
+#[test]
+fn each_machine_export_with_other_roots_or_pool_gets_its_own_name() {
+    let pool = [sid("S-1-5-21-1-2-3-1005"), sid("S-1-5-21-1-2-3-1006")];
+    let name = machine_name(b"pem", &pool);
+    assert!(
+        name.starts_with("machine-") && name.len() == 28 && name.get(24..) == Some(".pem"),
+        "{name}"
+    );
+    assert_eq!(
+        name,
+        machine_name(b"pem", &[pool[1].clone(), pool[0].clone()])
+    );
+    assert_ne!(
+        name,
+        machine_name(b"pem2", &pool),
+        "other roots: another name"
+    );
+    assert_ne!(
+        name,
+        machine_name(b"pem", &pool[..1]),
+        "another pool: another name"
+    );
 }
 
 #[test]
