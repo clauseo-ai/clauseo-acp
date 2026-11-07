@@ -145,7 +145,7 @@ pub(crate) async fn on_state(
         Seen::Checked
     } else {
         let had = identity.recorded_now(agent);
-        match settle(backend, agent, &read, None, now) {
+        match settle(backend, agent, &read, None, now, false) {
             Verdict::Changed => Seen::Changed,
             _ if had => Seen::Checked,
             _ if identity.recorded_now(agent) => Seen::Recorded,
@@ -220,16 +220,21 @@ pub(crate) async fn check(backend: &AgentsBackend, agent: &AgentId) -> Verdict {
     let read = read_account(backend, agent, begun).await;
     let unwritten_again =
         matches!(read, Read::Unwritten(_)) && identity.refresh.unwritten_before(agent);
-    let now = backend.compose.monotonic();
-    let mut verdict = settle(backend, agent, read.account(), Some(ticket), now);
-    if unwritten_again && matches!(verdict, Verdict::Same | Verdict::Idle) {
-        // A second answer with no rewrite: the refresh fails with the network up.
-        verdict = identity.entry(agent, |entry| {
-            entry.verdict = Verdict::Unknown;
-            entry.again = false;
-            entry.verdict
-        });
+    if unwritten_again || *read.account() == AccountRead::Refused {
+        // A second answer with no rewrite (the refresh fails with the network up), or Codex's
+        // refused login: unknown, and it sticks until a forced read confirms or a sign-in.
+        identity.refresh.stick(agent);
     }
+    let now = backend.compose.monotonic();
+    let confirming = matches!(read, Read::Rewritten(..));
+    let verdict = settle(
+        backend,
+        agent,
+        read.account(),
+        Some(ticket),
+        now,
+        confirming,
+    );
     tracing::info!(%agent, kind = verdict.kind(), "identity check");
     unconfirmed(backend, agent, &read, unwritten_again, verdict);
     let ended = match read {
@@ -279,7 +284,7 @@ impl Read {
 
 /// Refresh-on-check's unknown (Codex's refused login, or a second forced answer with no
 /// rewrite) shows the sign-in-again card, its cause logged by kind; any verdict but unknown
-/// takes it away.
+/// takes it away (a held unknown stays unknown until a forced read confirms or a sign-in).
 fn unconfirmed(
     backend: &AgentsBackend,
     agent: &AgentId,
@@ -375,13 +380,16 @@ fn codex_login(backend: &AgentsBackend, agent: &AgentId) -> Option<PathBuf> {
 
 /// The verdict of `read` for `agent`, set unless `ticket`'s check was overtaken; the first
 /// account seen with none recorded, before any launch, is recorded, holding for the stamps the
-/// entry has (a check's, taken as it began).
+/// entry has (a check's, taken as it began). While refresh-on-check's unknown sticks
+/// (`Refresh::stick`), only a `confirming` read (the plain read of a forced read's rewrite)
+/// naming the recorded account lifts it, or records: any other stays unknown.
 fn settle(
     backend: &AgentsBackend,
     agent: &AgentId,
     read: &AccountRead,
     ticket: Option<Ticket>,
     now: Duration,
+    confirming: bool,
 ) -> Verdict {
     let identity = &backend.wiring.identity;
     // The login files after the read: a no-email sign-in's window records only while they are
@@ -390,7 +398,11 @@ fn settle(
     identity.entry(agent, |entry| {
         let _broke = entry.break_window(&after, now);
     });
-    let judged = identity.judge(agent, read, now, &after);
+    let stuck = identity.refresh.stuck(agent);
+    let judged = match identity.judge(agent, read, now, &after) {
+        Judged::Record(_) if stuck && !confirming => Judged::Is(Verdict::Unknown),
+        judged => judged,
+    };
     let current = identity.entry(agent, |entry| {
         ticket.is_none_or(|Ticket(generation)| generation == entry.generation)
     });
@@ -417,12 +429,16 @@ fn settle(
             identity.record(agent, Some(hash), now, None)
         }
         Judged::Is(verdict) => identity.entry(agent, |entry| {
-            // A changed account stays until a sign-in records again.
+            // A changed account stays until a sign-in records again; a held unknown until a
+            // forced read confirms or a sign-in.
+            let confirms = confirming && verdict == Verdict::Same;
+            let held = stuck && matches!(verdict, Verdict::Same | Verdict::Idle) && !confirms;
             if entry.verdict != Verdict::Changed {
-                entry.verdict = verdict;
+                entry.verdict = if held { Verdict::Unknown } else { verdict };
             }
-            // Only a status that failed, timed out or was refused is tried again on the timer.
-            entry.again = matches!(read, AccountRead::Failed | AccountRead::Refused);
+            // Only a status that failed, timed out or was refused is tried again on the timer;
+            // a held unknown is tried again by its forced re-check.
+            entry.again = !stuck && matches!(read, AccountRead::Failed | AccountRead::Refused);
             entry.checked_at = Some(now);
             entry.verdict
         }),

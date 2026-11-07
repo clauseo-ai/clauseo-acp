@@ -175,6 +175,94 @@ fn an_answer_with_no_rewrite_is_retried_once_at_thirty_seconds_and_the_same_agai
     assert_eq!(forced_and_plain(&id).0, 3);
 }
 
+/// A rig whose Codex login reached refresh-on-check's unknown by two forced answers with no
+/// rewrite (at 2 s and 32 s): held, the card saying sign in again.
+fn held_unknown(test: &str) -> IdRig {
+    let id = changed_login(test);
+    id.look(2);
+    id.look(32);
+    assert_eq!(forced_and_plain(&id), (2, 0));
+    assert_eq!(verdict(&id), Verdict::Unknown);
+    assert!(sign_in_again(&id));
+    id
+}
+
+/// Whether `agent.identity_unknown` refuses Codex's launches now, its verdict unknown.
+fn refused_unknown(id: &IdRig) -> bool {
+    let refusal = crate::bridge::lock(&id.rig.backend.wiring.refused)
+        .get(&codex())
+        .copied();
+    refusal == Some(ErrorCode::AgentIdentityUnknown) && verdict(id) == Verdict::Unknown
+}
+
+#[test]
+fn a_held_unknown_survives_a_touch_of_the_login_and_plain_checks() {
+    let id = held_unknown("refresh-held-touch");
+    // The session touches auth.json: the look checks, plainly (forced 2 s ago), and the old
+    // id_token names the recorded account; it stays unknown.
+    files::rewrite_in_place(&id.codex_login());
+    id.look(34);
+    assert_eq!(forced_and_plain(&id), (2, 1), "a plain check ran");
+    assert!(refused_unknown(&id), "launches still refused");
+    assert!(sign_in_again(&id), "the card still says sign in again");
+    // And a check a launch asks for, as plainly.
+    block_on(check(&id.rig.backend, &codex()));
+    assert_eq!(forced_and_plain(&id), (2, 2));
+    assert_eq!(verdict(&id), Verdict::Unknown);
+    files::rewrite_in_place(&id.codex_login());
+    id.look(36);
+    assert_eq!(verdict(&id), Verdict::Unknown, "again and again");
+}
+
+#[test]
+fn a_held_unknown_is_lifted_by_a_confirming_forced_read() {
+    let id = held_unknown("refresh-held-confirm");
+    refresh_rewrites(&id);
+    id.look(91);
+    assert_eq!(forced_and_plain(&id).0, 2);
+    id.look(92);
+    assert_eq!(
+        forced_and_plain(&id),
+        (3, 1),
+        "forced, rewritten, its file read"
+    );
+    assert_eq!(verdict(&id), Verdict::Same);
+    assert_eq!(id.rig.host.calls().last(), Some(&refused(&codex(), None)));
+    assert!(!sign_in_again(&id));
+}
+
+#[test]
+fn a_held_unknown_is_lifted_by_a_sign_in_through_clauseo() {
+    let id = held_unknown("refresh-held-sign-in");
+    id.signs_in(&codex(), ONE);
+    assert_eq!(verdict(&id), Verdict::Same);
+    assert!(!sign_in_again(&id));
+    // A plain check after it is the same account again.
+    block_on(check(&id.rig.backend, &codex()));
+    assert_eq!(verdict(&id), Verdict::Same);
+    assert_eq!(id.rig.host.calls().last(), Some(&refused(&codex(), None)));
+}
+
+#[test]
+fn codexs_refused_login_stays_unknown_through_a_plain_check() {
+    let id = changed_login("refresh-refused-held");
+    id.rig
+        .agents
+        .accounts
+        .forced_answers(&codex(), AccountRead::Refused);
+    id.look(2);
+    assert_eq!(verdict(&id), Verdict::Unknown);
+    files::rewrite_in_place(&id.codex_login());
+    id.look(4);
+    assert_eq!(
+        forced_and_plain(&id),
+        (1, 1),
+        "a plain check, naming the account"
+    );
+    assert!(refused_unknown(&id));
+    assert!(sign_in_again(&id));
+}
+
 #[test]
 fn an_answer_with_no_rewrite_then_a_rewrite_with_the_same_account_confirms() {
     let id = changed_login("refresh-no-rewrite-then-rewrite");
