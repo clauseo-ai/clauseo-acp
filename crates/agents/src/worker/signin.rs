@@ -387,11 +387,16 @@ impl SigninHub {
         true
     }
 
-    /// Ends `ticket`'s job with the state unchanged.
+    /// Ends `ticket`'s job with the state unchanged, and says so
+    /// (`AgentsEvent::SigninUnchanged`); nothing once the job is superseded.
     pub(crate) fn end_job(&self, ticket: &Ticket) {
         let mut inner = self.lock();
         if is_current(&inner, ticket) {
             inner.jobs.remove(&ticket.agent);
+            // Fails only when every receiver is gone; nobody is listening then.
+            drop(self.events.try_send(AgentsEvent::SigninUnchanged {
+                agent: ticket.agent.clone(),
+            }));
         }
     }
 

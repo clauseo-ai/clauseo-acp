@@ -91,7 +91,8 @@ pub(crate) struct AgentsBackend {
     /// a running sign-in to its cancel, so a start never slips past a key or an endpoint.
     pub(crate) signin_gate: Mutex<()>,
     /// The agents whose status check [`AgentsBackend::recheck_sign_in`] asked for and whose
-    /// next sign-in state has not come yet: a second hold meanwhile asks for none.
+    /// job has not ended yet (no sign-in state and no `SigninUnchanged` since): a second hold
+    /// meanwhile asks for none.
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
@@ -518,6 +519,11 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
+                // A job that ended with no state (a status check that could not tell): an
+                // `auth_required` re-check of it is over, so the next hold may ask again.
+                AgentsEvent::SigninUnchanged { agent } => {
+                    lock(&self.rechecks).remove(&agent);
+                }
                 _ => {}
             }
         }
