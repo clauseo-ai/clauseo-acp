@@ -45,39 +45,27 @@ pub fn profile_of(sid: &Sid) -> Result<Option<ProfileDir>, MachineError> {
 /// Deletes `sid`'s profile: its folder and its `ProfileList` entry. Refuses, deleting nothing,
 /// unless `sid` passes [`check_pool`]: a local account of this machine, not built in, not this
 /// process's user nor `owner` (the user who asked), and named as a pool user if it resolves.
-/// Then stops every process whose token user is exactly `sid`, refusing when one can't be listed
-/// or stopped; then takes the links out of the
-/// folder `ProfileList` lists ([`clear_profile_links`]), refusing, deleting nothing more,
-/// when it can't; then `DeleteProfileW`, tried
-/// again for up to about three seconds while the profile service still holds the hive. No
-/// profile is `Ok`, so a re-run skips what is gone.
+/// Then, in order: stops every process whose token user is exactly `sid` ([`stop_all`]);
+/// takes the links out of the folder `ProfileList` lists ([`clear_profile_links`]); stops the
+/// user's processes again, since a child started after the first list could plant a link after
+/// the sweep; sweeps the links once more if that second pass stopped any; then `DeleteProfileW`,
+/// tried again for up to about three seconds while the profile service still holds the hive.
+/// A process that can't be listed or stopped, or a sweep that fails, refuses the delete, leaving
+/// the profile as it is. No profile is `Ok`, so a re-run skips what is gone.
 pub fn delete_profile(sid: &Sid, owner: &Sid) -> Result<(), MachineError> {
     let one = std::slice::from_ref(sid);
     check_pool(one, owner)?;
     // Nothing running as the user may change the profile between the link sweep and the
     // delete: a process that can't be listed or stopped leaves the profile as it is.
-    match stop_pool_processes(one, owner) {
-        Ok(stopped) if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() => {
-            tracing::warn!(
-                failed = stopped.failed.len(),
-                timed_out = stopped.timed_out.len(),
-                "processes of a pool user couldn't be stopped before its profile delete"
-            );
-            return Err(MachineError::Other(
-                "a process of the sandbox user couldn't be stopped, so its profile is left as \
-                 it is"
-                    .to_owned(),
-            ));
-        }
-        Ok(_) => {}
-        Err(error) => {
-            return Err(MachineError::Other(format!(
-                "the sandbox user's processes couldn't be listed, so its profile is left as it \
-                 is: {error}"
-            )));
-        }
+    stop_all(one, owner)?;
+    let listed = profile_of(sid)?;
+    if let Some(listed) = &listed {
+        clear_profile_links(&listed.path)?;
     }
-    if let Some(listed) = profile_of(sid)? {
+    // A child started after the first list may have planted a link after the sweep: when the
+    // second pass stops one, the links are swept again.
+    let late = stop_all(one, owner)?;
+    if let Some(listed) = listed.as_ref().filter(|_| late > 0) {
         clear_profile_links(&listed.path)?;
     }
     let text = wide(sid.as_str());
@@ -101,6 +89,31 @@ pub fn delete_profile(sid: &Sid, owner: &Sid) -> Result<(), MachineError> {
             return Err(os("DeleteProfileW", &error));
         }
         wait();
+    }
+}
+
+/// Stops every process whose token user is one of `one` ([`stop_pool_processes`]) and returns
+/// how many were stopped; refuses, so the profile is left as it is, when one can't be listed,
+/// stopped or seen to exit.
+fn stop_all(one: &[Sid], owner: &Sid) -> Result<usize, MachineError> {
+    match stop_pool_processes(one, owner) {
+        Ok(stopped) if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() => {
+            tracing::warn!(
+                failed = stopped.failed.len(),
+                timed_out = stopped.timed_out.len(),
+                "processes of a pool user couldn't be stopped before its profile delete"
+            );
+            Err(MachineError::Other(
+                "a process of the sandbox user couldn't be stopped, so its profile is left as \
+                 it is"
+                    .to_owned(),
+            ))
+        }
+        Ok(stopped) => Ok(stopped.ended.len()),
+        Err(error) => Err(MachineError::Other(format!(
+            "the sandbox user's processes couldn't be listed, so its profile is left as it \
+             is: {error}"
+        ))),
     }
 }
 
