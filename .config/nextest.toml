@@ -63,6 +63,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The sandbox's elevated set-up exe test makes a fresh pool, 8 users since the top-up (#609), and
+# each user's first logon makes its profile: 12 to 15 s each on the windows-2025 runner (CI run
+# 42339880668), so about 2 min with the removal after; 30 s killed it. 300 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & test(/elevated_set_up_/)'
+slow-timeout = { period = "30s", terminate-after = 10 }
+
 # The sandbox's tier B timing row (ignored; run on a Windows VM with --run-ignored) makes 50,000
 # files, then times three walks over them: about 11 s, 10 s and 10 s each on the S15 PR3 VM run at
 # fca0bf0ca, plus the file creation, so 30 s killed it on 3 of 3 tries. 600 s still ends a hung one.
