@@ -6,9 +6,11 @@
 use super::{DATA, DELETED, KEPT_SET_ASIDE, World, exists, make};
 
 /// A record with no open session, as a clean close leaves it.
-const CLOSED: &[u8] = br#"{"version": 1, "matter": "m", "sessions": [], "names": []}"#;
+const CLOSED: &[u8] = b"{\"version\": 1, \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \
+    \"sessions\": [], \"names\": []}";
 /// A record whose session never had its after-session pass: a crash's changes still unchecked.
-const OPEN: &[u8] = br#"{"version": 1, "matter": "m", "sessions": ["s1"], "names": []}"#;
+const OPEN: &[u8] = b"{\"version\": 1, \"matter\": \"01890a5d-ac96-774b-bcce-b302099a8057\", \
+    \"sessions\": [\"s1\"], \"names\": []}";
 
 /// Two matters' folders in the set-aside, each holding only the bookkeeping, and the ledger.
 const MATTERS: [&str; 2] = [

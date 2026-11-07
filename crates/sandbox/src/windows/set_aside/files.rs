@@ -20,21 +20,31 @@
 //! empty.
 
 use std::collections::BTreeSet;
+#[cfg(any(windows, test))]
 use std::ffi::{OsStr, OsString};
+#[cfg(any(windows, test))]
 use std::fs::File;
+#[cfg(any(windows, test))]
 use std::io;
+#[cfg(any(windows, test))]
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::names::{Links, Names, keyed};
+#[cfg(any(windows, test))]
 use super::{Entry, SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure};
+#[cfg(any(windows, test))]
 use crate::windows::matters::SANDBOX_DIR;
+#[cfg(any(windows, test))]
 use crate::windows::write;
 
+#[cfg(any(windows, test))]
 const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
+#[cfg(any(windows, test))]
 const MANIFEST_FILE: &str = "manifest.json";
+#[cfg(any(windows, test))]
 const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
 /// The version both files are written in and the only one read.
 const VERSION: u32 = 1;
@@ -72,6 +82,7 @@ pub(super) struct Record {
 }
 
 /// What a pass records of the matter: [`Record::names`] and [`Record::links`].
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Snapshot {
     pub(super) names: Names,
@@ -79,6 +90,14 @@ pub(super) struct Snapshot {
 }
 
 impl Record {
+    /// Whether `bytes` read as a record of [`VERSION`] with no open session; anything the typed
+    /// read refuses is `false`.
+    pub(super) fn closed(bytes: &[u8]) -> bool {
+        serde_json::from_slice::<Record>(bytes)
+            .is_ok_and(|record| record.version == VERSION && record.sessions.is_empty())
+    }
+
+    #[cfg(any(windows, test))]
     pub(super) fn new(matter: MatterId, sessions: BTreeSet<String>, seen: Snapshot) -> Record {
         Record {
             version: VERSION,
@@ -91,6 +110,7 @@ impl Record {
 }
 
 /// Every item set aside from a matter and not restored.
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Manifest {
@@ -105,6 +125,7 @@ pub(super) struct Manifest {
     pub(super) intents: Vec<Entry>,
 }
 
+#[cfg(any(windows, test))]
 impl Default for Manifest {
     fn default() -> Manifest {
         Manifest {
@@ -117,6 +138,7 @@ impl Default for Manifest {
 }
 
 /// Where one matter's set-aside lives.
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone)]
 pub(super) struct Place {
     /// `<data_dir>\sandbox`, where each move's folder chain starts.
@@ -126,6 +148,7 @@ pub(super) struct Place {
     matter: MatterId,
 }
 
+#[cfg(any(windows, test))]
 impl Place {
     pub(super) fn new(data_dir: &Path, matter: &MatterId) -> Place {
         let sandbox = data_dir.join(SANDBOX_DIR);
@@ -215,6 +238,7 @@ impl Place {
 }
 
 /// The file at `path`, checked first; `None` when it is missing.
+#[cfg(any(windows, test))]
 fn read(path: &Path) -> Result<Option<Vec<u8>>, SetAsideFailure> {
     write::check_owned_file(path).map_err(|e| io_failure(&e))?;
     match std::fs::read(path) {
@@ -225,6 +249,7 @@ fn read(path: &Path) -> Result<Option<Vec<u8>>, SetAsideFailure> {
 }
 
 /// Replaces the file at `path` with `value` as JSON, checking the old file and the new one.
+#[cfg(any(windows, test))]
 fn save(path: &Path, value: &impl Serialize) -> Result<(), SetAsideFailure> {
     let mut bytes = serde_json::to_vec_pretty(value)
         .map_err(|_unwritable| SetAsideFailure::Io(io::ErrorKind::InvalidData))?;
@@ -235,6 +260,7 @@ fn save(path: &Path, value: &impl Serialize) -> Result<(), SetAsideFailure> {
 }
 
 /// `error` as a failure of its kind; the message, which may name a path, goes to the debug log.
+#[cfg(any(windows, test))]
 pub(super) fn io_failure(error: &io::Error) -> SetAsideFailure {
     tracing::debug!(%error, "a set-aside file-system call failed");
     SetAsideFailure::Io(error.kind())

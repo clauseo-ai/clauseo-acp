@@ -418,3 +418,38 @@ fn timestamps_are_utc() {
     assert_eq!(timestamp(leap), "20000229T000000-000Z");
     assert_eq!(rfc3339(launch()), "2025-11-05T10:15:00.123Z");
 }
+
+#[test]
+fn the_bookkeeping_reads_a_record_as_files_rs_writes_it() {
+    use std::collections::BTreeSet;
+
+    use super::bookkeeping::set_aside_record_closed;
+    use super::files::{Record, Snapshot};
+    let matter = matter_one();
+    let written = |sessions: &[&str]| {
+        let sessions: BTreeSet<String> = sessions.iter().map(|s| (*s).to_owned()).collect();
+        serde_json::to_vec_pretty(&Record::new(matter, sessions, Snapshot::default())).unwrap()
+    };
+    assert!(set_aside_record_closed(&written(&[])));
+    assert!(!set_aside_record_closed(&written(&["s1"])));
+    assert!(!set_aside_record_closed(&written(&["s1", "s2"])));
+    // What the typed read refuses counts as open: a second `sessions`, another version, a
+    // field it doesn't know, a missing one, no JSON.
+    let text = String::from_utf8(written(&[])).unwrap();
+    let refused = [
+        text.replacen(
+            "\"sessions\": []",
+            "\"sessions\": [], \"sessions\": [\"s1\"]",
+            1,
+        ),
+        text.replacen("\"version\": 1", "\"version\": 2", 1),
+        text.replacen("\"sessions\": []", "\"sessions\": [], \"extra\": 1", 1),
+        text.replacen("\"sessions\": [],", "", 1),
+        "{}".to_owned(),
+        "data".to_owned(),
+    ];
+    for bytes in refused {
+        assert_ne!(bytes, text);
+        assert!(!set_aside_record_closed(bytes.as_bytes()), "{bytes}");
+    }
+}

@@ -243,6 +243,7 @@ pub(crate) fn lock_exclusive_for(path: &Path, wait: Duration) -> io::Result<File
 /// [`check_owned_file`] checks it, so a link there is refused, never followed. A missing file is
 /// fine. The clean-close record goes this way at every launch (S15 `PR3d`), and off Windows the
 /// set-aside's bookkeeping (`set_aside/bookkeeping.rs`).
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(crate) fn remove_owned_file(path: &Path) -> io::Result<()> {
     check_owned_file(path)?;
     match std::fs::remove_file(path) {
@@ -254,7 +255,7 @@ pub(crate) fn remove_owned_file(path: &Path) -> io::Result<()> {
 /// Removes the folder `path` when it is empty (`rmdir`, which never follows a link nor
 /// recurses). The stand-in off Windows, where only tests run it, for the set-aside's forget on
 /// NTFS (`set_aside/bookkeeping.rs`).
-#[cfg(not(windows))]
+#[cfg(all(not(windows), any(test, feature = "test-support")))]
 pub(crate) fn remove_empty_folder(path: &Path) -> io::Result<()> {
     std::fs::remove_dir(path)
 }

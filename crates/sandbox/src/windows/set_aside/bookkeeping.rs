@@ -40,17 +40,11 @@ pub enum SetAsideBookkeeping {
     Left,
 }
 
-/// Whether `bytes`, a set-aside record, lists no open session: a JSON object of version 1 whose
-/// `sessions` is an empty list. Anything else, unparsable included, is open (kept).
-pub fn set_aside_record_closed(bytes: &[u8]) -> bool {
-    let Ok(serde_json::Value::Object(record)) = serde_json::from_slice(bytes) else {
-        return false;
-    };
-    record.get("version").and_then(serde_json::Value::as_u64) == Some(1)
-        && record
-            .get("sessions")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(Vec::is_empty)
+/// Whether `bytes`, a set-aside record, lists no open session: read as the record `files.rs`
+/// writes (`Record`, its version the one written), with no session in it. Anything its typed
+/// read refuses (a duplicate field, an unknown one, another version, unparsable) is open (kept).
+pub(crate) fn set_aside_record_closed(bytes: &[u8]) -> bool {
+    super::files::Record::closed(bytes)
 }
 
 /// `--remove`'s call: deletes `matter`'s set-aside bookkeeping under `data_dir` (a data folder
