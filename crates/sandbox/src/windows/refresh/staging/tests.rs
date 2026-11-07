@@ -3,12 +3,15 @@
 //! back, rename and delete; and the admin folder's hold, which keeps out a handle that would fail
 //! a rename into it. The tests' owner is this user, since only SYSTEM (or a holder of
 //! `SeRestorePrivilege`) may make SYSTEM the owner; the production SDDL's own read-back match is
-//! tested with the engine.
+//! tested with the engine. A read-back is compared with what `as_read_back` makes of the SDDL,
+//! which writes this user's SID as Windows does (`LA` when CI runs as the built-in
+//! Administrator).
 
 use super::*;
 use crate::test_support::TempDir;
 use crate::windows::record::current_user_sid;
 use crate::windows::refresh::source::read_capped;
+use crate::windows::refresh::{STAGING_SDDL, sddl_matches};
 use crate::windows::test_junction::junction;
 
 /// This user alone, full control, inherited; protected: `STAGING_SDDL` with this user for
@@ -18,16 +21,45 @@ fn own_sddl() -> String {
     format!("O:{me}D:P(A;OICI;FA;;;{me})")
 }
 
+/// Whether `found`, read back, is `expected` in the form Windows writes it.
+fn reads_back_as(found: &str, expected: &str) -> bool {
+    sddl_matches(found, &as_read_back(expected).unwrap())
+}
+
+#[test]
+fn an_sddl_is_written_back_as_windows_writes_it() {
+    // A well-known SID by its number comes back as its alias; an alias stays as it is.
+    assert_eq!(
+        as_read_back("O:S-1-5-18D:P(A;OICI;FA;;;S-1-5-18)").unwrap(),
+        STAGING_SDDL
+    );
+    assert_eq!(as_read_back(STAGING_SDDL).unwrap(), STAGING_SDDL);
+    assert_eq!(
+        as_read_back("O:BAD:P(A;;FA;;;S-1-5-32-544)").unwrap(),
+        "O:BAD:P(A;;FA;;;BA)"
+    );
+    // Not SDDL: an error, never a match.
+    assert!(as_read_back("O:SYD:P(A;;FA;;;not-a-sid)").is_err());
+}
+
+#[test]
+fn a_descriptor_naming_this_user_matches_its_read_back() {
+    let dir = TempDir::new("refresh-staging-me");
+    let staging = dir.path().join("staging");
+    secure_dir(&staging, &own_sddl()).unwrap();
+    let found = sddl_of(&open_dir(&staging, SECURITY_ACCESS, FILE_SHARE_MODE(0)).unwrap()).unwrap();
+    assert!(reads_back_as(&found, &own_sddl()), "{found}");
+    // Its read-back is this user's, not SYSTEM's.
+    assert!(!reads_back_as(&found, STAGING_SDDL), "{found}");
+}
+
 #[test]
 fn the_staging_folder_is_made_with_its_dacl_and_reads_back() {
     let dir = TempDir::new("refresh-staging-new");
     let staging = dir.path().join("staging");
     secure_dir(&staging, &own_sddl()).unwrap();
     let found = sddl_of(&open_dir(&staging, SECURITY_ACCESS, FILE_SHARE_MODE(0)).unwrap()).unwrap();
-    assert!(
-        crate::windows::refresh::sddl_matches(&found, &own_sddl()),
-        "{found}"
-    );
+    assert!(reads_back_as(&found, &own_sddl()), "{found}");
 }
 
 #[test]
@@ -38,10 +70,7 @@ fn a_staging_folder_already_there_is_secured_again() {
     secure_dir(&staging, &own_sddl()).unwrap();
     let found = sddl_of(&open_dir(&staging, SECURITY_ACCESS, FILE_SHARE_MODE(0)).unwrap()).unwrap();
     assert!(found.contains("D:P"), "{found}");
-    assert!(
-        crate::windows::refresh::sddl_matches(&found, &own_sddl()),
-        "{found}"
-    );
+    assert!(reads_back_as(&found, &own_sddl()), "{found}");
 }
 
 #[test]

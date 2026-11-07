@@ -21,8 +21,8 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES,
+    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateDirectoryW, CreateFileW, DeleteFileW, FILE_ADD_FILE,
@@ -40,6 +40,10 @@ use super::source::{Handle, code_of};
 
 /// `READ_CONTROL`, `WRITE_DAC` and `WRITE_OWNER`: what reading and setting a descriptor need.
 const SECURITY_ACCESS: u32 = 0x0002_0000 | 0x0004_0000 | 0x0008_0000;
+
+/// What a read-back reads and writes as SDDL: the owner and the DACL.
+const READ_BACK: OBJECT_SECURITY_INFORMATION =
+    OBJECT_SECURITY_INFORMATION(OWNER_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0);
 
 /// A security descriptor from SDDL, allocated with `LocalAlloc`, freed on drop.
 struct Descriptor(PSECURITY_DESCRIPTOR);
@@ -87,6 +91,33 @@ impl Descriptor {
         }
         Ok((owner, dacl.cast_const()))
     }
+
+    /// Its owner and DACL as SDDL, written by Windows: a well-known SID as its alias (`SY`,
+    /// `BA`, `LA` for this machine's built-in Administrator...), any other as `S-1-...`.
+    fn to_sddl(&self) -> Result<String, Failed> {
+        let mut text = PWSTR(null_mut());
+        // SAFETY: the descriptor is live; `text` receives a LocalAlloc'd string freed below.
+        unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                self.0,
+                SDDL_REVISION_1,
+                READ_BACK,
+                &raw mut text,
+                None,
+            )
+        }
+        .map_err(|error| {
+            failed(
+                "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+                &error,
+            )
+        })?;
+        // SAFETY: on success the call wrote a NUL-terminated string at `text`.
+        let sddl = unsafe { text.to_string() }.unwrap_or_default();
+        // SAFETY: `text` came from the conversion's LocalAlloc and is freed once, here.
+        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+        Ok(sddl)
+    }
 }
 
 impl Drop for Descriptor {
@@ -126,12 +157,21 @@ pub(super) fn secure_dir(path: &Path, sddl: &str) -> Result<(), Failed> {
         set_security(&folder, &descriptor)?;
     }
     let found = sddl_of(&folder)?;
-    if !super::sddl_matches(&found, sddl) {
+    let expected = as_read_back(sddl)?;
+    if !super::sddl_matches(&found, &expected) {
         return Err(format!(
-            "the staging folder reads back as {found}, not {sddl}"
+            "the staging folder reads back as {found}, not {expected}"
         ));
     }
     Ok(())
+}
+
+/// `sddl` as [`sddl_of`] would read it back: made into a descriptor and written out again
+/// with the same owner and DACL flags, so its SIDs take the form Windows writes (`LA` for the
+/// built-in Administrator's `S-1-5-21-...-500`, `SY` for `S-1-5-18`). Every comparison of a
+/// read-back with [`super::sddl_matches`] goes through this, which stays a string compare.
+pub(super) fn as_read_back(sddl: &str) -> Result<String, Failed> {
+    Descriptor::from_sddl(sddl)?.to_sddl()
 }
 
 /// The admin folder `path`, opened for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`),
@@ -223,14 +263,13 @@ fn set_security(object: &Handle, descriptor: &Descriptor) -> Result<(), Failed> 
 /// The open `object`'s owner and DACL, as SDDL.
 pub(super) fn sddl_of(object: &Handle) -> Result<String, Failed> {
     let mut descriptor = Descriptor(PSECURITY_DESCRIPTOR(null_mut()));
-    let what = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
     // SAFETY: the handle is open with READ_CONTROL; the descriptor GetSecurityInfo allocates
     // is freed when `descriptor` drops.
     let read = unsafe {
         GetSecurityInfo(
             object.0,
             SE_FILE_OBJECT,
-            what,
+            READ_BACK,
             None,
             None,
             None,
@@ -241,28 +280,7 @@ pub(super) fn sddl_of(object: &Handle) -> Result<String, Failed> {
     if read != ERROR_SUCCESS {
         return Err(format!("GetSecurityInfo failed ({})", read.0));
     }
-    let mut text = PWSTR(null_mut());
-    // SAFETY: the descriptor is live; `text` receives a LocalAlloc'd string freed below.
-    unsafe {
-        ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.0,
-            SDDL_REVISION_1,
-            what,
-            &raw mut text,
-            None,
-        )
-    }
-    .map_err(|error| {
-        failed(
-            "ConvertSecurityDescriptorToStringSecurityDescriptorW",
-            &error,
-        )
-    })?;
-    // SAFETY: on success the call wrote a NUL-terminated string at `text`.
-    let sddl = unsafe { text.to_string() }.unwrap_or_default();
-    // SAFETY: `text` came from the conversion's LocalAlloc and is freed once, here.
-    unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
-    Ok(sddl)
+    descriptor.to_sddl()
 }
 
 /// Writes `bytes` as the new file `path`, made with the owner and DACL `sddl` describes, write
