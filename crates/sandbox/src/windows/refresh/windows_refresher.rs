@@ -1,0 +1,269 @@
+//! The refresh's real [`Refresher`]: the fixed paths under `FOLDERID_ProgramFiles`, the record
+//! in `HKLM\SOFTWARE\Clauseo\Sandbox` (64-bit view), the token check, and the Event Log.
+#![expect(
+    unsafe_code,
+    reason = "FFI to SHGetKnownFolderPath, the registry writes and the Event Log"
+)]
+
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+use windows::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
+use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::System::EventLog::{
+    DeregisterEventSource, EVENTLOG_ERROR_TYPE, EVENTLOG_INFORMATION_TYPE, RegisterEventSourceW,
+    ReportEventW,
+};
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_SZ, RegCloseKey, RegFlushKey,
+    RegOpenKeyExW, RegSetValueExW,
+};
+use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+use windows::core::{HSTRING, PCWSTR, w};
+
+use super::source::read_capped;
+use super::{
+    ADMIN_COPY_SDDL, EXE_CAP, Failed, OWN_VERSION, RefreshExit, RefreshRecord, Refresher, SIG_CAP,
+    STAGING_SDDL, SourceError, SourceFile, UPDATER_KEY, refresh, staging,
+};
+use crate::windows::record::read_string;
+use crate::windows::setup::owner::this_process;
+
+/// The record's key under `HKLM`.
+const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
+/// The record's value naming the per-user install folder (PR 2's `--adopt` writes it).
+pub(crate) const USER_INSTALL_DIR: &str = "UserInstallDir";
+/// The record's value holding the admin copy's SHA-256 (PR 2's `--adopt` writes it first).
+pub(crate) const ADMIN_COPY_SHA256: &str = "AdminCopySha256";
+/// The setup exe's file name, in the user folder and as the admin copy.
+pub(crate) const EXE_NAME: &str = "clauseo-sandbox-setup.exe";
+/// Its signature's file name.
+pub(crate) const SIG_NAME: &str = "clauseo-sandbox-setup.exe.sig";
+/// The staged copy's name in staging.
+pub(super) const STAGED_NAME: &str = "clauseo-sandbox-setup.exe.new";
+/// The set-aside copy's name in staging.
+pub(super) const SET_ASIDE_NAME: &str = "clauseo-sandbox-setup.exe.old";
+/// The Event Log source the refresh writes as (the Application log).
+const EVENT_SOURCE: PCWSTR = w!("Clauseo Sandbox");
+
+/// `--refresh`: [`refresh`] over a [`WindowsRefresher`] with the key and version built in.
+pub fn run() -> RefreshExit {
+    let mut fs = WindowsRefresher::new();
+    refresh(&mut fs, UPDATER_KEY, OWN_VERSION)
+}
+
+/// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.
+pub struct WindowsRefresher {
+    /// `<ProgramFiles>\Clauseo\Sandbox`, or why it couldn't be found.
+    sandbox: Result<PathBuf, Failed>,
+}
+
+impl Default for WindowsRefresher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WindowsRefresher {
+    /// The machine, its folder found from `FOLDERID_ProgramFiles`.
+    pub fn new() -> WindowsRefresher {
+        WindowsRefresher {
+            sandbox: sandbox_dir(),
+        }
+    }
+
+    /// `<sandbox>\<rel>`.
+    fn at(&self, rel: &str) -> Result<PathBuf, Failed> {
+        self.sandbox
+            .as_ref()
+            .map(|dir| dir.join(rel))
+            .map_err(Clone::clone)
+    }
+
+    /// `<sandbox>\staging`.
+    fn staging(&self) -> Result<PathBuf, Failed> {
+        self.at("staging")
+    }
+
+    /// `<sandbox>\staging\<name>`.
+    fn staged(&self, name: &str) -> Result<PathBuf, Failed> {
+        Ok(self.staging()?.join(name))
+    }
+}
+
+/// `<FOLDERID_ProgramFiles>\Clauseo\Sandbox`: where the admin copy and staging live.
+pub(crate) fn sandbox_dir() -> Result<PathBuf, Failed> {
+    Ok(program_files()?.join("Clauseo").join("Sandbox"))
+}
+
+/// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment.
+fn program_files() -> Result<PathBuf, Failed> {
+    let folder = FOLDERID_ProgramFiles;
+    // SAFETY: `folder` is a live GUID for the call; no token is passed. The string returned is
+    // copied, then freed with CoTaskMemFree, once.
+    let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
+        .map_err(|error| format!("SHGetKnownFolderPath failed ({})", error.code().0))?;
+    // SAFETY: on success the call wrote a NUL-terminated string at `path`.
+    let units = unsafe { path.as_wide() }.to_vec();
+    // SAFETY: the string came from SHGetKnownFolderPath and is freed once, here.
+    unsafe { CoTaskMemFree(Some(path.0.cast_const().cast())) };
+    if units.is_empty() {
+        return Err("Windows gave no Program Files folder".to_owned());
+    }
+    Ok(PathBuf::from(OsString::from_wide(&units)))
+}
+
+impl Refresher for WindowsRefresher {
+    fn is_system(&mut self) -> Result<bool, Failed> {
+        this_process()
+            .map(|(_elevated, system)| system)
+            .map_err(|error| format!("this process's token can't be read: {error}"))
+    }
+
+    fn current_exe(&mut self) -> Result<PathBuf, Failed> {
+        std::env::current_exe().map_err(|error| format!("this exe's path: {error}"))
+    }
+
+    fn admin_copy(&mut self) -> Result<PathBuf, Failed> {
+        self.at(EXE_NAME)
+    }
+
+    fn record(&mut self) -> Result<RefreshRecord, Failed> {
+        let key = HSTRING::from(RECORD_KEY);
+        let read = |value: &str| {
+            let value = HSTRING::from(value);
+            read_string(PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr()))
+                .map_err(|error| format!("the record: {error}"))
+        };
+        Ok(RefreshRecord {
+            user_install_dir: read(USER_INSTALL_DIR)?,
+            admin_copy_sha256: read(ADMIN_COPY_SHA256)?,
+        })
+    }
+
+    fn clear_leftovers(&mut self) -> Result<(), Failed> {
+        staging::delete(&self.staged(SET_ASIDE_NAME)?)?;
+        staging::delete(&self.staged(STAGED_NAME)?)
+    }
+
+    fn read_source(&mut self, dir: &Path, which: SourceFile) -> Result<Vec<u8>, SourceError> {
+        match which {
+            SourceFile::Exe => read_capped(&dir.join(EXE_NAME), EXE_CAP),
+            SourceFile::Sig => read_capped(&dir.join(SIG_NAME), SIG_CAP),
+        }
+    }
+
+    fn stage(&mut self, exe: &[u8]) -> Result<Vec<u8>, Failed> {
+        staging::secure_dir(&self.staging()?, STAGING_SDDL)?;
+        let staged = self.staged(STAGED_NAME)?;
+        staging::write_new(&staged, exe, STAGING_SDDL)?;
+        read_capped(&staged, EXE_CAP).map_err(|error| format!("the staged copy: {error}"))
+    }
+
+    fn admin_copy_sha256(&mut self) -> Result<Option<[u8; 32]>, Failed> {
+        match read_capped(&self.at(EXE_NAME)?, EXE_CAP) {
+            Ok(bytes) => Ok(Some(Sha256::digest(&bytes).into())),
+            Err(SourceError::Missing) => Ok(None),
+            Err(error) => Err(format!("the admin copy: {error}")),
+        }
+    }
+
+    fn secure_staged(&mut self) -> Result<(), Failed> {
+        staging::secure_file(&self.staged(STAGED_NAME)?, ADMIN_COPY_SDDL)
+    }
+
+    fn set_aside_admin_copy(&mut self) -> Result<(), Failed> {
+        staging::rename(&self.at(EXE_NAME)?, &self.staged(SET_ASIDE_NAME)?)
+    }
+
+    fn place_staged(&mut self) -> Result<(), Failed> {
+        staging::rename(&self.staged(STAGED_NAME)?, &self.at(EXE_NAME)?)
+    }
+
+    fn restore_admin_copy(&mut self) -> Result<(), Failed> {
+        staging::rename(&self.staged(SET_ASIDE_NAME)?, &self.at(EXE_NAME)?)
+    }
+
+    fn delete_set_aside_later(&mut self) -> Result<(), Failed> {
+        staging::delete_at_reboot(&self.staged(SET_ASIDE_NAME)?)
+    }
+
+    fn write_sha256(&mut self, hex: &str) -> Result<(), Failed> {
+        write_record_string(ADMIN_COPY_SHA256, hex)
+    }
+
+    fn discard_staged(&mut self) {
+        if let Ok(staged) = self.staged(STAGED_NAME) {
+            let _left_for_the_next_run = staging::delete(&staged);
+        }
+    }
+
+    fn log(&mut self, error: bool, line: &str) {
+        event_log(error, line);
+    }
+}
+
+/// Sets the `REG_SZ` `name` of the record's key (which must exist) to `text`, and flushes the
+/// key, so the value is on disk before the run ends.
+fn write_record_string(name: &str, text: &str) -> Result<(), Failed> {
+    let subkey = HSTRING::from(RECORD_KEY);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated and outlives the call; `key` is a live out-pointer,
+    // closed below.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            KEY_SET_VALUE | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    if opened != ERROR_SUCCESS {
+        return Err(format!("RegOpenKeyExW failed ({})", opened.0));
+    }
+    let data: Vec<u8> = text
+        .encode_utf16()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let name = HSTRING::from(name);
+    // SAFETY: the key is open with KEY_SET_VALUE; the name is NUL-terminated and `data` a live
+    // slice, a NUL-terminated UTF-16 string.
+    let set = unsafe { RegSetValueExW(key, &name, None, REG_SZ, Some(&data)) };
+    // SAFETY: the key is open.
+    let flushed = unsafe { RegFlushKey(key) };
+    // SAFETY: the key came from RegOpenKeyExW and is closed once, here.
+    let _closed = unsafe { RegCloseKey(key) };
+    if set != ERROR_SUCCESS {
+        return Err(format!("RegSetValueExW failed ({})", set.0));
+    }
+    if flushed != ERROR_SUCCESS {
+        return Err(format!("RegFlushKey failed ({})", flushed.0));
+    }
+    Ok(())
+}
+
+/// Writes `line` to the Application log as source "Clauseo Sandbox", event 1; an error when
+/// `error`. A log that can't be written is dropped: the exit code still says what happened.
+fn event_log(error: bool, line: &str) {
+    // SAFETY: the source name is a static NUL-terminated string; the handle, when given, is
+    // deregistered below.
+    let Ok(source) = (unsafe { RegisterEventSourceW(PCWSTR::null(), EVENT_SOURCE) }) else {
+        return;
+    };
+    let text = HSTRING::from(line);
+    let strings = [PCWSTR(text.as_ptr())];
+    let kind = if error {
+        EVENTLOG_ERROR_TYPE
+    } else {
+        EVENTLOG_INFORMATION_TYPE
+    };
+    // SAFETY: the handle is registered; `strings` holds one NUL-terminated string that
+    // outlives the call; no SID or raw data.
+    let _reported = unsafe { ReportEventW(source, kind, 0, 1, None, 0, Some(&strings), None) };
+    // SAFETY: the handle came from RegisterEventSourceW and is deregistered once, here.
+    let _deregistered = unsafe { DeregisterEventSource(HANDLE(source.0)) };
+}

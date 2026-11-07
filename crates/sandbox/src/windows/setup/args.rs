@@ -15,6 +15,8 @@
 //!   which also takes the admin copy away, last. The hook adds `--per-machine` only in
 //!   the per-machine installer, chosen when the installer is built; nothing else ever. Who asked
 //!   comes from the process's recorded parent (D-B2), never from an argument.
+//! - `--refresh`: the admin copy's refresh (`refresh.rs`), which the SYSTEM task runs. It takes
+//!   no other argument: everything it reads comes from the record and fixed paths.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
@@ -66,6 +68,8 @@ pub enum Mode {
         /// record values and the refresh task, last. Without it (the app's), they stay.
         uninstall: bool,
     },
+    /// `--refresh`.
+    Refresh,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -82,7 +86,7 @@ pub struct AdoptUser {
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
-         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] ({0})"
+         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -90,6 +94,15 @@ pub struct Usage(pub String);
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
+    if mode == "--refresh" {
+        return match args.next() {
+            None => Ok(Mode::Refresh),
+            Some(extra) => Err(Usage(format!(
+                "--refresh takes no {:?}",
+                extra.to_string_lossy()
+            ))),
+        };
+    }
     let mut parent = None;
     let mut data_dir = None;
     let mut add = None;

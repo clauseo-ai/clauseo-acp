@@ -31,8 +31,17 @@ fn a_wrong_command_line_exits_usage_and_touches_nothing() {
         &["--remove", "--parent", "1"][..],
     ] {
         let exit = main(line.iter().map(OsString::from));
-        assert_eq!(exit, SetupExit::Usage, "{line:?}");
+        assert_eq!(exit, SetupExit::Usage.as_code(), "{line:?}");
     }
+}
+
+#[test]
+fn refresh_outside_the_admin_copy_exits_not_allowed() {
+    // The test process is neither LOCAL SYSTEM nor the admin copy: refused, nothing read.
+    let exit = main(["--refresh"].map(OsString::from));
+    assert_eq!(exit, refresh::RefreshExit::NotAllowed.as_code());
+    let exit = main(["--refresh", r"C:\x"].map(OsString::from));
+    assert_eq!(exit, SetupExit::Usage.as_code());
 }
 
 #[test]
@@ -74,7 +83,7 @@ fn a_parent_that_isnt_the_recorded_one_writes_no_result() {
         "--data-dir".to_owned(),
         data.display().to_string(),
     ];
-    assert_eq!(main(line.map(OsString::from)), SetupExit::Failed);
+    assert_eq!(main(line.map(OsString::from)), SetupExit::Failed.as_code());
     assert_eq!(result_file::read(&data), Ok(None));
 }
 

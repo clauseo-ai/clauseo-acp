@@ -48,6 +48,11 @@ subtle = { workspace = true }
 serde_json = { workspace = true }
 # The elevated set-up's pool passwords are wiped from memory on drop (src/windows/setup).
 zeroize = { workspace = true }
+# The admin copy's refresh (src/windows/refresh): the staged exe's minisign signature, checked
+# against the updater key build.rs embeds, and its SHA-256, which the record holds. Built on every
+# OS: the checks are pure and tested everywhere.
+minisign-verify = { workspace = true }
+sha2 = { workspace = true }
 # The egress proxy's upstream: proxy URLs, and the logs of an ignored setting or a failed lookup.
 # (url and tracing are listed above.)
 
@@ -99,6 +104,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
 # known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
+# The admin copy's refresh (src/windows/refresh): its SYSTEM task through ITaskService
+# (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
+# log lines in the Event Log (System_EventLog).
 [target.'cfg(windows)'.dependencies]
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
@@ -120,13 +128,17 @@ windows = { workspace = true, features = [
   "Win32_System_IO",
   "Win32_System_Ioctl",
   "Win32_System_Com",
+  "Win32_System_EventLog",
   "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
   "Win32_System_ProcessStatus",
   "Win32_System_Registry",
   "Win32_System_Services",
   "Win32_System_SystemInformation",
   "Win32_System_SystemServices",
+  "Win32_System_TaskScheduler",
   "Win32_System_Threading",
+  "Win32_System_Variant",
   "Win32_System_WindowsProgramming",
   "Win32_UI_Shell",
 ] }
@@ -134,6 +146,9 @@ windows = { workspace = true, features = [
 # build.rs compiles the setup exe's VERSIONINFO on msvc with embed-resource, its values read from
 # crates/desktop/tauri.conf.json with serde_json. Not target-gated: a build script runs on the
 # host and checks TARGET, and both crates are in the tree already (tauri-build, the deps above).
+#
+# It also embeds the updater key the admin copy's refresh trusts (src/windows/refresh/key.rs) and
+# the app's version, on every target.
 [build-dependencies]
 embed-resource = { workspace = true }
 serde_json = { workspace = true }
@@ -145,6 +160,8 @@ insta = { workspace = true }
 clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
+# The refresh's signature tests sign with an Ed25519 key they make.
+ring = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).
