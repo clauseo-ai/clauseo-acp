@@ -1,0 +1,131 @@
+//! The (B) token spec built from its inputs.
+
+use super::*;
+
+fn sid(text: &str) -> Sid {
+    Sid::parse(text).unwrap()
+}
+
+const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1005";
+const DESKTOP: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+const LOGON: &str = "S-1-5-5-0-123456";
+const MATTER: &str = "S-1-5-21-444444444-555555555-666666666-1234";
+
+#[test]
+fn the_spec_is_design_b() {
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
+    let restricting: Vec<&str> = spec.restricting.iter().map(Sid::as_str).collect();
+    assert_eq!(restricting, [POOL, "S-1-5-12", "S-1-5-32-545", "S-1-1-0"]);
+    assert_eq!(spec.deny_only, [sid(LOGON)]);
+    assert_eq!(spec.integrity.as_str(), "S-1-16-4096");
+    assert_eq!(
+        spec.default_dacl,
+        format!("D:(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})")
+    );
+}
+
+#[test]
+fn the_default_dacl_names_no_logon_sid_and_no_broad_group() {
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
+    for absent in [
+        LOGON,
+        "S-1-1-0",
+        "S-1-5-32-545",
+        "S-1-5-12",
+        ";WD)",
+        ";BU)",
+        ";AU)",
+    ] {
+        assert!(
+            !spec.default_dacl.contains(absent),
+            "{absent} in {}",
+            spec.default_dacl
+        );
+    }
+}
+
+#[test]
+fn the_desktop_user_gets_wait_query_and_terminate_only() {
+    // SYNCHRONIZE, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE.
+    assert_eq!(DESKTOP_USER_RIGHTS, 0x0010_0000 | 0x1000 | 0x1);
+}
+
+#[test]
+fn a_matter_sid_is_appended_last_when_asked() {
+    let spec =
+        TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), Some(&sid(MATTER))).unwrap();
+    assert_eq!(spec.restricting.len(), 5);
+    assert_eq!(spec.restricting[4], sid(MATTER));
+    assert!(!spec.default_dacl.contains(MATTER));
+}
+
+#[test]
+fn the_pool_user_must_not_be_the_desktop_user() {
+    assert_eq!(
+        TokenSpec::for_pool(&sid(DESKTOP), &sid(LOGON), &sid(DESKTOP), None),
+        Err(TokenSpecError::PoolIsDesktopUser)
+    );
+}
+
+#[test]
+fn well_known_sids_are_not_accounts() {
+    for broad in ["S-1-1-0", "S-1-5-32-545", "S-1-5-18", "S-1-5-11", LOGON] {
+        let refused = TokenSpec::for_pool(&sid(broad), &sid(LOGON), &sid(DESKTOP), None);
+        assert!(
+            matches!(
+                refused,
+                Err(TokenSpecError::NotAnAccount {
+                    role: "the pool user",
+                    ..
+                })
+            ),
+            "{broad}: {refused:?}"
+        );
+        let refused = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(broad), None);
+        assert!(
+            matches!(
+                refused,
+                Err(TokenSpecError::NotAnAccount {
+                    role: "the desktop user",
+                    ..
+                })
+            ),
+            "{broad}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn the_deny_only_sid_must_be_a_logon_sid() {
+    for not_logon in [POOL, "S-1-5-5-1", "S-1-5-5-1-2-3", "S-1-5-18"] {
+        assert_eq!(
+            TokenSpec::for_pool(&sid(POOL), &sid(not_logon), &sid(DESKTOP), None),
+            Err(TokenSpecError::NotALogonSid(sid(not_logon))),
+        );
+    }
+    assert!(is_logon_sid(&sid("S-1-5-5-0-999")));
+}
+
+#[test]
+fn the_private_desktop_is_low_and_shut_to_the_logon_sid() {
+    let sddl = desktop_sddl(&sid(POOL), None);
+    assert_eq!(
+        sddl,
+        format!("D:(A;;GA;;;SY)(A;;GA;;;{POOL})S:(ML;;NW;;;LW)")
+    );
+    assert!(!sddl.contains(DESKTOP));
+    let with_matter = desktop_sddl(&sid(POOL), Some(&sid(MATTER)));
+    assert!(
+        with_matter.contains(&format!("(A;;GA;;;{MATTER})S:")),
+        "{with_matter}"
+    );
+}
+
+#[test]
+fn display_names_every_part() {
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
+    let text = spec.to_string();
+    for part in [POOL, LOGON, "S-1-16-4096", "0x101001"] {
+        assert!(text.contains(part), "{text}");
+    }
+}

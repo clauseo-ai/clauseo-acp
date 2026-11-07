@@ -70,6 +70,7 @@ mod folder;
 pub mod ledger;
 pub mod marker;
 pub mod matters;
+pub mod pipe;
 pub mod pool;
 #[cfg(windows)]
 mod private_dir;
@@ -79,6 +80,7 @@ mod record;
 // The admin copy's refresh: its engine and checks build everywhere for the tests.
 #[cfg(any(windows, test))]
 pub mod refresh;
+pub mod runner;
 pub mod secrets;
 mod set_aside;
 // Set-up's engine calls `fence_registered`, which builds where it does.
@@ -91,6 +93,7 @@ pub mod sids;
 mod test_acl;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_dacl;
+pub mod token;
 // The host's data folder fence tests make junctions too (`test-support`).
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod test_junction;
