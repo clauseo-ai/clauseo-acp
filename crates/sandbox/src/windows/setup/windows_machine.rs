@@ -424,10 +424,8 @@ impl Machine for WindowsMachine {
 
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
         // Elevated, never as the owner: WFP and the firewall are the machine's.
-        wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Os {
-            call: error.call,
-            code: error.code,
-        })
+        // Any WFP failure, the Base Filtering Engine not running included, fails the set-up.
+        wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Other(error.cause()))
     }
 
     fn protect_for_owner(

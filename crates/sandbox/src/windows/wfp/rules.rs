@@ -138,13 +138,86 @@ pub const FIREWALL_UNDER_POLICY: &str = "Group Policy keeps this computer's own 
      filters still enforce. IT can add the same rules by Group Policy, or let local rules apply \
      (AllowLocalPolicyMerge)";
 
+/// How the second layer's loss ends, in every cause's words.
+const STILL_ENFORCED: &str = "the second layer of Clauseo's network protection is off; its \
+     network filters still enforce";
+
+/// HRESULTs a firewall call gives when the Windows Defender Firewall service isn't running:
+/// `ERROR_SERVICE_NOT_ACTIVE`, `EPT_S_NOT_REGISTERED`, `RPC_S_SERVER_UNAVAILABLE`.
+const SERVICE_STOPPED: [u32; 3] = [0x8007_0426, 0x8007_06D9, 0x8007_06BA];
+
+/// Why the firewall rules don't all take effect, each named for firm IT. None fails the set-up:
+/// WFP's filters, which did succeed, are the boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirewallTrouble {
+    /// Group Policy keeps local rules from taking effect; what `LocalPolicyModifyState` said.
+    GroupPolicy(String),
+    /// The Windows Defender Firewall service (`mpssvc`) isn't running.
+    ServiceStopped,
+    /// Windows Firewall is off for a current network profile, as when another firewall product
+    /// owns the computer's firewall.
+    TurnedOff,
+    /// A firewall call failed for another reason: which, and its code.
+    Com {
+        /// The call, or what it was for.
+        what: String,
+        /// Its HRESULT.
+        code: u32,
+    },
+    /// A rule's `LocalUserAuthorizedList` read back without a pool user.
+    RuleUsers {
+        /// The rule's name.
+        rule: String,
+        /// The pool user's SID it lacks.
+        missing: String,
+    },
+}
+
+impl FirewallTrouble {
+    /// A failed firewall call `what` with HRESULT `code`: [`FirewallTrouble::ServiceStopped`]
+    /// when the code says the service isn't running.
+    pub fn from_call(what: &str, code: u32) -> FirewallTrouble {
+        if SERVICE_STOPPED.contains(&code) {
+            FirewallTrouble::ServiceStopped
+        } else {
+            FirewallTrouble::Com {
+                what: what.to_owned(),
+                code,
+            }
+        }
+    }
+
+    /// The words for firm IT.
+    pub fn words(&self) -> String {
+        match self {
+            FirewallTrouble::GroupPolicy(detail) => format!("{FIREWALL_UNDER_POLICY} ({detail})"),
+            FirewallTrouble::ServiceStopped => format!(
+                "the Windows Defender Firewall service (mpssvc) isn't running, so \
+                 {STILL_ENFORCED}. IT can set the service to start automatically"
+            ),
+            FirewallTrouble::TurnedOff => format!(
+                "Windows Firewall is turned off for the current network, as it is when another \
+                 firewall product owns this computer's firewall, so {STILL_ENFORCED}. IT can add \
+                 the same rules in that firewall, or turn Windows Firewall back on"
+            ),
+            FirewallTrouble::Com { what, code } => {
+                format!("a firewall call failed ({what}, error {code:#x}), so {STILL_ENFORCED}")
+            }
+            FirewallTrouble::RuleUsers { rule, missing } => format!(
+                "the firewall rule {rule} didn't keep the sandbox user {missing}, so \
+                 {STILL_ENFORCED} for that user"
+            ),
+        }
+    }
+}
+
 /// What set-up's firewall step came to. The firewall is the second layer, so neither fails the
 /// set-up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FirewallOutcome {
     /// Every rule is written, and local rules take effect in every current profile.
     Applied,
-    /// The rules don't all take effect, and why: Group Policy ([`FIREWALL_UNDER_POLICY`]), or a
-    /// rule that couldn't be written.
+    /// The rules don't all take effect, and why, each cause in [`FirewallTrouble::words`]:
+    /// Group Policy, the service stopped, the firewall turned off, or a failed call.
     Ineffective(String),
 }

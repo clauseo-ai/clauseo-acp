@@ -72,6 +72,26 @@ pub struct WfpError {
     pub code: u32,
 }
 
+/// Result codes WFP's calls give when the Base Filtering Engine isn't running
+/// (`EPT_S_NOT_REGISTERED`, `RPC_S_SERVER_UNAVAILABLE`, `ERROR_SERVICE_NOT_ACTIVE`), as Win32
+/// codes and as HRESULTs.
+const BFE_DOWN: [u32; 6] = [1753, 1722, 1062, 0x8007_06D9, 0x8007_06BA, 0x8007_0426];
+
+impl WfpError {
+    /// The words for set-up's cause: the Base Filtering Engine named when it isn't running,
+    /// else the call and its code. Either fails the set-up: WFP is the boundary.
+    pub fn cause(&self) -> String {
+        if BFE_DOWN.contains(&self.code) {
+            format!(
+                "the Base Filtering Engine service (BFE) isn't running, and Clauseo's network \
+                 protection needs it: IT can set it to start automatically ({self})"
+            )
+        } else {
+            self.to_string()
+        }
+    }
+}
+
 /// One of set-up's block filters as WFP has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundFilter {
