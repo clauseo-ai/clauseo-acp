@@ -178,6 +178,26 @@ fn is_within(host: &str, domain: &str) -> bool {
         .is_some_and(|head| head.is_empty() || head.ends_with('.'))
 }
 
+/// `ERROR_WINHTTP_AUTODETECTION_FAILED`: WPAD found no PAC file URL.
+#[cfg(any(windows, test))]
+const AUTODETECTION_FAILED: u32 = 12_180;
+
+/// What a failed WPAD lookup (`WinHttpGetProxyForUrl` with auto-detect, its Win32 error) means
+/// when nothing else is set (no PAC URL, no static proxy): `ERROR_WINHTTP_AUTODETECTION_FAILED`
+/// (12180) is no proxy, so `DIRECT`; any other error (the PAC file found but not downloaded,
+/// 12167; a timeout, 12002; the WinHTTP service failing, 12178; and the rest) is a failed lookup,
+/// so the caller keeps an earlier answer. `WinHTTP` reports "no WPAD on this network" and a
+/// transient discovery failure with the same code (12180), so a transient one still reads as
+/// direct on a refresh.
+#[cfg(any(windows, test))]
+pub(super) fn wpad_only(error: u32) -> Result<Route, String> {
+    if error == AUTODETECTION_FAILED {
+        Ok(Route::Direct)
+    } else {
+        Err(format!("WPAD failed (WinHTTP error {error})"))
+    }
+}
+
 /// A `WinHTTP` proxy string, as `WinHttpGetIEProxyConfigForCurrentUser` and
 /// `WinHttpGetProxyForUrl` give it: entries split by `;` or white space, each `host[:port]` or
 /// `scheme=host[:port]`, a host perhaps written `http://host`. For a CONNECT the first `https=`
