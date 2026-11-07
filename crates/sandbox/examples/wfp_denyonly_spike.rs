@@ -142,7 +142,38 @@ mod spike {
         let admin_sid = super::sids::user(&admin)?;
         let owner = Sid::parse(&admin_sid)?;
         cleanup.owner = Some(owner.clone());
-        let setup = NetworkSetup::new(&owner, &Sid::parse(&group_sid)?, &[Sid::parse(&user_sid)?])?;
+        let outside = TcpListener::bind("127.0.0.1:0")?;
+        let inside = (61080..=61179)
+            .find_map(|p| TcpListener::bind(("127.0.0.1", p)).ok())
+            .ok_or("no range port")?;
+        let (o, i) = (outside.local_addr()?.port(), inside.local_addr()?.port());
+        let accept = |l: TcpListener| {
+            std::thread::spawn(move || {
+                for s in l.incoming() {
+                    drop(s);
+                }
+            })
+        };
+        drop((accept(outside), accept(inside)));
+        let desktop = tokens::desktop(&t)?;
+        say(&format!("DESKTOP {}", desktop.name));
+        let world = World {
+            desktop,
+            pool,
+            admin,
+            user_sid,
+            group_sid,
+            admin_sid,
+            o,
+            i,
+        };
+        // The same rows with no filter of ours, so each result after is attributed.
+        let mut tally = baseline(&world, exe);
+        let setup = NetworkSetup::new(
+            &owner,
+            &Sid::parse(&world.group_sid)?,
+            &[Sid::parse(&world.user_sid)?],
+        )?;
         let report = install(&ns(), &setup)?;
         say(&format!(
             "INSTALL filters={} firewall={:?}",
@@ -157,35 +188,13 @@ mod spike {
                 &format!("name={name}"),
             ]);
         }
-        let outside = TcpListener::bind("127.0.0.1:0")?;
-        let inside = (61080..=61179)
-            .find_map(|p| TcpListener::bind(("127.0.0.1", p)).ok())
-            .ok_or("no range port")?;
-        let (o, i) = (outside.local_addr()?.port(), inside.local_addr()?.port());
-        let accept = |l: TcpListener| {
-            std::thread::spawn(move || {
-                for s in l.incoming() {
-                    drop(s);
-                }
-            })
-        };
-        drop((accept(outside), accept(inside)));
-        let user_s = Sid::parse(&user_sid)?;
-        let check_pool = check_launch_in(&ns(), &user_s, &[i]).map_err(|e| e.to_string());
-        let check_admin = check_launch_in(&ns(), &owner, &[i]).map_err(|e| e.to_string());
-        let desktop = tokens::desktop(&t)?;
-        say(&format!("DESKTOP {}", desktop.name));
-        let world = World {
-            desktop,
-            pool,
-            admin,
-            user_sid,
-            group_sid,
-            admin_sid,
-            o,
-            i,
-        };
-        let tally = measure(&world, exe, &check_pool, &check_admin);
+        let user_s = Sid::parse(&world.user_sid)?;
+        let check_pool = check_launch_in(&ns(), &user_s, &[world.i]).map_err(|e| e.to_string());
+        let check_admin = check_launch_in(&ns(), &owner, &[world.i]).map_err(|e| e.to_string());
+        let after = measure(&world, exe, &check_pool, &check_admin);
+        for (total, more) in tally.iter_mut().zip(after) {
+            *total += more;
+        }
         say(&format!(
             "SUMMARY pass={} fail={} info={}",
             tally[0], tally[1], tally[2]
@@ -262,7 +271,25 @@ mod spike {
             Some(check_admin.is_err()),
         );
         pool_rows(t, w, exe);
-        other_rows(t, w, exe);
+        other_rows(t, w, exe, "wfp:");
+        tally
+    }
+
+    /// Before set-up's filters: the non-pool rows, and the pool user's deny-only child (which
+    /// must start and reach, or its rows after prove nothing).
+    fn baseline(w: &World, exe: &Path) -> [usize; 3] {
+        let mut tally = [0usize; 3];
+        let t = &mut tally;
+        let outside = format!("connect:127.0.0.1:{}", w.o);
+        for (n, who, how) in [
+            (1, "base:pool-plain", Derive::Plain),
+            (2, "base:pool-deny-only-user", Derive::DenyUser),
+        ] {
+            let token = tokens::derive(&w.pool, how, &w.user_sid, Some(&w.group_sid));
+            let (got, pass) = probe(&token, w, exe, &outside, "reached");
+            row(t, n, who, "outside", "reached", &got, pass);
+        }
+        other_rows(t, w, exe, "base:");
         tally
     }
 
@@ -306,7 +333,7 @@ mod spike {
     }
 
     /// Tokens that aren't the pool's: none should be caught but by measured collateral.
-    fn other_rows(t: &mut [usize; 3], w: &World, exe: &Path) {
+    fn other_rows(t: &mut [usize; 3], w: &World, exe: &Path, phase: &str) {
         let outside = format!("connect:127.0.0.1:{}", w.o);
         let rows: [(u32, &str, Derive, &str); 3] = [
             (7, "admin-own", Derive::Plain, "reached"),
@@ -326,7 +353,15 @@ mod spike {
         for (n, who, how, expect) in rows {
             let token = tokens::derive(&w.admin, how, &w.admin_sid, None);
             let (got, pass) = probe(&token, w, exe, &outside, expect);
-            row(t, n, who, "outside", expect, &got, pass);
+            row(
+                t,
+                n,
+                &format!("{phase}{who}"),
+                "outside",
+                expect,
+                &got,
+                pass,
+            );
         }
         let lowbox = "derived:lowbox:connect:1.1.1.1:443".to_owned();
         let token = tokens::derive(&w.admin, Derive::Plain, &w.admin_sid, None);
@@ -334,14 +369,22 @@ mod spike {
         row(
             t,
             12,
-            "admin-appcontainer-child",
+            &format!("{phase}admin-appcontainer-child"),
             "outside",
             "reached",
             &got,
             pass,
         );
         let (got, pass) = probe(&tokens::system(), w, exe, &outside, "reached");
-        row(t, 10, "system", "outside", "reached", &got, pass);
+        row(
+            t,
+            10,
+            &format!("{phase}system"),
+            "outside",
+            "reached",
+            &got,
+            pass,
+        );
     }
 
     /// Runs `step` under `token`; what happened, and whether it matches `expect`.

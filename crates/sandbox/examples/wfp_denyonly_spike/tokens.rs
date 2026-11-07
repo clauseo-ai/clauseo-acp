@@ -12,12 +12,14 @@ use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::{
-    AdjustTokenPrivileges, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken, DuplicateTokenEx,
-    LOGON32_LOGON, LOGON32_LOGON_BATCH, LOGON32_LOGON_INTERACTIVE, LOGON32_LOGON_NETWORK_CLEARTEXT,
-    LOGON32_PROVIDER_DEFAULT, LUID_AND_ATTRIBUTES, LogonUserW, LookupPrivilegeValueW,
-    PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED, SECURITY_ATTRIBUTES, SID_AND_ATTRIBUTES,
-    SecurityImpersonation, SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DUPLICATE,
-    TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TokenIntegrityLevel, TokenPrimary,
+    ACL, AdjustTokenPrivileges, CREATE_RESTRICTED_TOKEN_FLAGS, CreateRestrictedToken,
+    DuplicateTokenEx, GetSecurityDescriptorDacl, LOGON32_LOGON, LOGON32_LOGON_BATCH,
+    LOGON32_LOGON_INTERACTIVE, LOGON32_LOGON_NETWORK_CLEARTEXT, LOGON32_PROVIDER_DEFAULT,
+    LUID_AND_ATTRIBUTES, LogonUserW, LookupPrivilegeValueW, PSECURITY_DESCRIPTOR, PSID,
+    SE_PRIVILEGE_ENABLED, SECURITY_ATTRIBUTES, SID_AND_ATTRIBUTES, SecurityImpersonation,
+    SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE,
+    TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TokenDefaultDacl, TokenIntegrityLevel,
+    TokenPrimary,
 };
 use windows::Win32::System::ProcessStatus::EnumProcesses;
 use windows::Win32::System::SystemServices::SE_GROUP_INTEGRITY;
@@ -209,7 +211,46 @@ pub(crate) fn derive(
         )
     }
     .map_err(|e| format!("CreateRestrictedToken: {e}"))?;
-    Ok(Token(out))
+    let out = Token(out);
+    open_default_dacl(&out)?;
+    Ok(out)
+}
+
+/// Gives `token` the default DACL {`Everyone`, `RESTRICTED`, `SYSTEM`}: a derived token's own
+/// default DACL names its user (deny-only now) or Administrators (not a restricting SID), so its
+/// process couldn't open itself and hung at start. An agent deriving a token can do the same.
+fn open_default_dacl(token: &Token) -> Result<(), String> {
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a live string and out-pointer; freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from("D:(A;;GA;;;WD)(A;;GA;;;RC)(A;;GA;;;SY)"),
+            SDDL_REVISION_1,
+            &raw mut sd,
+            None,
+        )
+    }
+    .map_err(|e| format!("the default DACL: {e}"))?;
+    let (mut present, mut defaulted) = (windows::core::BOOL(0), windows::core::BOOL(0));
+    let mut acl: *mut ACL = std::ptr::null_mut();
+    // SAFETY: `sd` is valid; the out-pointers are live.
+    let read = unsafe {
+        GetSecurityDescriptorDacl(sd, &raw mut present, &raw mut acl, &raw mut defaulted)
+    };
+    let dacl = TOKEN_DEFAULT_DACL { DefaultDacl: acl };
+    let size = u32::try_from(size_of::<TOKEN_DEFAULT_DACL>()).unwrap_or_default();
+    // SAFETY: `dacl` points into `sd`, alive until freed below.
+    let set = read.and_then(|()| unsafe {
+        SetTokenInformation(
+            token.0,
+            TokenDefaultDacl,
+            (&raw const dacl).cast::<c_void>(),
+            size,
+        )
+    });
+    // SAFETY: from the conversion, freed once.
+    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    set.map_err(|e| format!("SetTokenInformation (default DACL): {e}"))
 }
 
 /// A Low-integrity copy of `token`.
