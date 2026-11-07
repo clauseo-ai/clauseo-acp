@@ -28,6 +28,29 @@ Each step prints what it did. Prepare writes `C:\ClauseoS15Vm\s15-manifest.txt` 
 moves it). Cleanup deletes only the paths listed there, and runs `clauseo-sandbox-setup --remove`
 only when prepare ran the set-up.
 
+## VM rows
+
+- **Interactive desktop** (`--interactive-desktop`): first candidate carrying PR 5; an
+  interactive desktop session (console or RDP, not session 0); run the harness with
+  `--interactive-desktop`; the agent's node child is refused CreateDesktopW, SwitchDesktop and
+  clipboard writes, and a control outside the job succeeds at each.
+
+  In the copy's console or RDP session (not over SSH's session 0), from the copy's own folder
+  (not `C:\ClauseoS15Vm\bin`, which prepare fills and cleanup deletes):
+
+  ```text
+  C:\s15\s15_launch_vm.exe --unattended --node C:\node\node.exe
+      --codex C:\codex\node_modules\@openai --interactive-desktop
+  ```
+
+  (one line), or after `prepare`, `C:\s15\s15_launch_vm.exe row node-pipes --interactive-desktop`.
+  With the flag, `node-pipes` fails unless each of the three effects has a control that
+  succeeded at it (variant (g) when it ran, else (a) to (d)) and the agent's node child was
+  refused it. Without it (CI), `SwitchDesktop` is information only and one such effect is
+  enough (below).
+
+## The rows
+
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`. `clipboard` skips in a session with no clipboard the harness
@@ -89,6 +112,19 @@ libuv's own nested job) does the effect decide instead, and both halves must hol
   as information.
 - The clipboard write fails in `OpenClipboard`, `EmptyClipboard` or `SetClipboardData` with
   5 (or `0x80070005`), what `WRITECLIPBOARD` gives. The call that failed is printed.
+- `SwitchDesktop` (`win_switch.rs`): the probe makes a desktop (the small heap), switches to it,
+  switches straight back to the input desktop (or its thread's own) and closes it. The code is
+  printed, or the create's code when the create failed (`create-failed <code>`). Only an
+  interactive window station can switch, so outside `--interactive-desktop` it is information.
+
+The gate is decided per effect (`gate.rs`). An effect is discriminating when a control that
+counts succeeded at it. The row passes when the agent's child is refused (the codes above) at
+least one discriminating effect; it fails when the agent's child succeeds at an effect (the limit
+is missing) or gets another code at a discriminating one; it is `INFO` only when no effect is
+discriminating. An effect no control could carry is named in the row text as information
+(`desktop: no control could create one ((a) 8, …), information only`), and the text names the
+variant that carried each discriminating effect. On CI every variant gets 8 from
+`CreateDesktopW`, while their clipboard writes succeed, so the clipboard carries the row.
 
 Then the harness runs the positive control (`checks_ctl.rs`): `probe ui-control` once per
 variant, each on its own fresh window station `ClauseoS15Ctl-<hex>` made as the outer runner
@@ -99,6 +135,17 @@ whatever job the harness runs in (on CI, the runner service's), which the row no
 tries `CreateDesktopW` on its own station, then the clipboard write, and prints each result with
 its token's user, integrity and restricting SIDs. Every variant's result is printed. The
 variants, closest to the agent first:
+
+- (g) the agent's own token shape on the agent's own station, outside the runner's job, so only
+  the job differs. In `node-pipes`, node prints `node waiting` after `probe job-ui` (which
+  prints `ui-effect station ClauseoRun-<hex>`) and waits for a line on stdin, so the agent's
+  station still exists. The harness starts `probe ui-relay` as matter A's pool user, as for (a),
+  on a fresh control station, and the relay starts `probe ui-control` with the agent's token
+  shape on `ClauseoRun-<hex>\Default` (the station's DACL names the pool user). (g) counts only
+  when it ran on that station, by the name the agent printed, as pool user A, Low, with 4
+  restricting SIDs. When (g) ran, it alone can carry an effect; when it couldn't, the row text
+  says why (the call and its code) and (a) to (d) carry instead. `codex` and `whoami` skip
+  (g): their probe has ended, and the agent's station with it, before the harness reads it.
 
 - (a) the agent's own token: the harness reads matter A's pool user's password from
   `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
@@ -118,13 +165,11 @@ variants, closest to the agent first:
 - (e) as (b), Low but with no restricting SIDs.
 - (f) the lawyer's own token unchanged, run as a child process the same way.
 
-The control is the first variant, in that order, that ran on its `ClauseoS15Ctl-` station with
-its own token shape and whose desktop create and clipboard write both succeeded; the row notes
-how it differs from the agent. The gate: only a variant at (d) or closer lets the row pass,
-since then the agent's 5s come from the job's limits. When (e) or (f) is the first to succeed,
-the row is `INFO` with every variant's codes as evidence, for a decision (for (f) the note says
-the control is unrestricted). When none succeeds, the row is `INFO`, naming each variant's
-codes, never `PASS`. Any other read of the agent's limits fails the row and names the value.
+A variant counts only when it ran on its station (`ClauseoS15Ctl-`, or the agent's for (g)) with
+its own token shape. Of (a) to (f), only (d) or closer can carry an effect, since then the
+agent's refusal comes from the job's limits; what (e) and (f) succeed at is printed as evidence
+only. The row notes how each carrier differs from the agent. Any other read of the agent's
+limits fails the row and names the value.
 
 `node-pipes` and `codex` also add a global atom as the lawyer and pass its name to
 `probe job-ui <atom>` (as node's argument, and in the command the mock asks codex to run). What
@@ -133,7 +178,7 @@ rule: atoms belong to a window station, so the agent's `ClauseoRun-…` station 
 atom whatever the job's limits are. The lookup outside the job is the control for the harness's
 own atom; the desktop refusal is the effect that tells the limits apart.
 
-The unit test of that rule (`checks_ui.rs`) runs on Windows with
+The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`) run on Windows with
 `cargo test -p clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI

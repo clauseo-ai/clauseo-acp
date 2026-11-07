@@ -9,6 +9,7 @@ use clauseo_sandbox::windows::ca_bundle;
 use clauseo_sandbox::windows::runner::{RUN_EXIT_BASE, RunExit};
 use clauseo_sandbox::windows::sids::Sid;
 
+use super::checks_ctl::Live;
 use super::checks_ui::{atom_info, ui_limits, with_atom};
 use super::launch::{Finished, Running, Spec, deadline, describe, launch, pool_of, summary, text};
 use super::manifest::Manifest;
@@ -152,7 +153,8 @@ pub(crate) fn whoami(ctx: &Ctx<'_>) -> Result<String, String> {
             "the privileges are {privileges:?}, not SeChangeNotifyPrivilege alone"
         ));
     }
-    let limits = ui_limits(ctx, lines)?;
+    let gone = Live::No("probe token has ended, and the agent's station with it");
+    let limits = ui_limits(ctx, lines, gone, false)?;
     Ok(format!(
         "{} at Low; restricted {want:?}; logon SID deny-only; SeChangeNotifyPrivilege alone; \
          {limits}",
@@ -160,9 +162,13 @@ pub(crate) fn whoami(ctx: &Ctx<'_>) -> Result<String, String> {
     ))
 }
 
+/// The line node prints once `probe job-ui` has answered, before it waits for one stdin line.
+const NODE_PAUSE: &str = "node waiting";
+
 /// Row 2: node starts node with piped stdio, as A; then the harness's `probe job-ui <atom>` as
 /// node's child shows node's tree runs inside the job's UI limits (`ui_limits`), with the
-/// harness's atom looked up as information.
+/// harness's atom looked up as information. Node then waits for a line on its stdin, so the
+/// agent's station still exists while the harness runs control variant (g) on it.
 pub(crate) fn node_pipes(ctx: &Ctx<'_>) -> Result<String, String> {
     with_atom(ctx, |atom| node_pipes_with(ctx, atom))
 }
@@ -170,7 +176,8 @@ pub(crate) fn node_pipes(ctx: &Ctx<'_>) -> Result<String, String> {
 fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
     let m = ctx.manifest;
     let node = m.node.clone().ok_or("no node")?;
-    // `node -e <script> <harness exe> <atom>`: process.argv[1] and [2].
+    // `node -e <script> <harness exe> <atom>`: process.argv[1] and [2]. After job-ui's lines it
+    // prints NODE_PAUSE and exits at the first stdin line or at stdin's end.
     let script = "const cp=require('child_process');\
                   const c=cp.spawn(process.execPath,['-e','process.stdout.write(\"ok\")'],\
                   {stdio:'pipe'});let o='';c.stdout.on('data',d=>o+=d);\
@@ -178,7 +185,10 @@ fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
                   c.on('close',k=>{process.stdout.write('child:'+o+' code:'+k+'\\n');\
                   const j=cp.spawnSync(process.argv[1],['probe','job-ui',process.argv[2]],\
                   {encoding:'utf8'});\
-                  process.stdout.write((j.stdout||'')+(j.error?'job-ui error '+j.error.code:''));})";
+                  process.stdout.write((j.stdout||'')\
+                  +(j.error?'job-ui error '+j.error.code+'\\n':'')+'node waiting\\n');\
+                  process.stdin.once('data',()=>process.exit(0));\
+                  process.stdin.once('end',()=>process.exit(0));})";
     let spec = Spec {
         program: text(&node),
         args: vec![
@@ -190,15 +200,39 @@ fn node_pipes_with(ctx: &Ctx<'_>, atom: &str) -> Result<String, String> {
         path: node.parent().map(Path::to_path_buf).into_iter().collect(),
         ..Spec::default()
     };
-    let done = run(ctx, "A", &spec)?;
-    for line in &done.stdout {
+    let until = deadline(ctx.limit);
+    let mut running = launch(m, "A", &spec)?;
+    let paused = running.line_after(NODE_PAUSE, until).is_some();
+    let early = paused.then(|| {
+        for line in &running.stdout {
+            ctx.note(&format!("node: {line}"));
+        }
+        ui_limits(ctx, &running.stdout.clone(), Live::Yes, ctx.strict)
+    });
+    let noted = if paused { running.stdout.len() } else { 0 };
+    if paused && let Err(why) = running.send("go\n") {
+        ctx.note(&format!(
+            "the line that ends node's wait wasn't sent: {why}"
+        ));
+    }
+    let done = running.finish(until)?;
+    ctx.note(&format!("A: node: {}", summary(&done)));
+    for line in done.stdout.iter().skip(noted) {
         ctx.note(&format!("node: {line}"));
+    }
+    for line in &done.stderr {
+        ctx.note(&format!("A stderr: {line}"));
     }
     ok_exit(&done)?;
     if !done.stdout.iter().any(|l| l.contains("child:ok")) {
         return Err(format!("node's child didn't answer ok: {:?}", done.stdout));
     }
-    let limits = ui_limits(ctx, &done.stdout)?;
+    let limits = if let Some(limits) = early {
+        limits?
+    } else {
+        let why = "node never printed its pause line, so the agent's station was gone";
+        ui_limits(ctx, &done.stdout, Live::No(why), ctx.strict)?
+    };
     atom_info(ctx, &done.stdout, atom);
     Ok(format!("node's child answered ok over a pipe; {limits}"))
 }

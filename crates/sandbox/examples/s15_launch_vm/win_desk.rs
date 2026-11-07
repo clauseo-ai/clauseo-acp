@@ -259,7 +259,7 @@ unsafe extern "system" {
 /// included, got 8 (`ERROR_NOT_ENOUGH_MEMORY`) from `CreateDesktopW` with the default heap on a
 /// fresh station in CI's session 0 (harness run 42367294132): a second desktop of the default
 /// size doesn't fit there. A small heap asks for little, so a refusal is about access, not room.
-const SMALL_HEAP_KB: u32 = 128;
+pub(crate) const SMALL_HEAP_KB: u32 = 128;
 
 /// `CreateDesktopW`'s code with the default heap, printed as information beside the
 /// small-heap code [`create_desktop_code`] gives.
