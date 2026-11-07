@@ -35,7 +35,7 @@ use clauseo_agents::{
     AgentsEvent, InstallState, Method, PasteCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use futures::{Stream, StreamExt as _};
+use futures::Stream;
 
 use super::admit::{key_stored, sign_in_barred};
 use super::compose::Compose;
@@ -53,7 +53,10 @@ pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{FirstRun, checked_endpoint, invalid, network_first, plan_method, retry};
+use self::parts::{
+    FirstRun, checked_endpoint, first_install_after_route, invalid, network_first, next_event,
+    plan_method, retry,
+};
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -476,9 +479,10 @@ impl AgentsBackend {
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
         let mut source = std::pin::pin!(source);
         let mut first_run = FirstRun::new(self.known.keys().cloned());
+        let mut first_install = None;
         let mut checked = BTreeSet::new();
         let mut tally = Tally::default();
-        while let Some(event) = source.next().await {
+        while let Some(event) = next_event(&mut source, &mut first_install).await {
             match event {
                 AgentsEvent::Install { agent, state } => {
                     let now = self.compose.monotonic();
@@ -490,7 +494,7 @@ impl AgentsBackend {
                         && self.known.contains_key(&first)
                     {
                         tracing::info!(agent = %first, "first run: installing");
-                        self.agents.install(&first);
+                        first_install = Some(first_install_after_route(self, first));
                     }
                 }
                 AgentsEvent::Signin { agent, state } => {

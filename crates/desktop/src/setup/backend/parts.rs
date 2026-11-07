@@ -1,11 +1,14 @@
 //! Small parts of the backend: first run's decision, the plan login a `StartSignIn` asks for,
 //! the endpoint check before `SetFirmEndpoint`'s confirm, and its two error answers; a retry's
-//! check, and the wait for the first network route before a command that reaches the network.
+//! check, and the wait for the first network route before a command that reaches the network
+//! or first run's install.
 
 use std::collections::BTreeSet;
 
 use clauseo_agents::{InstallState, Method, SigninError};
 use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError, SetupCommand};
+use futures::future::{BoxFuture, Either, select};
+use futures::{FutureExt as _, Stream, StreamExt as _};
 
 use super::AgentsBackend;
 
@@ -43,6 +46,39 @@ pub(super) async fn network_first(backend: &AgentsBackend, command: &SetupComman
     );
     if reaches {
         backend.wiring.network.ready().await;
+    }
+}
+
+/// First run's install of `first`, once the first network route has reached `Agents` (as
+/// [`network_first`] waits for it, at most the same bound), so its first download goes through
+/// the resolved proxy and never direct first. The pump runs it beside its events
+/// ([`next_event`]).
+pub(super) fn first_install_after_route(
+    backend: &AgentsBackend,
+    first: AgentId,
+) -> BoxFuture<'_, ()> {
+    async move {
+        backend.wiring.network.ready().await;
+        backend.agents.install(&first);
+    }
+    .boxed()
+}
+
+/// The pump's next event from `source`; meanwhile `pending` (first run's install), when set,
+/// runs, and is cleared once done. It goes first, so one already able to end does before the
+/// events end.
+pub(super) async fn next_event<S: Stream + Unpin>(
+    source: &mut S,
+    pending: &mut Option<BoxFuture<'_, ()>>,
+) -> Option<S::Item> {
+    loop {
+        let Some(install) = pending.as_mut() else {
+            return source.next().await;
+        };
+        match select(install, source.next()).await {
+            Either::Left(((), _)) => *pending = None,
+            Either::Right((event, _)) => return event,
+        }
     }
 }
 

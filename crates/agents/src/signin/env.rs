@@ -12,9 +12,14 @@
 //! - "plus the agent's home variables";
 //! - "`ANTHROPIC_API_KEY=""` for Claude and `CODEX_API_KEY=""` for Codex, so a stray key cannot
 //!   win and status reports only the plan login";
-//! - "`HTTPS_PROXY` from `network.upstream_proxy`";
+//! - "`HTTPS_PROXY` from `network.upstream_proxy`", with `NO_PROXY` holding the loopback names
+//!   (then the inherited ones), since the OAuth callback is on this computer (S17);
 //! - "the agent's `network.ca_certs` entry as `NODE_EXTRA_CA_CERTS` for Claude and as
-//!   `SSL_CERT_FILE` for Codex (Codex is a native binary)";
+//!   `CODEX_CA_CERTIFICATE` for Codex" (S17: Codex loads it beside the system roots, while
+//!   `SSL_CERT_FILE` would reach the tools in its shell, many of which take it to replace them;
+//!   an inherited `SSL_CERT_FILE` is left as it is);
+//! - `NODE_USE_SYSTEM_CA=1` unless the base sets it (S17: Node trusts the OS store too, where a
+//!   firm's TLS-inspecting proxy puts its root; Node 24.6 and 22.19 on, older ones ignore it);
 //! - "and `BROWSER`" (the shim, Claude's login runs on macOS and Linux).
 //!
 //! Names are matched without regard to ASCII case: Windows reads them that way, and on Unix a
@@ -177,17 +182,51 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
     }
     if let Some(proxy) = inputs.proxy {
         set(&mut env, "HTTPS_PROXY", OsStr::new(proxy));
+        let no_proxy = with_loopback(&env);
+        set(&mut env, "NO_PROXY", OsStr::new(&no_proxy));
+    }
+    let system_ca = env.iter().any(|(name, value)| {
+        name.to_string_lossy().eq_ignore_ascii_case(SYSTEM_CA_VAR) && !value.is_empty()
+    });
+    if !system_ca {
+        set(&mut env, SYSTEM_CA_VAR, OsStr::new("1"));
     }
     env
 }
 
+/// The variable that makes Node trust the OS's certificate store beside its own roots:
+/// `NODE_USE_SYSTEM_CA=1`, for every Node Clauseo starts (sign-in's runs here, desktop's
+/// launches and readers through [`crate::SYSTEM_CA_VAR`]).
+pub(crate) const SYSTEM_CA_VAR: &str = "NODE_USE_SYSTEM_CA";
+
+/// What a run with a proxy never sends through it: this computer, where the OAuth callback
+/// listens.
+const LOOPBACK: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
+
+/// The loopback names, then those of `env`'s `NO_PROXY` (in any case) not already there.
+fn with_loopback(env: &BTreeMap<OsString, OsString>) -> String {
+    let inherited = env
+        .iter()
+        .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case("NO_PROXY"))
+        .map(|(_, value)| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut names: Vec<&str> = LOOPBACK.to_vec();
+    for name in inherited.split(',').map(str::trim) {
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names.join(",")
+}
+
 /// The variable `vendor`'s CLI reads an extra CA file from: `NODE_EXTRA_CA_CERTS` for Claude
-/// (Node), `SSL_CERT_FILE` for Codex (a native binary). Desktop's launch env takes the same
-/// mapping (`crate::ca_cert_var`).
+/// (Node), `CODEX_CA_CERTIFICATE` for Codex (which loads it beside the system roots; never
+/// `SSL_CERT_FILE`, which the tools in an agent's shell take to replace theirs). Desktop's launch
+/// env takes the same mapping (`crate::ca_cert_var`).
 pub(crate) fn ca_var(vendor: Vendor) -> &'static str {
     match vendor {
         Vendor::Claude => "NODE_EXTRA_CA_CERTS",
-        Vendor::Codex => "SSL_CERT_FILE",
+        Vendor::Codex => "CODEX_CA_CERTIFICATE",
     }
 }
 

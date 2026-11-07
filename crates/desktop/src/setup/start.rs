@@ -27,7 +27,8 @@
 //! launch comes before them: `signin.policy_unreadable` for each agent an unreadable policy
 //! blocks, `agent.keys_loading` for every other known agent. The first load is bounded
 //! ([`KEYS_LOAD_BOUND`], on the setup thread's timer); once it is over and the first network
-//! route is known (at most `FIRST_ROUTE_WAIT`, `network/follow.rs`), each agent gets its
+//! route is known (at most until `FIRST_ROUTE_WAIT` after the setup thread's start, the keys'
+//! load included, `network/follow.rs`), each agent gets its
 //! refusal in force (`setup/refusal.rs`: none, or `agent.key_unreadable` for a stored key
 //! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
 //! the thread that then follows the settings and the keys' notes, so they never cross; a
@@ -317,6 +318,14 @@ pub(crate) fn spawn(read: SetupStart, parts: SetupParts, side: HostSide) -> std:
 
 /// The setup thread's work.
 fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
+    // The first route's wait counts from here (review L5). The OS's proxy lookups start now, on
+    // the network thread, beside the keys' load and off the window's start path.
+    let setup_start = SystemClock.monotonic();
+    let network = follow(
+        Follower::unbound(side.network, ProxyEnv::from_process, os_lookup, OS_FALLBACK),
+        setup_start,
+    );
+    network.update(read.settings.network.clone());
     let marker = KeyMarker::new(&read.data_dir, read.known.keys());
     let keys = Arc::new(KeyCache::load_bounded(
         Keychain::os(),
@@ -338,7 +347,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     };
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The settings' and the environment's route; the OS's follows from the network thread.
-    let network = read.network_at_start().agents_network();
+    let at_start = read.network_at_start().agents_network();
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
         .known
@@ -348,10 +357,9 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     config.managed = read.managed;
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;
-    config.install.proxy = network.proxy;
-    config.install.signin_proxy = network.signin_proxy;
-    config.install.ca_certs = network.ca_certs;
-    let network_facts = read.settings.network.clone();
+    config.install.proxy = at_start.proxy;
+    config.install.signin_proxy = at_start.signin_proxy;
+    config.install.ca_certs = at_start.ca_certs;
     config.clock = Arc::clone(&clock);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
@@ -374,15 +382,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             compose.show_key(agent, &keys);
         }
         let firm_policy = facts.firm_policy.clone();
-        let follower = Follower::new(
-            side.network,
-            Arc::clone(&agents),
-            ProxyEnv::from_process,
-            os_lookup,
-            OS_FALLBACK,
-        );
-        let network = follow(follower);
-        network.update(network_facts);
+        // The route resolved so far, if any, goes first in `Agents`' queue.
+        network.bind(Arc::clone(&agents));
         let wiring = Wiring::new(
             side.readers,
             side.reused,

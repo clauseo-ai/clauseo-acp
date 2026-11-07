@@ -162,11 +162,16 @@ pub use status::is_sign_in_again;
 pub use worker::Agents;
 
 /// The variable `agent`'s CLI reads an extra CA file (`network.ca_certs`) from:
-/// `NODE_EXTRA_CA_CERTS` for Claude, `SSL_CERT_FILE` for Codex; `None` for an agent with no
-/// vendor here. The one mapping: sign-in's runs take it too.
+/// `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE` for Codex; `None` for an agent with
+/// no vendor here. The one mapping: sign-in's runs take it too.
 pub fn ca_cert_var(agent: &clauseo_protocol::AgentId) -> Option<&'static str> {
     signin::vendor_of(agent).map(signin::env::ca_var)
 }
+
+/// `NODE_USE_SYSTEM_CA`: set to `1`, Node trusts the OS's certificate store beside its own
+/// roots (Node 24.6 and 22.19 on). Sign-in's runs set it; desktop's launches and readers take it
+/// from here.
+pub const SYSTEM_CA_VAR: &str = signin::env::SYSTEM_CA_VAR;
 
 /// Tests only: a host-name resolver standing in for the OS's. `Err` reads as a failed name
 /// lookup (offline).

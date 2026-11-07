@@ -19,7 +19,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
@@ -126,8 +126,10 @@ impl Agents {
             events,
         });
         let (commands, inbox) = mpsc::channel();
+        let network = Arc::new(RwLock::new(config.install.network()));
         let worker = Worker {
             config,
+            network,
             launcher: install,
             signin_launcher: signin,
             timer: Arc::new(timer),
@@ -162,8 +164,9 @@ impl Agents {
         self.send(Command::Retry(agent.clone(), use_system_proxy));
     }
 
-    /// Replaces the proxies and CA files (`network.*`, resolved by the caller): every install
-    /// and sign-in job started after this takes them; a running job keeps its own.
+    /// Replaces the proxies and CA files (`network.*`, resolved by the caller): every sign-in
+    /// job started after this takes them, and every install try, a running job's next one too
+    /// (one waiting offline); a running sign-in keeps its own.
     pub fn set_network(&self, network: Network) {
         self.send(Command::SetNetwork(Box::new(network)));
     }
@@ -382,6 +385,8 @@ impl Drop for Agents {
 /// The worker thread's state.
 struct Worker<T> {
     config: AgentsConfig,
+    /// The network every install try reads as it starts; `config.install`'s copy is sign-in's.
+    network: Arc<RwLock<Network>>,
     /// The installs' children; `signin_launcher` starts sign-in's, clearing the environment.
     launcher: Arc<dyn Launcher>,
     signin_launcher: Arc<dyn Launcher>,
@@ -400,7 +405,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Install(agent) => self.install(&agent),
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
-                Command::SetNetwork(network) => self.config.install.set_network(*network),
+                Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
         }
@@ -502,6 +507,11 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         }
     }
 
+    fn set_network(&mut self, network: Network) {
+        self.config.install.set_network(network.clone());
+        *self.network.write().unwrap_or_else(PoisonError::into_inner) = network;
+    }
+
     fn retry(&mut self, agent: &AgentId, use_system_proxy: bool) {
         if self.config.snapshot.agent(agent).is_none() {
             return;
@@ -545,6 +555,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         let job = Job {
             ticket: ticket.clone(),
             config: self.config.clone(),
+            network: Arc::clone(&self.network),
             launcher: Arc::clone(&self.launcher),
             timer: Arc::clone(&self.timer),
             shared: Arc::clone(&self.shared),

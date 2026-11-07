@@ -18,7 +18,7 @@ use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::pin::pin;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
@@ -26,7 +26,7 @@ use clauseo_protocol::AgentId;
 use futures::future::{Either, select};
 
 use crate::cancel::Cancel;
-use crate::config::AgentsConfig;
+use crate::config::{AgentsConfig, Network};
 use crate::disk;
 use crate::download::{FetchError, FetchKind, write_kind};
 use crate::log::{InstallLog, redact};
@@ -50,6 +50,7 @@ const MB: u64 = 1_000_000;
 pub(crate) struct Job<T> {
     pub(crate) ticket: Ticket,
     pub(crate) config: AgentsConfig,
+    pub(crate) network: Arc<RwLock<Network>>, // `Agents::set_network`'s, read by each try
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) timer: Arc<T>,
     pub(crate) shared: Arc<Shared>,

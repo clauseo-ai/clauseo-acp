@@ -157,7 +157,8 @@ fn a_read_s_variables_are_the_launch_hook_s_for_the_plan_and_the_key() {
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_BASE_URL",
             "AWS_REGION",
-            "CLAUDE_CODE_USE_BEDROCK"
+            "CLAUDE_CODE_USE_BEDROCK",
+            "NODE_USE_SYSTEM_CA"
         ]
     );
     // And a read's spec carries each of them.

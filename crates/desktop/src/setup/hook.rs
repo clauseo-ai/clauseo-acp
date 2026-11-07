@@ -12,9 +12,9 @@
 //! - the agents' network route, from the [`NetworkSlot`] (`setup/network.rs`): the proxy as
 //!   `HTTPS_PROXY` and `HTTP_PROXY` with `NO_PROXY` for loopback, and the agent's
 //!   `network.ca_certs` file under its CLI's variable (`NODE_EXTRA_CA_CERTS` for Claude,
-//!   `SSL_CERT_FILE` for Codex, sign-in's mapping). Never over a proxy or CA variable the plan's
-//!   `env` or the agent's own entry sets; the host's forced variables (the sandbox's egress
-//!   proxy) come after the hook's and win.
+//!   `CODEX_CA_CERTIFICATE` for Codex, sign-in's mapping), and `NODE_USE_SYSTEM_CA=1`. Never over
+//!   one the plan's `env` or the agent's own entry sets, and never `SSL_CERT_FILE`; the host's
+//!   forced variables (the sandbox's egress proxy, its root set) come after the hook's and win.
 //!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
@@ -76,17 +76,22 @@ impl SetupHook {
 
     /// What this hook adds for `agent` of `kind` ([`setup_vars`]), as the host takes it.
     fn setup_env(&self, agent: &AgentId, kind: AgentKind) -> BTreeMap<OsString, OsString> {
-        setup_vars(&self.keys, &self.plans, &self.network, agent, kind)
+        let (vars, routed) = setup_parts(&self.keys, &self.plans, &self.network, agent, kind);
+        let vars = vars
             .iter()
-            .map(|(name, value)| (OsString::from(name), OsString::from(value.as_str())))
-            .collect()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value.as_str())));
+        let routed = routed
+            .into_iter()
+            .map(|(name, value)| (OsString::from(name), value));
+        vars.chain(routed).collect()
     }
 }
 
 /// The variables setup adds for `agent` of `kind`, to its launches (the hook) and its limits
 /// reads (`setup/readers.rs`) alike: its firm plan's, then the network route's that the plan
 /// leaves free, then its stored key's (none while the keys load, or with no key). Zeroed when
-/// dropped.
+/// dropped. A CA path that is not UTF-8 is left out here (a limits read takes text); the
+/// launches get it as it is ([`SetupHook`]'s env).
 pub(crate) fn setup_vars(
     keys: &KeySlot,
     plans: &Plans,
@@ -94,6 +99,27 @@ pub(crate) fn setup_vars(
     agent: &AgentId,
     kind: AgentKind,
 ) -> BTreeMap<String, Zeroizing<String>> {
+    let (mut vars, routed) = setup_parts(keys, plans, network, agent, kind);
+    for (name, value) in routed {
+        if let Ok(value) = value.into_string() {
+            vars.insert(name, Zeroizing::new(value));
+        }
+    }
+    vars
+}
+
+/// The plan's and the key's variables, and the network route's beside them.
+type SetupParts = (BTreeMap<String, Zeroizing<String>>, Vec<(String, OsString)>);
+
+/// [`setup_vars`]' parts: the plan's and the key's variables, and the network route's beside
+/// them (none a plan variable takes), whose CA path stays an `OsString`.
+fn setup_parts(
+    keys: &KeySlot,
+    plans: &Plans,
+    network: &NetworkSlot,
+    agent: &AgentId,
+    kind: AgentKind,
+) -> SetupParts {
     let mut vars = BTreeMap::new();
     let plan = plans
         .read()
@@ -110,14 +136,11 @@ pub(crate) fn setup_vars(
     };
     let routed = route.launch_vars(agent, &planned);
     drop(route);
-    for (name, value) in routed {
-        vars.insert(name, Zeroizing::new(value));
-    }
     let key = keys.get().and_then(|keys| keys.get(agent));
     if let Some(key) = key.filter(|key| !key.is_empty()) {
         vars.insert(key_var(kind).to_owned(), key);
     }
-    vars
+    (vars, routed)
 }
 
 /// The variable `kind`'s key goes in.

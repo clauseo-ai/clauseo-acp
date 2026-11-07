@@ -1,15 +1,18 @@
 //! The network thread's step: each change reaches `Agents` and the launch env and is logged
 //! once, by source, scheme, host and port, never with a password.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
+use clauseo_agents::{Clock as _, SystemClock};
 use clauseo_host::ProfileHook as _;
+use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_protocol::AgentId;
 use url::Url;
 
-use super::super::{NetworkFacts, NetworkRoute, NetworkSlot, ProxyEnv};
-use super::{Follower, NetworkFollow};
+use super::super::{NetworkFacts, NetworkRoute, NetworkSlot, OsLookup, ProxyEnv, ask_all};
+use super::{FIRST_ROUTE_WAIT, Follower, NetworkFollow, OS_LOOKUP_BUDGET, follow};
 use crate::bridge::lock;
 use crate::setup::SetupHook;
 use crate::setup::backend::SetupAgents;
@@ -237,4 +240,108 @@ fn a_refresh_through_the_settings_changes_the_next_install_sign_in_and_launch() 
     follow.update(facts());
     assert_eq!(lock(&agents.0).last().unwrap().proxy, None);
     assert!(!hook_env(&hook, &codex()).contains_key("HTTPS_PROXY"));
+}
+
+const OS_PROXY: &str = "http://os-proxy.firm.example:8080";
+
+/// The time since `start`, a monotonic reading.
+fn since(start: Duration) -> Duration {
+    SystemClock.monotonic().saturating_sub(start)
+}
+
+/// An OS lookup that takes `slow` for a host whose name starts `slow`, `each` for others.
+fn slow_os(each: Duration, slow: Duration) -> Arc<OsLookup> {
+    Arc::new(move |target: &Url| {
+        let slow_host = target
+            .host_str()
+            .is_some_and(|host| host.starts_with("slow"));
+        futures::executor::block_on(AsyncIoTimer.after(if slow_host { slow } else { each }));
+        Some(OS_PROXY.to_owned())
+    })
+}
+
+fn targets(hosts: &[&str]) -> BTreeSet<Url> {
+    hosts
+        .iter()
+        .map(|host| Url::parse(&format!("https://{host}/")).unwrap())
+        .collect()
+}
+
+/// The OS is asked about every target at once: five slow lookups take about one's time.
+#[test]
+fn five_slow_lookups_take_about_one_lookups_time() {
+    let os = slow_os(Duration::from_millis(400), Duration::ZERO);
+    let asked = SystemClock.monotonic();
+    let hosts = [
+        "a.example",
+        "b.example",
+        "c.example",
+        "d.example",
+        "e.example",
+    ];
+    let answers = ask_all(targets(&hosts), &os, Duration::from_secs(5));
+    let took = since(asked);
+    assert_eq!(answers.len(), 5);
+    assert!(
+        answers
+            .values()
+            .all(|answer| answer.as_deref() == Some(OS_PROXY))
+    );
+    assert!(
+        took < Duration::from_millis(1_200),
+        "{took:?}: one after another"
+    );
+}
+
+/// A lookup past the budget counts as direct in the route; the answers in time are kept, and
+/// the route is made by the budget, not by the slow lookup.
+#[test]
+fn a_lookup_past_the_budget_counts_as_direct_and_the_rest_are_kept() {
+    let os = slow_os(Duration::ZERO, Duration::from_secs(3));
+    let asked = SystemClock.monotonic();
+    let budget = Duration::from_millis(300);
+    let answers = ask_all(targets(&["slow.example", "fast.example"]), &os, budget);
+    let took = since(asked);
+    assert!(took >= budget && took < Duration::from_secs(2), "{took:?}");
+    let fast = Url::parse("https://fast.example/").unwrap();
+    assert_eq!(
+        answers.get(&fast).cloned().flatten().as_deref(),
+        Some(OS_PROXY)
+    );
+    assert!(!answers.contains_key(&Url::parse("https://slow.example/").unwrap()));
+    // The whole resolution fits the 5 s budget, a margin left to hand the route on.
+    assert!(OS_LOOKUP_BUDGET < FIRST_ROUTE_WAIT);
+    assert_eq!(FIRST_ROUTE_WAIT, Duration::from_secs(5));
+}
+
+/// The start hands the read to the network thread and goes on at once, however slow the OS
+/// lookups (so neither the window nor the keys' load waits on them); the route lands within the
+/// budget, and `Agents`, bound after it, gets it then.
+#[test]
+fn the_start_never_waits_on_the_lookups_and_agents_bound_later_get_the_route() {
+    let slot = NetworkSlot::default();
+    let started = SystemClock.monotonic();
+    let os = slow_os(Duration::from_millis(500), Duration::ZERO);
+    let follower = Follower::unbound(
+        Arc::clone(&slot),
+        ProxyEnv::default,
+        move |target: &Url| os(target),
+        true,
+    );
+    let network = follow(follower, started);
+    network.update(facts());
+    assert!(
+        since(started) < Duration::from_millis(300),
+        "{:?}: the start waited on the lookups",
+        since(started)
+    );
+    crate::test_support::block_on(network.ready());
+    assert!(since(started) < FIRST_ROUTE_WAIT, "{:?}", since(started));
+    let route = current_of(&slot);
+    assert_eq!(route.agents[&claude()].launch.as_deref(), Some(OS_PROXY));
+    let agents = Arc::new(Networks::default());
+    network.bind(Arc::clone(&agents) as Arc<dyn SetupAgents>);
+    let pushed = lock(&agents.0).clone();
+    assert_eq!(pushed.len(), 1, "the route resolved before the bind");
+    assert_eq!(pushed[0].proxy.as_deref(), Some(OS_PROXY));
 }

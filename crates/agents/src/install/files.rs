@@ -5,6 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::PoisonError;
 use std::time::Duration;
 
 use clauseo_process::Timer;
@@ -122,8 +123,14 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             }
             Source::Fetch(fetch_job) => {
                 if fetcher.is_none() {
+                    // The network now, not the job's start's: a try after `set_network` (one
+                    // waiting offline, say) goes through the new proxy.
+                    let mut install = config.install.clone();
+                    let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
+                    install.set_network(network.clone());
+                    drop(network);
                     fetcher = Some(Fetcher::new(
-                        &config.install,
+                        &install,
                         &job.ticket.agent,
                         job.system_proxy.as_deref(),
                         &config.data_dir,

@@ -304,13 +304,13 @@ fn a_launch_gets_the_proxy_no_proxy_and_its_ca_variable() {
     let codex_env = hook_env(&hook, &codex());
     assert_eq!(codex_env["HTTPS_PROXY"], FIRM);
     assert!(
-        !codex_env.contains_key("SSL_CERT_FILE"),
+        !codex_env.contains_key("CODEX_CA_CERTIFICATE"),
         "Codex has no CA file"
     );
 }
 
 #[test]
-fn codex_takes_its_ca_file_as_ssl_cert_file() {
+fn codex_takes_its_ca_file_as_codex_ca_certificate_never_ssl_cert_file() {
     let mut set = facts();
     set.ca_certs
         .insert(codex(), PathBuf::from("/firm/codex.pem"));
@@ -322,7 +322,7 @@ fn codex_takes_its_ca_file_as_ssl_cert_file() {
     );
     let codex_env = hook_env(&hook, &codex());
     assert_eq!(
-        codex_env.get("SSL_CERT_FILE").map(String::as_str),
+        codex_env.get("CODEX_CA_CERTIFICATE").map(String::as_str),
         Some("/firm/codex.pem")
     );
     assert!(
@@ -351,12 +351,13 @@ fn a_plans_proxy_or_ca_variable_is_never_overridden() {
     let claude_env = hook_env(&hook, &claude());
     assert_eq!(claude_env["https_proxy"], "http://plan-proxy.example:1");
     assert_eq!(claude_env["NODE_EXTRA_CA_CERTS"], "/plan/ca.pem");
-    for name in ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "http_proxy"] {
-        assert!(
-            !claude_env.contains_key(name),
-            "{name} beside the plan's proxy"
-        );
-    }
+    assert!(
+        !claude_env.contains_key("HTTPS_PROXY"),
+        "HTTPS_PROXY beside the plan's https_proxy"
+    );
+    // Each variable on its own: the ones the plan leaves free still come.
+    assert_eq!(claude_env["HTTP_PROXY"], FIRM);
+    assert!(claude_env["NO_PROXY"].starts_with("localhost,127.0.0.1,::1"));
 }
 
 #[test]
@@ -371,9 +372,45 @@ fn an_agents_own_entry_variables_are_never_overridden() {
     }
     let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), network);
     let claude_env = hook_env(&hook, &claude());
-    for name in ["HTTPS_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS"] {
+    for name in ["NO_PROXY", "no_proxy", "NODE_EXTRA_CA_CERTS"] {
         assert!(!claude_env.contains_key(name), "{name} over the entry's");
     }
+}
+
+/// The entry's own variables, for Claude, with the firm's proxy routed.
+fn entry_env(own: &[&str]) -> BTreeMap<String, String> {
+    let (network, _ca) = proxied(None);
+    network.write().unwrap().own_vars.insert(
+        claude(),
+        own.iter().map(|name| (*name).to_owned()).collect(),
+    );
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), network);
+    hook_env(&hook, &claude())
+}
+
+/// An entry that sets only `NO_PROXY` keeps its own and still gets the firm's proxy (review M3).
+#[test]
+fn an_entry_with_only_no_proxy_keeps_it_and_still_gets_the_proxy() {
+    let env = entry_env(&["NO_PROXY"]);
+    assert_eq!(env["HTTPS_PROXY"], FIRM);
+    assert_eq!(env["HTTP_PROXY"], FIRM);
+    if cfg!(not(windows)) {
+        assert_eq!(env["https_proxy"], FIRM);
+    }
+    assert!(!env.contains_key("NO_PROXY") && !env.contains_key("no_proxy"));
+}
+
+/// An entry's own `HTTPS_PROXY` stays (in neither case added); `HTTP_PROXY` and `NO_PROXY`,
+/// which it leaves free, come. An entry's `ALL_PROXY` keeps both proxies out.
+#[test]
+fn an_entry_with_its_own_https_proxy_keeps_it() {
+    let env = entry_env(&["HTTPS_PROXY"]);
+    assert!(!env.contains_key("HTTPS_PROXY") && !env.contains_key("https_proxy"));
+    assert_eq!(env["HTTP_PROXY"], FIRM);
+    assert!(env.contains_key("NO_PROXY"));
+    let env = entry_env(&["all_proxy"]);
+    assert!(!env.contains_key("HTTPS_PROXY") && !env.contains_key("HTTP_PROXY"));
+    assert!(env.contains_key("NO_PROXY"));
 }
 
 #[test]
@@ -428,4 +465,87 @@ fn a_shown_proxy_is_its_scheme_host_and_port_only() {
         )
     );
     assert!(!route.contains(SECRET), "{route}");
+}
+
+/// The environment's proxy: `HTTPS_PROXY`, `https_proxy`, then `ALL_PROXY`, `all_proxy`;
+/// never `HTTP_PROXY` for the agents' HTTPS.
+#[test]
+fn the_env_reads_all_proxy_after_the_https_ones_and_never_http_proxy() {
+    let from = |pairs: &[(&str, &str)]| {
+        let vars: BTreeMap<String, String> = pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        ProxyEnv::from_vars(|name| vars.get(name).cloned()).https
+    };
+    let all = ("ALL_PROXY", "http://all.example:1");
+    let https = ("https_proxy", "http://https.example:2");
+    let http = ("HTTP_PROXY", "http://http.example:3");
+    assert_eq!(
+        from(&[all, https, http]).as_deref(),
+        Some("http://https.example:2")
+    );
+    assert_eq!(from(&[all, http]).as_deref(), Some("http://all.example:1"));
+    assert_eq!(
+        from(&[("all_proxy", "http://a.example:4")]).as_deref(),
+        Some("http://a.example:4")
+    );
+    assert_eq!(from(&[http]), None);
+    assert_eq!(from(&[("ALL_PROXY", " ")]), None);
+}
+
+/// A CA path that is not UTF-8 reaches the launch env byte for byte.
+#[cfg(unix)]
+#[test]
+fn a_ca_path_that_is_not_utf8_reaches_the_launch_as_it_is() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let ca = PathBuf::from(std::ffi::OsStr::from_bytes(b"/firm/ca-\xff.pem"));
+    let mut set = facts();
+    set.ca_certs.insert(claude(), ca.clone());
+    let route = resolve(&set, &env(None), false, &no_os);
+    let hook = SetupHook::new(
+        Arc::new(OnceLock::new()),
+        Arc::default(),
+        Arc::new(RwLock::new(route)),
+    );
+    let env = hook.launch_env(&claude());
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("NODE_EXTRA_CA_CERTS")),
+        Some(&ca.into_os_string())
+    );
+}
+
+/// Every launch trusts the OS's store too (`NODE_USE_SYSTEM_CA=1`), proxy or not, unless the
+/// plan or the entry sets it; and the hook never names `SSL_CERT_FILE`, in any case, so one the
+/// launcher sets (the sandbox's whole System root set: the host's forced variables come after
+/// the hook's, `clauseo_host`'s `launch_spec_drops_inherited_git_and_forced_wins`) or the agent
+/// inherits survives beside a firm CA file.
+#[test]
+fn launches_use_the_system_ca_and_never_touch_a_launchers_ssl_cert_file() {
+    let mut set = facts();
+    set.ca_certs
+        .insert(codex(), PathBuf::from("/firm/codex.pem"));
+    let route = resolve(&set, &env(None), false, &no_os);
+    let network = Arc::new(RwLock::new(route));
+    let hook = SetupHook::new(
+        Arc::new(OnceLock::new()),
+        Arc::default(),
+        Arc::clone(&network),
+    );
+    for agent in [claude(), codex()] {
+        let env = hook_env(&hook, &agent);
+        assert_eq!(env["NODE_USE_SYSTEM_CA"], "1", "{agent}");
+        assert!(
+            !env.keys()
+                .any(|name| name.eq_ignore_ascii_case("SSL_CERT_FILE")),
+            "{agent}: {env:?}"
+        );
+    }
+    network
+        .write()
+        .unwrap()
+        .own_vars
+        .insert(claude(), ["node_use_system_ca".to_owned()].into());
+    let env = hook_env(&hook, &claude());
+    assert!(!env.contains_key("NODE_USE_SYSTEM_CA"), "over the entry's");
 }
