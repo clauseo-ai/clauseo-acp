@@ -150,15 +150,14 @@ impl AgentsBackend {
                 use_system_proxy, ..
             } => self.retry(&agent, use_system_proxy)?,
             SetupCommand::StartSignIn { console, .. } => {
-                if !switch::switch_first(self, &agent, &info.name).await {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
-                }
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
-                agents
-                    .sign_in(&agent, method)
+                switch::sign_in(agents, &agent, method, switch)
                     .map_err(|error| signin_error(&error))?;
                 tracing::info!(%agent, method = ?method, "sign-in started");
                 self.replaced(&agent);
@@ -176,14 +175,13 @@ impl AgentsBackend {
                     .map_err(|error| signin_error(&error))?;
             }
             SetupCommand::UseDeviceCode { .. } => {
-                if !switch::switch_first(self, &agent, &info.name).await {
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
                     return Ok(());
-                }
+                };
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                agents
-                    .sign_in(&agent, Method::DeviceCode)
+                switch::sign_in(agents, &agent, Method::DeviceCode, switch)
                     .map_err(|error| signin_error(&error))?;
                 tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
                 self.replaced(&agent);
@@ -206,13 +204,15 @@ impl AgentsBackend {
             }
             SetupCommand::UseDifferentAccount { .. } => {
                 self.refuse_start(&agent)?;
+                let Some(switch) = switch::switch_first(self, &agent, &info.name).await else {
+                    return Ok(());
+                };
                 if self.reused(&agent) {
                     leave::leave_first(self, &agent, leave::After::Rule).await?;
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                agents
-                    .use_different_account(&agent)
+                switch::use_different(agents, &agent, switch)
                     .map_err(|error| signin_error(&error))?;
                 self.replaced(&agent);
             }

@@ -7,6 +7,7 @@ mod after;
 mod auth_held;
 mod counts;
 mod endpoint;
+mod fake_seams;
 mod fakes;
 mod key_marker;
 mod key_reads;

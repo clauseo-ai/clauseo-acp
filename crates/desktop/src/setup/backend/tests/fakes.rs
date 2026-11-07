@@ -2,13 +2,14 @@
 //! opener, each recording what it was asked, and the backend over them.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
     AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
+    Source,
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
@@ -18,13 +19,14 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
+pub(super) use super::fake_seams::{FakeConfirm, FakeOpener};
 use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 use crate::setup::compose::{Compose, is_running};
-use crate::setup::confirm::{Ask, SetupConfirm};
+use crate::setup::confirm::SetupConfirm;
 use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::LeaveTimer;
@@ -125,6 +127,24 @@ impl SetupAgents for FakeAgents {
         };
         self.reserve(name, agent, true)
     }
+    fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
+        let name = match method {
+            Method::DeviceCode => "sign_in_device_code_switching",
+            _ => "sign_in_switching",
+        };
+        self.reserve(name, agent, true)
+    }
+    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login.
+    fn replaces_own_login(&self, agent: &AgentId) -> bool {
+        agent.as_str() == "codex-acp"
+            && matches!(
+                lock(&self.signin).get(agent),
+                Some(SigninState::SignedIn {
+                    source: Source::Own,
+                    ..
+                })
+            )
+    }
     /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.answer("cancel_sign_in", agent)?;
@@ -152,6 +172,9 @@ impl SetupAgents for FakeAgents {
     }
     fn use_different_account(&self, agent: &AgentId) -> Result<(), SigninError> {
         self.reserve("use_different_account", agent, true)
+    }
+    fn use_different_account_switching(&self, agent: &AgentId) -> Result<(), SigninError> {
+        self.reserve("use_different_account_switching", agent, true)
     }
     fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         lock(&self.signin).get(agent).cloned()
@@ -378,36 +401,6 @@ impl SetupHost for RecordingHost {
             .take()
             .ok_or_else(|| HostError::new(ErrorCode::Internal, "the tests feed no holds"));
         Box::pin(std::future::ready(answer))
-    }
-}
-
-/// The confirms, answered `answer`, each ask recorded.
-pub(super) struct FakeConfirm {
-    pub(super) answer: bool,
-    pub(super) asked: Mutex<Vec<Ask>>,
-}
-
-impl SetupConfirm for FakeConfirm {
-    fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool> {
-        lock(&self.asked).push(ask);
-        Box::pin(std::future::ready(self.answer))
-    }
-}
-
-/// The opener, each URL recorded.
-#[derive(Default)]
-pub(super) struct FakeOpener(pub(super) Mutex<Vec<String>>);
-
-impl Opener for FakeOpener {
-    fn open_url(&self, url: &str) -> Result<(), HostError> {
-        lock(&self.0).push(url.to_owned());
-        Ok(())
-    }
-    fn open_path(&self, _path: &Path, _kind: &str) -> Result<(), HostError> {
-        Ok(())
-    }
-    fn reveal(&self, _path: &Path) -> Result<(), HostError> {
-        Ok(())
     }
 }
 

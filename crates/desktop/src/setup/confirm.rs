@@ -73,11 +73,13 @@ pub(crate) fn words(ask: &Ask) -> (String, String, String) {
             format!("{name} will go back to its usual service."),
             "Stop using it".to_owned(),
         ),
-        // Provisional words, for the copy review.
+        // The copy review's words (provisional). English only: the setup confirms have no Hindi
+        // path yet (`Ask::Install`'s neither); the review's Hindi waits in its words file.
         Ask::SwitchAccount { name } => (
             "Sign in with a different account?".to_owned(),
             format!(
-                "This signs you out of {name} first, in every matter. Then you can sign in again."
+                "This signs you out of {name} first, in every matter. Then you can sign in with \
+                 the account you want."
             ),
             "Sign out and continue".to_owned(),
         ),

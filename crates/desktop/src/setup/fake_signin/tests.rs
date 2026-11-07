@@ -91,6 +91,17 @@ impl crate::setup::backend::SetupAgents for Real {
         self.call("use_different_account");
         Ok(())
     }
+    fn use_different_account_switching(&self, _: &AgentId) -> Result<(), SigninError> {
+        self.call("use_different_account_switching");
+        Ok(())
+    }
+    fn sign_in_switching(&self, _: &AgentId, _: Method) -> Result<(), SigninError> {
+        self.call("sign_in_switching");
+        Ok(())
+    }
+    fn replaces_own_login(&self, _: &AgentId) -> bool {
+        false
+    }
     fn signin_state(&self, _: &AgentId) -> Option<SigninState> {
         None
     }
