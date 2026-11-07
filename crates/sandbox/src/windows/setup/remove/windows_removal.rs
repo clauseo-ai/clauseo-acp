@@ -217,7 +217,7 @@ impl Removal for WindowsRemoval {
         self.actor.is_some()
     }
 
-    fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<(), MachineError> {
+    fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<usize, MachineError> {
         let stopped = processes::stop_pool_processes(pool, owner)?;
         if !stopped.ended.is_empty() {
             tracing::warn!(
@@ -232,7 +232,7 @@ impl Removal for WindowsRemoval {
                 "processes of the sandbox users couldn't all be stopped"
             );
         }
-        Ok(())
+        Ok(stopped.failed.len() + stopped.timed_out.len())
     }
 
     fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
