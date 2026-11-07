@@ -104,8 +104,10 @@ export function EdgePrompt({
     const said =
       kind === "off"
         ? state.kind === "allowed"
-          ? w.v("Protection switched off for this matter at {time}.", { time: w.clock(state.at) })
-          : w.v("Protection kept. Clauseo left the scanned annexures unread.")
+          ? w.v("Safe workspace switched off for this matter at {time}.", {
+              time: w.clock(state.at),
+            })
+          : w.v("Safe workspace kept. Clauseo left the scanned annexures unread.")
         : state.kind === "allowed"
           ? kind === "folder"
             ? w.v(
@@ -153,11 +155,13 @@ export function EdgePrompt({
       : kind === "site"
         ? w.v("Clauseo wants to open a website this matter hasn't used before: {place}.", { place })
         : w.v(
-            "Clauseo asks to work without protection in this matter, to read the scanned annexures with a program on this computer.",
+            "Clauseo asks to work outside the Safe workspace in this matter, to read the scanned annexures with a program on this computer.",
           );
   const kept =
     kind === "off"
-      ? w.v("Without protection, Clauseo can reach any file on this computer without asking.")
+      ? w.v(
+          "Outside the Safe workspace, Clauseo can reach any file on this computer without asking.",
+        )
       : w.v("Clauseo works inside this matter's folder and asks before going beyond it.");
   const allow = (
     <Button
@@ -183,7 +187,7 @@ export function EdgePrompt({
     >
       {kind !== "off" && <IconCross size={16} />}
       <span className="deva-nudge">
-        {kind === "off" ? w.v("Keep protection") : w.v("Don't allow")}
+        {kind === "off" ? w.v("Keep the Safe workspace") : w.v("Don't allow")}
       </span>
       {keys && <Kbd className="perm-key">{kind === "off" ? "Enter" : "Esc"}</Kbd>}
     </Button>

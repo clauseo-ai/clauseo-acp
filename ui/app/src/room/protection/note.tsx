@@ -1,9 +1,14 @@
-// UC: the Not protected note in the room, the chunk note-load.ts loads: the cause's body (components' protection.tsx),
-// its retry through the set-up confirm where Windows' administrator prompt follows (setup.tsx), the waiting line in
-// the button's place and a refusal's words under the body. When the matter becomes protected the note closes. The
-// firm's notice (required.tsx) rides in the same chunk.
+// UC: the Not protected note in the room, the chunk note-load.ts loads: the cause's body
+// (components' protection.tsx), its retry through the set-up confirm where Windows' administrator
+// prompt follows (setup.tsx), the waiting line in the button's place and a refusal's words under
+// the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
+// installer the retry gives way to its line and, on a personal install, "Get the installer". When
+// the matter becomes protected the note closes. The firm's notice (required.tsx) rides in the same
+// chunk.
 import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
+import { openInstallerPage, repairPage } from "./installer.ts";
 import { useEffect, useState } from "react";
 import type { MatterId } from "../../transport/protocol.ts";
 import { explainDue, markExplained } from "./explained.ts";
@@ -16,17 +21,21 @@ import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
 import { canRetry } from "./view.ts";
 import { named1385, poolOf, whyOf } from "./detail.ts";
 
-/** The note's `why` for a cause. */
+/** The note's `why` for a cause: a missing admin copy reads as not set up yet. */
 const noteWhy = (cause: Cause): NoteWhy =>
-  cause.group === "setup"
-    ? (cause.name as NoteWhy)
-    : cause.group === "off"
-      ? "off"
-      : cause.group === "pool"
-        ? "pool"
-        : whyOf(cause) === "not_built"
-          ? "not_built"
-          : "cant";
+  blockOf(cause) === "admin_copy_missing"
+    ? "needs_set_up"
+    : blockOf(cause) !== null
+      ? "blocked"
+      : cause.group === "setup"
+        ? (cause.name as NoteWhy)
+        : cause.group === "off"
+          ? "off"
+          : cause.group === "pool"
+            ? "pool"
+            : whyOf(cause) === "not_built"
+              ? "not_built"
+              : "cant";
 
 export function ProtectionNote({
   transport,
@@ -48,7 +57,8 @@ export function ProtectionNote({
   open: boolean;
   onClose: () => void;
 }) {
-  const { lang } = useDisplay();
+  const display = useDisplay();
+  const { lang } = display;
   const state = useProtection(store);
   const { press, confirm } = useSetUpPress(
     state,
@@ -75,7 +85,14 @@ export function ProtectionNote({
     if (gone && open) onClose();
   }, [gone, open, onClose]);
   if (cause === null) return null;
-  const retry = canRetry(cause);
+  const repair = needsInstaller(state.view, cause);
+  const retry = !repair && canRetry(cause);
+  const block = blockLine(lang, cause);
+  const page = repair && !firmInstall(state.view) ? repairPage(display) : null;
+  const extra = [
+    ...(block === null ? [] : [block]),
+    ...(repair ? [repairLine(lang, state.view)] : []),
+  ];
   return (
     <>
       <NotProtectedNote
@@ -86,6 +103,8 @@ export function ProtectionNote({
         named1385={named1385(cause)}
         waiting={retry ? waitingWords(lang, state, cause) : null}
         failed={retry ? failedWords(lang, state) : null}
+        extra={extra}
+        onGetInstaller={page === null ? undefined : () => openInstallerPage(transport, page)}
         onClose={close}
         onProtect={retry ? press : undefined}
       />

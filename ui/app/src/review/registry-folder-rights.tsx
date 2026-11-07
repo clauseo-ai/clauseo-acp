@@ -164,7 +164,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. Codex can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. For full protection, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -177,7 +177,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. Codex can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. For full protection, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,

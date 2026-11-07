@@ -1,9 +1,10 @@
-// @vitest-environment happy-dom
-// UC's Safe workspace in the settings window (settings.html#workspace), over FakeTransport with the protection wire:
-// one test per row of the brief's Settings table; the quiet unavailable state while the query answers
-// command.invalid (before R17 PR-B admits this window), never an error; no section without the wire; "Remove set-up"
-// always through its confirm, Cancel sending nothing; the set-up's confirm by the same rule as the room's; the wait and
-// a refusal; no account name or SID for any fixture; and no timer at rest.
+// @vitest-environment happy-dom UC's Safe workspace in the settings window
+// (settings.html#workspace), over FakeTransport with the protection wire: one test per row of the
+// brief's Settings table; the quiet unavailable state while the query answers command.invalid
+// (before R17 PR-B admits this window), never an error; no section without the wire; "Remove
+// set-up" always through its confirm, Cancel sending nothing; a set-up with no Windows prompt sent
+// at once, and design B's repair in the button's place where it would bring one; a block's reason
+// line; the wait and a refusal; no account name or SID for any fixture; and no timer at rest.
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { pw } from "@clauseo/components/lib/words-protection.ts";
@@ -13,7 +14,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { connectDisplay } from "../../display/connect.ts";
 import { DEFAULT_UI, type DisplayStore } from "../../room/display-store.ts";
-import { np, PROT, view } from "../../room/protection/fixtures.ts";
+import { NO_PROMPT, np, PROT, view } from "../../room/protection/fixtures.ts";
+import { installerPage } from "../../room/protection/installer.ts";
+import { APP_VERSION } from "../version.ts";
 import { FakeTransport, type FakeProtectionHost } from "../../transport/fake-transport.ts";
 import type { Protection, ProtectionView } from "../../transport/protocol.ts";
 import { SettingsApp } from "../settings-app.tsx";
@@ -110,7 +113,7 @@ test("while the query answers command.invalid (not admitted yet), the quiet unav
     },
   });
   expect(block()?.dataset["state"]).toBe("unavailable");
-  expect(text()).toBe(st("en", "Clauseo can't show this computer's protection here yet."));
+  expect(text()).toBe(st("en", "Clauseo can't show this computer's Safe workspace here yet."));
   expect(one("protection-setup")).toBeNull();
   expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("protection"));
 });
@@ -148,8 +151,8 @@ test.each([
   [
     "needs_set_up",
     PROT.needs,
-    "Protection isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
-    "Set up protection",
+    "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
+    "Set up the Safe workspace",
   ],
   [
     "set_up_refused",
@@ -160,16 +163,19 @@ test.each([
   [
     "set_up_failed",
     PROT.failed,
-    "Protection couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
+    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
     "Set up again",
   ],
-] as const)("%s: Not protected, why, and its set-up", async (state, p, note, label) => {
-  await mount({ view: () => view(p) });
-  expect(block()?.dataset["state"]).toBe(state);
-  expect(text()).toContain(st("en", "Not protected"));
-  expect(text()).toContain(st("en", note));
-  expect(one("protection-setup")?.textContent).toBe(label);
-});
+] as const)(
+  "%s, set up with no prompt: Not protected, why, and its set-up",
+  async (state, p, note, label) => {
+    await mount({ view: () => view(p, NO_PROMPT) });
+    expect(block()?.dataset["state"]).toBe(state);
+    expect(text()).toContain(st("en", "Not protected"));
+    expect(text()).toContain(st("en", note));
+    expect(one("protection-setup")?.textContent).toBe(label);
+  },
+);
 
 test("set_up_failed with R17 PR-E's 1385 cause adds the line for IT", async () => {
   await mount({ view: () => view(np({ set_up_failed: { why: "logon_right_denied_1385" } })) });
@@ -182,7 +188,7 @@ test.each([
     "plain unsupported on Linux",
     "unsupported",
     "linux",
-    "This computer can't give Clauseo's protection",
+    "This computer can't run the Safe workspace",
   ],
   ["why os", { unsupported: { why: "os" } }, "linux", "isn't available on Linux yet"],
   [
@@ -195,9 +201,9 @@ test.each([
     "why not_built",
     { unsupported: { why: "not_built" } },
     "windows",
-    "This version of Clauseo doesn't have protection yet",
+    "This version of Clauseo doesn't have the Safe workspace yet",
   ],
-  ["a newer cause", "some_newer_cause", "windows", "This computer can't give Clauseo's protection"],
+  ["a newer cause", "some_newer_cause", "windows", "This computer can't run the Safe workspace"],
 ] as const)("can't, %s: its line, and no act", async (_c, cause, platform, words) => {
   await mount({ view: () => view(np(cause)) }, platform);
   expect(block()?.dataset["state"]).toBe("cant");
@@ -212,7 +218,7 @@ test("required: Managed by firm beside the status; Not protected adds the firm's
   expect(one("protection-required")?.textContent).toBe(
     st(
       "en",
-      "Your firm requires protection, so Clauseo doesn't answer on this computer until it's protected.",
+      "Your firm requires the Safe workspace, so Clauseo doesn't answer on this computer until it's set up.",
     ),
   );
 });
@@ -240,12 +246,12 @@ test("Remove set-up always confirms first: Cancel sends nothing, confirming send
   await press(one("protection-remove"));
   const confirm = one("protection-confirm");
   expect(confirm?.dataset["act"]).toBe("remove");
-  expect(confirm?.textContent).toContain(pw("en", "Remove protection's set-up?"));
+  expect(confirm?.textContent).toContain(pw("en", "Remove the Safe workspace from this computer?"));
   expect(confirm?.textContent).toContain("It will say the publisher is unknown");
   expect(confirm?.textContent).toContain(
     pw(
       "en",
-      "Afterwards, Clauseo works on this computer without protection until you set it up again.",
+      "Afterwards, Clauseo works on this computer without the Safe workspace until it's set up again.",
     ),
   );
   await press(one("protection-confirm-cancel"));
@@ -264,19 +270,98 @@ test("Remove set-up always confirms first: Cancel sends nothing, confirming send
   expect(block()?.dataset["state"]).toBe("needs_set_up");
 });
 
-test("Set up again confirms first where it asks an administrator, and a refusal says its words", async () => {
-  const s = held(PROT.refused);
+test("Set up again with no Windows prompt sends at once, with no confirm, and a refusal says its words", async () => {
+  const s = held(PROT.refused, NO_PROMPT);
   const t = await mount(s.host);
   await press(one("protection-setup"));
-  expect(one("protection-confirm")?.dataset["act"]).toBe("setup");
-  expect(t.protectionCommands()).toEqual([]);
-  await press(one("protection-confirm-ok"));
+  expect(one("protection-confirm")).toBeNull();
   expect(t.protectionCommands()).toEqual(["retry_protection"]);
   await act(async () =>
     s.answers[0]!.reject({ code: "sandbox.setup_refused", message: "no", retryable: true }),
   );
   await settle();
   expect(one("protection-failed")?.textContent).toBe(errorWords("en", "sandbox.setup_refused"));
+});
+
+test.each([
+  ["needs_set_up", PROT.needs],
+  ["set_up_refused", PROT.refused],
+] as const)(
+  "%s whose set-up would bring Windows' prompt (an older host): the repair stands in the button's place",
+  async (state, p) => {
+    const t = await mount({ view: () => view(p) });
+    expect(block()?.dataset["state"]).toBe(state);
+    expect(one("protection-setup")).toBeNull();
+    expect(one("protection-repair")?.textContent).toBe(
+      pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+    );
+    expect(one("protection-installer")).not.toBeNull();
+    expect(t.protectionCommands()).toEqual([]);
+  },
+);
+
+test("admin_copy_missing: not set up yet, the repair, and Get the installer opens the installed version's page", async () => {
+  const t = await mount({ view: () => view(PROT.missing) });
+  expect(block()?.dataset["state"]).toBe("blocked");
+  expect(text()).toContain(
+    st(
+      "en",
+      "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.",
+    ),
+  );
+  expect(one("protection-block")?.textContent).toBe(
+    pw("en", "The Safe workspace wasn't set up when Clauseo was installed."),
+  );
+  expect(one("protection-repair")?.textContent).toBe(
+    pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+  );
+  await press(one("protection-installer"));
+  expect(t.only("open_external")).toEqual([
+    { call: "open_external", url: installerPage(APP_VERSION) },
+  ]);
+  expect(t.protectionCommands()).toEqual([]);
+});
+
+test.each([
+  ["required", { required: true }],
+  ["no unprotected auto mode", { unprotected_auto_allowed: false }],
+] as const)(
+  "admin_copy_missing on a firm install (%s): ask IT, with no button",
+  async (_c, over) => {
+    await mount({ view: () => view(PROT.missing, over) });
+    expect(one("protection-repair")?.textContent).toBe(
+      pw("en", "Ask your IT team to install Clauseo again."),
+    );
+    expect(one("protection-installer")).toBeNull();
+    expect(one("protection-setup")).toBeNull();
+  },
+);
+
+test.each([
+  [
+    "policy",
+    PROT.policy,
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+  ],
+  [
+    "other_account",
+    PROT.otherAccount,
+    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+  ],
+  ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
+] as const)("a block, %s: what stops it, its line, and no act", async (_c, p, line) => {
+  await mount({ view: () => view(p) });
+  expect(block()?.dataset["state"]).toBe("blocked");
+  expect(text()).toContain(
+    pw(
+      "en",
+      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
+    ),
+  );
+  expect(one("protection-block")?.textContent).toBe(line);
+  expect(one("protection-repair")).toBeNull();
+  expect(one("protection-installer")).toBeNull();
+  expect(one("protection-setup")).toBeNull();
 });
 
 test("#protection opens the Safe workspace, the name the wire gives it", async () => {
@@ -368,7 +453,7 @@ test("keys: confirming Remove set-up puts focus on the waiting line in its place
   expect(document.activeElement).toBe(document.querySelector(".set-pane h2"));
 });
 
-test("keys: Set up protection without a confirm puts focus on the waiting line", async () => {
+test("keys: Set up the Safe workspace without a confirm puts focus on the waiting line", async () => {
   const s = held(PROT.needs, { retry_asks_admin: false } as Partial<ProtectionView>);
   await mount(s.host);
   one("protection-setup")?.focus();

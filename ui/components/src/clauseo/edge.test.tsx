@@ -285,15 +285,17 @@ test("on Windows the computer's dialog is a window of its own, Clauseo's title b
 test("switching protection off: the computer asks, and keeping protection is the default", async () => {
   await show(dialog({ kind: "off", matter: "Acme Ltd v. State" }, "mac"));
   const os = one(".sysd-dialog");
-  expect(os.textContent).toContain("Switch off protection for Acme Ltd v. State?");
-  expect(os.querySelector(".sysd-button[data-primary]")?.textContent).toBe("Keep protection");
+  expect(os.textContent).toContain("Switch off the Safe workspace for Acme Ltd v. State?");
+  expect(os.querySelector(".sysd-button[data-primary]")?.textContent).toBe(
+    "Keep the Safe workspace",
+  );
   expect(os.querySelector(".sysd-check-input")).toBeNull();
 });
 
 test.each([
-  ["mac", "macOS didn't allow the protected space on this computer."],
-  ["windows", "Windows didn't allow the protected space on this computer."],
-  ["linux", "Linux didn't allow the protected space on this computer."],
+  ["mac", "macOS didn't allow the Safe workspace on this computer."],
+  ["windows", "Windows didn't allow the Safe workspace on this computer."],
+  ["linux", "Linux didn't allow the Safe workspace on this computer."],
 ] as const)(
   "on %s, a matter whose protection couldn't be set up says which computer refused",
   async (platform, said) => {
@@ -323,7 +325,7 @@ test("Not protected is explained once: three plain lines, and Understood, the da
   );
   const note = one('[role="alertdialog"]');
   expect(note.textContent).toContain("This matter is not protected");
-  expect(note.textContent).toContain("Protection is off for Acme Ltd v. State.");
+  expect(note.textContent).toContain("The Safe workspace is off for Acme Ltd v. State.");
   expect(note.textContent).not.toContain("The line under the question box");
   await vi.waitFor(() => expect(document.activeElement?.textContent).toBe("Understood"));
   expect(document.activeElement?.className).toContain("bg-primary");

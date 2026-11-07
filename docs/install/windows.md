@@ -94,18 +94,24 @@ Check on the laptop pass: the box's wording on Windows 11.
 > Screenshot to come: the same box with "Run anyway".
 <!-- img/windows-smartscreen-run.png -->
 
-### 3. The per-machine installer only
+### 3. Windows asks once
 
-The usual installer, `Clauseo_<version>_x64-setup.exe`, installs for you alone and asks no
-further question. Skip this part.
-
-The per-machine installer, `Clauseo_<version>_x64-machine-setup.exe`, is the one firms use. It
-installs for everyone on the computer, so Windows asks:
+The usual installer, `Clauseo_<version>_x64-setup.exe`, installs for you alone. It also sets up
+the Safe workspace, which keeps Clauseo inside each matter's folder, and that needs Windows'
+permission once. The installer says so first, then Windows asks:
 
 > Do you want to allow this app from an unknown publisher to make changes to your device?
 
+The per-machine installer, `Clauseo_<version>_x64-machine-setup.exe`, is the one firms use. It
+installs for everyone on the computer, so Windows asks the same question.
+
 It shows "Publisher: Unknown". Click **Yes**. If you aren't an administrator, Windows asks for
-one's name and password.
+one's name and password; someone who is can type theirs.
+
+If you click **No**, Clauseo still installs and works, but without the Safe workspace: it asks
+before changing anything outside a matter's folder. To set the Safe workspace up later, run the
+Clauseo installer again. Clauseo's Settings, under Safe workspace, has a button that opens the
+download page for your version.
 
 Check on the laptop pass: the prompt's wording.
 

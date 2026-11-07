@@ -54,7 +54,7 @@ function Opener({ act: which, onConfirm }: { act: ProtectionConfirmAct; onConfir
   );
 }
 
-for (const which of ["setup", "remove"] as const)
+for (const which of ["add", "remove"] as const)
   test(`the ${which} confirm starts on Cancel, and Escape sends nothing and gives focus back`, async () => {
     const onConfirm = vi.fn();
     await show(<Opener act={which} onConfirm={onConfirm} />);
@@ -70,7 +70,7 @@ for (const which of ["setup", "remove"] as const)
 
 test("Cancel sends nothing and gives focus back", async () => {
   const onConfirm = vi.fn();
-  await show(<Opener act="setup" onConfirm={onConfirm} />);
+  await show(<Opener act="add" onConfirm={onConfirm} />);
   byId("opener")?.focus();
   await press(byId("opener"));
   await press(byId("protection-confirm-cancel"));
@@ -91,7 +91,7 @@ function NoteWithConfirm({ onConfirm }: { onConfirm: () => void }) {
         onProtect={() => setConfirming(true)}
       />
       <ProtectionConfirm
-        act="setup"
+        act="add"
         open={confirming}
         onOpenChange={setConfirming}
         onConfirm={onConfirm}
@@ -100,7 +100,7 @@ function NoteWithConfirm({ onConfirm }: { onConfirm: () => void }) {
   );
 }
 
-test("from the note, Escape closes the confirm alone and focus goes back to Set up protection", async () => {
+test("from the note, Escape closes the confirm alone and focus goes back to Set up the Safe workspace", async () => {
   const onConfirm = vi.fn();
   await show(<NoteWithConfirm onConfirm={onConfirm} />);
   byId("protection-setup")?.focus();

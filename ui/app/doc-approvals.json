@@ -1,8 +1,8 @@
 {
   "docs/install/windows.md": {
     "status": "provisional",
-    "at": "2026-11-05",
-    "by": "stage F (provisional; Rohan batch review)",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup: section 3, Windows asks once)",
     "pr": 442
   },
   "docs/install/macos.md": {

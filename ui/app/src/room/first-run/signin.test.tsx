@@ -395,7 +395,7 @@ const FOUND: [FoundLogin, string][] = [
   ],
   [
     "claude_windows_sandbox",
-    "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
   ],
   [
     "reused_signed_out",

@@ -1,11 +1,16 @@
-// Not protected, explained. When a matter stands without protection, the system's alert dialog says why in plain
-// lines: what Clauseo can now reach, and what is still kept. The cause picks the body (UC): protection not set up on
-// this computer yet, the set-up refused or failed, a computer that can't give it, every protected space in use (counts
-// only, never a name), or protection switched off for the matter. The body is the same for both plans: "asks before
-// changing anything outside this matter's folder" is true for Claude and ChatGPT alike. Understood, the act, is the
-// dark primary and takes the starting focus. A set-up cause offers its retry beside it ("Set up protection", "Try
-// again"; a full pool's "Add room" while it can grow), which leaves the note open: the waiting line stands in the
-// button's place, and a refusal's words under it. The open lock leads it, in concrete: nothing here is red.
+// Not protected, explained. When a matter stands without protection, the system's alert dialog says
+// why in plain lines: what Clauseo can now reach, and what is still kept. The cause picks the body
+// (UC): protection not set up on this computer yet, the set-up refused or failed, a computer that
+// can't give it, every protected space in use (counts only, never a name), or protection switched
+// off for the matter. The body is the same for both plans: "asks before changing anything outside
+// this matter's folder" is true for Claude and ChatGPT alike. Design B adds a Safe workspace
+// something on this computer stops, whose reason's line the caller gives, and the repair: its line,
+// and on a personal install "Get the installer", which opens the installed version's release page
+// (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
+// set-up cause offers its retry beside it ("Set up the Safe workspace", "Try again"; a full pool's
+// "Add room" while it can grow), which leaves the note open: the waiting line stands in the
+// button's place, and a refusal's words under it. The open lock leads it, in concrete: nothing here
+// is red.
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
@@ -23,7 +28,8 @@ export type NoteWhy =
   | "set_up_failed"
   | "cant"
   | "not_built"
-  | "pool";
+  | "pool"
+  | "blocked";
 
 /** The pool's counts (NotProtectedCause's pool_full): how many protected spaces, and what holds them. */
 export type NotePool = {
@@ -43,8 +49,10 @@ export function NotProtectedNote({
   addRoom = false,
   waiting = null,
   failed = null,
+  extra = [],
   onClose,
   onProtect,
+  onGetInstaller,
 }: {
   open: boolean;
   /** The matter's name as filed. */
@@ -60,9 +68,14 @@ export function NotProtectedNote({
   waiting?: string | null;
   /** Optional: the last retry's refusal, in its code's words. */
   failed?: string | null;
+  /** Optional: lines after the cause's body, in the page's language (design B: the block's reason,
+   * the repair). */
+  extra?: string[];
   onClose: () => void;
   /** The retry: set protection up, try again, or add room. Without it, no retry shows. */
   onProtect?: (() => void) | undefined;
+  /** Optional: opens the installer's page ("Get the installer"); without it, no such button. */
+  onGetInstaller?: (() => void) | undefined;
 }) {
   const w = useVersionWords();
   const { platform } = useDisplay();
@@ -82,64 +95,71 @@ export function NotProtectedNote({
     why === "off"
       ? [
           w.v(
-            "Protection is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
+            "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
             { matter },
           ),
         ]
       : why === "needs_set_up"
         ? [
             p(
-              "Protection isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+              "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
             ),
           ]
         : why === "not_built"
           ? [
               p(
-                "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
               ),
             ]
-          : why === "cant"
+          : why === "blocked"
             ? [
                 p(
-                  "This computer can't give Clauseo's protection, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
                 ),
               ]
-            : why === "pool"
+            : why === "cant"
               ? [
                   p(
-                    "All {size} of this computer's protected spaces are in use, so this matter works without protection for now. It's protected again once one is free.",
-                    { size: pool?.size ?? 0 },
+                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
                   ),
                 ]
-              : [
-                  p(
-                    "Protection couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-                  ),
-                  ...(refused
-                    ? [
-                        platform === "windows"
-                          ? w.v("Windows didn't allow the protected space on this computer.")
-                          : platform === "linux"
-                            ? w.v("Linux didn't allow the protected space on this computer.")
-                            : w.v("macOS didn't allow the protected space on this computer."),
-                      ]
-                    : named1385
+              : why === "pool"
+                ? [
+                    p(
+                      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
+                      { size: pool?.size ?? 0 },
+                    ),
+                  ]
+                : [
+                    p(
+                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                    ),
+                    ...(refused
                       ? [
-                          p(
-                            "Windows policy on this computer doesn't let Clauseo's protection accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
-                          ),
+                          platform === "windows"
+                            ? w.v("Windows didn't allow the Safe workspace on this computer.")
+                            : platform === "linux"
+                              ? w.v("Linux didn't allow the Safe workspace on this computer.")
+                              : w.v("macOS didn't allow the Safe workspace on this computer."),
                         ]
-                      : []),
-                ];
+                      : named1385
+                        ? [
+                            p(
+                              "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+                            ),
+                          ]
+                        : []),
+                  ];
   const retry =
     onProtect === undefined ||
     why === "off" ||
     why === "cant" ||
+    why === "blocked" ||
     why === "not_built" ||
     (why === "pool" && !addRoom)
       ? null
       : why === "needs_set_up"
-        ? p("Set up protection")
+        ? p("Set up the Safe workspace")
         : why === "pool"
           ? p("Add room")
           : w.v("Try again");
@@ -160,7 +180,7 @@ export function NotProtectedNote({
         }
         body={
           <span className="np-note-body">
-            {lines.map((line) => (
+            {[...lines, ...extra].map((line) => (
               <span key={line}>
                 <Say>{line}</Say>
               </span>
@@ -209,6 +229,11 @@ export function NotProtectedNote({
         }
         actions={
           <>
+            {onGetInstaller !== undefined && (
+              <Button kind="quiet" onClick={onGetInstaller} data-testid="protection-installer">
+                <span className="deva-nudge">{p("Get the installer")}</span>
+              </Button>
+            )}
             {retry !== null &&
               (waiting !== null ? (
                 <span className="np-note-wait" role="status" data-testid="protection-wait">

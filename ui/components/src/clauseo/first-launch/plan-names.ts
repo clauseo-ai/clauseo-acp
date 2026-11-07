@@ -15,7 +15,7 @@ export const FOUND: Record<Found, FirstLaunchKey> = {
     "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.",
   codex_keyring: "Codex on this computer keeps its sign-in where Clauseo can't share it.",
   claude_windows_sandbox:
-    "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
   reused_signed_out: "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
   reused_changed:
     "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",

@@ -96,29 +96,29 @@ export const HI = {
   "Not protected": "संरक्षित नहीं",
   "Set up again": "फिर से सेट करें",
   "Set up on {date}, with Windows' permission.": "{date} को Windows की अनुमति से सेट किया गया।",
-  "Clauseo can't show this computer's protection here yet.":
-    "Clauseo अभी यहाँ इस कंप्यूटर का संरक्षण नहीं दिखा सकता।",
+  "Clauseo can't show this computer's Safe workspace here yet.":
+    "Clauseo अभी यहाँ इस कंप्यूटर का सुरक्षित कार्यक्षेत्र नहीं दिखा सकता।",
   "macOS keeps Clauseo inside each matter's folder.":
     "macOS, Clauseo को हर मामले के फ़ोल्डर के भीतर रखता है।",
   "Windows keeps Clauseo inside each matter's folder.":
     "Windows, Clauseo को हर मामले के फ़ोल्डर के भीतर रखता है।",
   "Set up with Windows' permission.": "Windows की अनुमति से सेट अप किया गया।",
-  "Protection isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.":
-    "इस कंप्यूटर पर संरक्षण अभी सेट अप नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "The Safe workspace isn't set up on this computer yet, so Clauseo asks before changing anything outside a matter's folder.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र अभी तैयार नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.":
     "Windows ने सेटअप की अनुमति नहीं दी, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Protection couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.":
-    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "This computer can't give Clauseo's protection, so Clauseo asks before changing anything outside a matter's folder.":
-    "यह कंप्यूटर Clauseo का संरक्षण नहीं दे सकता, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Clauseo's protection isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.":
-    "Clauseo का संरक्षण अभी Linux पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Clauseo's protection isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.":
-    "Clauseo का संरक्षण अभी Windows on ARM पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.":
-    "Clauseo के इस संस्करण में अभी संरक्षण नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-  "Your firm requires protection, so Clauseo doesn't answer on this computer until it's protected.":
-    "आपकी फ़र्म संरक्षण अनिवार्य करती है, इसलिए संरक्षित होने तक Clauseo इस कंप्यूटर पर उत्तर नहीं देता।",
+  "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This computer can't run the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.":
+    "यह कंप्यूटर सुरक्षित कार्यक्षेत्र नहीं चला सकता, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.":
+    "सुरक्षित कार्यक्षेत्र अभी Linux पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.":
+    "सुरक्षित कार्यक्षेत्र अभी ARM वाले Windows पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.":
+    "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  "Your firm requires the Safe workspace, so Clauseo doesn't answer on this computer until it's set up.":
+    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo इस कंप्यूटर पर उत्तर नहीं देता।",
   "Your firm doesn't allow Clauseo to work without asking on this computer.":
     "आपकी फ़र्म इस कंप्यूटर पर Clauseo को बिना पूछे काम करने की अनुमति नहीं देती।",
 } as const;

@@ -221,7 +221,7 @@ export function AllowedList({
       )}
       <div className="allows-foot" data-unprotected={unprotected !== null ? "" : undefined}>
         <p className="allows-protection">
-          <span className="allows-protection-name">{w.v("Protection")}</span>
+          <span className="allows-protection-name">{w.v("Safe workspace")}</span>
           <span className="allows-protection-state">
             <Say>
               {unprotected === null
@@ -246,7 +246,9 @@ export function AllowedList({
           onClick={onProtection}
         >
           <span className="deva-nudge">
-            {unprotected === null ? w.v("Switch off protection") : w.v("Switch protection on")}
+            {unprotected === null
+              ? w.v("Switch off the Safe workspace")
+              : w.v("Switch the Safe workspace on")}
           </span>
         </Button>
       </div>

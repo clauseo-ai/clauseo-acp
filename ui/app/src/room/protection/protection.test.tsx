@@ -210,12 +210,12 @@ test("protection_changed for the open matter swaps the line and both marks in on
 const noteText = () => note()?.textContent ?? "";
 
 test.each([
-  ["needs", "needs_set_up", "Protection isn't set up on this computer yet."],
-  ["refused", "set_up_refused", "Protection couldn't be set up on this computer"],
-  ["failed", "set_up_failed", "Protection couldn't be set up on this computer"],
-  ["unsupported", "cant", "This computer can't give Clauseo's protection"],
-  ["newer", "cant", "This computer can't give Clauseo's protection"],
-  ["off", "off", "Protection is off for Sharma v. State of Delhi."],
+  ["needs", "needs_set_up", "The Safe workspace isn't set up on this computer yet."],
+  ["refused", "set_up_refused", "The Safe workspace couldn't be set up on this computer"],
+  ["failed", "set_up_failed", "The Safe workspace couldn't be set up on this computer"],
+  ["unsupported", "cant", "This computer can't run the Safe workspace"],
+  ["newer", "cant", "This computer can't run the Safe workspace"],
+  ["off", "off", "The Safe workspace is off for Sharma v. State of Delhi."],
 ] as const)("the note for %s says its cause, and what is still kept", async (key, why, words) => {
   await mount(PROT[key]);
   expect(note()?.dataset["cause"]).toBe(why);
@@ -223,7 +223,7 @@ test.each([
   expect(noteText()).toContain(
     vt("en", "Every change inside the matter's folder is still kept, and Versions can undo it."),
   );
-  expect(noteText()).not.toContain(vt("en", "Switch protection on"));
+  expect(noteText()).not.toContain(vt("en", "Switch the Safe workspace on"));
   // never a promise to ask before each change (Changed, 11)
   expect(noteText()).not.toContain("asks before each change");
   const buttons = [...note()!.querySelectorAll("button")].map((b) => b.textContent);
@@ -239,7 +239,7 @@ test("the pool's note: counts only, one line per nonzero count, and its ways out
   expect(text).toContain(
     pw(
       "en",
-      "All {size} of this computer's protected spaces are in use, so this matter works without protection for now. It's protected again once one is free.",
+      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
       { size: 8 },
     ),
   );
@@ -308,7 +308,7 @@ test("a build without protection (unsupported { why: not_built }) reads calmly: 
   expect(noteText()).toContain(
     pw(
       "en",
-      "This version of Clauseo doesn't have protection yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+      "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
     ),
   );
   expect(document.body.querySelector('[data-testid="protection-setup"]')).toBeNull();

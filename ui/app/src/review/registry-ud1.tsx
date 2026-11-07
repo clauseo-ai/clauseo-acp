@@ -401,7 +401,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     "plan-found",
   ],
   [
-    "Clauseo's safe workspace can't share Claude Code's sign-in on Windows yet.",
+    "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
     { ...found("claude_windows_sandbox"), platform: "windows" },
     "plan-found",
   ],

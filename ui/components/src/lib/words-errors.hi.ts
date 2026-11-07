@@ -129,14 +129,14 @@ export const HI = {
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
     "इस मामले के फ़ोल्डर में एक फ़ाइल शॉर्टकट है। Clauseo शॉर्टकट को संरक्षित नहीं कर सकता, इसलिए उसके हटने तक इस मामले में उत्तर नहीं देगा। उसे कहीं और ले जाएँ या हटाएँ, फिर दोबारा पूछें।",
-  "Protection wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.":
-    "संरक्षण सेट अप नहीं हुआ, क्योंकि Windows को अनुमति नहीं मिली। फिर से प्रयास करें, और Windows के पूछने पर Yes चुनें।",
-  "Protection couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
-    "इस कंप्यूटर पर संरक्षण सेट अप नहीं हो सका। फिर से प्रयास करें। बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसे दिखवाएँ।",
-  "Clauseo needs to set up protection on this computer once before it can answer here. Set it up, then ask again. Your question is kept.":
-    "यहाँ उत्तर देने से पहले Clauseo को इस कंप्यूटर पर एक बार संरक्षण सेट अप करना होगा। इसे सेट अप करें, फिर दोबारा पूछें। आपका प्रश्न रखा गया है।",
-  "Your firm requires protection, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
-    "आपकी फ़र्म संरक्षण अनिवार्य करती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+  "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.":
+    "Windows को अनुमति नहीं मिली, इसलिए सुरक्षित कार्यक्षेत्र तैयार नहीं हुआ। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
+  "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
+  "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.":
+    "जब तक इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता। आपका प्रश्न रखा गया है।",
+  "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.":
+    "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
