@@ -47,6 +47,18 @@ pub use limits::{
 pub use relay::{RelayConfig, RelaySession, Relays, TurnHandle};
 pub use wiring::{ConnectorEvents, ConnectorOpener, ConnectorsWiring};
 
+/// What a paid `recharge` answer says of the balance after the call it resumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumedBalance {
+    /// No call was resumed (`resumed` missing or `null`): `balance_credits` is the balance.
+    NoCall,
+    /// `resumed.balance_credits`, or else the balance the last of `resumed.charge_lines` names.
+    Known(i64),
+    /// A call was resumed but neither says the balance after it (a charge line in a format
+    /// not read): `balance_credits`, from before its charge, is stale.
+    Unknown,
+}
+
 /// What the relay tells the host, from the relay's own threads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -77,8 +89,13 @@ pub enum RelayEvent {
     RechargePaid {
         /// The session whose call it was.
         session: SessionKey,
-        /// `structuredContent.balance_credits`, when it is a whole number.
+        /// `structuredContent.recharge_id`, when present: repeats of one recharge are told apart.
+        recharge_id: Option<String>,
+        /// `structuredContent.balance_credits`, when it is a whole number: the balance before the
+        /// call it resumed spent anything.
         balance_credits: Option<i64>,
+        /// What the answer says of the balance after the call it resumed.
+        resumed_balance: ResumedBalance,
     },
     /// A message the relay forwards started or ended (`RelayEvents::call`): the idle stop
     /// counts it as the session's agent at work, in a turn or between turns (R20b).
@@ -196,4 +213,9 @@ pub trait RelayEvents: Send + Sync {
     fn call(&self, session: SessionKey, call: RelayCall) {
         let _ = (session, call);
     }
+
+    /// A paid `recharge` result resumed a charged call; called before the relay drops the
+    /// account copy, so an account read begun before this is known to be from before that
+    /// charge (the host's balance epoch). The default does nothing.
+    fn resumed_charge(&self) {}
 }

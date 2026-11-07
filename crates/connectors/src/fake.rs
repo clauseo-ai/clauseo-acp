@@ -199,6 +199,7 @@ struct FakeState {
     api: api::ApiState,
     fail_next: HashMap<String, VecDeque<u16>>,
     delay_next: HashMap<String, VecDeque<Duration>>,
+    hold_next: HashMap<String, VecDeque<CancelFlag>>,
     inject_next: HashMap<String, VecDeque<Injected>>,
 }
 
@@ -225,6 +226,7 @@ impl FakeState {
             api: api::ApiState::new(),
             fail_next: HashMap::new(),
             delay_next: HashMap::new(),
+            hold_next: HashMap::new(),
             inject_next: HashMap::new(),
         }
     }
@@ -337,6 +339,19 @@ impl FakeHandle {
             .entry(path.to_owned())
             .or_default()
             .push_back(delay);
+    }
+
+    /// The next request to `path` is answered as it arrives but sent only once the flag returned
+    /// is set (or the fake stops): a reply the connector wrote before something else happened,
+    /// delivered after it. Calls queue up.
+    pub fn hold_next(&self, path: &str) -> CancelFlag {
+        let release = CancelFlag::new();
+        self.lock()
+            .hold_next
+            .entry(path.to_owned())
+            .or_default()
+            .push_back(release.clone());
+        release
     }
 
     /// The next request to `path` (no query) gets exactly this status, these headers and this

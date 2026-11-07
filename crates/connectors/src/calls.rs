@@ -64,8 +64,10 @@ pub(crate) fn account(handle: &ConnectorHandle) -> Result<Account, Error> {
     let mut cache = lock(&handle.inner.account);
     let now = handle.inner.shared.config.clock.now();
     let generation = handle.inner.generation.load(Ordering::SeqCst);
-    if let Some((cached_generation, account)) = cache.as_ref()
+    let forgets = handle.inner.forgets.load(Ordering::SeqCst);
+    if let Some((cached_generation, cached_forgets, account)) = cache.as_ref()
         && *cached_generation == generation
+        && *cached_forgets == forgets
         && now
             .duration_since(account.fetched_at)
             .is_ok_and(|age| age < ACCOUNT_MIN_INTERVAL)
@@ -90,7 +92,10 @@ pub(crate) fn account(handle: &ConnectorHandle) -> Result<Account, Error> {
         402 => return Err(out_of_credit(handle, &reply)),
         status => return Err(Error::Http { status }),
     };
-    *cache = Some((generation, account.clone()));
+    // Forgotten while in flight: the caller gets it, the cache does not.
+    if handle.inner.forgets.load(Ordering::SeqCst) == forgets {
+        *cache = Some((generation, forgets, account.clone()));
+    }
     Ok(account)
 }
 
@@ -167,7 +172,7 @@ pub(crate) fn wait_recharge(
                 if recharge.status.settled() {
                     if recharge.status == RechargeStatus::Paid {
                         // The balance changed: the next account read asks the connector.
-                        *lock(&handle.inner.account) = None;
+                        handle.forget_account();
                     }
                     return Ok(recharge);
                 }
@@ -405,6 +410,8 @@ pub(crate) fn add_api_key(
     let key = Secret::from(key);
     let auth = Zeroizing::new(format!("Bearer {}", key.expose()));
     let url = handle.account_url();
+    // Before the request, as `account` does: a forget during it leaves no copy tagged current.
+    let forgets = handle.inner.forgets.load(Ordering::SeqCst);
     let headers = [
         ("Authorization", auth.as_str()),
         ("Accept", "application/json"),
@@ -439,7 +446,7 @@ pub(crate) fn add_api_key(
         );
         if let Ok(account) = parsed {
             let generation = handle.inner.generation.load(Ordering::SeqCst);
-            *lock(&handle.inner.account) = Some((generation, account));
+            *lock(&handle.inner.account) = Some((generation, forgets, account));
         }
     }
     Ok(())

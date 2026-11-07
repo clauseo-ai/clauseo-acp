@@ -106,6 +106,9 @@ mod connector_races;
 #[path = "host/connector_recharge.rs"]
 mod connector_recharge;
 #[cfg(test)]
+#[path = "host/connector_resume_order.rs"]
+mod connector_resume_order;
+#[cfg(test)]
 #[path = "host/connector_rig.rs"]
 mod connector_rig;
 #[cfg(test)]

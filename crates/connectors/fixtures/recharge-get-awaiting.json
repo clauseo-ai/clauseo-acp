@@ -27,5 +27,6 @@
         "wait": true
       }
     }
-  ]
+  ],
+  "then": "Waiting for the human to pay. Call recharge as next says again: once paid, it runs the held call and returns its result."
 }

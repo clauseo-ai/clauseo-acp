@@ -165,8 +165,11 @@ pub(crate) struct HandleInner {
     /// Bumped whenever the credential is replaced or ends; the account cache is kept only for
     /// the generation it was read under.
     pub(crate) generation: AtomicU64,
-    /// The last account read and the generation it belongs to.
-    pub(crate) account: Mutex<Option<(u64, Account)>>,
+    /// Bumped by [`ConnectorHandle::forget_account`]: the account cache is kept only for the
+    /// count it was read under, so a read in flight when it is forgotten does not refill it.
+    pub(crate) forgets: AtomicU64,
+    /// The last account read, with the generation and the forget count it belongs to.
+    pub(crate) account: Mutex<Option<(u64, u64, Account)>>,
     pub(crate) metadata: Mutex<Option<Arc<Metadata>>>,
     /// The pending sign-in's number and cancel flag.
     pub(crate) pending: Mutex<Option<(u64, CancelFlag)>>,
@@ -224,6 +227,7 @@ impl ConnectorHandle {
                 slot: Mutex::new(Slot::Unread),
                 persist_failed: AtomicBool::new(false),
                 generation: AtomicU64::new(0),
+                forgets: AtomicU64::new(0),
                 account: Mutex::new(None),
                 metadata: Mutex::new(None),
                 pending: Mutex::new(None),
@@ -286,8 +290,9 @@ impl ConnectorHandle {
     /// Drops the account's copy, so the next [`ConnectorHandle::account`] asks the connector:
     /// for a balance that changed where this crate did not see it (a paid `recharge` tool
     /// result through the relay).
+    /// Never waits: a read in flight keeps the lock, and stores nothing once this is called.
     pub fn forget_account(&self) {
-        *lock(&self.inner.account) = None;
+        self.inner.forgets.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Opens a recharge for `pack`; its pay link is always ours.

@@ -9,8 +9,9 @@
 //! - a `tools/call`'s `result.isError` and, only when it is `true`, its `structuredContent` up to
 //!   [`MAX_STRUCTURED_BYTES`] (a larger one is `OtherError`, logged), which
 //!   [`classify_tool_result_for`] reads from a small value rebuilt around it;
-//! - a `recharge` call's `result.structuredContent.status` and `balance_credits`, borrowed, so a
-//!   paid recharge refreshes the balance (`RechargePaid`).
+//! - a `recharge` call's `result.structuredContent.status`, `recharge_id` and `balance_credits`,
+//!   borrowed, and its `resumed.balance_credits` or else `resumed.charge_lines` (small), so a
+//!   paid recharge refreshes the balance (`RechargePaid`) with what the call it resumed spent.
 //!
 //! What reaches the agent is never rebuilt: `content` and `structuredContent`, every block of
 //! each, pass as the connector wrote them. (Claude Code shows its model only `structuredContent`
@@ -27,7 +28,7 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use super::super::super::limits::{MAX_REPLY_BYTES, Spend};
-use super::super::super::{RelayEvent, texts};
+use super::super::super::{RelayEvent, ResumedBalance, texts};
 use super::super::conn::Conn;
 use super::super::{Session, lock};
 use super::{Call, log_name};
@@ -79,14 +80,32 @@ pub(super) struct ToolResult<'a> {
     pub(super) structured: Option<&'a RawValue>,
 }
 
-/// A `recharge` result's `structuredContent`: its status, and the balance after it.
+/// A `recharge` result's `structuredContent`: its status, its recharge, the balance before the
+/// call it resumed, and that call.
 #[derive(Deserialize)]
 struct RechargeResult<'a> {
     #[serde(borrow, default, deserialize_with = "present")]
     status: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
+    recharge_id: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
     balance_credits: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    resumed: Option<&'a RawValue>,
 }
+
+/// `structuredContent.resumed`: only its balance and charge lines are read; `result` and `text`
+/// (as large as the call's answer) are skipped unbuilt.
+#[derive(Deserialize)]
+struct Resumed<'a> {
+    #[serde(borrow, default, deserialize_with = "present")]
+    balance_credits: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    charge_lines: Option<&'a RawValue>,
+}
+
+/// The largest raw `resumed.charge_lines` read; a larger one is left out.
+const MAX_CHARGE_LINES_BYTES: usize = 4 * 1024;
 
 /// A member that is present, whatever its value (`null` included); a missing one is the
 /// field's default, `None`. Plain `Option` would read `null` as missing.
@@ -252,11 +271,21 @@ fn read_result(conn: &Conn, call: &Call, result: &RawValue) {
             session: session.key,
         }),
         ToolOutcome::Ok if spend == Spend::Recharge => {
-            if let Some(Paid { balance_credits }) = recharge_paid(result) {
+            if let Some(paid) = recharge_paid(result) {
+                // Forget, bump, forget. The first forget comes before the bump, so a read that
+                // records the new epoch can't be served the copy from before the charge (the
+                // copy is kept per forget count). The bump comes before the event, so a read
+                // begun before it is dropped. The last forget is the plain paid-result one.
+                if paid.resumed_balance != ResumedBalance::NoCall {
+                    hub.connector.forget_account();
+                    hub.events.resumed_charge();
+                }
                 hub.connector.forget_account();
                 hub.events.event(RelayEvent::RechargePaid {
                     session: session.key,
-                    balance_credits,
+                    recharge_id: paid.recharge_id,
+                    balance_credits: paid.balance_credits,
+                    resumed_balance: paid.resumed_balance,
                 });
             }
         }
@@ -297,13 +326,19 @@ fn tool_outcome(session: &Session, result: &RawValue) -> ToolOutcome {
 
 /// A `recharge` result that said paid.
 struct Paid {
-    /// Its `balance_credits`, when that is a whole number.
+    /// Its top-level `recharge_id`, when that is a small string.
+    recharge_id: Option<String>,
+    /// Its `balance_credits`, when that is a whole number: the balance before the call it
+    /// resumed spent anything.
     balance_credits: Option<i64>,
+    /// What it says of the balance after the call it resumed.
+    resumed_balance: ResumedBalance,
 }
 
 /// Whether a `recharge` result (not an error) says `structuredContent.status == "paid"`, and
-/// then its `balance_credits` when that is a whole number. Only those two members are read; the
-/// rest (a resumed call's result, say) is skipped unbuilt.
+/// then its recharge, its `balance_credits` when that is a whole number and the balance its
+/// resumed call's charge lines end on. Only those members are read; the rest (a resumed call's
+/// result, say) is skipped unbuilt.
 fn recharge_paid(result: &RawValue) -> Option<Paid> {
     let read = object::<ToolResult<'_>>(result)?;
     let is_error = read
@@ -312,10 +347,81 @@ fn recharge_paid(result: &RawValue) -> Option<Paid> {
     let structured = object::<RechargeResult<'_>>(read.structured.filter(|_| !is_error)?)?;
     let paid = structured.status.and_then(small_string).as_deref() == Some("paid");
     paid.then(|| Paid {
+        recharge_id: structured.recharge_id.and_then(small_string),
         balance_credits: structured
             .balance_credits
             .and_then(|raw| serde_json::from_str::<i64>(raw.get()).ok()),
+        resumed_balance: structured
+            .resumed
+            .map_or(ResumedBalance::NoCall, resumed_balance),
     })
+}
+
+/// The balance after a resumed call: `resumed.balance_credits` when it is a whole number, else
+/// the one the last charge line names (`"Charged 40 credits · balance 1,960"`), else
+/// `Unknown`. A `null` `resumed` resumed nothing.
+fn resumed_balance(resumed: &RawValue) -> ResumedBalance {
+    if resumed.get() == "null" {
+        return ResumedBalance::NoCall;
+    }
+    let Some(read) = object::<Resumed<'_>>(resumed) else {
+        return ResumedBalance::Unknown;
+    };
+    let whole = |raw: &RawValue| serde_json::from_str::<i64>(raw.get()).ok();
+    let lines = || {
+        let lines = read
+            .charge_lines
+            .filter(|raw| raw.get().len() <= MAX_CHARGE_LINES_BYTES)?;
+        let lines = serde_json::from_str::<Vec<String>>(lines.get()).ok()?;
+        balance_in(lines.last()?)
+    };
+    read.balance_credits
+        .and_then(whole)
+        .or_else(lines)
+        .map_or(ResumedBalance::Unknown, ResumedBalance::Known)
+}
+
+/// The number after the last `balance` (any case) in `line`: digits, or digits in groups of
+/// three after the first one to three, split by commas, and not cut short ([`ends_number`]: the
+/// whole part of a decimal, `12 345`, `1'960`). `None` for anything else, so a changed format is
+/// not read as a wrong number.
+fn balance_in(line: &str) -> Option<i64> {
+    let at = line.to_ascii_lowercase().rfind("balance")?;
+    let rest = line
+        .get(at + "balance".len()..)?
+        .trim_start_matches([' ', ':']);
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == ','))
+        .unwrap_or(rest.len());
+    let (token, after) = rest.split_at(end);
+    let mut groups = token.split(',');
+    let first = groups.next()?;
+    let grouped = token.contains(',');
+    let fits = !first.is_empty()
+        && (!grouped || first.len() <= 3)
+        && groups.all(|group| group.len() == 3)
+        && ends_number(after);
+    if !fits {
+        return None;
+    }
+    token.replace(',', "").parse().ok()
+}
+
+/// Whether `after`, what follows a number's digits and commas, ends that number: the line's end,
+/// or anything but a letter, a digit or `_`, unless spaces, apostrophes (`'`, `’`, `ʼ`), thin or
+/// no-break spaces and dots lead on to another digit (`12 345`, `1'960`, `1 960`, `1960.5`):
+/// the number was cut short, and is not read. An apostrophe right after it never ends one.
+fn ends_number(after: &str) -> bool {
+    let joins = |c: char| c.is_whitespace() || matches!(c, '\'' | '’' | 'ʼ' | '.');
+    let Some(next) = after.chars().next() else {
+        return true;
+    };
+    if next.is_alphanumeric() || matches!(next, '_' | '\'' | '’' | 'ʼ') {
+        return false;
+    }
+    !after
+        .trim_start_matches(joins)
+        .starts_with(|c: char| c.is_numeric())
 }
 
 /// A `protocolVersion` fit for a header: 1 to 32 ASCII letters, digits, `-`, `.` or `_`.

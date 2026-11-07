@@ -121,8 +121,11 @@ pub struct PayUrl(String);
 impl PayUrl {
     /// A production pay link, or `None`: `https`, host exactly `data.clauseo.chat` (no port,
     /// not even 443, and no user info), path exactly `/pay/<id>` with `<id>` matching
-    /// `[A-Za-z0-9_-]{1,128}`, no query, no fragment. A backslash or a percent escape anywhere
-    /// is refused, so nothing the URL parser would rewrite gets through.
+    /// `[A-Za-z0-9_-]{1,128}`, no query, no fragment. Nothing the URL parser rewrites gets
+    /// through: the parsed link must read as the text written, but for the ASCII case of the
+    /// scheme and host, which it lowercases (a dot segment such as `/pay/rch_1/../x`, a tab or a
+    /// newline inside, or a space around the link, is refused). A backslash or a percent escape
+    /// anywhere is refused as well.
     pub fn parse(connector: &KnownConnector, text: &str) -> Option<PayUrl> {
         PayUrl::parse_for(connector, &Origin::Production, text)
     }
@@ -145,7 +148,10 @@ impl PayUrl {
         let written = text
             .split_once("://")
             .and_then(|(_, rest)| rest.split(['/', '?', '#']).next());
-        let ours = written.is_some_and(|written| written.eq_ignore_ascii_case(&authority))
+        // As written: the parser drops dot segments, tabs, newlines and spaces around the link,
+        // and lowercases the scheme and host; the path's case it keeps, so only those differ.
+        let ours = url.as_str().eq_ignore_ascii_case(text)
+            && written.is_some_and(|written| written.eq_ignore_ascii_case(&authority))
             && url.scheme() == prefix.scheme()
             && url.host_str().is_some()
             && url.host_str() == prefix.host_str()

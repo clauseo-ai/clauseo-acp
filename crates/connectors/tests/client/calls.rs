@@ -111,6 +111,29 @@ fn the_account_is_read_at_most_once_a_minute() {
     assert_eq!(rig.fake.requests_to("/v1/case-law/account").len(), 2);
 }
 
+/// A read in flight when the copy is forgotten (a paid result through a relay) hands back what
+/// it read but does not refill the copy: the next read asks the connector.
+#[test]
+fn a_read_in_flight_when_the_account_is_forgotten_leaves_no_copy() {
+    let rig = manual_rig();
+    sign_in(&rig);
+    let path = "/v1/case-law/account";
+    let before = rig.fake.requests_to(path).len();
+    let release = rig.fake.hold_next(path);
+    thread::scope(|scope| {
+        let read = scope.spawn(|| rig.handle.account());
+        while rig.fake.requests_to(path).len() == before {
+            assert!(!release.wait_timeout(Duration::from_millis(5)));
+        }
+        rig.handle.forget_account();
+        release.cancel();
+        assert_eq!(read.join().unwrap().unwrap().balance_credits, 1000);
+    });
+    rig.fake.set_balance(900);
+    assert_eq!(rig.handle.account().unwrap().balance_credits, 900);
+    assert_eq!(rig.fake.requests_to(path).len(), before + 2);
+}
+
 #[test]
 fn the_account_after_sign_out_is_not_served_from_the_cache() {
     let rig = manual_rig();

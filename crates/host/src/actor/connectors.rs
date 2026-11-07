@@ -28,6 +28,7 @@ pub(super) mod hint;
 mod jobs;
 mod limits;
 mod pay_link;
+mod recharged;
 mod watch;
 
 use std::sync::Arc;
@@ -48,7 +49,8 @@ use crate::connectors::{ConnectorOpener, ConnectorsWiring, CredentialEnd, RelayE
 use crate::error::Error;
 use jobs::{Change, Finished, Job, Post, Reach, Refusal};
 use limits::{Reads, UsedIds};
-use watch::{Watch, end_recharges, open_recharge, out_of_credit, recharged};
+use recharged::recharged;
+use watch::{Watch, end_recharges, open_recharge, out_of_credit};
 
 /// The least time between two account reads that a paid result, `Check` or `RefreshBalance`
 /// asks for.
@@ -95,6 +97,9 @@ pub(crate) struct ConnectorsOnActor {
     /// The state last published, so an unchanged one is not sent again.
     published: Option<ConnectorsState>,
     reads: Reads,
+    /// The reads after relays' paid `recharge` results (one at a time, repeats paced), and the
+    /// balance epoch.
+    recharged: limits::Recharged,
     /// The sign-in in flight: its number (a newer `Add` makes the older one's end stale) and
     /// its cancel.
     sign_in: (u64, Option<CancelFlag>),
@@ -135,11 +140,13 @@ impl ConnectorsOnActor {
                 events: wiring.events,
             })
         });
+        let recharged = limits::Recharged::sharing(wired.as_ref().map(|w| w.events.balances()));
         Self {
             wired,
             state: crate::connectors::state::CaseLaw::default(),
             published: None,
             reads: Reads::default(),
+            recharged,
             sign_in: (0, None),
             watch: None,
             watches: 0,
@@ -327,6 +334,7 @@ fn wired(actor: &Actor) -> Result<&Wired, Error> {
 /// Starts `job` off the actor; a failed start gives the read slot back.
 fn spawn(actor: &mut Actor, command: Option<CommandId>, job: Job) -> Result<(), Error> {
     let slot = matches!(job, Job::Check { slot: true } | Job::Read);
+    let recharged = matches!(job, Job::Recharged);
     let wired = wired(actor)?;
     let reach = Reach {
         connectors: Arc::clone(&wired.connectors),
@@ -334,10 +342,15 @@ fn spawn(actor: &mut Actor, command: Option<CommandId>, job: Job) -> Result<(), 
         post: Post(actor.post.clone()),
         credentials: Arc::clone(&actor.connectors.credentials),
         generation: generation(actor),
+        balances: Arc::clone(&actor.connectors.recharged.epoch),
+        started: actor.connectors.recharged.epoch.load(Ordering::SeqCst),
     };
     let started = jobs::spawn(reach, command, job);
     if started.is_err() && slot {
         actor.connectors.reads.in_flight = false;
+    }
+    if started.is_err() && recharged {
+        actor.connectors.recharged.in_flight = false;
     }
     started
 }
@@ -415,6 +428,8 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
     } else if finished.account.is_some() {
         connectors.reads.last = Some(now.mono);
     }
+    let catch_up = recharged::drop_stale_balance(actor, &mut finished);
+    let connectors = &mut actor.connectors;
     let state = &mut connectors.state;
     let liveness = finished.liveness.is_some();
     if let Some(liveness) = finished.liveness {
@@ -467,6 +482,12 @@ fn on_finished(actor: &mut Actor, mut finished: Finished) {
         }
     }
     note_persist(actor);
+    if finished.recharged {
+        recharged::read_ended(actor);
+    }
+    if let Some(recharge) = catch_up {
+        recharged::catch_up(actor, recharge);
+    }
     if let Some(payment) = finished.out_of_credit {
         out_of_credit(actor, payment);
     }
@@ -492,8 +513,11 @@ fn on_relay(actor: &mut Actor, event: RelayEvent) {
         }
         RelayEvent::OutOfCredit { payment, .. } => out_of_credit(actor, payment),
         RelayEvent::RechargePaid {
-            balance_credits, ..
-        } => recharged(actor, balance_credits),
+            recharge_id,
+            balance_credits,
+            resumed_balance,
+            ..
+        } => recharged(actor, recharge_id, (balance_credits, resumed_balance)),
         RelayEvent::CaseLawFound { session, found } => {
             super::turn::case_law::found(actor, session.thread, found);
             return;

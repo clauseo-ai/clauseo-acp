@@ -11,12 +11,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clauseo_connectors::{
-    Account, CancelFlag, ConnectorHandle, Connectors, CredentialStatus, Error as Failed, Liveness,
-    PaymentRef, SignInError,
+    CancelFlag, ConnectorHandle, Connectors, CredentialStatus, Error as Failed, SignInError,
 };
 use clauseo_protocol::{CommandId, ErrorCode, RechargeOutcome, RedactedString};
 
 mod failures;
+mod finished;
 
 use super::ConnectorInput;
 use crate::actor::input::Input;
@@ -24,6 +24,7 @@ use crate::connectors::ConnectorOpener;
 use crate::error::Error;
 pub(super) use failures::kind;
 use failures::{recharge_outcome, refusal, sign_in_kind};
+pub(crate) use finished::{Change, Finished, Refusal};
 
 /// The job threads' name.
 const THREAD_NAME: &str = "clauseo-connector";
@@ -38,88 +39,6 @@ const KEY_FAILED: &str = "the API key was not added";
 const JOB_FAILED: &str = "the connector's work ended without a result";
 /// The refusal of a key whose check outlasted a sign-out, a remove or the switch going off.
 const KEY_ENDED: &str = "the connector was signed out or turned off while the key was checked";
-
-/// A command's refusal, in fixed words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Refusal {
-    pub(super) code: ErrorCode,
-    pub(super) message: &'static str,
-}
-
-impl Refusal {
-    pub(super) const fn new(code: ErrorCode, message: &'static str) -> Self {
-        Self { code, message }
-    }
-
-    pub(super) fn into_error(self) -> Error {
-        Error::refused(self.code, self.message)
-    }
-}
-
-/// What a job found; each field set replaces what the actor holds.
-#[derive(Debug)]
-pub(crate) struct Finished {
-    /// The command to answer, when the job still owes it an answer.
-    pub(super) command: Option<CommandId>,
-    pub(super) reply: Result<(), Refusal>,
-    pub(super) credential: Option<CredentialStatus>,
-    pub(super) liveness: Option<Liveness>,
-    pub(super) account: Option<Account>,
-    /// The account read answered out of credit, with the payment it opened.
-    pub(super) out_of_credit: Option<PaymentRef>,
-    /// Whether the job held the actor's one-a-minute read slot.
-    pub(super) slot: bool,
-    pub(super) change: Change,
-    /// The credential generation the job started under.
-    pub(super) generation: u64,
-}
-
-impl Finished {
-    pub(super) fn new(command: Option<CommandId>) -> Self {
-        Self {
-            command,
-            reply: Ok(()),
-            credential: None,
-            liveness: None,
-            account: None,
-            out_of_credit: None,
-            slot: false,
-            change: Change::Nothing,
-            generation: 0,
-        }
-    }
-
-    fn refused(command: Option<CommandId>, refusal: Refusal) -> Self {
-        Self {
-            reply: Err(refusal),
-            ..Self::new(command)
-        }
-    }
-}
-
-/// What a job changes beyond what it read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Change {
-    Nothing,
-    /// A sign-in ended; `error` when it failed (not a cancelled one).
-    SignInEnded {
-        generation: u64,
-        error: Option<&'static str>,
-    },
-    /// An API key failed: the state shows it until the next command.
-    Failed(&'static str),
-    /// Signed out or removed: the account, out of credit and the pay link go.
-    Reset,
-    /// A recharge settled: how, when the host can tell (`None` when the watch failed), and the
-    /// balance its answer carried, shown when no account read came with it.
-    Recharge {
-        recharge: String,
-        outcome: Option<RechargeOutcome>,
-        balance: Option<i64>,
-    },
-    /// A liveness check ended without an answer (a panic): nothing waits on it any longer.
-    NoLiveness,
-}
 
 /// One job.
 pub(super) enum Job {
@@ -151,7 +70,8 @@ pub(super) enum Job {
     Remove,
     /// The account, holding the read slot.
     Read,
-    /// The account after a relay's paid `recharge` result, at once and without the slot.
+    /// The account after a relay's paid `recharge` result, at once, without the slot and from
+    /// the connector.
     Recharged,
 }
 
@@ -216,6 +136,9 @@ pub(super) struct Reach {
     /// The actor's credential generation, and the one the job started under.
     pub(super) credentials: Arc<AtomicU64>,
     pub(super) generation: u64,
+    /// The actor's balance epoch (`limits::Recharged::epoch`), and the one the job started under.
+    pub(super) balances: Arc<AtomicU64>,
+    pub(super) started: u64,
 }
 
 impl Reach {
@@ -223,6 +146,11 @@ impl Reach {
     /// the connectors crate's credential lock before a credential is stored.
     fn still(&self) -> bool {
         self.credentials.load(Ordering::SeqCst) == self.generation
+    }
+
+    /// The actor's balance epoch now.
+    fn epoch(&self) -> u64 {
+        self.balances.load(Ordering::SeqCst)
     }
 }
 
@@ -240,11 +168,13 @@ pub(super) fn spawn(reach: Reach, command: Option<CommandId>, job: Job) -> Resul
                 post: Some(reach.post.clone()),
                 command,
                 slot: job.holds_slot(),
+                recharged: matches!(job, Job::Recharged),
                 change: job.on_panic(),
                 generation: reach.generation,
             };
             if let Some(mut finished) = run(&reach, command, job) {
                 finished.generation = reach.generation;
+                finished.started = reach.started;
                 reach
                     .post
                     .send(ConnectorInput::Finished(Box::new(finished)));
@@ -273,6 +203,7 @@ struct Unfinished {
     post: Option<Post>,
     command: Option<CommandId>,
     slot: bool,
+    recharged: bool,
     change: Change,
     generation: u64,
 }
@@ -293,6 +224,7 @@ impl Drop for Unfinished {
             let refusal = Refusal::new(ErrorCode::Internal, JOB_FAILED);
             post.send(ConnectorInput::Finished(Box::new(Finished {
                 slot: self.slot,
+                recharged: self.recharged,
                 change: self.change.clone(),
                 generation: self.generation,
                 ..Finished::refused(self.command, refusal)
@@ -309,7 +241,7 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
         Job::Check { slot } => {
             let liveness = reach.connectors.liveness();
             let mut finished = if slot {
-                read(handle, command)
+                read(reach, command)
             } else {
                 Finished::new(command)
             };
@@ -325,12 +257,17 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
         } => credits(reach, command, (&pack, watch), &cancel)?,
         Job::Watch {
             recharge, cancel, ..
-        } => watch(handle, recharge, &cancel)?,
+        } => watch(reach, recharge, &cancel)?,
         Job::SignOut | Job::Remove => sign_out(handle, command, matches!(job, Job::Remove)),
-        Job::Read => read(handle, command),
+        Job::Read => read(reach, command),
         Job::Recharged => {
             let mut finished = Finished::new(command);
-            read_into(handle, &mut finished);
+            finished.recharged = true;
+            // From the connector, never the crate's copy: a read from before a resumed charge
+            // may have left it.
+            let epoch = reach.epoch();
+            handle.forget_account();
+            read_into(handle, &mut finished, epoch);
             finished
         }
     };
@@ -340,19 +277,20 @@ fn run(reach: &Reach, command: Option<CommandId>, job: Job) -> Option<Finished> 
 }
 
 /// The account when signed in, holding the read slot.
-fn read(handle: &ConnectorHandle, command: Option<CommandId>) -> Finished {
+fn read(reach: &Reach, command: Option<CommandId>) -> Finished {
     let mut finished = Finished::new(command);
     finished.slot = true;
-    read_into(handle, &mut finished);
+    read_into(&reach.handle, &mut finished, reach.epoch());
     finished
 }
 
 /// Reads the account into `finished` when signed in: the account, or the payment an
 /// out-of-credit answer opened. A failure is logged and reads nothing.
-fn read_into(handle: &ConnectorHandle, finished: &mut Finished) {
+fn read_into(handle: &ConnectorHandle, finished: &mut Finished, epoch: u64) {
     if !matches!(handle.status(), CredentialStatus::SignedIn(_)) {
         return;
     }
+    finished.read_at = Some(epoch);
     match handle.account() {
         Ok(account) => finished.account = Some(account),
         Err(Failed::InsufficientCredits(payment)) => finished.out_of_credit = Some(payment),
@@ -418,7 +356,7 @@ fn sign_in(
         }
     });
     if result.is_ok() {
-        read_into(handle, &mut finished);
+        read_into(handle, &mut finished, reach.epoch());
     }
     finished
 }
@@ -427,11 +365,12 @@ fn sign_in(
 /// meanwhile), then zeroed.
 fn api_key(reach: &Reach, command: Option<CommandId>, key: &str) -> Finished {
     let handle = &reach.handle;
+    let epoch = reach.epoch();
     match handle.add_api_key_while(key, &|| reach.still()) {
         Ok(()) => {
             let mut finished = Finished::new(command);
             // From memory: adding the key read the account.
-            read_into(handle, &mut finished);
+            read_into(handle, &mut finished, epoch);
             finished
         }
         Err(Failed::Cancelled) => {
@@ -502,14 +441,15 @@ fn credits(
         recharge: recharge.recharge_id.clone(),
         pay_url,
     });
-    watch(&reach.handle, recharge.recharge_id, cancel)
+    watch(reach, recharge.recharge_id, cancel)
 }
 
 /// Waits for `recharge` to settle, then reads the account if it was paid (the connectors crate
 /// dropped its copy), keeping the balance the paid answer carried for when the read fails.
 /// `None` when cancelled: a newer recharge or a sign-out took its place. A watch that reaches its
 /// deadline counts as expired; one that fails otherwise has no outcome.
-fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Option<Finished> {
+fn watch(reach: &Reach, recharge: String, cancel: &CancelFlag) -> Option<Finished> {
+    let handle = &reach.handle;
     let mut finished = Finished::new(None);
     let mut balance = None;
     let outcome = match handle.wait_recharge(&recharge, cancel) {
@@ -529,7 +469,8 @@ fn watch(handle: &ConnectorHandle, recharge: String, cancel: &CancelFlag) -> Opt
         }
     };
     if outcome == Some(RechargeOutcome::Paid) {
-        read_into(handle, &mut finished);
+        // The epoch now, not at the watch's start: this read may come minutes after.
+        read_into(handle, &mut finished, reach.epoch());
     }
     finished.change = Change::Recharge {
         recharge,
