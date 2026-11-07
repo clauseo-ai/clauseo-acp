@@ -311,9 +311,8 @@ pub struct SetupReport {
 /// users (`top_up.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TopUp {
-    /// The recorded users counted free before this run made any: their accounts exist, no
-    /// matter row holds them, no ledger entry grants them access, and any mark is cleared by
-    /// this run's reset.
+    /// The recorded users counted free before this run made any: their accounts exist and the
+    /// reuse rule (`pool::assign`) would hand them out once this run's resets are done.
     pub free_before: usize,
     /// The users made for the rule, beyond those the set-up, the re-run or the requested `add`
     /// makes; they are in [`SetupReport::made`] too.
@@ -321,8 +320,4 @@ pub struct TopUp {
     /// How many more the rule wanted that the cap ([`POOL_CAP`](crate::windows::pool::POOL_CAP)
     /// SIDs in the record) left out; 0 when none. Not a failure.
     pub short: usize,
-    /// A re-run that topped up but still reset every kept user's password, as a plain re-run
-    /// does, and why: a kept user's profile was missing, temporary, or couldn't be read.
-    /// `None` when no such re-run.
-    pub repair: Option<String>,
 }

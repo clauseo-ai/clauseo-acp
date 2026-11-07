@@ -241,6 +241,15 @@ pub(crate) fn decide(
     }
 }
 
+/// The users of `pool` [`decide`] would hold back from a new matter, in pool order, by the same
+/// rule (`held_back_why`): the set-up's top-up counts the rest as free (`setup/top_up.rs`).
+pub(crate) fn held_back(pool: &[Sid], rows: &Rows, held: &Holds<'_>) -> Vec<Sid> {
+    let held_back = pool
+        .iter()
+        .filter(|user| held_back_why(user, rows, held).is_some());
+    held_back.cloned().collect()
+}
+
 /// Why `user` can't go to another matter, or `None` when it may.
 fn held_back_why(user: &Sid, rows: &Rows, held: &Holds<'_>) -> Option<Why> {
     if let Some((holder, _)) = rows.iter().find(|(_, row)| row.holds() == Some(user)) {

@@ -33,8 +33,8 @@
 //! users and never resets an existing password, but for a user owed a profile reset.
 //!
 //! Every run then tops the pool up to [`MIN_FREE_AFTER_RUN`] free users, cap allowing
-//! (`top_up.rs`): a fresh pool is 8, an extend's `add` is a minimum, and a re-run that adds
-//! users goes the extend way unless a kept user's profile needs the re-run's repair.
+//! (`top_up.rs`): a fresh pool is 8, an extend's `add` is a minimum, and a re-run stays a
+//! re-run (every kept password reset) and makes the shortfall too.
 //!
 //! Both reset each recorded user released from a matter (`resets.rs`): its profile deleted, a new
 //! password, one logon that makes the profile again, its `LocalLow` closed by step 7's owner

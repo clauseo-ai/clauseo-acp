@@ -1,7 +1,7 @@
 //! The reuse rule against what a real fence writes: each matter's sibling denies name every other
 //! pool user, and grant none of them anything; a released user waits for its profile reset.
 
-use super::pool::{Launch, full, ledger_in, pool, reread, sids_in, user};
+use super::pool::{Launch, full, ledger_in, ledger_owing, pool, reread, sids_in, user};
 use super::*;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights};
 use crate::windows::admit::PathKind;
@@ -280,4 +280,34 @@ fn a_release_during_a_clear_stays_marked() {
     assert_eq!(setup.reset_done(&setup.resets_due()), Ok(vec![user(1)]));
     let after: Vec<Sid> = sids_in(&temp).needs_reset().iter().cloned().collect();
     assert_eq!(after, [user(2)], "the later release keeps its mark");
+}
+
+/// The set-up's top-up counts free exactly what `assign` would hand out once the run's resets
+/// are done: a user held only by a hand-back owed isn't free, a marked user no matter holds is,
+/// and a ledger that can't be read holds every user.
+#[test]
+fn the_top_ups_count_holds_back_what_assign_does() {
+    let temp = TempDir::new("reuse-topup-count");
+    let records = TempDir::new("reuse-topup-ledger");
+    let ledger = ledger_owing(&records, &matter().to_string(), &user(2));
+    let none = OpenSessions::default();
+    let mut sids = sids_in(&temp);
+    let (one, new) = (matter(), matter());
+    assert_eq!(
+        sids.launch(&one, &pool(4), reread(&ledger), &none),
+        Ok(user(1))
+    );
+    sids.release(&one, UNIX_EPOCH).unwrap();
+    // `assign` holds back user 1 (owed a reset) and user 2 (a hand-back owed) now.
+    assert_eq!(
+        sids.launch(&new, &pool(4), reread(&ledger), &none),
+        Ok(user(3))
+    );
+    sids.release(&new, UNIX_EPOCH).unwrap();
+    // After the run's resets, users 1 and 3 are reset and free; user 2 still waits on its
+    // hand-back.
+    let held = sids.held_after_resets(&pool(4), reread(&ledger)());
+    assert_eq!(held, [user(2)]);
+    let unreadable = io::Error::other("unreadable");
+    assert_eq!(sids.held_after_resets(&pool(4), Err(unreadable)), pool(4));
 }

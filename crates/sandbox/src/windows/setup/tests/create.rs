@@ -21,7 +21,6 @@ fn a_fresh_run_calls_every_step_in_order() {
         free_before: 0,
         added: 4,
         short: 0,
-        repair: None,
     };
     assert_eq!(report.top_up, top_up);
     assert_eq!(report.reset, []);
