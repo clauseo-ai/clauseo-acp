@@ -473,3 +473,12 @@ crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line 
 # named like the variants beside it, so no exit code is used twice.
 crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
 crates/sandbox/src/windows/reclaim/taken_tests.rs timed clippy::disallowed_methods
+# S15 PR5: tier B's runner (clauseo-sandbox-run), the (B) token, the runner pipes and the CA bundle.
+crates/sandbox/src/bin/clauseo-sandbox-run.rs exit_with clippy::exit
+crates/sandbox/src/bin/clauseo-sandbox-run.rs main clippy::print_stderr
+crates/sandbox/src/windows/token/os.rs - unsafe_code
+crates/sandbox/src/windows/pipe/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer.rs - unsafe_code
+crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
+crates/sandbox/src/windows/runner/inner.rs - unsafe_code
