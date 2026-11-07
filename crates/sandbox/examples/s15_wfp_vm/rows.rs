@@ -580,7 +580,8 @@ fn owner_rows(ns: &Namespace) -> (usize, usize) {
             Ok(()) => "allowed".to_owned(),
             Err(error) => format!("refused ({error})"),
         };
-        let pass = probe.result.is_err() == probe.expect_refused;
+        // A refusal passes only as access denied from the call under test.
+        let pass = probe.passed();
         let expect = if probe.expect_refused {
             Expect::NotReached
         } else {
