@@ -84,6 +84,8 @@ pub(crate) struct FetchJob {
 pub(crate) struct Fetcher {
     agent: ureq::Agent,
     data_dir: PathBuf,
+    /// The agent being installed, for the app log's lines.
+    agent_id: AgentId,
 }
 
 impl Fetcher {
@@ -143,19 +145,21 @@ impl Fetcher {
             .build();
         #[cfg(feature = "test-support")]
         if let Some(resolver) = install.resolver.clone() {
-            let agent = ureq::Agent::with_parts(
+            let client = ureq::Agent::with_parts(
                 config,
                 ureq::unversioned::transport::DefaultConnector::new(),
                 TestNames(resolver),
             );
             return Ok(Fetcher {
-                agent,
+                agent: client,
                 data_dir: data_dir.to_owned(),
+                agent_id: agent.clone(),
             });
         }
         Ok(Fetcher {
             agent: ureq::Agent::new_with_config(config),
             data_dir: data_dir.to_owned(),
+            agent_id: agent.clone(),
         })
     }
 
@@ -176,7 +180,14 @@ impl Fetcher {
             host: host.as_deref(),
             data_dir: &self.data_dir,
         };
-        if let Some(size) = complete_size(&job.dest, &job.expected).map_err(|err| at.io(&err))? {
+        let kept = complete_size(&job.dest, &job.expected).map_err(|err| at.io(&err))?;
+        if kept == Kept::Mismatch {
+            tracing::info!(
+                agent = %self.agent_id,
+                "install: download discarded: checksum mismatch of a kept file; fetched again"
+            );
+        }
+        if let Kept::Complete(size) = kept {
             progress(size, size);
             return Ok(size);
         }
@@ -467,24 +478,35 @@ pub(crate) fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// What [`complete_size`] found at a destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kept {
+    /// The file, with the right digest, of this size.
+    Complete(u64),
+    /// Nothing there (or a link, now deleted).
+    Absent,
+    /// A file with the wrong digest, now deleted.
+    Mismatch,
+}
+
 /// The size of `dest` when it is there with the right digest; a wrong one is deleted, and so is
 /// a link found there (the link itself, never what it points to).
-fn complete_size(dest: &Path, expected: &Expected) -> io::Result<Option<u64>> {
+fn complete_size(dest: &Path, expected: &Expected) -> io::Result<Kept> {
     match std::fs::symlink_metadata(dest) {
         Ok(meta) if meta.file_type().is_symlink() => {
             write::remove_file(dest)?;
-            return Ok(None);
+            return Ok(Kept::Absent);
         }
         Ok(meta) if meta.is_file() => {}
-        _ => return Ok(None),
+        _ => return Ok(Kept::Absent),
     }
     let mut hasher = expected.hasher();
     let size = hash_file(dest, &mut hasher)?;
     if hasher.matches(expected) {
-        Ok(Some(size))
+        Ok(Kept::Complete(size))
     } else {
         write::remove_file(dest)?;
-        Ok(None)
+        Ok(Kept::Mismatch)
     }
 }
 

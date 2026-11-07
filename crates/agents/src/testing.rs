@@ -39,6 +39,14 @@ pub enum Behaviour {
     Stall,
     /// The bytes with no `Content-Length`: the body ends when the connection closes.
     NoLength,
+    /// Headers for the whole length and this many body bytes, then a reset (`SO_LINGER` 0).
+    /// ureq reads a reset mid-body as the peer closing (`UnexpectedEof`), as for [`CutAfter`].
+    ///
+    /// [`CutAfter`]: Behaviour::CutAfter
+    ResetAfter(usize),
+    /// No response at all, then a reset: the request fails as a connection reset, as when the
+    /// network goes away between files or before a try's first answer.
+    Reset,
 }
 
 /// One request the registry saw.
@@ -230,6 +238,10 @@ fn connection(mut stream: TcpStream, shared: &Shared) {
     if request.method != "CONNECT" {
         let start = instant();
         let served = respond(&mut stream, shared, &request);
+        if matches!(served, Ok(true)) {
+            // Closed with a reset rather than a FIN.
+            drop(socket2::SockRef::from(&stream).set_linger(Some(std::time::Duration::ZERO)));
+        }
         let ms = millis_since(start);
         trace(format_args!(
             "registry: {} {} served in {ms} ms: {served:?}",
@@ -327,14 +339,15 @@ fn parse_head(head: &[u8], tunnelled: bool) -> Option<Request> {
     })
 }
 
-/// Records `request` and answers it from its route.
-fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::Result<()> {
+/// Records `request` and answers it from its route; `true` when the connection is to close
+/// with a reset ([`Behaviour::ResetAfter`]).
+fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::Result<bool> {
     let (bytes, behaviour) = {
         let mut state = shared.lock();
         state.requests.push(request.clone());
         let Some(route) = state.routes.get_mut(&request.path) else {
             drop(state);
-            return write_status(stream, 404, "text/plain", b"not found");
+            return write_status(stream, 404, "text/plain", b"not found").map(|()| false);
         };
         (
             Arc::clone(&route.bytes),
@@ -355,7 +368,7 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
     let (status, body, range) = match start {
         Some(start) if start >= len => {
             let header = format!("Content-Range: bytes */{len}\r\n");
-            return write_response(stream, 416, "text/plain", &header, b"", 0);
+            return write_response(stream, 416, "text/plain", &header, b"", 0).map(|()| false);
         }
         Some(start) => {
             let range = format!("Content-Range: bytes {start}-{}/{len}\r\n", len - 1);
@@ -364,9 +377,10 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
         None => (200, &bytes[..], String::new()),
     };
     let kind = "application/octet-stream";
-    match behaviour {
+    let reset = matches!(behaviour, Behaviour::ResetAfter(_) | Behaviour::Reset);
+    let written = match behaviour {
         Behaviour::Normal => write_response(stream, status, kind, &range, body, body.len()),
-        Behaviour::CutAfter(n) => {
+        Behaviour::CutAfter(n) | Behaviour::ResetAfter(n) => {
             let sent = body.get(..n.min(body.len())).unwrap_or_default();
             write_response(stream, status, kind, &range, sent, body.len())
         }
@@ -377,6 +391,7 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
             }
             write_response(stream, status, kind, &range, &tampered, body.len())
         }
+        Behaviour::Reset => Ok(()),
         Behaviour::Status(code) => write_status(stream, code, "text/plain", b"refused"),
         Behaviour::Html => {
             let page = b"<!DOCTYPE html><html><body>Blocked by policy</body></html>";
@@ -398,7 +413,8 @@ fn respond(stream: &mut impl Write, shared: &Shared, request: &Request) -> io::R
             stream.write_all(rest)?;
             stream.flush()
         }
-    }
+    };
+    written.map(|()| reset)
 }
 
 /// Counts a stall, then waits for the next release (or the registry's drop).

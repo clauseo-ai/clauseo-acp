@@ -296,8 +296,8 @@ fn a_status_that_says_not_logged_in_signs_out() {
             found: Some(Found::NoLogin)
         }
     );
-    // one in Clauseo's home, one for detection
-    assert_eq!(fx.codex_runs(&["login", "status"]).len(), before + 2);
+    // One in Clauseo's home; none for detection, as the lawyer's home has no `.codex`.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), before + 1);
 }
 
 /// Review H2: the login ran (exit 0, writing Codex's `auth.json`), then `account/read` failed.

@@ -43,6 +43,10 @@ mod reuse_codex;
 #[path = "signin/shim.rs"]
 mod shim;
 
+#[cfg(test)]
+#[path = "signin/clean_home.rs"]
+mod clean_home;
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;

@@ -5,8 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::{
-    FetchError, FetchJob, FetchKind, Place, Source, complete_size, hash_read, host_of, part_path,
-    write_checked,
+    FetchError, FetchJob, FetchKind, Kept, Place, Source, complete_size, hash_read, host_of,
+    part_path, write_checked,
 };
 use crate::cancel::Cancel;
 use crate::integrity::Expected;
@@ -130,7 +130,9 @@ pub(crate) fn copy_from_bundle(
         host: None,
         data_dir,
     };
-    if let Some(size) = complete_size(&job.dest, &job.expected).map_err(|err| at.io(&err))? {
+    if let Kept::Complete(size) =
+        complete_size(&job.dest, &job.expected).map_err(|err| at.io(&err))?
+    {
         progress(size, size);
         return Ok(size);
     }

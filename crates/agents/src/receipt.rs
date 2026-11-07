@@ -186,5 +186,22 @@ pub(crate) fn remove_stale(scan: &Scan) -> io::Result<()> {
     Ok(())
 }
 
+/// The app log's line for each folder the start's clean-up removes under `agent`'s `install/`,
+/// by its own name only (`<hash>` with no valid receipt, `.tmp-<hash>-<n>`, another hash).
+pub(crate) fn log_stale(agent: &AgentId, scan: &Scan) {
+    for path in &scan.remove {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        tracing::info!(
+            %agent,
+            attempt = 0,
+            folder = %name,
+            "install: set-up discarded: folder stale at start"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests;

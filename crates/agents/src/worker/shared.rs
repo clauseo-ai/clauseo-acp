@@ -151,7 +151,13 @@ impl Inner {
             return;
         };
         running.cancel.cancel();
-        if next != Some(&running.agent) {
+        if next == Some(&running.agent) {
+            tracing::info!(
+                agent = %running.agent,
+                attempt = 0,
+                "install: job replaced: a new job for the same agent stops the running one"
+            );
+        } else {
             Inner::set(self, events, &running.agent, InstallState::Paused, None);
         }
     }
