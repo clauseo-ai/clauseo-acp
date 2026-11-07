@@ -80,3 +80,12 @@ fn the_removal_takes_both_tasks_down_after_the_values_and_before_the_copy() {
         assert!(at > 0, "{task:?} goes after the values");
     }
 }
+
+#[test]
+fn the_action_names_the_admin_copy_in_quotes() {
+    let exe = Path::new(r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe");
+    assert_eq!(
+        action_path(exe),
+        r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#
+    );
+}

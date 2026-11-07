@@ -77,6 +77,8 @@ mod source;
 mod staging;
 #[cfg(windows)]
 pub mod task;
+#[cfg(any(windows, test))]
+mod task_folder;
 #[cfg(test)]
 mod task_tests;
 #[cfg(test)]
@@ -89,7 +91,7 @@ mod windows_refresher;
 
 pub use rules::{
     EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
-    TEARDOWN, Teardown, hex, inside_profile, same_path, sddl_matches, task_sddl,
+    TEARDOWN, Teardown, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 #[cfg(windows)]
 pub use task::{

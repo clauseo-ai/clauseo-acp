@@ -105,6 +105,12 @@ pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }
 
+/// The task action's program: `exe`'s path in double quotes, as a command line takes a path
+/// with spaces (`C:\Program Files\...`), so no prefix of it can be read as the program.
+pub fn action_path(exe: &Path) -> String {
+    format!("\"{}\"", exe.display())
+}
+
 /// The staging folder's owner and DACL: SYSTEM, alone, full control, inherited by what is made
 /// inside; protected.
 pub const STAGING_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)";
