@@ -19,6 +19,9 @@
 //!   nothing, its answer decides this launch as a plain read's would, and one forced retry is
 //!   due [`UNWRITTEN_RETRY`] later (the 60 s rate waived for it). The same again is unknown:
 //!   launches refused, and the card says sign in again. No answer in between changes nothing.
+//! - **That unknown sticks** ([`Refresh::stick`]), as does Codex's refused login: no plain read
+//!   lifts it, however the file is written or touched meanwhile (the login stays pending, so
+//!   forcing goes on). Only a confirming forced read or a sign-in through Clauseo does.
 //! - **At most one forced refresh per [`GUARD`].** While pending, a check forces once
 //!   [`GUARD`] has passed since Clauseo's last forced refresh (at once if it has), however
 //!   recently or often the file was written: constant writes delay a force by [`GUARD`] at
@@ -137,11 +140,23 @@ struct State {
     misses: u32,
     /// The earliest the next forced read may run after the last miss.
     retry: Option<Retry>,
-    /// The last forced read that answered did so with no rewrite.
-    unwritten: bool,
+    /// What refresh-on-check holds against the login.
+    doubt: Doubt,
     /// A look found the forced check due and asked for it (a look's clock may run ahead of
     /// the check's).
     fired: bool,
+}
+
+/// What refresh-on-check holds against a login, until a forced read confirms it or a sign-in
+/// through Clauseo records again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Doubt {
+    #[default]
+    None,
+    /// The last forced read that answered did so with no rewrite.
+    Unwritten,
+    /// Unknown that sticks: a second answer with no rewrite, or Codex's refused login.
+    Held,
 }
 
 /// The next forced read's retry.
@@ -222,7 +237,8 @@ impl Refresh {
         let now = inner.at(now);
         let state = inner.agents.entry(agent.clone()).or_default();
         // No login file to refresh, or the confirmed one: nothing pending.
-        if !matches!(stamp, Stamp::File(_)) || state.confirmed == Some(stamp) {
+        let confirmed = state.confirmed == Some(stamp) && state.doubt != Doubt::Held;
+        if !matches!(stamp, Stamp::File(_)) || confirmed {
             state.pending = false;
             state.fired = false;
             return Plan::Plain;
@@ -270,11 +286,13 @@ impl Refresh {
             Ended::Unconfirmed => {
                 state.confirmed = None;
                 state.pending = true;
-                state.unwritten = false;
+                if state.doubt == Doubt::Unwritten {
+                    state.doubt = Doubt::None;
+                }
             }
-            Ended::Unwritten if !state.unwritten => {
+            Ended::Unwritten if state.doubt == Doubt::None => {
                 state.pending = true;
-                state.unwritten = true;
+                state.doubt = Doubt::Unwritten;
                 state.retry = Some(Retry {
                     at: now.saturating_add(UNWRITTEN_RETRY),
                     waives_rate: true,
@@ -307,7 +325,25 @@ impl Refresh {
         lock(&self.inner)
             .agents
             .get(agent)
-            .is_some_and(|state| state.unwritten)
+            .is_some_and(|state| state.doubt != Doubt::None)
+    }
+
+    /// `agent`'s unknown sticks (a second answer with no rewrite, or Codex's refused login): no
+    /// plain read lifts it, and the login stays pending, so forcing goes on; only a confirming
+    /// forced read or a sign-in through Clauseo ends it.
+    pub(crate) fn stick(&self, agent: &AgentId) {
+        let mut inner = lock(&self.inner);
+        let state = inner.agents.entry(agent.clone()).or_default();
+        state.doubt = Doubt::Held;
+        state.pending = true;
+    }
+
+    /// Whether `agent`'s unknown sticks ([`Refresh::stick`]).
+    pub(crate) fn stuck(&self, agent: &AgentId) -> bool {
+        lock(&self.inner)
+            .agents
+            .get(agent)
+            .is_some_and(|state| state.doubt == Doubt::Held)
     }
 
     /// A sign-in through Clauseo recorded `agent`'s account: what refresh-on-check held against

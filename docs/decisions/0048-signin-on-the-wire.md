@@ -743,7 +743,9 @@ changes (`setup/identity.rs`).
     is unknown: launches refused (`agent.identity_unknown`), and the card says sign in again
     (`SignIn::Failed { code: signin.unconfirmed }`: "Clauseo couldn't confirm your Codex
     sign-in. Sign in again to carry on."), until a forced read confirms or a sign-in through
-    Clauseo records again. Forcing goes on with the backoff.
+    Clauseo records again. That unknown sticks, as Codex's refused login's does: no plain read
+    lifts it or records, however `auth.json` is written or touched meanwhile (the login stays
+    pending, so forcing goes on with the backoff); only a confirming forced read or a sign-in. Forcing goes on with the backoff.
   - *No answer, never refused:* a forced read that had no answer, timed out, or got any JSON-RPC
     error but the one below falls back to the plain read, which decides this launch as before.
     The stamp stays pending and nothing else changes.

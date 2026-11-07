@@ -229,6 +229,31 @@ fn an_answer_with_no_rewrite_is_retried_once_at_thirty_seconds_then_backs_off() 
 }
 
 #[test]
+fn a_held_unknown_keeps_even_the_confirmed_stamp_pending_until_a_confirm() {
+    let files = Files::new("refresh-a_held_unknown_keeps_even_the_");
+    let refresh = Refresh::default();
+    let login = files.stamp(1);
+    assert_eq!(refresh.plan(&codex(), login, secs(0)), Plan::Forced);
+    refresh.forced_ended(&codex(), Ended::Confirmed(login), secs(0));
+    refresh.stick(&codex());
+    assert!(refresh.stuck(&codex()));
+    assert_eq!(
+        refresh.plan(&codex(), login, secs(10)),
+        Plan::Plain,
+        "inside the rate"
+    );
+    assert!(refresh.fire_if_due(&codex(), secs(60)), "still pending");
+    assert_eq!(refresh.plan(&codex(), login, secs(60)), Plan::Forced);
+    refresh.forced_ended(&codex(), Ended::Missed, secs(60));
+    assert!(refresh.stuck(&codex()), "no answer keeps it");
+    refresh.forced_ended(&codex(), Ended::Confirmed(files.stamp(2)), secs(120));
+    assert!(!refresh.stuck(&codex()), "a confirm ends it");
+    refresh.stick(&codex());
+    refresh.signed_in(&codex());
+    assert!(!refresh.stuck(&codex()), "so does a sign-in");
+}
+
+#[test]
 fn only_a_stamp_no_later_than_the_reply_can_be_its_rewrite() {
     let files = Files::new("refresh-only_a_stamp_no_later_than_the");
     let written = files.stamp(1);
