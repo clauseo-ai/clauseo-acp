@@ -33,7 +33,9 @@
 //!    so a run where it failed ends at 48 unless each process's token, or a pool owner, named it;
 //! 5. cancels every BITS job a pool user owns (`BG_JOB_ENUM_ALL_USERS`, each job's owner), even
 //!    when no process was found: a pool user's job doesn't run, but stays queued until it is
-//!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48;
+//!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
+//!    of [`JOBS_CAP`] jobs, the most read, as more may be past it (the pool's jobs within it are
+//!    cancelled first, and the log line says the list was longer);
 //! 6. adds each pool user it found running, or owning a job, to the record's `ResetSids`, under the
 //!    set-up lock (a bounded wait), so the next set-up deletes and remakes its profile before the
 //!    user runs anything again (`resets.rs`): what the stopped process left in its profile goes
@@ -84,7 +86,8 @@ pub enum StopExit {
     NotPool,
     /// 48: a pool user's process was still there when the passes ran out of time, a process's
     /// user couldn't be read, a pool user's BITS job wasn't cancelled (or a job's owner couldn't
-    /// be read), or a process snapshot or the BITS list couldn't be taken.
+    /// be read), a process snapshot or the BITS list couldn't be taken, or the BITS list reached
+    /// [`JOBS_CAP`].
     NotStopped,
     /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids` (the
     /// set-up lock stayed held, or the write failed).
@@ -127,6 +130,10 @@ pub const EXIT_WAIT: Duration = Duration::from_secs(1);
 /// pass that began just before it, with many processes that won't exit, then waits for none,
 /// so the run ends inside the task's limit.
 pub const LAST_WAITS: Duration = Duration::from_secs(15);
+
+/// The most BITS jobs the stop reads (`Stopper::bits_jobs`). A list that reaches it may have
+/// been cut, so jobs of the pool's may be left past it: the run ends at 48.
+pub(crate) const JOBS_CAP: usize = 10_000;
 
 /// The idle process's pid.
 const IDLE_PID: u32 = 0;
@@ -246,7 +253,8 @@ pub trait Stopper {
     /// refuses isn't asked again at once.
     fn pause(&mut self);
     /// Every BITS job on this machine, all users', each as its owner: `None` when it couldn't
-    /// be read. The list replaces the last one, for [`Stopper::cancel_job`].
+    /// be read; at most [`JOBS_CAP`]. The list replaces the last one, for
+    /// [`Stopper::cancel_job`].
     fn bits_jobs(&mut self) -> Result<Vec<Option<Sid>>, Failed>;
     /// Cancels the job at `at` in the last list, which removes it.
     fn cancel_job(&mut self, at: usize) -> Result<(), Failed>;
@@ -290,6 +298,8 @@ struct Passes {
     /// BITS jobs not cancelled: a pool user's whose cancel failed, or one whose owner couldn't
     /// be read.
     jobs_failed: usize,
+    /// The BITS list reached [`JOBS_CAP`], so jobs past it may not have been read.
+    jobs_capped: bool,
 }
 
 /// Runs the stop as the module says.
@@ -327,9 +337,14 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     } else {
         ""
     };
+    let capped = if passes.jobs_capped {
+        format!(" (the BITS job list was longer than {JOBS_CAP})")
+    } else {
+        String::new()
+    };
     let counts = format!(
         "{} pool users, {} found running, {} processes stopped in {} passes, {} left, \
-         {} unknown{list}, {} BITS jobs cancelled, {} not",
+         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,
@@ -344,8 +359,10 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     if let Err(why) = ran.and(cancelled) {
         return not_stopped(&why);
     }
-    if passes.jobs_failed > 0 {
-        return not_stopped("a BITS job wasn't cancelled, or its owner couldn't be read");
+    if passes.jobs_failed > 0 || passes.jobs_capped {
+        return not_stopped(
+            "a BITS job wasn't cancelled, its owner couldn't be read, or the list was cut",
+        );
     }
     if passes.left > 0 {
         return not_stopped("a pool user's process was still there when the passes' time ran out");
@@ -434,7 +451,8 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
 /// Step 5: every BITS job a pool user owns is cancelled, its owner added to `passes.found`;
 /// another user's is left alone. It runs whatever the passes found: a pool user's job outlives
 /// its processes, and the session's end leaves nothing else to stop. A list that can't be read is
-/// the error; a cancel that fails, or an owner that can't be read, is counted.
+/// the error; a cancel that fails, or an owner that can't be read, is counted; a list of
+/// [`JOBS_CAP`] jobs is marked `jobs_capped` once the pool's jobs in it are cancelled.
 fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
     let owners = fs
         .bits_jobs()
@@ -452,6 +470,7 @@ fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resu
             None => passes.jobs_failed += 1,
         }
     }
+    passes.jobs_capped = owners.len() >= JOBS_CAP;
     Ok(())
 }
 

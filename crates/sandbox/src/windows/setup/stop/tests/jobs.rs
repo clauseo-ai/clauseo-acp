@@ -68,6 +68,31 @@ fn a_job_whose_owner_cant_be_read_is_left_and_is_48() {
 }
 
 #[test]
+fn a_list_at_its_cap_is_48_after_the_pool_jobs_in_it_are_cancelled() {
+    let other = Some(sid(1013));
+    let mut owners = vec![other; JOBS_CAP];
+    owners[5] = Some(sid(1010));
+    let (exit, fake) = run(owners.clone(), &[]);
+    assert_eq!(exit, StopExit::NotStopped);
+    assert_eq!(cancelled(&fake), [5]);
+    assert_eq!(fake.resets, [sid(1010)]);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("1 BITS jobs cancelled, 0 not (the BITS job list was longer than 10000)"),
+        "{line}"
+    );
+    // One job fewer is the whole list: done, and the line says nothing of a cut.
+    owners.pop();
+    let (exit, fake) = run(owners, &[]);
+    assert_eq!(exit, StopExit::Done);
+    assert!(
+        !fake.logged[0].1.contains("longer than"),
+        "{:?}",
+        fake.logged
+    );
+}
+
+#[test]
 fn a_list_that_cant_be_read_is_48_after_the_processes_are_stopped() {
     let mut fake = Fake::new(&[1010]);
     fake.snapshots = vec![Ok(vec![seen(10, Some(sid(1010)))]), Ok(Vec::new())];
