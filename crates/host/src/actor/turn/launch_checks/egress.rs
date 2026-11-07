@@ -153,8 +153,8 @@ pub(crate) fn proxy_config(
         record: None,
         // Stage C's rule: the token-free listener only for a launch with the browser.
         browser,
-        // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS`. R17
-        // PR-D asks for `ListenerFor::TierB` when it runs a tier-B launch's agent jailed.
+        // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS` until
+        // R17 PR-E passes `ListenerFor::TierB` for a tier-B launch, as for the relay.
         listener: ListenerFor::Other,
     }
 }
