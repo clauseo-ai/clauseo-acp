@@ -1298,13 +1298,15 @@ admin copy.
    snapshot and opens each process with `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE` (and
    `PROCESS_SUSPEND_RESUME | READ_CONTROL` where it can). Once every handle is open it reads the
    kernel's process list (`WTSEnumerateProcessesExW`, level 1), which gives an administrator each
-   process's SID whatever the token's DACL says; a pid can't be reused while a handle to it is open,
-   so each entry is the process its handle is on. A pool user owns its token and can drop SYSTEM
-   from the token's DACL (`SeDebugPrivilege` passes the process's DACL, not the token's), so the
-   token's user is only a cross-check: when it differs from the list's, the process's user is
-   unknown. With no list entry, the token's user counts. With neither, the process object's
-   owner (which a standard user can't set to another account) may add the process, never clear
-   it: an owner that is a pool SID gets it stopped, and any other owner leaves it unknown, since
+   process's SID; a pid can't be reused while a handle to it is open, so each entry is the process
+   its handle is on. A pool user owns its token and can drop SYSTEM from the token's DACL
+   (`SeDebugPrivilege` passes the process's DACL, not the token's). The list reads the token
+   too: such a process gets no SID from it (CI run 42416074600), and its token can't be read
+   either, so the process object's owner names it, read with `READ_CONTROL` under
+   `SeDebugPrivilege`, which the token's DACL can't take away. The token's user is a
+   cross-check: when it differs from the list's, the process's user is unknown. With no list
+   entry, the token's user counts. With neither, the owner (which a standard user can't set to
+   another account) may add the process, never clear it: an owner that is a pool SID gets it stopped, and any other owner leaves it unknown, since
    an owner is the creator, not the user (an elevated administrator's processes are owned by
    Administrators). A process whose user no source gives is never stopped but counts as unknown,
    unless it also can't be opened with `PROCESS_TERMINATE` while the list was read (a protected

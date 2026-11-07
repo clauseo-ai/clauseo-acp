@@ -322,8 +322,9 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
 
 /// The kernel's process list (`WTSEnumerateProcessesExW`, level 1, every session): each pid
 /// with its user's SID, `None` where the list names none, leaving out a process with no thread
-/// (one that has exited, kept by a handle). An administrator gets every process's SID, read by
-/// the kernel from the token whatever the token's DACL says.
+/// (one that has exited, kept by a handle). The list reads each token as this process: a token
+/// whose DACL shuts out SYSTEM gets no SID (CI run 42416074600), and its process's owner names
+/// it instead (`stop::user_of`).
 fn listed_users() -> Result<BTreeMap<u32, Option<Sid>>, Failed> {
     let mut level = INFO_LEVEL_1;
     let mut info = PWSTR::null();
