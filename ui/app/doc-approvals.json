@@ -25,7 +25,9 @@
       "policyFolderExists",
       "policyFolderFailed",
       "removeStillRunning",
-      "removeSkippedSilent"
+      "removeSkippedSilent",
+      "removeExeMissing",
+      "setupExeRemoved"
     ],
     "slots": {
       "$R9": "the data folder",

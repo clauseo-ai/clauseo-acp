@@ -15,12 +15,12 @@ fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn read(relative: &str) -> String {
+pub(super) fn read(relative: &str) -> String {
     std::fs::read_to_string(manifest_dir().join(relative)).unwrap()
 }
 
 /// `hooks.nsh`'s lines, comments and blank lines left out, trimmed.
-fn hook_code() -> Vec<String> {
+pub(super) fn hook_code() -> Vec<String> {
     read("windows/hooks.nsh")
         .lines()
         .map(str::trim)
@@ -30,14 +30,14 @@ fn hook_code() -> Vec<String> {
 }
 
 /// The index of the first code line holding all of `parts`.
-fn line_with(code: &[String], parts: &[&str]) -> usize {
+pub(super) fn line_with(code: &[String], parts: &[&str]) -> usize {
     code.iter()
         .position(|line| parts.iter().all(|part| line.contains(part)))
         .unwrap_or_else(|| panic!("no line in hooks.nsh holds {parts:?}"))
 }
 
 /// The pre-uninstall macro's code lines.
-fn preuninstall(code: &[String]) -> &[String] {
+pub(super) fn preuninstall(code: &[String]) -> &[String] {
     let start = line_with(code, &["!macro NSIS_HOOK_PREUNINSTALL"]);
     let end = start + line_with(&code[start..], &["!macroend"]);
     &code[start..end]
@@ -311,7 +311,11 @@ fn the_hooks_messages_name_the_kept_folder_through_localappdata() {
     assert_eq!(body[kept - 1], "${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}");
     assert_eq!(body[both - 1], "${Else}");
     assert_eq!(body[both + 1], "${EndIf}");
-    let boxes = body.iter().filter(|line| line.starts_with("MessageBox"));
+    // The data folder's boxes: those after step 2 starts (the one before is removeExeMissing's).
+    let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    let boxes = body[deletion..]
+        .iter()
+        .filter(|line| line.starts_with("MessageBox"));
     assert_eq!(boxes.count(), 4, "{body:?}");
 }
 
@@ -420,7 +424,8 @@ fn the_hook_shows_no_box_when_the_data_folder_is_gone_and_no_path_through_a_link
         "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(deleteAppDataFailedUnnamed)\""
     );
     assert_eq!(body[silent + 5], "${ElseIf} $R8 == \"\"");
-    let boxes = (0..body.len()).filter(|&at| body[at].starts_with("MessageBox"));
+    let deletion = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
+    let boxes = (deletion..body.len()).filter(|&at| body[at].starts_with("MessageBox"));
     for at in boxes {
         assert!(silent + 3 < at, "{body:?}");
     }

@@ -26,6 +26,11 @@
 ;    every step. Only an ended wait (WAIT_OBJECT_0), an exit code read and that code 0 count as
 ;    removed. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
 ;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
+;    With the tool missing (Windows security can quarantine it: Defender called it
+;    Trojan:Win32/Bearfoos.A!ml, a false positive) nothing can be removed. When the machine's
+;    record (HKLM\SOFTWARE\Clauseo\Sandbox, 64-bit view) shows a set-up, the uninstaller says so
+;    (removeExeMissing): a box, or under /S a line in the details list and exit code
+;    CLAUSEO_EXIT_REMOVE_EXE_MISSING, so the protection's accounts are never left unsaid.
 ; 2. When the "Also delete conversations, saved versions and settings" box is ticked, the app
 ;    deletes its data folders itself (`Clauseo.exe --delete-app-data`, delete_app_data.rs), never
 ;    following a link, and the box is cleared so the template's `RmDir /r` never runs: NSIS 3.11's
@@ -37,13 +42,16 @@
 ;    the sandbox's records in it; else the whole folder.
 ;
 ; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept, removeStillRunning,
-; removeSkippedSilent); the uninstall-declined line is S15a's.
+; removeSkippedSilent, removeExeMissing, setupExeRemoved); the uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $COMMONAPPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
 ; docs/firm-it.md section 6) owned by Administrators, so a user who made the folder first cannot
 ; make a firm's policy be ignored. A folder that is already there is left as it is.
 ; The uninstaller leaves that folder, since a firm's policy may be in it.
+; Then both installers check that clauseo-sandbox-setup.exe is still in $INSTDIR: Windows security
+; can remove it as it is written. Gone, they say so (setupExeRemoved): a box, or under /S a line
+; in the details list and exit code CLAUSEO_EXIT_SETUP_EXE_REMOVED. The install stays.
 
 ; Exit codes of `Clauseo.exe --delete-app-data` (crates/desktop/src/delete_app_data.rs; a test
 ; holds them equal).
@@ -51,6 +59,13 @@
 !define CLAUSEO_KEPT_SANDBOX 2
 !define CLAUSEO_KEPT_SET_ASIDE 3
 !define CLAUSEO_KEPT_AND_FAILED 4
+
+; The installers' own exit codes under /S (SetErrorLevel), listed in docs/firm-it.md, "If Windows
+; security removed Clauseo's set-up program". Tauri's template sets none, and NSIS uses 0, 1
+; (cancelled) and 2 (aborted); these stay clear of those and of the codes Intune and SCCM read as
+; success or retry (1223, 1618, 1641, 1707, 3010).
+!define CLAUSEO_EXIT_SETUP_EXE_REMOVED 20
+!define CLAUSEO_EXIT_REMOVE_EXE_MISSING 21
 
 ; Sets $R4 to 1 when PATH is a real folder: GetFileAttributesW says a folder (0x10) and no
 ; reparse point (0x400), so a junction or a link is never named as kept and the lawyer is never
@@ -158,6 +173,25 @@
         ${EndIf}
       ${EndIf}
       System::Free $R6
+    ${EndIf}
+    ; The tool gone (quarantined, say), so nothing was removed: said only when the machine's
+    ; record exists, the protection having been set up. The record is in the 64-bit view, which
+    ; this 32-bit uninstaller reads only through SetRegView 64; put back after. EnumRegValue sets
+    ; the error flag when the key can't be opened. Under /S no box: a details line and the exit
+    ; code, which the uninstaller only returns when run with _?= (its stub returns at once).
+    ${IfNot} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+      SetRegView 64
+      ClearErrors
+      EnumRegValue $R3 HKLM "SOFTWARE\Clauseo\Sandbox" 0
+      ${IfNot} ${Errors}
+        DetailPrint "$(removeExeMissing)"
+        ${If} ${Silent}
+          SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}
+        ${Else}
+          MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeExeMissing)"
+        ${EndIf}
+      ${EndIf}
+      SetRegView lastused
     ${EndIf}
 
     ; 2. The data folders, deleted by the app.
@@ -322,4 +356,15 @@
     Pop $R6
     Pop $R5
   !endif
+  ; Both installers: the sandbox's set-up program still there. Windows security can quarantine it
+  ; as it is written; the install stays as it is, and the person or IT is told. Under /S no box:
+  ; a details line and the exit code, for Intune or SCCM.
+  ${IfNot} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+    DetailPrint "$(setupExeRemoved)"
+    ${If} ${Silent}
+      SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION|MB_OK "$(setupExeRemoved)"
+    ${EndIf}
+  ${EndIf}
 !macroend
