@@ -55,6 +55,19 @@ fn anything_the_parser_would_rewrite_is_refused() {
         ("a deeper path", "https://data.clauseo.chat/pay/rch_1/x"),
         ("a trailing slash", "https://data.clauseo.chat/pay/rch_1/"),
         ("a dot in the id", "https://data.clauseo.chat/pay/rch.1"),
+        (
+            "a dot segment after the id",
+            "https://data.clauseo.chat/pay/rch_1/../x",
+        ),
+        (
+            "a single dot segment",
+            "https://data.clauseo.chat/pay/./rch_1",
+        ),
+        ("a tab inside", "https://data.clauseo.chat/pay/rch\t_1"),
+        ("a tab in the host", "https://data.clauseo\t.chat/pay/rch_1"),
+        ("a newline inside", "https://data.clauseo.chat/pay/rch_1\n"),
+        ("a space before", " https://data.clauseo.chat/pay/rch_1"),
+        ("a space after", "https://data.clauseo.chat/pay/rch_1 "),
     ];
     for (why, text) in refused {
         assert_eq!(PayUrl::parse(&CASE_LAW, text), None, "{why}: {text}");

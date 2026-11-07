@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-use super::super::super::RelayEvent;
+use super::super::super::{RelayEvent, ResumedBalance};
 use super::support::*;
 
 /// A tool's answer for a request id.
@@ -135,7 +135,9 @@ fn a_paid_recharge_result_reports_its_balance_and_drops_the_account_copy() {
         rig.events.take(),
         vec![RelayEvent::RechargePaid {
             session: rig.key,
+            recharge_id: None,
             balance_credits: Some(2000),
+            resumed_balance: ResumedBalance::Unknown,
         }]
     );
     rig.handle.account().unwrap();
@@ -154,7 +156,140 @@ fn a_paid_recharge_result_reports_its_balance_and_drops_the_account_copy() {
         rig.events.take(),
         vec![RelayEvent::RechargePaid {
             session: rig.key,
+            recharge_id: None,
             balance_credits: None,
+            resumed_balance: ResumedBalance::NoCall,
         }]
     );
+}
+
+/// The connector's resumed shape: `recharge_id` at the top, and the balance after the resumed
+/// call: `resumed.balance_credits` first, else the one the last charge line names, else
+/// `Unknown` (a format not read is never a number); a `null` `resumed` resumed nothing. Five
+/// cases per relay: a turn takes at most five `recharge` calls.
+#[test]
+fn a_resumed_paid_result_reports_the_balance_after_the_resumed_call() {
+    use ResumedBalance::{Known, NoCall, Unknown};
+    let line = "search_law: Charged 40 credits · balance 1,960";
+    let resumed = |fields: Value| {
+        let mut resumed = json!({"tool": "search_law", "in_content_blocks": true,
+            "result": null, "text": "1. Daryao v. State of U.P."});
+        for (key, value) in fields.as_object().unwrap() {
+            resumed[key] = value.clone();
+        }
+        resumed
+    };
+    let cases = [
+        (
+            resumed(
+                json!({"balance_credits": 1955, "charged_credits": 45, "charge_lines": [line]}),
+            ),
+            Known(1955),
+        ),
+        (resumed(json!({"charge_lines": [line]})), Known(1960)),
+        (
+            resumed(json!({"charge_lines": ["Charged 40 credits", "Balance: 12,345,678 credits"]})),
+            Known(12_345_678),
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 5", "Charged 40 credits"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["search_law: 60 credits"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1,96,0"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1960.5 credits"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance ₹196.00"]})),
+            Unknown,
+        ),
+        // A number cut short is not read: a space, an apostrophe, a thin or no-break space, or a
+        // dot before more digits.
+        (
+            resumed(json!({"charge_lines": ["balance 12 345"]})),
+            Unknown,
+        ),
+        (resumed(json!({"charge_lines": ["balance 1'960"]})), Unknown),
+        (resumed(json!({"charge_lines": ["balance 1’960"]})), Unknown),
+        (
+            resumed(json!({"charge_lines": ["balance 1\u{2009}960"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1\u{a0}960 credits"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1,960 5"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1960_000"]})),
+            Unknown,
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1,960'"]})),
+            Unknown,
+        ),
+        // A word, punctuation or the end after it reads.
+        (
+            resumed(json!({"charge_lines": ["balance 1,960."]})),
+            Known(1960),
+        ),
+        (
+            resumed(json!({"charge_lines": ["Balance 1960 credits"]})),
+            Known(1960),
+        ),
+        (
+            resumed(json!({"charge_lines": ["balance 1,960 (₹196)"]})),
+            Known(1960),
+        ),
+        (resumed(json!({"charge_lines": "balance 5"})), Unknown),
+        (resumed(json!({"balance_credits": "lots"})), Unknown),
+        (resumed(json!({})), Unknown),
+        (json!(null), NoCall),
+    ];
+    for chunk in cases.chunks(5) {
+        resumed_cases(chunk);
+    }
+}
+
+/// Each `resumed` in a paid answer through a fresh relay, and the balance it reports.
+fn resumed_cases(cases: &[(Value, ResumedBalance)]) {
+    let rig = rig();
+    rig.add_api_key();
+    rig.events.take();
+    let mut agent = rig.agent();
+    let json_type = [("Content-Type", "application/json")];
+    for (n, (resumed, resumed_balance)) in (1_u64..).zip(cases.iter().cloned()) {
+        let status = json!({"recharge_id": "rch_1", "status": "paid", "balance_credits": 2000,
+            "then": "Carry on.", "resumed": resumed});
+        let reply = result(
+            n,
+            &status,
+            &[json!({"type": "text", "text": status.to_string()})],
+        );
+        rig.fake
+            .answer_next(MCP, 200, &json_type, reply.to_string().as_bytes());
+        agent.send_value(&call(n, "recharge"));
+        assert_eq!(agent.recv(), reply);
+        assert_eq!(
+            rig.events.take(),
+            vec![RelayEvent::RechargePaid {
+                session: rig.key,
+                recharge_id: Some("rch_1".to_owned()),
+                balance_credits: Some(2000),
+                resumed_balance,
+            }],
+            "{resumed}"
+        );
+    }
 }

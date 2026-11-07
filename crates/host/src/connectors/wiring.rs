@@ -9,6 +9,7 @@
 //! connectors wired, an event is dropped.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use clauseo_connectors::Connectors;
@@ -59,12 +60,16 @@ pub(crate) type EventSink = Box<dyn Fn(RelayEvent) + Send + Sync>;
 #[derive(Default)]
 pub struct ConnectorEvents {
     sink: OnceLock<EventSink>,
+    /// The balance epoch, shared with the actor and its jobs: [`RelayEvents::resumed_charge`]
+    /// bumps it.
+    balances: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for ConnectorEvents {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectorEvents")
             .field("bound", &self.sink.get().is_some())
+            .field("balances", &self.balances.load(Ordering::SeqCst))
             .finish()
     }
 }
@@ -82,6 +87,11 @@ impl ConnectorEvents {
             tracing::warn!("the connector events were already bound to a host");
         }
     }
+
+    /// The balance epoch the relays bump.
+    pub(crate) fn balances(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.balances)
+    }
 }
 
 impl RelayEvents for ConnectorEvents {
@@ -95,5 +105,9 @@ impl RelayEvents for ConnectorEvents {
 
     fn call(&self, session: SessionKey, call: RelayCall) {
         self.event(RelayEvent::Call { session, call });
+    }
+
+    fn resumed_charge(&self) {
+        self.balances.fetch_add(1, Ordering::SeqCst);
     }
 }

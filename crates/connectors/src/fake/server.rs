@@ -206,9 +206,23 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
+/// [`answer_now`], sent once a hold on this path, if any, is released (or the fake stops).
+fn answer(shared: &Shared, request: &RecordedRequest) -> Option<Response> {
+    let hold = shared
+        .lock()
+        .hold_next
+        .get_mut(&request.path)
+        .and_then(std::collections::VecDeque::pop_front);
+    let response = answer_now(shared, request);
+    if let Some(release) = hold {
+        while !release.wait_timeout(Duration::from_millis(20)) && !shared.stop.is_cancelled() {}
+    }
+    response
+}
+
 /// The injected answer, failure or delay for this path, then the endpoint's answer. `None`
 /// closes the connection unanswered.
-fn answer(shared: &Shared, request: &RecordedRequest) -> Option<Response> {
+fn answer_now(shared: &Shared, request: &RecordedRequest) -> Option<Response> {
     let (inject, fail, delay) = {
         let mut state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
         let fail = state
