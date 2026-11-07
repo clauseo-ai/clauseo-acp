@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::time::Duration;
 
 use super::super::check_folder_with;
@@ -113,4 +113,43 @@ fn a_refused_folder_is_canonicalised_once() {
         );
     }
     assert_eq!(*calls.lock().unwrap(), 1);
+}
+
+#[test]
+fn two_first_checks_at_once_canonicalise_a_hung_folder_once() {
+    let dir = TestDir::new("listed-joiners");
+    let (_, hung, listed, fine) = layout(&dir);
+    let (hanging, release) = hanging_on(&hung);
+    let calls = Arc::new(Mutex::new(0_u32));
+    let (counted, hung_path) = (Arc::clone(&calls), hung.clone());
+    let canonicalize: Canonicalize = Arc::new(move |path: &Path| {
+        if path == hung_path {
+            *counted.lock().unwrap() += 1;
+        }
+        hanging(path)
+    });
+    let refused = vec![hung, listed];
+    let start = Arc::new(Barrier::new(2));
+    let (sender, receiver) = mpsc::channel();
+    for _ in 0..2 {
+        let (refused, canonicalize, fine) =
+            (refused.clone(), Arc::clone(&canonicalize), fine.clone());
+        let (start, sender) = (Arc::clone(&start), sender.clone());
+        std::thread::spawn(move || {
+            start.wait();
+            drop(sender.send(check_folder_with(&fine, &refused, &canonicalize)));
+        });
+    }
+    for _ in 0..2 {
+        let answer = receiver
+            .recv_timeout(BOUND)
+            .expect("each check answers within 3 s");
+        answer.unwrap();
+    }
+    assert_eq!(
+        *calls.lock().unwrap(),
+        1,
+        "the hung folder is canonicalised once"
+    );
+    drop(release);
 }
