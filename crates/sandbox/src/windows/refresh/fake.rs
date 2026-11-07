@@ -126,6 +126,14 @@ impl Refresher for Fake {
     fn admin_copy(&mut self) -> Result<PathBuf, Failed> {
         Ok(PathBuf::from(ADMIN))
     }
+    fn lock(&mut self) -> Result<bool, Failed> {
+        // `fail: Some("lock")` is another holder.
+        self.calls.push("lock");
+        Ok(self.fail != Some("lock"))
+    }
+    fn unlock(&mut self) {
+        self.calls.push("unlock");
+    }
     fn record(&mut self) -> Result<RefreshRecord, Failed> {
         self.calls.push("record");
         Ok(self.record.clone())

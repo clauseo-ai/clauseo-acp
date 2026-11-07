@@ -406,9 +406,13 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
         RefreshExit::OutsideProfile,
         RefreshExit::WrongMachine,
         RefreshExit::FolderBusy,
+        RefreshExit::LockHeld,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43]);
+    assert_eq!(
+        codes,
+        [0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]
+    );
     let setup: Vec<u8> = crate::windows::setup::SetupExit::ALL
         .iter()
         .map(|exit| exit.as_code())

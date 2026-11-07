@@ -822,7 +822,11 @@ no path argument and no environment. `UserInstallDir` is untrusted: the lawyer c
 folder of it through a junction at any time, or re-run `--adopt` with another folder. The run:
 
 1. refuses unless it runs as LOCAL SYSTEM from the admin copy's path;
-2. refuses a build whose key is the placeholder, before reading anything;
+2. refuses a build whose key is the placeholder, before reading anything. It then tries the
+   set-up lock (the named mutex the set-up, `--remove` and `--adopt` take) without waiting, and
+   holds it to the end of the run; held elsewhere, it exits 44 having read nothing. `--adopt`
+   holds the same lock from its record checks through its hash and record write, so a refresh
+   never swaps the copy between the two;
 3. refuses an install folder that isn't inside the copy owner's profile (`ProfileList`'s
    `ProfileImagePath` for `AdminCopyOwner`; a temporary profile counts as none). For a
    `machine` owner, the folder must instead be one only SYSTEM, Administrators or
