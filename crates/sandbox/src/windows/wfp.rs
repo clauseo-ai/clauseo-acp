@@ -48,7 +48,7 @@ pub use check::{FoundFilter, NetworkGap, SetupReader, WfpError, check_setup};
 pub use install::{NetworkRemoved, install, remove};
 #[cfg(windows)]
 pub use permit::LaunchPermit;
-pub use spec::{FirewallOutcome, Namespace, NetworkReport, NetworkSetup};
+pub use spec::{FirewallOutcome, FirewallTrouble, Namespace, NetworkReport, NetworkSetup};
 
 /// Removes Clauseo's network set-up ([`remove`] in [`Namespace::production`]), elevated, with
 /// the grants of `owner` (the machine record's `OwnerSid`) taken back. For S15 `PR4j`'s

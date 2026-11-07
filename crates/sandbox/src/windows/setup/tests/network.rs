@@ -1,10 +1,11 @@
 //! Set-up's network step (S15 PR7): every live pool user covered, an extend covering the new
 //! one, a WFP failure failing and rolling back the set-up, and a firewall that Group Policy
-//! ignores leaving the set-up done on WFP's filters alone.
+//! ignores, or that fails in any other way, leaving the set-up done on WFP's filters alone; WFP
+//! failing (the Base Filtering Engine down included) fails the set-up.
 
 use super::*;
-use crate::windows::wfp::FirewallOutcome;
 use crate::windows::wfp::spec::FIREWALL_UNDER_POLICY;
+use crate::windows::wfp::{FirewallOutcome, FirewallTrouble, WfpError};
 
 /// The SIDs `rids` names, as the fake makes them.
 fn sids(rids: &[u32]) -> Vec<Sid> {
@@ -96,4 +97,58 @@ fn a_firewall_group_policy_ignores_leaves_the_set_up_done_on_wfp_alone() {
     );
     assert!(machine.state.marker.is_some());
     assert!(FIREWALL_UNDER_POLICY.contains("AllowLocalPolicyMerge"));
+}
+
+#[test]
+fn a_firewall_that_fails_with_wfp_ok_passes_with_a_note() {
+    for trouble in [
+        FirewallTrouble::ServiceStopped,
+        FirewallTrouble::TurnedOff,
+        FirewallTrouble::from_call("Rules::Add", 0x8000_4005),
+    ] {
+        let mut machine = FakeMachine::new("network-firewall-fails");
+        let mut acl = FakeAcl::default();
+        machine.around.firewall = Some(FirewallOutcome::Ineffective(trouble.words()));
+        let report = set_up_fresh(&mut machine, &mut acl);
+        assert_eq!(
+            report.network.firewall,
+            FirewallOutcome::Ineffective(trouble.words()),
+            "{trouble:?}"
+        );
+        assert_eq!(report.network.filters, 6, "{trouble:?}");
+        assert!(
+            machine.state.marker.is_some(),
+            "{trouble:?}: set-up is done"
+        );
+    }
+}
+
+#[test]
+fn wfp_failing_fails_the_set_up_naming_the_base_filtering_engine() {
+    let mut machine = FakeMachine::new("network-bfe-down");
+    let mut acl = FakeAcl::default();
+    let bfe = WfpError {
+        call: "FwpmEngineOpen0",
+        code: 1753,
+    };
+    machine.fails.push((
+        "network 1001,1002,1003,1004".to_owned(),
+        MachineError::Other(bfe.cause()),
+    ));
+    let req = request(&mut machine, 0, Vec::new());
+    let outcome = set_up(&mut machine, &mut acl, &req);
+    let failure = outcome.clone().unwrap_err();
+    assert_eq!(failure.step, Step::Network);
+    assert_eq!(failure.exit, SetupExit::Failed);
+    assert!(failure.rolled_back);
+    assert!(machine.state.marker.is_none());
+    // What the app reads back is a failed set-up (SetUpFailed), its cause naming BFE.
+    let told = result_file::SetupResult::of(&outcome);
+    let code = u32::from(SetupExit::Failed.as_code());
+    match result_file::outcome(code, Some(&Ok(Some(told)))) {
+        Err(crate::SetupError::Failed(why)) => {
+            assert!(why.contains("Base Filtering Engine service (BFE)"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
 }

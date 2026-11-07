@@ -762,12 +762,21 @@ block the range too, and each permit opens its own launch's ports. The firewall 
 Windows Firewall's own sublayer, where our soft permit can't beat them; blocking loopback TCP
 outside the range there caps every permit at the range.
 
-**Group Policy and the firewall.** When Group Policy keeps local firewall rules from taking
-effect (`LocalPolicyModifyState` is not OK in every current profile), or a rule can't be
-written, set-up goes on: WFP's filters enforce alone, and `SetupReport::network` names the
-firewall as ineffective. For firm IT: with Group Policy owning the firewall, the second layer of
-Clauseo's network protection is off; add the same rules by Group Policy, or let local rules apply
-(`AllowLocalPolicyMerge`).
+**When the firewall fails.** WFP is the boundary: any WFP call that fails, the Base Filtering
+Engine not running included (named for IT: set BFE to start automatically), fails the set-up, so
+the machine stays on tier C (`SetUpFailed`). The firewall is the second layer: once WFP's filters
+are in, no firewall failure fails the set-up. Set-up goes on with WFP alone, `SetupReport::network`
+names the firewall as ineffective with its cause, and the set-up logs it. The causes:
+- Group Policy keeps local rules from taking effect (`LocalPolicyModifyState` is not OK in every
+  current profile). For firm IT: add the same rules by Group Policy, or let local rules apply
+  (`AllowLocalPolicyMerge`).
+- The Windows Defender Firewall service (`mpssvc`) isn't running. IT can set it to start
+  automatically.
+- Windows Firewall is off for a current profile, as it is when a third-party firewall owns the
+  computer. IT can add the same rules there, or turn Windows Firewall back on.
+- A firewall call fails otherwise; the call and its code are named.
+
+`setup-result.json` doesn't carry it; the host can show it later through R17 if IT asks.
 
 **Inbound loopback** to a pool user's own listener is not blocked: whoever connects is filtered on
 its own connect side, so the agent's loopback pair on a listed port works. No listener rule:
