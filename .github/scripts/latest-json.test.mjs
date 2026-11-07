@@ -29,7 +29,18 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { assets, buildManifest, manifestProblems, sandboxAsset, signatureCheck, signedVersion } from "./latest-json.mjs";
+import {
+  PLACEHOLDER_KEY_ID,
+  assets,
+  buildManifest,
+  expectedKeyId,
+  manifestProblems,
+  publicKeyId,
+  sandboxAsset,
+  signatureCheck,
+  signedVersion,
+  versionString,
+} from "./latest-json.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RELEASE_YML = join(here, "..", "workflows", "release.yml");
@@ -467,6 +478,134 @@ test("signatureCheck holds the trusted comment to the signed name and version wh
   }
 });
 
+// ---- the sandbox tool's UpdaterKeyId ----
+
+const TEST_PUB = readFileSync(join(here, "..", "..", "crates", "desktop", "release", "updater-test.pub"), "utf8");
+const CONFIG_PUB = JSON.parse(readFileSync(join(here, "..", "..", "crates", "desktop", "tauri.conf.json"), "utf8")).plugins
+  .updater.pubkey;
+
+/** One VERSIONINFO node: header, NUL-ended UTF-16 key, padding, value (text or bytes), padding, children. */
+function versionNode(key, { text = null, bytes = Buffer.alloc(0), children = [] } = {}) {
+  const pad = (b) => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)]);
+  const value = text === null ? bytes : Buffer.from(`${text}\0`, "utf16le");
+  const head = Buffer.alloc(6);
+  head.writeUInt16LE(text === null ? bytes.length : text.length + 1, 2);
+  head.writeUInt16LE(text === null ? 0 : 1, 4);
+  const body = Buffer.concat([pad(Buffer.concat([head, Buffer.from(`${key}\0`, "utf16le")])), pad(value), ...children.map(pad)]);
+  body.writeUInt16LE(body.length, 0);
+  return body;
+}
+
+/** A PE32+ file with one .rsrc section holding RT_VERSION/1/0x409 with <strings>, or no resources. */
+function fakePe(strings) {
+  const VA = 0x1000;
+  const RAW = 0x200;
+  let rsrc = Buffer.alloc(0);
+  if (strings !== null) {
+    const fixed = Buffer.alloc(52);
+    fixed.writeUInt32LE(0xfeef04bd, 0);
+    const info = versionNode("VS_VERSION_INFO", {
+      bytes: fixed,
+      children: [
+        versionNode("StringFileInfo", {
+          children: [
+            versionNode("040904B0", {
+              children: Object.entries(strings).map(([key, text]) => versionNode(key, { text })),
+            }),
+          ],
+        }),
+      ],
+    });
+    // Three directories of one entry each (16 + 8 bytes), a data entry (16), then the data.
+    const dir = (id, target, subdirectory) => {
+      const b = Buffer.alloc(24);
+      b.writeUInt16LE(1, 14);
+      b.writeUInt32LE(id, 16);
+      b.writeUInt32LE((target | (subdirectory ? 0x80000000 : 0)) >>> 0, 20);
+      return b;
+    };
+    const entry = Buffer.alloc(16);
+    entry.writeUInt32LE(VA + 88, 0);
+    entry.writeUInt32LE(info.length, 4);
+    rsrc = Buffer.concat([dir(16, 24, true), dir(1, 48, true), dir(0x409, 72, false), entry, info]);
+  }
+  const header = Buffer.alloc(RAW);
+  header.write("MZ", 0, "latin1");
+  header.writeUInt32LE(0x40, 0x3c);
+  header.write("PE\0\0", 0x40, "latin1");
+  header.writeUInt16LE(0x8664, 0x44);
+  header.writeUInt16LE(1, 0x46);
+  header.writeUInt16LE(240, 0x54);
+  const optional = 0x58;
+  header.writeUInt16LE(0x20b, optional);
+  header.writeUInt32LE(16, optional + 108);
+  header.writeUInt32LE(strings === null ? 0 : VA, optional + 112 + 16);
+  header.writeUInt32LE(rsrc.length, optional + 112 + 20);
+  const section = optional + 240;
+  header.write(".rsrc", section, "latin1");
+  header.writeUInt32LE(rsrc.length, section + 8);
+  header.writeUInt32LE(VA, section + 12);
+  header.writeUInt32LE(rsrc.length, section + 16);
+  header.writeUInt32LE(RAW, section + 20);
+  return Buffer.concat([header, rsrc]);
+}
+
+test("publicKeyId prints a key's ID as minisign does, and expectedKeyId picks each mode's", () => {
+  // Each against the ID minisign wrote in the key's own untrusted comment.
+  for (const pub of [REAL_PUB, TEST_PUB]) {
+    const comment = Buffer.from(pub.trim(), "base64").toString("utf8").split("\n")[0];
+    assert.equal(publicKeyId(pub), comment.split(" ").at(-1));
+  }
+  assert.equal(publicKeyId(TEST_PUB), "B142942ACEC5F521");
+  assert.equal(publicKeyId(REAL_PUB), "CF7C722EAF73FC91");
+  assert.equal(publicKeyId(""), null);
+  assert.equal(expectedKeyId("test", "", TEST_PUB), "B142942ACEC5F521");
+  assert.equal(expectedKeyId("release", REAL_PUB, TEST_PUB), "CF7C722EAF73FC91");
+  assert.throws(() => expectedKeyId("release", "", TEST_PUB), /plugins\.updater\.pubkey/);
+  // dry: tauri.conf.json's key when it has one (build.rs's fallback), else build.rs's placeholder.
+  assert.equal(expectedKeyId("dry", REAL_PUB, TEST_PUB), "CF7C722EAF73FC91");
+  assert.equal(expectedKeyId("dry", "", TEST_PUB), PLACEHOLDER_KEY_ID);
+  assert.equal(PLACEHOLDER_KEY_ID, "AC986E7C6BA67AB9");
+  assert.throws(() => expectedKeyId("nightly", "", TEST_PUB));
+});
+
+test("versionString reads a VERSIONINFO string through the PE's resources", () => {
+  const pe = fakePe({ ProductName: "Clauseo", UpdaterKeyId: "B142942ACEC5F521" });
+  assert.equal(versionString(pe, "UpdaterKeyId"), "B142942ACEC5F521");
+  assert.equal(versionString(pe, "ProductName"), "Clauseo");
+  assert.equal(versionString(pe, "FileVersion"), null);
+  assert.equal(versionString(fakePe(null), "UpdaterKeyId"), null);
+  // The bytes alone are no UpdaterKeyId: a string outside the resources is not read.
+  assert.equal(versionString(Buffer.concat([fakePe(null), Buffer.from("UpdaterKeyId B142942ACEC5F521", "utf16le")]), "UpdaterKeyId"), null);
+  assert.throws(() => versionString(Buffer.from("not a PE file"), "UpdaterKeyId"), /not a readable PE file/);
+  assert.throws(() => versionString(pe.subarray(0, pe.length - 40), "UpdaterKeyId"), /not a readable PE file/);
+});
+
+test("--key-id passes a matching UpdaterKeyId, fails another and warns (3) on none", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-json-key-id-"));
+  const run = (strings, mode) => {
+    const exe = join(dir, "tool.exe");
+    writeFileSync(exe, fakePe(strings));
+    return spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--key-id", exe, mode], { encoding: "utf8" });
+  };
+  try {
+    assert.equal(run({ UpdaterKeyId: "B142942ACEC5F521" }, "test").status, 0);
+    const other = run({ UpdaterKeyId: "CF7C722EAF73FC91" }, "test");
+    assert.equal(other.status, 1);
+    assert.match(other.stderr, /UpdaterKeyId CF7C722EAF73FC91, not the test key B142942ACEC5F521/);
+    const none = run({ ProductName: "Clauseo" }, "test");
+    assert.equal(none.status, 3);
+    assert.match(none.stderr, /no UpdaterKeyId/);
+    assert.equal(run(null, "test").status, 3);
+    // dry, against whichever key tauri.conf.json holds today (empty: the placeholder).
+    const dry = expectedKeyId("dry", CONFIG_PUB, TEST_PUB);
+    assert.equal(run({ UpdaterKeyId: dry }, "dry").status, 0);
+    assert.equal(run({ UpdaterKeyId: "B142942ACEC5F521" }, "dry").status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("release.yml signs the sandbox tool, ships its .sig in both installers and checks both in assemble", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
   const at = (commands, line) => {
@@ -488,6 +627,10 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   at(assemble, 'node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||');
   const listed = at(assemble, 'grep -qxF "$inner" <<< "$listing" ||');
   const same = at(assemble, '7z e -so -spd "$installer" "$inner" | cmp - "$published" ||');
+  const keyId = at(assemble, 'node .github/scripts/latest-json.mjs --key-id "$exe" "$MODE" || status=$?');
+  assert.ok(verified < keyId && keyId < listed, "the key ID is checked with the signatures");
+  assert.match(text, /# TODO\(sandbox-admin-refresh\): a failure once/);
+  assert.ok(assemble.some((line) => line.includes("has no UpdaterKeyId yet") && line.includes('>> "$GITHUB_STEP_SUMMARY"')));
   const notes = at(assemble, 'echo "## Inside the Windows installers"');
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);

@@ -149,7 +149,10 @@ Developer ID.
   checks the `.sig` (and the currentUser installer's) against the mode's updater public key (a dry
   run's comes from each Windows leg as the artifact `dry-updater-pub-<target>`), opens both
   installers with 7-Zip (`p7zip-full`) and fails unless each holds exactly the published exe and
-  `.sig` at the install folder's root. The release notes list its SHA-256 per architecture under
+  `.sig` at the install folder's root. It also reads the tool's VERSIONINFO string `UpdaterKeyId` (stage C)
+  by parsing its PE resources and fails unless it is the mode's key ID: test's `updater-test.pub`,
+  release's `tauri.conf.json` pubkey, dry's the same when set, else `build.rs`'s placeholder
+  `AC986E7C6BA67AB9`. Until stage C's PR 3 merges an exe without it only warns. The release notes list its SHA-256 per architecture under
   "Inside the Windows installers", for IT to check a copy restored from quarantine (firm-it §10).
 - The `build` job sets `CLAUSEO_RELEASE_MODE` and, for a release or a test run, `CLAUSEO_UPDATER_PUBKEY`
   (public keys only) for the sandbox's `build.rs`; a dry run sets no key, so its refresh fails closed.

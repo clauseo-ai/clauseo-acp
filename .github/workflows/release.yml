@@ -902,6 +902,21 @@ jobs:
               { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
             node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||
               { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
+            # The updater key ID the tool was built with (its VERSIONINFO string UpdaterKeyId, stage
+            # C) must be this mode's: test's updater-test.pub, release's tauri.conf.json pubkey, dry's
+            # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId).
+            status=0
+            node .github/scripts/latest-json.mjs --key-id "$exe" "$MODE" || status=$?
+            case $status in
+              0) ;;
+              3)
+                # TODO(sandbox-admin-refresh): a failure once stage C's PR 3, which puts UpdaterKeyId
+                # in the tool's VERSIONINFO, merges.
+                echo "::warning::$(basename "$exe") has no UpdaterKeyId; not compared with the $MODE key"
+                echo "- $label: \`$(basename "$exe")\` has no UpdaterKeyId yet, so its updater key ID was not compared." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              *) echo "::error::$(basename "$exe") does not carry the $MODE updater key ID (see above)"; exit 1 ;;
+            esac
             for installer in "${files[0]}" "${files[1]}"; do
               listing=$(7z l -slt -ba "$installer" | sed -n 's/^Path = //p')
               for inner in "$SANDBOX_EXE" "$SANDBOX_EXE.sig"; do
