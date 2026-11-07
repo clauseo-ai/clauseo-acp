@@ -31,6 +31,9 @@
 //! removed last (`admin_remove.rs`), by the removal of the install that placed it only (the
 //! app's plain `--remove` keeps it, with its record values); a failure there is
 //! logged and the exit stays the removal's, as what is left is only administrators' to change.
+//!
+//! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
+//! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -53,22 +56,32 @@ use super::{SetupRequest, owner_failure, set_up};
 use crate::windows::NtfsAcl;
 use crate::windows::admin_copy::{Removal, copy_removable};
 use crate::windows::private_dir::resolve_folder;
+use crate::windows::refresh;
 use crate::windows::sids::Sid;
 
-/// Runs the exe on `args` (those after its name) and returns its exit.
-pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
+/// Runs the exe on `args` (those after its name) and returns its process exit code: a
+/// [`SetupExit`]'s, or for `--refresh` a [`refresh::RefreshExit`]'s.
+pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
         tracing::error!(%error, "the DLL search couldn't be kept to System32");
-        return SetupExit::Failed;
+        return SetupExit::Failed.as_code();
     }
     let mode = match args::parse(args) {
         Ok(mode) => mode,
         Err(usage) => {
             tracing::error!(%usage, "the set-up was started wrongly");
-            return SetupExit::Usage;
+            return SetupExit::Usage.as_code();
         }
     };
+    if mode == Mode::Refresh {
+        return refresh::run().as_code();
+    }
+    run_mode(mode).as_code()
+}
+
+/// Every mode but `--refresh`, which [`main`] runs.
+fn run_mode(mode: Mode) -> SetupExit {
     match mode {
         Mode::SetUp {
             parent,
@@ -114,6 +127,7 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
+        Mode::Refresh => SetupExit::Usage,
     }
 }
 

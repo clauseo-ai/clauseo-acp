@@ -383,3 +383,20 @@ fn a_quoted_argument_reads_back_exactly() {
     assert_eq!(quote(r"C:\plain\path"), r"C:\plain\path");
     assert_eq!(quote(r"C:\with space\"), r#""C:\with space\\""#);
 }
+
+#[test]
+fn refresh_takes_no_argument_at_all() {
+    assert_eq!(parsed(&["--refresh"]), Ok(Mode::Refresh));
+    // No path, no flag, nothing: the refresh reads only the record and fixed paths.
+    for extra in [
+        "--data-dir",
+        r"C:\Users\x",
+        "--parent",
+        "--per-machine",
+        "--refresh",
+        "",
+    ] {
+        assert!(parsed(&["--refresh", extra]).is_err(), "{extra:?}");
+    }
+    assert!(parsed(&["--remove", "--refresh"]).is_err());
+}
