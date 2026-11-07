@@ -276,7 +276,7 @@ pub use clock::{Clock, Now, SystemClock};
 pub use config::TestProxy;
 pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
-    NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
+    NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers, SessionKey,
 };
 pub use encode::EncodedEvent;
 pub use error::Error;
