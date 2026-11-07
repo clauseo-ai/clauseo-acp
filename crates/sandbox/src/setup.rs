@@ -96,14 +96,16 @@ pub enum Blocked {
     /// SYSTEM, Administrators or `TrustedInstaller`, or lets another account change it.
     AdminCopyUnsafe,
     /// Tier B is set up for another Windows account on this computer (D5's one owner): a launch
-    /// or set-up by a second user (`windows::admin_copy::check_owner`), and `--adopt`'s exit 2,
+    /// or set-up by a second user (`windows::admin_copy::check_launchable`, through
+    /// `AdminCopyFs::another_owner`), and `--adopt`'s exit 2,
     /// which changes nothing.
     OtherAccount,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
-    /// exhaustive, and the test of the names lists this.
+    /// exhaustive, the test of the names lists this, and a
+    /// compile-time match below fails the build until a new variant has its place here.
     pub const ALL: [Blocked; 6] = [
         Blocked::LogonRight,
         Blocked::Policy,
@@ -126,6 +128,32 @@ impl Blocked {
         }
     }
 }
+
+// `Blocked::ALL` tied to the enum at compile time: `place`'s match is exhaustive, so a new
+// variant doesn't build until it has an arm here, its index in `ALL` (append it there too), and
+// the build fails unless `ALL` holds each variant at the index its arm names.
+const _: () = {
+    const fn place(blocked: Blocked) -> usize {
+        match blocked {
+            Blocked::LogonRight => 0,
+            Blocked::Policy => 1,
+            Blocked::AdminCopyMissing => 2,
+            Blocked::AdminCopyChanged => 3,
+            Blocked::AdminCopyUnsafe => 4,
+            Blocked::OtherAccount => 5,
+        }
+    }
+    let [first, second, third, fourth, fifth, sixth] = Blocked::ALL;
+    assert!(
+        place(first) == 0
+            && place(second) == 1
+            && place(third) == 2
+            && place(fourth) == 3
+            && place(fifth) == 4
+            && place(sixth) == 5,
+        "Blocked::ALL is out of order"
+    );
+};
 
 impl std::fmt::Display for Blocked {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

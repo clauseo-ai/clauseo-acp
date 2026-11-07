@@ -133,7 +133,8 @@ fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> 
 }
 
 /// Registers (or updates) `\Clauseo\SandboxRefresh` as the module says, for the record owner
-/// `owner_sid`. Elevated: `--adopt` calls it once the admin copy and the record are in place.
+/// `owner_sid`. Elevated: `--adopt` calls it once the admin copy is locked in place, before it
+/// writes the record's admin-copy values (a run before then exits 33, changing nothing).
 pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     let sddl = task_sddl(owner_sid);
@@ -198,6 +199,8 @@ pub fn register_refresh_task(owner_sid: &Sid) -> Result<(), TaskError> {
             .Create(TASK_ACTION_EXEC)
             .map_err(com("IActionCollection::Create"))?;
         let exec: IExecAction = action.cast().map_err(com("IExecAction"))?;
+        // Unquoted, as the Task Scheduler takes it: every folder on the path is under
+        // %ProgramFiles%, which only administrators can write, so no one else can plant a prefix.
         exec.SetPath(&BSTR::from(exe.as_os_str().to_string_lossy().as_ref()))
             .map_err(com("IExecAction::SetPath"))?;
         exec.SetArguments(&BSTR::from(REFRESH_ARG))

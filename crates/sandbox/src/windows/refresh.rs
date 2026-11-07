@@ -8,10 +8,12 @@
 //!
 //! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path;
 //! 2. refuses a build whose updater key is the placeholder, before reading anything;
-//! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `OwnerSid`, `UserInstallDir` (a plain
-//!    local path, which must lie inside the owner's profile as `ProfileList` names it, a
-//!    temporary profile counting as none) and
-//!    `AdminCopyVersion`; nothing else comes from outside: no argument, no environment;
+//! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `AdminCopyOwner`, `UserInstallDir`
+//!    (a plain local path, which must lie inside the owner's profile as `ProfileList` names it,
+//!    a temporary profile counting as none; for a `machine` owner, a folder only SYSTEM,
+//!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test) and
+//!    `AdminCopyVersion`; nothing else comes from outside: no argument, no environment. Not
+//!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays;
 //! 4. clears what an earlier refresh left in staging;
 //! 5. reads the exe and its `.sig` from the install folder, which the lawyer controls and may
 //!    re-point at any time: every folder of its path is opened relative to its parent's handle
@@ -28,7 +30,10 @@
 //! 8. stops when the staged SHA-256 is the record's `AdminCopySha256`; when it is the hash of
 //!    the file at the admin path (an earlier refresh stopped before its record writes), writes
 //!    the record and stops; refuses a version equal to the recorded one whose bytes differ;
-//! 9. gives the staged file the admin copy's DACL, sets the running admin copy aside in staging
+//! 9. gives the staged file the admin copy's DACL, opens the admin folder for adding a file,
+//!    sharing read, write and delete, and holds it until the renames are done, so no one can
+//!    hold the folder against them (a failed open stops the run before anything moves); then
+//!    sets the running admin copy aside in staging
 //!    (a rename, which a running exe allows) and moves the staged file into place, back to back
 //!    and write-through, and only then writes the new `AdminCopyVersion` (the signed version,
 //!    as signed), then the new `AdminCopySha256`. The set-aside copy stays in staging until the
@@ -90,6 +95,7 @@ pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, run};
 
+use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use signature::{SignatureError, verify};
 
@@ -129,7 +135,7 @@ pub enum RefreshExit {
     Done,
     /// 32: not LOCAL SYSTEM, or not run from the admin copy's path.
     NotAllowed,
-    /// 33: the record can't be read, or lacks a usable `OwnerSid`, `UserInstallDir` or
+    /// 33: the record can't be read, or lacks a usable `AdminCopyOwner`, `UserInstallDir` or
     /// `AdminCopyVersion`.
     NoRecord,
     /// 34: the user folder's exe or `.sig` was refused: missing, a reparse point on the way or
@@ -149,10 +155,13 @@ pub enum RefreshExit {
     /// 40: the signed version is older than the record's `AdminCopyVersion` (or the same, with
     /// other bytes), or a version or the `FILEVERSION` can't be read.
     Downgrade,
-    /// 41: `UserInstallDir` isn't inside the owner's profile, or the owner has none.
+    /// 41: `UserInstallDir` isn't inside the owner's profile, or the owner has none; for a
+    /// `machine` owner, it isn't a folder only administrators can change.
     OutsideProfile,
     /// 42: the staged exe is for another CPU type than this copy.
     WrongMachine,
+    /// 43: the admin folder couldn't be held for the renames (someone holds it); nothing moved.
+    FolderBusy,
 }
 
 impl RefreshExit {
@@ -171,6 +180,7 @@ impl RefreshExit {
             RefreshExit::Downgrade => 40,
             RefreshExit::OutsideProfile => 41,
             RefreshExit::WrongMachine => 42,
+            RefreshExit::FolderBusy => 43,
         }
     }
 }
@@ -178,8 +188,8 @@ impl RefreshExit {
 /// The values of the record the refresh reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefreshRecord {
-    /// `OwnerSid`: the Windows user the record belongs to.
-    pub owner_sid: Option<String>,
+    /// `AdminCopyOwner`: whose install placed the copy, a SID or `machine`.
+    pub copy_owner: Option<String>,
     /// `UserInstallDir`: the per-user install folder, as `--adopt` recorded it.
     pub user_install_dir: Option<String>,
     /// `AdminCopySha256`: the admin copy's SHA-256, 64 lowercase hex digits.
@@ -254,6 +264,10 @@ pub trait Refresher {
     fn record(&mut self) -> Result<RefreshRecord, Failed>;
     /// `owner`'s profile folder (`ProfileList`'s `ProfileImagePath`); `None` when it has none.
     fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed>;
+    /// Whether `dir` is a folder, no link, that only SYSTEM, Administrators or
+    /// `TrustedInstaller` can change (`admin_copy::level_safe`), as `--adopt --per-machine`
+    /// requires of its install folder.
+    fn admin_only_dir(&mut self, dir: &Path) -> Result<bool, Failed>;
     /// Deletes what an earlier run left in staging (the set-aside copy, a staged file).
     fn clear_leftovers(&mut self) -> Result<(), Failed>;
     /// The exe and `.sig` of the folder `dir`, opened as step 5 says; which one failed, and why.
@@ -265,6 +279,12 @@ pub trait Refresher {
     fn admin_copy_sha256(&mut self) -> Result<Option<[u8; 32]>, Failed>;
     /// Gives the staged file the admin copy's owner and protected DACL.
     fn secure_staged(&mut self) -> Result<(), Failed>;
+    /// Opens the admin folder for adding a file, sharing read, write and delete, and keeps the
+    /// handle until [`Refresher::release_admin_folder`]: while it is open, no one can open the
+    /// folder in a way that fails the renames into it.
+    fn hold_admin_folder(&mut self) -> Result<(), Failed>;
+    /// Closes the handle [`Refresher::hold_admin_folder`] opened, if any.
+    fn release_admin_folder(&mut self);
     /// Renames the admin copy (this running exe) to the set-aside name in staging.
     fn set_aside_admin_copy(&mut self) -> Result<(), Failed>;
     /// Moves the staged file to the admin path.
@@ -379,16 +399,16 @@ fn allowed(fs: &mut impl Refresher) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Step 3: the record's owner, its `UserInstallDir` (a full local path from a drive letter
-/// with no `.`, `..`, stream or trailing-dot part, `args::data_dir_of`'s rules, inside the
-/// owner's profile) and its `AdminCopyVersion`.
+/// Step 3: the record's `AdminCopyOwner`, its `UserInstallDir` (a full local path from a drive
+/// letter with no `.`, `..`, stream or trailing-dot part, `args::data_dir_of`'s rules, inside
+/// the owner's profile, or administrators-only for `machine`) and its `AdminCopyVersion`.
 fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Refusal> {
     let refuse = |why: &str| (RefreshExit::NoRecord, why.to_owned());
     let owner = record
-        .owner_sid
+        .copy_owner
         .as_deref()
-        .and_then(|text| Sid::parse(text).ok())
-        .ok_or_else(|| refuse("the record has no usable OwnerSid"))?;
+        .and_then(CopyOwner::parse)
+        .ok_or_else(|| refuse("the record has no usable AdminCopyOwner"))?;
     let dir = record
         .user_install_dir
         .as_deref()
@@ -403,15 +423,27 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         .admin_copy_version
         .ok_or_else(|| refuse("the record has no AdminCopyVersion"))?;
     let outside = |why: String| (RefreshExit::OutsideProfile, why);
-    let profile = fs
-        .profile_dir(&owner)
-        .map_err(outside)?
-        .ok_or_else(|| outside(format!("{owner} has no profile")))?;
-    if !inside_profile(&dir, &profile) {
-        return Err(outside(format!(
-            "{} isn't inside {owner}'s profile",
-            dir.display()
-        )));
+    match owner {
+        CopyOwner::User(owner) => {
+            let profile = fs
+                .profile_dir(&owner)
+                .map_err(outside)?
+                .ok_or_else(|| outside(format!("{owner} has no profile")))?;
+            if !inside_profile(&dir, &profile) {
+                return Err(outside(format!(
+                    "{} isn't inside {owner}'s profile",
+                    dir.display()
+                )));
+            }
+        }
+        CopyOwner::Machine => {
+            if !fs.admin_only_dir(&dir).map_err(outside)? {
+                return Err(outside(format!(
+                    "{} isn't a folder only administrators can change",
+                    dir.display()
+                )));
+            }
+        }
     }
     Ok(Checked {
         dir,
@@ -477,6 +509,17 @@ fn replace(
     }
     fs.secure_staged()
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
+    fs.hold_admin_folder()
+        .map_err(|why| (RefreshExit::FolderBusy, why))?;
+    let swapped = swap(fs);
+    fs.release_admin_folder();
+    swapped?;
+    write_record(fs, &signed.version, &hex)?;
+    Ok(Replaced::Swapped)
+}
+
+/// The two renames, with the admin folder held; a failed move puts the old copy back.
+fn swap(fs: &mut impl Refresher) -> Result<(), Refusal> {
     // The gap: from here to the move, no exe is at the task's path. Nothing runs in between.
     fs.set_aside_admin_copy()
         .map_err(|why| (RefreshExit::ReplaceFailed, why))?;
@@ -487,8 +530,7 @@ fn replace(
         };
         return Err((RefreshExit::ReplaceFailed, format!("{why}; {restored}")));
     }
-    write_record(fs, &signed.version, &hex)?;
-    Ok(Replaced::Swapped)
+    Ok(())
 }
 
 /// A refused signature's exit (35, or 36 for the placeholder key) and log line.

@@ -811,8 +811,11 @@ record owner's logon and on demand, needs no network, stops after 5 minutes, and
 at once. The task and its folder carry `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;<owner>)`, so
 the owner can read and run the task but can't change or delete it. The folder gets that owner and
 DACL when it is made, and again on each registration if it was already there. The app asks for a
-run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). `--remove`
-deletes the task and the staging folder.
+run after an update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). Only
+`--remove --uninstall` deletes the task and the staging folder ("Two removals"); plain
+`--remove` keeps them with the copy. `--adopt` registers the task before it writes the record's
+admin-copy values, so a failed registration leaves no valid record: `--adopt` exits 3, and the
+launcher's check finds the copy missing.
 
 **The run.** `--refresh` takes nothing from the user except the files in the recorded folder:
 no path argument and no environment. `UserInstallDir` is untrusted: the lawyer can re-point any
@@ -820,8 +823,12 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
 
 1. refuses unless it runs as LOCAL SYSTEM from the admin copy's path;
 2. refuses a build whose key is the placeholder, before reading anything;
-3. refuses an install folder that isn't inside the record owner's profile (`ProfileList`'s
-   `ProfileImagePath` for `OwnerSid`; a temporary profile counts as none);
+3. refuses an install folder that isn't inside the copy owner's profile (`ProfileList`'s
+   `ProfileImagePath` for `AdminCopyOwner`; a temporary profile counts as none). For a
+   `machine` owner, the folder must instead be one only SYSTEM, Administrators or
+   `TrustedInstaller` can change (`level_safe`, `--adopt --per-machine`'s test). It reads
+   `AdminCopyOwner`, not `OwnerSid`, because the in-app `--remove` deletes `OwnerSid` and keeps
+   the copy and the task;
 4. opens the drive's root, then each folder of the path relative to its parent's handle
    (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and `FILE_OPEN_REPARSE_POINT`),
    refusing a reparse point at every level. It then opens `clauseo-sandbox-setup.exe` and its
@@ -834,8 +841,12 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    exe for another CPU never replaces it;
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
-9. otherwise renames the running copy into staging, which Windows allows for a running exe, and
-   moves the staged file into place with the admin copy's DACL. Only then does it write the new
+9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
+   read, write and delete, and holds it until the renames are done: a user can read the folder,
+   and a handle that shares read only would fail a rename into it, so one already open stops the
+   run (exit 43) before anything moves, and none can be opened while it is held. It then renames
+   the running copy into staging, which Windows allows for a running exe, and moves the staged
+   file into place with the admin copy's DACL. Only then does it write the new
    `AdminCopyVersion` (the signed version, as signed), then the new hash. The set-aside copy
    stays in staging until the next run deletes it. That run starts from the new copy, which shows
    the new copy runs.
@@ -868,7 +879,8 @@ checked.
   the exe's own version.
 - The signed version is then ordered against `AdminCopyVersion` by semver precedence
   (`version_not_older`). A prerelease is older than its release, so `1.4.0-beta.1` can't replace
-  `1.4.0`, but `1.4.0` replaces its beta. Build metadata doesn't count.
+  `1.4.0`, but `1.4.0` replaces its beta. Build metadata doesn't count. `release.yml` signs only
+  plain `X.Y.Z` today, so the prerelease ordering is latent until a prerelease is signed.
 - An older version is refused. So is an equal version whose bytes differ from the copy in place.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
@@ -878,10 +890,15 @@ checked.
 placeholder has an all-zero key and is refused by its id. A release build
 (`CLAUSEO_RELEASE_MODE=release`, any profile) fails unless the key is the pinned production key,
 `PRODUCTION_KEY_ID` in `refresh/key.rs`. That id is unset until #527 adds the production key, so
-until then every release build fails. The guard alone would depend on the variable being set. So
-on msvc the exe's `VERSIONINFO` also carries the key's id, as the string `UpdaterKeyId` (16 hex
-digits). A release's assembly can read it from the file, without running the exe (which would
-prompt), and refuse a release whose key isn't the production one.
+until then every release build fails. Two things enforce it:
+- `build.rs`, with the mode `release.yml` exports as `CLAUSEO_RELEASE_MODE` in its build
+  legs' env (`release`, `test` or `dry`, from `check`'s mode; #648, which also exports the test
+  key as `CLAUSEO_UPDATER_PUBKEY` in a test run). Any other value, the empty string included,
+  fails the build, so a typo can't turn the guard off. Unset is a local build.
+- On msvc the exe's `VERSIONINFO` carries the key's id, as the string `UpdaterKeyId` (16 hex
+  digits). `release.yml`'s assemble job reads it from each shipped setup exe, without running
+  it (which would prompt), and compares it with the mode's key (#648). Until this PR merges,
+  an exe without the string is only a warning there; after it, a failure.
 
 Each refusal keeps the old copy, writes one Event Log line (source `Clauseo Sandbox`, naming no
 user path beyond the install folder), and exits with its own code. The codes start at 32, clear

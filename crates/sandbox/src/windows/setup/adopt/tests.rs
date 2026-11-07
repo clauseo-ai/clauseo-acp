@@ -28,6 +28,8 @@ struct Fake {
     found: Vec<(PathBuf, Found)>,
     security: Vec<u8>,
     changes: Vec<String>,
+    /// The `AdminCopySha256` the record holds, as `write_values` leaves it.
+    recorded: Option<String>,
     /// The refresh task's registration fails.
     task_fails: bool,
     set_up_exit: SetupExit,
@@ -55,6 +57,7 @@ impl Fake {
             ],
             security: locked_dacl(true),
             changes: Vec::new(),
+            recorded: None,
             task_fails: false,
             set_up_exit: SetupExit::Done,
         }
@@ -138,6 +141,7 @@ impl Adopter for Fake {
             values.version,
             values.owner.text()
         ));
+        self.recorded = Some(values.sha256.clone());
         Ok(())
     }
 
@@ -172,7 +176,7 @@ fn refused(fake: &mut Fake, install: &str, target: &Target, exit: SetupExit, cas
 }
 
 #[test]
-fn a_per_user_adopt_locks_records_registers_the_task_then_sets_up_in_that_order() {
+fn a_per_user_adopt_locks_registers_the_task_records_then_sets_up_in_that_order() {
     let mut fake = Fake::new();
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
@@ -181,24 +185,37 @@ fn a_per_user_adopt_locks_records_registers_the_task_then_sets_up_in_that_order(
     assert_eq!(fake.changes.len(), 4, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
+    assert_eq!(fake.changes[1], format!("task {LAWYER}"));
     assert_eq!(
-        fake.changes[1],
+        fake.changes[2],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[2], format!("task {LAWYER}"));
     assert_eq!(fake.changes[3], format!("set-up {DATA}"));
 }
 
 #[test]
-fn a_refresh_task_that_cant_be_registered_fails_before_the_set_up() {
+fn a_refresh_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
     let mut fake = Fake::new();
     fake.task_fails = true;
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Failed
     );
-    assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
-    assert!(fake.changes[1].starts_with("record "), "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 1, "{:?}", fake.changes);
+    assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
+    // The launcher's check over what the record then holds: the copy is missing, so tier B
+    // isn't used with no task to refresh the copy.
+    let mut copy = admin_copy::fake::Fake::ready();
+    copy.recorded = fake.recorded.clone();
+    assert_eq!(admin_copy::check(&copy), Err(Blocked::AdminCopyMissing));
+    // Registered, the same copy passes.
+    let mut fake = Fake::new();
+    assert_eq!(
+        adopt(&mut fake, Path::new(INSTALL), &user()),
+        SetupExit::Done
+    );
+    copy.recorded = fake.recorded.clone();
+    assert!(admin_copy::check(&copy).is_ok());
 }
 
 #[test]

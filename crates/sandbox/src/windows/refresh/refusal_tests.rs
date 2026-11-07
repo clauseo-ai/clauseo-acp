@@ -334,7 +334,7 @@ fn an_install_folder_outside_the_owners_profile_reads_nothing() {
     }
     for owner in [None, Some("not a sid")] {
         let mut fake = Fake::new(&old(), &new(), &key, &good());
-        fake.record.owner_sid = owner.map(str::to_owned);
+        fake.record.copy_owner = owner.map(str::to_owned);
         assert_eq!(
             run_fake(&mut fake, &key),
             RefreshExit::NoRecord,
@@ -357,6 +357,40 @@ fn an_install_folder_outside_the_owners_profile_reads_nothing() {
 }
 
 #[test]
+fn the_profile_check_keys_on_the_admin_copy_owner_not_the_pool_owner() {
+    let key = key();
+    // A user's copy: its profile, as before. `OwnerSid` plays no part: the in-app `--remove`
+    // deletes it and keeps the copy and the task, and the copy still refreshes.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
+    assert!(!fake.calls.contains(&"admin_only_dir"));
+    // A per-machine copy: the install folder must be administrators-only, no profile read.
+    for (admin_only, exit) in [
+        (true, RefreshExit::Done),
+        (false, RefreshExit::OutsideProfile),
+    ] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.record.copy_owner = Some("machine".to_owned());
+        fake.profile = None;
+        fake.admin_only = admin_only;
+        assert_eq!(run_fake(&mut fake, &key), exit, "{admin_only}");
+        assert!(fake.calls.contains(&"admin_only_dir"));
+        assert_eq!(fake.calls.contains(&"read_source"), admin_only);
+    }
+    // No `AdminCopyOwner`, or `Machine` in another case: no record, nothing read.
+    for owner in [None, Some("Machine")] {
+        let mut fake = Fake::new(&old(), &new(), &key, &good());
+        fake.record.copy_owner = owner.map(str::to_owned);
+        assert_eq!(
+            run_fake(&mut fake, &key),
+            RefreshExit::NoRecord,
+            "{owner:?}"
+        );
+        assert!(!fake.calls.contains(&"read_source"), "{owner:?}");
+    }
+}
+
+#[test]
 fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
     let all = [
         RefreshExit::Done,
@@ -371,9 +405,10 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
         RefreshExit::Downgrade,
         RefreshExit::OutsideProfile,
         RefreshExit::WrongMachine,
+        RefreshExit::FolderBusy,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]);
+    assert_eq!(codes, [0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43]);
     let setup: Vec<u8> = crate::windows::setup::SetupExit::ALL
         .iter()
         .map(|exit| exit.as_code())
