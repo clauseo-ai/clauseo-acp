@@ -19,6 +19,8 @@
 //! - `setup` (S15 `PR4d`): the elevated set-up's steps and rollback over its `Machine` seam,
 //!   with the setup exe's exit codes (`SetupExit`), and the exe's own work (`PR4h`).
 //! - `UserSetup` (Windows, `PR4h`): `SandboxSetup` for the app, starting the setup exe.
+//! - `bundled`: the exes tier B needs beside the app's exe; one missing (Windows security
+//!   can quarantine the set-up program) is `Blocked::ToolMissing`, and tier B doesn't run.
 //! - [`reclaim`] (S15 `PR4i`): the elevated clean-up's targets, picked from the ledger, its
 //!   owner-only walk over a seam (`acl/take.rs` on Windows), and the lawyer's hand-back after.
 //!
@@ -56,6 +58,8 @@ mod acl_bytes;
 pub mod acl_plan;
 pub mod admit;
 pub mod apply;
+#[cfg(any(windows, test))]
+pub mod bundled;
 pub mod clean_close;
 #[cfg(windows)]
 mod detect;

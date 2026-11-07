@@ -13,11 +13,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::write_clean_close;
-use super::{Closed, LaunchCheck, LaunchPath, NtfsJournal, check_launch, session_cursor};
+use super::{Closed, LaunchCheck, LaunchPath, NtfsJournal, check_launch_beside, session_cursor};
 use crate::windows::NtfsAcl;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, LOW_LABEL_SID, Rights};
 use crate::windows::admit::{FolderList, PathKind, ReadDir};
 use crate::windows::apply::{Surroundings, apply, apply_checked, repair_after_session};
+use crate::windows::bundled::fake_bundle;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::set_aside::{after_session, before_launch, before_launch_checked};
 use crate::windows::test_acl::grant;
@@ -200,7 +201,9 @@ fn later_launch(w: &World, files: usize, edit: Option<&dyn Fn()>) -> LaunchPath 
     let walked = started.elapsed();
     let later = plan(w, &policy);
     let started = Instant::now();
-    let check: LaunchCheck = check_launch(&data, &ledger(&data), &later, &NtfsJournal).unwrap();
+    let bundle = fake_bundle(&w.dir);
+    let check: LaunchCheck =
+        check_launch_beside(&bundle, &data, &ledger(&data), &later, &NtfsJournal).unwrap();
     let checked = started.elapsed();
     let started = Instant::now();
     before_launch_checked(&policy, &data, &matter, "s2", &[], at(120), &check).unwrap();

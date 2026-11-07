@@ -1,7 +1,8 @@
 //! `UserSetup` on Windows CI, unelevated: the state it reads on a runner nothing set up, and
-//! a set-up exe that isn't there.
+//! a set-up exe that isn't there (`Blocked::ToolMissing`).
 
 use super::*;
+use crate::Blocked;
 use crate::test_support::TempDir;
 
 #[test]
@@ -12,20 +13,31 @@ fn the_state_on_a_runner_nothing_set_up_is_needed() {
 }
 
 #[test]
-fn a_missing_exe_fails_to_start_naming_the_error_and_leaves_no_result() {
+fn a_missing_exe_is_tool_missing_for_every_start_and_the_state_says_so() {
     let dir = TempDir::new("user-setup-missing");
     let data = dir.path().join("data");
-    let setup = UserSetup::new(data.clone(), dir.path().join("no-such-setup.exe")).unwrap();
-    for outcome in [setup.run(), setup.extend(4), setup.remove()] {
-        let Err(SetupError::Failed(why)) = outcome else {
-            panic!("a missing exe is a failure: {outcome:?}");
-        };
-        assert!(
-            why.contains("didn't start") && why.contains("error"),
-            "{why}"
-        );
+    let setup = UserSetup::new(data, dir.path().join("no-such-setup.exe")).unwrap();
+    for outcome in [
+        setup.remove(),
+        setup.reclaim(),
+        setup.extend(4),
+        setup.run(),
+    ] {
+        assert_eq!(outcome, Err(SetupError::Blocked(Blocked::ToolMissing)));
     }
-    assert_eq!(result_file::read(&data), Ok(None));
+    // A start through the result file records the block, so `state` reports it.
+    assert_eq!(setup.state(), SetupState::Blocked(Blocked::ToolMissing));
+}
+
+#[test]
+fn a_folder_in_the_exes_place_is_tool_missing() {
+    let dir = TempDir::new("user-setup-folder");
+    let exe = dir.dir("clauseo-sandbox-setup.exe");
+    let setup = UserSetup::new(dir.path().join("data"), exe).unwrap();
+    assert_eq!(
+        setup.remove(),
+        Err(SetupError::Blocked(Blocked::ToolMissing))
+    );
 }
 
 #[test]

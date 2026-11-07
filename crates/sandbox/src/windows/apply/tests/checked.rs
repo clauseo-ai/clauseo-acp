@@ -2,9 +2,10 @@
 //! keeps, and the record it removes whatever happens next.
 
 use super::*;
+use crate::windows::bundled::fake_bundle;
 use crate::windows::clean_close::fake::{FakeJournal, found, journal_for};
 use crate::windows::clean_close::{
-    Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch, session_cursor,
+    Closed, FullReason, LaunchCheck, LaunchPath, WalkInputs, check_launch_beside, session_cursor,
     write_clean_close,
 };
 use crate::windows::set_aside::Checked;
@@ -81,7 +82,8 @@ impl Launched {
     }
 
     fn check(&self) -> LaunchCheck {
-        check_launch(
+        check_launch_beside(
+            &fake_bundle(&self.w.dir),
             &self.w.at("data"),
             &self.ledger,
             &self.plan(),

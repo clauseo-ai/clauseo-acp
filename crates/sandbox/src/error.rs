@@ -96,13 +96,19 @@ pub enum Error {
         /// for PR6 to show the lawyer.
         at: std::path::PathBuf,
     },
+    /// Windows tier B refuses to launch for a cause only whoever looks after the computer can
+    /// fix (D-B4): a bundled sandbox exe isn't beside the app (`Blocked::ToolMissing`, from
+    /// `windows::clean_close::check_launch`). Nothing was planned or written, and the caller
+    /// shows the cause rather than run on a weaker tier in silence.
+    #[error("the sandbox can't run: {0}")]
+    Blocked(crate::Blocked),
 }
 
 impl Error {
     /// The code a client sees. A refused policy stops the launch, so it is a failed launch, as
     /// a launch error is, and so are the proxy's errors and a folder tier B can't prepare (the
     /// caller falls back to the tier it can get); a failed probe is unexpected, so it is
-    /// `Internal`.
+    /// `Internal`. A block only an administrator can lift is `SandboxBlocked`, not retryable.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::Policy(_)
@@ -113,6 +119,7 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_) => ErrorCode::AgentLaunchFailed,
+            Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
@@ -141,6 +148,18 @@ mod tests {
         assert_eq!(
             folder.to_string(),
             "the sandbox can't prepare the state folder: it is on a network drive"
+        );
+        let missing = Error::Blocked(crate::Blocked::ToolMissing);
+        assert_eq!(missing.code(), ErrorCode::SandboxBlocked);
+        assert!(
+            !missing.code().is_retryable(),
+            "only an administrator can fix it"
+        );
+        assert!(
+            missing
+                .to_string()
+                .starts_with("the sandbox can't run: clauseo-sandbox-setup.exe"),
+            "{missing}"
         );
     }
 }

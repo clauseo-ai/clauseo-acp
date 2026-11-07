@@ -64,6 +64,15 @@ impl TempDir {
         Ok(path)
     }
 
+    /// A file symbolic link at `rel` under the folder, pointing at `target`. An error when this
+    /// process may not make symlinks (no admin and no Developer Mode).
+    #[cfg(windows)]
+    pub(crate) fn symlink_file(&self, rel: &str, target: &Path) -> std::io::Result<PathBuf> {
+        let path = self.0.join(rel);
+        std::os::windows::fs::symlink_file(target, &path)?;
+        Ok(path)
+    }
+
     /// A hard link at `rel` under the folder to the existing file `original`.
     pub(crate) fn hard_link(&self, rel: &str, original: &Path) -> PathBuf {
         let path = self.0.join(rel);

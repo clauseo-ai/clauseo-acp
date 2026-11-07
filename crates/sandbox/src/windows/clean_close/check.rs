@@ -10,16 +10,45 @@ use super::record::{self, CleanRecord, Unusable};
 use super::{FullReason, LaunchCheck, WalkInputs};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
+use crate::windows::bundled;
 use crate::windows::ledger::{EntryState, Ledger};
 use crate::windows::set_aside;
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
-/// `apply`. Under the matter's set-aside lock it reads the matter's clean-close record and
-/// removes it, whatever comes next: a failed removal refuses the launch
+/// `apply`. First, every exe tier B needs is beside the running exe (`bundled::check_bundled`),
+/// or the launch is refused with [`Error::Blocked`] (`Blocked::ToolMissing`): without the
+/// set-up program tier B can't top up, reclaim or be removed, so it must not run, and nothing
+/// is read or removed. Then, under the matter's set-aside lock, it reads the matter's
+/// clean-close record and removes it, whatever comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
 /// decides ([`LaunchCheck::path`]): see the module's docs and 0049. `ledger` is read as the
 /// caller opened it, just before.
 pub fn check_launch(
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
+    bundled::check_bundled_here().map_err(Error::Blocked)?;
+    check_launch_after(data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] with the bundled exes looked for in `bundle`, not beside the running exe:
+/// the tests' seam, since a test binary has no set-up program beside it.
+#[cfg(test)]
+pub(crate) fn check_launch_beside(
+    bundle: &Path,
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
+    bundled::check_bundled(bundle).map_err(Error::Blocked)?;
+    check_launch_after(data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] once the bundled exes were found.
+fn check_launch_after(
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
