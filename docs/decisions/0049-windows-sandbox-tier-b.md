@@ -536,8 +536,16 @@ started elevated, by the app or by the uninstall hook.
   `clauseo-sandbox-setup.exe` beside `Clauseo.exe`, with its `requireAdministrator` manifest: it
   is the installer's payload and the refresh task's source, and nothing starts it.
 - **What stays open.** The installer's elevated step runs from wherever the lawyer started the
-  installer; a swapped installer is outside this decision. Keeping the copy current after an app
-  update is the refresh task's job, a later change.
+  installer; a swapped installer is outside this decision. While it runs, the unelevated
+  installer holds its own exe open sharing only reads, which keeps other Windows accounts from
+  rewriting, renaming or deleting it; a process already running as the lawyer can close that
+  handle in the installer (`DuplicateHandle` with close-source) or inject into it, then swap the
+  file before the elevated step opens it. The installer refuses the elevated step while
+  Clauseo's main window (class `ClauseoMainWindow`) is on the desktop, and agents can't outlive
+  the app, since Clauseo's jobs are kill-on-close; so the residual is same-user code persisted
+  outside Clauseo's jobs, which can still race. A same-user process can also fake that window and
+  so block the elevated step: a denial of service only, accepted. Keeping the copy current after
+  an app update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)
 

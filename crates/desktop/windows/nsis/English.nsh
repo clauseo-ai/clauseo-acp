@@ -8,7 +8,7 @@
 ; deleteAppDataFailedUnnamed 2026-11-06), then the two the per-machine installer shows about the
 ; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
-; (removeSkippedSilent, 2026-11-07), then the nine the installer shows about the admin copy of
+; (removeSkippedSilent, 2026-11-07), then the eleven the installer shows about the admin copy of
 ; S15's set-up program (adminCopy*, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
@@ -57,7 +57,10 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protec
 ; adminCopyMachineFailed: the per-machine installer's set-up failed; a box interactively, a
 ; details line always. adminCopySkippedSilent: a silent per-user install (/S) can't ask for the
 ; prompt; details list only. adminCopyNewerKept: the copy already on the computer is from a newer
-; Clauseo than this installer, so it stays; details list only.
+; Clauseo than this installer, so it stays; details list only. adminCopyAppRunning: Clauseo was
+; still running, so Safe workspace wasn't set up (a box and a details line; exit code 24).
+; adminCopyStillRunning: the set-up outlasted the installer's 10-minute wait and finishes by
+; itself; details list only.
 LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up Safe workspace. Windows may name the publisher as Unknown Publisher. That's expected: it's this installer asking."
 LangString adminCopyWorking ${LANG_ENGLISH} "Setting up Safe workspace. This can take a few minutes."
 LangString adminCopyDone ${LANG_ENGLISH} "Safe workspace is set up."
@@ -66,6 +69,8 @@ LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe works
 LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
 LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
 LangString adminCopyNewerKept ${LANG_ENGLISH} "Clauseo kept the newer copy of Safe workspace's set-up program that's already on this computer."
+LangString adminCopyAppRunning ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because Clauseo is running. Quit Clauseo, then run this installer again."
+LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo is still setting up Safe workspace. It finishes on its own."
 LangString adminCopySkippedSilent ${LANG_ENGLISH} "Safe workspace isn't set up, because this install is silent. To set it up, run this installer again without /S."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/

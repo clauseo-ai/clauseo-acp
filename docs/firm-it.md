@@ -55,6 +55,7 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
 |---|---|
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but setting up Safe workspace failed |
+| 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
 Only the last code set is reported, so an install that set several reports one of them.
 
