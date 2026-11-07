@@ -1,12 +1,13 @@
-// Design B's repair page: stage F's per-version release page, built in one place, and no page for a
-// test build or a version that isn't a plain X.Y.Z. And the cause-to-words table: each reason R17
-// PR-E names, other_account, and an unknown reason's "ask IT" line.
+// Design B's repair page: stage F's per-version release page for the build's release mode, built
+// in one place, and no page for a dry run or a version that isn't a plain X.Y.Z. And the
+// cause-to-words table: each reason R17 PR-E names, other_account, and an unknown reason's "ask
+// IT" line.
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { causeOf } from "./causes.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller } from "./blocked.ts";
 import { PROT, view } from "./fixtures.ts";
-import { installerPage, isTestBuild, openInstallerPage, repairPage } from "./installer.ts";
+import { installerPage, openInstallerPage, repairPage } from "./installer.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
 import type { NotProtectedCause } from "../../transport/protocol.ts";
 
@@ -28,12 +29,28 @@ test.each(["0.1.0-dev", "v0.1.0", "", "0.1"])(
   },
 );
 
-test("a test build offers no page; any other display does", () => {
-  expect(isTestBuild({ testBuild: true })).toBe(true);
-  expect(isTestBuild({ lang: "en" })).toBe(false);
-  expect(repairPage({ testBuild: true }, "0.1.0")).toBeNull();
-  expect(repairPage({ testBuild: false }, "0.1.0")).toBe(installerPage("0.1.0"));
+test("a release opens its v tag's page", () => {
+  expect(repairPage({ releaseMode: "release" }, "0.1.0")).toBe(
+    "https://github.com/clauseo-ai/clauseo-acp/releases/tag/v0.1.0",
+  );
 });
+
+test("a test build opens its test-v tag's page", () => {
+  expect(repairPage({ releaseMode: "test" }, "0.1.0")).toBe(
+    "https://github.com/clauseo-ai/clauseo-acp/releases/tag/test-v0.1.0",
+  );
+});
+
+test("a dry run has no page, so no button", () => {
+  expect(repairPage({ releaseMode: "dry" }, "0.1.0")).toBeNull();
+});
+
+test.each(["release", "test", "dry"] as const)(
+  "in %s mode, a version that isn't plain X.Y.Z has no page",
+  (releaseMode) => {
+    expect(repairPage({ releaseMode }, "0.1.0-dev")).toBeNull();
+  },
+);
 
 const cause = (c: unknown) => causeOf(c as NotProtectedCause);
 

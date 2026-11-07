@@ -1,6 +1,6 @@
 // UC: the first run's Safe workspace step, as first-run.tsx draws it: the parts it takes from the
 // note's chunk, its words, and design B's repair (blocked.ts, installer.ts).
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { fl } from "@clauseo/components/lib/words-first-launch.ts";
 import type { ProtectionState } from "../../store/protection.ts";
 import type { loadProtectionNote } from "../protection/note-load.ts";
@@ -43,8 +43,13 @@ export const stepWords = (lang: Lang, pw: StepParts["pw"]) => ({
 });
 
 /** UC, design B: the repair's lines (the cause's, then what to do) and its page, null for no
- * button: a firm install, a test build, or a version with no release page. */
-export function repairOf(state: ProtectionState, parts: StepParts, lang: Lang, display: object) {
+ * button: a firm install, a dry run, or a version with no release page. */
+export function repairOf(
+  state: ProtectionState,
+  parts: StepParts,
+  lang: Lang,
+  display: Pick<Display, "releaseMode">,
+) {
   const cause = parts.computerCause(state.view);
   const block = parts.blockLine(lang, cause);
   return {
