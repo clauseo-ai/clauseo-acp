@@ -42,8 +42,11 @@
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "icons/installer-sidebar.bmp",
         "headerImage": "icons/installer-header.bmp",
-        "languages": ["English"],
-        "customLanguageFiles": { "English": "windows/nsis/English.nsh" }
+        "languages": ["English", "Hindi"],
+        "customLanguageFiles": {
+          "English": "windows/nsis/English.nsh",
+          "Hindi": "windows/nsis/Hindi.nsh"
+        }
       }
     },
     "linux": {

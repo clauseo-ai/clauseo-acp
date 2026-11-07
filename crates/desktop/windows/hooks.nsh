@@ -41,8 +41,9 @@
 ;    says one line (English.nsh): the kept folder when one is there, never the whole folder with
 ;    the sandbox's records in it; else the whole folder.
 ;
-; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept, removeStillRunning,
-; removeSkippedSilent, removeExeMissing, setupExeRemoved); the uninstall-declined line is S15a's.
+; The words are in English.nsh and Hindi.nsh (deleteAppDataFailed, deleteAppDataKept,
+; removeStillRunning, removeSkippedSilent, removeExeMissing, setupExeRemoved); the
+; uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -54,6 +55,18 @@
 ; Then both installers check that clauseo-sandbox-setup.exe is still in $INSTDIR: Windows security
 ; can remove it as it is written. Gone, they say so (setupExeRemoved): a box, or under /S a line
 ; in the details list and exit code CLAUSEO_EXIT_SETUP_EXE_REMOVED. The install stays.
+;
+; The language (English or Hindi, windows/nsis/*.nsh). NSIS fixes the pages' language after
+; .onInit and un.onInit (NSIS 3.11 Source/exehead/Ui.c:396-397, set_language; Docs/src/var.but:54
+; "You can only change this variable in .onInit"), and the template gives neither a hook, so
+; MUI_CUSTOMFUNCTION_GUIINIT (Ui.c:525, after set_language) would be too late. The installer
+; therefore speaks Windows' display language (NSIS's own choice), English otherwise. The
+; uninstaller's un.onInit runs MUI_UNGETLANGUAGE (installer.nsi:770), which reads
+; HKCU\${MANUPRODUCTKEY} "Installer Language" (installer.nsi:164-166) and, when that is empty and
+; the uninstall is not silent, shows LangDLL's language picker (two languages). So
+; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
+; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
+; the installer's own. The template deletes it with the data (installer.nsi:884, and step 2).
 
 ; NSIS's warning 6000 is "unknown variable/constant detected, ignoring" (Source/build.h,
 ; DW_VAR_IGNORED_UNKNOWN): an unknown name stays as literal text and the hook does the wrong thing
@@ -212,6 +225,9 @@
       DeleteRegKey /ifempty SHCTX "${MANUKEY}"
       DeleteRegValue HKCU "${MANUPRODUCTKEY}" "Installer Language"
       DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
+      ; The app's language (the app writes it), so Software\Clauseo goes too. Only here: when the
+      ; lawyer keeps their data it stays, so a reinstall's uninstaller speaks their language.
+      DeleteRegValue HKCU "${MANUKEY}" "UiLanguage"
       DeleteRegKey /ifempty HKCU "${MANUKEY}"
       ; The uninstalling user's local data folder, for the messages ($LOCALAPPDATA in the
       ; current user's context; a per-machine uninstall runs in the all-users one, put back
@@ -306,6 +322,25 @@
 ; (installer.nsi) includes this file at line 36, before `!define INSTALLMODE` at line 46, so a
 ; test at file scope would see no INSTALLMODE.
 !macro NSIS_HOOK_POSTINSTALL
+  ; The uninstaller's language, both installers. LANG_HINDI and LANG_ENGLISH come from the
+  ; template's MUI_LANGUAGE lines (installer.nsi:471), after this file is included but before the
+  ; section this macro is inserted in.
+  !ifndef LANG_HINDI
+    !error "hooks.nsh needs Hindi in bundle.windows.nsis.languages"
+  !endif
+  Push $R0
+  Push $R1
+  StrCpy $R1 $LANGUAGE
+  ; A failed read leaves "", which is neither: the installer's own language is kept.
+  ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage"
+  ${If} $R0 S== "hi"
+    StrCpy $R1 ${LANG_HINDI}
+  ${ElseIf} $R0 S== "en"
+    StrCpy $R1 ${LANG_ENGLISH}
+  ${EndIf}
+  WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $R1
+  Pop $R1
+  Pop $R0
   !if "${INSTALLMODE}" == "perMachine"
     Push $R5
     Push $R6
