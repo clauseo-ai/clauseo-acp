@@ -63,6 +63,9 @@ pub(crate) struct Spec {
     pub(crate) path: Vec<PathBuf>,
     /// The CA bundle, when the row uses one.
     pub(crate) ca_bundle: Option<PathBuf>,
+    /// The credential link, when the row names one (the `m3-hardlink` row); granted too, as
+    /// `granted_paths` grants a policy's.
+    pub(crate) credential_link: Option<PathBuf>,
 }
 
 impl Spec {
@@ -132,6 +135,7 @@ pub(crate) fn message(
     env.extend(spec.env.iter().cloned());
     let mut runtime = vec![bin];
     runtime.extend(spec.path.iter().map(|p| text(p)));
+    let link = spec.credential_link.as_deref().map(text);
     let message = LaunchMessage {
         version: LAUNCH_VERSION,
         pool_user: Sid::parse(&pool.sid).map_err(|e| format!("pool SID: {e}"))?,
@@ -144,9 +148,14 @@ pub(crate) fn message(
         state: state.clone(),
         tmpdir: None,
         runtime: runtime.clone(),
-        granted: [vec![matter, state], runtime].concat(),
+        granted: [
+            vec![matter, state],
+            runtime,
+            link.clone().into_iter().collect(),
+        ]
+        .concat(),
         ca_bundle: spec.ca_bundle.as_deref().map(text),
-        credential_link: None,
+        credential_link: link,
         firm_ca: Vec::new(),
     };
     message.check().map_err(|e| e.to_string())?;

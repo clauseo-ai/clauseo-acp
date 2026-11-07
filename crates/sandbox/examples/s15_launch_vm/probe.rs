@@ -15,6 +15,7 @@
 //! - `find-atom <name>`: `atom <n>`, 0 when `GlobalFindAtomW` finds none.
 //! - `read <path>`: `read ok <bytes>` or `read error <code>`.
 //! - `write <path>`: `write <code>` from opening it for writing (nothing is written).
+//! - `runners`, `breakaway`, `handles`, `desktop`: the security probes, `probe_sec.rs`.
 
 use std::io::BufRead as _;
 use std::process::{Command, ExitCode, Stdio};
@@ -27,6 +28,9 @@ use super::{ui, win};
 pub(crate) fn run(args: &[String]) -> ExitCode {
     let what = args.first().map_or("", String::as_str);
     let rest = args.get(1..).unwrap_or_default();
+    if let Some(code) = super::probe_sec::run(what) {
+        return code;
+    }
     match what {
         "token" => token(),
         "wait" => {
@@ -108,7 +112,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         },
         _ => usage(
             "token|wait|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
-             clipboard-read|clipboard-write|find-atom",
+             clipboard-read|clipboard-write|find-atom|runners|breakaway|handles|desktop",
         ),
     }
 }

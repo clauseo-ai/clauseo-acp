@@ -21,10 +21,10 @@ const LOGON_ID: u32 = 0xC000_0000;
 /// `SE_GROUP_USE_FOR_DENY_ONLY`.
 const DENY_ONLY: u32 = 0x10;
 /// What another pool user's open must get: `ERROR_ACCESS_DENIED`.
-const DENIED: &str = "5";
+pub(crate) const DENIED: &str = "5";
 
 /// Runs `spec` as matter `which` to its end, noting its summary.
-fn run(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Finished, String> {
+pub(crate) fn run(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Finished, String> {
     let done = launch(ctx.manifest, which, spec)?.finish(deadline(ctx.limit))?;
     ctx.note(&format!(
         "{which}: {} {}: {}",
@@ -39,7 +39,7 @@ fn run(ctx: &Ctx<'_>, which: &str, spec: &Spec) -> Result<Finished, String> {
 }
 
 /// Starts the probe `args` as matter `which` and waits for its `pid` line.
-fn started(ctx: &Ctx<'_>, which: &str, args: &[&str]) -> Result<(Running, u32), String> {
+pub(crate) fn started(ctx: &Ctx<'_>, which: &str, args: &[&str]) -> Result<(Running, u32), String> {
     let mut running = launch(ctx.manifest, which, &Spec::probe(ctx.manifest, args))?;
     let pid = running
         .line_after("pid ", deadline(ctx.limit))
@@ -61,7 +61,7 @@ fn started(ctx: &Ctx<'_>, which: &str, args: &[&str]) -> Result<(Running, u32), 
 }
 
 /// The value after `key ` on each line of `lines` that has it.
-fn values<'a>(lines: &'a [String], key: &str) -> Vec<&'a str> {
+pub(crate) fn values<'a>(lines: &'a [String], key: &str) -> Vec<&'a str> {
     let prefix = format!("{key} ");
     lines
         .iter()
@@ -215,12 +215,15 @@ pub(crate) fn open_process(ctx: &Ctx<'_>) -> Result<String, String> {
 /// Row 4: B gets 5 on each of A's runner pipes.
 pub(crate) fn pipes(ctx: &Ctx<'_>) -> Result<String, String> {
     let (mut a, _pid) = started(ctx, "A", &["wait"])?;
-    let result = pipes_while(ctx);
+    let result = pipes_as(ctx, "B");
     a.kill();
     result
 }
 
-fn pipes_while(ctx: &Ctx<'_>) -> Result<String, String> {
+/// While A runs: matter `which`'s probe opens each of A's four runner pipes for read and for write,
+/// and every open must give 5. `B` is another pool user; `A` is a second agent of A's own matter
+/// (the same user), where 231 (busy) would mean the DACL and label let it through.
+pub(crate) fn pipes_as(ctx: &Ctx<'_>, which: &str) -> Result<String, String> {
     let names = win::list_pipes("clauseo-run-").map_err(|e| format!("listing pipes: {e}"))?;
     ctx.note(&format!("pipes listed: {names:?}"));
     if names.len() < 4 {
@@ -231,7 +234,7 @@ fn pipes_while(ctx: &Ctx<'_>) -> Result<String, String> {
     }
     let mut args = vec!["open-pipes"];
     args.extend(names.iter().map(String::as_str));
-    let done = run(ctx, "B", &Spec::probe(ctx.manifest, &args))?;
+    let done = run(ctx, which, &Spec::probe(ctx.manifest, &args))?;
     let mut bad = Vec::new();
     for name in &names {
         let line = values(&done.stdout, &format!("pipe {name}"));
@@ -243,10 +246,12 @@ fn pipes_while(ctx: &Ctx<'_>) -> Result<String, String> {
         }
     }
     if !bad.is_empty() {
-        return Err(format!("not 5 for every open: {bad:?}"));
+        return Err(format!(
+            "{which}: not 5 for every open (231 is busy: let through): {bad:?}"
+        ));
     }
     Ok(format!(
-        "B got 5 opening each of {} pipes for read and write",
+        "{which} got 5 opening each of {} pipes for read and write",
         names.len()
     ))
 }
