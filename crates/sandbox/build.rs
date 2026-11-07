@@ -31,12 +31,13 @@
 //! `main` with the exe's folder first: `netapi32.dll` pulls in `netutils.dll` and `samcli.dll`,
 //! which aren't `KnownDLLs`. So the imports whose own imports aren't all `KnownDLLs` are
 //! delay-loaded (`/DELAYLOAD`, with `delayimp.lib`): `netapi32.dll` and `userenv.dll` (the
-//! accounts and profiles), and since S15 PR7 `fwpuclnt.dll` (the WFP filters) and
-//! `iphlpapi.dll` (the port check's listener table). They load at their first call, after `main`
-//! has run `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so they and their own
-//! imports come from System32; nothing calls them before `main` (no static initialiser or TLS
-//! callback in the crate). `tests/setup_exe.rs` checks the exe's import and delay-import
-//! directories, its version information and its one manifest.
+//! accounts and profiles), since S15 PR7 `fwpuclnt.dll` (the WFP filters) and `iphlpapi.dll`
+//! (the port check's listener table), and `wtsapi32.dll` (the stop's process list,
+//! `WTSEnumerateProcessesExW`). They load at their first call, after `main` has run
+//! `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so they and their own imports come
+//! from System32; nothing calls them before `main` (no static initialiser or TLS callback in the
+//! crate). `tests/setup_exe.rs` checks the exe's import and delay-import directories, its
+//! version information and its one manifest.
 //!
 //! On every target it embeds the updater key the admin copy's refresh trusts (ADR 0049, "Admin
 //! copy refresh"; `src/windows/refresh/key.rs`) as `CLAUSEO_SANDBOX_UPDATER_KEY`. The key is
@@ -88,6 +89,7 @@ fn main() -> Result<(), Error> {
             "/DELAYLOAD:userenv.dll",
             "/DELAYLOAD:fwpuclnt.dll",
             "/DELAYLOAD:iphlpapi.dll",
+            "/DELAYLOAD:wtsapi32.dll",
             "delayimp.lib",
             "/Brepro",
             "/DEBUG:NONE",
