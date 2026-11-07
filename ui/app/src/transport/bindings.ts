@@ -1735,6 +1735,14 @@ export type ErrorCode =
 "sandbox.cleaning_up" | 
 /** The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. */
 "agent.install_setup_failed" | 
+/** Clauseo is confirming which account this agent's login belongs to; no agent was started. */
+"agent.identity_checking" | 
+/** Clauseo could not confirm which account this agent's login belongs to (its status check failed or gave no account); no agent was started. Trying again can succeed. */
+"agent.identity_unknown" | 
+/** The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. */
+"signin.account_changed" | 
+/** Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Its launches are refused until it is confirmed or signed in again. */
+"signin.unconfirmed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
