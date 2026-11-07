@@ -152,6 +152,10 @@ pub(crate) struct RunFolders {
     pub(crate) lease: Arc<straggler::Lease>,
     /// Whether the launch prep waited for a browser slot (`browser::slot_wait`).
     pub(crate) slot_waited: bool,
+    /// `<data>/process-groups/<matter>-<thread>-<launch>.json`: the agent's process-group
+    /// record (`process_groups.rs`, Unix), written at the launch and removed with the run once
+    /// the removal's wait saw the tree gone. Outside the run folder, which the agent can write.
+    pub(crate) process_group: PathBuf,
 }
 
 impl RunFolders {
@@ -174,6 +178,7 @@ impl RunFolders {
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
+            process_group: crate::process_groups::record_path(data, key),
         }
     }
 
@@ -512,7 +517,16 @@ pub(super) fn on_prepared(
         state.run = Some(run.clone());
     }
     let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
-    let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
+    let tree = state(actor, thread).and_then(|state| Some(state.agent.as_ref()?.link.tree_watch()));
+    let launched = tree.is_some();
+    // The agent's group, recorded in this actor step, the one its process started in; a
+    // process that started and then failed its launch is recorded too.
+    if let Some(tree) = tree.as_ref().or(failed_tree.as_ref()) {
+        actor
+            .turn_path
+            .process_groups
+            .write(&run.process_group, tree);
+    }
     if launched {
         packs::hold_notice(actor, thread, packs_skipped);
     } else {

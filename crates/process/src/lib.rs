@@ -20,6 +20,10 @@
 //! - The processes running under a name, with their starts (macOS and Windows), for `matters`'
 //!   stale owner-file rule: every process from libproc's `proc_listallpids` on macOS, from a
 //!   Toolhelp snapshot on Windows.
+//! - A process group's identity across a restart (Unix, `group.rs`): a process's start stamp,
+//!   the boot's stamp, and a group's running members, for `host`'s records of each agent's
+//!   group and its sweep of those a crashed desktop left (decision record 0051). Windows needs
+//!   none: the Job Object's kill-on-close ends the tree when the desktop's process dies.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
 //!
 //! # Interface
@@ -53,6 +57,12 @@
 //!   parent pid.
 //! - [`processes_named`] (macOS and Windows): the starts of the running processes with a name,
 //!   or `None` when that is unknown. It blocks, and signals nothing.
+//! - [`start_stamp`], [`presence`], [`session_id`], [`boot_stamp`] and [`group_members`]
+//!   (Unix): a pid's [`StartStamp`] (opaque text through [`StartStamp::encode`]), whether it
+//!   exists ([`Presence`]), its session, the boot's stamp, and a group's running [`Member`]s,
+//!   each blocking and signalling nothing; [`kill_group`] (SIGKILL to a group,
+//!   never 0, 1 or this process's own) and [`kill_member`] (SIGKILL to a pid still running with
+//!   its listed start).
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
 //!   [`ExitReport::detach_reason`] for `AgentSessionDetached`. [`ShutdownOutcome`] names the
 //!   ladder step that ended the agent, or says it never exited (`Unresponsive`).
@@ -95,6 +105,8 @@
 
 mod descendants;
 mod error;
+#[cfg(unix)]
+mod group;
 mod handle;
 mod launch;
 mod live;
@@ -108,6 +120,11 @@ mod timer;
 
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
+#[cfg(unix)]
+pub use group::{
+    Member, Presence, StartStamp, boot_stamp, group_members, kill_group, kill_member, presence,
+    session_id, start_stamp,
+};
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,

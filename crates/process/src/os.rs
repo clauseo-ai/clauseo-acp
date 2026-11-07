@@ -20,7 +20,10 @@ pub(crate) use macos::named;
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub(crate) use unix::{Ask, Root, Tree, Watch, now, prepare, signal, watch};
+pub(crate) use unix::{
+    Ask, Root, Tree, Watch, boot, exists, kill_group, kill_started, members, now, prepare,
+    session_of, signal, start_any, start_of, watch,
+};
 #[cfg(all(unix, feature = "test-support"))]
 pub(crate) use unix::{kill_pid, running, started_before_now};
 

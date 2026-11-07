@@ -51,6 +51,23 @@ fn the_group_reads_gone_once_the_agent_and_its_helper_have_gone() {
     assert!(gone_within(&watch, 500));
 }
 
+/// The watch carries the agent's group id and the start read at its spawn, still there once
+/// the agent has exited and been reaped (the host records a failed launch's group with it).
+#[test]
+fn the_watch_keeps_the_group_and_the_spawn_time_start() {
+    let Launched { mut handle, .. } = launch("sleep 0.2");
+    let pid = handle.pid();
+    let running = clauseo_process::start_stamp(pid).expect("the agent's start");
+    let watch = handle.tree_watch();
+    assert_eq!(watch.group(), pid);
+    assert_eq!(watch.leader_start(), Some(running));
+    block_on(handle.exited());
+    drop(handle);
+    assert!(gone_within(&watch, 500));
+    assert_eq!(clauseo_process::start_stamp(pid), None, "the agent is gone");
+    assert_eq!(watch.leader_start(), Some(running), "the start stays known");
+}
+
 /// A process of the group that is killed but not yet reaped keeps the group: the watch reads
 /// gone only once it is reaped. This test becomes the orphans' reaper (Linux's child
 /// subreaper) and leaves the helper unreaped until it reaps it by pid.

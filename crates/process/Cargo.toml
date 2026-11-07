@@ -20,12 +20,14 @@ memchr = { workspace = true }
 thiserror = { workspace = true }
 
 # killpg for the shutdown ladder and the tree kill; kill for a listed descendant; clock_gettime
-# and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`).
+# and sysconf(_SC_CLK_TCK) for a sweep's cutoff (`time`, `feature`); getpgrp, so a recorded
+# group's kill never names this process's own group (`process`, src/group.rs).
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal", "time", "feature"] }
+nix = { workspace = true, features = ["signal", "time", "feature", "process"] }
 
-# libproc's proc_listchildpids, proc_pidinfo and proc_pidpath: the descendant listing
-# (src/os/macos.rs).
+# libproc's proc_listchildpids, proc_pidinfo and proc_pidpath: the descendant listing; its
+# proc_listpgrppids and sysctlbyname(kern.boottime): a recorded group's members and the boot
+# stamp (src/os/macos.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }
 

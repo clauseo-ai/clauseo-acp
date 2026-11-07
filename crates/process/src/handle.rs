@@ -78,7 +78,11 @@ impl Handle {
 
     /// A [`TreeWatch`] on the agent's tree, which outlives the handle.
     pub fn tree_watch(&self) -> TreeWatch {
-        TreeWatch(crate::os::watch(&self.tree))
+        TreeWatch {
+            watch: crate::os::watch(&self.tree),
+            #[cfg(unix)]
+            leader_start: self.root.start(),
+        }
     }
 
     /// The agent's descendants, to list and end while it runs (see [`Descendants`]).
@@ -192,12 +196,30 @@ impl Drop for Handle {
 /// On Windows it holds the job open, so the job's kill-on-close waits for it too; the handle
 /// has always sent the job its `TerminateJobObject` by the time it drops.
 #[derive(Debug, Clone)]
-pub struct TreeWatch(crate::os::Watch);
+pub struct TreeWatch {
+    watch: crate::os::Watch,
+    /// The agent's start, read while it was this process's unreaped child (Unix).
+    #[cfg(unix)]
+    leader_start: Option<u64>,
+}
 
 impl TreeWatch {
     /// Whether the tree is gone. A blocking-free OS query; poll it.
     pub fn gone(&self) -> bool {
-        self.0.gone()
+        self.watch.gone()
+    }
+
+    /// The agent's process group id, its own pid (Unix; Windows's tree is a Job Object).
+    #[cfg(unix)]
+    pub fn group(&self) -> u32 {
+        self.watch.group()
+    }
+
+    /// The agent's (the group leader's) start, as read when it was spawned, so it is known even
+    /// once the agent has exited and been reaped; `None` when that read failed (Unix).
+    #[cfg(unix)]
+    pub fn leader_start(&self) -> Option<crate::StartStamp> {
+        self.leader_start.map(crate::StartStamp::from_raw)
     }
 }
 

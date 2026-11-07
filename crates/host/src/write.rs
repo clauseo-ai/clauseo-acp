@@ -126,6 +126,19 @@ pub(crate) fn make_private_dir(path: &Path) -> io::Result<()> {
 /// The temp file's name holds the process id and a count, so two writes (or two hosts sharing a
 /// data folder) never share one.
 pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace_private(path, bytes, true)
+}
+
+/// [`replace_private_file`] with no sync: the rename is atomic, but a power cut may lose the
+/// file. For an agent's process-group record (`process_groups.rs`), written on the host thread
+/// at each launch and meaningless after a reboot anyway.
+#[cfg(unix)]
+pub(crate) fn replace_private_file_unsynced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace_private(path, bytes, false)
+}
+
+/// The temp file, written (and synced when `sync`), renamed over `path`.
+fn replace_private(path: &Path, bytes: &[u8], sync: bool) -> io::Result<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNT: AtomicU64 = AtomicU64::new(0);
@@ -139,7 +152,7 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let written = options.open(&temp).and_then(|mut file| {
         file.write_all(bytes)?;
-        file.sync_all()
+        if sync { file.sync_all() } else { Ok(()) }
     });
     let renamed = written.and_then(|()| std::fs::rename(&temp, path));
     if renamed.is_err() {

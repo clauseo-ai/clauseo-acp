@@ -209,11 +209,71 @@ From the orchestrator's rulings, built in PR-C2 and live with PR-C; a release bl
   held as `sign_in`, and run after the new sign-in.
 - `identity.json` keeps a SHA-256 of the identity, never the identity itself.
 
-**A residual.** If desktop is killed or crashes, a jailed descendant of an agent can survive with
-its loopback grant to that session's proxy and relay ports, which a later session may bind. The
-crash-survivor sweep closes it: each agent's process group id and its leader's start time are
-recorded in `run/<session>/`, and at the next start the host `killpg`s each group that still
-matches, before any port is claimed. It lands right after #532 and is a release blocker.
+**The crash-survivor sweep.** If desktop is killed or crashes, its shutdown ladder never runs. The
+agent usually exits on its stdin's end, but what it started in its process group lives on, and a
+jailed survivor keeps its loopback grant to that session's proxy and relay ports, which a later
+session may bind. So the host (`crates/host/src/process_groups.rs`) records each agent's group
+and ends what a crashed run left at its next start.
+
+- **Where.** `<data>/process-groups/<matter>-<thread>-<launch>-<host pid>.json` (the host's pid
+  because launch ids start again in each run, and a record an earlier run left must not be
+  replaced), written atomically (0600, not synced: a reboot voids it) on the host thread in the
+  step that started the agent's process, a launch that failed after the spawn included, and
+  deleted when the session's removal frees its run (the tree proven gone). A run held past the
+  removal's cap keeps its record, so a later crash still sweeps it. A failed write logs its kind
+  and the launch goes on. Not in `run/<session>/`: a jailed agent can write there (its `tmp`),
+  and could forge a record naming another of the lawyer's groups (Word's, with its real start),
+  which the next start would kill. No jail grant covers `process-groups`: the policy allows only
+  the matter, the session's state and temp folders, the matter's notes, the Claude store and
+  credential link, the runtime and read paths and the allowed folders, and `hidden` denies the
+  data folder (`crates/sandbox/src/policy.rs`); Claude's data fence denies every entry of the
+  data folder that is not the session's own (`crates/host/src/agent/data_fence/launch.rs`). A
+  tier-C agent runs unjailed and could signal the lawyer's processes itself anyway. At read, a
+  record that is a link, has `nlink > 1`, is not this user's, is over 4 KiB, is of another
+  version or does not parse is refused unread and deleted.
+- **What.** `{"v":2,"pgid":…,"leader_start":…,"sid":…,"boot":…}`: the group's id (the agent's
+  pid), the leader's start (Linux: `/proc/<pid>/stat` field 22; macOS: `pbi_start_tvsec` and
+  `pbi_start_tvusec`), its session id (Linux: field 6; macOS: `getsid`) and the boot's stamp
+  (Linux: `boot_id`; macOS: `kern.bootsessionuuid`, fixed per boot, where `kern.boottime`
+  moves when the clock is stepped), from `clauseo_process::start_stamp`, `session_id` and
+  `boot_stamp`. A record without `sid` (version 1) is unusable and deleted unswept.
+- **The match rule.** Only a group proved to be the agent's is signalled; anything unprovable is
+  left alone and counted. Another boot: the record goes and nothing is signalled (pids start
+  again at each boot). A process holds the group's id (`kill(pgid, 0)` is not `ESRCH`, so a
+  zombie or another user's process counts): `SIGKILL` to the group only when its start (a
+  zombie's too, on Linux) is the recorded leader's; another start means the id was given again,
+  and an unreadable start (another user's process; on macOS a zombie leader, which
+  `PROC_PIDTBSDINFO` cannot read) is unprovable; both are left alone. No process holds it but members
+  of the group run: a group id is not given again while a member lives, but once the agent's
+  group emptied a later process may take the id, `setsid` or `setpgid(0, 0)`, and exit, leaving
+  a leader-less group of its own children (every double-fork daemon does this). The agent is
+  started with `process_group(0)`, never `setsid`, so its tree stays in the host's session. So
+  the group is ended only when every member is in the recorded session, that session is not the
+  group's own id, and no member started before the recorded leader; otherwise, or when the
+  listing fails or may be cut short (more than 65 536 members on macOS), the whole group is left
+  alone, with no per-member kills. Neither: nothing to do. Then the record goes. (This narrows
+  the brief's first rule, which ended any leader-less group, after the security review.)
+- **When.** In `Host::start`'s start-up on the host thread, once the store's lock is held (a
+  second host on the same data folder has failed by then, so it never sweeps a live host's
+  agents) and before the actor serves, so before any launch claims a browser, proxy or relay
+  port; `Host::start` returns only after it. Each ended group gets up to 500 ms to empty, and the
+  sweep takes at most 2 s on the host's clock, leaving the records it did not reach for the next
+  start. One log line of counts: found, ended, reused, unsure, left, refused, other boot, not
+  reached; never a pid or path. `run/`'s own sweep at the first launch is unchanged and does
+  not depend on it.
+- **Windows** records nothing: the agent's Job Object has `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
+  so the tree ends when the desktop's process dies, however it dies.
+- **Residuals.** A group that took the id later in the host's own session passes the session
+  test when all its members started after the recorded leader: a shell job when desktop was
+  started from that terminal, or on Linux another app of the same graphical session whose group
+  leader exited. A descendant that left the group (`setsid`, `setpgid`) is not in it: that is
+  the jail's to contain. A launch whose record write failed, or whose start was not read at the
+  spawn, is not swept (a failed launch is recorded with the start the spawn read, and the host's
+  own session). Between the leader's
+  start check and `killpg`, the group could empty and its id be taken again: a pid wrap within
+  microseconds, inherent to `killpg`. A restart in another pid namespace (Flatpak, a container)
+  or with a `hidepid` `/proc` sees other or unreadable pids; its records end nothing, as their
+  groups read as gone, reused or unsure.
 
 ### The settings and their safe values
 

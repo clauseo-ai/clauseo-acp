@@ -17,6 +17,8 @@ pub(super) use death::end_with_parent;
 pub(super) struct Stat {
     pub(super) parent: u32,
     pub(super) group: u32,
+    /// Field 6, `session`: the session id.
+    pub(super) session: u32,
     /// Field 22, `starttime`: clock ticks from boot to the process's start. With the pid it
     /// names one process: a reused pid has a later start.
     pub(super) start: u64,
@@ -40,6 +42,7 @@ pub(super) fn parse_stat(text: &str) -> Option<Stat> {
     Some(Stat {
         parent: fields.get(1)?.parse().ok()?,
         group: fields.get(2)?.parse().ok()?,
+        session: fields.get(3)?.parse().ok()?,
         start: fields.get(22 - 3)?.parse().ok()?,
         exited: matches!(state, "Z" | "X"),
     })
@@ -98,6 +101,46 @@ pub(super) fn list(root: u32, root_start: u64) -> Option<Vec<Proc>> {
         }
     }
     Some(found)
+}
+
+/// The start of process `pid` whether or not it has exited (a zombie's stat line still holds
+/// it); `None` when it is gone or unreadable.
+pub(super) fn start_any(pid: u32) -> Option<u64> {
+    stat(pid).map(|stat| stat.start)
+}
+
+/// The session id of process `pid` (field 6); `None` when it is gone or unreadable.
+pub(super) fn session_of(pid: u32) -> Option<u32> {
+    stat(pid).map(|stat| stat.session)
+}
+
+/// The running members of process group `group`, each with its start and session: every
+/// process whose `/proc/<pid>/stat` field 5 (`pgrp`) is `group` and that has not exited.
+/// `None` when `/proc` cannot be read. Blocking: it reads the stat line of every process.
+pub(super) fn members(group: u32) -> Option<Vec<(u32, u64, u32)>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        // A process that exits between the directory read and the stat read is skipped.
+        if let Some(stat) = stat(pid).filter(|stat| !stat.exited && stat.group == group) {
+            found.push((pid, stat.start, stat.session));
+        }
+    }
+    Some(found)
+}
+
+/// This boot's id, `/proc/sys/kernel/random/boot_id` without its line end; `None` when it
+/// cannot be read or is empty.
+pub(super) fn boot() -> Option<String> {
+    let text = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = text.trim();
+    (!id.is_empty()).then(|| id.to_owned())
 }
 
 /// The executable process `pid` runs, as the kernel resolved it; `None` when unreadable (a

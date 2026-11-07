@@ -258,6 +258,8 @@ crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/parent_death.rs - clippy::disallowed_methods
+# The process-group stamps' tests start their own sleepers with std (decision record 0051).
+crates/process/src/group/tests.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
 crates/process/tests/spawn_options.rs console_processes unsafe_code
 
@@ -294,6 +296,8 @@ crates/host/src/write.rs - clippy::disallowed_methods
 # R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.
 crates/host/src/write.rs sync_dir clippy::unnecessary_wraps
 crates/host/tests/host/write.rs - clippy::disallowed_methods
+# The crash-survivor sweep's tests start their own process groups and plant records and links.
+crates/host/tests/host/process_groups.rs - clippy::disallowed_methods
 crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
 crates/host/benches/reopen.rs - clippy::unwrap_used
 crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
