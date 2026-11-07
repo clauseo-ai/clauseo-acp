@@ -10,7 +10,7 @@ use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
 use crate::windows::token::TokenSpec;
-use crate::windows::token::os::{logon_sid, make, own_token, shut_self, user};
+use crate::windows::token::os::{logon_sid, make, own_token, shut_self, shut_token_first, user};
 use crate::windows::write;
 
 /// A failure before the agent ran: its exit code and what failed (a call and its code).
@@ -20,6 +20,14 @@ struct Failure(RunExit, String);
 pub fn run_inner(base: &str) -> u32 {
     restrict_dll_search();
     quiet_errors();
+    // First of all, before a pipe is opened: shut this runner's own token to all but SYSTEM. The
+    // outer runner read its user while it was suspended; the launch adds the desktop user below.
+    let Ok(token) = own_token() else {
+        return RunExit::Token.code();
+    };
+    if shut_token_first(&token).is_err() {
+        return RunExit::Token.code();
+    }
     let Ok(set) = PipeSet::parse(base) else {
         return RunExit::Usage.code();
     };
@@ -31,25 +39,21 @@ pub fn run_inner(base: &str) -> u32 {
         Ok(launch) => launch,
         Err(_) => return RunExit::Pipe.code(),
     };
-    // First, before anything else: shut this runner's token, process, threads and later objects
-    // to the agent (`token::os::shut_self`); the outer shut the process and first thread while
-    // this runner was still suspended.
-    let shut = own_token()
-        .and_then(|token| shut_self(&token, &launch.desktop_user).map(|()| token))
+    // Then, before anything else: shut this runner's token (now with the desktop user's query),
+    // process, threads and later objects to the agent (`token::os::shut_self`); the outer shut the
+    // process and first thread while this runner was still suspended.
+    let shut = shut_self(&token, &launch.desktop_user)
         .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e));
-    let token = match shut {
-        Ok(token) => token,
-        Err(Failure(exit, what)) => {
-            drop(write_frame(
-                &ctl,
-                &InnerReport::Failed {
-                    exit: exit.code(),
-                    what,
-                },
-            ));
-            return exit.code();
-        }
-    };
+    if let Err(Failure(exit, what)) = shut {
+        drop(write_frame(
+            &ctl,
+            &InnerReport::Failed {
+                exit: exit.code(),
+                what,
+            },
+        ));
+        return exit.code();
+    }
     match start(&set, &launch, &token) {
         Ok(agent) => {
             if write_frame(&ctl, &InnerReport::Started { pid: agent.pid }).is_err() {
