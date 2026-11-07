@@ -33,6 +33,16 @@ pub(crate) fn run_adopt(names: Names, install_dir: &Path, target: &Target) -> Se
     adopt(&mut WindowsAdopter::new(names), install_dir, target)
 }
 
+/// `sid`'s own profile folder, as `ProfileList` names it (`profile_of`); a temporary profile
+/// counts as none, as its folder isn't the user's own. `--adopt` and the refresh task (PR 3)
+/// both check the install folder against it.
+pub(crate) fn own_profile(sid: &Sid) -> Result<Option<PathBuf>, String> {
+    let profile = profile_of(sid).map_err(|error| error.to_string())?;
+    Ok(profile
+        .filter(|profile| !profile.temporary)
+        .map(|profile| profile.path))
+}
+
 impl Adopter for WindowsAdopter {
     fn program_files(&mut self) -> Result<PathBuf, String> {
         os::program_files().map_err(|error| error.to_string())
@@ -65,12 +75,8 @@ impl Adopter for WindowsAdopter {
         })
     }
 
-    /// A temporary profile counts as none: its folder isn't the user's own.
     fn profile_of(&mut self, sid: &Sid) -> Result<Option<PathBuf>, String> {
-        let profile = profile_of(sid).map_err(|error| error.to_string())?;
-        Ok(profile
-            .filter(|profile| !profile.temporary)
-            .map(|profile| profile.path))
+        own_profile(sid)
     }
 
     /// One that can't be read counts as missing.

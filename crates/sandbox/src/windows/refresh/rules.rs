@@ -1,5 +1,6 @@
 //! The refresh's fixed values and pure rules: the task's argument and limit, the descriptors of
-//! the task, the staging folder and the admin copy, and the comparisons of paths, descriptors
+//! the task and the staging folder (the admin copy's is `admin_copy::LOCKED_FILE_SDDL`, which
+//! `--adopt` gives the first copy), and the comparisons of paths, descriptors
 //! and the install folder against the owner's profile. No Windows call; tested on every OS.
 
 use std::path::Path;
@@ -21,11 +22,6 @@ pub fn task_sddl(owner: &Sid) -> String {
 /// The staging folder's owner and DACL: SYSTEM, alone, full control, inherited by what is made
 /// inside; protected.
 pub const STAGING_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)";
-/// The admin copy's owner and DACL, given to the staged file before it moves into place:
-/// Administrators own it; SYSTEM and Administrators have full control, Users read and run it;
-/// protected. The installer's first copy (PR 1) is to carry the same, so a refresh changes no
-/// access.
-pub const ADMIN_COPY_SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;BU)";
 
 /// Whether `found`, an owner and DACL read back as SDDL, is `expected`: the same text but for
 /// the DACL's `AI` and `AR` flags, which Windows adds when it sets a descriptor through
