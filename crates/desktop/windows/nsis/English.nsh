@@ -9,7 +9,8 @@
 ; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
 ; (removeSkippedSilent, 2026-11-07); then the two drafts about a set-up program Windows security
-; removed (removeExeMissing, setupExeRemoved, 2026-11-07).
+; removed (removeExeMissing, setupExeRemoved, 2026-11-07), and the draft for an admin copy the
+; uninstaller won't start (removeAdminCopyRefused, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -49,6 +50,11 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe w
 ; installer found that program gone right after writing it; the install stays. A box; under /S a
 ; details line and exit code 20. Provisional (app thread, stage C's fact check, 2026-11-07).
 LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
+; removeAdminCopyRefused: the uninstaller found S15's set-up program in Program Files, but a
+; folder on its way or the file itself can be changed by more than administrators, or its SHA-256
+; isn't the one the machine's record holds (or either couldn't be read), so it didn't start it.
+; A box; under /S a details line and exit code 27. Draft, for the app thread (2026-11-07).
+LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo didn't remove its sandbox, because it couldn't confirm that its set-up program in Program Files is the one it installed and that only administrators can change it. The sandbox's hidden user accounts are still on this computer. Whoever looks after this computer can remove them; the steps are in Clauseo's notes for IT."
 LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
