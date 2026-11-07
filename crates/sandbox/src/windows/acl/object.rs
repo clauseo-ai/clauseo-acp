@@ -29,12 +29,12 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_128, FILE_ID_BOTH_DIR_INFO,
     FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_INFO, FILE_LIST_DIRECTORY,
-    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo,
     FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GETFINALPATHNAMEBYHANDLE_FLAGS,
     GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumePathNameW, OPEN_EXISTING,
-    OpenFileById, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE, WRITE_DAC,
-    WRITE_OWNER,
+    OpenFileById, READ_CONTROL, ReadFile, SYNCHRONIZE, VOLUME_NAME_DOS, VOLUME_NAME_NONE,
+    WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
@@ -291,6 +291,51 @@ impl Object {
     /// any of its names.
     pub(in crate::windows) fn file_id(&self) -> io::Result<(u64, [u8; 16])> {
         id_info(&self.handle)
+    }
+
+    /// The plain file `name` in this folder, opened relative to its handle ([`open_at`], never
+    /// through a link) for reading, and read whole; `None` when it is missing. A reparse point,
+    /// a folder, a file with another name, or one over `cap` bytes is refused.
+    pub(in crate::windows) fn read_child(
+        &self,
+        name: &[u16],
+        cap: usize,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let access = FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | SYNCHRONIZE.0;
+        let handle = match open_at(&self.handle, name, access) {
+            Ok(handle) => handle,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let file = Object::describe(handle, false, false)?;
+        if file.folder || file.tag.is_some() || file.links > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a plain file",
+            ));
+        }
+        let mut bytes = vec![0u8; cap.saturating_add(1)];
+        let mut filled = 0;
+        loop {
+            let mut read = 0u32;
+            let room = bytes.get_mut(filled..).unwrap_or_default();
+            // SAFETY: the handle is open for synchronous reads with FILE_READ_DATA; `room` is
+            // a live, writable slice and `read` a live out-pointer.
+            unsafe { ReadFile(file.handle.0, Some(room), Some(&raw mut read), None) }
+                .map_err(|e| os_error(&e))?;
+            if read == 0 {
+                break;
+            }
+            filled += usize::try_from(read).map_err(io::Error::other)?;
+            if filled > cap {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "larger than its cap",
+                ));
+            }
+        }
+        bytes.truncate(filled);
+        Ok(Some(bytes))
     }
 
     /// Whether it is a volume's root: its path without the volume is `\` (Codex's

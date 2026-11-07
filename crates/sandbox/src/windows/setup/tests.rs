@@ -1,6 +1,7 @@
 //! The set-up engine against [`fake::FakeMachine`] and [`fake::FakeAcl`], on every OS: the
 //! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), the
-//! extend and re-run (`extend.rs`), and the profile resets they owe (`resets.rs`).
+//! extend and re-run (`extend.rs`) and the profile resets they owe (`resets.rs`); and `--remove`
+//! over the same fake (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`).
 
 use std::path::PathBuf;
 
@@ -17,6 +18,9 @@ mod local_low;
 mod owner;
 mod registered;
 mod remains;
+mod remove;
+mod remove_fake;
+mod remove_ledger;
 mod resets;
 mod rollback;
 

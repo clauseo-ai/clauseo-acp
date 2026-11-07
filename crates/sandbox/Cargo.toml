@@ -137,6 +137,10 @@ clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
 
+# The S15 PR4j VM harness (examples/s15_remove_vm) lists each matter file's SHA-256.
+[target.'cfg(windows)'.dev-dependencies]
+sha2 = { workspace = true }
+
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).
 [target.'cfg(target_os = "macos")'.dev-dependencies]

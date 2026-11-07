@@ -171,7 +171,30 @@ pub(super) fn read_state(path: &Path, trust: &Trust) -> io::Result<State> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(State::empty()),
         Err(error) => return Err(error),
     };
-    let Value::Object(mut top) = serde_json::from_slice(&bytes).map_err(invalid)? else {
+    parse_state(&bytes, trust)
+}
+
+/// The ledger `bytes` hold, read by the caller from the file at `path` (`--remove` opens it
+/// relative to its checked folder's handle, never by path); each entry checked as
+/// [`Ledger::open`](super::Ledger::open) checks it. A later change reads the file again.
+#[cfg(windows)]
+pub(crate) fn from_bytes(
+    path: std::path::PathBuf,
+    bytes: &[u8],
+    trusted: &[Sid],
+    reserved: &Reserved,
+) -> io::Result<super::Ledger> {
+    let trust = Trust {
+        trusted: trusted.to_vec(),
+        reserved: reserved.clone(),
+    };
+    let state = parse_state(bytes, &trust)?;
+    Ok(super::Ledger { path, trust, state })
+}
+
+/// The ledger's contents from its file's `bytes`, each entry checked against `trust`.
+fn parse_state(bytes: &[u8], trust: &Trust) -> io::Result<State> {
+    let Value::Object(mut top) = serde_json::from_slice(bytes).map_err(invalid)? else {
         return Err(invalid("the ACL ledger is not a JSON object"));
     };
     let version = match top.remove("version") {

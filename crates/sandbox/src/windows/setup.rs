@@ -39,6 +39,9 @@
 //! A failure rolls back what this run made (`rollback.rs`, D-B7) and reports the step
 //! ([`SetupFailure`]). No record write ever puts the owner's SID in `PoolSids`.
 //!
+//! The uninstall's `--remove` (`PR4j`) is [`remove()`], over its own seam
+//! ([`remove::Removal`], `remove.rs`).
+//!
 //! Pure apart from its seams: built for Windows and for the tests on every OS.
 
 use std::path::PathBuf;
@@ -92,6 +95,7 @@ pub mod record_values;
 #[cfg(windows)]
 mod record_write;
 pub mod registered;
+pub mod remove;
 mod resets;
 pub mod result_file;
 mod rollback;
@@ -106,6 +110,11 @@ pub use outcome::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
     ERROR_LOGON_TYPE_NOT_GRANTED, JournalOutcome, LOGON_NOT_GRANTED, LOGON_REFUSED,
     SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, launch_error,
+};
+// `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
+// import of both would make their shared method names ambiguous in the set-up's tests.
+pub use remove::{
+    LedgerWork, REMOVE_LOCK_WAIT_MS, RemoveFailure, RemoveReport, RemoveStep, Removed, remove,
 };
 #[cfg(windows)]
 pub use windows_machine::{Names, WindowsMachine};

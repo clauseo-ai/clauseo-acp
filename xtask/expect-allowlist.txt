@@ -447,4 +447,10 @@ crates/sandbox/src/windows/user_setup.rs - unsafe_code
 crates/sandbox/src/windows/user_setup.rs UserSetup::forget_matter clippy::disallowed_methods
 crates/sandbox/src/windows/setup/around.rs Around::set_aside clippy::disallowed_methods
 crates/sandbox/src/bin/clauseo-sandbox-setup.rs main clippy::print_stderr
+# The --remove VM harness (S15 PR4j): its FFI, and the reg query and PowerShell lists it reads.
+crates/sandbox/examples/s15_remove_vm/win.rs - unsafe_code
+crates/sandbox/examples/s15_remove_vm/snapshot.rs capture clippy::disallowed_methods
 crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line clippy::disallowed_methods
+# S15 PR4j: `SetupExit::Removed`, the exit 0 the uninstall hook reads, as an alias of `Done`
+# named like the variants beside it, so no exit code is used twice.
+crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals

@@ -59,7 +59,14 @@ fn each_mode_parses_in_full() {
         parsed(&["--reclaim", "--parent", "9"]),
         Ok(Mode::Reclaim { parent: 9 })
     );
-    assert_eq!(parsed(&["--remove"]), Ok(Mode::Remove));
+    assert_eq!(
+        parsed(&["--remove"]),
+        Ok(Mode::Remove { per_machine: false })
+    );
+    assert_eq!(
+        parsed(&["--remove", "--per-machine"]),
+        Ok(Mode::Remove { per_machine: true })
+    );
 }
 
 #[test]
@@ -138,7 +145,20 @@ fn every_bad_form_is_a_usage_error() {
         &["--remove", "--parent", "1"],
         &["--remove", "--data-dir", r"C:\d"],
         &["--remove", "--add", "1"],
-        &["--remove", "--per-machine"],
+        &["--remove", "--per-machine", "--per-machine"],
+        &["--remove", "--per-machine", "1"],
+        &["--remove", "--per-machine=1"],
+        &["--per-machine", "--remove"],
+        // --per-machine belongs to --remove only.
+        &[
+            "--set-up",
+            "--parent",
+            "1",
+            "--data-dir",
+            r"C:\d",
+            "--per-machine",
+        ],
+        &["--reclaim", "--parent", "1", "--per-machine"],
     ];
     for line in bad {
         assert!(parsed(line).is_err(), "{line:?} parsed");

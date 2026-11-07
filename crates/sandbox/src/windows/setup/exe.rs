@@ -13,9 +13,12 @@
 //! can't be found writes no result (there is no one to write it as); the app then names the
 //! exit code. Before anything, the DLL search is kept to System32.
 //!
-//! `--reclaim` is `PR4i`'s and `--remove` `PR4j`'s. Until then `--reclaim` fails, and
-//! `--remove` exits 0 only when the machine has no record (nothing was set up), so the
-//! uninstaller keeps `sandbox\` whenever a pool may still need its records.
+//! `--remove [--per-machine]` (`PR4j`, `remove.rs`) takes the user who asked from the recorded
+//! parent too (`Owner::of_parent`, the hook passing no `--parent`); one that can't be found is
+//! no one, which a per-user removal refuses and a per-machine one doesn't need. `--per-machine`
+//! from a process that is neither elevated nor LOCAL SYSTEM exits `Usage`, nothing touched. It
+//! writes no result file: the hook reads only the exit code. `--reclaim` is `PR4i`'s; until
+//! then it fails.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -25,8 +28,8 @@ use super::around::Around;
 use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
 use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
-use super::owner::Owner;
-use super::record_write::{self, RECORD_KEY};
+use super::owner::{Owner, this_process};
+use super::remove::{WindowsRemoval, per_machine_allowed, remove};
 use super::result_file::{self, SetupResult};
 use super::windows_machine::{Names, WindowsMachine};
 use super::{SetupRequest, owner_failure, set_up};
@@ -64,7 +67,16 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> SetupExit {
             tracing::error!("--reclaim isn't built yet (S15 PR4i)");
             SetupExit::Failed
         }
-        Mode::Remove => remove(RECORD_KEY),
+        Mode::Remove { per_machine } => {
+            if per_machine && !may_remove_per_machine() {
+                tracing::error!("--per-machine needs an elevated process or LOCAL SYSTEM");
+                return SetupExit::Usage;
+            }
+            let invoker = Owner::of_parent(None)
+                .inspect_err(|error| tracing::warn!(%error, "the user who asked isn't known"))
+                .ok();
+            run_remove(Names::production(), invoker, per_machine)
+        }
     }
 }
 
@@ -149,18 +161,38 @@ fn owners_data_dir(owner: &Owner, given: &Path) -> Result<PathBuf, (SetupExit, S
     Ok(canonical)
 }
 
-/// `--remove` until `PR4j`: 0 when `HKLM\<key>` is missing (nothing was set up, so nothing
-/// needs `sandbox\`'s records), else [`SetupExit::Failed`], which keeps them.
-fn remove(key: &str) -> SetupExit {
-    match record_write::read(key) {
-        Ok(None) => SetupExit::Done,
-        Ok(Some(_)) => {
-            tracing::error!("removing a pool isn't built yet (S15 PR4j); its records are kept");
-            SetupExit::Failed
-        }
+/// Whether this process may run `--per-machine`: elevated, or LOCAL SYSTEM
+/// (`remove::per_machine_allowed`). A token that can't be read may not.
+fn may_remove_per_machine() -> bool {
+    match this_process() {
+        Ok((elevated, system)) => per_machine_allowed(elevated, system),
         Err(error) => {
-            tracing::error!(%error, "the machine's record can't be read; its records are kept");
-            SetupExit::Failed
+            tracing::error!(%error, "this process's token can't be read");
+            false
+        }
+    }
+}
+
+/// `--remove` (`per_machine`: `--per-machine`) on the machine `names` names, for `invoker`,
+/// the verified parent's token user when found: [`remove`] over a [`WindowsRemoval`], its
+/// outcome logged with counts and causes only.
+pub(crate) fn run_remove(names: Names, invoker: Option<Owner>, per_machine: bool) -> SetupExit {
+    let mut acl = match NtfsAcl::new() {
+        Ok(acl) => acl,
+        Err(error) => {
+            tracing::error!(%error, "this process's token can't be read; nothing was removed");
+            return SetupExit::Failed;
+        }
+    };
+    let mut machine = WindowsRemoval::new(names, invoker);
+    match remove(&mut machine, &mut acl, per_machine) {
+        Ok(removed) => {
+            tracing::info!(?removed, "the removal finished");
+            SetupExit::Removed
+        }
+        Err(failure) => {
+            tracing::error!(step = %failure.step, cause = %failure.cause, "the removal stopped");
+            failure.exit
         }
     }
 }
