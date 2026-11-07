@@ -17,7 +17,7 @@ use windows::Win32::Networking::WinHttp::{
 };
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
-use super::{Configured, Route};
+use super::{Configured, PacSetting, Route};
 
 use super::parse::{self, AUTOPROXY_SERVICE_ERROR, Bypass, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT};
 
@@ -32,10 +32,18 @@ pub(super) struct Failed {
 }
 
 /// What the settings hold, for a failure that read none: a PAC URL or a static proxy. Settings
-/// that cannot be read hold neither.
+/// that cannot be read are `unreadable`.
 pub(super) fn configured() -> Configured {
-    IeConfig::current().map_or_else(|_| Configured::default(), |config| config.configured())
+    IeConfig::current().map_or_else(|_| UNREADABLE, |config| config.configured())
 }
+
+/// Settings that could not be read.
+const UNREADABLE: Configured = Configured {
+    pac: PacSetting::None,
+    static_proxy: false,
+    broken_script: false,
+    unreadable: true,
+};
 
 /// `WinHTTP`'s resolve, connect, send and receive timeouts for a PAC download, in milliseconds.
 const PAC_TIMEOUT_MS: i32 = 5_000;
@@ -49,7 +57,7 @@ const PAC_TIMEOUT_MS: i32 = 5_000;
 pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, Failed> {
     let config = IeConfig::current().map_err(|why| Failed {
         why,
-        configured: None,
+        configured: Some(UNREADABLE),
     })?;
     let configured = config.configured();
     let failed = |why: String, configured: Configured| Failed {
@@ -163,9 +171,13 @@ impl IeConfig {
     /// A PAC URL or a static proxy set: auto-detect alone is neither.
     fn configured(&self) -> Configured {
         Configured {
-            pac_url: self.auto_config_url.take_string().is_some(),
+            pac: if self.auto_config_url.take_string().is_some() {
+                PacSetting::Named
+            } else {
+                PacSetting::None
+            },
             static_proxy: self.proxy.take_string().is_some(),
-            broken_script: false,
+            ..Configured::default()
         }
     }
 }

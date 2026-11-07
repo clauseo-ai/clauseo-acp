@@ -14,7 +14,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
-use crate::proxy::upstream::{Answer, Env, Failure, OsAnswer, OsRoute, Scheme};
+use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
@@ -198,8 +198,9 @@ pub(crate) struct Setup {
     pub(crate) os: Option<Box<OsRoute>>,
     /// For `Upstream::System`: an OS lookup that may fail, in place of `os`.
     pub(crate) answers: Option<Box<OsAnswer>>,
-    /// For `Upstream::System`: what the settings show when a lookup fails without asking the OS.
-    pub(crate) intent: Failure,
+    /// For `Upstream::System`: the settings read when a lookup fails without asking the OS
+    /// (nothing meant when `None`).
+    pub(crate) intent: Option<Box<Intent>>,
     /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
     pub(crate) browser: bool,
 }
@@ -214,7 +215,7 @@ impl Default for Setup {
             env: None,
             os: None,
             answers: None,
-            intent: Failure::Unmeant,
+            intent: None,
             browser: true,
         }
     }
@@ -277,7 +278,10 @@ pub(crate) fn rig(setup: Setup) -> Rig {
                         os(scheme, host, port).into()
                     })
                 });
-                Some((env.unwrap_or_default(), answers, setup.intent))
+                let intent = setup
+                    .intent
+                    .unwrap_or_else(|| Box::new(|| Failure::Unmeant));
+                Some((env.unwrap_or_default(), answers, intent))
             }
         },
     };

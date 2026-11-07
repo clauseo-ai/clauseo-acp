@@ -245,23 +245,27 @@ or the lookup took longer than the connect timeout) now takes the first of:
    new host first drops those past 10 minutes, then the oldest. The time is when the OS lookup
    answered, which a cached answer keeps, so a route served from the 60 s cache is not younger than
    it is. Another host's route is never used: a PAC script routes host by host.
-2. **A refusal, when the firm meant a proxy:** the settings name a PAC URL or a static proxy, or
-   WinHTTP found a PAC script it could not run (12166, WPAD's included). The connection gets 502,
+2. **A refusal, when the firm meant a proxy:** the settings name a PAC URL, an inline PAC script
+   (macOS `ProxyAutoConfigJavaScript`, as an MDM profile pushes) or a static proxy, WinHTTP found
+   a PAC script it could not run (12166, WPAD's included), or the settings could not be read, or
+   not within the connect timeout (refusing is the safe side when the firm may require a proxy).
+   The connection gets 502,
    the status an upstream that fails already gets, for CONNECT and plain `http://` alike (the
    proxy's refusals carry no header naming the cause), the record's verdict is `Failed`, and
    `Denial::UpstreamUnavailable { host, port }` goes through the rate cap like any denial.
-3. **Direct, otherwise:** a plain network with nothing configured, or auto-detect (WPAD) alone that
-   found nothing usable, where there is no firm proxy to go around.
+3. **Direct, otherwise:** settings read and naming nothing (a plain network), or auto-detect
+   (WPAD) alone that found nothing usable, where there is no firm proxy to go around.
 
 The OS lookup reads the reason when it fails and the cache keeps it with the failure, in a
 crate-internal `Answer::Failed(Failure)`; the public `UpstreamAnswer` and `upstream_answer` are as
 they were, so desktop's refresh is unchanged. On macOS the reason is the system proxy settings
-(`ProxyAutoConfigEnable` with a URL, `HTTPEnable` or `HTTPSEnable`); on Windows the current user's
+(`ProxyAutoConfigEnable` with a URL, a `ProxyAutoConfigJavaScript` present, `HTTPEnable` or
+`HTTPSEnable`); on Windows the current user's
 settings (an auto-config URL or a proxy string) and the PAC error code. A failure that asked the OS
 nothing (no slot, a lookup past the connect timeout, past the Windows thread bound) reads the
-settings then. macOS's own error for a PAC script that would not run is not mapped, so a broken
-script found by WPAD alone on macOS still goes direct. Settings that cannot be read count as
-nothing configured.
+settings then. Known gap: macOS's own error for a PAC script that would not run is not mapped,
+so a broken script that WPAD alone found on macOS still goes direct. WPAD is off by default on
+macOS, and firms push a PAC URL, an inline script or a static proxy, each of which refuses.
 
 ## Status
 

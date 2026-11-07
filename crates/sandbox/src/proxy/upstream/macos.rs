@@ -13,17 +13,18 @@ use std::ptr::NonNull;
 use objc2_cf_network::{
     CFNetworkCopyProxiesForURL, CFNetworkCopySystemProxySettings, kCFNetworkProxiesHTTPEnable,
     kCFNetworkProxiesHTTPSEnable, kCFNetworkProxiesProxyAutoConfigEnable,
-    kCFNetworkProxiesProxyAutoConfigURLString, kCFProxyAutoConfigurationJavaScriptKey,
-    kCFProxyAutoConfigurationURLKey, kCFProxyHostNameKey, kCFProxyPortNumberKey,
-    kCFProxyTypeAutoConfigurationJavaScript, kCFProxyTypeAutoConfigurationURL, kCFProxyTypeHTTP,
-    kCFProxyTypeHTTPS, kCFProxyTypeKey, kCFProxyTypeNone,
+    kCFNetworkProxiesProxyAutoConfigJavaScript, kCFNetworkProxiesProxyAutoConfigURLString,
+    kCFProxyAutoConfigurationJavaScriptKey, kCFProxyAutoConfigurationURLKey, kCFProxyHostNameKey,
+    kCFProxyPortNumberKey, kCFProxyTypeAutoConfigurationJavaScript,
+    kCFProxyTypeAutoConfigurationURL, kCFProxyTypeHTTP, kCFProxyTypeHTTPS, kCFProxyTypeKey,
+    kCFProxyTypeNone,
 };
 use objc2_core_foundation::{
     CFArray, CFDictionary, CFError, CFNumber, CFRetained, CFRunLoop, CFRunLoopRunResult,
     CFRunLoopSource, CFStreamClientContext, CFString, CFType, CFURL,
 };
 
-use super::{Configured, Route};
+use super::{Configured, PacSetting, Route};
 
 /// The longest a PAC run may take, in seconds.
 const PAC_TIMEOUT_SECONDS: f64 = 5.0;
@@ -100,20 +101,29 @@ pub(super) fn route(target: &str) -> Result<Route, String> {
     choose(&proxies, Some(&url))
 }
 
-/// What the system settings hold, for a failed lookup: a PAC URL turned on, or a static HTTP or
-/// HTTPS proxy turned on. Settings that cannot be read hold neither.
+/// What the system settings hold, for a failed lookup; settings that cannot be read are
+/// `unreadable`.
 pub(super) fn configured() -> Configured {
     // SAFETY: takes no arguments and returns an owned dictionary or null.
     let Some(settings) = (unsafe { CFNetworkCopySystemProxySettings() }) else {
-        return Configured::default();
+        return Configured {
+            unreadable: true,
+            ..Configured::default()
+        };
     };
     // SAFETY: the system proxy settings are keyed by strings, whose values are CF objects.
-    let settings = unsafe { settings.cast_unchecked::<CFString, CFType>() };
+    configured_from(unsafe { settings.cast_unchecked::<CFString, CFType>() })
+}
+
+/// A PAC URL turned on, an inline PAC script present (an MDM profile's; its presence is the
+/// signal), or a static HTTP or HTTPS proxy turned on.
+fn configured_from(settings: &CFDictionary<CFString, CFType>) -> Configured {
     // SAFETY: CFNetwork's exported constant strings, as in `names`.
-    let (pac_on, pac_url, http_on, https_on) = unsafe {
+    let (pac_on, pac_url, pac_script, http_on, https_on) = unsafe {
         (
             kCFNetworkProxiesProxyAutoConfigEnable,
             kCFNetworkProxiesProxyAutoConfigURLString,
+            kCFNetworkProxiesProxyAutoConfigJavaScript,
             kCFNetworkProxiesHTTPEnable,
             kCFNetworkProxiesHTTPSEnable,
         )
@@ -123,11 +133,17 @@ pub(super) fn configured() -> Configured {
             .and_then(|number| number.as_i64())
             .is_some_and(|number| number != 0)
     };
-    let named = value::<CFString>(settings, pac_url).is_some_and(|url| !url.to_string().is_empty());
+    let text = |key: &CFString| {
+        value::<CFString>(settings, key).is_some_and(|text| !text.to_string().trim().is_empty())
+    };
     Configured {
-        pac_url: on(pac_on) && named,
+        pac: if (on(pac_on) && text(pac_url)) || text(pac_script) {
+            PacSetting::Named
+        } else {
+            PacSetting::None
+        },
         static_proxy: on(http_on) || on(https_on),
-        broken_script: false,
+        ..Configured::default()
     }
 }
 
@@ -294,4 +310,41 @@ fn run_pac(pac: &Pac<'_>, target: &CFURL) -> Result<Route, String> {
             "the PAC run ended with no result".to_owned()
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use objc2_cf_network::{
+        kCFNetworkProxiesProxyAutoConfigEnable, kCFNetworkProxiesProxyAutoConfigJavaScript,
+    };
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
+
+    use super::configured_from;
+    use crate::proxy::upstream::{Failure, PacSetting};
+
+    /// Readable settings that name nothing: nothing meant.
+    #[test]
+    fn empty_settings_meant_no_proxy() {
+        let empty = CFDictionary::<CFString, CFType>::from_slices(&[], &[]);
+        assert_eq!(configured_from(&empty).failure(), Failure::Unmeant);
+    }
+
+    /// An inline PAC script (an MDM profile's) means a proxy, even with no PAC URL.
+    #[test]
+    fn an_inline_pac_script_meant_a_proxy() {
+        // SAFETY: CFNetwork's exported constant strings.
+        let (script_key, enable_key) = unsafe {
+            (
+                kCFNetworkProxiesProxyAutoConfigJavaScript,
+                kCFNetworkProxiesProxyAutoConfigEnable,
+            )
+        };
+        let script = CFString::from_str("function FindProxyForURL(u, h) { return \"DIRECT\"; }");
+        let enabled = CFNumber::new_i32(1);
+        let (script, enabled): (&CFType, &CFType) = (&script, &enabled);
+        let settings = CFDictionary::from_slices(&[script_key, enable_key], &[script, enabled]);
+        let configured = configured_from(&settings);
+        assert_eq!(configured.pac, PacSetting::Named, "with no PAC URL");
+        assert_eq!(configured.failure(), Failure::MeantProxy);
+    }
 }
