@@ -130,6 +130,28 @@ fn a_second_hold_while_a_status_check_is_on_its_way_starts_none() {
     );
 }
 
+/// Review L5: a status check that ends with no state (it could not tell) still ends the
+/// re-check, so a later hold asks again instead of waiting for a state that never comes.
+#[test]
+fn a_status_check_that_ends_with_no_state_lets_a_later_hold_check_again() {
+    let rig = rig(true);
+    rig.s18_was(&codex(), signed_in());
+    feed_holds(&rig, vec![frame(&[(2, true)])]);
+    block_on(follow_sign_in_holds(&rig.backend));
+    assert_eq!(status_checks(&rig), 1);
+
+    // the job ends with the state unchanged
+    let event = AgentsEvent::SigninUnchanged { agent: codex() };
+    block_on(rig.backend.pump(futures::stream::iter([event])));
+    feed_holds(&rig, vec![frame(&[(3, true)])]);
+    block_on(follow_sign_in_holds(&rig.backend));
+    assert_eq!(
+        status_checks(&rig),
+        2,
+        "a new hold after a job with no state checks again"
+    );
+}
+
 #[test]
 fn rows_sent_again_or_held_for_another_reason_are_no_new_hold() {
     let none: Vec<AgentId> = Vec::new();

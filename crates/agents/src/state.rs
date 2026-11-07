@@ -45,6 +45,12 @@ pub enum AgentsEvent {
         /// What happened.
         note: SigninNote,
     },
+    /// An agent's sign-in job ended with no new state (a status check that could not tell, say):
+    /// the last [`AgentsEvent::Signin`] state stands, and the agent has no job running.
+    SigninUnchanged {
+        /// The agent.
+        agent: AgentId,
+    },
 }
 
 /// Where an agent's install is.
