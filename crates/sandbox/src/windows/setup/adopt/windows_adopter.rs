@@ -100,13 +100,6 @@ impl Adopter for WindowsAdopter {
             tracing::error!("--adopt: the set-up has no installing user");
             return SetupExit::Failed;
         };
-        let names = Names {
-            record_key: self.names.record_key.clone(),
-            group: self.names.group.clone(),
-            mutex: self.names.mutex.clone(),
-            users: self.names.users.clone(),
-            journals: self.names.journals,
-        };
-        run_set_up(names, owner, data_dir, 0)
+        run_set_up(self.names.clone(), owner, data_dir, 0)
     }
 }
