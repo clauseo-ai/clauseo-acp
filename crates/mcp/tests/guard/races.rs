@@ -157,15 +157,34 @@ fn a_killed_guards_reaper_leaves_the_next_run_alone() {
     drop(first);
 }
 
+/// The reaper's second daemon kill in the two tests below, in place of its 1 s
+/// (`CLAUSEO_TEST_REAPER_AGAIN_MS`, a `test-support` knob). The late daemon binds only once the
+/// test, which has seen the guard exit or Chrome go, writes `late-go`, and that must happen
+/// before the second kill. On the loaded macOS runner it took longer than 1 s (run 42327600655,
+/// job 128267244234: the whole test took 25.8 s there and 1.3 s on its retry), so the daemon bound
+/// after the second kill and lived on. 5 s leaves the test that long for it, and the test's 10 s
+/// wait for the daemon's end still covers the kill.
+#[cfg(unix)]
+const LATE_AGAIN_MS: &str = "5000";
+
+/// The guard for a `daemon_stub late` run, with [`LATE_AGAIN_MS`].
+#[cfg(unix)]
+fn late_guard(scratch: &Scratch) -> Guard {
+    let late = [std::ffi::OsStr::new("late")];
+    let mut command = guard_command(scratch, &example("daemon_stub"), &late);
+    command.env("CLAUSEO_TEST_REAPER_AGAIN_MS", LATE_AGAIN_MS);
+    Guard::start(command)
+}
+
 /// A daemon that binds its socket only after the guard's cleanup and the reaper's first kill
 /// (`daemon_stub late`, in a group of its own) is still ended: the reaper ends the run's daemon
-/// once more about 1 s after the guard dies. Before, it lived until its idle timeout.
+/// once more (about 1 s, here [`LATE_AGAIN_MS`]) after the guard dies. Before, it lived until its
+/// idle timeout.
 #[cfg(unix)]
 #[test]
 fn a_daemon_that_binds_after_a_killed_guards_cleanup_is_ended() {
     let scratch = Scratch::new("race_late_kill");
-    let late = [std::ffi::OsStr::new("late")];
-    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &late));
+    let mut guard = late_guard(&scratch);
     guard.send_call("open");
     guard.stderr_until(LISTENING);
     let daemon = pid_in(&scratch.socket_dir().join("late.pid"));
@@ -182,13 +201,12 @@ fn a_daemon_that_binds_after_a_killed_guards_cleanup_is_ended() {
 }
 
 /// The same after the guard's own cleanup at the end of its stdin: the reaper, told `done`,
-/// ends the run's daemon once more about 1 s later.
+/// ends the run's daemon once more (about 1 s, here [`LATE_AGAIN_MS`]) later.
 #[cfg(unix)]
 #[test]
 fn a_daemon_that_binds_after_the_guards_cleanup_is_ended() {
     let scratch = Scratch::new("race_late_done");
-    let late = [std::ffi::OsStr::new("late")];
-    let mut guard = Guard::start(guard_command(&scratch, &example("daemon_stub"), &late));
+    let mut guard = late_guard(&scratch);
     guard.send_call("open");
     guard.stderr_until(LISTENING);
     let daemon = pid_in(&scratch.socket_dir().join("late.pid"));

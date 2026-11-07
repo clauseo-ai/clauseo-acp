@@ -47,10 +47,26 @@ use crate::Failure;
 /// The mode's command line.
 pub const USAGE: &str = "usage: clauseo-mcp browser-reaper --socket-dir <folder> --session <name> \
                          --cwd <folder> --run <id>";
-/// How long the reaper waits for Chrome to be gone before it deletes the profile anyway.
+/// How long the reaper waits for Chrome's group to be gone before it deletes the profile anyway.
 const GONE_WAIT: Duration = Duration::from_secs(5);
 /// How long after the guard's `done` or its death the reaper ends the run's daemon once more.
 const DAEMON_AGAIN: Duration = Duration::from_secs(1);
+/// Tests only (the `test-support` feature, never in a shipped build): [`DAEMON_AGAIN`] in
+/// milliseconds, read from the guard's environment and handed to the reaper, whose own is cleared.
+#[cfg(feature = "test-support")]
+const DAEMON_AGAIN_FOR_TESTS: &str = "CLAUSEO_TEST_REAPER_AGAIN_MS";
+
+/// [`DAEMON_AGAIN`], or in a `test-support` build the test's.
+fn daemon_again() -> Duration {
+    #[cfg(feature = "test-support")]
+    if let Some(ms) = std::env::var(DAEMON_AGAIN_FOR_TESTS)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return Duration::from_millis(ms);
+    }
+    DAEMON_AGAIN
+}
 /// What the reaper writes once it holds its share of the run's lock.
 const READY: &str = "ready";
 
@@ -116,6 +132,10 @@ impl Reaper {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .process_group(0);
+        #[cfg(feature = "test-support")]
+        if let Some(ms) = std::env::var_os(DAEMON_AGAIN_FOR_TESTS) {
+            command.env(DAEMON_AGAIN_FOR_TESTS, ms);
+        }
         let mut child = command.spawn()?;
         let teller = Teller(Arc::new(Mutex::new(child.stdin.take())));
         let mut ready = String::new();
@@ -190,13 +210,13 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     for line in BufReader::new(io::stdin().lock()).lines() {
         let Ok(line) = line else { break };
         if pids.take(&line) {
-            pause(DAEMON_AGAIN);
+            pause(daemon_again());
             kill_daemon(dir, session);
             return Ok(0);
         }
     }
     clean_up(dir, session, cwd, run, pids.chrome, pids.agent);
-    pause(DAEMON_AGAIN);
+    pause(daemon_again());
     kill_daemon(dir, session);
     drop(hold);
     Ok(0)
@@ -245,9 +265,17 @@ fn clean_up(
     kill_daemon(socket_dir, session);
     if let Some(pid) = chrome_pid {
         chrome::kill_group(pid);
-        // Not the reaper's child, so it cannot be reaped here; its new parent reaps it.
+        // The whole group, not Chrome alone: no member of it is the reaper's child, so each
+        // stays a zombie until its new parent reaps it, and `record::forget` keeps a record
+        // whose group has one (`ChromeProcess::gone`). Waiting for Chrome alone left the record
+        // behind in 1 of 15 loaded runs of the real-Chrome test
+        // a_guard_killed_while_chrome_starts_leaves_no_chrome on iris (2026-11-07).
+        let group = record::ChromeProcess {
+            id: pid,
+            created: 0,
+        };
         for _ in 0..GONE_WAIT.as_millis() / 100 {
-            if !alive(pid) {
+            if group.gone() {
                 break;
             }
             pause(Duration::from_millis(100));
@@ -300,11 +328,6 @@ fn listener_pid(stream: &UnixStream) -> Option<i32> {
 #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
 fn listener_pid(_stream: &UnixStream) -> Option<i32> {
     None
-}
-
-/// Whether process `pid` exists (a zombie counts until its parent reaps it).
-fn alive(pid: u32) -> bool {
-    i32::try_from(pid).is_ok_and(|raw| kill(Pid::from_raw(raw), None).is_ok())
 }
 
 #[cfg(test)]

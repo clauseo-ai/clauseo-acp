@@ -30,9 +30,13 @@ use serde_json::{Value, json};
 use crate::page_proxy::{DOWNLOADS, HEADING, PageProxy};
 use crate::support::{CDP_PORT, GUARD, Guard, Scratch, guard_args, host_env, left_in};
 use crate::write;
+pub(crate) use session::{Session, processes};
+use session::{group_of, stderr_within};
 
 #[path = "real_chrome/idle.rs"]
 mod idle;
+#[path = "real_chrome/session.rs"]
+mod session;
 // Lazy start with the real binaries, under `real_chrome::` so it joins nextest's `real-chrome`
 // test group (`.config/nextest.toml`).
 #[path = "real_lazy.rs"]
@@ -134,6 +138,16 @@ fn command_on(
             "AGENT_BROWSER_EXECUTABLE_PATH",
             chrome_for(scratch, &binaries.1, quiet),
         );
+    // The guard ends a Chrome that has not printed its endpoint after 15 s (`START_WAIT`). On the
+    // loaded CI runner that once ended the first start of
+    // a_killed_guards_reaper_leaves_the_next_run_alone (run 42316209734, job 128229376708: its
+    // first open failed and the test ended after 15.07 s), where Chrome takes about 1 s on an
+    // idle machine; 45 s here, so a test with two starts still ends within nextest's 120 s. A
+    // quiet Chrome never prints its endpoint, so the test's 60 s wait for it to listen ended at
+    // the guard's 15 s: in run 42261112174 Chrome had not listened by then, the guard killed it,
+    // and the test waited out its 60 s in vain. For it the guard waits past the test.
+    let start_ms = if quiet { "90000" } else { "45000" };
+    command.env("CLAUSEO_TEST_GUARD_START_MS", start_ms);
     command
 }
 
@@ -146,9 +160,13 @@ pub(crate) fn request(guard: &mut Guard, id: u64, method: &str, params: &Value) 
         if reply["id"] != json!(id) {
             continue;
         }
-        assert!(reply.get("error").is_none(), "{method}: {reply}");
         let result = reply["result"].clone();
-        assert_ne!(result["isError"], json!(true), "{method}: {result}");
+        if reply.get("error").is_some() || result["isError"] == json!(true) {
+            // The guard's notes say why (a start that timed out, a port that stayed taken): run
+            // 42316209734 failed here with the error reply alone.
+            let stderr = stderr_within(guard, Duration::from_secs(5));
+            panic!("{method}: {reply}\nthe guard's stderr:\n{stderr}");
+        }
         return result;
     }
 }
@@ -190,87 +208,6 @@ pub(crate) fn handshake(guard: &mut Guard) {
     ] {
         assert!(names.contains(&tool), "no {tool} in {names:?}");
     }
-}
-
-/// The session's processes: Chrome's process group (its leader found by its profile in
-/// `/proc/*/cmdline`), agent-browser's daemon (its pid file, if it started), and any process
-/// whose command line names the scratch folder (Chrome's crashpad handlers lead groups of their
-/// own).
-pub(crate) struct Session {
-    pub(crate) chrome_group: i32,
-    daemon: Option<i32>,
-    scratch: PathBuf,
-}
-
-impl Session {
-    pub(crate) fn find(scratch: &Scratch) -> Self {
-        let flag = format!(
-            "--user-data-dir={}",
-            scratch.cwd().join("chrome-profile-").display()
-        );
-        let chrome = processes()
-            .into_iter()
-            .find(|pid| {
-                std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmd| {
-                    cmd.split(|b| *b == 0)
-                        .any(|arg| arg.starts_with(flag.as_bytes()))
-                })
-            })
-            .expect("Chrome with the session's profile");
-        let daemon = crate::support::daemon_pid_file(&scratch.socket_dir())
-            .and_then(|file| std::fs::read_to_string(file).ok())
-            .and_then(|text| text.trim().parse().ok());
-        Self {
-            chrome_group: group_of(chrome).unwrap(),
-            daemon,
-            scratch: scratch.path().to_owned(),
-        }
-    }
-
-    /// What of the session still runs (zombies not counted).
-    pub(crate) fn left(&self) -> Vec<String> {
-        processes()
-            .into_iter()
-            .filter_map(|pid| {
-                let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-                let (_, rest) = stat.rsplit_once(") ")?;
-                let fields: Vec<&str> = rest.split(' ').collect();
-                let zombie = fields.first() == Some(&"Z");
-                let in_group =
-                    fields.get(2).and_then(|g| g.parse().ok()) == Some(self.chrome_group);
-                (!zombie && (in_group || Some(pid) == self.daemon)).then(|| stat.clone())
-            })
-            .chain(left_in(&self.scratch))
-            .collect()
-    }
-
-    pub(crate) fn assert_gone(&self, scratch: &Scratch) {
-        let gone = (0..200).any(|_| {
-            let none = self.left().is_empty();
-            if !none {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            none
-        });
-        assert!(gone, "left behind: {:?}", self.left());
-        assert_eq!(
-            crate::support::run_files(&scratch.cwd()),
-            Vec::<PathBuf>::new()
-        );
-    }
-}
-
-pub(crate) fn processes() -> Vec<i32> {
-    std::fs::read_dir("/proc")
-        .unwrap()
-        .flatten()
-        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
-        .collect()
-}
-
-fn group_of(pid: i32) -> Option<i32> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    stat.rsplit_once(") ")?.1.split(' ').nth(2)?.parse().ok()
 }
 
 fn listed(dir: &Path) -> BTreeSet<String> {
@@ -429,6 +366,7 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
     guard.send(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "agent_browser_open", "arguments": {"url": "http://page.test/"}}}));
     guard.stderr_until("Chrome started; waiting for it to listen");
+    let started = Instant::now();
     // 60 s: on the loaded CI runner Chrome once took over 10 s to listen (.config/nextest.toml).
     let listening = (0..1200).any(|_| {
         let up = std::net::TcpStream::connect(format!("127.0.0.1:{cdp}")).is_ok();
@@ -437,7 +375,14 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
         }
         up
     });
-    assert!(listening, "Chrome never listened on {cdp}");
+    eprintln!(
+        "Chrome listening after its start: {:.2} s",
+        started.elapsed().as_secs_f64()
+    );
+    if !listening {
+        let stderr = stderr_within(&mut guard, Duration::from_secs(2));
+        panic!("Chrome never listened on {cdp}; the guard's stderr:\n{stderr}");
+    }
     let session = Session::find(&scratch);
     eprintln!("running before the kill: {}", left_in(scratch.path()).len());
     nix::sys::signal::kill(
