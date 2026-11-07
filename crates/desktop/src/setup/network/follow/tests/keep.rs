@@ -14,7 +14,9 @@ use clauseo_process::{AsyncIoTimer, Timer as _};
 use clauseo_sandbox::{Route, UpstreamAnswer};
 use url::Url;
 
-use super::super::super::{NetworkFacts, NetworkSlot, OsAnswer, ProxyEnv, os_answer};
+use super::super::super::{
+    Answered, NetworkFacts, NetworkSlot, OsAnswer, ProxyEnv, kept_over_unknown, os_answer,
+};
 use super::super::{Follower, NetworkFollow, follow};
 use super::{OS_PROXY, claude, codex, facts, hook_env, since};
 use crate::bridge::lock;
@@ -121,6 +123,50 @@ fn a_refresh_keeps_the_previous_proxy_when_a_lookup_fails_or_is_late() {
     assert_eq!(refresh().and_then(|n| n.proxy), None);
     assert_eq!(proxy_of(&hook), None, "an explicit DIRECT");
     assert_eq!(hook_env(&hook, &codex()).get("HTTPS_PROXY"), None);
+}
+
+/// A failed lookup after a cached `DIRECT` or proxy keeps that answer for its target when the
+/// same hosts are asked; an explicit answer replaces it; with no earlier answers it stays unknown.
+#[test]
+fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
+    let (direct, proxied) = (
+        Url::parse("https://direct.example/").unwrap(),
+        Url::parse("https://proxied.example/").unwrap(),
+    );
+    let last: Answered = [
+        (direct.clone(), OsAnswer::Direct),
+        (proxied.clone(), OsAnswer::Proxy(OS_PROXY.to_owned())),
+    ]
+    .into();
+    let failed: Answered = [
+        (direct.clone(), OsAnswer::Unknown),
+        (proxied.clone(), OsAnswer::Unknown),
+    ]
+    .into();
+    assert_eq!(kept_over_unknown(failed.clone(), Some(&last)), last);
+    assert_eq!(
+        kept_over_unknown(failed.clone(), None),
+        failed,
+        "nothing to keep"
+    );
+    let answered: Answered = [
+        (direct.clone(), OsAnswer::Proxy(NEW_PROXY.to_owned())),
+        (proxied.clone(), OsAnswer::Direct),
+    ]
+    .into();
+    assert_eq!(kept_over_unknown(answered.clone(), Some(&last)), answered);
+    // Through the follower: a cached DIRECT, then a failure on a refresh, stays direct.
+    let os = Os::new(OsAnswer::Direct);
+    let (network, hook) = inline(&os);
+    let refresh = network.refresher();
+    network.update(facts());
+    assert_eq!(proxy_of(&hook), None);
+    os.set(OsAnswer::Unknown, Duration::ZERO);
+    refresh();
+    assert_eq!(proxy_of(&hook), None, "a failure after DIRECT");
+    os.set(OsAnswer::Proxy(OS_PROXY.to_owned()), Duration::ZERO);
+    refresh();
+    assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY));
 }
 
 /// A first route with no answer goes direct, as before; so does one that asks the OS about
