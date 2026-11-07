@@ -952,18 +952,21 @@ leaves that profile, both naming the part.
   whole tree. Error 1058 (Secondary Logon disabled) is `SetUpFailed` with set-up's own cause; a
   secret that couldn't be read fails that launch only.
 - **DLL loads.** Both runners call `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)` first
-  in `main`, and the exe is linked as the setup exe is (`build.rs`): its static imports load
-  from System32 (`/DEPENDENTLOADFLAG:0x800`), and `userenv.dll`, whose own imports aren't all
-  KnownDLLs, is delay-loaded; a CI test reads the import directories. The inner runner starts in
+  in `main`, and stop (`RunExit::DllSearch`) if it or `SetDllDirectoryW("")` fails. The exe is
+  linked as the setup exe is (`build.rs`): its static imports load from System32
+  (`/DEPENDENTLOADFLAG:0x800`), and `userenv.dll`, whose own imports aren't all KnownDLLs, is
+  delay-loaded; a CI test reads the import directories. The inner runner starts in
   System32, a folder its Low agent can't write. An agent exit code in the runner's own range
   comes back as `AgentReserved`, never as a runner or set-up failure. The host removes the
   launch file if the outer exits without having removed it. If the outer is killed between the
   logon and the job, a suspended inner runner is left that never runs.
 - **A window station and desktop of the agent's own.** The outer makes a window station,
-  `ClauseoRun-<16 hex>`, holding one desktop, each naming only `SYSTEM` and the pool user,
-  labelled Low, before the inner runner joins the job; the agent starts on it. Neither the
-  lawyer's `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a service
-  window station grants the token anything, and user32 then fails to start the agent
+  `ClauseoRun-<16 hex>` from 64 random bits of its own (not the pipe base, which the pipe listing
+  shows), with `CWF_CREATE_ONLY`, so a station that already has the name fails the launch rather
+  than being opened. It holds one desktop. Both name only `SYSTEM` and the pool user, are
+  labelled Low, and are made before the inner runner joins the job; the agent starts on it.
+  Neither the lawyer's `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a
+  service window station grants the token anything, and user32 then fails to start the agent
   (`0xC0000142`; the first Windows runs of the harness). Its own station also keeps the agent's
   clipboard and global atoms apart from the lawyer's.
 - **UI limits on the job:** reading and writing the clipboard, global atoms, other processes'
@@ -983,12 +986,49 @@ leaves that profile, both naming the part.
   after reading the launch it adds the lawyer's query and shuts every thread it has; once the
   agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
   gives its default DACL the threads' entries so a thread the system starts in it later is shut
-  too, and shuts every thread again. No
-  agent of the pool user, the new one or one already running, opens its Medium, unrestricted
-  token (the harness's `runners` row first found query and duplicate open). The agent's own
-  token gets an explicit DACL naming the pool user. Both runner exes are GUI-subsystem, so
-  neither gets a console host. It makes the agent's profile folders part by part relative to
-  each parent's handle, never through a link.
+  too, and shuts every thread again. Once the inner runs, its own agent can't open its Medium,
+  unrestricted token. A process already running as the pool user could, in the gap before the
+  shut; the next item closes that gap. The agent's own token gets an explicit DACL naming the
+  pool user. Both runner exes are GUI-subsystem, so neither gets a console host. It makes the
+  agent's profile folders part by part relative to each parent's handle, never through a link.
+- **One live session per pool user, and the sweep (M1).** From `CreateProcessWithLogonW`
+  returning until the outer's shut, the suspended inner runner's process and thread carry the
+  logon's default DACL, which gives the pool user full access. A process already running as that
+  pool user could open the process then, and its token too (the harness's `runners` row first
+  found `TOKEN_QUERY` and `TOKEN_DUPLICATE` open on that DACL). A handle opened in the gap
+  outlives the shut, and the token is Medium, unrestricted, with the lawyer's logon SID enabled.
+  Two rules close the gap:
+  - A pool user serves one live session at a time. A matter holds one pool user for now, so
+    `MatterSids::assign` refuses a second session of a matter while the matter's set-aside
+    record lists another session open (`Assign::Busy`; a record that can't be read counts as
+    busy). Until a follow-up gives a matter's second session a pool user of its own, tier B
+    serves one live session per matter, and a second concurrent one gets `Busy`. Mapping `Busy`
+    is PR6's job.
+  - The outer kills every process of the pool user outside its kill-on-close job: (a) before the
+    logon; (b) once the suspended inner is in the job and shut, before it resumes; every 30 s
+    while the session runs; and (c) at session end. With no other live session on the pool user,
+    no process of it outside the job is legitimate. (b) kills anything that opened the inner in
+    the gap, a process the logon itself set off included, before the inner runs any code. The
+    list comes from `WTSEnumerateProcessesW`, which gives each process's user without opening
+    it. Each process found is opened, which pins its pid, and checked against a second list, so
+    a pid reused meanwhile is left alone. At (a) and (b), a process whose user can't be read, or
+    one of the pool user's that can't be opened, checked or ended, fails the launch
+    (`RunExit::Sweep`). Mid-session and at the end a failure is logged, and the next tick tries
+    a mid-session one again. Each kill is logged with its pid, image name and sweep point. An
+    outer that is killed runs no (c); the next launch's (a) sweeps what it left.
+
+  The experiment that would lower a duplicated token to Low and impersonate it from the agent
+  was dropped. With one live session per pool user and sweep (b), no other process of the pool
+  user is alive in the gap to hold a handle.
+- **Processes a service starts outside the job (M2).** An agent can ask a Windows service to
+  start a process as its pool user, and that process may land outside the job: Secondary Logon
+  (`CreateProcessWithLogonW` with `LOGON_NETCREDENTIALS_ONLY`), WMI (`Win32_Process.Create`),
+  Task Scheduler or BITS. Tier B bounds such a process; it doesn't prevent it. The sweep kills it
+  within about 30 s mid-session, or at session end. One the desktop user can't open, such as a
+  task's process under a fresh logon whose default DACL isn't the agent's, isn't killed: each
+  tick logs it, and the next launch's (a) refuses to start while it runs. The design that closes
+  this is AppContainer, after launch (see "Rejected: AppContainer (spike A)" for what blocks it
+  today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
