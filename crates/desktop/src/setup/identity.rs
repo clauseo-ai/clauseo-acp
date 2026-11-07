@@ -19,12 +19,12 @@
 //! - **A `SignedIn` that is not one of those** (S18's status check, at start or when a window
 //!   shows Plans) is compared: another account is [`Verdict::Changed`]. Before R17 the pump
 //!   took such a state as a new sign-in and restarted the agents on it.
-//! - **The verdict is cached** per agent with the [`FileStamp`]s (file id, last write, last
-//!   status change and size) of its login files, taken before the status read it holds for
-//!   (never cleared: with an account recorded, no stamps means check), and checked again at
-//!   once when one changes: at each launch (`identity/gate.rs`, the host's launch gate) and
-//!   between (`identity/watch.rs`, a stat every [`POLL`], sessions running or not), each
-//!   agent's check on its own. A macOS Claude login (the Keychain) is checked again before a
+//! - **The verdict is cached** per agent with the [`clauseo_agents::FileStamp`]s (file id, last
+//!   write, last status change and size) of its login files, taken before the status read it
+//!   holds for (never cleared: with an account recorded, no stamps means check), and checked
+//!   again at once when one changes: at each launch (`identity/gate.rs`, the host's launch
+//!   gate) and between (`identity/watch.rs`, a stat every [`POLL`], sessions running or not),
+//!   each agent's check on its own. A macOS Claude login (the Keychain) is checked again before a
 //!   launch once the last check is [`KEYCHAIN_STALE`] old.
 //! - **The refusals** (`setup/refusal.rs`): [`Verdict::refusal`]. `agent.identity_checking`
 //!   while a check runs or is due (a launch waits for it, and asks for it through the host's
@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_agents::{AccountHash, AccountRead, FileStamp};
+use clauseo_agents::{AccountHash, AccountRead};
 use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::Files;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -61,12 +61,13 @@ pub(crate) use self::check::{exempt, exemption_changed};
 pub(crate) use self::gate::gate;
 pub(crate) use self::gate::{GateSlot, launch_gate};
 pub(crate) use self::verdict::Verdict;
-pub(crate) use self::watch::{fail_closed, follow_identity};
+pub(crate) use self::watch::{Stamp, fail_closed, follow_identity};
 #[cfg(test)]
 pub(crate) use self::watch::{poll_once, stamps};
 
 mod check;
 mod gate;
+mod refresh;
 mod store;
 mod verdict;
 mod watch;
@@ -81,17 +82,6 @@ pub(crate) const UNKNOWN_AGAIN: Duration = Duration::from_secs(30);
 /// The most one check may take, past the status runs' own limits (Claude's status 5 s; Codex's
 /// `login status` 15 s, then its app-server 20 s): then it is unknown.
 pub(crate) const CHECK_BOUND: Duration = Duration::from_secs(40);
-
-/// What one login file's stat found: its stamp, none there, or the stat's error kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stamp {
-    /// The file, by id and last write.
-    File(FileStamp),
-    /// No file (or a link, which is not the login).
-    Missing,
-    /// The stat failed for another reason.
-    Unreadable(std::io::ErrorKind),
-}
 
 /// One agent's state.
 #[derive(Debug, Default)]
@@ -231,6 +221,8 @@ pub(crate) struct Identities {
     inner: Mutex<Inner>,
     asks: UnboundedSender<AgentId>,
     asked: Mutex<Option<UnboundedReceiver<AgentId>>>,
+    /// Refresh-on-check for Codex (`refresh.rs`).
+    pub(crate) refresh: refresh::Refresh,
     /// The followers panicked past their restarts (`setup/supervise.rs`): every agent on the
     /// shared login is refused `agent.identity_unknown` (a changed one keeps its refusal),
     /// whatever its verdict, until Clauseo starts again.
@@ -284,11 +276,19 @@ impl Identities {
             lawyer_home,
             keychain_fallback: cfg!(target_os = "macos"),
             bound: CHECK_BOUND,
+            refresh: refresh::Refresh::default(),
             inner: Mutex::new(inner),
             asks,
             asked: Mutex::new(Some(asked)),
             dead: AtomicBool::new(false),
         }
+    }
+
+    /// Tests: Codex's forced refresh on (the app's) or off (the tests of other parts).
+    #[cfg(test)]
+    pub(crate) fn with_forced_refresh(mut self, on: bool) -> Self {
+        self.refresh.on = on;
+        self
     }
 
     /// Tests: the Keychain fallback on or off, whatever the OS.

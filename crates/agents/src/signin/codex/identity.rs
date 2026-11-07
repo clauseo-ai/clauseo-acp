@@ -68,7 +68,21 @@ pub(crate) async fn read_as<T: Timer + Send + Sync>(
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> AccountRead {
-    let answered = match account(job, cancel, kind, cwd).await {
+    read_with(job, cancel, kind, cwd, false).await
+}
+
+/// [`read_as`], with `refreshToken: true` when `refresh` (R17's forced refresh: Codex
+/// refreshes the tokens with `OpenAI` before it answers, in the same request). A refresh the
+/// server refuses (an auth error, `refresh_token_reused`) comes back as a JSON-RPC error:
+/// [`AccountRead::NoAccount`], a definite answer; no answer stays [`AccountRead::NoAnswer`].
+pub(crate) async fn read_with<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    kind: RunKind<'_>,
+    cwd: &Path,
+    refresh: bool,
+) -> AccountRead {
+    let answered = match account(job, cancel, kind, cwd, refresh).await {
         Some(Ok(answered)) => answered,
         Some(Err(clauseo_codex_appserver::Error::Rpc { .. })) => return AccountRead::NoAccount,
         Some(Err(_)) | None => return AccountRead::NoAnswer,
@@ -90,12 +104,14 @@ pub(crate) fn app_server_args(kind: RunKind<'_>) -> Vec<OsString> {
 }
 
 /// The app-server's answer to `initialize` then `account/read`: the response or the call's
-/// error; `None` when it did not start, or was cut short by its limit or by Cancel.
+/// error; `None` when it did not start, or was cut short by its limit or by Cancel. With
+/// `refresh`, `account/read` asks for a token refresh first (no other request is added).
 async fn account<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     kind: RunKind<'_>,
     cwd: &Path,
+    refresh: bool,
 ) -> Option<Result<GetAccountResponse, clauseo_codex_appserver::Error>> {
     let mut spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
     spec.cwd = cwd.to_path_buf();
@@ -115,7 +131,11 @@ async fn account<T: Timer + Send + Sync>(
         drop(notifications);
         let calls = async move {
             client.initialize(ClientInfo::clauseo()).await?;
-            client.account().await
+            if refresh {
+                client.account_refreshed().await
+            } else {
+                client.account().await
+            }
         };
         Some(join(driver, calls).await.1)
     });

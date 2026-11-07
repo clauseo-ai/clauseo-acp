@@ -9,7 +9,8 @@ use super::{open_enum, required_nullable};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountParams {
-    /// Asks for a token refresh before answering. [`Client`](crate::Client) never sets it.
+    /// Asks for a token refresh before answering. [`Client`](crate::Client) sets it only in
+    /// `account_refreshed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<bool>,
 }

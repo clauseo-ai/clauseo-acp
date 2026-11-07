@@ -723,12 +723,33 @@ changes (`setup/identity.rs`).
   `identity.json` reads as a first run. Sessions will be denied writes to `<data_dir>/agents/`
   once the sandbox's enforcement lands (S14/S15, 0051 PR-D/E); today it is not enforced at
   launch (`clauseo_sandbox`'s `detect.rs` reports `NotBuilt`), so see the known gap below.
+- *Refresh-on-check (Codex).* A Codex check's `account/read` sends `refreshToken: true`
+  (`Agents::read_account_refreshed`; the same one request, no other round trip) so Codex
+  refreshes the tokens with `OpenAI` before it names the account. Desktop keeps the last
+  confirmed stamp of `auth.json` (metadata only) and forces only on the first check since
+  start or when the stamp is not the confirmed one; an unchanged stamp reads as before. After a
+  forced check that confirms the account, the stamp after the read is the confirmed one, so
+  Codex's own rewrite of the file forces nothing (the change still gets one plain check). A
+  login file last written under 60 s ago (a session's own refresh) is read plain now, and one
+  forced re-check is due at its last write plus 60 s; plain again, with nothing more due, if the
+  file changed by then. A forced read with no answer (offline, a timeout, a proxy down) falls
+  back to the plain read, which decides as before, and one forced re-check is due 60 s later: a
+  network blip refuses nothing. Only a definite answer refuses: another account
+  (`signin.account_changed`), or a refresh refused or naming no account
+  (`agent.identity_unknown`). One forced refresh runs at a time in the whole process; a second
+  check of the same home takes the first one's answer. Logs use fixed words ("identity: forced
+  refresh", "identity: refresh skipped, login just changed", "identity: forced refresh had no
+  answer; unforced check used"). Claude's checks force nothing.
 - **Known gap (R17).** The code is public, so assume an attacker knows the check.
-  - *Token-only swap.* Codex's `account/read` reads the email from the stored `id_token`
-    without contacting the server. Swapping the access and refresh tokens while keeping the
-    `id_token` passes the check until Codex's next refresh, and the attacker controls when that
-    is: the file's `last_refresh` decides it, so it can be put off by days. Claude is presumed
-    open: its status email likely comes from `.claude.json`, which a swap doesn't touch.
+  - *Token-only swap: closed for Codex by refresh-on-check.* Codex's plain `account/read` reads
+    the email from the stored `id_token` without contacting the server, so swapping the access
+    and refresh tokens under the old `id_token` would pass a plain read until Codex's next
+    refresh (which the file's `last_refresh` lets an attacker put off by days). A check of a
+    changed login file forces the refresh, so `OpenAI` answers for the tokens. What is left: a
+    check that the 60 s guard holds off reads plain, and its forced re-check comes a minute
+    later; a forced read with no answer is decided on the plain read until its one retry.
+    Claude is presumed open: its status email likely comes from `.claude.json`, which a swap
+    doesn't touch.
   - *The data folder, until the sandbox is enforced.* Until S14/S15's enforcement lands (0051
     PR-D/E), a session could delete or rewrite `identity.json`. During a run the in-memory
     record still catches a swap. Across a restart, the startup check would trust a swapped
@@ -744,10 +765,16 @@ changes (`setup/identity.rs`).
     session starts on a written login; what remains is a write by a session already running (or
     anything else) between the stamps taken at the sign-in's last running state and that read:
     it is recorded as the account signed in.
-  - *Closing them.* Both of the first two close with a forced refresh on the check
-    (`account/read` with `refreshToken: true`), once stage B's proof shows running sessions in
-    two matters survive it without `refresh_token_reused`: a row on the release checklist. For
-    Claude, PR-D's read-only `CLAUDE_CODE_OAUTH_TOKEN` closes it where it applies.
+  - *Refresh races.* Codex 0.162.1 takes no lock across processes for a `ChatGPT` login
+    (`refresh_lock` is an in-process semaphore, `FileAuthStorage` takes none), so a forced
+    refresh at the very moment a session refreshes would send the same refresh token twice
+    (`refresh_token_reused`). The 60 s guard and the one forced refresh at a time in Clauseo
+    narrow this; nothing closes it.
+  - *The release confirmation.* Stage B's proof forced 3 refreshes under two live sessions in
+    two matters sharing a hard-linked `auth.json` (6/6 turns, no `refresh_token_reused`; each
+    refresh rewrote the file in place). A turn across a natural token expiry (around
+    2026-11-17) is still a row on the release checklist. For Claude, PR-D's read-only
+    `CLAUDE_CODE_OAUTH_TOKEN` closes the token swap where it applies.
 
 ## Consequences
 

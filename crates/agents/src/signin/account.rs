@@ -84,8 +84,11 @@ pub enum AccountRead {
 /// A read's answer, on its way from the job's thread.
 pub type AccountFuture = Pin<Box<dyn Future<Output = AccountRead> + Send>>;
 
-/// The read: see the module docs.
-pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountRead {
+/// The read: see the module docs. With `refresh` (Codex only; Claude ignores it), Codex's
+/// `account/read` asks for a token refresh first ([`codex::identity::read_with`]), and an
+/// answer that names no account or errs (the refresh refused) is a definite
+/// [`AccountRead::NoAccount`]; no answer stays [`AccountRead::Failed`].
+pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>, refresh: bool) -> AccountRead {
     let cancel = &job.ticket.cancel;
     let kind = if found::is_reused(job) {
         RunKind::Reused { home: &job.home }
@@ -106,10 +109,13 @@ pub(crate) async fn read<T: Timer + Send + Sync>(job: &SigninJob<T>) -> AccountR
             // the account is not known either way.
             StatusSaid::NoMarker | StatusSaid::NoAnswer => AccountRead::Failed,
             StatusSaid::LoggedIn => {
-                match codex::identity::read_as(job, cancel, kind, &job.home).await {
+                match codex::identity::read_with(job, cancel, kind, &job.home, refresh).await {
                     identity::AccountRead::Chatgpt(identity) => named(&identity),
                     // An API-key, Bedrock or unknown kind of account names no email.
                     identity::AccountRead::NotChatgpt => AccountRead::NoAccount,
+                    // A forced refresh refused (an auth error, `refresh_token_reused`) or
+                    // naming no account is a definite answer: not this login.
+                    identity::AccountRead::NoAccount if refresh => AccountRead::NoAccount,
                     // `login status` said signed in, yet `account/read` named no account or
                     // answered with an error: who is signed in is not known.
                     identity::AccountRead::NoAccount | identity::AccountRead::NoAnswer => {

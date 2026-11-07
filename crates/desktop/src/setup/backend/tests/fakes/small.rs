@@ -65,6 +65,12 @@ pub(in crate::setup::backend) struct FakeAccounts {
     stalled: Mutex<bool>,
     /// The agents whose reads wait for a test to open them ([`FakeAccounts::hold`]).
     held: Mutex<BTreeMap<AgentId, Shared<oneshot::Receiver<()>>>>,
+    /// Whether each read so far was forced (`read_account_refreshed`), in order.
+    pub(in crate::setup::backend) forced: Mutex<Vec<(AgentId, bool)>>,
+    /// What a forced read answers, by agent, when it differs from the plain read's.
+    forced_reads: Mutex<BTreeMap<AgentId, AccountRead>>,
+    /// Forced reads running now, and the most that ran at once.
+    pub(in crate::setup::backend) running: Arc<Mutex<(usize, usize)>>,
 }
 
 impl FakeAccounts {
@@ -87,10 +93,25 @@ impl FakeAccounts {
         open
     }
 
+    /// `agent`'s forced reads answer `read` from now on (its plain ones are unchanged).
+    pub(in crate::setup::backend) fn forced_answers(&self, agent: &AgentId, read: AccountRead) {
+        lock(&self.forced_reads).insert(agent.clone(), read);
+    }
+
+    /// How many of `agent`'s reads so far were forced, and how many were plain.
+    pub(in crate::setup::backend) fn forced_and_plain(&self, agent: &AgentId) -> (usize, usize) {
+        let forced = lock(&self.forced);
+        let of = forced.iter().filter(|(who, _)| who == agent);
+        let count = of.clone().filter(|(_, forced)| *forced).count();
+        (count, of.count() - count)
+    }
+
     /// Every agent's status answers nothing set (a failed read), and none is held.
     pub(in crate::setup::backend) fn clear(&self) {
         lock(&self.reads).clear();
         lock(&self.held).clear();
+        lock(&self.forced_reads).clear();
+        lock(&self.forced).clear();
     }
 
     /// Whether reads never answer.
@@ -98,20 +119,32 @@ impl FakeAccounts {
         *lock(&self.stalled) = stalled;
     }
 
-    pub(in crate::setup::backend) fn read(&self, agent: &AgentId) -> AccountFuture {
+    pub(in crate::setup::backend) fn read(&self, agent: &AgentId, forced: bool) -> AccountFuture {
+        lock(&self.forced).push((agent.clone(), forced));
         if *lock(&self.stalled) {
             return Box::pin(futures::future::pending());
         }
-        if let Some(opened) = lock(&self.held).get(agent).cloned() {
-            let reads = Arc::clone(&self.reads);
-            let agent = agent.clone();
-            return Box::pin(async move {
-                let _open = opened.await;
-                let read = lock(&reads).get(&agent).cloned();
-                read.unwrap_or(AccountRead::Failed)
-            });
+        let special = forced
+            .then(|| lock(&self.forced_reads).get(agent).cloned())
+            .flatten();
+        let running = Arc::clone(&self.running);
+        if forced {
+            let mut now = lock(&running);
+            now.0 += 1;
+            now.1 = now.1.max(now.0);
         }
-        let read = lock(&self.reads).get(agent).cloned();
-        Box::pin(std::future::ready(read.unwrap_or(AccountRead::Failed)))
+        let reads = Arc::clone(&self.reads);
+        let opened = lock(&self.held).get(agent).cloned();
+        let agent = agent.clone();
+        Box::pin(async move {
+            if let Some(opened) = opened {
+                let _open = opened.await;
+            }
+            let read = special.or_else(|| lock(&reads).get(&agent).cloned());
+            if forced {
+                lock(&running).0 -= 1;
+            }
+            read.unwrap_or(AccountRead::Failed)
+        })
     }
 }

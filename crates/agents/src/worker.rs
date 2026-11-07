@@ -57,7 +57,7 @@ enum Command {
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
     /// Start an account read, answering on its sender.
-    Account(Box<SigninStart>, oneshot::Sender<AccountRead>),
+    Account(Box<SigninStart>, bool, oneshot::Sender<AccountRead>),
 }
 
 /// What the handle, the worker and the jobs share.
@@ -349,9 +349,21 @@ impl Agents {
     /// sign-in job and changes no state. `Failed` when it could not tell, or could not start
     /// (an unknown agent, no home, no install, the handle shut down).
     pub fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        self.start_read(agent, false)
+    }
+
+    /// [`Agents::read_account`] with a forced token refresh, for Codex: its `account/read`
+    /// sends `refreshToken: true` (the same request, no other), so Codex refreshes the login
+    /// with `OpenAI` before it answers. A refresh refused, or an answer naming no account, is
+    /// `NoAccount`; no answer is `Failed`. For Claude it is `read_account`.
+    pub fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
+        self.start_read(agent, true)
+    }
+
+    fn start_read(&self, agent: &AgentId, refresh: bool) -> AccountFuture {
         let (reply, answer) = oneshot::channel();
         if let Ok(start) = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)) {
-            self.send(Command::Account(Box::new(start), reply));
+            self.send(Command::Account(Box::new(start), refresh, reply));
         }
         Box::pin(async move { answer.await.unwrap_or(AccountRead::Failed) })
     }
@@ -409,7 +421,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Pause(agent) => self.pause(&agent),
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
                 Command::Signin(start) => signin::start_job(&self, *start),
-                Command::Account(start, reply) => signin::start_account(&self, *start, reply),
+                Command::Account(start, refresh, reply) => {
+                    signin::start_account(&self, *start, refresh, reply);
+                }
             }
         }
     }

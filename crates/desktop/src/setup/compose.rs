@@ -304,6 +304,11 @@ impl Compose {
         }
     }
 
+    /// The clock's wall time, which R17's refresh-on-check ages Codex's login file by.
+    pub(crate) fn wall(&self) -> SystemTime {
+        self.clock.now()
+    }
+
     /// The clock's monotonic reading, which times the pump's counted runs (`backend/count.rs`).
     pub(crate) fn monotonic(&self) -> std::time::Duration {
         self.clock.monotonic()

@@ -48,6 +48,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn shutdown(&self, wait: Duration) -> bool;
     /// `Agents::read_account`: R17's identity check.
     fn read_account(&self, agent: &AgentId) -> AccountFuture;
+    /// `Agents::read_account_refreshed`: R17's check with a forced Codex token refresh.
+    fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture;
 }
 
 impl SetupAgents for Agents {
@@ -104,5 +106,8 @@ impl SetupAgents for Agents {
     }
     fn read_account(&self, agent: &AgentId) -> AccountFuture {
         Agents::read_account(self, agent)
+    }
+    fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
+        Agents::read_account_refreshed(self, agent)
     }
 }

@@ -177,7 +177,13 @@ impl SetupAgents for FakeAgents {
     }
     fn read_account(&self, agent: &AgentId) -> AccountFuture {
         self.call("read_account", agent);
-        self.accounts.read(agent)
+        self.accounts.read(agent, false)
+    }
+    /// Journaled as `read_account` too, so a count of reads counts it; the fake accounts keep
+    /// which reads were forced.
+    fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
+        self.call("read_account", agent);
+        self.accounts.read(agent, true)
     }
     fn shutdown(&self, _wait: Duration) -> bool {
         lock(&self.journal).push("agents.shutdown".to_owned());
@@ -427,7 +433,7 @@ fn rig_with(accept: bool, keychain: Keychain, keys: KeyCache, plan_locked: bool)
         keys,
         plan_locked,
         None,
-        Identities::in_memory(),
+        Identities::in_memory().with_forced_refresh(false),
     )
 }
 

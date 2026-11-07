@@ -109,6 +109,87 @@ fn codex_reads_the_account_from_account_read_and_sees_a_swap() {
     );
 }
 
+/// The params of each `account/read` the fake's app-server got in `agent`'s home, in order.
+fn account_read_params(fx: &Fixture, agent: &AgentId) -> Vec<serde_json::Value> {
+    let log = fx.config.signin.homes[agent].join("fake-account-read-params");
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_forced_read_sends_refresh_token_and_a_plain_one_does_not() {
+    let fx = Fixture::new("account-codex-refresh", "ok-after:0");
+    let agents = signed_in(&fx, &codex(), Method::Browser);
+    let before = account_read_params(&fx, &codex()).len();
+    assert_eq!(
+        block_on(agents.read_account(&codex())),
+        account("test@example.com")
+    );
+    let marker = std::fs::read(fake_marker(&fx, &codex())).unwrap();
+    #[cfg(unix)]
+    let inode = {
+        use std::os::unix::fs::MetadataExt as _;
+        std::fs::metadata(fake_marker(&fx, &codex())).unwrap().ino()
+    };
+    assert_eq!(
+        block_on(agents.read_account_refreshed(&codex())),
+        account("test@example.com")
+    );
+    let params = account_read_params(&fx, &codex());
+    assert_eq!(
+        params[before..],
+        [
+            serde_json::json!({}),
+            serde_json::json!({"refreshToken": true})
+        ],
+        "the plain read sends no refreshToken, the forced one sends true, in the same request"
+    );
+    // The fake's refresh rewrote the login in place, as Codex's does: the same file and bytes.
+    assert_eq!(std::fs::read(fake_marker(&fx, &codex())).unwrap(), marker);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let now = std::fs::metadata(fake_marker(&fx, &codex())).unwrap().ino();
+        assert_eq!(now, inode);
+    }
+    // Claude has no forced refresh: its forced read is its plain one.
+    assert_eq!(
+        block_on(agents.read_account_refreshed(&claude())),
+        AccountRead::Failed,
+        "Claude is not signed in on this fixture's handle"
+    );
+}
+
+#[test]
+fn a_refused_refresh_is_no_account_and_one_with_no_answer_is_failed() {
+    let fx = Fixture::new("account-codex-refresh-refused", "ok-after:0");
+    let agents = signed_in(&fx, &codex(), Method::Browser);
+    swap_to(&fx, &codex(), "refresh-refused", "test@example.com");
+    assert_eq!(
+        block_on(agents.read_account_refreshed(&codex())),
+        AccountRead::NoAccount,
+        "refresh_token_reused is a definite answer"
+    );
+    assert_eq!(
+        block_on(agents.read_account(&codex())),
+        account("test@example.com"),
+        "the plain read is untouched"
+    );
+    swap_to(&fx, &codex(), "refresh-silent", "test@example.com");
+    assert_eq!(
+        block_on(agents.read_account_refreshed(&codex())),
+        AccountRead::Failed,
+        "no answer tells nothing"
+    );
+    assert_eq!(
+        block_on(agents.read_account(&codex())),
+        account("test@example.com")
+    );
+}
+
 #[test]
 fn a_read_that_cannot_start_is_failed() {
     let mut fx = Fixture::new("account-not-ready", "ok-after:0");
@@ -157,5 +238,22 @@ fn a_read_costs_one_status_run_on_the_fakes() {
             took[2], took[4]
         );
         assert!(took[4] < std::time::Duration::from_secs(5), "{took:?}");
+        // Refresh-on-check: the forced read is the same runs and the same one request, its
+        // params carrying refreshToken (the fake's refresh is a rewrite in place, no network).
+        let mut forced = Vec::new();
+        for _ in 0..5 {
+            let start = std::time::Instant::now();
+            assert_eq!(
+                block_on(agents.read_account_refreshed(&agent)),
+                account("test@example.com")
+            );
+            forced.push(start.elapsed());
+        }
+        forced.sort();
+        eprintln!(
+            "R17 timing: {agent} read_account_refreshed on the fake, median {:?}, max {:?}",
+            forced[2], forced[4]
+        );
+        assert!(forced[4] < std::time::Duration::from_secs(5), "{forced:?}");
     }
 }
