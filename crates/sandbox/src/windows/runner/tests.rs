@@ -446,30 +446,21 @@ fn launch_files_have_the_run_folders_names() {
 }
 
 #[test]
-fn the_firm_ca_files_come_from_the_launch_and_the_spec() {
+fn the_firm_ca_files_come_from_the_launch_alone() {
     let mut spec = message();
-    spec.firm_ca = vec![r"C:\Firm\proxy-ca.pem".to_owned()];
-    spec.env.extend([
-        (
-            "ssl_cert_file".to_owned(),
-            r#""C:\Firm\other.pem""#.to_owned(),
-        ),
-        (
-            "SSL_CERT_FILE".to_owned(),
-            r"c:\firm\PROXY-CA.pem".to_owned(),
-        ),
-        (
-            "SSL_CERT_FILE".to_owned(),
-            format!(r"{DATA}\sandbox-ca\roots.pem"),
-        ),
-    ]);
+    spec.firm_ca = vec![
+        r"C:\Firm\proxy-ca.pem".to_owned(),
+        r"c:\firm\PROXY-CA.pem".to_owned(),
+        format!(r"{DATA}\sandbox-ca\roots.pem"),
+    ];
+    spec.env
+        .push(("SSL_CERT_FILE".to_owned(), r"C:\Firm\other.pem".to_owned()));
     assert_eq!(
         firm_ca_files(&spec),
-        [r"C:\Firm\proxy-ca.pem", r"C:\Firm\other.pem"],
-        "each once, never the bundle itself"
+        [r"C:\Firm\proxy-ca.pem"],
+        "each once, never the bundle itself, never the spec's own SSL_CERT_FILE"
     );
     spec.check().unwrap();
-    // Without a bundle there is nothing to merge into: the spec's SSL_CERT_FILE passes.
     spec.ca_bundle = None;
     assert_eq!(firm_ca_files(&spec), Vec::<String>::new());
     let mut bad = message();

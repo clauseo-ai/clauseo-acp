@@ -10,7 +10,7 @@ use std::path::Path;
 use super::LaunchMessage;
 use super::env::{CA_VARS, firm_ca_files};
 use super::paths::WinPath;
-use crate::windows::ca_bundle::{merge, write_merged};
+use crate::windows::ca_bundle::{disallowed, merge, write_merged};
 use crate::windows::sids::Sid;
 
 /// The largest machine bundle read.
@@ -69,11 +69,13 @@ fn merged(
             )),
         }
     }
-    let merged = merge(&machine, &files);
-    if merged.firm_unparsable > 0 {
+    let merged = merge(&machine, &files, &disallowed()?);
+    let left_out = merged.firm_unparsable + merged.firm_disallowed + merged.firm_not_ca;
+    if left_out > 0 {
         say(&format!(
-            "clauseo-sandbox-run: {} firm CA entries didn't parse and were left out",
-            merged.firm_unparsable
+            "clauseo-sandbox-run: firm CA entries left out: {} unreadable, {} disallowed, {} not \
+             a CA",
+            merged.firm_unparsable, merged.firm_disallowed, merged.firm_not_ca
         ));
     }
     if merged.firm_kept == 0 {

@@ -118,8 +118,9 @@ impl fmt::Debug for PipeSet {
 }
 
 /// What the desktop user and the pool user may do on a runner pipe: `FILE_GENERIC_READ |
-/// FILE_GENERIC_WRITE` (`0x12019f`), never `WRITE_DAC` or `WRITE_OWNER`.
-pub const PIPE_RIGHTS: u32 = 0x0012_019f;
+/// FILE_GENERIC_WRITE` less `FILE_CREATE_PIPE_INSTANCE` (`0x4`), so `0x12019b`: never
+/// `WRITE_DAC`, `WRITE_OWNER` or a new instance.
+pub const PIPE_RIGHTS: u32 = 0x0012_019b;
 
 /// Every runner pipe's descriptor (D11): protected, the desktop user and the pool user with
 /// [`PIPE_RIGHTS`] and no one else, and a Medium label with no-write-up and no-read-up, so

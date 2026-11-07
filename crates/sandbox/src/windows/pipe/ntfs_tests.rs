@@ -32,8 +32,8 @@ use crate::windows::test_pool::{
     Impersonating, Owned, TestUser, acl_entries, log_on, low_restricted_token,
 };
 
-/// `FILE_GENERIC_READ | FILE_GENERIC_WRITE`: each entry's rights (`pipe::PIPE_RIGHTS`).
-const READ_WRITE: u32 = 0x0012_019F;
+/// Each entry's rights (`pipe::PIPE_RIGHTS`): read and write, no new instance.
+const READ_WRITE: u32 = 0x0012_019B;
 /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE`.
 const LABEL: u8 = 0x11;
 /// `SYSTEM_MANDATORY_LABEL_NO_WRITE_UP | SYSTEM_MANDATORY_LABEL_NO_READ_UP`.
