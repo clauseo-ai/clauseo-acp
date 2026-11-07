@@ -155,6 +155,17 @@ crates/store/benches/commit.rs - clippy::unwrap_used
 
 # The setup exe's VERSIONINFO .rc, written into OUT_DIR by the build script.
 crates/sandbox/build.rs write_out clippy::disallowed_methods
+# The admin copy's refresh: build.rs's copy of the key module (public in the crate), the FFI of
+# its reads (the install folder's handle-relative walk included), staging, record and Event Log
+# writes and Task Scheduler calls, and its tests' BLAKE2b, which keeps RFC 7693's names.
+crates/sandbox/build.rs key unreachable_pub
+crates/sandbox/src/windows/refresh/source.rs - unsafe_code
+crates/sandbox/src/windows/refresh/staging.rs - unsafe_code
+crates/sandbox/src/windows/refresh/task.rs - unsafe_code
+crates/sandbox/src/windows/refresh/walk.rs - unsafe_code
+crates/sandbox/src/windows/refresh/windows_refresher.rs - unsafe_code
+crates/sandbox/src/windows/refresh/test_signer.rs compress clippy::many_single_char_names
+crates/sandbox/src/windows/refresh/test_signer.rs g clippy::many_single_char_names
 crates/sandbox/examples/run_sandboxed/env.rs remove_secret clippy::disallowed_methods
 crates/sandbox/examples/run_sandboxed.rs jail::catch_termination unsafe_code
 # Added by S16: the upstream lookup's FFI to CFNetwork (macOS) and WinHTTP (Windows).

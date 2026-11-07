@@ -34,8 +34,7 @@
 //! import and delay-import directories, its version information and its one manifest.
 //!
 //! On every target it embeds the updater key the admin copy's refresh trusts (ADR 0049, "Admin
-//! copy refresh"; `src/windows/refresh/key.rs`) as `CLAUSEO_SANDBOX_UPDATER_KEY`, and the app's
-//! `version` as `CLAUSEO_SANDBOX_VERSION`, the lowest version a refresh takes. The key is
+//! copy refresh"; `src/windows/refresh/key.rs`) as `CLAUSEO_SANDBOX_UPDATER_KEY`. The key is
 //! `CLAUSEO_UPDATER_PUBKEY` when set, else `plugins.updater.pubkey` from `tauri.conf.json`,
 //! both Tauri's base64 of a minisign public-key file; with neither (a dry build), the placeholder,
 //! which verifies nothing, so such a build's refresh fails closed. A key that isn't a minisign
@@ -94,7 +93,7 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-/// Embeds the refresh's updater key and the app's version, as the module says.
+/// Embeds the refresh's updater key, as the module says.
 fn refresh_key(dir: &Path) -> Result<(), Error> {
     println!("cargo:rerun-if-changed=src/windows/refresh/key.rs");
     println!("cargo:rerun-if-env-changed=CLAUSEO_UPDATER_PUBKEY");
@@ -115,11 +114,6 @@ fn refresh_key(dir: &Path) -> Result<(), Error> {
     let profile = std::env::var("PROFILE").unwrap_or_default();
     key::release_guard(mode.as_deref(), &profile, id)?;
     println!("cargo:rustc-env=CLAUSEO_SANDBOX_UPDATER_KEY={chosen}");
-    let version = conf
-        .pointer("/version")
-        .and_then(serde_json::Value::as_str)
-        .ok_or("tauri.conf.json has no string at /version")?;
-    println!("cargo:rustc-env=CLAUSEO_SANDBOX_VERSION={version}");
     Ok(())
 }
 

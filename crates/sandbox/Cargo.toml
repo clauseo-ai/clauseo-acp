@@ -147,8 +147,8 @@ windows = { workspace = true, features = [
 # crates/desktop/tauri.conf.json with serde_json. Not target-gated: a build script runs on the
 # host and checks TARGET, and both crates are in the tree already (tauri-build, the deps above).
 #
-# It also embeds the updater key the admin copy's refresh trusts (src/windows/refresh/key.rs) and
-# the app's version, on every target.
+# It also embeds the updater key the admin copy's refresh trusts (src/windows/refresh/key.rs), on
+# every target.
 [build-dependencies]
 embed-resource = { workspace = true }
 serde_json = { workspace = true }

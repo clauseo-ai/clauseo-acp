@@ -799,10 +799,10 @@ for `--reclaim`.
 
 The elevated exe runs only from its admin copy,
 `%ProgramFiles%\Clauseo\Sandbox\clauseo-sandbox-setup.exe`
-(PR 1 places it; PR 2's `--adopt` records `AdminCopySha256` and `UserInstallDir` in
-`HKLM\SOFTWARE\Clauseo\Sandbox`). A per-user install updates itself without elevation, so the
-copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and only from an exe the
-updater key signed.
+(PR 1 places it; PR 2's `--adopt` records `AdminCopySha256`, `AdminCopyVersion` and
+`UserInstallDir` in `HKLM\SOFTWARE\Clauseo\Sandbox`). A per-user install updates itself without
+elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and
+only from an exe the updater key signed.
 
 **The task.** `\Clauseo\SandboxRefresh` is registered through `ITaskService` by `--adopt`
 (`register_refresh_task`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path,
@@ -814,26 +814,36 @@ update (`request_admin_refresh`, `IRegisteredTask::Run`, unelevated). `--remove`
 and the staging folder.
 
 **The run.** `--refresh` takes nothing from the user except the files in the recorded folder:
-no path argument and no environment. It:
+no path argument and no environment. `UserInstallDir` is untrusted: the lawyer can re-point any
+folder of it through a junction at any time, or re-run `--adopt` with another folder. It:
 
 1. refuses unless it runs as LOCAL SYSTEM from the admin copy's path;
 2. refuses a build whose key is the placeholder, before reading anything;
-3. opens `<UserInstallDir>\clauseo-sandbox-setup.exe` and its `.sig` with
-   `FILE_FLAG_OPEN_REPARSE_POINT`, and refuses a reparse point, anything but a regular file, a
-   second hard link, or more than 16 MiB (exe) or 4 KiB (`.sig`);
-4. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
+3. refuses an install folder that isn't inside the record owner's profile (`ProfileList`'s
+   `ProfileImagePath` for `OwnerSid`);
+4. opens the drive's root, then each folder of the path relative to its parent's handle
+   (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and `FILE_OPEN_REPARSE_POINT`),
+   refusing a reparse point at every level; then opens `clauseo-sandbox-setup.exe` and its
+   `.sig` relative to the last folder, and refuses a reparse point, anything but a regular file, a
+   second hard link, or more than 16 MiB (exe) or 4 KiB (`.sig`). Every open is for reading:
+   SYSTEM never writes or deletes anything in the folder;
+5. copies the exe into `Sandbox\staging\` (owner SYSTEM, protected SYSTEM-only DACL, read back),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
-5. stops when the staged SHA-256 is already recorded;
-6. otherwise sets the running copy aside by renaming it into staging, which Windows allows for a
+6. reads the staged exe's `FILEVERSION` from its `VERSIONINFO` and refuses one older than
+   `AdminCopyVersion` (`version_not_older`), so an older signed exe can't roll the copy back;
+7. stops when the staged SHA-256 is already recorded;
+8. otherwise sets the running copy aside by renaming it into staging, which Windows allows for a
    running exe, moves the staged file into place with the admin copy's DACL, and only then writes
-   the new hash. The old copy is deleted at the next reboot or the next run.
+   the new `AdminCopyVersion`, then the new hash. The old copy is deleted at the next reboot or
+   the next run.
 
 **Crash safety.** The record never names a file that isn't at the admin path. Until the last
 step the record holds the old hash. A crash between the two renames leaves no file at the path,
 which the launcher treats as a missing copy, so it asks for a re-adopt. A crash after the move
 leaves the new file under the old hash, which the launcher refuses. The next run then finds the
-admin path already holding the staged exe and writes its hash without another swap. A failed
-move puts the old copy back.
+admin path already holding the staged exe and writes its version and hash without another swap.
+The version goes first, so a recorded new hash always has its version. A failed move puts the old
+copy back.
 
 **The signature.** The `.sig` is Tauri's: base64 of a minisign signature file, prehashed (`ED`),
 checked with `minisign-verify`. The key is built in by `crates/sandbox/build.rs`:
@@ -842,16 +852,11 @@ placeholder `AC986E7C6BA67AB9`. The placeholder has an all-zero key and is refus
 A release build (`CLAUSEO_RELEASE_MODE=release`, release profile) with the placeholder or the test
 key `B142942ACEC5F521` fails to build. The trusted comment is the signer's once the global
 signature verifies. It must name `clauseo-sandbox-setup.exe`, so a signed installer can't stand in
-for the exe. Its `version:` must be no lower than the running copy's, so an older signed exe
-can't roll the copy back.
+for the exe.
 
 Each refusal keeps the old copy, writes one Event Log line (source `Clauseo Sandbox`, naming no
 user path beyond the install folder), and exits with its own code. The codes start at 32, clear
 of the set-up's (`RefreshExit`).
-
-**Accepted: a junction above the install folder.** Only the exe and `.sig` themselves are opened
-without following a reparse point. A junction in the folder's own path changes only which bytes
-are read, and those bytes must still verify, so it gains nothing.
 
 ## Consequences
 

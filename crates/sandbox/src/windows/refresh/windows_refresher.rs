@@ -25,18 +25,24 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::read_capped;
 use super::{
-    ADMIN_COPY_SDDL, EXE_CAP, Failed, OWN_VERSION, RefreshExit, RefreshRecord, Refresher, SIG_CAP,
-    STAGING_SDDL, SourceError, SourceFile, UPDATER_KEY, refresh, staging,
+    ADMIN_COPY_SDDL, EXE_CAP, Failed, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL,
+    SourceError, SourceFile, Sources, UPDATER_KEY, refresh, staging, walk,
 };
 use crate::windows::record::read_string;
 use crate::windows::setup::owner::this_process;
+use crate::windows::setup::profile::profile_of;
+use crate::windows::sids::Sid;
 
 /// The record's key under `HKLM`.
 const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
+/// The record's owner (set-up writes it).
+const OWNER_SID: &str = "OwnerSid";
 /// The record's value naming the per-user install folder (PR 2's `--adopt` writes it).
 pub(crate) const USER_INSTALL_DIR: &str = "UserInstallDir";
 /// The record's value holding the admin copy's SHA-256 (PR 2's `--adopt` writes it first).
 pub(crate) const ADMIN_COPY_SHA256: &str = "AdminCopySha256";
+/// The record's value holding the admin copy's file version (PR 2's `--adopt` writes it first).
+pub(crate) const ADMIN_COPY_VERSION: &str = "AdminCopyVersion";
 /// The setup exe's file name, in the user folder and as the admin copy.
 pub(crate) const EXE_NAME: &str = "clauseo-sandbox-setup.exe";
 /// Its signature's file name.
@@ -51,7 +57,7 @@ const EVENT_SOURCE: PCWSTR = w!("Clauseo Sandbox");
 /// `--refresh`: [`refresh`] over a [`WindowsRefresher`] with the key and version built in.
 pub fn run() -> RefreshExit {
     let mut fs = WindowsRefresher::new();
-    refresh(&mut fs, UPDATER_KEY, OWN_VERSION)
+    refresh(&mut fs, UPDATER_KEY)
 }
 
 /// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.
@@ -138,9 +144,16 @@ impl Refresher for WindowsRefresher {
                 .map_err(|error| format!("the record: {error}"))
         };
         Ok(RefreshRecord {
+            owner_sid: read(OWNER_SID)?,
             user_install_dir: read(USER_INSTALL_DIR)?,
             admin_copy_sha256: read(ADMIN_COPY_SHA256)?,
+            admin_copy_version: read(ADMIN_COPY_VERSION)?,
         })
+    }
+
+    fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed> {
+        let profile = profile_of(owner).map_err(|error| format!("the owner's profile: {error}"))?;
+        Ok(profile.map(|profile| profile.path))
     }
 
     fn clear_leftovers(&mut self) -> Result<(), Failed> {
@@ -148,11 +161,8 @@ impl Refresher for WindowsRefresher {
         staging::delete(&self.staged(STAGED_NAME)?)
     }
 
-    fn read_source(&mut self, dir: &Path, which: SourceFile) -> Result<Vec<u8>, SourceError> {
-        match which {
-            SourceFile::Exe => read_capped(&dir.join(EXE_NAME), EXE_CAP),
-            SourceFile::Sig => read_capped(&dir.join(SIG_NAME), SIG_CAP),
-        }
+    fn read_sources(&mut self, dir: &Path) -> Result<Sources, (SourceFile, SourceError)> {
+        walk::read_sources(dir)
     }
 
     fn stage(&mut self, exe: &[u8]) -> Result<Vec<u8>, Failed> {
@@ -188,6 +198,10 @@ impl Refresher for WindowsRefresher {
 
     fn delete_set_aside_later(&mut self) -> Result<(), Failed> {
         staging::delete_at_reboot(&self.staged(SET_ASIDE_NAME)?)
+    }
+
+    fn write_version(&mut self, version: &str) -> Result<(), Failed> {
+        write_record_string(ADMIN_COPY_VERSION, version)
     }
 
     fn write_sha256(&mut self, hex: &str) -> Result<(), Failed> {
