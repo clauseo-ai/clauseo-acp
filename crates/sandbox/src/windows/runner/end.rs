@@ -217,6 +217,17 @@ impl<S: SweeperSteps> EndSweep<S> {
         swept
     }
 
+    /// Whether the session ended clean, so the outer removes its unclean-session marker
+    /// (`marker.rs`): its end began at the inner's exit (no cancel, no failure), the inner
+    /// reported the agent's exit (`reported`), the end sweeper started (the job emptied first)
+    /// and exited 0 (`swept`), and no sweep found an escapee.
+    pub(crate) fn clean(&self, swept: Swept, reported: bool) -> bool {
+        self.began() == Some(EndSignal::InnerExited)
+            && reported
+            && swept == Swept::Clean
+            && !self.escaped()
+    }
+
     /// The outer's exit code for a run that would exit `code`: [`RunExit::Escapee`] when a sweep
     /// of the session found an escapee, whatever `code` is (the agent's own, even 0, which the
     /// outer then says on stderr); else `code`.
