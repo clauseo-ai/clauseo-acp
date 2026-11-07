@@ -270,6 +270,7 @@ fn get<'l>(lines: &'l [String], key: &str) -> Option<&'l str> {
 fn facts(lines: &[String]) -> String {
     let keys = [
         "desktop-create",
+        "desktop-create-default-heap",
         "clipboard-write",
         "desktop-sa",
         "user",

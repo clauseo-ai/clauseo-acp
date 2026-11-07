@@ -83,7 +83,10 @@ limits must be exactly `0xff`. Only when it reads exactly `0x0` (node's children
 libuv's own nested job) does the effect decide instead, and both halves must hold:
 
 - `CreateDesktopW` on its own station fails with exactly 5. The station's DACL grants
-  `WINSTA_CREATEDESKTOP`, so only the job's `DESKTOP` limit refuses it.
+  `WINSTA_CREATEDESKTOP`, so only the job's `DESKTOP` limit refuses it. Agent and control both
+  ask for a 128 KB heap (`CreateDesktopExW`): with the default heap every control variant, the
+  lawyer's plain token included, got 8 in CI's session 0. The default-heap code is printed too,
+  as information.
 - The clipboard write fails in `OpenClipboard`, `EmptyClipboard` or `SetClipboardData` with
   5 (or `0x80070005`), what `WRITECLIPBOARD` gives. The call that failed is printed.
 
