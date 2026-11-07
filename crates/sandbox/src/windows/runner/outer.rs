@@ -3,7 +3,7 @@
 
 use std::io::{self, Write as _};
 use std::path::Path;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -11,10 +11,9 @@ use super::desktop::AgentDesktop;
 use super::end::{EndSignal, EndSweep, copy, exit_code, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
-use super::spawn::{Process, end_job, kill_on_close_job, restrict_dll_search, system_folder};
+use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
-use crate::windows::acl::object::Handle;
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
 use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
@@ -87,7 +86,8 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
-    // From here every end path starts the detached end sweeper first (`end.rs`).
+    // From here every end path first ends the job, waits for it to empty, and starts the
+    // detached end sweeper (`end.rs`).
     let end: End = Arc::new(EndSweep::new(OsSweeper {
         data_dir,
         pool_user: message.pool_user.clone(),
@@ -97,6 +97,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         exe: exe_text.to_owned(),
         cwd,
         kept: Mutex::new(None),
+        job: OnceLock::new(),
     }));
     let result = session(&message, &end);
     if result.is_err() {
@@ -125,7 +126,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         .map(|role| ServerPipe::create(&set.name(*role), *role, &sddl))
         .collect::<io::Result<Vec<_>>>()
         .map_err(|e| Failure::new(RunExit::Pipe, os("CreateNamedPipeW", &e)))?;
-    let job = kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?;
+    // Held by the end sweeper's steps, so every end path ends it and waits for it to empty
+    // before the sweeper starts (`end.rs`).
+    let job = sweeper
+        .hold_job(kill_on_close_job().map_err(|e| Failure::new(RunExit::Job, os("job", &e)))?);
     // Only a missing or unusable secret is the set-up's to fix; a read that failed is this
     // launch's alone, and a SID the pool doesn't hold is a bad launch.
     let password = secret_for(data_dir, &message.pool_user).map_err(|error| match error {
@@ -171,7 +175,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         exe: &sweeper.exe,
         base: set.base(),
         cwd: &sweeper.cwd,
-        job: &job,
+        job,
         given: None,
     };
     let inner = start(&mut steps)?;
@@ -193,13 +197,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
             .unwrap_or_default(),
         job: given,
     };
-    let result = serve(&inner, &job, pipes, &launch, end);
-    // `serve` returns only on a failure (`relay` exits the process): the end sweeper first, then
-    // the job's processes end, and `job` drops.
+    let result = serve(&inner, pipes, &launch, end);
+    // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,
+    // then the end sweeper starts.
     end.trigger(EndSignal::Failed);
-    let code = result.as_ref().err().map_or(RunExit::Spawn, |f| f.0);
-    end_job(&job, code.code());
-    drop(job);
     result
 }
 
@@ -207,7 +208,6 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
 /// runner exits, and gives its exit code.
 fn serve(
     inner: &Process,
-    job: &Handle,
     pipes: Vec<ServerPipe>,
     launch: &InnerLaunch,
     end: &End,
@@ -243,7 +243,7 @@ fn serve(
         }
         Err(error) => return Err(Failure::new(RunExit::Pipe, os("ctl read", &error))),
     }
-    relay(inner, job, ctl, [stdin, stdout, stderr], end)
+    relay(inner, ctl, [stdin, stdout, stderr], end)
 }
 
 /// The next report on `ctl` that isn't a `Log` line; each `Log` line goes to stderr.
@@ -310,14 +310,13 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 /// Relays this process's stdin to the agent's and the agent's stdout and stderr to this
 /// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
 /// closes when this process's stdin ends, so the agent reads the end of its input. `ctl`'s `Log`
-/// lines (the inner's sweeps) go to stderr meanwhile. The end sweeper starts first when the
-/// host's stdin ends or the inner runner exits. Once the inner exited, the output has [`DRAIN`]
-/// to finish; then the job is ended, which closes what a lingering descendant still holds, and the
-/// output gets [`DRAIN`] again. On a cancel the exit code is the one the run would have had
-/// without the end sweeper (`end::exit_code`).
+/// lines (the inner's sweeps) go to stderr meanwhile. When the host's stdin ends or the inner
+/// runner exits, the job is ended and emptied and the end sweeper started first (`end.rs`): a
+/// descendant the agent left in the job ends then, and what it held closes. Then the output has
+/// [`DRAIN`] per stream to finish. On a cancel the exit code is the one the run would have had
+/// without the job's end (`end::exit_code`).
 fn relay(
     inner: &Process,
-    job: &Handle,
     ctl: ServerPipe,
     [stdin, stdout, stderr]: [ServerPipe; 3],
     end: &End,
@@ -369,13 +368,8 @@ fn relay(
         exit_code(end.began(), inner_code, reported)
     });
     let mut left = 2;
-    for ended_job in [false, true] {
-        if ended_job {
-            end_job(job, code);
-        }
-        while left > 0 && drained.recv_timeout(DRAIN).is_ok() {
-            left -= 1;
-        }
+    while left > 0 && drained.recv_timeout(DRAIN).is_ok() {
+        left -= 1;
     }
     tell_status(last.as_ref(), code);
     end.steps().wait();
