@@ -112,8 +112,9 @@ converted document. From there they can call any IPC command the page can reach.
   WebView2 takes in place of the app's arguments, gets the rule added at its end as
   `main` starts (Chromium takes the last of a repeated switch, so it wins over the variable's own
   rules). Residual: an `AdditionalBrowserArguments` policy value for the app's exe under `HKCU`
-  or `HKLM` `Software\Policies\Microsoft\Edge\WebView2` replaces the app's arguments and drops
-  the rule; only something already running with the lawyer's rights, or the firm's admin, can
+  or `HKLM` `Software\Policies\Microsoft\Edge\WebView2` is documented as replacing the app's
+  arguments, which would drop the rule (WebView2 157 on the Windows VM merged them instead, and
+  the rule held, 2026-11-07); only something already running with the lawyer's rights, or the firm's admin, can
   set one, and the app logs a warning naming the hive (never the value) when one is set. Known
   gap: on macOS (WKWebView) a refused navigation's host and
   `dns-prefetch`/`preconnect` targets can still put a name of the page's choosing into a DNS
