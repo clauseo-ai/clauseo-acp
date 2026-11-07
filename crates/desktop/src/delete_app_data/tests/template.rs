@@ -357,9 +357,21 @@ fn the_elevated_branch_loads_no_plug_in_calls_no_function_and_reads_nothing_the_
         "UnsafeStrCpy $PLUGINSDIR \"$0\"",
         "UnsafeStrCpy $TEMP \"$0\"",
     ];
-    // LogicLib's words, which expand to plain jumps; anything else in ${...} is a define.
+    // LogicLib's words, which expand to plain jumps (FileExists to IfFileExists); anything else
+    // in ${...} is a define.
     let logic = [
-        "If", "IfNot", "ElseIf", "Else", "EndIf", "AndIf", "OrIf", "Do", "Loop", "ExitDo", "Errors",
+        "If",
+        "IfNot",
+        "ElseIf",
+        "Else",
+        "EndIf",
+        "AndIf",
+        "OrIf",
+        "Do",
+        "Loop",
+        "ExitDo",
+        "Errors",
+        "FileExists",
     ];
     for (name, body) in &macros {
         for line in *body {
@@ -419,6 +431,7 @@ fn the_elevated_branch_checks_its_arguments_and_the_record_then_quits() {
             "!insertmacro CLAUSEO_ADMIN_COPY '--owner-sid $R2 --user-install-dir \"$INSTDIR\" \
              --data-dir \"$R3\"'",
             "${If} $R8 <> ${CLAUSEO_ADMIN_NOT_RUN}",
+            "${AndIf} $R8 <> ${CLAUSEO_ADMIN_REMOVED}",
             "IntOp $R8 $R8 + ${CLAUSEO_ADMIN_EXIT_BASE}",
             "${EndIf}",
             "${EndIf}",

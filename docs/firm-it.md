@@ -60,7 +60,7 @@ What a silent (`/S`) install can return:
 | Code | Meaning |
 |---|---|
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
-| 23 | Per-machine install: installed, but Safe workspace's set-up failed, or hadn't finished after 10 minutes |
+| 23 | Per-machine install: installed, but Safe workspace's set-up failed or didn't finish (still running after 10 minutes), a failed copy included |
 | 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
 
@@ -770,10 +770,13 @@ Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, which sets up and
 Windows protection (section 1); on our test machine, as `Trojan:Win32/Bearfoos.A!ml`, a false
 positive. Without it the protection can't be set up, or removed by the uninstaller.
 
-- **Installing:** if the copy Clauseo runs is gone after copying, the install stays and says so;
-  `/S` exits 20. That copy is the one in `C:\Program Files\Clauseo\Sandbox` when the install ran
-  Safe workspace's elevated step, else the one in the install folder: after a declined prompt,
-  with Clauseo running, or for a per-user `/S`, `/P` or `/UPDATE` install.
+- **Installing:** Clauseo runs only the copy in `C:\Program Files\Clauseo\Sandbox`. If the install
+  wrote that copy and it was gone when the install tried to start it, the install stays and says
+  so, and exits 20 (a `/P` install writes a line in its details list and sets no code). An
+  install that didn't write the copy (a declined prompt, Clauseo running, a per-user `/S`, `/P`
+  or `/UPDATE` install) never says this, and a copy that couldn't be written is a failed set-up
+  (23 under `/S`). A copy missing from the install folder only holds up Clauseo's next refresh of
+  the admin copy, which Clauseo reports.
 - **Uninstalling:** if the file is gone and the protection was set up (the key
   `HKLM\SOFTWARE\Clauseo\Sandbox` exists), the uninstaller says the sandbox's hidden accounts are
   still on the computer; with `/S` it exits 21 instead. The rest of the uninstall carries on.
@@ -792,7 +795,7 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 | 0 | Done |
 | 1 | Cancelled by the person installing (NSIS) |
 | 2 | Stopped by an error (NSIS) |
-| 20 | `/S` install: installed, but Windows security removed `clauseo-sandbox-setup.exe` |
+| 20 | Install: installed, but this run wrote `clauseo-sandbox-setup.exe` to `C:\Program Files\Clauseo\Sandbox` and Windows security removed it (`/S` and interactive; not `/P`) |
 | 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
 | 27 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program in `C:\Program Files\Clauseo\Sandbox` failed its check |
 

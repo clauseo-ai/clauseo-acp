@@ -210,7 +210,6 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
         "${EndIf}",
         "${Else}",
-        "StrCpy $ClauseoAdminSectionRan 1",
         "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
         "${If} $R1 = 1",
         "StrCpy $R8 ${CLAUSEO_ADOPT_OTHER_ACCOUNT}",
@@ -232,7 +231,8 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "Pop $0",
     ];
     assert_eq!(body[1..], expected, "{body:?}");
-    // A box only interactively: never under /S (23, also past the wait), /P or /UPDATE.
+    // A box only interactively: never under /S (23, also past the wait; 20 for a copy written and
+    // then removed), /P or /UPDATE.
     let says = macro_body(&admin, "CLAUSEO_ADMIN_COPY_MACHINE_SAYS");
     let expected = [
         "${If} $R8 = ${CLAUSEO_ADOPT_DONE}",
@@ -244,6 +244,16 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "StrCpy $ClauseoAdminTimedOut 1",
         "${If} ${Silent}",
         "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}",
+        "${EndIf}",
+        "${ElseIf} $R8 = ${CLAUSEO_ADMIN_REMOVED}",
+        "DetailPrint \"$(setupExeRemoved)\"",
+        "${If} $PassiveMode <> 1",
+        "SetErrorLevel ${CLAUSEO_EXIT_SETUP_EXE_REMOVED}",
+        "${EndIf}",
+        "${IfNot} ${Silent}",
+        "${AndIf} $PassiveMode <> 1",
+        "${AndIf} $UpdateMode <> 1",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
         "${EndIf}",
         "${Else}",
         "DetailPrint \"$(adminCopyMachineFailed)\"",

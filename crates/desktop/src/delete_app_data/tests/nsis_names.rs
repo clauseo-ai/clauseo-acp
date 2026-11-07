@@ -1,7 +1,7 @@
 //! The names the installer scripts may use: every `$NAME` in hooks.nsh, English.nsh and Hindi.nsh
-//! is one NSIS knows, a register, one of the template's variables that the hooks use, or one
-//! `admin_copy.nsh` declares for them. NSIS keeps an unknown name as literal text (the installer
-//! showed `$COMMONAPPDATA` unexpanded), so this test is what fails a misspelt name before a build.
+//! is one NSIS knows, a register, or one of the template's variables that the hooks use. NSIS keeps
+//! an unknown name as literal text (the installer showed `$COMMONAPPDATA` unexpanded), so this test
+//! is what fails a misspelt name before a build.
 
 use super::sources::{hook_code, line_with, read};
 
@@ -93,19 +93,6 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
         // uninstall hook reads.
         "DeleteAppDataCheckboxState",
     ];
-    // The variables admin_copy.nsh declares, which hooks.nsh includes before its macros, that
-    // hooks.nsh reads; each must be declared there.
-    const HOOK_VARS: &[&str] = &[
-        // 1 once the admin section ran: the set-up program check looks at the admin copy.
-        "ClauseoAdminSectionRan",
-    ];
-    let admin_copy = read("windows/admin_copy.nsh");
-    for name in HOOK_VARS {
-        assert!(
-            admin_copy.lines().any(|line| line == format!("Var {name}")),
-            "admin_copy.nsh declares no {name}"
-        );
-    }
     // Registers $0-$9 and $R0-$R9 need no declaration.
     let digit = |s: &str| s.len() == 1 && s.bytes().all(|b| b.is_ascii_digit());
     let register = |name: &str| digit(name) || name.strip_prefix('R').is_some_and(digit);
@@ -120,8 +107,7 @@ fn the_installer_scripts_use_only_known_nsis_variables() {
                 checked += 1;
                 let known = register(name)
                     || NSIS_CONSTANTS.contains(&name)
-                    || TEMPLATE_VARS.contains(&name)
-                    || HOOK_VARS.contains(&name);
+                    || TEMPLATE_VARS.contains(&name);
                 assert!(
                     known,
                     "{file}:{}: ${name} is not an NSIS variable: {line}",
