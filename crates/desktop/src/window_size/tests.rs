@@ -93,3 +93,27 @@ fn the_window_state_leaves_out_the_visibility_and_the_decorations() {
         (StateFlags::all() - StateFlags::VISIBLE - StateFlags::DECORATIONS).bits()
     );
 }
+
+/// Window-state saves to Tauri's `app_config_dir`, which on Windows is the Roaming folder
+/// (`%APPDATA%`). A firm can redirect that folder to a file share that is down (a laptop off
+/// VPN). The plugin resolves it on the main thread before the first window and at both quit
+/// saves, which held the launch for about 20 s and the quit for 20 to 40 s. So
+/// `app.appDirectoriesOverride` moves the config folder to `$LOCALDATA`, which is not
+/// redirected, and overrides that one folder only: `root` would move the `WebView2` profile,
+/// and `data` or `localData` are not window-state's.
+#[test]
+fn window_state_is_in_the_local_data_folder_not_the_roaming_one() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+    let conf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let identifier = conf["identifier"].as_str().unwrap();
+    let over = conf["app"]["appDirectoriesOverride"]
+        .as_object()
+        .expect("app.appDirectoriesOverride is an object of directories");
+    assert_eq!(
+        over.get("config").and_then(serde_json::Value::as_str),
+        Some(format!("$LOCALDATA/{identifier}").as_str())
+    );
+    let keys: Vec<&str> = over.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["config"], "only the config folder is overridden");
+}

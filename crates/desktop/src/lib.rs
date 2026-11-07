@@ -221,6 +221,9 @@ pub fn run() -> tauri::Result<()> {
     let builder = builder.plugin_rust_only(tauri_plugin_updater::Builder::new().build());
     let app = builder
         // Not decorations: the frame is the room's (window_frame.rs), never a saved one.
+        // The state lives in the local data folder, not Roaming AppData, so a share that is
+        // down cannot stall start or quit (`app.appDirectoriesOverride` in tauri.conf.json). The
+        // Roaming state is not migrated: a saved window size is lost once.
         .plugin_rust_only(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(window_size::state_flags())
