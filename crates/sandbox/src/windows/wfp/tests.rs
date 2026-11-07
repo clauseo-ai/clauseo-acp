@@ -484,6 +484,16 @@ fn the_base_filtering_engine_down_is_named() {
 }
 
 #[test]
+fn an_owner_probe_refusal_counts_only_as_access_denied_from_its_own_call() {
+    let denied = |call, code| WfpError { call, code };
+    assert!(denied("FwpmFilterAdd0", 5).is_access_denied_from("FwpmFilterAdd0"));
+    assert!(denied("FwpmFilterAdd0", 0x8007_0005).is_access_denied_from("FwpmFilterAdd0"));
+    // FWP_E_INCOMPATIBLE_CONDITION, say: refused, but not for the owner's rights.
+    assert!(!denied("FwpmFilterAdd0", 0x8032_0025).is_access_denied_from("FwpmFilterAdd0"));
+    assert!(!denied("FwpmEngineOpen0", 5).is_access_denied_from("FwpmFilterAdd0"));
+}
+
+#[test]
 fn only_administrators_or_system_may_own_our_objects() {
     assert!(owner_allowed("S-1-5-32-544"));
     assert!(owner_allowed("S-1-5-18"));

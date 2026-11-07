@@ -144,6 +144,12 @@ pub(in crate::windows::wfp) fn owner_allowed(owner: &str) -> bool {
 }
 
 impl WfpError {
+    /// Whether this is access denied (`ERROR_ACCESS_DENIED`, as a Win32 code or an HRESULT)
+    /// from `call`: what the owner probe's refusals must be, so none passes for another reason.
+    pub fn is_access_denied_from(&self, call: &str) -> bool {
+        self.call == call && matches!(self.code, 5 | 0x8007_0005)
+    }
+
     /// The words for set-up's cause: the Base Filtering Engine named when it isn't running,
     /// objects of ours owned by someone other than Administrators or SYSTEM named, else the
     /// call and its code. Each fails the set-up: WFP is the boundary.

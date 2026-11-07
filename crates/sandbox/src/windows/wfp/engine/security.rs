@@ -15,11 +15,13 @@ use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FwpmSubLayerGetSecurityInfoByKey0, FwpmSubLayerSetSecurityInfoByKey0,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, REVOKE_ACCESS, SDDL_REVISION_1,
     SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE, OWNER_SECURITY_INFORMATION, PSID,
+    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, NO_INHERITANCE,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
 };
 use windows::core::{GUID, HSTRING, PWSTR};
 
@@ -127,8 +129,65 @@ pub(in crate::windows::wfp) fn grant(
     };
     // SAFETY: `merged` came from SetEntriesInAclW (LocalAlloc) and is freed once, here.
     unsafe { LocalFree(Some(HLOCAL(merged.cast()))) };
-    check("Fwpm*SetSecurityInfoByKey0", code, &[])
+    check(SET_SECURITY, code, &[])
 }
+
+/// Replaces `object`'s DACL in `ns` with `sddl`'s, with no read first: the call needs only
+/// `WRITE_DAC`, so the owner probe's refusal comes from that right alone.
+pub(in crate::windows::wfp) fn set_dacl(
+    engine: &Engine,
+    ns: &Namespace,
+    object: Object,
+    sddl: &str,
+) -> Result<(), WfpError> {
+    let (kind, key) = kind_and_key(ns, object);
+    let key = key.as_ref().map(ptr::from_ref);
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a live string and out-pointer; freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &HSTRING::from(sddl),
+            SDDL_REVISION_1,
+            &raw mut sd,
+            None,
+        )
+    }
+    .map_err(|error| WfpError {
+        call: "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+        code: code_of(error.code()),
+    })?;
+    let (mut present, mut defaulted) = (windows::core::BOOL(0), windows::core::BOOL(0));
+    let mut acl: *mut ACL = ptr::null_mut();
+    // SAFETY: `sd` is valid; the out-pointers are live; `acl` points into `sd`.
+    let read = unsafe {
+        GetSecurityDescriptorDacl(sd, &raw mut present, &raw mut acl, &raw mut defaulted)
+    };
+    let info = DACL_SECURITY_INFORMATION.0;
+    let dacl = Some(acl.cast_const());
+    let handle = engine.handle;
+    let code = read.map_or(u32::MAX, |()| {
+        // SAFETY: `key` is as in [`grant`]; `acl` lives in `sd` through the call.
+        unsafe {
+            match kind {
+                Kind::Filter => {
+                    FwpmFilterSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
+                }
+                Kind::Sublayer => {
+                    FwpmSubLayerSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
+                }
+                Kind::Provider => {
+                    FwpmProviderSetSecurityInfoByKey0(handle, key, info, None, None, dacl, None)
+                }
+            }
+        }
+    });
+    // SAFETY: from the conversion, freed once.
+    unsafe { LocalFree(Some(HLOCAL(sd.0))) };
+    check(SET_SECURITY, code, &[])
+}
+
+/// The call name a failed DACL write gives.
+pub(in crate::windows::wfp) const SET_SECURITY: &str = "Fwpm*SetSecurityInfoByKey0";
 
 /// The owner of `object` in `ns`, as a SID string.
 pub(in crate::windows::wfp) fn owner_of(
