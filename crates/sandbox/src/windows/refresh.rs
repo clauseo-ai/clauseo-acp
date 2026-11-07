@@ -90,7 +90,7 @@ mod walk;
 mod windows_refresher;
 #[cfg(test)]
 #[cfg(windows)]
-mod windows_tests;
+pub(crate) mod windows_tests;
 
 pub use rules::{
     EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,

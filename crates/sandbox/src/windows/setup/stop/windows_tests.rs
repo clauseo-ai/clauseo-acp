@@ -24,12 +24,18 @@ use windows::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-use super::pick;
-use super::windows_stopper::{look_at, processes};
+use super::windows_bits::{self, Com};
+use super::windows_stopper::{WindowsStopper, look_at, processes};
+use super::{Passes, cancel_jobs, pick};
+use crate::test_support::TempDir;
 use crate::windows::acl::object::{Handle, words};
 use crate::windows::acl_bytes::{build_descriptor, empty_acl};
+use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
+use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
 use crate::windows::setup::processes::{DebugPrivilege, owner_of};
-use crate::windows::test_dacl::elevated;
+use crate::windows::setup::strays::TASK_TEST_PREFIX;
+use crate::windows::sids::Sid;
+use crate::windows::test_dacl::{elevated, protect_with};
 
 /// Whether the test may run here: an elevated token and `CLAUSEO_ELEVATED_TESTS=1`.
 fn gate(test: &str) -> bool {
@@ -133,4 +139,100 @@ fn elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_pic
     assert!(picked.stop.is_empty() && picked.unknown == 1, "{picked:?}");
     drop(debug);
     drop(child);
+}
+
+/// The BITS jobs of `owner`, all users' listed as `windows_bits` lists them for the stop.
+fn jobs_of(owner: &Sid) -> usize {
+    let jobs = windows_bits::jobs().unwrap();
+    jobs.iter()
+        .filter(|(_, by)| by.as_ref() == Some(owner))
+        .count()
+}
+
+/// The test user, with every BITS job it owns cancelled as this administrator before the
+/// account and its profile go (`TestUser`'s drop, after this one's).
+struct WithJobs(TestUser);
+
+impl Drop for WithJobs {
+    fn drop(&mut self) {
+        let _com = Com::new();
+        match windows_bits::jobs() {
+            Ok(jobs) => {
+                for (job, owner) in &jobs {
+                    if owner.as_ref() == Some(&self.0.sid)
+                        && let Err(why) = windows_bits::cancel(job)
+                    {
+                        eprintln!("a job of {} wasn't cancelled: {why}", self.0.name);
+                    }
+                }
+            }
+            Err(why) => eprintln!("the BITS jobs weren't listed for the clean-up: {why}"),
+        }
+    }
+}
+
+/// `--stop`'s BITS step (`cancel_jobs`, over the real `WindowsStopper`) cancels a job a pool
+/// user left queued. CI runs it as an elevated administrator, not as LOCAL SYSTEM: the run as
+/// SYSTEM, from the task, is a VM row. A cancel that fails, `ERROR_NOT_LOGGED_ON` (1245)
+/// included, fails the test: that is the evidence the step works for a logged-off user.
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_the_stop_cancels_a_pool_users_bits_job() {
+    if !gate("elevated_the_stop_cancels_a_pool_users_bits_job") {
+        return;
+    }
+    // 1. A standard account, as the task test makes one.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = WithJobs(TestUser::named(TASK_TEST_PREFIX, &random_hex(3)));
+    let sid = user.0.sid.clone();
+    eprintln!("1. the test user: {} {}", user.0.name, sid.as_str());
+    let dir = TempDir::new("stop-bits");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+
+    // 2. As that user, unelevated: a download job with no file, left queued.
+    let job = format!("ClauseoStopProbe{}", std::process::id());
+    let create = format!(r#""{}\bitsadmin.exe" /create /download {job}"#, system32());
+    let (code, printed) = try_in_cmd(&user.0, dir.path(), &create);
+    eprintln!("2. as the test user: {create}\nexit {code:?}\n{printed}");
+    assert_eq!(
+        code,
+        Some(0),
+        "bitsadmin /create as the test user:\n{printed}"
+    );
+
+    // 3. As this process: the job is there, owned by the test user.
+    let _com = Com::new();
+    let before = jobs_of(&sid);
+    eprintln!(
+        "3. jobs owned by {} before the stop: {before}",
+        sid.as_str()
+    );
+    assert!(before >= 1, "no BITS job is owned by the test user");
+
+    // 4. The stop's own BITS step, with the test user as the pool.
+    let mut stopper = WindowsStopper::new();
+    let mut passes = Passes::default();
+    let pool = std::slice::from_ref(&sid);
+    let listed = cancel_jobs(&mut stopper, pool, &mut passes);
+    eprintln!(
+        "4. cancel_jobs: {listed:?}, {} cancelled, {} not, capped {}",
+        passes.jobs_cancelled, passes.jobs_failed, passes.jobs_capped
+    );
+    assert_eq!(listed, Ok(()));
+    assert_eq!(
+        passes.jobs_failed, 0,
+        "a job wasn't cancelled, or its owner wasn't read"
+    );
+    assert!(!passes.jobs_capped);
+    assert_eq!(passes.jobs_cancelled, before);
+    assert!(passes.found.contains(&sid), "the owner is marked as found");
+    drop(stopper);
+    let after = jobs_of(&sid);
+    eprintln!("4. jobs owned by {} after the stop: {after}", sid.as_str());
+    assert_eq!(after, 0, "a job of the test user is still listed");
+    eprintln!("5. the clean-up cancels anything left, then deletes the user");
 }
