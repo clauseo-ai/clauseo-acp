@@ -15,6 +15,12 @@
 //!   `ui-effect clipboard-write failed <call> <code>` (the call that failed, `GetLastError`);
 //!   with `atom`, `ui-info atom <name> <n>` (`GlobalFindAtomW`, 0 when none). `token` prints
 //!   all but the atom line too.
+//! - `ui-control`: the harness's positive control, started as the lawyer under the agent's token
+//!   shape (Low, restricted) on the control station's `Default` desktop, outside the runner's
+//!   job: `ui-control station <name>`, `ui-control integrity <sid>`, `ui-control restricted
+//!   <n>`, `ui-control ui-limits <hex>` (information), then `ui-control desktop-create <code>`
+//!   and `ui-control clipboard-write ok` or `ui-control clipboard-write failed <call> <code>`,
+//!   the same two calls as `job-ui`'s effect.
 //! - `clipboard-read`: `clipboard-read ok <text>` or `clipboard-read error <why>`.
 //! - `clipboard-write <text>`: `clipboard-write ok` or `clipboard-write error <why>`.
 //! - `find-atom <name>`: `atom <n>`, 0 when `GlobalFindAtomW` finds none.
@@ -74,6 +80,10 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             job_ui(rest.first().map(String::as_str));
             ExitCode::SUCCESS
         }
+        "ui-control" => {
+            ui_control();
+            ExitCode::SUCCESS
+        }
         "clipboard-read" => {
             match ui::read_text() {
                 Ok(text) => say(&format!("clipboard-read ok {text}")),
@@ -117,7 +127,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         },
         _ => usage(
             "token|wait|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
-             clipboard-read|clipboard-write|find-atom|runners|breakaway|handles|desktop",
+             ui-control|clipboard-read|clipboard-write|find-atom|runners|breakaway|handles|desktop",
         ),
     }
 }
@@ -163,6 +173,37 @@ fn job_ui(atom: Option<&str>) {
     }
     if let Some(name) = atom {
         say(&format!("ui-info atom {name} {}", ui::find_atom(name)));
+    }
+}
+
+/// The positive control's two calls, as `job_ui` makes them, and what tells its token and
+/// station apart (information for the harness, which checks the shape).
+fn ui_control() {
+    match super::win_desk::own_station_name() {
+        Ok(name) => say(&format!("ui-control station {name}")),
+        Err(code) => say(&format!("ui-control station error {code}")),
+    }
+    match win::own_token() {
+        Ok(facts) => {
+            say(&format!("ui-control integrity {}", facts.integrity));
+            say(&format!("ui-control restricted {}", facts.restricted.len()));
+        }
+        Err(error) => say(&format!("ui-control token error {}", code(&error))),
+    }
+    match win::job_ui_limits() {
+        Ok(limits) => say(&format!("ui-control ui-limits {limits:#x}")),
+        Err(error) => say(&format!("ui-control ui-limits error {}", code(&error))),
+    }
+    say(&format!(
+        "ui-control desktop-create {}",
+        super::win_desk::create_desktop_code()
+    ));
+    match ui::write_failed("clauseo-ui-control") {
+        Ok(()) => say("ui-control clipboard-write ok"),
+        Err(failed) => say(&format!(
+            "ui-control clipboard-write failed {} {}",
+            failed.call, failed.code
+        )),
     }
 }
 

@@ -2,8 +2,9 @@
 //! `WinSta0\Default`'s DACLs as SDDL, and the probe's tries (its own station's name, opening
 //! `WinSta0` and then `Default` on it, `SwitchDesktop` on its own desktop, a GDI capture of the
 //! screen it can reach), `CreateDesktopW` on the caller's own station (`job-ui`'s effect), and
-//! the harness's control: a fresh window station with a `Default` desktop, made the way the
-//! outer runner makes the agent's. Each gives a plain value or the Win32 code, never a panic.
+//! the harness's control station: a fresh window station with a `Default` desktop, made the way
+//! the outer runner makes the agent's, kept open while the control process runs on it. Each
+//! gives a plain value or the Win32 code, never a panic.
 #![expect(
     unsafe_code,
     reason = "FFI to the window station, desktop, security descriptor and GDI calls"
@@ -269,64 +270,85 @@ pub(crate) fn create_desktop_code() -> u32 {
     0
 }
 
-/// The harness's control for the agent's `CreateDesktopW`: makes the window station `name` as
-/// `runner/desktop.rs` makes `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)`
-/// with a DACL of `user_sid` and `SYSTEM`, labelled Low), switches this process to it, makes
-/// the desktop `Default` there (`GENERIC_ALL`, the same descriptor), switches back and closes
-/// both. The call that failed and its code otherwise.
-pub(crate) fn control_station(name: &str, user_sid: &str) -> Result<(), (&'static str, u32)> {
-    let sddl = format!("D:(A;;GA;;;{user_sid})(A;;GA;;;SY)S:(ML;;NW;;;LW)");
-    let mut descriptor = PSECURITY_DESCRIPTOR::default();
-    // SAFETY: the text is a live HSTRING; `descriptor` is a live out-pointer, freed below.
-    unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            &HSTRING::from(sddl),
-            SDDL_REVISION_1,
-            &raw mut descriptor,
-            None,
-        )
-    }
-    .map_err(|e| {
-        (
-            "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-            code_of(&e),
-        )
-    })?;
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(0),
-        lpSecurityDescriptor: descriptor.0,
-        bInheritHandle: false.into(),
-    };
-    // SAFETY: the name is a live HSTRING; the attributes and their descriptor outlive the call;
-    // the station is closed below.
-    let made = unsafe {
-        CreateWindowStationW(
-            &HSTRING::from(name),
-            0,
-            GENERIC_ALL,
-            Some(&raw const attributes),
-        )
-    };
-    let result = match made {
-        Ok(station) => {
-            let result = desktop_on(station, &attributes);
-            // SAFETY: made above and no longer the process's station; closed once.
-            drop(unsafe { CloseWindowStation(station) });
-            result
+/// The control station: the window station `name`, made as `runner/desktop.rs` makes
+/// `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `user_sid`
+/// and `SYSTEM`, labelled Low), and its desktop `Default` (`GENERIC_ALL`, the same descriptor),
+/// made with this process switched to it for the call only. Both stay open while it lives, so the
+/// control process can start on `<name>\Default`; closed on drop.
+pub(crate) struct ControlStation {
+    station: HWINSTA,
+    desktop: HDESK,
+}
+
+impl ControlStation {
+    /// Makes the station and its desktop; the call that failed and its code otherwise.
+    pub(crate) fn open(name: &str, user_sid: &str) -> Result<ControlStation, (&'static str, u32)> {
+        let sddl = format!("D:(A;;GA;;;{user_sid})(A;;GA;;;SY)S:(ML;;NW;;;LW)");
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: the text is a live HSTRING; `descriptor` is a live out-pointer, freed below.
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                &HSTRING::from(sddl),
+                SDDL_REVISION_1,
+                &raw mut descriptor,
+                None,
+            )
         }
-        Err(error) => Err(("CreateWindowStationW", code_of(&error))),
-    };
-    // SAFETY: allocated by the conversion with LocalAlloc, freed once, after its last use.
-    unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
-    result
+        .map_err(|e| {
+            (
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+                code_of(&e),
+            )
+        })?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(0),
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: false.into(),
+        };
+        // SAFETY: the name is a live HSTRING; the attributes and their descriptor outlive the
+        // call; the station is closed on failure below, or by the guard's drop.
+        let made = unsafe {
+            CreateWindowStationW(
+                &HSTRING::from(name),
+                0,
+                GENERIC_ALL,
+                Some(&raw const attributes),
+            )
+        };
+        let result = match made {
+            Ok(station) => match desktop_on(station, &attributes) {
+                Ok(desktop) => Ok(ControlStation { station, desktop }),
+                Err(failed) => {
+                    // SAFETY: made above and not the process's station; closed once.
+                    drop(unsafe { CloseWindowStation(station) });
+                    Err(failed)
+                }
+            },
+            Err(error) => Err(("CreateWindowStationW", code_of(&error))),
+        };
+        // SAFETY: allocated by the conversion with LocalAlloc, freed once, after its last use
+        // (the objects keep their own copies).
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+        result
+    }
+}
+
+impl Drop for ControlStation {
+    fn drop(&mut self) {
+        // SAFETY: both made in `open`, the station not the process's; each closed once, here.
+        unsafe {
+            drop(CloseDesktop(self.desktop));
+            drop(CloseWindowStation(self.station));
+        }
+    }
 }
 
 /// Makes the desktop `Default` on `station` with `attributes`, this process switched to it for
-/// the call only, and closes it.
+/// the call only; its handle, open.
 fn desktop_on(
     station: HWINSTA,
     attributes: &SECURITY_ATTRIBUTES,
-) -> Result<(), (&'static str, u32)> {
+) -> Result<HDESK, (&'static str, u32)> {
     // SAFETY: plain call; the process's own station isn't ours to close.
     let own = unsafe { GetProcessWindowStation() }
         .map_err(|e| ("GetProcessWindowStation", code_of(&e)))?;
@@ -353,9 +375,13 @@ fn desktop_on(
     if desktop.is_null() {
         return Err(("CreateDesktopW", code));
     }
-    // SAFETY: made above, closed once.
-    drop(unsafe { CloseDesktop(HDESK(desktop)) });
-    back.map_err(|e| ("SetProcessWindowStation (back)", code_of(&e)))
+    let desktop = HDESK(desktop);
+    if let Err(error) = back {
+        // SAFETY: made above, closed once.
+        drop(unsafe { CloseDesktop(desktop) });
+        return Err(("SetProcessWindowStation (back)", code_of(&error)));
+    }
+    Ok(desktop)
 }
 
 /// The code `SwitchDesktop` on this thread's own desktop gives; 0 when it switched.
