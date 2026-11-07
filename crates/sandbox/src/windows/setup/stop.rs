@@ -47,20 +47,22 @@
 //!    pool user at once, before anything is stopped, as that process may be any of theirs. Once
 //!    the lock stays held, or a write fails, no more are tried (49), so the lock's wait comes once
 //!    at most;
-//! 7. only then, on a run that will end 0, writes `StopCompleted` and
-//!    `StopLeft` (0) into the record under the set-up lock (`record_values::STOP_COMPLETED`).
+//! 7. only then, on a run that will end 0, counts `StopSequence` up by one and writes
+//!    `StopCompleted` into the record under the set-up lock (`record_values::STOP_SEQUENCE`).
 //!    `StopCompleted` is when the last clean observation began, not when it is written: the
 //!    earlier of the pass that found no pool user's process (after which nothing was stopped)
 //!    and the BITS step's enumeration, so a pool process started after it isn't claimed covered.
 //!    A run the task's end kills, or one that ends non-zero, never writes them and leaves an
-//!    earlier pair as it is; a write that fails, or a lock that stays held, is 49.
+//!    earlier pair as it is (the sequence unchanged); a write that fails, or a lock that stays
+//!    held, is 49.
 //!
 //! The owner may end the task: it holds read and execute on it (`FRFX`, `refresh::task_sddl`),
 //! since starting a task needs execute (CI run 42416074600), and execute ends one too. So an
-//! ended stop must never pass for a finished one: only `StopCompleted` says the pool is clear.
-//! The logon refusal (F4) and the unclean-session marker are to clear on it alone; that wiring
-//! lands in the follow-up PR. Ending a stop is denial of service only, which code running as
-//! the owner could do to its own sessions anyway.
+//! ended stop must never pass for a finished one: only a completed stop counts `StopSequence` up.
+//! The follow-up PR clears the logon refusal (F4) and the unclean-session marker only on a
+//! `StopSequence` greater than the one the marker recorded, so nothing trusts the clock;
+//! `StopCompleted` is the last clean pass's time, for diagnostics. Ending a stop is denial of
+//! service only, which code running as the owner could do to its own sessions anyway.
 //!
 //! The reset itself isn't done here: it sets a new password, which only the owner's
 //! `secrets.bin` may hold (DPAPI, as the owner), and its open-session check and its `LocalLow`
@@ -93,7 +95,8 @@ mod windows_tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopExit {
     /// 0: every pool user's process found was stopped (or none ran), those users are marked, and
-    /// `StopCompleted` is written (with a pool recorded; with none there is nothing to clear).
+    /// `StopSequence` is counted up with `StopCompleted` (with a pool recorded; with none there
+    /// is nothing to clear).
     Done,
     /// 45: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was stopped.
     NotAllowed,
@@ -108,7 +111,8 @@ pub enum StopExit {
     /// [`JOBS_CAP`].
     NotStopped,
     /// 49: the processes were stopped, but their users couldn't be marked in `ResetSids`, or
-    /// `StopCompleted` couldn't be written (the set-up lock stayed held, or the write failed).
+    /// `StopSequence` and `StopCompleted` couldn't be written (the set-up lock stayed held, or
+    /// the write failed).
     NotMarked,
 }
 
@@ -286,9 +290,9 @@ pub trait Stopper {
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
     /// The wall clock, as a `FILETIME` (100 ns since 1601, UTC).
     fn now(&mut self) -> u64;
-    /// Writes the record's `StopCompleted` (`at`, a `FILETIME`) and `StopLeft` (0), under the
-    /// set-up lock.
-    fn record_completed(&mut self, at: u64) -> Result<(), Failed>;
+    /// Counts the record's `StopSequence` up by one and writes `StopCompleted` (`at`, a
+    /// `FILETIME`), under the set-up lock: the new sequence.
+    fn record_completed(&mut self, at: u64) -> Result<u64, Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -541,10 +545,10 @@ fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
     }
 }
 
-/// Step 7: `StopCompleted` (`at`, the last clean observation) and `StopLeft` written under
-/// the set-up lock, once everything before has passed. The lock's wait may come a second time
-/// here only when a set-up took the lock after the marks; a run the task's limit ends meanwhile
-/// writes nothing.
+/// Step 7: `StopSequence` counted up and `StopCompleted` (`at`, the last clean observation)
+/// written under the set-up lock, once everything before has passed. The lock's wait may come a
+/// second time here only when a set-up took the lock after the marks; a run the task's limit
+/// ends meanwhile writes nothing.
 fn completed(fs: &mut impl Stopper, at: u64) -> Result<(), String> {
     let written = match fs.lock() {
         Ok(true) => {
@@ -555,5 +559,7 @@ fn completed(fs: &mut impl Stopper, at: u64) -> Result<(), String> {
         Ok(false) => Err("the set-up lock stayed held".to_owned()),
         Err(why) => Err(why),
     };
-    written.map_err(|why| format!("StopCompleted wasn't written: {why}"))
+    written
+        .map(|_sequence| ())
+        .map_err(|why| format!("StopCompleted wasn't written: {why}"))
 }

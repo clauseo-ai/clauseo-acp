@@ -67,8 +67,8 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
-    /// The record's `StopCompleted` once written, with each write counted.
-    completed: Option<(u64, usize)>,
+    /// The record's `StopCompleted` and `StopSequence` once written: `None` before.
+    completed: Option<(u64, u64)>,
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
@@ -238,15 +238,15 @@ impl Stopper for Fake {
         filetime(self.now)
     }
 
-    fn record_completed(&mut self, at: u64) -> Result<(), Failed> {
+    fn record_completed(&mut self, at: u64) -> Result<u64, Failed> {
         assert!(self.held, "written under the set-up lock");
         if self.marks == Marks::CompletionFails {
             return Err("RegSetValueExW failed (5)".to_owned());
         }
-        let writes = self.completed.map_or(0, |(_, writes)| writes);
-        self.completed = Some((at, writes + 1));
+        let sequence = self.completed.map_or(0, |(_, sequence)| sequence) + 1;
+        self.completed = Some((at, sequence));
         self.done.push("completed".to_owned());
-        Ok(())
+        Ok(sequence)
     }
 
     fn log(&mut self, error: bool, line: &str) {

@@ -559,7 +559,7 @@ started elevated, by the app or by the uninstall hook.
   between calls; the launch and the elevated start hash it every time.
 - **Two removals.** The app's in-app removal runs plain `--remove`: the pool, its entries and the
   rest go, and the set-up's record values with them (`OwnerSid`, `GroupSid`, `PoolSids`,
-  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopLeft`), but the copy, its four values and the SYSTEM tasks
+  `DataDir`, `Removing`, `ResetSids`, `StopCompleted`, `StopSequence`), but the copy, its four values and the SYSTEM tasks
   (refresh and stop) stay, so a later
   in-app set-up elevates the verified copy with no installer. `AdminCopyOwner` staying keeps the
   one-owner rule: the same lawyer sets up again, another user is `OtherAccount`. The
@@ -1148,7 +1148,7 @@ owner's `schtasks /run` was refused ("Access is denied", CI run 42416074600). Ex
 ends a running task (`SchRpcStop`), so the owner can end a stop or a refresh. That is accepted:
 ending a task is denial of service only, which code running as the lawyer can do to its own
 sessions anyway. An ended refresh keeps the old copy, and an ended stop can't pass for a finished
-one (only `StopCompleted` counts, "Stopping the pool's processes"). The elevated test
+one (only a completed stop counts `StopSequence` up, "Stopping the pool's processes"). The elevated test
 `elevated_the_owner_can_start_and_end_a_task_it_can_read_and_execute` shows both as a fresh
 standard account: `schtasks /run` starts the task and `schtasks /end` ends it. The folder gets that owner and DACL
 when it is made. A folder already there is kept, and given them again, only when its owner is
@@ -1334,21 +1334,22 @@ admin copy.
    held or a write fails, no more users are tried (49), so the wait comes once at most.
    Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run;
 7. only on a run that will end 0 (every pool user's process gone, every pool BITS job cancelled,
-   `ResetSids` written), writes `StopCompleted` (`REG_QWORD`, a `FILETIME`: when the last clean
+   `ResetSids` written), under the set-up lock, reads `StopSequence` (`REG_QWORD`, 0 when absent)
+   and writes it one higher, with `StopCompleted` (`REG_QWORD`, a `FILETIME`: when the last clean
    observation began, the earlier of the pass that found no pool user's process and the BITS
-   step's enumeration, so a pool process started after it isn't claimed covered)
-   and `StopLeft` (`REG_DWORD`, 0) into the record, under the set-up lock. Both are set-up
+   step's enumeration, so a pool process started after it isn't claimed covered). Both are set-up
    values outside the record proper, deleted with the record by `--remove`. A run that is ended,
    interrupted by the task's limit, or exits non-zero never writes them and leaves an earlier
    pair as it is; a write that fails, or a lock that stays held, is 49. A run with no pool
    recorded has nothing to clear and writes nothing.
 
-**Only `StopCompleted` counts.** The owner holds execute access on the task, which Run needs
+**Only `StopSequence` counts.** The owner holds execute access on the task, which Run needs
 (CI run 42416074600) and which also ends a task, so code running as the lawyer can end a stop
-mid-pass. An ended stop can't pass for a finished one: the F4 logon refusal and the
-unclean-session marker clear only on `StopCompleted`, never on the task's end or its exit
-code. That wiring lands in the follow-up PR with the runner (#649); this
-PR writes the value. Ending a stop is denial of service only: the pool users stay refused until a
+mid-pass. An ended stop can't pass for a finished one: the follow-up clears the F4 refusal and
+the marker only on a `StopSequence` greater than the one the marker recorded, never on the
+task's end or its exit code, so nothing trusts the clock; `StopCompleted` is the last clean
+pass's time, for diagnostics. That wiring lands in the follow-up PR with the runner (#649); this
+PR writes the values. Ending a stop is denial of service only: the pool users stay refused until a
 stop completes.
 
 It logs one Event Log line with counts only (processes stopped, passes, left, unknown, jobs
@@ -1356,12 +1357,12 @@ cancelled and not), and says so when a pass couldn't read the process list. Its 
 
 | Code | Meaning |
 |---|---|
-| 0 | every pool user's process found was stopped (or none ran), those users are marked, and `StopCompleted` is written |
+| 0 | every pool user's process found was stopped (or none ran), those users are marked, and `StopSequence` is counted up |
 | 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
 | 46 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
 | 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
-| 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopCompleted` couldn't be written |
+| 49 | the processes were stopped, but their users couldn't be added to `ResetSids`, or `StopSequence` and `StopCompleted` couldn't be written |
 
 **The reset.** The stop doesn't reset the profiles itself. A reset sets a new password, which
 only the owner's `secrets.bin` may hold (DPAPI, as the owner). Its open-session check and its
@@ -1376,7 +1377,7 @@ task. All it can do is stop the sandboxed agents and mark their users for a rese
 more than quitting Clauseo does. It takes no argument, so it can't be pointed at anything else.
 The same entry lets that code end a running stop or refresh (execute access ends a task, CI run
 42416074600): denial of service only. An ended refresh keeps the old copy. An ended stop never
-writes `StopCompleted`, so it can't pass for a finished one.
+counts `StopSequence` up, so it can't pass for a finished one.
 
 **Speed.** The launch path doesn't change. The task runs only when a sweep saw a pool user's
 process it couldn't stop, or once at Clauseo's start after an unclean session

@@ -23,11 +23,11 @@ use super::lock::Descriptor;
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
     CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
-    RawRecord, RegValue, SETUP_VALUES, STOP_COMPLETED, STOP_LEFT, USER_INSTALL_DIR, resets_with,
-    resets_without, sids_value,
+    RawRecord, RegValue, SETUP_VALUES, STOP_COMPLETED, STOP_SEQUENCE, USER_INSTALL_DIR,
+    resets_with, resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
-use crate::windows::record::{RecordError, read_dword, read_string, read_units};
+use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
 use crate::windows::sids::Sid;
 
 /// The record's key under `HKLM`, as `record.rs` names it.
@@ -153,13 +153,23 @@ pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineErro
     set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&all))
 }
 
-/// Writes the stop's completion: `StopCompleted` as `at` (a `FILETIME`) and `StopLeft` as 0
-/// ([`STOP_COMPLETED`]), the key made and secured as [`write`] does. The stop task calls it as
-/// SYSTEM, under the set-up lock, only on a run that ends 0.
-pub(crate) fn write_stop_completed(key: &str, at: u64) -> Result<(), MachineError> {
+/// Writes the stop's completion and returns the new sequence: `StopSequence` read (0 when
+/// absent) and written one higher, and `StopCompleted` as `at` (a `FILETIME`)
+/// ([`STOP_SEQUENCE`], [`STOP_COMPLETED`]), the key made and secured as [`write`] does. The
+/// stop task calls it as SYSTEM, under the set-up lock, only on a run that ends 0, so no two
+/// stops read the same sequence.
+pub(crate) fn write_stop_completed(key: &str, at: u64) -> Result<u64, MachineError> {
+    let subkey = HSTRING::from(key);
+    let name = HSTRING::from(STOP_SEQUENCE);
+    let seen = read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)?;
+    let next = seen
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| MachineError::Other("the record's StopSequence is at its end".to_owned()))?;
     let opened = open_secured(key)?;
+    set_value(&opened, STOP_SEQUENCE, &RegValue::Qword(next))?;
     set_value(&opened, STOP_COMPLETED, &RegValue::Qword(at))?;
-    set_value(&opened, STOP_LEFT, &RegValue::Dword(0))
+    Ok(next)
 }
 
 /// Takes `done`, the users a set-up has reset, off the record's `ResetSids`, deleting the value

@@ -1,27 +1,41 @@
-//! The stop's completion (step 7): only a run that ends 0 writes `StopCompleted` and
-//! `StopLeft` 0, under the set-up lock; a run that ends 48 or 49, or one the task's end
-//! interrupts, never does, and leaves an earlier one as it is.
+//! The stop's completion (step 7): only a run that ends 0 counts `StopSequence` up and writes
+//! `StopCompleted`, under the set-up lock; a run that ends 48 or 49, or one the task's end
+//! interrupts, never does, and leaves an earlier pair as it is.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
 
 /// A completion written by an earlier run, which a run that doesn't end 0 must leave alone.
-const EARLIER: Option<(u64, usize)> = Some((7, 1));
+const EARLIER: Option<(u64, u64)> = Some((7, 1));
 
 #[test]
-fn a_run_that_ends_0_writes_the_completion_with_none_left_last_and_under_the_lock() {
+fn a_run_that_ends_0_writes_the_completion_last_and_under_the_lock() {
     let mut fake = Fake::new(&[1010, 1011]);
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
     fake.jobs = Ok(vec![Some(sid(1011))]);
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(
-        fake.completed.map(|(_, writes)| writes),
+        fake.completed.map(|(_, sequence)| sequence),
         Some(1),
-        "written once"
+        "a first stop writes 1"
     );
     assert_eq!(fake.done.last().map(String::as_str), Some("completed"));
     assert!(!fake.held, "the lock is given back");
+}
+
+#[test]
+fn each_completed_stop_counts_the_sequence_up_by_one() {
+    let mut fake = Fake::new(&[1010]);
+    fake.snapshots = vec![Ok(Vec::new())];
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(1));
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(2));
+    // From an earlier record's sequence, one up.
+    fake.completed = Some((7, 41));
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(fake.completed.map(|(_, sequence)| sequence), Some(42));
 }
 
 #[test]
