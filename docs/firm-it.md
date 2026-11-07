@@ -66,6 +66,11 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   `clauseo-sandbox-setup.exe` may stay in the install folder until it has. If the removal doesn't
   finish (a folder it can't reach, say), the `sandbox` folder and the key stay: reinstall
   Clauseo, then uninstall it again, and the new removal finishes the job.
+- A sandbox user's profile folder (`C:\Users\ClauseoSb01`, say) that Windows left behind, which
+  set-up names when it stops, is deleted with `rd /s /q "C:\Users\ClauseoSb01"` from a Command
+  Prompt run as administrator: `rd` deletes a junction or symbolic link inside as a link and
+  leaves what it points at. Never run `takeown /R` or `icacls /T` on a sandbox user's profile:
+  both follow links and would change folders outside it.
 
 ### Intune (Win32 app)
 
