@@ -9,12 +9,11 @@
 
 use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
 use windows::Win32::Networking::WinHttp::{
-    ERROR_WINHTTP_AUTODETECTION_FAILED, WINHTTP_ACCESS_TYPE_NAMED_PROXY,
-    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP, WINHTTP_AUTO_DETECT_TYPE_DNS_A,
-    WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL, WINHTTP_AUTOPROXY_OPTIONS,
-    WINHTTP_AUTOPROXY_RUN_INPROCESS, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO,
-    WinHttpCloseHandle, WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen,
-    WinHttpSetTimeouts,
+    WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTO_DETECT_TYPE_DHCP,
+    WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL,
+    WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_AUTOPROXY_RUN_INPROCESS,
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO, WinHttpCloseHandle,
+    WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen, WinHttpSetTimeouts,
 };
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
@@ -31,19 +30,27 @@ const UNABLE_TO_DOWNLOAD_SCRIPT: u32 = 12_167;
 const AUTOPROXY_SERVICE_ERROR: u32 = 12_178;
 
 /// The system's route for `target` (`https://host:port/`). `Err` holds a reason with no URL.
+/// A WPAD lookup that failed, with nothing else set, is `Err` ([`parse::wpad_only`]): only
+/// "no WPAD file found" (12180) reads as no proxy. `WinHTTP` reports "no WPAD on this network"
+/// and a transient discovery failure with the same code (12180), so a transient one still reads
+/// as direct on a refresh.
 pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String> {
     let config = IeConfig::current()?;
     let auto_config_url = config.auto_config_url.take_string();
+    let mut wpad = None;
     if config.auto_detect || auto_config_url.is_some() {
         let session = Session::open()?;
         if config.auto_detect {
             match session.proxy_for_url(target, &Pac::AutoDetect) {
                 Ok(route) => return Ok(route),
-                Err(error) if error == ERROR_WINHTTP_AUTODETECTION_FAILED => {
-                    tracing::debug!(host, port, "no WPAD file found");
-                }
                 Err(error) => {
-                    tracing::warn!(port, error, "WPAD failed; trying the next setting");
+                    let answer = parse::wpad_only(error);
+                    if answer.is_ok() {
+                        tracing::debug!(host, port, "no WPAD file found");
+                    } else {
+                        tracing::warn!(port, error, "WPAD failed; trying the next setting");
+                    }
+                    wpad = Some(answer);
                 }
             }
         }
@@ -54,7 +61,8 @@ pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String
         }
     }
     let Some(proxy) = config.proxy.take_string() else {
-        return Ok(Route::Direct);
+        // Nothing else set: WPAD's answer, a failure included; none at all is direct.
+        return wpad.unwrap_or(Ok(Route::Direct));
     };
     let bypass = Bypass::parse(&config.bypass.take_string().unwrap_or_default());
     if bypass.matches(&parse::normal_host(host), port) {

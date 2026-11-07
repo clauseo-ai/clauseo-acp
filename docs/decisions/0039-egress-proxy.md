@@ -104,7 +104,10 @@ code departs from the brief.
   WinHTTP lookup, WPAD included, is bounded to 10 s on its own thread, and at most 8 such threads
   live at once in the process (a lookup left running past its bound keeps its slot), so hung
   lookups cannot pile up threads; past that the lookup fails. A failed lookup is kept apart from
-  `DIRECT` (`UpstreamAnswer::Failed`, cached the same 60 s); a connection takes it as direct, and
+  `DIRECT` (`UpstreamAnswer::Failed`, cached the same 60 s): on Windows, a WPAD lookup that fails
+  with nothing else set is failed, but for WinHTTP's "no WPAD file found" (12180), which is no
+  proxy; WinHTTP reports "no WPAD on this network" and a transient discovery failure with that same
+  code, so a transient one still reads as direct; a connection takes it as direct, and
   `upstream_answer` hands it to a caller that keeps an earlier answer over a failure (desktop's S17
   route refresh). `upstream_for` (stage E's connector relay) maps a failure to direct, returns
   `Result<Route, Error>` and refuses a firm URL that `start_proxy` refuses, so the relay fails
