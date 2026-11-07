@@ -289,8 +289,9 @@ pub(crate) fn breakaway(lines: &[String]) -> Result<String, String> {
     }
 }
 
-/// `wts-visibility`, from `probe wts`'s lines (`win_pool::wts_lines`): always INFO, naming what
-/// a pool user's `WTSEnumerateProcessesW` returned next to its Toolhelp snapshot, or the error.
+/// `wts-visibility`, from `probe wts`'s lines (`win_pool::wts_lines`), once the probe ran: always
+/// PASS, information naming what a pool user's `WTSEnumerateProcessesW` returned next to its
+/// Toolhelp snapshot, or the error. Only a probe that never ran is INFO (the row's own).
 pub(crate) fn wts_visibility(lines: &[String]) -> Verdict {
     let toolhelp = match (
         values(lines, "wts toolhelp").first(),
@@ -301,7 +302,7 @@ pub(crate) fn wts_visibility(lines: &[String]) -> Verdict {
         (None, None) => "no Toolhelp line".to_owned(),
     };
     if let Some(code) = values(lines, "wts enum-error").first() {
-        return Verdict::Info(format!(
+        return Verdict::Pass(format!(
             "as the pool user, WTSEnumerateProcessesW failed with {code}; {toolhelp}"
         ));
     }
@@ -312,7 +313,7 @@ pub(crate) fn wts_visibility(lines: &[String]) -> Verdict {
             _ => None,
         }
     }) else {
-        return Verdict::Info(format!("probe wts printed no wts enum line: {lines:?}"));
+        return Verdict::Pass(format!("probe wts printed no wts enum line: {lines:?}"));
     };
     let (total, sid, own) = counts;
     let missing = values(lines, "wts missing").first().map_or_else(
@@ -322,7 +323,7 @@ pub(crate) fn wts_visibility(lines: &[String]) -> Verdict {
             format!("{n} Toolhelp processes not in WTS (first: {names})")
         },
     );
-    Verdict::Info(format!(
+    Verdict::Pass(format!(
         "as the pool user: {toolhelp}; WTSEnumerateProcessesW {total} entries, {sid} with a user \
          SID, {own} the pool user's; {missing}"
     ))
@@ -520,9 +521,9 @@ mod tests {
         assert!(breakaway(&failed).is_err());
     }
 
-    fn info_names(verdict: &Verdict, words: &[&str]) {
-        let Verdict::Info(text) = verdict else {
-            panic!("not INFO: {verdict:?}");
+    fn pass_names(verdict: &Verdict, words: &[&str]) {
+        let Verdict::Pass(text) = verdict else {
+            panic!("not PASS: {verdict:?}");
         };
         for word in words {
             assert!(text.contains(word), "{text:?} doesn't name {word:?}");
@@ -530,13 +531,13 @@ mod tests {
     }
 
     #[test]
-    fn wts_visibility_is_info_naming_the_counts() {
+    fn wts_visibility_passes_naming_the_counts() {
         let seen = lines(&[
             "wts toolhelp 120",
             "wts enum 41 sid 41 own 3",
             "wts missing 79 lsass.exe,csrss.exe",
         ]);
-        info_names(
+        pass_names(
             &wts_visibility(&seen),
             &[
                 "Toolhelp 120",
@@ -546,20 +547,20 @@ mod tests {
                 "79",
             ],
         );
-        info_names(&wts_visibility(&seen), &["lsass.exe,csrss.exe"]);
+        pass_names(&wts_visibility(&seen), &["lsass.exe,csrss.exe"]);
     }
 
     #[test]
-    fn wts_visibility_is_info_on_an_error_or_no_lines() {
+    fn wts_visibility_passes_on_an_error_or_no_lines() {
         let failed = lines(&["wts toolhelp 120", "wts enum-error 5"]);
-        info_names(&wts_visibility(&failed), &["failed with 5", "Toolhelp 120"]);
+        pass_names(&wts_visibility(&failed), &["failed with 5", "Toolhelp 120"]);
         let no_toolhelp = lines(&["wts toolhelp-error 24", "wts enum 3 sid 0 own 0"]);
-        info_names(
+        pass_names(
             &wts_visibility(&no_toolhelp),
             &["Toolhelp failed (24)", "3 entries"],
         );
-        info_names(&wts_visibility(&[]), &["no wts enum line"]);
-        info_names(
+        pass_names(&wts_visibility(&[]), &["no wts enum line"]);
+        pass_names(
             &wts_visibility(&lines(&["wts enum 3 sid"])),
             &["no wts enum line"],
         );

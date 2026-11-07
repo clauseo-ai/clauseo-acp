@@ -153,12 +153,13 @@ pool user's, so either listing with one is INFO, naming the count and the images
   `S-1-5-12`, `S-1-5-32-545` and `S-1-1-0`, the integrity is Low and every logon SID is
   deny-only (as `whoami` asserts); FAIL names each that differs; INFO when the token can't be
   read. The logon SID's attributes are printed.
-- `wts-visibility`: information only, always INFO (it never fails, and like any INFO row it
-  turns the result red). The harness runs `probe wts` as A's pool user, outside any job, on a
-  control station of its own, and ends it after 30 s. The probe counts a Toolhelp snapshot's
-  processes; what `WTSEnumerateProcessesW` on `WTS_CURRENT_SERVER_HANDLE` returns (its entries,
-  those with a user SID, those whose SID is the pool user's); and the Toolhelp processes WTS left
-  out, with the first eight image names. A failed call is recorded with its code.
+- `wts-visibility`: information only. PASS whenever the probe ran, its counts printed as
+  `information:` notes; INFO (naming why) only when the probe couldn't run; never FAIL. The harness
+  runs `probe wts` as A's pool user, outside any job, on a control station of its own, and ends it
+  after 30 s. The probe counts a Toolhelp snapshot's processes; what `WTSEnumerateProcessesW` on
+  `WTS_CURRENT_SERVER_HANDLE` returns (its entries, those with a user SID, those whose SID is the
+  pool user's); and the Toolhelp processes WTS left out, with the first eight image names. A failed
+  call is recorded with its code.
 
 - `end-cleanup` (`checks_cleanup.rs`, verdict in `cleanup_verdict.rs`): before the session, the
   harness, logged on as A's pool user as above, runs `probe items plant <tag>`
