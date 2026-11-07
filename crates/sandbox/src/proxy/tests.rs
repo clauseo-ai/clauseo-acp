@@ -4,6 +4,7 @@
 
 mod browser;
 mod connect;
+mod failed;
 mod harness;
 mod http;
 mod limits;

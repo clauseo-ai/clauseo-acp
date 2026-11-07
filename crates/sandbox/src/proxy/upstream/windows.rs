@@ -17,8 +17,25 @@ use windows::Win32::Networking::WinHttp::{
 };
 use windows::core::{BOOL, HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
-use super::Route;
+use super::{Configured, Route};
+
 use super::parse::{self, AUTOPROXY_SERVICE_ERROR, Bypass, PacFrom, UNABLE_TO_DOWNLOAD_SCRIPT};
+
+/// `ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`: a PAC script was found and would not run.
+const BAD_AUTO_PROXY_SCRIPT: u32 = 12_166;
+
+/// A failed lookup: the reason, with no URL, and what the settings held (`None` when they could
+/// not be read).
+pub(super) struct Failed {
+    pub(super) why: String,
+    pub(super) configured: Option<Configured>,
+}
+
+/// What the settings hold, for a failure that read none: a PAC URL or a static proxy. Settings
+/// that cannot be read hold neither.
+pub(super) fn configured() -> Configured {
+    IeConfig::current().map_or_else(|_| Configured::default(), |config| config.configured())
+}
 
 /// `WinHTTP`'s resolve, connect, send and receive timeouts for a PAC download, in milliseconds.
 const PAC_TIMEOUT_MS: i32 = 5_000;
@@ -27,13 +44,22 @@ const PAC_TIMEOUT_MS: i32 = 5_000;
 /// A WPAD lookup that failed, with nothing else set, is `Err` unless its error means no proxy
 /// here (12180, 12167, 12178: [`parse::pac_error`]); a PAC URL that fails is always `Err`.
 /// `WinHTTP` reports "no WPAD on this network" and a transient discovery failure with the same
-/// code (12180), so a transient one still reads as direct on a refresh.
-pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String> {
-    let config = IeConfig::current()?;
+/// code (12180), so a transient one still reads as direct on a refresh. A failure carries what
+/// the settings held, and whether WPAD's script would not run (12166).
+pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, Failed> {
+    let config = IeConfig::current().map_err(|why| Failed {
+        why,
+        configured: None,
+    })?;
+    let configured = config.configured();
+    let failed = |why: String, configured: Configured| Failed {
+        why,
+        configured: Some(configured),
+    };
     let auto_config_url = config.auto_config_url.take_string();
     let mut wpad = None;
     if config.auto_detect || auto_config_url.is_some() {
-        let session = Session::open()?;
+        let session = Session::open().map_err(|why| failed(why, configured))?;
         if config.auto_detect {
             match session.proxy_for_url(target, &Pac::AutoDetect) {
                 Ok(route) => return Ok(route),
@@ -44,14 +70,20 @@ pub(super) fn route(target: &str, host: &str, port: u16) -> Result<Route, String
                     } else {
                         tracing::warn!(port, error, "WPAD failed; trying the next setting");
                     }
-                    wpad = Some(answer);
+                    let broken_script = error == BAD_AUTO_PROXY_SCRIPT;
+                    let configured = Configured {
+                        broken_script,
+                        ..configured
+                    };
+                    wpad = Some(answer.map_err(|why| failed(why, configured)));
                 }
             }
         }
         if let Some(url) = auto_config_url {
             return session
                 .proxy_for_url(target, &Pac::Url(&url))
-                .or_else(|error| parse::pac_error(PacFrom::Url, error));
+                .or_else(|error| parse::pac_error(PacFrom::Url, error))
+                .map_err(|why| failed(why, configured));
         }
     }
     let Some(proxy) = config.proxy.take_string() else {
@@ -126,6 +158,15 @@ impl IeConfig {
             proxy: WinString(raw.lpszProxy),
             bypass: WinString(raw.lpszProxyBypass),
         })
+    }
+
+    /// A PAC URL or a static proxy set: auto-detect alone is neither.
+    fn configured(&self) -> Configured {
+        Configured {
+            pac_url: self.auto_config_url.take_string().is_some(),
+            static_proxy: self.proxy.take_string().is_some(),
+            broken_script: false,
+        }
     }
 }
 
