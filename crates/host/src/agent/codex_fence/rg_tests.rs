@@ -172,7 +172,9 @@ const PLANTABLE_PER_MATTER: usize = 6 + 3 * 6 + 1;
 /// bwrap.rs:62).
 const CODEX_GLOB_CAP: usize = 8192;
 
-/// The 8192-cap headroom and the depth cap, through the real split and rg. One matter is heavy
+/// The 8192-cap headroom and the depth cap, through the real rg with Codex's split mirrored
+/// (rust-v0.162.1, pinned above) and its cap as the constant 8192
+/// (`MAX_UNREADABLE_GLOB_MATCHES`), not through Codex's own code. One matter is heavy
 /// with files that are not logins (hundreds of transcripts, logs, notes, tool results), has
 /// every name the globs can match within the depth cap, and has plants one folder deeper: 300
 /// `notes/x<n>/codex-acp/auth.json` (stage C's cross-matter shutdown) and a snapshot in a

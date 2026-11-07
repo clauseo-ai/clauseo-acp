@@ -277,6 +277,13 @@ The orchestrator's conditions, which the later pull requests must meet:
 - Adding a cause needs only its row in `open_data_enum!`, its sample, a `docs/ui-states.md`
   row and its words.
 - Firm IT can set the keys now; nothing acts on them until the host's sandbox reads them.
+- Residual of PR-C's Codex fence (rust-v0.162.1): Codex finds rg only through PATH
+  (`linux-sandbox/src/bwrap.rs:901`, `sandboxing/src/bwrap.rs:193-206`). The `@openai/codex`
+  package Clauseo installs ships `vendor/<triple>/codex-path/rg`, which Codex puts first on its
+  PATH (`arg0/src/lib.rs:160-171`). If that copy is missing, Codex's fallback walker lists
+  symlinks and masks their targets (bwrap.rs:1124, :930-932). A hostile agent could then plant a
+  link that hides a host file, such as /bin/sh, from other matters' sandboxes. PR-D: on Linux,
+  refuse the fence when `codex-path/rg` is missing.
 - Residual of PR-C's Codex fence: a matter created while another matter's Codex session runs
   stays readable to that session's shell (its transcripts, logs and notes; its logins are
   denied) until the session ends. Neither shape closes it:
