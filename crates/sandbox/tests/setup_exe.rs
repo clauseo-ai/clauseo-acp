@@ -338,10 +338,33 @@ fn the_exe_carries_version_information_and_one_manifest() {
             || manifest.contains("level=\"requireAdministrator\""),
         "{manifest}"
     );
-    assert!(
-        manifest.contains("{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"),
-        "setup.manifest's Windows 10 and 11 supportedOS: {manifest}"
-    );
+    for (os, id) in SUPPORTED_OS {
+        assert!(
+            manifest.contains(id),
+            "setup.manifest's {os} supportedOS: {manifest}"
+        );
+    }
+}
+
+/// The `supportedOS` IDs `setup.manifest` declares: Windows 10 and 11, 8.1, 8 and 7.
+const SUPPORTED_OS: [(&str, &str); 4] = [
+    (
+        "Windows 10 and 11",
+        "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}",
+    ),
+    ("Windows 8.1", "{1f676c76-80e1-4239-95bb-83d0f6d0da78}"),
+    ("Windows 8", "{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"),
+    ("Windows 7", "{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"),
+];
+
+/// The manifest input itself, on every platform: the msvc test above sees it only once linked.
+#[test]
+fn the_manifest_declares_windows_7_to_11() {
+    let manifest = include_str!("../setup.manifest");
+    for (os, id) in SUPPORTED_OS {
+        let line = format!("<supportedOS Id=\"{id}\"/>");
+        assert!(manifest.contains(&line), "{os}: {manifest}");
+    }
 }
 
 #[cfg(not(windows))]
