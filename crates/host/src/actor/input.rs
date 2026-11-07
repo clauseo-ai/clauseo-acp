@@ -147,6 +147,12 @@ pub(crate) enum Request {
     },
     /// A sign-in call (`turn/sign_in.rs`).
     SignIn(SignInRequest),
+    /// `HostHandle::site_blocked`: the egress proxy refused a listed site (`blocked.rs`). No
+    /// reply: the proxy never waits for the host.
+    SiteBlocked {
+        session: crate::config::SessionKey,
+        site: crate::handle::BlockedSite,
+    },
     Shutdown {
         reply: Reply<()>,
     },

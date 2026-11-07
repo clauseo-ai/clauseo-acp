@@ -516,7 +516,8 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::LimitsViewChanged(_)
         | HostEvent::BrowserInstall { .. }
         | HostEvent::CaseLawHint { .. }
-        | HostEvent::ProtectionChanged { .. } => false,
+        | HostEvent::ProtectionChanged { .. }
+        | HostEvent::SiteBlocked { .. } => false,
     }
 }
 

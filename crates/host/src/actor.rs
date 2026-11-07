@@ -21,6 +21,7 @@ use futures::executor::{LocalPool, LocalSpawner};
 use futures::future::{AbortHandle, Abortable};
 use futures::task::LocalSpawnExt;
 
+use crate::blocklist;
 use crate::clock::{Clock, Now};
 use crate::config::{HostConfig, ProfileHook};
 use crate::encode::Encoder;
@@ -33,6 +34,7 @@ use crate::snapshot::SnapshotWorker;
 
 mod app;
 mod app_lists;
+mod blocked;
 mod browser_install;
 mod commands;
 mod connectors;
@@ -160,6 +162,10 @@ pub(crate) struct Actor {
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,
     /// The app subscribers, in the order they came.
     pub(crate) app_subs: Vec<app::AppSub>,
+    /// The sites the egress proxy refused, per thread, for the running turn (`blocked.rs`).
+    pub(crate) blocked: blocked::Blocks,
+    /// The settings the block list's updater reads each round, kept current (`blocklist.rs`).
+    pub(crate) blocklist: Option<crate::blocklist::Live>,
     /// The limits model, its reader, timer and subscribers (`limits.rs`).
     pub(crate) limits: limits::LimitsHost,
     /// The rail's triage: streams it holds loaded and the snooze timer (`triage.rs`).
@@ -245,7 +251,7 @@ pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error>
 
 /// The host thread's body.
 fn run(
-    config: HostConfig,
+    mut config: HostConfig,
     requests: async_channel::Receiver<Request>,
     (post, internal): (async_channel::Sender<Input>, async_channel::Receiver<Input>),
     ready: mpsc::Sender<Result<(), Error>>,
@@ -253,6 +259,7 @@ fn run(
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
+    let blocklist = blocklist::take(&mut config);
     let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open(config, spawner, post, ready.clone()).await {
             Ok(actor) => actor,
@@ -262,6 +269,11 @@ fn run(
             }
         };
         startup::begin_startup(&mut actor);
+        // Stops when this block ends, however it ends (`blocklist.rs`).
+        let _blocklist = blocklist.and_then(|start| {
+            actor.blocklist = Some(start.live.clone());
+            blocklist::start(start)
+        });
         let exit = main_loop::main_loop(&mut actor, requests, internal).await;
         let fail_close = update::fails_close(&actor);
         let close = |actor| async move {

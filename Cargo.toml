@@ -137,6 +137,9 @@ caseless = "0.2.2"
 # The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
 # (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
 flate2 = "1.1.10"
+# clauseo-blocklist: the block list's minisign check. Already in the lock through
+# tauri-plugin-updater.
+minisign-verify = "0.3.0"
 quick-xml = "0.42.0"
 # clauseo-settings: JSONC (settings.json and policy.json take comments and trailing commas),
 # the settings JSON Schema, and macOS managed preferences (CFPreferencesCopyAppValue and

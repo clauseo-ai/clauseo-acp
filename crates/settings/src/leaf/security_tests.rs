@@ -219,7 +219,11 @@ fn refuse_locks_the_sandbox_and_network_keys_at_their_safe_values() {
     assert!(settings.network.upstream_proxy.is_some());
     let mut settings = set();
     assert!(refuse("network.", &mut settings));
-    assert_eq!(settings.network, crate::schema::NetworkSettings::default());
+    let locked = crate::schema::NetworkSettings {
+        allow_unsafe_site_override: false,
+        ..crate::schema::NetworkSettings::default()
+    };
+    assert_eq!(settings.network, locked);
     assert!(settings.sandbox.required);
     let mut settings = set();
     Leaf::Refused("sandbox.allow_unprotected_auto".to_owned()).apply_policy(&mut settings);
@@ -232,4 +236,49 @@ fn refuse_locks_the_sandbox_and_network_keys_at_their_safe_values() {
         assert!(!refuse(key, &mut settings), "{key}");
         assert_eq!(settings, set(), "{key}");
     }
+}
+
+// Decision record 0053: allowing a blocked site is on by default; refused, or a policy value that
+// does not type, locks it off; a mistyped `settings.json` value goes back to its default, on.
+#[test]
+fn refuse_locks_the_unsafe_site_override_off_and_reset_restores_it() {
+    let key = "network.allow_unsafe_site_override";
+    assert!(Settings::default().network.allow_unsafe_site_override);
+    assert!(crate::leaf::SECURITY_KEYS.contains(&key));
+    assert!(!crate::leaf::POLICY_ONLY_KEYS.contains(&key));
+    let mut settings = Settings::default();
+    assert!(refuse(key, &mut settings));
+    assert!(!settings.network.allow_unsafe_site_override);
+    let mut settings = Settings::default();
+    Leaf::Refused(key.to_owned()).apply_policy(&mut settings);
+    assert!(!settings.network.allow_unsafe_site_override);
+    let mut settings = Settings::default();
+    settings.network.allow_unsafe_site_override = false;
+    Leaf::Refused(key.to_owned()).apply(&mut settings);
+    assert!(settings.network.allow_unsafe_site_override);
+}
+
+// Decision record 0053: block list updates are on by default and set by policy only; refused,
+// a policy value that does not type, or a mistyped value all leave them on, their default, so an
+// unreadable policy never stops protection updates.
+#[test]
+fn list_updates_are_policy_only_and_lock_on() {
+    let key = "network.unsafe_site_list_updates";
+    assert!(Settings::default().network.unsafe_site_list_updates);
+    assert!(crate::leaf::SECURITY_KEYS.contains(&key));
+    assert!(crate::leaf::POLICY_ONLY_KEYS.contains(&key));
+    let off = || {
+        let mut settings = Settings::default();
+        settings.network.unsafe_site_list_updates = false;
+        settings
+    };
+    let mut settings = off();
+    assert!(refuse(key, &mut settings));
+    assert!(settings.network.unsafe_site_list_updates);
+    let mut settings = off();
+    Leaf::Refused(key.to_owned()).apply_policy(&mut settings);
+    assert!(settings.network.unsafe_site_list_updates);
+    let mut settings = off();
+    Leaf::Refused(key.to_owned()).apply(&mut settings);
+    assert!(settings.network.unsafe_site_list_updates);
 }

@@ -229,6 +229,7 @@ fn assert_scalars(ts: &str) {
         "FileRefId",
         "FolderRefId",
         "ViewEpoch",
+        "BlockedSiteId",
         "AgentId",
         "AgentSessionId",
         "ContentId",

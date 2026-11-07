@@ -221,7 +221,8 @@ fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }
-            | HostEvent::ProtectionChanged { .. } => {}
+            | HostEvent::ProtectionChanged { .. }
+            | HostEvent::SiteBlocked { .. } => {}
             other @ (HostEvent::Patches(_)
             | HostEvent::Events(_)
             | HostEvent::CaughtUp { .. }
@@ -469,7 +470,8 @@ fn import_summary(
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }
-            | HostEvent::ProtectionChanged { .. }) => panic!("no matter_created before {other:?}"),
+            | HostEvent::ProtectionChanged { .. }
+            | HostEvent::SiteBlocked { .. }) => panic!("no matter_created before {other:?}"),
         }
     }
 }

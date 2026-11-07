@@ -80,12 +80,12 @@ impl EgressProxy for TestProxy {
 /// How to start a host. The data folder is `Effective::data_dir()`.
 #[non_exhaustive]
 pub struct HostConfig {
-    effective: Effective,
+    pub(crate) effective: Effective,
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
     home_folder: Option<PathBuf>,
-    clock: Arc<dyn Clock>,
+    pub(crate) clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
     managed_mcp: PathBuf,
@@ -101,6 +101,7 @@ pub struct HostConfig {
     search: SearchSeams,
     update: UpdateSeams,
     idle: IdleStop,
+    pub(crate) blocklist: Option<crate::blocklist::BlockListSeams>,
 }
 
 impl HostConfig {
@@ -143,6 +144,7 @@ impl HostConfig {
                 fail_close: false,
             },
             idle: IdleStop::default(),
+            blocklist: None,
         }
     }
 
@@ -322,6 +324,12 @@ impl HostConfig {
             BrowserLaunch::InJail => Ok(self),
             BrowserLaunch::OutsideJail { cdp_port } => Err(UnsupportedLaunch { cdp_port }),
         }
+    }
+
+    /// The block list (default: none: no `clauseo-blocklist` thread, no fetch; ADR 0053).
+    pub fn with_blocklist(mut self, seams: crate::blocklist::BlockListSeams) -> Self {
+        self.blocklist = Some(seams);
+        self
     }
 
     /// The clock (default: [`SystemClock`]).

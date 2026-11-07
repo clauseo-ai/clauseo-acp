@@ -98,8 +98,10 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "install.bundle",
             "install.registry",
             "mcp.servers",
+            "network.allow_unsafe_site_override",
             "network.allowed_domains",
             "network.ca_certs",
+            "network.unsafe_site_list_updates",
             "network.upstream_proxy",
             "plans.",
             "privacy.counts",
@@ -127,7 +129,9 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             );
             match &w.kind {
                 WarningKind::InvalidValue { key, message } => {
-                    assert!(message.ends_with("locked off"), "{message}");
+                    let on = key == "network.unsafe_site_list_updates";
+                    let end = if on { "locked on" } else { "locked off" };
+                    assert!(message.ends_with(end), "{message}");
                     key.as_str()
                 }
                 other => panic!("{other:?}"),
@@ -154,7 +158,9 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "sandbox.allow_unprotected_auto",
             "network.upstream_proxy",
             "network.ca_certs",
-            "network.allowed_domains"
+            "network.allowed_domains",
+            "network.allow_unsafe_site_override",
+            "network.unsafe_site_list_updates"
         ]
     );
 }
