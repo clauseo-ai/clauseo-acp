@@ -5,7 +5,8 @@
 
 ; Clauseo's wording: the one line whose words differ from Tauri's (approved by Rohan, 2026-11-03),
 ; then the four lines windows/hooks.nsh shows after the app deletes its data (S20, 2026-11-05;
-; deleteAppDataFailedUnnamed 2026-11-06).
+; deleteAppDataFailedUnnamed 2026-11-06), then the two the per-machine installer shows about the
+; firm-policy folder (2026-11-06).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -24,6 +25,12 @@ LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all 
 ; could not be read), so no path is shown: one would lead through the link. The folder is named
 ; by its name instead. Provisional (app thread, 2026-11-06).
 LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It's in the ai.clauseo.desktop folder in your local AppData folder. Ask whoever looks after this computer to remove it."
+; policyFolderExists and policyFolderFailed: the per-machine installer's lines in its details list
+; (DetailPrint, windows/hooks.nsh NSIS_HOOK_POSTINSTALL) about the firm-policy folder;
+; $COMMONAPPDATA is C:\ProgramData there. Exists: something was already at that path, left as it
+; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
+LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $COMMONAPPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
+LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $COMMONAPPDATA\Clauseo for a firm policy. Your IT team can create it."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
