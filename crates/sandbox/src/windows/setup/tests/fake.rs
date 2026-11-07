@@ -114,6 +114,8 @@ pub(super) struct FakeMachine {
     pub(super) stuck_owners: BTreeSet<String>,
     /// Accounts whose logon leaves their profile with no `LocalLow`.
     pub(super) no_local_low: BTreeSet<String>,
+    /// The users the owner's `matters.json` marks as owed a profile reset.
+    pub(super) needs_reset: BTreeSet<Sid>,
     next_rid: u32,
     passwords: u32,
     around: Around,
@@ -162,6 +164,7 @@ impl FakeMachine {
             self_owned_local_low: BTreeSet::new(),
             stuck_owners: BTreeSet::new(),
             no_local_low: BTreeSet::new(),
+            needs_reset: BTreeSet::new(),
             next_rid: 1000,
             passwords: 0,
             around: Around,
@@ -498,6 +501,19 @@ impl Machine for FakeMachine {
     ) -> Result<Vec<RegisteredMatter>, MachineError> {
         self.owner_call("registered_matters")?;
         Ok(self.matters.clone())
+    }
+
+    fn resets_due(&mut self) -> Result<Vec<Sid>, MachineError> {
+        self.owner_call("resets_due")?;
+        Ok(self.needs_reset.iter().cloned().collect())
+    }
+
+    fn reset_done(&mut self, users: &[Sid]) -> Result<(), MachineError> {
+        self.owner_call(&format!("reset_done {}", rids(users)))?;
+        for user in users {
+            self.needs_reset.remove(user);
+        }
+        Ok(())
     }
 
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {

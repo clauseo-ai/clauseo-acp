@@ -1,6 +1,6 @@
 //! The set-up engine against [`fake::FakeMachine`] and [`fake::FakeAcl`], on every OS: the
-//! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), and the
-//! extend and re-run (`extend.rs`).
+//! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), the
+//! extend and re-run (`extend.rs`), and the profile resets they owe (`resets.rs`).
 
 use std::path::PathBuf;
 
@@ -17,6 +17,7 @@ mod local_low;
 mod owner;
 mod registered;
 mod remains;
+mod resets;
 mod rollback;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};

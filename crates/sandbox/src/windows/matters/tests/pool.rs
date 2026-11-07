@@ -161,7 +161,11 @@ fn each_reason_holds_a_user_back() {
     let open = OpenSessions::new([one]);
     let got = sids.launch(&new, &pool, reread(&empty), &open);
     assert_eq!(got, Err(full(1, vec![(user(1), Why::Open)])));
-    // Another matter's open session doesn't hold it.
+    // NeedsReset: released, its profile not reset yet.
+    let got = sids.launch(&new, &pool, reread(&empty), &none_open());
+    assert_eq!(got, Err(full(1, vec![(user(1), Why::NeedsReset)])));
+    // Once reset, another matter's open session doesn't hold it.
+    assert_eq!(sids.reset_done(&pool), Ok(vec![user(1)]));
     let other_open = OpenSessions::new([two]);
     assert_eq!(
         sids.launch(&new, &pool, reread(&empty), &other_open),
@@ -246,6 +250,13 @@ fn a_released_user_goes_to_another_matter() {
     );
     assert_eq!(row.released_at, Some(1));
     assert_eq!(
+        reloaded.needs_reset().iter().collect::<Vec<_>>(),
+        [&user(1)]
+    );
+    let got = sids.launch(&two, &pool(1), reread(&ledger), &none_open());
+    assert_eq!(got, Err(full(1, vec![(user(1), Why::NeedsReset)])));
+    assert_eq!(sids.reset_done(&[user(1)]), Ok(vec![user(1)]));
+    assert_eq!(
         sids.launch(&two, &pool(1), reread(&ledger), &none_open()),
         Ok(user(1))
     );
@@ -272,6 +283,7 @@ fn never_used_users_go_first_then_the_longest_free() {
     }
     sids.release(&second, at(100)).unwrap();
     sids.release(&first, at(200)).unwrap();
+    sids.reset_done(&pool(3)).unwrap();
     // User 3 was never used, so it goes before both released ones.
     assert_eq!(
         sids.launch(&third, &pool(3), reread(&ledger), &none_open()),
@@ -351,7 +363,7 @@ fn a_version_1_file_is_upgraded_on_the_next_write() {
     );
     let text = std::fs::read_to_string(&path).unwrap();
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(json["version"], 2);
+    assert_eq!(json["version"], 3);
     let row = &json["matters"][a.to_string()];
     assert_eq!(row["sid"], sid);
     assert_eq!(row["pool_user"], user(1).as_str());
@@ -368,7 +380,7 @@ fn an_unreadable_file_is_refused_and_left_as_it_is() {
     let v2 = |rows: String| format!(r#"{{"version":2,"matters":{{{rows}}}}}"#);
     for bad in [
         "not json".to_owned(),
-        r#"{"version":3,"matters":{}}"#.to_owned(),
+        r#"{"version":4,"matters":{}}"#.to_owned(),
         format!(r#"{{"version":2,"matters":{{"{a}":{{}}}}}}"#),
         format!(r#"{{"version":2,"matters":{{"{a}":{{"released_at":5}}}}}}"#),
         format!(r#"{{"version":2,"matters":{{"{a}":{{"pool_user":"{u1}","x":1}}}}}}"#),
@@ -391,6 +403,7 @@ fn an_unreadable_file_is_refused_and_left_as_it_is() {
             folder: temp.path().join(SANDBOX_DIR),
             reserved: Reserved::default(),
             rows: Rows::new(),
+            needs_reset: BTreeSet::new(),
             lock_wait: None,
             owner_of: fake_owner,
         };

@@ -161,6 +161,13 @@ pub trait Machine {
         &mut self,
         trusted: &[Sid],
     ) -> Result<Vec<RegisteredMatter>, MachineError>;
+    /// The pool users the owner's `matters.json` marks as owed a profile reset that no matter
+    /// holds (`MatterSids::resets_due`). The engine calls it as the owner, once the lock is held,
+    /// over a recorded pool. A missing file is none; one that can't be read is the error.
+    fn resets_due(&mut self) -> Result<Vec<Sid>, MachineError>;
+    /// Clears the reset mark of each of `users` in the owner's `matters.json`
+    /// (`MatterSids::reset_done`), as the owner, once their profiles are made again and closed.
+    fn reset_done(&mut self, users: &[Sid]) -> Result<(), MachineError>;
     /// The owner's ledger, `<data_dir>\sandbox\acl-ledger.json`, opened trusting `trusted` (the
     /// pool users and the group) against this machine's reserved accounts.
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger>;

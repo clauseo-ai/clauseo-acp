@@ -29,6 +29,7 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
         "lock",
         "read_record",
         "registered_matters",
+        "resets_due",
         "seclogon",
         "logon_right",
     ]
@@ -131,6 +132,7 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
         "lock",
         "read_record",
         "registered_matters",
+        "resets_due",
         "seclogon",
         "logon_right",
     ]

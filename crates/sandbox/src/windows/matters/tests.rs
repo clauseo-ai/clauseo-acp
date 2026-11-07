@@ -4,6 +4,7 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod pool;
+mod reuse;
 mod review;
 mod review2;
 
@@ -55,7 +56,7 @@ fn the_file_is_replaced_whole_and_reloads() {
     let folder = temp.path().join(SANDBOX_DIR);
     let text = std::fs::read_to_string(folder.join(MATTERS_FILE)).unwrap();
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(json["version"], 2);
+    assert_eq!(json["version"], 3);
     assert_eq!(json["matters"][a.to_string()]["sid"], sid.as_str());
     let mut names: Vec<String> = std::fs::read_dir(&folder)
         .unwrap()
@@ -81,7 +82,7 @@ fn a_bad_file_is_refused_and_left_as_it_is() {
     let sid = "S-1-5-21-1-2-3-1000";
     for bad in [
         "not json".to_owned(),
-        r#"{"version":3,"matters":{}}"#.to_owned(),
+        r#"{"version":4,"matters":{}}"#.to_owned(),
         format!(r#"{{"version":1,"matters":{{"{a}":"S-1-5-32-544"}}}}"#),
         format!(r#"{{"version":1,"matters":{{"{a}":"{sid}","{b}":"{sid}"}}}}"#),
         format!(r#"{{"version":1,"matters":{{"not-a-matter":"{sid}"}}}}"#),

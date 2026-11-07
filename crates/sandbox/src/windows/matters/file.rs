@@ -1,6 +1,10 @@
-//! `matters.json`'s format. Version 2 is written: one row per matter, `{ sid?, pool_user?,
-//! released_at?, held_before? }`. Version 1 (matter id to SID) is read as rows with only a SID,
-//! and is upgraded on the next write. Any other version is refused.
+//! `matters.json`'s format. Version 3 is written: one row per matter, `{ sid?, pool_user?,
+//! released_at?, held_before? }`, and `needs_reset`, the pool users released from a matter whose
+//! profile and hive the elevated set-up hasn't reset yet. Version 2 (the rows alone) is read with
+//! every user a row released, and no row holds, needing a reset, as nothing reset them; version 1
+//! (matter id to SID) as rows with only a SID. Both are upgraded on the next write. Any other
+//! version is refused, so a version 2 reader refuses a file with resets owed rather than drop
+//! them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -17,7 +21,9 @@ use super::super::write;
 use crate::SetupError;
 
 /// The version `matters.json` is written at.
-pub(super) const MATTERS_VERSION: u32 = 2;
+pub(super) const MATTERS_VERSION: u32 = 3;
+/// The version before the resets owed: the rows alone.
+const MATTERS_V2: u32 = 2;
 /// The version before pool users: matter id to SID.
 const MATTERS_V1: u32 = 1;
 
@@ -60,11 +66,35 @@ impl MatterRow {
 /// The rows of `matters.json`, by matter.
 pub type Rows = BTreeMap<MatterId, MatterRow>;
 
+/// What `matters.json` holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Contents {
+    /// One row per matter.
+    pub(super) rows: Rows,
+    /// The pool users owed a profile reset (`MatterSids::release` marks one, the elevated
+    /// set-up clears it): none goes to another matter until then (`Why::NeedsReset`).
+    pub(super) needs_reset: BTreeSet<Sid>,
+}
+
 /// `matters.json` as it is written.
 #[derive(Serialize)]
 struct MattersOut<'a> {
     version: u32,
     matters: &'a Rows,
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    needs_reset: &'a BTreeSet<Sid>,
+}
+
+/// A version 3 file as it is read.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MattersV3In {
+    /// Read by [`Version`]; listed so `deny_unknown_fields` admits it.
+    #[serde(rename = "version")]
+    _version: de::IgnoredAny,
+    matters: UniqueMatters<MatterRow>,
+    #[serde(default)]
+    needs_reset: Vec<Sid>,
 }
 
 /// The version alone, read first to choose the shape of the rest.
@@ -117,42 +147,66 @@ impl<'de, V: Deserialize<'de>> Deserialize<'de> for UniqueMatters<V> {
 
 /// Reads and checks the file `path`, as [`super::MatterSids::load_with`] describes. No file is
 /// no rows.
-pub(super) fn read(path: &Path, reserved: &Reserved) -> Result<Rows, SetupError> {
+pub(super) fn read(path: &Path, reserved: &Reserved) -> Result<Contents, SetupError> {
     let failed = |why: String| SetupError::Failed(format!("{}: {why}", path.display()));
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Rows::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Contents::default()),
         Err(error) => return Err(failed(error.to_string())),
     };
     let parse_error = |error: serde_json::Error| failed(error.to_string());
     let version: Version = serde_json::from_slice(&bytes).map_err(parse_error)?;
-    let rows = match version.version {
+    let contents = match version.version {
         MATTERS_V1 => {
             let file: MattersIn<Sid> = serde_json::from_slice(&bytes).map_err(parse_error)?;
             let row = |sid| MatterRow {
                 sid: Some(sid),
                 ..MatterRow::default()
             };
-            file.matters
-                .0
-                .into_iter()
-                .map(|(m, sid)| (m, row(sid)))
-                .collect()
+            let rows = file.matters.0.into_iter().map(|(m, sid)| (m, row(sid)));
+            Contents {
+                rows: rows.collect(),
+                needs_reset: BTreeSet::new(),
+            }
+        }
+        MATTERS_V2 => {
+            let file: MattersIn<MatterRow> = serde_json::from_slice(&bytes).map_err(parse_error)?;
+            let rows = file.matters.0;
+            let needs_reset = released_users(&rows);
+            Contents { rows, needs_reset }
         }
         MATTERS_VERSION => {
-            let file: MattersIn<MatterRow> = serde_json::from_slice(&bytes).map_err(parse_error)?;
-            file.matters.0
+            let file: MattersV3In = serde_json::from_slice(&bytes).map_err(parse_error)?;
+            Contents {
+                rows: file.matters.0,
+                needs_reset: file.needs_reset.into_iter().collect(),
+            }
         }
         other => return Err(failed(format!("version {other}, not {MATTERS_VERSION}"))),
     };
-    check(&rows, reserved).map_err(failed)?;
-    Ok(rows)
+    check(&contents, reserved).map_err(failed)?;
+    Ok(contents)
+}
+
+/// The users `rows` name as released (a released `pool_user`, or one in `held_before`) that no
+/// row holds: a version 2 file's, none of them reset since.
+fn released_users(rows: &Rows) -> BTreeSet<Sid> {
+    let held: BTreeSet<&Sid> = rows.values().filter_map(MatterRow::holds).collect();
+    rows.values()
+        .flat_map(|row| {
+            let released = row.pool_user.iter().filter(|_| row.released_at.is_some());
+            released.chain(&row.held_before)
+        })
+        .filter(|user| !held.contains(user))
+        .cloned()
+        .collect()
 }
 
 /// Refuses rows that can't be right: a row with neither a SID nor a pool user, a release with no
 /// pool user, a SID not of the matter form or one `reserved` refuses, one SID held twice or also
-/// named as a pool user, or one pool user held by two matters at once.
-fn check(rows: &Rows, reserved: &Reserved) -> Result<(), String> {
+/// named as a pool user (or owed a reset), or one pool user held by two matters at once.
+fn check(contents: &Contents, reserved: &Reserved) -> Result<(), String> {
+    let rows = &contents.rows;
     let mut sids = BTreeSet::new();
     let mut held = BTreeMap::new();
     for (matter, row) in rows {
@@ -184,6 +238,7 @@ fn check(rows: &Rows, reserved: &Reserved) -> Result<(), String> {
     let pool_users: BTreeSet<&Sid> = rows
         .values()
         .flat_map(|r| r.pool_user.iter().chain(&r.held_before))
+        .chain(&contents.needs_reset)
         .collect();
     if let Some(sid) = sids.iter().find(|sid| pool_users.contains(*sid)) {
         return Err(format!("{sid} is both a matter SID and a pool user"));
@@ -191,12 +246,13 @@ fn check(rows: &Rows, reserved: &Reserved) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes `rows` to `path` atomically, at [`MATTERS_VERSION`].
-pub(super) fn save(path: &Path, rows: &Rows) -> Result<(), SetupError> {
+/// Writes `contents` to `path` atomically, at [`MATTERS_VERSION`].
+pub(super) fn save(path: &Path, contents: &Contents) -> Result<(), SetupError> {
     let failed = |why: String| SetupError::Failed(format!("{}: {why}", path.display()));
     let file = MattersOut {
         version: MATTERS_VERSION,
-        matters: rows,
+        matters: &contents.rows,
+        needs_reset: &contents.needs_reset,
     };
     let mut bytes = serde_json::to_vec_pretty(&file).map_err(|error| failed(error.to_string()))?;
     bytes.push(b'\n');

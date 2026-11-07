@@ -44,19 +44,27 @@ pub enum NotPool {
 #[cfg(test)]
 pub(crate) const TEST_PREFIX: &str = "ClauseoSbTL";
 
+/// The account name prefix of the elevated profile reset test (`logon/tests/reset.rs`):
+/// `ClauseoSbTR` and six hex digits, a pool user's in test builds only.
+#[cfg(test)]
+pub(crate) const RESET_TEST_PREFIX: &str = "ClauseoSbTR";
+
 /// The account name prefix of the setup exe's elevated test (`PR4h`): `ClauseoSbTS`, four hex
 /// digits for the run, then the pool user's two digits; a pool user's in test builds only.
 #[cfg(test)]
 pub(crate) const SETUP_TEST_PREFIX: &str = "ClauseoSbTS";
 
 /// Whether `name` is a pool user's account name: `ClauseoSbNN` exactly ([`pool_number`]),
-/// or in test builds a [`TEST_PREFIX`] or [`SETUP_TEST_PREFIX`] name.
+/// or in test builds a [`TEST_PREFIX`], [`RESET_TEST_PREFIX`] or [`SETUP_TEST_PREFIX`] name.
 pub fn is_pool_account_name(name: &str) -> bool {
     if pool_number(name).is_some() {
         return true;
     }
     #[cfg(test)]
-    if let Some(suffix) = name.strip_prefix(TEST_PREFIX) {
+    if let Some(suffix) = name
+        .strip_prefix(TEST_PREFIX)
+        .or_else(|| name.strip_prefix(RESET_TEST_PREFIX))
+    {
         return suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit());
     }
     #[cfg(test)]

@@ -10,6 +10,7 @@ use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
     LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport, Step, cause_of,
 };
+use super::resets::{self, resets_due};
 use super::rollback::{Made, Run, roll_back};
 use super::{POOL_START, SetupRequest};
 use crate::windows::fence::RegisteredMatter;
@@ -42,6 +43,8 @@ struct Plan {
     reset: bool,
     /// The owner's registered matters, read after the lock (`Machine::registered_matters`).
     matters: Vec<RegisteredMatter>,
+    /// The recorded users owed a profile reset (`resets.rs`), read after the lock.
+    resets: Vec<Sid>,
 }
 
 /// What the users' steps hand on: each live user's profile and the passwords set this run.
@@ -53,6 +56,8 @@ struct Users {
     secrets: Vec<(Sid, Password)>,
     /// The users whose passwords this run reset.
     reset: Vec<PoolUser>,
+    /// The users whose profiles this run deleted and made again (`resets.rs`).
+    profiles_reset: Vec<PoolUser>,
     /// Pool names skipped for an account outside the record (D-B5).
     skipped: Vec<(String, Sid)>,
 }
@@ -68,9 +73,11 @@ pub(super) fn run(
         .map_err(|error| SetupFailure::early(Step::ReadRecord, cause_of(&error)))?;
     check_owner(before.as_ref(), &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
+    let resets = resets_due(machine, before.as_ref())?;
     preflight(machine)?;
     let mut plan = plan_pool(machine, before.as_ref(), req)?;
     plan.matters = matters;
+    plan.resets = resets;
     let mut run = Run::new(before);
     match change(machine, acl, req, &plan, &mut run) {
         Ok(report) => Ok(report),
@@ -286,6 +293,7 @@ fn change(
         machine.protect_for_owner(&users.secrets, &live)
     })
     .map_err(|error| (Step::Secrets, cause_of(&error)))?;
+    let profiles_reset = resets::clear(machine, users.profiles_reset);
     let marker = Marker {
         version: SETUP_VERSION,
         user_sid: req.owner.clone(),
@@ -299,6 +307,7 @@ fn change(
         pool: users.profiles.into_iter().map(|(user, _)| user).collect(),
         made: run.made.iter().map(|made| made.user.clone()).collect(),
         reset: users.reset,
+        profiles_reset,
         group,
         group_made: run.group_made,
         dropped: plan.dropped.clone(),
@@ -338,7 +347,8 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
 
 /// A recorded user that exists. A re-run resets its password, puts it back in its groups,
 /// hides it and logs it on (which makes its profile again if it was deleted). An extend leaves
-/// it as it is, but puts it in a group this run made, and reads its profile.
+/// it as it is, but puts it in a group this run made, and reads its profile. A user owed a
+/// profile reset (`resets.rs`) has its profile deleted first, then goes as in a re-run.
 fn keep_user(
     machine: &mut impl Machine,
     plan: &Plan,
@@ -348,7 +358,8 @@ fn keep_user(
     users: &mut Users,
 ) -> Result<(), Failed> {
     let name = user.name.as_str();
-    if !plan.reset {
+    let wipe = plan.resets.contains(&user.sid);
+    if !plan.reset && !wipe {
         if run.group_made {
             machine
                 .add_to_group(name, group)
@@ -365,6 +376,12 @@ fn keep_user(
         };
         users.profiles.push((user.clone(), profile.path));
         return Ok(());
+    }
+    if wipe {
+        machine
+            .delete_profile(&user.sid)
+            .map_err(|error| (Step::ResetProfile, cause_of(&error)))?;
+        users.profiles_reset.push(user.clone());
     }
     let password = machine.new_password();
     machine
