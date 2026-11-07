@@ -10,12 +10,13 @@
 //! reset's (`reset.rs`) is `ClauseoSbTR`.
 
 use std::fmt::Write as _;
-use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
+use super::super::account_list::{names_starting, profile_sids};
+use super::super::accounts::{self, Kind};
 use super::super::journal::{journal_size, journal_volumes};
 use super::super::machine::Password;
+use super::super::password::generate;
 use super::super::preflight::{logon_right, machine_domain, seclogon};
 use super::super::processes::{Stopped, running, stop_pool_processes};
 use super::super::profile::{delete_profile, profile_of};
@@ -54,41 +55,11 @@ fn random_hex(bytes: usize) -> String {
     })
 }
 
-/// Runs PowerShell's `script`; its standard output, trimmed. Panics when it fails (scripts
-/// here carry no password).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the tests read accounts with PowerShell"
-)]
-fn powershell(script: &str) -> String {
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PowerShell failed: {output:?}");
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
-}
-
-/// The SID of the local account `name`.
-fn sid_of(name: &str) -> Sid {
-    Sid::parse(&powershell(&format!(
-        "(Get-LocalUser -Name '{name}').SID.Value"
-    )))
-    .unwrap()
-}
-
-/// Deletes the account `name` (`net user /delete`); a failure is printed, not raised.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the tests delete accounts with `net user`"
-)]
+/// Deletes the account `name` (`NetUserDel`) and its sign-in screen value; a failure is
+/// printed, not raised.
 fn delete_account(name: &str) {
-    let output = Command::new("net")
-        .args(["user", name, "/delete"])
-        .output()
-        .unwrap();
-    if !output.status.success() {
-        eprintln!("net user {name} /delete failed: {}", output.status);
+    if let Err(error) = accounts::delete_user(name) {
+        eprintln!("{name} wasn't deleted: {error}");
     }
 }
 
@@ -102,25 +73,32 @@ fn me() -> Sid {
 /// account with its profile, then any profile whose folder has that prefix and whose account is
 /// gone.
 fn clear_leftovers(prefix: &str) {
-    let accounts = powershell(&format!(
-        "Get-LocalUser -Name '{prefix}*' | ForEach-Object {{ $_.Name + ' ' + $_.SID.Value }}"
-    ));
-    for line in accounts.lines() {
-        let Some((name, sid)) = line.trim().split_once(' ') else {
-            continue;
-        };
-        if let Ok(sid) = Sid::parse(sid) {
+    for name in names_starting(prefix, Kind::User).unwrap() {
+        if let Some(sid) = accounts::sid_of(&name, Kind::User).unwrap() {
             drop(delete_profile(&sid, &me()));
         }
-        delete_account(name);
+        delete_account(&name);
     }
-    let profiles = powershell(&format!(
-        "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList' | \
-         Where-Object {{ (Get-ItemProperty $_.PSPath).ProfileImagePath -like '*\\{prefix}*' }} | \
-         ForEach-Object {{ $_.PSChildName }}"
-    ));
-    for line in profiles.lines() {
-        if let Ok(sid) = Sid::parse(line.trim()) {
+    sweep_profiles(prefix);
+}
+
+/// Deletes the profile of each `ProfileList` entry whose folder has `prefix` as a name, as
+/// `\<prefix>` in its `ProfileImagePath` (without case).
+fn sweep_profiles(prefix: &str) {
+    let folder = format!(r"\{}", prefix.to_lowercase());
+    for name in profile_sids().unwrap() {
+        let Ok(sid) = Sid::parse(&name) else {
+            continue;
+        };
+        let Some(profile) = profile_of(&sid).unwrap() else {
+            continue;
+        };
+        if profile
+            .path
+            .to_string_lossy()
+            .to_lowercase()
+            .contains(&folder)
+        {
             drop(delete_profile(&sid, &me()));
         }
     }
@@ -135,48 +113,26 @@ struct TestUser {
 
 impl TestUser {
     /// Makes `ClauseoSbTL<6 hex>` in `Users`, with a random password meeting the complexity
-    /// policy. The password reaches PowerShell on its standard input, never a command line.
+    /// policy.
     fn new() -> TestUser {
         TestUser::named(PREFIX, &random_hex(3))
     }
 
-    /// Makes `<prefix><suffix>` as [`TestUser::new`] does.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the tests make accounts with PowerShell"
-    )]
+    /// Makes `<prefix><suffix>` as [`TestUser::new`] does. The password goes to `NetUserAdd` in a
+    /// buffer wiped when the call returns, never on a command line.
     fn named(prefix: &str, suffix: &str) -> TestUser {
         let name = format!("{prefix}{suffix}");
         assert!(name.len() <= 20, "{name}");
-        let password = Password::new(format!("Aa1!{}", random_hex(12)));
-        let script = format!(
-            "$p = [Console]::In.ReadLine() | ConvertTo-SecureString -AsPlainText -Force; \
-             New-LocalUser -Name '{name}' -Password $p -AccountNeverExpires | Out-Null; \
-             Add-LocalGroupMember -SID 'S-1-5-32-545' -Member '{name}'"
-        );
-        let mut child = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut stdin = child.stdin.take().unwrap();
-        stdin.write_all(password.as_bytes()).unwrap();
-        stdin.write_all(b"\n").unwrap();
-        drop(stdin);
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "New-LocalUser {name} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let sid = sid_of(&name);
-        TestUser {
+        let password = generate().unwrap();
+        let sid = accounts::create_user(&name, &password).unwrap();
+        // Made before the group is set, so a failure there still deletes the account on drop.
+        let user = TestUser {
             name,
             password,
             sid,
-        }
+        };
+        accounts::add_member(&accounts::users_group().unwrap(), &user.sid).unwrap();
+        user
     }
 }
 
