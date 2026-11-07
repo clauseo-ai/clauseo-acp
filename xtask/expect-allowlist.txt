@@ -451,6 +451,12 @@ crates/sandbox/src/windows/setup/logon/tests/reset.rs - unsafe_code
 crates/sandbox/src/windows/setup/logon/tests/reset.rs leave_marker clippy::disallowed_methods
 crates/sandbox/src/windows/setup/logon/tests/reset.rs wait clippy::disallowed_methods
 crates/sandbox/src/windows/setup/preflight.rs - unsafe_code
+# S15 PR7: the network filters' WFP calls, the owner's grants on them, a launch's reads of
+# them, and the firewall rules through COM.
+crates/sandbox/src/windows/wfp/engine.rs - unsafe_code
+crates/sandbox/src/windows/wfp/engine/read.rs - unsafe_code
+crates/sandbox/src/windows/wfp/engine/security.rs - unsafe_code
+crates/sandbox/src/windows/wfp/firewall.rs - unsafe_code
 crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods

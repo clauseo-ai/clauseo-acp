@@ -94,6 +94,7 @@ mod test_world;
 mod tests;
 #[cfg(windows)]
 mod user_setup;
+pub mod wfp;
 mod write;
 pub mod writer;
 
