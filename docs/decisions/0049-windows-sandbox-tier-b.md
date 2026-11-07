@@ -1004,36 +1004,79 @@ leaves that profile, both naming the part.
     busy). Until a follow-up gives a matter's second session a pool user of its own, tier B
     serves one live session per matter, and a second concurrent one gets `Busy`. Mapping `Busy`
     is PR6's job.
-  - The outer kills every process of the pool user outside its kill-on-close job: (a) before the
-    logon; (b) once the suspended inner is in the job and shut, before it resumes; every 30 s
-    while the session runs; and (c) at session end. With no other live session on the pool user,
-    no process of it outside the job is legitimate. (b) kills anything that opened the inner in
-    the gap, a process the logon itself set off included, before the inner runs any code. The
-    list comes from `WTSEnumerateProcessesW`, which gives each process's user without opening
-    it. Each process found is opened, which pins its pid, and checked against a second list, so
-    a pid reused meanwhile is left alone. An entry with no user SID is passed over: the service
-    reads each token as SYSTEM, so only the kernel's own, pseudo and protected processes come
-    back without one, and a pool user can start none of them. At (a) and (b), a list that can't
-    be read, or a process of the pool user's that can't be opened, checked or ended, fails the
-    launch (`RunExit::Sweep`). Microsoft documents that only a member of Administrators may list
-    other users' processes this way; whether an unelevated standard user sees the pool user's
-    processes is unmeasured, and CI's desktop user is an admin (open, a VM row). Mid-session and
-    at the end a failure is logged, and the next tick tries a mid-session one again. Each kill is
-    logged with its pid, image name and sweep point. An outer that is killed runs no (c); the
-    next launch's (a) sweeps what it left.
+  - Every process of the pool user outside the kill-on-close job is killed, and the pool user
+    does the killing. The outer can't: `WTSEnumerateProcessesW` lists another user's processes
+    only to a member of Administrators (Microsoft: "the caller must be a member of the
+    Administrators group to enumerate processes that are running under a different user's
+    context"). The outer runs unelevated, and under UAC even an admin lawyer's token has
+    Administrators deny-only. So a sweep from the outer would see no pool-user process and pass:
+    it would fail open. CI's elevated runner hid this. The pool user lists every process with a
+    Toolhelp snapshot, which holds every session's, and reads each one's token user by opening it
+    with `PROCESS_QUERY_LIMITED_INFORMATION` and its token with `TOKEN_QUERY`. Its own processes
+    open for it, because their default DACL grants their user full access. A process it can't
+    open, or whose token it can't open, is another user's, the kernel's or a protected one, and is
+    passed over. Each process found is opened, which pins its pid, and checked against a second
+    list, so a pid reused meanwhile is left alone. Each kill is logged with its pid, image name
+    and sweep point, through `ctl` to the outer's stderr.
+  - **First act.** The inner's first act once resumed, before it reads the launch or makes
+    anything, is that sweep. It keeps only itself: the job is unnamed and its only full handle is
+    the outer's, and the inner has started nothing yet, so nothing else can be in it. A list that
+    can't be read, or a process of the pool user's that can't be opened, checked or ended, makes
+    the inner exit with `RunExit::Sweep` and start no agent, so the launch fails closed. The
+    timing holds because no code of the launch's runs before this sweep. The inner first limits
+    its DLL search, sets its error mode and shuts its own token, and the only token anyone could
+    have opened in the gap is the inner's own, as the pool user it already is. A process that
+    opened the inner in the gap, or one this logon set off, is dead before the launch is read.
+  - **Cleanup.** Right after the first-act sweep, still before the launch, the inner removes
+    what the pool user could have left to start at a logon: scheduled tasks whose principal or
+    author is the pool user, in every folder it can read; its BITS jobs, cancelled; every value of
+    its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder. The
+    Startup folder must lie in the pool user's profile. It is reached one name at a time relative
+    to each folder's handle, with no reparse point followed, and each entry is deleted as itself,
+    so a link is deleted and never what it names. Each kind is logged by count alone, with no
+    names or contents. A kind that fails is logged and the rest still run; the launch goes on.
+  - **Mid-session and end.** The outer duplicates a handle to the job into the suspended inner,
+    with `JOB_OBJECT_QUERY` alone, and names its value in the launch. While the agent runs, the
+    inner sweeps every 30 s and keeps the job's processes (`IsProcessInJob` against that
+    handle); a failure is logged, and the next tick tries again. When the agent exits, the inner
+    sweeps once more before it exits.
+  - **The end sweeper.** The outer's first reaction to any end signal is to start the end
+    sweeper. The signals are the host's stdin ending (the host's cancel ladder closes it, then
+    gives the outer 2 s before it ends the outer's job), the inner exiting, and any failure once
+    the launch is read. A guard starts it once a session. The sweeper is `clauseo-sandbox-run
+    --sweep`, started as the pool user with `CreateProcessWithLogonW` and the password the outer
+    reads again from `secrets.bin` (wiped after). Its process and thread are shut as the inner's
+    are, and then it is resumed. It is never assigned to the outer's job. The Secondary Logon
+    service starts it as its own child, outside the caller's jobs, in a job of the service's own,
+    so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
+    every process of the pool user but itself, with no job exemption because the session is
+    ending, then makes the same cleanup, all on its own 60 s limit. It logs to its stderr, which
+    the outer relays while it lives; on a cancel nobody reads it. Its exit code says whether
+    everything went, and the outer logs a failure if it is still alive to see it. It writes no
+    result file. The run folder admits only the lawyer, `SYSTEM` and Administrators, and a file
+    the pool user could write there would be writable by its other processes too.
+  - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
+    logon: the end sweeper removed it, and if it didn't run, the first act removes it before the
+    launch is read. The residual case is a cancel that kills the outer inside the 2 s before the
+    sweeper's logon completes. Then no end sweeper runs, and the cleanup waits for the next
+    launch's first act. A task or BITS job that the next logon sets off then starts a process
+    that lives only until the first-act sweep. That sweep comes before any code of the launch's
+    runs and before the agent exists, and the outer has shut the inner's process and thread by
+    then.
 
   The experiment that would lower a duplicated token to Low and impersonate it from the agent
-  was dropped. With one live session per pool user and sweep (b), no other process of the pool
-  user is alive in the gap to hold a handle.
+  was dropped. With one live session per pool user and the first-act sweep, no other process of
+  the pool user is alive to use a handle it took in the gap.
 - **Processes a service starts outside the job (M2).** An agent can ask a Windows service to
   start a process as its pool user, and that process may land outside the job: Secondary Logon
   (`CreateProcessWithLogonW` with `LOGON_NETCREDENTIALS_ONLY`), WMI (`Win32_Process.Create`),
-  Task Scheduler or BITS. Tier B bounds such a process; it doesn't prevent it. The sweep kills it
-  within about 30 s mid-session, or at session end. One the desktop user can't open, such as a
-  task's process under a fresh logon whose default DACL isn't the agent's, isn't killed: each
-  tick logs it, and the next launch's (a) refuses to start while it runs. The design that closes
-  this is AppContainer, after launch (see "Rejected: AppContainer (spike A)" for what blocks it
-  today).
+  Task Scheduler or BITS. Tier B bounds such a process; it doesn't prevent it. The inner's tick
+  kills it within about 30 s, and the end sweeper at session end. The pool user can open such a
+  process because its default DACL grants its user, and that holds in session 0 too. The
+  exception is one that shuts its own DACL to its user, with an `OWNER RIGHTS` entry that takes
+  away the owner's implied rights. The sweep can't read that process's user, so it passes over
+  it. The design that closes this is AppContainer, after launch (see "Rejected: AppContainer
+  (spike A)" for what blocks it today).
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
   agent's stdin, stdout and stderr), one instance each, made first or refused, local clients
   only, with an explicit protected DACL giving the lawyer and the pool user read and write (no
