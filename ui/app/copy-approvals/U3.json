@@ -525,15 +525,15 @@
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "U3-err-signin.cancelled": {
-    "en": "Sign-in was cancelled in the browser.",
-    "hi": "ब्राउज़र में साइन इन रद्द कर दिया गया।",
+    "en": "Sign-in was cancelled.",
+    "hi": "साइन इन रद्द हो गया।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
-    "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Was \"Sign-in was cancelled in the browser.\" (approved 2026-11-05); the cancel can come from the app's own Cancel or from a quit, not only the browser"
   },
   "U3-err-signin.link_expired": {
     "en": "The sign-in link expired. Try again.",

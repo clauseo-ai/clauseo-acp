@@ -257,9 +257,9 @@ test("signin-done: with a key, Using an API key; with no email or plan, the line
   expect(byId("signin-done")?.textContent).toBe("Signed in to Claude");
 });
 
-test("signin-cancel: Sign-in was cancelled in the browser, with Sign in", async () => {
+test("signin-cancel: Sign-in was cancelled, with Sign in", async () => {
   const t = await at({ failed: { code: "signin.cancelled", at: AT } });
-  expect(text()).toContain("Sign-in was cancelled in the browser.");
+  expect(text()).toContain("Sign-in was cancelled.");
   await press("Sign in");
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });

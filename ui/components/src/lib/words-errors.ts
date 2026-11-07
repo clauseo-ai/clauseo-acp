@@ -154,7 +154,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
   "agent.install_failed": "Setting up didn't finish. Try again.",
-  "signin.cancelled": "Sign-in was cancelled in the browser.",
+  "signin.cancelled": "Sign-in was cancelled.",
   "signin.link_expired": "The sign-in link expired. Try again.",
   "signin.no_plan": "This account has no plan that works with Clauseo.",
   "signin.device_code_off": "Sign-in with a code is turned off for this ChatGPT account.",
