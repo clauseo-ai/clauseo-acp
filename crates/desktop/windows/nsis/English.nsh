@@ -8,7 +8,7 @@
 ; deleteAppDataFailedUnnamed 2026-11-06), then the two the per-machine installer shows about the
 ; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
 ; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
-; (removeSkippedSilent, 2026-11-07), then the four the installer shows about the admin copy of
+; (removeSkippedSilent, 2026-11-07), then the nine the installer shows about the admin copy of
 ; S15's set-up program (adminCopy*, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
@@ -43,17 +43,30 @@ LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its pro
 ; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
 ; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
 LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. To remove it, reinstall Clauseo and uninstall it without /S."
-; The admin copy (windows/hooks.nsh, "The admin copy"): tier B, Clauseo's strongest protection,
-; needs one UAC prompt at install. adminCopyNotSetUp: the prompt was declined, or the set-up failed;
-; Clauseo is installed and works with its other protection. adminCopyOtherAccount: another Windows
-; account on this computer already has tier B. Each in a box and the details list.
-; adminCopySkippedSilent: a silent per-user install (/S) can't ask for the prompt; details list
-; only. adminCopyStillRunning: the set-up outlasted the installer's 5-minute wait and finishes by
-; itself; details list only. Drafts for the app thread and stage F (2026-11-07).
-LangString adminCopyNotSetUp ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up. Clauseo works without it. To set it up, run this installer again and allow it to make changes when Windows asks."
-LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but its strongest protection isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
-LangString adminCopySkippedSilent ${LANG_ENGLISH} "Clauseo's strongest protection isn't set up, because this install is silent. To set it up, run this installer again without /S."
-LangString adminCopyStillRunning ${LANG_ENGLISH} "Clauseo is still setting up its strongest protection. It finishes on its own."
+; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
+; these lines), needs one UAC prompt at install. The installer is English only (0035), so these
+; have no Hindi. Provisional (app thread and stage F, 2026-11-07).
+; adminCopyAsk: a box just before the prompt, saying it is coming and why; the prompt may name the
+; publisher "Unknown Publisher" while the installer is unsigned.
+; adminCopyWorking and adminCopyDone: details-list lines while the set-up runs (it can take a few
+; minutes) and once it is done.
+; adminCopyDeclined: the prompt was declined; for a standard user, whoever looks after the
+; computer types their password into it. adminCopyFailed: the set-up ran and failed (or couldn't
+; start). adminCopyOtherAccount: another Windows account on this computer already has tier B.
+; Each a box and a details line, per-user installs.
+; adminCopyMachineFailed: the per-machine installer's set-up failed; a box interactively, a
+; details line always. adminCopySkippedSilent: a silent per-user install (/S) can't ask for the
+; prompt; details list only. adminCopyNewerKept: the copy already on the computer is from a newer
+; Clauseo than this installer, so it stays; details list only.
+LangString adminCopyAsk ${LANG_ENGLISH} "Next, Windows asks for permission to set up Safe workspace. Windows may name the publisher as Unknown Publisher. That's expected: it's this installer asking."
+LangString adminCopyWorking ${LANG_ENGLISH} "Setting up Safe workspace. This can take a few minutes."
+LangString adminCopyDone ${LANG_ENGLISH} "Safe workspace is set up."
+LangString adminCopyDeclined ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because Windows' permission prompt was declined. Clauseo works without it. To set it up, run this installer again and choose Yes. If Windows asks for an administrator's password, ask whoever looks after this computer to enter it."
+LangString adminCopyFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace couldn't be set up. Clauseo works without it. Run this installer again to try once more. If it still isn't set up, ask whoever looks after this computer."
+LangString adminCopyOtherAccount ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace isn't set up, because another Windows account on this computer already has it. Clauseo works without it."
+LangString adminCopyMachineFailed ${LANG_ENGLISH} "Clauseo is installed, but Safe workspace couldn't be set up on this computer. Clauseo works without it. Whoever looks after this computer can run this installer again to set it up."
+LangString adminCopyNewerKept ${LANG_ENGLISH} "Clauseo kept the newer copy of Safe workspace's set-up program that's already on this computer."
+LangString adminCopySkippedSilent ${LANG_ENGLISH} "Safe workspace isn't set up, because this install is silent. To set it up, run this installer again without /S."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

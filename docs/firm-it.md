@@ -37,8 +37,27 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   that key. It makes two shortcuts for all users,
   `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk` and
   `C:\Users\Public\Desktop\Clauseo.lnk`, also with `/S`. It writes nothing under `HKCU`. The app it starts at the end runs un-elevated (medium integrity).
-- The per-user installer raises no UAC prompt, installs in `%LOCALAPPDATA%\Clauseo` and writes
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`.
+- The per-user installer installs in `%LOCALAPPDATA%\Clauseo` and writes
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo`. At the end of an
+  interactive install it says a UAC prompt is next, then raises one, to set up Safe workspace (S15
+  tier B): elevated, it writes the sandbox's set-up program from the installer itself into
+  `C:\Program Files\Clauseo\Sandbox` and runs it from there. A standard user needs an
+  administrator to type their password into the prompt; Safe workspace is set up for the user who
+  ran the installer. Declined or failed, Clauseo is installed and works without it, and
+  running the installer again sets it up. A silent (`/S`) or passive (`/P`) per-user install
+  raises no prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
+  elevated, sets up the same folder on every install and update.
+
+**Exit codes** of the installers under `/S`, besides NSIS's 0 (done), 1 (cancelled) and 2
+(stopped by an error):
+
+| Code | Meaning |
+|---|---|
+| 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
+| 23 | Per-machine install: installed, but setting up Safe workspace failed |
+
+Only the last code set is reported, so an install that set several reports one of them.
+
 - Uninstalling asks one question, an unticked box: "Also delete conversations, saved versions and
   settings". Left unticked, each user's data folder (`%LOCALAPPDATA%\ai.clauseo.desktop`) stays.
   The silent `/S` uninstall asks nothing and always keeps it. Ticked, `Clauseo.exe` deletes the

@@ -26,10 +26,15 @@
       "policyFolderFailed",
       "removeStillRunning",
       "removeSkippedSilent",
-      "adminCopyNotSetUp",
+      "adminCopyAsk",
+      "adminCopyWorking",
+      "adminCopyDone",
+      "adminCopyDeclined",
+      "adminCopyFailed",
       "adminCopyOtherAccount",
-      "adminCopySkippedSilent",
-      "adminCopyStillRunning"
+      "adminCopyMachineFailed",
+      "adminCopyNewerKept",
+      "adminCopySkippedSilent"
     ],
     "slots": {
       "$R9": "the data folder",
