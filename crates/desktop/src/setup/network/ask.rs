@@ -51,9 +51,14 @@ pub(crate) type Answered = BTreeMap<Url, OsAnswer>;
 pub(crate) const KEEP_FOR: Duration = Duration::from_mins(10);
 
 /// The longest one proxy's probe takes ([`Reach`]): its host resolved and a TCP connect to its
-/// port. A resolve starts the probes it needs at the latest this long before its budget ends,
-/// so they end within it.
+/// port. A resolve starts the probes it needs at the latest this long, plus [`PROBE_MARGIN`],
+/// before its budget ends, so they end within it.
 pub(crate) const PROBE_CAP: Duration = Duration::from_secs(1);
+
+/// The room left after a probe that takes its whole [`PROBE_CAP`] (a proxy that drops packets
+/// silently) before the budget ends: its thread's start and hand-back, so a dead proxy is known
+/// dead in this route rather than kept for one more refresh.
+const PROBE_MARGIN: Duration = Duration::from_millis(200);
 
 /// Whether a proxy (`http://host:port`) takes a TCP connection within [`PROBE_CAP`]: connect
 /// and close, nothing sent. Blocking.
@@ -273,9 +278,9 @@ impl Probing {
 /// [`Answers::late`].
 ///
 /// A keepable proxy ([`Probe`]) is probed once a fresh answer could replace it: when its
-/// target's lookup answers `DIRECT` or nothing, or is still running [`PROBE_CAP`] before the
-/// budget ends. So every probe ends within the budget, and none runs while the OS keeps
-/// answering with proxies.
+/// target's lookup answers `DIRECT` or nothing, or is still running [`PROBE_CAP`] and
+/// [`PROBE_MARGIN`] before the budget ends. So every probe ends within the budget, and none runs
+/// while the OS keeps answering with proxies.
 pub(crate) fn ask_all(
     targets: BTreeSet<Url>,
     os: &Arc<OsLookup>,
@@ -284,7 +289,7 @@ pub(crate) fn ask_all(
 ) -> Answers {
     let clock = SystemClock;
     let deadline = clock.monotonic() + budget;
-    let probe_from = deadline.saturating_sub(PROBE_CAP);
+    let probe_from = deadline.saturating_sub(PROBE_CAP + PROBE_MARGIN);
     let mut probing = Probing::new(probe);
     let (send, answers) = mpsc::channel();
     let mut waiting = BTreeSet::new();
