@@ -43,8 +43,10 @@
 //! `CLAUSEO_UPDATER_PUBKEY` when set, else `plugins.updater.pubkey` from `tauri.conf.json`,
 //! both Tauri's base64 of a minisign public-key file; with neither (a dry build), the placeholder,
 //! which verifies nothing, so such a build's refresh fails closed. A key that isn't a minisign
-//! public key fails the build, and so does a release build (`CLAUSEO_RELEASE_MODE=release`, the
-//! release profile) whose key is the placeholder or the throwaway test key (`release_guard`).
+//! public key fails the build, and so does a release build (`CLAUSEO_RELEASE_MODE=release`, any
+//! profile) whose key isn't the pinned production key, `PRODUCTION_KEY_ID`, or while none is
+//! pinned (`release_guard`). On msvc the exe's `VERSIONINFO` also carries the key's id as the
+//! string `UpdaterKeyId`, so a release's assembly can check it from the file without running it.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -72,7 +74,7 @@ fn main() -> Result<(), Error> {
         .ok_or("tauri.conf.json has no string at /version")?
         .to_owned();
     println!("cargo:rustc-env=CLAUSEO_APP_VERSION={version}");
-    refresh_key(Path::new(&dir))?;
+    let key_id = refresh_key(Path::new(&dir))?;
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.ends_with("-windows-msvc") {
         for arg in [
@@ -95,13 +97,13 @@ fn main() -> Result<(), Error> {
             "cargo:rustc-link-arg-bin={BIN}=/MANIFESTINPUT:{}",
             manifest.display()
         );
-        version_info(Path::new(&dir))?;
+        version_info(Path::new(&dir), key_id)?;
     }
     Ok(())
 }
 
-/// Embeds the refresh's updater key, as the module says.
-fn refresh_key(dir: &Path) -> Result<(), Error> {
+/// Embeds the refresh's updater key, as the module says, and returns its id.
+fn refresh_key(dir: &Path) -> Result<u64, Error> {
     println!("cargo:rerun-if-changed=src/windows/refresh/key.rs");
     println!("cargo:rerun-if-env-changed=CLAUSEO_UPDATER_PUBKEY");
     println!("cargo:rerun-if-env-changed=CLAUSEO_RELEASE_MODE");
@@ -118,10 +120,9 @@ fn refresh_key(dir: &Path) -> Result<(), Error> {
     let chosen = given.unwrap_or_else(|| key::compact(key::PLACEHOLDER_KEY));
     let id = key::key_id(&chosen).map_err(|why| format!("the updater public key: {why}"))?;
     let mode = std::env::var("CLAUSEO_RELEASE_MODE").ok();
-    let profile = std::env::var("PROFILE").unwrap_or_default();
-    key::release_guard(mode.as_deref(), &profile, id)?;
+    key::release_guard(mode.as_deref(), id)?;
     println!("cargo:rustc-env=CLAUSEO_SANDBOX_UPDATER_KEY={chosen}");
-    Ok(())
+    Ok(id)
 }
 
 /// `crates/desktop/tauri.conf.json`, parsed; cargo reruns the script when it changes.
@@ -132,7 +133,7 @@ fn tauri_conf(dir: &Path) -> Result<serde_json::Value, Error> {
 }
 
 /// Writes the setup exe's `VERSIONINFO` `.rc` into `OUT_DIR` and links it into that exe.
-fn version_info(dir: &Path) -> Result<(), Error> {
+fn version_info(dir: &Path, key_id: u64) -> Result<(), Error> {
     let conf = tauri_conf(dir)?;
     let field = |pointer: &str| -> Result<String, Error> {
         let value = conf.pointer(pointer).and_then(serde_json::Value::as_str);
@@ -150,6 +151,7 @@ fn version_info(dir: &Path) -> Result<(), Error> {
         ("OriginalFilename", format!("{BIN}.exe")),
         ("ProductName", field("/productName")?),
         ("ProductVersion", version.clone()),
+        (key::KEY_ID_VERSION_STRING, format!("{key_id:016X}")),
     ];
     let rc = PathBuf::from(std::env::var("OUT_DIR")?).join("setup-version.rc");
     write_out(&rc, &rc_text(&numeric(&version)?, &strings)?)?;

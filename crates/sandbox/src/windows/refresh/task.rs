@@ -5,8 +5,9 @@
 //!   starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with
 //!   `--refresh` and nothing else, at the record owner's logon and on demand, needs no network,
 //!   stops after 5 minutes, and never runs twice at once. Its descriptor
-//!   ([`task_sddl`](super::task_sddl)) lets SYSTEM and Administrators do anything and the owner
-//!   read and run it, nothing more; the folder `\Clauseo` gets the same.
+//!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
+//!   Administrators do anything and the owner read and run it, nothing more; the folder
+//!   `\Clauseo` gets the same owner and DACL, made with them or set again when it is there.
 //! - [`unregister_refresh_task`] and [`remove_staging`], which `--remove` calls.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update:
 //!   it asks the Task Scheduler to run the task (`IRegisteredTask::Run`), which the owner's
@@ -108,26 +109,27 @@ fn service() -> Result<ITaskService, TaskError> {
     Ok(service)
 }
 
-/// The folder `\Clauseo`, made with `sddl` when it is missing, given `sddl` when it is there.
+/// The folder `\Clauseo`, made with `sddl` (its owner and DACL) when it is missing; then
+/// `sddl` is set on it again, so a folder that was already there, made by anyone, gets the same
+/// owner and DACL as a new one.
 fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> {
     // SAFETY: a live service and a BSTR that outlives the call.
-    match unsafe { service.GetFolder(&BSTR::from(TASK_FOLDER)) } {
-        Ok(folder) => {
-            // SAFETY: a live folder and a BSTR; flags 0.
-            unsafe { folder.SetSecurityDescriptor(&BSTR::from(sddl), 0) }
-                .map_err(com("ITaskFolder::SetSecurityDescriptor"))?;
-            Ok(folder)
-        }
+    let folder = match unsafe { service.GetFolder(&BSTR::from(TASK_FOLDER)) } {
+        Ok(folder) => folder,
         Err(error) if missing(&error) => {
             // SAFETY: as above.
             let root = unsafe { service.GetFolder(&BSTR::from("\\")) }
                 .map_err(com("ITaskService::GetFolder"))?;
             // SAFETY: a live root folder; the name and the VARIANT outlive the call.
             unsafe { root.CreateFolder(&BSTR::from(FOLDER_NAME), &VARIANT::from(sddl)) }
-                .map_err(com("ITaskFolder::CreateFolder"))
+                .map_err(com("ITaskFolder::CreateFolder"))?
         }
-        Err(error) => Err(com("ITaskService::GetFolder")(error)),
-    }
+        Err(error) => return Err(com("ITaskService::GetFolder")(error)),
+    };
+    // SAFETY: a live folder and a BSTR; flags 0.
+    unsafe { folder.SetSecurityDescriptor(&BSTR::from(sddl), 0) }
+        .map_err(com("ITaskFolder::SetSecurityDescriptor"))?;
+    Ok(folder)
 }
 
 /// Registers (or updates) `\Clauseo\SandboxRefresh` as the module says, for the record owner

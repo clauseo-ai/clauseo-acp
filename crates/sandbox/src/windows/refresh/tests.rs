@@ -8,7 +8,7 @@ use super::*;
 fn a_signed_newer_exe_replaces_the_admin_copy_then_the_record() {
     let key = key();
     let mut fake = Fake::new(&old(), &new(), &key, &good());
-    assert_eq!(refresh(&mut fake, &key.public()), RefreshExit::Done);
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
     assert_eq!(fake.admin_file, Some(new()));
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&new())));
     assert_eq!(
@@ -34,7 +34,7 @@ fn a_crash_at_any_step_never_leaves_a_hash_for_a_file_that_isnt_there() {
     for crash in STEPS {
         let mut fake = Fake::new(&old(), &new(), &key, &good());
         fake.crash = Some(crash);
-        let _exit = refresh(&mut fake, &key.public());
+        let _exit = run_fake(&mut fake, &key);
         assert!(fake.record_names_what_is_there(&old()), "crash at {crash}");
         assert_ne!(
             fake.record.admin_copy_sha256,
@@ -49,7 +49,7 @@ fn a_crash_at_any_step_never_leaves_a_hash_for_a_file_that_isnt_there() {
         fake.crash = None;
         fake.crashed = false;
         assert_eq!(
-            refresh(&mut fake, &key.public()),
+            run_fake(&mut fake, &key),
             RefreshExit::Done,
             "after {crash}"
         );
@@ -68,7 +68,7 @@ fn a_new_copy_left_unrecorded_gets_its_hash_without_another_swap() {
     let key = key();
     let mut fake = Fake::new(&old(), &new(), &key, &good());
     fake.admin_file = Some(new());
-    assert_eq!(refresh(&mut fake, &key.public()), RefreshExit::Done);
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&new())));
     assert!(!fake.calls.contains(&"set_aside"));
     assert_eq!(fake.staged, None, "the staged copy is discarded");
@@ -78,7 +78,7 @@ fn a_new_copy_left_unrecorded_gets_its_hash_without_another_swap() {
 fn an_exe_already_recorded_changes_nothing() {
     let key = key();
     let mut fake = Fake::new(&new(), &new(), &key, &good());
-    assert_eq!(refresh(&mut fake, &key.public()), RefreshExit::Done);
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::Done);
     assert!(!fake.calls.contains(&"set_aside") && !fake.calls.contains(&"write_sha256"));
     assert_eq!(fake.staged, None);
     assert_eq!(
@@ -92,10 +92,7 @@ fn a_failed_move_puts_the_old_copy_back() {
     let key = key();
     let mut fake = Fake::new(&old(), &new(), &key, &good());
     fake.fail = Some("place_staged");
-    assert_eq!(
-        refresh(&mut fake, &key.public()),
-        RefreshExit::ReplaceFailed
-    );
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::ReplaceFailed);
     assert_eq!(fake.admin_file, Some(old()));
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&old())));
     assert_eq!(fake.staged, None, "the staged copy is discarded");
@@ -116,7 +113,7 @@ fn a_failed_set_aside_or_securing_keeps_the_old_copy() {
     ] {
         let mut fake = Fake::new(&old(), &new(), &key, &good());
         fake.fail = Some(fail);
-        assert_eq!(refresh(&mut fake, &key.public()), exit, "{fail}");
+        assert_eq!(run_fake(&mut fake, &key), exit, "{fail}");
         assert_eq!(fake.admin_file, Some(old()), "{fail}");
         assert_eq!(
             fake.record.admin_copy_sha256,
@@ -132,10 +129,7 @@ fn a_failed_record_write_exits_its_own_code() {
     let key = key();
     let mut fake = Fake::new(&old(), &new(), &key, &good());
     fake.fail = Some("write_sha256");
-    assert_eq!(
-        refresh(&mut fake, &key.public()),
-        RefreshExit::RecordNotWritten
-    );
+    assert_eq!(run_fake(&mut fake, &key), RefreshExit::RecordNotWritten);
     assert_eq!(fake.admin_file, Some(new()));
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&old())));
 }

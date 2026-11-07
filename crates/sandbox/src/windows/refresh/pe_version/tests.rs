@@ -1,7 +1,7 @@
 //! The `FILEVERSION` read from a PE image's bytes: a minimal image built here, and every way a
 //! truncated or foreign image fails to `None`, never a panic.
 
-use super::super::test_signer::image;
+use super::super::test_signer::{image, image_for};
 use super::*;
 
 #[test]
@@ -42,37 +42,9 @@ fn a_foreign_or_broken_image_has_no_version() {
 }
 
 #[test]
-fn version_not_older_compares_as_numbers() {
-    for (recorded, candidate) in [
-        ("1.4.0", "1.4.0.0"),
-        ("1.4.0.0", "1.4.0"),
-        ("v1.4.0-beta.2", "1.4.0.0"),
-        ("1.4.0", "1.4.1.0"),
-        ("1.4.0", "1.10.0.0"),
-        ("1.9.9.9", "2.0.0.0"),
-        ("0.1.0", "0.1.0.1"),
-    ] {
-        assert!(
-            version_not_older(recorded, candidate),
-            "{recorded} -> {candidate}"
-        );
-    }
-    for (recorded, candidate) in [
-        ("1.4.0", "1.3.9.0"),
-        ("1.10.0", "1.9.0.0"),
-        ("2.0.0.0", "1.99.99.99"),
-        ("1.4.0.1", "1.4.0.0"),
-        // Unreadable on either side: refused.
-        ("", "1.4.0.0"),
-        ("1.4.0", ""),
-        ("1.4.0", "1.4.0.0.0"),
-        ("one", "1.4.0.0"),
-        ("1..4", "1.4.0.0"),
-        ("1.4.0", "1.4.x.0"),
-    ] {
-        assert!(
-            !version_not_older(recorded, candidate),
-            "{recorded} -> {candidate}"
-        );
-    }
+fn the_machine_is_read_from_the_coff_header() {
+    assert_eq!(machine(&image([1, 4, 0, 0], b"")), Some(MACHINE_X64));
+    let arm = image_for(MACHINE_ARM64, [1, 4, 0, 0], b"");
+    assert_eq!(machine(&arm), Some(MACHINE_ARM64));
+    assert_eq!(machine(b"MZ not a PE"), None);
 }

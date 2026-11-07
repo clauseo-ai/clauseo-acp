@@ -55,6 +55,8 @@ zeroize = { workspace = true }
 # OS: the checks are pure and tested everywhere.
 minisign-verify = { workspace = true }
 sha2 = { workspace = true }
+# The signed versions it compares, by semver precedence (a prerelease below its release).
+semver = { workspace = true }
 # The egress proxy's upstream: proxy URLs, and the logs of an ignored setting or a failed lookup.
 # (url and tracing are listed above.)
 

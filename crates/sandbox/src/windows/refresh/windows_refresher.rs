@@ -25,8 +25,8 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::read_capped;
 use super::{
-    ADMIN_COPY_SDDL, EXE_CAP, Failed, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL,
-    SourceError, SourceFile, Sources, UPDATER_KEY, refresh, staging, walk,
+    ADMIN_COPY_SDDL, EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher,
+    STAGING_SDDL, SourceError, SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
 };
 use crate::windows::record::read_string;
 use crate::windows::setup::owner::this_process;
@@ -57,7 +57,11 @@ const EVENT_SOURCE: PCWSTR = w!("Clauseo Sandbox");
 /// `--refresh`: [`refresh`] over a [`WindowsRefresher`] with the key and version built in.
 pub fn run() -> RefreshExit {
     let mut fs = WindowsRefresher::new();
-    refresh(&mut fs, UPDATER_KEY)
+    let trust = Trust {
+        key: UPDATER_KEY,
+        machine: OWN_MACHINE,
+    };
+    refresh(&mut fs, &trust)
 }
 
 /// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.
@@ -153,7 +157,10 @@ impl Refresher for WindowsRefresher {
 
     fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed> {
         let profile = profile_of(owner).map_err(|error| format!("the owner's profile: {error}"))?;
-        Ok(profile.map(|profile| profile.path))
+        // A temporary profile isn't the owner's own folder: none, so the refresh refuses.
+        Ok(profile
+            .filter(|profile| !profile.temporary)
+            .map(|profile| profile.path))
     }
 
     fn clear_leftovers(&mut self) -> Result<(), Failed> {
@@ -194,10 +201,6 @@ impl Refresher for WindowsRefresher {
 
     fn restore_admin_copy(&mut self) -> Result<(), Failed> {
         staging::rename(&self.staged(SET_ASIDE_NAME)?, &self.at(EXE_NAME)?)
-    }
-
-    fn delete_set_aside_later(&mut self) -> Result<(), Failed> {
-        staging::delete_at_reboot(&self.staged(SET_ASIDE_NAME)?)
     }
 
     fn write_version(&mut self, version: &str) -> Result<(), Failed> {
