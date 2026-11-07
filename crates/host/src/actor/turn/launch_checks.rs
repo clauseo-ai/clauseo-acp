@@ -32,6 +32,10 @@
 //! agent's process tree has been killed (or the agent never started). The session's case-law
 //! relay and its token file (R24, [`relay`]) are made on the same thread and ride the same way.
 //!
+//! With the sandbox's launchers (`Sandbox::with_launchers`, R17 PR-B2), a launch whose checks
+//! passed on the actor asks the seam for its launcher off the actor first ([`sandbox`]), and
+//! the agent spawns through it; the seam's `after_session` follows the agent's exit.
+//!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
 //! swept through a link at `<data>/run` or `<data>/agent-state`.
@@ -85,6 +89,8 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
+    /// What the sandbox's launchers gave this launch ([`sandbox`]); `None` without them.
+    pub(super) sandbox: Option<sandbox::Sandboxed>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -136,6 +142,10 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// The spawned agent's jail ([`sandbox::SandboxSession`]), set on the thread's run folder
+    /// only once the agent spawned through the sandbox's launcher: its removal calls the seam's
+    /// `after_session`. `None` without the seam and on every other clone.
+    pub(crate) sandbox: Option<sandbox::SandboxSession>,
 }
 
 impl RunFolders {
@@ -155,6 +165,7 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
+            sandbox: None,
         }
     }
 
@@ -313,6 +324,7 @@ pub(super) fn prepare(
                     run,
                     skills_written,
                     packs_skipped,
+                    sandbox: None,
                 })
             },
             undo_late,
@@ -451,6 +463,24 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
+    // With the sandbox's launchers, the launch's launcher comes from them first, off the actor.
+    if let Some(seam) = actor.protection.launchers() {
+        sandbox::start(actor, thread, id, waiting, prepared, seam);
+        return;
+    }
+    launch_prepared(actor, thread, waiting, prepared, None);
+}
+
+/// The launch on the actor with what its checks (and the sandbox's launcher) found; when no agent
+/// started, its run folder is removed off the actor. A spawned agent's jail (`sandbox`) rides on
+/// the thread's run folder from then on.
+fn launch_prepared(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    mut prepared: Box<Prepared>,
+    sandbox: Option<sandbox::SandboxSession>,
+) {
     let run = prepared.run.clone();
     let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
     if let Some(state) = state(actor, thread) {
@@ -460,6 +490,9 @@ pub(super) fn on_prepared(
     let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
     if launched {
         packs::hold_notice(actor, thread, packs_skipped);
+        if let Some(run) = state(actor, thread).and_then(|state| state.run.as_mut()) {
+            run.sandbox = sandbox;
+        }
     } else {
         if let Some(state) = state(actor, thread) {
             state.run = None;
@@ -473,8 +506,11 @@ pub(super) fn on_prepared(
 /// started, so its browser slot, if it held one, is free. The removal counts as work in flight
 /// ([`super::super::Work::run_removals`]) until its [`TurnInput::RunRemoved`], so shutdown
 /// answers only once the folder and the claims are gone (or the removal's wait has passed).
-fn discard(actor: &mut Actor, thread: ThreadId, run: RunFolders) {
+fn discard(actor: &mut Actor, thread: ThreadId, mut run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
+    if let Some(session) = run.sandbox.take() {
+        sandbox::after_session(actor, thread, run.key.matter, session);
+    }
     let clock = std::sync::Arc::clone(&actor.clock);
     let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
     actor.work.run_removals += 1;
@@ -520,6 +556,8 @@ pub(super) fn remove_run(actor: &mut Actor, thread: ThreadId) {
 
 mod browser;
 pub(super) mod relay;
+mod sandbox;
+pub(super) use sandbox::on_sandboxed;
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;
