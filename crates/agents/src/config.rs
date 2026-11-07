@@ -99,6 +99,10 @@ pub struct InstallConfig {
     /// `network.ca_certs`: an agent's extra CA file (PEM), the TLS roots of its downloads. npm
     /// never gets it, since npm makes no network call here.
     pub ca_certs: BTreeMap<AgentId, PathBuf>,
+    /// Called by each install try before it makes its HTTP client (S17's route refresh): the
+    /// network to use, resolved again by the caller when its last is stale, or `None` to take
+    /// the one [`crate::Agents::set_network`] last gave. It may block; the caller bounds it.
+    pub refresh: Option<Arc<RefreshFn>>,
     /// Tests only: resolves host names instead of the OS, so a test can be offline and come
     /// back, and can see every host a download looked up.
     #[cfg(feature = "test-support")]
@@ -140,6 +144,9 @@ impl InstallConfig {
         self.ca_certs = ca_certs;
     }
 }
+
+/// What [`InstallConfig::refresh`] calls.
+pub type RefreshFn = dyn Fn() -> Option<Network> + Send + Sync;
 
 /// Names whether a proxy is set, never its text.
 fn shown(proxy: Option<&str>) -> Option<&'static str> {

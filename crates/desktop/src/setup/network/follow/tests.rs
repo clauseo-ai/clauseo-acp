@@ -345,3 +345,88 @@ fn the_start_never_waits_on_the_lookups_and_agents_bound_later_get_the_route() {
     assert_eq!(pushed.len(), 1, "the route resolved before the bind");
     assert_eq!(pushed[0].proxy.as_deref(), Some(OS_PROXY));
 }
+
+/// An OS whose answer the test switches, counting its lookups.
+struct Switchable {
+    answer: Arc<Mutex<String>>,
+    lookups: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Switchable {
+    fn new(answer: &str) -> Self {
+        Self {
+            answer: Arc::new(Mutex::new(answer.to_owned())),
+            lookups: Arc::default(),
+        }
+    }
+
+    fn lookup(&self) -> impl Fn(&Url) -> Option<String> + Send + Sync + 'static {
+        let (answer, lookups) = (Arc::clone(&self.answer), Arc::clone(&self.lookups));
+        move |_target: &Url| {
+            lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(lock(&answer).clone())
+        }
+    }
+
+    fn switch(&self, answer: &str) {
+        answer.clone_into(&mut lock(&self.answer));
+    }
+
+    fn lookups(&self) -> usize {
+        self.lookups.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+const NEW_PROXY: &str = "http://vpn-proxy.firm.example:3128";
+
+/// A route followed on its own thread, fresh for `fresh_for`, from `os`; its slot and the
+/// launch hook over it, once the first route has landed.
+fn followed(os: &Switchable, fresh_for: Duration) -> (NetworkFollow, SetupHook) {
+    let slot = NetworkSlot::default();
+    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .fresh_for(fresh_for);
+    let network = follow(follower, SystemClock.monotonic());
+    network.update(facts());
+    crate::test_support::block_on(network.ready());
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), slot);
+    (network, hook)
+}
+
+/// The network changes: within the freshness an install try's refresh and a launch take the
+/// route as it is, with no OS lookup; past it the try's refresh resolves again and gets the new
+/// proxy, and the next launch takes it too.
+#[test]
+fn past_the_freshness_an_install_try_and_the_next_launch_get_the_new_proxy() {
+    let os = Switchable::new(OS_PROXY);
+    let fresh_for = Duration::from_secs(1);
+    let (network, hook) = followed(&os, fresh_for);
+    let refresh = network.refresher();
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], OS_PROXY);
+    let asked = os.lookups();
+    os.switch(NEW_PROXY);
+    assert_eq!(refresh().and_then(|n| n.proxy).as_deref(), Some(OS_PROXY));
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], OS_PROXY);
+    assert_eq!(os.lookups(), asked, "within the freshness: no lookup");
+    crate::test_support::block_on(AsyncIoTimer.after(fresh_for));
+    assert_eq!(refresh().and_then(|n| n.proxy).as_deref(), Some(NEW_PROXY));
+    assert_eq!(hook_env(&hook, &claude())["HTTPS_PROXY"], NEW_PROXY);
+    assert!(os.lookups() > asked);
+}
+
+/// With nothing asking, a stale route is resolved again by the network thread itself, so a
+/// launch, which never waits, finds the new proxy.
+#[test]
+fn a_stale_route_is_resolved_again_by_itself_for_the_next_launch() {
+    let os = Switchable::new(OS_PROXY);
+    let fresh_for = Duration::from_millis(300);
+    let (_network, hook) = followed(&os, fresh_for);
+    os.switch(NEW_PROXY);
+    let switched = SystemClock.monotonic();
+    while hook_env(&hook, &claude())["HTTPS_PROXY"] != NEW_PROXY {
+        assert!(
+            since(switched) < Duration::from_secs(10),
+            "never resolved again"
+        );
+        crate::test_support::block_on(AsyncIoTimer.after(Duration::from_millis(50)));
+    }
+}
