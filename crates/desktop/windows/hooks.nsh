@@ -20,11 +20,12 @@
 ;    tool reads its records under the data folder's `sandbox` folder to take its access rules back
 ;    off the lawyer's folders. sidecars.mjs bundles it in the Windows installers.
 ;    Before starting it the hook checks the copy as the app does (admin_copy.rs): every folder from
-;    the drive's root down to it, and the copy, admin-only; then the copy's SHA-256 (certutil) the
-;    one the machine's record holds (AdminCopySha256). Anything else, or anything it can't read,
-;    and it refuses: nothing is started, `sandbox\` is kept, and it says so
-;    (removeAdminCopyRefused): a box, or under /S a line in the details list and exit code
-;    CLAUSEO_EXIT_ADMIN_COPY_REFUSED.
+;    the drive's root down to it, and the copy, admin-only; then the copy's SHA-256, computed in
+;    this process (bcrypt), the one the machine's record holds (AdminCopySha256). Anything else, or
+;    anything it can't read or compute, and it refuses: nothing is started, `sandbox\` is kept,
+;    and under /S exit code CLAUSEO_EXIT_ADMIN_COPY_REFUSED. It says the hidden accounts are still
+;    there (removeAdminCopyRefused: a details line, and a box unless /S) only when the record names
+;    an owner, per user the uninstalling user (CLAUSEO_OWNER_TO_TELL); else a details line only.
 ;    The start looks its verb up in HKLM\SOFTWARE\Classes\exefile alone (SEE_MASK_CLASSKEY),
 ;    never in HKCU\Software\Classes, which the uninstalling user can write.
 ;    Both pass `--uninstall`, which the app's in-app removal never does: it also takes the admin
@@ -231,95 +232,79 @@
   ${EndIf}
 !macroend
 
-; certutil's SHA-256 of the copy at $0, written to the file at $4 in the uninstaller's own
-; temporary folder ($PLUGINSDIR): certutil started directly (CreateProcessW, no window, never
-; through cmd.exe), its output and errors the file, and waited for up to a minute. $2 is 1 when it
-; ended in time. The file is created anew, inheritable (SECURITY_ATTRIBUTES: nLength 12, no
-; descriptor, bInheritHandle 1), for writing (GENERIC_WRITE), shared for reading, CREATE_ALWAYS
-; (2), FILE_ATTRIBUTE_NORMAL (0x80). A 32-bit STARTUPINFOW is 68 bytes, with STARTF_USESHOWWINDOW
-; | STARTF_USESTDHANDLES (0x101), SW_HIDE and the handles last; a PROCESS_INFORMATION 16
-; (hProcess, hThread, ...). Uses $1 and $R6 to $R9.
-!macro CLAUSEO_CERTUTIL_HASH
+; The SHA-256 of the copy at $0, computed in this process (bcrypt.dll from $SYSDIR, by its full
+; path, through System::Call), never by a program started for it: AppLocker, WDAC or an ASR rule
+; may block one. The file opened for reading (FILE_GENERIC_READ 0x120089), shared for reading only
+; (FILE_SHARE_READ 1), OPEN_EXISTING (3), so no one writes it while it is read; read in 64 KiB
+; chunks (ReadFile) into BCryptHashData; then BCryptFinishHash's 32 bytes as 64 lowercase hex
+; digits in $4. $2 is 1 when every call succeeded (an NTSTATUS of 0, a ReadFile that didn't fail),
+; else 0 and $4 "". Each handle and the buffer are given back on every path: the file
+; (CloseHandle), the hash (BCryptDestroyHash), the algorithm (BCryptCloseAlgorithmProvider), the
+; buffer (System::Free). Uses $1 and $5 to $7, and $R6 to $R9.
+!macro CLAUSEO_SHA256_OF_COPY
   StrCpy $2 0
-  System::Call '*(i 12, p 0, i 1) p .R6'
-  System::Call 'kernel32::CreateFileW(w r4, i 0x40000000, i 1, p R6, i 2, i 0x80, p 0) p .R7'
-  System::Free $R6
-  ${If} $R7 <> -1
-    StrCpy $1 '"$SYSDIR\certutil.exe" -hashfile "$0" SHA256'
-    System::Call '*(i 68, p 0, p 0, p 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0x101, &i2 0, &i2 0, p 0, p 0, p R7, p R7) p .R8'
-    System::Call '*(&i16) p .R9'
-    ; bInheritHandles 1, for the file; CREATE_NO_WINDOW (0x08000000).
-    System::Call 'kernel32::CreateProcessW(w "$SYSDIR\certutil.exe", w r1, p 0, p 0, i 1, i 0x08000000, p 0, p 0, p R8, p R9) i .r1'
-    System::Call 'kernel32::CloseHandle(p R7)'
-    ${If} $1 <> 0
-      System::Call '*$R9(p .R6, p .R7)'
-      System::Call 'kernel32::CloseHandle(p R7)'
-      System::Call 'kernel32::WaitForSingleObject(p R6, i 60000) i .r1'
-      ${If} $1 = 0
-        StrCpy $2 1
-      ${EndIf}
-      System::Call 'kernel32::CloseHandle(p R6)'
-    ${EndIf}
-    System::Free $R8
-    System::Free $R9
-  ${EndIf}
-!macroend
-
-; Sets $R4 to 1 when a line of certutil's output in the file at $4, spaces, tabs, CR and LF
-; dropped (Windows 7's certutil spaces the bytes), is the recorded hash in $3, compared as NSIS
-; compares (case-insensitively). The output is ANSI text, or UTF-16LE (a NUL or a byte order
-; mark's 0xFE as its second byte). Uses $1, $8, $9 and $R6 to $R8.
-!macro CLAUSEO_HASH_LINE_MATCHES
-  ClearErrors
-  FileOpen $R6 "$4" r
-  ${IfNot} ${Errors}
-    FileReadByte $R6 $1
-    FileReadByte $R6 $1
+  StrCpy $4 ""
+  StrCpy $R6 0
+  System::Call '$SYSDIR\bcrypt.dll::BCryptOpenAlgorithmProvider(*p .R6, w "SHA256", p 0, i 0) i .r1'
+  ${If} $1 = 0
     StrCpy $R7 0
+    System::Call '$SYSDIR\bcrypt.dll::BCryptCreateHash(p R6, *p .R7, p 0, i 0, p 0, i 0, i 0) i .r1'
     ${If} $1 = 0
-    ${OrIf} $1 = 254
-      StrCpy $R7 1
+      System::Call 'kernel32::CreateFileW(w r0, i 0x120089, i 1, p 0, i 3, i 0, p 0) p .R8'
+      ${If} $R8 <> -1
+        System::Alloc 65536
+        Pop $R9
+        ${If} $R9 <> 0
+          StrCpy $5 1
+          ${Do}
+            System::Call 'kernel32::ReadFile(p R8, p R9, i 65536, *i .r6, p 0) i .r1'
+            ${If} $1 = 0
+              StrCpy $5 0
+              ${ExitDo}
+            ${EndIf}
+            ${If} $6 = 0
+              ${ExitDo}
+            ${EndIf}
+            System::Call '$SYSDIR\bcrypt.dll::BCryptHashData(p R7, p R9, i r6, i 0) i .r1'
+            ${If} $1 <> 0
+              StrCpy $5 0
+              ${ExitDo}
+            ${EndIf}
+          ${Loop}
+          ${If} $5 = 1
+            System::Call '$SYSDIR\bcrypt.dll::BCryptFinishHash(p R7, p R9, i 32, i 0) i .r1'
+            ${If} $1 = 0
+              ${For} $5 0 31
+                IntOp $6 $R9 + $5
+                System::Call '*$6(&i1 .r7)'
+                IntOp $7 $7 & 0xFF
+                IntFmt $7 "%02x" $7
+                StrCpy $4 "$4$7"
+              ${Next}
+              StrCpy $2 1
+            ${EndIf}
+          ${EndIf}
+          System::Free $R9
+        ${EndIf}
+        System::Call 'kernel32::CloseHandle(p R8)'
+      ${EndIf}
+      System::Call '$SYSDIR\bcrypt.dll::BCryptDestroyHash(p R7)'
     ${EndIf}
-    FileSeek $R6 0 SET
-    ${Do}
-      ClearErrors
-      ${If} $R7 = 1
-        FileReadUTF16LE $R6 $1
-      ${Else}
-        FileRead $R6 $1
-      ${EndIf}
-      ${If} ${Errors}
-        ${ExitDo}
-      ${EndIf}
-      StrCpy $8 ""
-      StrCpy $9 0
-      ${Do}
-        StrCpy $R8 $1 1 $9
-        ${If} $R8 == ""
-          ${ExitDo}
-        ${EndIf}
-        ${If} $R8 != " "
-        ${AndIf} $R8 != "$\t"
-        ${AndIf} $R8 != "$\r"
-        ${AndIf} $R8 != "$\n"
-          StrCpy $8 "$8$R8"
-        ${EndIf}
-        IntOp $9 $9 + 1
-      ${Loop}
-      ${If} $8 == $3
-        StrCpy $R4 1
-      ${EndIf}
-    ${Loop}
-    FileClose $R6
+    System::Call '$SYSDIR\bcrypt.dll::BCryptCloseAlgorithmProvider(p R6, i 0)'
+  ${EndIf}
+  ${If} $2 <> 1
+    StrCpy $4 ""
   ${EndIf}
 !macroend
 
 ; Sets $R4 to 1 when the admin copy may be started elevated, in this order: (1) every level from
 ; the drive's root to the copy passes CLAUSEO_LEVEL_SAFE, the root against
 ; CLAUSEO_ROOT_CHANGE_RIGHTS and the rest against CLAUSEO_CHANGE_RIGHTS; (2) the machine's record
-; (64-bit view) holds a 64-character AdminCopySha256; (3) certutil hashes the copy; (4) a line of
-; its output is that hash. Anything that fails or can't be read leaves $R4 0. Keeps $0 to $9,
-; $R0 to $R2 and $R6 to $R9.
+; (64-bit view) holds a 64-character AdminCopySha256; (3) the copy's SHA-256
+; (CLAUSEO_SHA256_OF_COPY); (4) the two equal, ignoring case. On a mismatch the record is read
+; once more and compared again: a refresh may have written a new copy and its hash between the
+; first read and the hash. $R4 is 2 when the hash couldn't be computed, else 0 when anything
+; fails or can't be read. Keeps $0 to $9, $R0 to $R2 and $R6 to $R9.
 !macro CLAUSEO_ADMIN_COPY_VERIFIED
   Push $0
   Push $1
@@ -376,14 +361,20 @@
     SetRegView lastused
     StrLen $2 $3
     ${If} $2 = 64
-      ; 3. The copy's hash, then 4. the two compared.
-      InitPluginsDir
-      StrCpy $4 "$PLUGINSDIR\admin-copy-sha256.txt"
-      !insertmacro CLAUSEO_CERTUTIL_HASH
-      ${If} $2 = 1
-        !insertmacro CLAUSEO_HASH_LINE_MATCHES
+      ; 3. The copy's hash, then 4. the two compared, the record read again once on a mismatch.
+      !insertmacro CLAUSEO_SHA256_OF_COPY
+      ${If} $2 <> 1
+        StrCpy $R4 2
+      ${Else}
+        ${If} $4 != $3
+          SetRegView 64
+          ReadRegStr $3 HKLM "SOFTWARE\Clauseo\Sandbox" "AdminCopySha256"
+          SetRegView lastused
+        ${EndIf}
+        ${If} $4 == $3
+          StrCpy $R4 1
+        ${EndIf}
       ${EndIf}
-      Delete "$4"
     ${EndIf}
   ${EndIf}
   Pop $R9
@@ -403,6 +394,39 @@
   Pop $2
   Pop $1
   Pop $0
+!macroend
+
+; Sets $R3 to the set-up's owner, the record's OwnerSid, when the uninstaller may say that the
+; sandbox's hidden accounts are still on the computer, else "". Not the key alone: --adopt
+; --per-machine writes it with nobody set up, and its admin-copy values outlive a removal, which
+; deletes OwnerSid. A per-user uninstall says it only to that owner: another Windows user's
+; uninstall leaves their set-up alone (CLAUSEO_REMOVE has no --per-machine), so it isn't theirs to
+; hear about. The uninstalling user's SID comes from its own token (CLAUSEO_OWN_SID,
+; admin_copy.nsh: System::Call, as the removal uses), compared exactly, as the record check does.
+; The per-machine uninstall removes every user's set-up, so it says it whoever the owner is. The
+; record is in the 64-bit view, which this 32-bit uninstaller reads only through SetRegView 64;
+; put back after. Sets $R2; keeps $R4 to $R7.
+!macro CLAUSEO_OWNER_TO_TELL
+  SetRegView 64
+  ReadRegStr $R3 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_OWNER_SID}"
+  SetRegView lastused
+  !if "${INSTALLMODE}" == "currentUser"
+    ${If} $R3 != ""
+      ; CLAUSEO_OWN_SID sets $R2 and uses $R4 to $R7; $R4 and $R5 are read later.
+      Push $R4
+      Push $R5
+      Push $R6
+      Push $R7
+      !insertmacro CLAUSEO_OWN_SID
+      Pop $R7
+      Pop $R6
+      Pop $R5
+      Pop $R4
+      ${If} $R2 S!= $R3
+        StrCpy $R3 ""
+      ${EndIf}
+    ${EndIf}
+  !endif
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -469,14 +493,27 @@
     ${AndIf} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
       ; The copy checked first (CLAUSEO_ADMIN_COPY_VERIFIED: the chain, then the hash compared
       ; with the record's), and started only when it passes. Refused: nothing starts, $R5 stays
-      ; 0 so `sandbox\` is kept, a details line, and a box or under /S the exit code.
+      ; 0 so `sandbox\` is kept, and under /S exit code 27. A hash that couldn't be computed
+      ; ($R4 2) says so in the details list. The hidden accounts are said to be still there
+      ; (removeAdminCopyRefused, a details line and a box unless /S) only to whom
+      ; CLAUSEO_OWNER_TO_TELL names an owner for; to anyone else, a details line that claims
+      ; nothing about them, in English, as NSIS's own details lines are, and no box.
       !insertmacro CLAUSEO_ADMIN_COPY_VERIFIED
       ${If} $R4 <> 1
-        DetailPrint "$(removeAdminCopyRefused)"
+        ${If} $R4 = 2
+          DetailPrint "couldn't compute the sandbox tool's hash"
+        ${EndIf}
+        !insertmacro CLAUSEO_OWNER_TO_TELL
+        ${If} $R3 != ""
+          DetailPrint "$(removeAdminCopyRefused)"
+          ${IfNot} ${Silent}
+            MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
+          ${EndIf}
+        ${ElseIf} $R4 = 0
+          DetailPrint "the sandbox tool in Program Files failed its check, so it wasn't started"
+        ${EndIf}
         ${If} ${Silent}
           SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}
-        ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
         ${EndIf}
       ${Else}
       ; The machine's class for an exe, opened read-only (HKEY_LOCAL_MACHINE 0x80000002, KEY_READ
@@ -523,39 +560,13 @@
       ${EndIf}
       ${EndIf}
     ${EndIf}
-    ; The tool gone (quarantined, say), so nothing was removed: said only when the machine's
-    ; record names a set-up's owner (OwnerSid), whose hidden accounts are then still there. Not
-    ; the key alone: --adopt --per-machine writes it with nobody set up, and its admin-copy values
-    ; outlive a removal, which deletes OwnerSid. A per-user uninstall says it only to that owner:
-    ; another Windows user's uninstall leaves their set-up alone (CLAUSEO_REMOVE has no
-    ; --per-machine), so it isn't theirs to hear about. The uninstalling user's SID comes from
-    ; its own token (CLAUSEO_OWN_SID, admin_copy.nsh: System::Call, as the removal above uses),
-    ; compared exactly, as the record check does. The per-machine uninstall removes every user's
-    ; set-up, so it says it whoever the owner is. The tool is the admin copy, the only one the
-    ; removal above starts. The record is in the 64-bit view, which this 32-bit uninstaller reads
-    ; only through SetRegView 64; put back after. Under /S no box: a details line and the exit
-    ; code, which the uninstaller only returns when run with _?= (its stub returns at once).
+    ; The tool gone (quarantined, say), so nothing was removed: said only to whom
+    ; CLAUSEO_OWNER_TO_TELL names a set-up's owner for, whose hidden accounts are then still
+    ; there. The tool is the admin copy, the only one the removal above starts. Under /S no box: a
+    ; details line and the exit code, which the uninstaller only returns when run in place with
+    ; _?= (its stub returns at once).
     ${IfNot} ${FileExists} "${CLAUSEO_ADMIN_EXE}"
-      SetRegView 64
-      ReadRegStr $R3 HKLM "${CLAUSEO_RECORD_KEY}" "${CLAUSEO_RECORD_OWNER_SID}"
-      SetRegView lastused
-      !if "${INSTALLMODE}" == "currentUser"
-        ${If} $R3 != ""
-          ; CLAUSEO_OWN_SID sets $R2 and uses $R4 to $R7; $R5 (removed) is read later.
-          Push $R4
-          Push $R5
-          Push $R6
-          Push $R7
-          !insertmacro CLAUSEO_OWN_SID
-          Pop $R7
-          Pop $R6
-          Pop $R5
-          Pop $R4
-          ${If} $R2 S!= $R3
-            StrCpy $R3 ""
-          ${EndIf}
-        ${EndIf}
-      !endif
+      !insertmacro CLAUSEO_OWNER_TO_TELL
       ${If} $R3 != ""
         DetailPrint "$(removeExeMissing)"
         ${If} ${Silent}

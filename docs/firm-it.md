@@ -83,16 +83,18 @@ with 25 under `/P` or `/UPDATE`.
 A passive (`/P`) install shows no box and sets no exit code for Safe workspace's outcomes, except
 the per-machine installer's 24, which every mode sets.
 
-What a per-machine uninstall can also return, in any mode (a box unless `/S`; for 25, unless `/P`
-or `/UPDATE` too):
+What a per-machine uninstall can also return: 25 and 26 in any mode (a box unless `/S`; for 25,
+unless `/P` or `/UPDATE` too), 27 under `/S` only:
 
 | Code | Meaning |
 |---|---|
 | 25 | Per-machine uninstall: nothing uninstalled, because the uninstaller couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
 | 26 | Per-machine uninstall: nothing uninstalled, because it wasn't run from its install folder, as when an option was put after `_?=` (see below) |
+| 27 | Per-machine `/S` uninstall: uninstalled, but the protection stays, since the set-up program in `C:\Program Files\Clauseo\Sandbox` failed its check (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 
-A `/S` uninstall, per-user or per-machine, can also return 21 or 27: uninstalled, but the
-protection stays (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)).
+A `/S` uninstall can also return 21: uninstalled, but the protection stays, since the set-up
+program was gone (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)). A
+silent per-user uninstall never returns 27: it skips the protection's removal.
 
 The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
 plug-ins included, in a new folder under `C:\Program Files\Clauseo\installer-temp`, which only
@@ -790,10 +792,13 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 - **Uninstalling, the copy refused:** before it starts the copy in
   `C:\Program Files\Clauseo\Sandbox`, the uninstaller checks it as Clauseo does: the drive's root,
   `C:\Program Files`, `Clauseo`, `Sandbox` and the file owned by SYSTEM, Administrators or
-  TrustedInstaller and changeable by no one else, and the file's SHA-256 the one recorded in
-  `AdminCopySha256` under that key. If not, it starts nothing and says the hidden accounts are
-  still on the computer; with `/S` it exits 27 instead. Put the folder's permissions back, or run
-  the Clauseo installer again, then uninstall again; or remove the protection by hand (below).
+  TrustedInstaller and changeable by no one else, and the file's SHA-256, which it computes
+  itself (no `certutil`), the one recorded in `AdminCopySha256` under that key. If not, or if it
+  can't compute the hash, it starts nothing; a per-machine `/S` uninstall exits 27. It says the
+  hidden accounts are still on the computer only when someone's protection is set up, as above
+  (a box unless `/S`); otherwise it only writes a line in its details list. Put the folder's
+  permissions back, or run the Clauseo installer again, then uninstall again; or remove the
+  protection by hand (below).
 
 **Exit codes** of both installers and the uninstaller:
 
@@ -804,12 +809,14 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 | 2 | Stopped by an error (NSIS) |
 | 20 | Install: installed, but this run wrote `clauseo-sandbox-setup.exe` to `C:\Program Files\Clauseo\Sandbox` and Windows security removed it (`/S` and interactive; not `/P`) |
 | 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
-| 27 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program in `C:\Program Files\Clauseo\Sandbox` failed its check |
 
-Intune reports 20 as a failed install unless you add it to the app's return codes. `uninstall.exe`
-returns 0 at once (section 1), so it reports 21 or 27 only when run as
+Intune reports 20 as a failed install unless you add it to the app's return codes. A per-machine
+uninstall runs in place, so its `QuietUninstallString`,
 `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no quotes),
-which leaves `uninstall.exe` and the folder behind; delete them afterwards.
+returns 21 or 27 itself; started without `_?=` it removes nothing and returns 26 (section 1). A
+per-user `uninstall.exe` returns 0 at once, so it reports 21 only when run as
+`"%LOCALAPPDATA%\Clauseo\uninstall.exe" /S _?=%LOCALAPPDATA%\Clauseo`, which leaves `uninstall.exe`
+and the folder behind; delete them afterwards.
 
 **Get the file back (preferred).** Never leave a Defender exclusion on a per-user install's
 `%LOCALAPPDATA%\Clauseo`: it weakens protection, since anything running as the lawyer could swap

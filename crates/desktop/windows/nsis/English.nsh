@@ -58,7 +58,9 @@ LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe wo
 ; removeAdminCopyRefused: the uninstaller found S15's set-up program in Program Files, but a
 ; folder on its way or the file itself can be changed by more than administrators, or its SHA-256
 ; isn't the one the machine's record holds (or either couldn't be read), so it didn't start it.
-; A box; under /S a details line and exit code 27. Draft, for the app thread (2026-11-07).
+; Said only when the record names a set-up's owner (per user, the uninstalling user), whose
+; accounts are then still there: a details line, and a box unless /S. Draft, for the app thread
+; (2026-11-07).
 LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
 LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
 ; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
