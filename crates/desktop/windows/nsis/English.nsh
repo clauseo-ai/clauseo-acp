@@ -13,7 +13,8 @@
 ; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the eleven the installer shows
 ; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07), then the one the
 ; per-machine installer shows when it can't make its protected temporary folder
-; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07).
+; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07), and
+; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -96,6 +97,10 @@ LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because 
 ; uninstallTempFailed: the same for the per-machine uninstaller, which stops before it removes
 ; anything; a box, skipped by /S, /P and /UPDATE, then exit code 25. Provisional (2026-11-07).
 LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a safe folder for its temporary files in Program Files. Nothing was removed. Run the uninstaller again. If it fails again, ask whoever looks after this computer."
+; uninstallNotInPlace: the per-machine uninstaller wasn't started in its own folder, as with options
+; added after _?= (windows/uninstall_in_place.nsh); a box, skipped by /S, then exit code 26.
+; Provisional (2026-11-07).
+LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started the way Windows registered it. Nothing was removed. Uninstall Clauseo from Settings, Apps, or ask whoever looks after this computer."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

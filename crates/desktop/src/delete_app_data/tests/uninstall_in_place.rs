@@ -1,9 +1,10 @@
 //! The per-machine uninstaller runs in place and deletes itself (`windows/uninstall_in_place.nsh`):
-//! `_?=` in both registry commands, its plug-in folder first in `un.onInit`, the running image
-//! renamed and then deleted by a delayed hidden cmd line that removes only empty folders, started
-//! once per run. Per-user keeps Tauri's lines. The Windows VM runs it for real.
+//! `_?=` in both registry commands; in `un.onInit` its plug-in folder first, then a refusal
+//! unless it runs in its own folder; then a delayed hidden cmd line, guarded by the main exe's
+//! absence, that deletes the image and removes only empty folders, started once per run.
+//! Per-user keeps Tauri's lines. The Windows VM runs it for real.
 
-use super::admin_copy::{assert_run, code_of, macro_body};
+use super::admin_copy::{assert_run, code_of, firm_it_codes, macro_body};
 use super::safe_temp::loads_a_plug_in;
 use super::sources::{line_with, read};
 use super::template::{TEMPLATE, block_code, split_blocks};
@@ -40,6 +41,10 @@ fn per_machine_registers_both_commands_in_place_and_per_user_keeps_tauris_line()
             "!endif",
         ]
     );
+    // Options before _?=: NSIS takes all that follows the last " _?=" as the folder.
+    let quiet = r#"$\"$INSTDIR\uninstall.exe$\" /S _?=$INSTDIR"#;
+    assert!(quiet.find(" /S").unwrap() < quiet.find(" _?=").unwrap());
+    assert!(read(TEMPLATE).contains(quiet));
     // Nothing else in the template writes either value: no QuietUninstallString per user.
     let text = read(TEMPLATE);
     assert_eq!(text.matches("\"QuietUninstallString\"").count(), 1);
@@ -89,6 +94,10 @@ fn the_uninstaller_makes_its_plug_in_folder_first_in_un_on_init() {
         [
             "!ifmacrodef CLAUSEO_MACHINE_START",
             "!insertmacro CLAUSEO_MACHINE_START",
+            "!endif",
+            // After the protected folder: the refusal unless it runs in place.
+            "!ifmacrodef CLAUSEO_UNINSTALL_IN_PLACE_CHECK",
+            "!insertmacro CLAUSEO_UNINSTALL_IN_PLACE_CHECK",
             "!endif",
         ]
     );
@@ -205,61 +214,25 @@ fn a_path_with_a_cmd_metacharacter_builds_no_command_line() {
     );
 }
 
-/// The whole cmd line, as NSIS builds it: cmd without `AutoRun` or delayed expansion, PING and
-/// both folders by full path, the renamed file (`$1`) deleted, both folders removed only empty.
-const COMMAND: &str = "StrCpy $ClauseoSelfDelete '/d /v:off /c \"\"$SYSDIR\\PING.EXE\" -n 4 \
-                       127.0.0.1 >nul & del /f /q \"$1\" & rmdir \"$INSTDIR\\installer-temp\" & \
-                       rmdir \"$INSTDIR\"\"'";
+/// The whole cmd line, as NSIS builds it: cmd without `AutoRun` or delayed expansion, PING by
+/// full path, uninstall.exe deleted only while no main exe is back, then both folders removed
+/// only when empty.
+const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR\installer-temp" & rmdir "$INSTDIR""'"#;
 
 #[test]
-fn the_running_image_is_checked_renamed_and_only_then_given_a_delete() {
+fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_back() {
     let code = code();
     assert_eq!(
         macro_body(&code, "CLAUSEO_UNINSTALL_SELF_DELETE")[1..],
         [
-            "!if \"${INSTALLMODE}\" == \"perMachine\"",
+            r#"!if "${INSTALLMODE}" == "perMachine""#,
             "Push $0",
-            "Push $1",
-            "Push $2",
-            "StrCpy $ClauseoSelfDelete \"\"",
-            // $INSTDIR refused first, before anything is made in it.
-            "!insertmacro CLAUSEO_CMD_SAFE $INSTDIR $0",
+            r#"StrCpy $ClauseoSelfDelete """#,
+            r#"!insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0"#,
             "${If} $0 = 1",
-            "${AndIf} ${FileExists} \"$INSTDIR\\uninstall.exe\"",
-            "ClearErrors",
-            "GetTempFileName $1 \"$INSTDIR\"",
-            "${IfNot} ${Errors}",
-            // The placeholder goes, so Rename (which refuses a target that exists) can use the
-            // name's stem.
-            "Delete \"$1\"",
-            "StrLen $2 $1",
-            "${Do}",
-            "IntOp $2 $2 - 1",
-            "${If} $2 < 0",
-            "${ExitDo}",
-            "${EndIf}",
-            "StrCpy $0 $1 1 $2",
-            "${If} $0 == \"\\\"",
-            "${ExitDo}",
-            "${EndIf}",
-            "${Loop}",
-            "IntOp $2 $2 + 1",
-            "StrCpy $1 $1 \"\" $2",
-            "StrCpy $1 $1 -4",
-            "StrCpy $1 \"$INSTDIR\\uninstall.$1.old\"",
-            // The renamed path refused too, then the rename, and the line only once it worked.
-            "!insertmacro CLAUSEO_CMD_SAFE $1 $0",
-            "${If} $0 = 1",
-            "ClearErrors",
-            "Rename \"$INSTDIR\\uninstall.exe\" \"$1\"",
-            "${IfNot} ${Errors}",
+            r#"${AndIf} ${FileExists} "$INSTDIR\uninstall.exe""#,
             COMMAND,
             "${EndIf}",
-            "${EndIf}",
-            "${EndIf}",
-            "${EndIf}",
-            "Pop $2",
-            "Pop $1",
             "Pop $0",
             "${If} ${Silent}",
             "!insertmacro CLAUSEO_START_SELF_DELETE",
@@ -267,30 +240,100 @@ fn the_running_image_is_checked_renamed_and_only_then_given_a_delete() {
             "!endif",
         ]
     );
-    // The comment says why /d is there, and the gap after Delete is said to be admin-only.
-    let text = read("windows/uninstall_in_place.nsh");
-    assert!(text.contains("; /d: an elevated cmd would otherwise run HKCU's Command Processor"));
-    assert!(text.contains("admin-only (Program Files'), so no one else can put anything"));
-    // No recursive removal anywhere in the file.
+    // No rename and no placeholder: NSIS holds its own exe open without delete sharing.
     for line in &code {
+        assert!(!line.starts_with("Rename "), "{line}");
+        assert!(!line.starts_with("GetTempFileName "), "{line}");
+        // No recursive removal anywhere in the file.
         assert!(!line.contains("/s"), "{line}");
         assert!(!line.contains("RMDir /r"), "{line}");
     }
+    // The comments say why /d is there, and what happens when the guard loses.
+    let text = read("windows/uninstall_in_place.nsh");
+    assert!(text.contains("; /d: an elevated cmd would otherwise run HKCU's Command Processor"));
+    assert!(text.contains("in the instant between cmd's \"if\" and its \"del\""));
+    assert!(text.contains("When the guard holds, the old file stays, which is harmless."));
 }
 
 #[test]
-fn the_command_starts_once_hidden_by_full_path_from_the_section_under_s_else_at_gui_end() {
+fn an_install_writes_the_main_exe_before_the_uninstaller() {
+    // The guard's premise: with no main exe in the folder, its uninstall.exe is the old one.
+    let lines = span(&read(TEMPLATE), "Section Install", "SectionEnd");
+    let main = line_with(&lines, &[r#"File "${MAINBINARYSRCPATH}""#]);
+    let uninstaller = line_with(&lines, &[r#"WriteUninstaller "$INSTDIR\uninstall.exe""#]);
+    assert!(main < uninstaller);
+    // The main exe is the name the line tests, and the uninstall deletes it before the line.
+    let text = read(TEMPLATE);
+    assert!(text.contains(r#"!define MAINBINARYNAME "{{main_binary_name}}""#));
+    let section = span(&text, "Section Uninstall", "SectionEnd");
+    let gone = line_with(&section, &[r#"Delete "$INSTDIR\${MAINBINARYNAME}.exe""#]);
+    assert!(gone < line_with(&section, &["; >>> clauseo: uninstall-self-delete"]));
+}
+
+#[test]
+fn the_uninstaller_refuses_to_run_anywhere_but_its_own_folder_with_26() {
     let code = code();
-    // Starting clears the line, so a second start does nothing.
+    assert_eq!(
+        macro_body(&code, "CLAUSEO_UNINSTALL_IN_PLACE_CHECK")[1..],
+        [
+            r#"!if "${INSTALLMODE}" == "perMachine""#,
+            "Push $0",
+            "Push $1",
+            "Push $2",
+            r#"StrCpy $0 "$EXEDIR""#,
+            "StrCpy $2 $0 1 -1",
+            r#"${If} $2 == "\""#,
+            "StrCpy $0 $0 -1",
+            "${EndIf}",
+            r#"StrCpy $1 "$INSTDIR""#,
+            "StrCpy $2 $1 1 -1",
+            r#"${If} $2 == "\""#,
+            "StrCpy $1 $1 -1",
+            "${EndIf}",
+            // StrCmp, so without case.
+            "${If} $0 != $1",
+            r#"MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK"#,
+            "SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}",
+            "Quit",
+            "${EndIf}",
+            "Pop $2",
+            "Pop $1",
+            "Pop $0",
+            "!endif",
+        ]
+    );
+    line_with(&code, &["!define CLAUSEO_EXIT_NOT_IN_PLACE 26"]);
+    let english = read("windows/nsis/English.nsh");
+    assert!(english.contains("LangString uninstallNotInPlace ${LANG_ENGLISH} \""));
+    let firm = read("../../docs/firm-it.md");
+    assert_eq!(
+        firm_it_codes(&firm, "What a per-machine uninstall can also return"),
+        [25, 26]
+    );
+    assert!(firm.contains("| 26 | Per-machine uninstall: nothing uninstalled"));
+}
+
+#[test]
+fn the_command_starts_once_hidden_in_sysdir_from_the_section_under_s_else_at_gui_end() {
+    let code = code();
+    // Starting clears the line, so a second start does nothing; cmd's working folder is $SYSDIR,
+    // not $INSTDIR, which its own rmdir removes.
     assert_eq!(
         macro_body(&code, "CLAUSEO_START_SELF_DELETE")[1..],
         [
-            "${If} $ClauseoSelfDelete != \"\"",
-            "ExecShell \"open\" \"$SYSDIR\\cmd.exe\" '$ClauseoSelfDelete' SW_HIDE",
-            "StrCpy $ClauseoSelfDelete \"\"",
+            r#"${If} $ClauseoSelfDelete != """#,
+            "SetOutPath $SYSDIR",
+            r#"ExecShell "open" "$SYSDIR\cmd.exe" '$ClauseoSelfDelete' SW_HIDE"#,
+            r#"StrCpy $ClauseoSelfDelete """#,
             "${EndIf}",
         ]
     );
+    // That is the only ExecShell.
+    let shells = code
+        .iter()
+        .filter(|line| line.starts_with("ExecShell "))
+        .count();
+    assert_eq!(shells, 1);
     assert_eq!(
         macro_body(&code, "CLAUSEO_UNINSTALL_GUI_END")[1..],
         ["!insertmacro CLAUSEO_START_SELF_DELETE"]
@@ -326,5 +369,5 @@ fn the_command_starts_once_hidden_by_full_path_from_the_section_under_s_else_at_
     // Declared once, and included where the other installer macros are.
     line_with(&code, &["Var ClauseoSelfDelete"]);
     let copy = read("windows/admin_copy.nsh");
-    assert!(copy.contains("!include \"${__FILEDIR__}\\uninstall_in_place.nsh\""));
+    assert!(copy.contains(r#"!include "${__FILEDIR__}\uninstall_in_place.nsh""#));
 }

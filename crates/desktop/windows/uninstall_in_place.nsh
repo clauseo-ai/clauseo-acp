@@ -10,34 +10,48 @@
 ; What.
 ; - The template's block "uninstall-string" writes, per machine, UninstallString
 ;   "<folder>\uninstall.exe" _?=<folder> and QuietUninstallString "<folder>\uninstall.exe" /S
-;   _?=<folder> (HKLM, which only administrators write). NSIS takes the last " _?=" on the line
-;   (Main.c, the uninstaller's scan runs backwards from the end), so the reinstall page, which
-;   appends its own "_?=$4" after the registry's value, still sets the folder it chose.
-; - A running image can't be deleted, so the template's Delete "$INSTDIR\uninstall.exe" fails, and
-;   its RMDir "$INSTDIR" with it (it names only that file and the folder, non-recursively). At the
-;   end of the section (block "uninstall-self-delete") CLAUSEO_UNINSTALL_SELF_DELETE renames the
-;   running image to $INSTDIR\uninstall.<unique>.old and builds a hidden cmd line that, about 3 s
-;   later (PING -n 4), deletes that one file and removes $INSTDIR\installer-temp and $INSTDIR, each
-;   only when empty (rmdir without /s). By then the uninstaller has exited, and NSIS's exit
-;   cleanup has removed its own plug-in folder inside installer-temp (safe_temp.nsh).
+;   _?=<folder> (HKLM, which only administrators write); options go before _?=. NSIS takes all
+;   that follows the last " _?=" as the folder (Main.c:330-339), so the reinstall page, which
+;   appends its own "_?=$4" after the registry's value, still sets the folder it chose, and an
+;   option appended after _?= would become part of the folder.
+; - So un.onInit (block "un-admin-section", after the protected plug-in folder) refuses to run
+;   unless $EXEDIR is $INSTDIR (CLAUSEO_UNINSTALL_IN_PLACE_CHECK): "UninstallString /S" would
+;   otherwise unregister Clauseo and leave its files. Exit 26, uninstallNotInPlace (no box under
+;   /S). It also refuses the %TEMP% copy that a by-hand start without _?= makes.
+; - NSIS holds its own exe open, sharing reads only, until it exits (fileform.c:192, util.c:465,
+;   Main.c:472), so the template's Delete "$INSTDIR\uninstall.exe" fails, and its RMDir "$INSTDIR"
+;   with it (they name only that file and the folder, non-recursively). At the end of the section
+;   (block "uninstall-self-delete") CLAUSEO_UNINSTALL_SELF_DELETE builds a hidden cmd line that,
+;   about 3 s later (PING -n 4), once the uninstaller has exited, deletes uninstall.exe if the
+;   main exe isn't there, then removes $INSTDIR\installer-temp and $INSTDIR, each only when empty
+;   (rmdir without /s). By then NSIS's exit cleanup has removed the uninstaller's own plug-in
+;   folder inside installer-temp (safe_temp.nsh).
+; - The guard: an install writes the main exe (File, first in Section Install) before
+;   WriteUninstaller, so with no main exe the uninstall.exe there is still this old one. A new
+;   install in the folder meanwhile writes the main exe first, and the line leaves its
+;   uninstall.exe. The guard loses only if that install's main exe and WriteUninstaller both land
+;   in the instant between cmd's "if" and its "del"; then the new uninstall.exe goes, which a
+;   reinstall puts back. When the guard holds, the old file stays, which is harmless.
 ; - It starts once. Interactive and /P (both have a window) start it from un.onGUIEnd (block
 ;   "un-gui-end"), after the user closes the window; the section's end would be too early, since
 ;   the window stays on "Completed" until Close. /S has no window, so no un.onGUIEnd: the section
-;   starts it. Starting clears the line, so nothing can start it twice.
+;   starts it. Starting clears the line, so nothing can start it twice. cmd starts in $SYSDIR
+;   (SetOutPath first), so its working folder doesn't hold $INSTDIR open.
 ; - The reinstall page runs the old uninstaller this same way (in place, never with /UPDATE: the
-;   template's update mode skips the uninstall). The self-delete is not skipped there: it deletes
-;   only the renamed .old (a name no installer writes) and folders that are empty; the new install
-;   writes a fresh uninstall.exe, and a folder removed while the user is still on the folder page
-;   is made again by the install's SetOutPath.
+;   template's update mode skips the uninstall). The self-delete is not skipped there: the guard
+;   keeps the new install's uninstall.exe, and a folder removed while the user is still on the
+;   folder page is made again by the install's SetOutPath.
 ;
-; It leaves the file, and starts nothing, when the cmd line can't be built safely: $INSTDIR or the
-; renamed path holds one of % ^ & | < > " ! (cmd expands % and, with delayed expansion, !, even in
-; quotes; the rest end the quoting or the command), uninstall.exe isn't there (a copy from %TEMP%
-; ran, and the template's Delete removed the file), GetTempFileName fails, or the rename fails.
-; The file is harmless: firm-it.md says it may stay until removed by hand.
+; It builds no line, and leaves uninstall.exe, when $INSTDIR\<main exe> holds one of
+; % ^ & | < > " ! (cmd expands % and, with delayed expansion, !, even in quotes; the rest end the
+; quoting or the command), or uninstall.exe isn't there. The file is harmless: firm-it.md says it
+; may stay until removed by hand.
 
 ; The cmd line, built in the section and started once (empty when there is nothing to start).
 Var ClauseoSelfDelete
+; The per-machine uninstaller's exit code when it isn't running in place (docs/firm-it.md):
+; nothing was uninstalled.
+!define CLAUSEO_EXIT_NOT_IN_PLACE 26
 
 ; Sets OUT to 1 when PATH holds none of % ^ & | < > " !, else 0. Plain NSIS and LogicLib, one
 ; character at a time. OUT must not be $R0, $R1 or $R2.
@@ -71,63 +85,59 @@ Var ClauseoSelfDelete
   Pop $R0
 !macroend
 
-; Starts the cmd line, once: hidden, by its full path, then forgets it.
+; Starts the cmd line, once: hidden, by its full path, in $SYSDIR, then forgets it.
 !macro CLAUSEO_START_SELF_DELETE
   ${If} $ClauseoSelfDelete != ""
+    SetOutPath $SYSDIR
     ExecShell "open" "$SYSDIR\cmd.exe" '$ClauseoSelfDelete' SW_HIDE
     StrCpy $ClauseoSelfDelete ""
   ${EndIf}
 !macroend
 
-; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed.
-; Keeps $0, $1 and $2.
-!macro CLAUSEO_UNINSTALL_SELF_DELETE
+; In un.onInit (block "un-admin-section"), after the protected folder: refuses unless $EXEDIR is
+; $INSTDIR, compared without case (StrCmp) and with one trailing "\" taken off each. Keeps $0-$2.
+!macro CLAUSEO_UNINSTALL_IN_PLACE_CHECK
   !if "${INSTALLMODE}" == "perMachine"
     Push $0
     Push $1
     Push $2
-    StrCpy $ClauseoSelfDelete ""
-    !insertmacro CLAUSEO_CMD_SAFE $INSTDIR $0
-    ${If} $0 = 1
-    ${AndIf} ${FileExists} "$INSTDIR\uninstall.exe"
-      ClearErrors
-      GetTempFileName $1 "$INSTDIR"
-      ${IfNot} ${Errors}
-        ; GetTempFileName made the file to claim the name, and Rename refuses a target that
-        ; exists, so the placeholder goes first. The gap is safe: a per-machine $INSTDIR is
-        ; admin-only (Program Files'), so no one else can put anything at that name meanwhile.
-        Delete "$1"
-        ; Its stem: the name after the last "\", less ".tmp".
-        StrLen $2 $1
-        ${Do}
-          IntOp $2 $2 - 1
-          ${If} $2 < 0
-            ${ExitDo}
-          ${EndIf}
-          StrCpy $0 $1 1 $2
-          ${If} $0 == "\"
-            ${ExitDo}
-          ${EndIf}
-        ${Loop}
-        IntOp $2 $2 + 1
-        StrCpy $1 $1 "" $2
-        StrCpy $1 $1 -4
-        StrCpy $1 "$INSTDIR\uninstall.$1.old"
-        !insertmacro CLAUSEO_CMD_SAFE $1 $0
-        ${If} $0 = 1
-          ClearErrors
-          Rename "$INSTDIR\uninstall.exe" "$1"
-          ${IfNot} ${Errors}
-            ; /d: an elevated cmd would otherwise run HKCU's Command Processor AutoRun, the user's
-            ; own hive under split-token UAC. /v:off: no ! expansion, whatever HKCU says. The
-            ; outer quotes: with more than two quotes, cmd /c drops the first and the last.
-            StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & del /f /q "$1" & rmdir "$INSTDIR\installer-temp" & rmdir "$INSTDIR""'
-          ${EndIf}
-        ${EndIf}
-      ${EndIf}
+    StrCpy $0 "$EXEDIR"
+    StrCpy $2 $0 1 -1
+    ${If} $2 == "\"
+      StrCpy $0 $0 -1
+    ${EndIf}
+    StrCpy $1 "$INSTDIR"
+    StrCpy $2 $1 1 -1
+    ${If} $2 == "\"
+      StrCpy $1 $1 -1
+    ${EndIf}
+    ${If} $0 != $1
+      MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK
+      SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}
+      Quit
     ${EndIf}
     Pop $2
     Pop $1
+    Pop $0
+  !endif
+!macroend
+
+; Last in Section Uninstall (block "uninstall-self-delete"), after everything else is removed.
+; Keeps $0.
+!macro CLAUSEO_UNINSTALL_SELF_DELETE
+  !if "${INSTALLMODE}" == "perMachine"
+    Push $0
+    StrCpy $ClauseoSelfDelete ""
+    ; The longest path the line names; $INSTDIR\installer-temp adds only safe characters.
+    !insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0
+    ${If} $0 = 1
+    ${AndIf} ${FileExists} "$INSTDIR\uninstall.exe"
+      ; /d: an elevated cmd would otherwise run HKCU's Command Processor AutoRun, the user's own
+      ; hive under split-token UAC. /v:off: no ! expansion, whatever HKCU says. The outer quotes:
+      ; with more than two quotes, cmd /c drops the first and the last. The brackets end the if
+      ; before the rmdirs (a quoted ")" in a path doesn't close them).
+      StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR\installer-temp" & rmdir "$INSTDIR""'
+    ${EndIf}
     Pop $0
     ; /S: no window, so no un.onGUIEnd; start it now. Interactive and /P wait for un.onGUIEnd.
     ${If} ${Silent}
