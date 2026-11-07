@@ -96,6 +96,11 @@ fn elevated_a_profile_reset_drops_what_the_user_wrote_in_its_profile_and_hive() 
     assert!(!first.path.exists(), "{}", first.path.display());
     let again = log_on_once(&user.name, &user.password).unwrap();
     assert!(!again.temporary, "{again:?}");
+    // The same folder back, as the set-up's reset requires (`resets::check_remade`).
+    assert_eq!(
+        again.path, first.path,
+        "no <name>.<computer> beside a folder left behind"
+    );
     assert_eq!(
         profile_of(&user.sid).unwrap().map(|p| p.path),
         Some(again.path.clone())
@@ -104,11 +109,9 @@ fn elevated_a_profile_reset_drops_what_the_user_wrote_in_its_profile_and_hive() 
         again.path.join(r"AppData\LocalLow").is_dir(),
         "the profile is made again"
     );
-    for profile in [&first.path, &again.path] {
-        for folder in [r"AppData\Local\Temp\Low", r"AppData\LocalLow"] {
-            let marker = profile.join(folder).join(MARKER);
-            assert!(!marker.exists(), "{}", marker.display());
-        }
+    for folder in [r"AppData\Local\Temp\Low", r"AppData\LocalLow"] {
+        let marker = again.path.join(folder).join(MARKER);
+        assert!(!marker.exists(), "{}", marker.display());
     }
     assert_eq!(hive_has(&hive, &again.path, KEY), "absent");
     assert_eq!(

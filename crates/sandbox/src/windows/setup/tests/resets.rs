@@ -52,7 +52,9 @@ fn an_extend_resets_a_marked_user_before_its_logon_and_closes_its_local_low_agai
     // owner is checked and the denies written; the mark is cleared once secrets.bin holds the
     // new password, before setup.json.
     let order = [
+        "profile_of 1001",
         "delete_profile 1001",
+        "exists ClauseoSb01",
         "set_password ClauseoSb01",
         "log_on_once ClauseoSb01",
         "owner_of ClauseoSb01",
@@ -205,4 +207,72 @@ fn unreadable_marks_fail_the_set_up_before_any_change() {
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
     assert_eq!((failure.step, failure.rolled_back), (Step::Matters, true));
     assert_eq!(machine.state, before);
+}
+
+/// Fails an extend over a pool owing `ClauseoSb02` a reset, after `fault` sets the machine up;
+/// checks the step and that the mark stays, and returns the machine, its calls only the extend's.
+fn failing_reset(test: &str, step: Step, fault: impl FnOnce(&mut FakeMachine)) -> FakeMachine {
+    let (mut machine, mut acl) = pool_with_a_reset_owed(test, 1002);
+    fault(&mut machine);
+    let from = machine.calls.len();
+    let req = request(&mut machine, 4, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    machine.calls.drain(..from);
+    assert_eq!(
+        (failure.step, failure.rolled_back),
+        (step, true),
+        "{}",
+        failure.cause
+    );
+    assert!(machine.needs_reset.contains(&sid(1002)), "the mark stays");
+    assert!(!machine.calls.iter().any(|c| c.starts_with("reset_done")));
+    machine
+}
+
+#[test]
+fn a_reset_must_prove_the_old_profile_is_gone() {
+    // Its folder survives the delete: refused before the password changes or a logon.
+    let machine = failing_reset("setup-reset-stuck", Step::ResetProfile, |machine| {
+        machine.faults.stuck.insert("ClauseoSb02".to_owned());
+    });
+    assert!(
+        !machine
+            .calls
+            .iter()
+            .any(|c| c == "set_password ClauseoSb02")
+    );
+    assert!(!machine.calls.iter().any(|c| c == "log_on_once ClauseoSb02"));
+
+    // The logon makes it somewhere else: refused; the new password is saved by the rollback.
+    let machine = failing_reset("setup-reset-moved", Step::ResetProfile, |machine| {
+        machine.faults.moved.insert("ClauseoSb02".to_owned());
+    });
+    let now = &machine.state.accounts["ClauseoSb02"].password;
+    assert_eq!(&machine.state.secrets[&sid(1002)], now);
+
+    // Where the profile is can't be read: refused before the delete.
+    let machine = failing_reset("setup-reset-unlisted", Step::ResetProfile, |machine| {
+        machine.fail("profile_of 1002");
+    });
+    assert!(!machine.calls.iter().any(|c| c == "delete_profile 1002"));
+
+    // ProfileList lists none, and the logon doesn't make the account's own folder: refused.
+    failing_reset("setup-reset-none-moved", Step::ResetProfile, |machine| {
+        machine.state.profiles.remove(&sid(1002));
+        machine.faults.moved.insert("ClauseoSb02".to_owned());
+    });
+    // With none listed, the account's own folder back is a reset.
+    let (mut machine, mut acl) = pool_with_a_reset_owed("setup-reset-none", 1002);
+    machine.state.profiles.remove(&sid(1002));
+    let req = request(&mut machine, 4, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert_eq!(report.profiles_reset, Ok(vec![pool_user(2)]));
+    assert!(machine.needs_reset.is_empty());
+}
+
+#[test]
+fn a_failed_password_save_keeps_the_mark() {
+    failing_reset("setup-reset-secrets", Step::Secrets, |machine| {
+        machine.fail("protect_for_owner 1002,1005,1006,1007,1008");
+    });
 }

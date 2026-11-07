@@ -33,7 +33,7 @@
 //! users and never resets an existing password, but for a user owed a profile reset.
 //!
 //! Both reset each recorded user released from a matter (`resets.rs`): its profile deleted, a new
-//! password, one logon that makes the profile again, its `LocalLow` closed by steps 7's owner
+//! password, one logon that makes the profile again, its `LocalLow` closed by step 7's owner
 //! check and denies; its mark in the owner's `matters.json` is cleared after step 10.
 //!
 //! A failure rolls back what this run made (`rollback.rs`, D-B7) and reports the step

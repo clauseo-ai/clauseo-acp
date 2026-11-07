@@ -1,6 +1,7 @@
 //! More of the set-up's fakes (split from `fake.rs`): the surroundings the fence's walks get,
-//! and how the call lines name a folder.
+//! how the call lines name a folder, and the profile faults the reset tests inject.
 
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -44,5 +45,44 @@ impl Surroundings for Around {
 
     fn credentials(&self) -> Option<PathBuf> {
         None
+    }
+}
+
+/// The profile faults the reset tests inject (`resets.rs`), and the folders deleted.
+#[derive(Debug, Default)]
+pub(super) struct ProfileFaults {
+    /// Accounts whose profile folder survives `delete_profile`.
+    pub(super) stuck: BTreeSet<String>,
+    /// Accounts whose logon makes `<name>.HOST` instead of `<name>`.
+    pub(super) moved: BTreeSet<String>,
+    /// The profile folders `delete_profile` deleted, until a logon makes them again.
+    gone: BTreeSet<PathBuf>,
+}
+
+impl ProfileFaults {
+    /// The folder under `Users` a logon of `name` makes.
+    pub(super) fn folder(&self, name: &str) -> String {
+        if self.moved.contains(name) {
+            format!("{name}.HOST")
+        } else {
+            name.to_owned()
+        }
+    }
+
+    /// `name`'s profile at `path` was deleted: gone, unless its folder is stuck.
+    pub(super) fn deleted(&mut self, name: Option<&String>, path: PathBuf) {
+        if !name.is_some_and(|name| self.stuck.contains(name)) {
+            self.gone.insert(path);
+        }
+    }
+
+    /// A logon made the profile at `path` again.
+    pub(super) fn made(&mut self, path: &Path) {
+        self.gone.remove(path);
+    }
+
+    /// Whether `path` is in a deleted profile.
+    pub(super) fn is_gone(&self, path: &Path) -> bool {
+        self.gone.iter().any(|folder| path.starts_with(folder))
     }
 }

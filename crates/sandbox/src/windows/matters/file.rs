@@ -81,7 +81,7 @@ pub(super) struct Contents {
 struct MattersOut<'a> {
     version: u32,
     matters: &'a Rows,
-    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    /// Always written, empty or not, and required on read: a file without it is refused.
     needs_reset: &'a BTreeSet<Sid>,
 }
 
@@ -93,7 +93,7 @@ struct MattersV3In {
     #[serde(rename = "version")]
     _version: de::IgnoredAny,
     matters: UniqueMatters<MatterRow>,
-    #[serde(default)]
+    /// Required, failing closed: a version 3 file without it is refused, never read as none.
     needs_reset: Vec<Sid>,
 }
 
