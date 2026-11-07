@@ -1,7 +1,8 @@
-//! What the stderr tail hides: the home folder, the values of the spec's secret variables and the
-//! secrets it names outright (`LaunchSpec::with_redacted`), words starting `sk-`, the word after
-//! `Bearer ` (in any case) and any URL's user name and password (`scheme://user:pass@host`
-//! becomes `scheme://***@host`: a proxy URL in the environment may carry them).
+//! What the stderr tail hides: the home folder, the values of the spec's secret variables, the
+//! password of each proxy variable (as written and percent-decoded) and the secrets the spec
+//! names outright (`LaunchSpec::with_redacted`), words starting `sk-`, the word after `Bearer `
+//! (in any case) and any URL's user name and password (`scheme://user:pass@host` becomes
+//! `scheme://***@host`: a proxy URL in the environment may carry them).
 
 use std::borrow::Cow;
 use std::cmp::Reverse;
@@ -39,8 +40,10 @@ impl std::fmt::Debug for Redactor {
 
 impl Redactor {
     /// `home` becomes `~`. The values of `env`'s variables whose names hold `KEY`, `TOKEN`,
-    /// `SECRET` or `PASSWORD`, and each of `extra` (secrets the spec names outright, such as
-    /// a token the agent reads from a file), at least 8 bytes long, become `[redacted]`.
+    /// `SECRET` or `PASSWORD`, the password of each proxy variable's URL (`HTTPS_PROXY` and
+    /// the like, [`proxy_passwords`]: as written and percent-decoded), and each of `extra`
+    /// (secrets the spec names outright, such as a token the agent reads from a file), at least
+    /// 8 bytes long, become `[redacted]`.
     pub(crate) fn new(
         home: Option<&Path>,
         env: &BTreeMap<OsString, OsString>,
@@ -54,6 +57,7 @@ impl Redactor {
             .iter()
             .filter(|(name, value)| is_secret_name(name) && value.len() >= MIN_SECRET)
             .map(|(_, value)| value.to_string_lossy().into_owned())
+            .chain(proxy_passwords(env))
             .chain(
                 extra
                     .iter()
@@ -187,6 +191,58 @@ fn without_userinfo_end(text: &str) -> &str {
         Some(at) => body.get(at + 1..).unwrap_or_default(),
         None => text,
     }
+}
+
+/// The password in each of `env`'s proxy variables (a name ending `_PROXY` in any case, but
+/// `NO_PROXY`), as written and percent-decoded: an agent may print either, and a password with
+/// an unencoded `/` or `#` is not one [`without_userinfo`] finds whole in a URL. The URL may
+/// have no scheme (`user:pass@host:port`). The user info runs to the value's last `@`.
+fn proxy_passwords(env: &BTreeMap<OsString, OsString>) -> Vec<String> {
+    let mut passwords = Vec::new();
+    for (name, value) in env {
+        let name = name.to_string_lossy().to_ascii_uppercase();
+        if !name.ends_with("_PROXY") || name == "NO_PROXY" {
+            continue;
+        }
+        let value = value.to_string_lossy();
+        let rest = value.split_once("://").map_or(&*value, |(_, rest)| rest);
+        let Some((userinfo, _host)) = rest.rsplit_once('@') else {
+            continue;
+        };
+        let Some((_user, password)) = userinfo.split_once(':') else {
+            continue;
+        };
+        if password.is_empty() {
+            continue;
+        }
+        let decoded = percent_decoded(password);
+        passwords.push(password.to_owned());
+        if let Some(decoded) = decoded.filter(|decoded| decoded != password) {
+            passwords.push(decoded);
+        }
+    }
+    passwords
+}
+
+/// `text` with each `%XX` decoded; `None` when the result is not UTF-8.
+fn percent_decoded(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        if let (b'%', Some(decoded)) = (byte, hex) {
+            out.push(decoded);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn is_secret_name(name: &OsStr) -> bool {
