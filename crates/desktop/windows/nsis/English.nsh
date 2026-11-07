@@ -13,7 +13,7 @@
 ; uninstaller won't start (removeAdminCopyRefused, 2026-11-07), then the eleven the installer shows
 ; about the admin copy of S15's set-up program (adminCopy*, 2026-11-07), then the one the
 ; per-machine installer shows when it can't make its protected temporary folder
-; (installTempFailed, 2026-11-07).
+; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -91,8 +91,11 @@ LangString adminCopyStillRunning ${LANG_ENGLISH} "Safe workspace may still be se
 LangString adminCopySkippedSilent ${LANG_ENGLISH} "Safe workspace isn't set up, because this install is silent. To set it up, run this installer again without /S."
 ; installTempFailed: the per-machine installer couldn't make its own temporary folder under
 ; Program Files (windows/safe_temp.nsh), so it stops before it loads anything; a box, skipped by
-; /S, then exit code 25. Provisional (stage F, 2026-11-07).
+; /S, /P and /UPDATE, then exit code 25. Provisional (stage F, 2026-11-07).
 LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because the installer couldn't make a safe folder for its temporary files in Program Files. Nothing was installed. Run the installer again. If it fails again, ask whoever looks after this computer."
+; uninstallTempFailed: the same for the per-machine uninstaller, which stops before it removes
+; anything; a box, skipped by /S, /P and /UPDATE, then exit code 25. Provisional (2026-11-07).
+LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a safe folder for its temporary files in Program Files. Nothing was removed. Run the uninstaller again. If it fails again, ask whoever looks after this computer."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

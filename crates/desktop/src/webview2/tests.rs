@@ -220,7 +220,7 @@ fn the_installer_language_files_name_the_product_through_nsis() {
 }
 
 #[test]
-fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_23_once_each() {
+fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_24_once_each() {
     // Tauri's 27, the eight lines windows/hooks.nsh shows after the app deletes its data or about
     // S15's removal (deleteAppDataFailed, deleteAppDataKept, deleteAppDataKeptFailed,
     // deleteAppDataFailedUnnamed, removeStillRunning, removeSkippedSilent, removeExeMissing and
@@ -229,17 +229,18 @@ fn the_installer_language_files_hold_tauris_27_messages_and_clauseos_23_once_eac
     // eleven about the admin copy (adminCopyAsk, adminCopyWorking, adminCopyDone,
     // adminCopyDeclined, adminCopyFailed, adminCopyOtherAccount, adminCopyMachineFailed,
     // adminCopyNewerKept, adminCopyAppRunning, adminCopyStillRunning and adminCopySkippedSilent),
-    // and the per-machine installer's one about its temporary folder (installTempFailed).
+    // and the per-machine installer's and uninstaller's about their temporary folders
+    // (installTempFailed and uninstallTempFailed).
     let [english, hindi] = language_files();
     let mut orders = Vec::new();
     for (file, constant) in [english, hindi] {
         let strings = lang_strings(&file);
-        assert_eq!(strings.len(), 50, "{file}");
+        assert_eq!(strings.len(), 51, "{file}");
         let order: Vec<String> = strings.iter().map(|(key, _, _)| key.clone()).collect();
         let mut keys = order.clone();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 50, "{file}");
+        assert_eq!(keys.len(), 51, "{file}");
         assert!(
             strings.iter().all(|(_, used, _)| used == constant),
             "{file}: every string is {constant}'s"
