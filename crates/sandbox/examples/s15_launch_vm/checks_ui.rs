@@ -6,7 +6,7 @@ use super::launch::{Spec, deadline, launch, summary};
 use super::manifest::Manifest;
 use super::rows::Ctx;
 use super::ui;
-use super::win::UI_LIMITS;
+use super::win::{self, UI_LIMITS};
 use super::win_desk;
 
 /// A random hex text, for the clipboard's text and the atom's name.
@@ -38,7 +38,7 @@ enum UiRead {
 
 /// Checks the UI limits bind the probe that printed `lines` (`probe job-ui`'s, or
 /// `probe token`'s): [`judge`]'s rules, and when it passed on the effect (a `0x0` read), the
-/// harness's positive controls ([`controls`]).
+/// harness's positive controls ([`controls`]); a failed desktop control makes the row INFO.
 pub(crate) fn ui_limits(ctx: &Ctx<'_>, lines: &[String]) -> Result<String, String> {
     match judge(lines)? {
         UiRead::Exact => Ok(format!("the job's UI limits read exactly {UI_LIMITS:#x}")),
@@ -108,24 +108,47 @@ fn judge(lines: &[String]) -> Result<UiRead, String> {
     }
 }
 
-/// The positive controls for the effect, run by the harness as the lawyer, outside the job, on
-/// its own window station: `CreateDesktopW` there must succeed (else the refusal proves
-/// nothing), and the clipboard write is tried (skipped with the reason when this session has no
-/// clipboard the harness can use).
+/// The positive controls for the effect, run by the harness as the lawyer, outside the job.
+/// The desktop control is the agent's kind of object: a fresh window station
+/// `ClauseoS15Ctl-<hex>`, made as the outer runner makes `ClauseoRun-…`, and `CreateDesktopW`
+/// on it ([`win_desk::control_station`]). It must succeed for the agent's 5 to count; when it
+/// fails, the call and code go to [`Ctx::info`] and the row is INFO, never PASS. The clipboard
+/// write is tried (skipped with the reason when this session has no clipboard the harness can
+/// use).
 fn controls(ctx: &Ctx<'_>) -> Result<String, String> {
-    let station = win_desk::own_station_name().unwrap_or_else(|c| format!("error {c}"));
+    let station = format!("ClauseoS15Ctl-{}", random()?);
     ctx.note(&format!(
-        "positive controls: run by the harness as the lawyer, outside the job, on another window \
-         station ({station}, not the agent's ClauseoRun-…)"
+        "positive controls: run by the harness as the lawyer, outside the job; the desktop one on \
+         a fresh window station {station}, made as the outer runner makes ClauseoRun-… \
+         (GENERIC_ALL; DACL: the harness's user and SYSTEM; Low label), CreateDesktopW(Default) \
+         on it"
     ));
-    let desktop = win_desk::create_desktop_code();
-    if desktop != 0 {
-        return Err(format!(
-            "the control CreateDesktopW on the harness's own station gave {desktop}, so the \
-             agent's 5 proves nothing"
-        ));
-    }
-    ctx.note("control: CreateDesktopW on the harness's station made a desktop (closed at once)");
+    let made = win::own_token()
+        .map_err(|e| {
+            (
+                "GetTokenInformation(TokenUser)",
+                e.raw_os_error().unwrap_or(-1),
+            )
+        })
+        .and_then(|token| {
+            win_desk::control_station(&station, &token.user)
+                .map_err(|(call, code)| (call, i32::try_from(code).unwrap_or(-1)))
+        });
+    let desktop = match made {
+        Ok(()) => {
+            ctx.note(&format!(
+                "control: {station} and its Default desktop were made (both closed at once)"
+            ));
+            format!("CreateDesktopW on a fresh station {station} worked")
+        }
+        Err((call, code)) => {
+            ctx.info(&format!(
+                "the desktop control failed: {call} gave {code} (station {station}), so the \
+                 agent's 5 on CreateDesktopW proves nothing"
+            ));
+            format!("the desktop control failed ({call} gave {code})")
+        }
+    };
     let clipboard = match ui::write_text(&format!("ClauseoS15-control-{}", random()?)) {
         Ok(()) => "the clipboard write worked".to_owned(),
         Err(why) => {
@@ -133,9 +156,7 @@ fn controls(ctx: &Ctx<'_>) -> Result<String, String> {
         }
     };
     ctx.note(&format!("control: {clipboard}"));
-    Ok(format!(
-        "controls outside the job on {station}: CreateDesktopW worked; {clipboard}"
-    ))
+    Ok(format!("controls outside the job: {desktop}; {clipboard}"))
 }
 
 /// Adds a global atom as the lawyer (the harness), runs `body` with its name, then deletes it;

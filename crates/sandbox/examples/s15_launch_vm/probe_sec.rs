@@ -4,15 +4,21 @@
 //!
 //! - `runners`: `pid <self>`, `parent <pid>` (its inner runner, from
 //!   `NtQueryInformationProcess(ProcessBasicInformation)`), then reads `<role> <pid>` lines from
-//!   stdin up to `end` (the outer runner, the host and proxy stand-ins). For each target:
+//!   stdin up to `end` (the outer runner, the host and proxy stand-ins), `conhost <pid>` lines
+//!   (each `conhost.exe` whose parent is the inner or the outer runner; a target, role
+//!   `conhost-<pid>`) and `threads <role> <tid>...` lines (the thread ids of the inner and the
+//!   outer runner), both from the harness's own Toolhelp snapshot (the agent's own is filtered).
+//!   For each target:
 //!   `runner-image <role> <pid> <path or code>`, one `runner <role> <right> <code>` per refused
 //!   right ([`REFUSED`] and the token's [`TOKEN_RIGHTS`]; 0 when it opened), and one
 //!   `runner-info <role> <right> <code>` per right that may be granted ([`INFO`]). Before
-//!   those: one `conhost <parent role> <pid>` per `conhost.exe` whose parent is the inner or
-//!   the outer runner (each then a target, role `conhost-<pid>`), or `conhost none` (or
-//!   `conhost error <code>`); and for the inner and the outer runner `threads <role> <pid> <n>`
-//!   (or `threads <role> <pid> error <code>`), then per thread `thread <role> <tid>` and
-//!   `<right> <code>` for each of [`THREAD_RIGHTS`] (0 when it opened).
+//!   those, as information from its own snapshot: `conhost-snapshot <parent role> <pid>` per
+//!   `conhost.exe` under either runner, or `conhost-snapshot none` (or
+//!   `conhost-snapshot error <code>`); for the inner and the outer runner
+//!   `snapshot <role> <pid> <n>` (or `snapshot <role> <pid> error <code>`), what its own thread
+//!   snapshot found (information);
+//!   then per thread id the harness sent `thread <role> <tid>` and `<right> <code>` for each of
+//!   [`THREAD_RIGHTS`] (0 when it opened).
 //! - `breakaway`: starts `probe wait` suspended with `CREATE_BREAKAWAY_FROM_JOB`; prints
 //!   `breakaway error <code>`, or `breakaway child <pid> in-job <true|false|error N>` and then
 //!   `breakaway killed <0 or code>` (the child is killed in every outcome).
@@ -99,12 +105,32 @@ fn runners() -> ExitCode {
         Err(why) => say(&format!("parent error {why}")),
     }
     // `<role> <pid>` lines (the outer runner, and for `lawyer-processes` the host and proxy
-    // stand-ins), then `end`.
+    // stand-ins), `conhost <pid>` and `threads <role> <tid>...` lines, then `end`.
+    let mut given: Vec<(String, Vec<u32>)> = Vec::new();
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         let line = line.trim();
         if line == "end" || line.is_empty() {
             break;
+        }
+        if let Some(rest) = line.strip_prefix("threads ") {
+            let mut words = rest.split_whitespace();
+            let role = words.next().unwrap_or_default().to_owned();
+            match words
+                .map(str::parse::<u32>)
+                .collect::<Result<Vec<u32>, _>>()
+            {
+                Ok(tids) => given.push((role, tids)),
+                Err(_) => say(&format!("target error {line:?}")),
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("conhost ") {
+            match rest.trim().parse::<u32>() {
+                Ok(pid) => targets.push((format!("conhost-{pid}"), pid)),
+                Err(_) => say(&format!("target error {line:?}")),
+            }
+            continue;
         }
         match line
             .split_once(' ')
@@ -114,7 +140,7 @@ fn runners() -> ExitCode {
             _ => say(&format!("target error {line:?}")),
         }
     }
-    runner_threads(&mut targets);
+    runner_threads(&targets, &given);
     for (role, pid) in &targets {
         match win_sec::image_of(*pid) {
             Ok(path) => say(&format!("runner-image {role} {pid} {path}")),
@@ -148,8 +174,9 @@ fn runners() -> ExitCode {
 }
 
 /// The console hosts and the threads of the two runners (the targets with roles `inner` and
-/// `outer`): prints their lines, and adds each console host to `targets`.
-fn runner_threads(targets: &mut Vec<(String, u32)>) {
+/// `outer`): what this process's own snapshot finds of both is printed as information; the
+/// threads tried are the ids in `given` (from the harness).
+fn runner_threads(targets: &[(String, u32)], given: &[(String, Vec<u32>)]) {
     let runners: Vec<(String, u32)> = targets
         .iter()
         .filter(|(role, _)| role == "inner" || role == "outer")
@@ -157,29 +184,26 @@ fn runner_threads(targets: &mut Vec<(String, u32)>) {
         .collect();
     let pids: Vec<u32> = runners.iter().map(|(_, pid)| *pid).collect();
     match win_thread::children_named(&pids, "conhost.exe") {
-        Ok(found) if found.is_empty() => say("conhost none"),
+        Ok(found) if found.is_empty() => say("conhost-snapshot none"),
         Ok(found) => {
             for (parent, pid) in found {
                 let role = runners
                     .iter()
                     .find(|(_, p)| *p == parent)
                     .map_or("?", |(role, _)| role.as_str());
-                say(&format!("conhost {role} {pid}"));
-                targets.push((format!("conhost-{pid}"), pid));
+                say(&format!("conhost-snapshot {role} {pid}"));
             }
         }
-        Err(code) => say(&format!("conhost error {code}")),
+        Err(code) => say(&format!("conhost-snapshot error {code}")),
     }
     for (role, pid) in &runners {
-        let threads = match win_thread::threads_of(*pid) {
-            Ok(threads) => threads,
-            Err(code) => {
-                say(&format!("threads {role} {pid} error {code}"));
-                continue;
-            }
-        };
-        say(&format!("threads {role} {pid} {}", threads.len()));
-        for tid in threads {
+        match win_thread::threads_of(*pid) {
+            Ok(threads) => say(&format!("snapshot {role} {pid} {}", threads.len())),
+            Err(code) => say(&format!("snapshot {role} {pid} error {code}")),
+        }
+    }
+    for (role, tids) in given {
+        for &tid in tids {
             let codes: Vec<String> = THREAD_RIGHTS
                 .iter()
                 .map(|(right, access)| {
