@@ -18,9 +18,9 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     GetTokenInformation, LookupAccountSidW, LookupPrivilegeNameW, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS,
-    TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, TokenGroups,
-    TokenIntegrityLevel, TokenPrivileges, TokenRestrictedSids, TokenUser,
+    PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE, TOKEN_ADJUST_DEFAULT, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER,
+    TokenGroups, TokenIntegrityLevel, TokenPrivileges, TokenRestrictedSids, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, FindClose,
@@ -112,6 +112,21 @@ pub(crate) fn own_token() -> io::Result<TokenFacts> {
     unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }
         .map_err(|e| os(&e))?;
     token_facts(Owned(token).0)
+}
+
+/// The code `OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT)` gives on this
+/// process's own token; 0 when it opened (closed again at once).
+pub(crate) fn own_token_adjust_default_code() -> u32 {
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo-handle needs no closing; `token` is a live out-pointer, closed by
+    // `Owned`.
+    match unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT, &raw mut token) } {
+        Ok(()) => {
+            drop(Owned(token));
+            0
+        }
+        Err(error) => code_of(&error),
+    }
 }
 
 /// What [`own_token`] reads, from `token` (a live handle with `TOKEN_QUERY`).

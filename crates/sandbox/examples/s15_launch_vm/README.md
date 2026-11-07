@@ -58,8 +58,8 @@ only when prepare ran the set-up.
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
-`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `wts-visibility`, `end-cleanup`,
-`cancel`.
+`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `child-token-default-dacl`,
+`wts-visibility`, `end-cleanup`, `cancel`.
 `clipboard` skips in a session with no clipboard the harness can use. `node-pipes` needs `--node`;
 `codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
@@ -160,6 +160,13 @@ pool user's, so either listing with one is INFO, naming the count and the images
   `S-1-5-12`, `S-1-5-32-545` and `S-1-1-0`, the integrity is Low and every logon SID is
   deny-only (as `whoami` asserts); FAIL names each that differs; INFO when the token can't be
   read. The logon SID's attributes are printed.
+- `child-token-default-dacl`: information only; it records a fact and doesn't gate. `probe
+  child-token` as A: the agent starts `probe token-adjust-default` as its child, inside the job,
+  and the child asks `OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT)` on its own
+  token. PASS whenever the child reported a result, the row's text and an `information:` note
+  saying whether it opened (the child's token DACL comes from the agent's default DACL, which
+  grants the pool user `GA`; any process can shut its own DACL through its pseudo-handle anyway)
+  or was refused, with the code. INFO (naming why) only when no result came back; never FAIL.
 - `wts-visibility`: information only. PASS whenever the probe ran, its counts printed as
   `information:` notes; INFO (naming why) only when the probe couldn't run; never FAIL. The harness
   runs `probe wts` as A's pool user, outside any job, on a control station of its own, and ends it
@@ -290,8 +297,8 @@ own atom; the desktop refusal is the effect that tells the limits apart.
 
 The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows',
 `breakaway`'s and `wts-visibility`'s in `pool_verdict.rs`, `end-cleanup`'s in
-`cleanup_verdict.rs`, `cancel`'s in `cancel_verdict.rs`) run on Windows with `cargo test -p
-clauseo-sandbox --example s15_launch_vm`.
+`cleanup_verdict.rs`, `cancel`'s in `cancel_verdict.rs`, `child-token-default-dacl`'s in
+`token_verdict.rs`) run on Windows with `cargo test -p clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI
 
@@ -308,8 +315,9 @@ exits 1 on `INFO` too. The output is the job's artifact.
 ## Probes
 
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`, `hold`,
-`open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
-`write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
-`runners`, `breakaway`, `handles`, `desktop`, `items`; and `ui-control`, `ui-relay` and `wts`,
-which the harness starts itself (the positive control and `wts-visibility`, above). `probe.rs`
-and `probe_sec.rs` document what each prints.
+`open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `child-token` (which starts
+`token-adjust-default` as its child), `echo`, `exit <n>`, `read <path>`, `write <path>`,
+`job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`, `runners`,
+`breakaway`, `handles`, `desktop`, `items`; and `ui-control`, `ui-relay` and `wts`, which the
+harness starts itself (the positive control and `wts-visibility`, above). `probe.rs` and
+`probe_sec.rs` document what each prints.
