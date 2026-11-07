@@ -12,12 +12,20 @@
 //! went direct would be refused by the firm's firewall and counted as a failed try. The start's
 //! `agent.keys_loading` launch refusal is lifted only after it too (`refusal::lift_at_start`), so
 //! no agent launched at start goes direct for its whole life.
+//!
+//! A route is fresh for [`ROUTE_FRESH_FOR`] (60 s): past it the thread resolves the last read
+//! again by itself, so a laptop that changed networks (office, home, VPN) gets the new proxy
+//! within about a minute. Launches read the route from the slot and never wait (the host's actor
+//! builds their env); each install try asks for a fresh one first ([`NetworkFollow::refresher`],
+//! `InstallConfig::refresh`), waiting at most the budget, and within the 60 s takes the route as
+//! it is, with no OS lookup.
 
 use std::pin::pin;
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use clauseo_agents::{Clock as _, Network, SystemClock};
+use clauseo_agents::{Clock, Network, SystemClock};
 use clauseo_process::{AsyncIoTimer, Timer as _};
 use futures::FutureExt as _;
 use futures::channel::oneshot;
@@ -38,6 +46,44 @@ pub(crate) const FIRST_ROUTE_WAIT: Duration = Duration::from_secs(5);
 /// for handing the route on. A lookup past it counts as direct in that route.
 pub(crate) const OS_LOOKUP_BUDGET: Duration = Duration::from_millis(4_750);
 
+/// How long a route is used before it is resolved again.
+pub(crate) const ROUTE_FRESH_FOR: Duration = Duration::from_secs(60);
+
+/// What the network thread is asked.
+enum Ask {
+    /// A settings read: the next route is made from it.
+    Facts(NetworkFacts),
+    /// A fresh route, if the last is stale; the network afterwards goes back on the sender.
+    Refresh(mpsc::Sender<Network>),
+}
+
+/// When the last route was made, and from what read.
+struct Freshness {
+    clock: Arc<dyn Clock>,
+    fresh_for: Duration,
+    /// The last read and when its route was made.
+    last: Option<(NetworkFacts, Duration)>,
+}
+
+impl Freshness {
+    /// Notes a route made from `facts` now.
+    fn resolved(&mut self, facts: NetworkFacts) {
+        self.last = Some((facts, self.clock.monotonic()));
+    }
+
+    /// The last read, when its route is stale.
+    fn stale(&self) -> Option<&NetworkFacts> {
+        let (facts, at) = self.last.as_ref()?;
+        (self.clock.monotonic().saturating_sub(*at) >= self.fresh_for).then_some(facts)
+    }
+
+    /// How long until the route is stale; `None` before the first.
+    fn due_in(&self) -> Option<Duration> {
+        let (_, at) = self.last.as_ref()?;
+        Some((*at + self.fresh_for).saturating_sub(self.clock.monotonic()))
+    }
+}
+
 /// Takes each settings read in: resolves the route and hands it on ([`Follower::take`]).
 pub(crate) struct NetworkFollow {
     sink: Box<dyn Fn(NetworkFacts) + Send + Sync>,
@@ -48,6 +94,8 @@ pub(crate) struct NetworkFollow {
     started: Duration,
     /// The follower, for [`NetworkFollow::bind`]; `None` for the default one.
     follower: Option<Arc<Mutex<Follower>>>,
+    /// Asks for a fresh route and waits at most the given time for it ([`Self::refresher`]).
+    refresh: Arc<dyn Fn(Duration) -> Option<Network> + Send + Sync>,
 }
 
 impl Default for NetworkFollow {
@@ -62,6 +110,7 @@ impl Default for NetworkFollow {
             first: first.shared(),
             started: SystemClock.monotonic(),
             follower: None,
+            refresh: Arc::new(|_wait| None),
         }
     }
 }
@@ -78,6 +127,14 @@ impl NetworkFollow {
         if let Some(follower) = &self.follower {
             lock(follower).bind(agents);
         }
+    }
+
+    /// What an install try calls first (`InstallConfig::refresh`): the network of a fresh route,
+    /// resolved again when the last is older than [`ROUTE_FRESH_FOR`] (at most the budget,
+    /// [`FIRST_ROUTE_WAIT`]), else the last as it is; `None` when none came in time.
+    pub(crate) fn refresher(&self) -> impl Fn() -> Option<Network> + Send + Sync + 'static {
+        let refresh = Arc::clone(&self.refresh);
+        move || refresh(FIRST_ROUTE_WAIT)
     }
 
     /// Waits until the first route has been handed on, at most until [`FIRST_ROUTE_WAIT`]
@@ -103,11 +160,13 @@ impl NetworkFollow {
         let first = follower.first_signal();
         let follower = Arc::new(Mutex::new(follower));
         let taker = Arc::clone(&follower);
+        let refresher = Arc::clone(&follower);
         Self {
             sink: Box::new(move |facts| lock(&taker).take(&facts)),
             first,
             started: SystemClock.monotonic(),
             follower: Some(follower),
+            refresh: Arc::new(move |_wait| lock(&refresher).refresh_if_stale()),
         }
     }
 }
@@ -146,6 +205,9 @@ pub(crate) struct Follower {
     logged: Option<String>,
     /// Told once the first route has been handed on.
     landed: Option<oneshot::Sender<()>>,
+    /// When the last route was made ([`Follower::take`] on the caller's thread; the network
+    /// thread keeps its own).
+    fresh: Freshness,
 }
 
 impl Follower {
@@ -182,7 +244,19 @@ impl Follower {
             last: None,
             logged: None,
             landed: None,
+            fresh: Freshness {
+                clock: Arc::new(SystemClock),
+                fresh_for: ROUTE_FRESH_FOR,
+                last: None,
+            },
         }
+    }
+
+    /// With `fresh_for` instead of [`ROUTE_FRESH_FOR`] (tests).
+    #[cfg(test)]
+    pub(crate) fn fresh_for(mut self, fresh_for: Duration) -> Self {
+        self.fresh.fresh_for = fresh_for;
+        self
     }
 
     /// What ends once the first route has been handed on.
@@ -195,7 +269,17 @@ impl Follower {
     /// Resolves `facts` and hands the route on ([`Follower::hand`]).
     pub(crate) fn take(&mut self, facts: &NetworkFacts) {
         let route = self.resolver.resolve(facts);
+        self.fresh.resolved(facts.clone());
         self.hand(route);
+    }
+
+    /// The last read resolved again when its route is stale; then the last network.
+    #[cfg(test)]
+    fn refresh_if_stale(&mut self) -> Option<Network> {
+        if let Some(facts) = self.fresh.stale().cloned() {
+            self.take(&facts);
+        }
+        self.last.clone()
     }
 
     /// Logs the source and proxies when they changed (and the first time), gives `Agents` the
@@ -251,30 +335,37 @@ impl Follower {
 pub(crate) fn follow(mut follower: Follower, started: Duration) -> NetworkFollow {
     let first = follower.first_signal();
     let resolver = follower.resolver.clone();
-    let (send, receive) = mpsc::channel::<NetworkFacts>();
+    let fresh = Freshness {
+        clock: Arc::clone(&follower.fresh.clock),
+        fresh_for: follower.fresh.fresh_for,
+        last: None,
+    };
+    let (send, receive) = mpsc::channel::<Ask>();
     let follower = Arc::new(Mutex::new(follower));
     let on_thread = Arc::clone(&follower);
     let spawned = std::thread::Builder::new()
         .name("clauseo-setup-network".to_owned())
-        .spawn(move || {
-            while let Ok(mut facts) = receive.recv() {
-                while let Ok(newer) = receive.try_recv() {
-                    facts = newer;
-                }
-                // Resolved with no lock held, so a bind never waits on the OS.
-                let route = resolver.resolve(&facts);
-                lock(&on_thread).hand(route);
-            }
-        });
-    let sink: Box<dyn Fn(NetworkFacts) + Send + Sync> = match spawned {
-        Ok(_thread) => Box::new(move |facts| {
-            // Gone only with the thread, which ends with the app.
-            let _sent = send.send(facts);
-        }),
+        .spawn(move || serve(&receive, &resolver, fresh, &on_thread));
+    let (sink, refresh): (Box<dyn Fn(NetworkFacts) + Send + Sync>, Refresh) = match spawned {
+        Ok(_thread) => {
+            let asks = send.clone();
+            let refresh: Refresh = Arc::new(move |wait| {
+                let (reply, answer) = mpsc::channel();
+                asks.send(Ask::Refresh(reply)).ok()?;
+                answer.recv_timeout(wait).ok()
+            });
+            let sink = Box::new(move |facts| {
+                // Gone only with the thread, which ends with the app.
+                let _sent = send.send(Ask::Facts(facts));
+            });
+            (sink, refresh)
+        }
         Err(err) => {
             tracing::warn!(%err, "no network thread: the proxy is resolved inline");
             let taker = Arc::clone(&follower);
-            Box::new(move |facts| lock(&taker).take(&facts))
+            let last = Arc::clone(&follower);
+            let refresh: Refresh = Arc::new(move |_wait| lock(&last).last.clone());
+            (Box::new(move |facts| lock(&taker).take(&facts)), refresh)
         }
     };
     NetworkFollow {
@@ -282,6 +373,57 @@ pub(crate) fn follow(mut follower: Follower, started: Duration) -> NetworkFollow
         first,
         started,
         follower: Some(follower),
+        refresh,
+    }
+}
+
+/// What [`NetworkFollow::refresher`] calls: a fresh route within the given wait.
+type Refresh = Arc<dyn Fn(Duration) -> Option<Network> + Send + Sync>;
+
+/// The network thread's loop, until every sender is gone: each read (the newest of any queued)
+/// is resolved, and the last again once stale, by itself or when a refresh asks; every refresh
+/// gets the network afterwards. Resolved with no lock held, so a bind never waits on the OS.
+fn serve(
+    receive: &mpsc::Receiver<Ask>,
+    resolver: &Resolver,
+    mut fresh: Freshness,
+    follower: &Mutex<Follower>,
+) {
+    loop {
+        let ask = match fresh.due_in() {
+            Some(wait) => match receive.recv_timeout(wait) {
+                Ok(ask) => Some(ask),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return,
+            },
+            None => match receive.recv() {
+                Ok(ask) => Some(ask),
+                Err(_) => return,
+            },
+        };
+        let mut newest = None;
+        let mut replies = Vec::new();
+        for ask in ask
+            .into_iter()
+            .chain(std::iter::from_fn(|| receive.try_recv().ok()))
+        {
+            match ask {
+                Ask::Facts(facts) => newest = Some(facts),
+                Ask::Refresh(reply) => replies.push(reply),
+            }
+        }
+        if let Some(facts) = newest.or_else(|| fresh.stale().cloned()) {
+            let route = resolver.resolve(&facts);
+            fresh.resolved(facts);
+            lock(follower).hand(route);
+        }
+        let network = lock(follower).last.clone();
+        for reply in replies {
+            if let Some(network) = network.clone() {
+                // The caller may have stopped waiting.
+                let _sent = reply.send(network);
+            }
+        }
     }
 }
 

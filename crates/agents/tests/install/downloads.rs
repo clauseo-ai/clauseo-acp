@@ -1,7 +1,7 @@
 //! The download rules: resume, integrity, offline, blocked, disk space and the log.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -155,6 +155,47 @@ fn a_job_waiting_offline_takes_a_proxy_set_meanwhile() {
     let after = names.lock().unwrap()[before..].to_vec();
     assert!(!after.is_empty(), "the proxy's name was looked up");
     assert!(after.iter().all(|name| name == "proxy.test"), "{after:?}");
+    assert!(agents.shutdown(secs(10)));
+}
+
+/// A try takes the network `InstallConfig::refresh` gives (S17's route refresh: desktop's route
+/// resolved again past 60 s) over the one `Agents` started with.
+#[test]
+fn a_try_takes_the_network_the_refresh_gives() {
+    let mut fx = Fixture::new("refresh-proxy");
+    let proxy = TestRegistry::start().unwrap();
+    let proxy_addr = proxy.addr();
+    fx.config.install.resolver = Some(TestResolver(Arc::new(move |name: &str| {
+        if name == "proxy.test" {
+            Ok(vec![proxy_addr])
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no {name}"),
+            ))
+        }
+    })));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asked);
+    let fresh = format!("http://proxy.test:{}", proxy_addr.port());
+    fx.config.install.refresh = Some(Arc::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        Some(Network {
+            proxy: Some(fresh.clone()),
+            ..Network::default()
+        })
+    }));
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    // The proxy here refuses the `CONNECT` (405), a failed try: its back-off follows.
+    fx.timer.fire_next(secs(2));
+    let first = proxy.requests().remove(0);
+    assert_eq!(
+        (first.method.as_str(), first.path.as_str()),
+        ("CONNECT", "registry.test:80")
+    );
+    assert!(asked.load(Ordering::SeqCst) >= 1);
     assert!(agents.shutdown(secs(10)));
 }
 
