@@ -2,7 +2,9 @@ use std::ffi::{OsStr, OsString};
 
 use tauri::Url;
 
-use super::{ENV_OVERRIDE, NO_DNS, WRY_DEFAULT_ARGS, browser_args, env_override_with_rule};
+use super::{
+    ENV_OVERRIDE, NO_DNS, WRY_DEFAULT_ARGS, browser_args, env_override_with_rule, registry_warning,
+};
 
 /// wry 0.57.0's default arguments, as `src/webview2/mod.rs` writes them when none are passed.
 const WRY_DEFAULTS: &[&str] = &["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection"];
@@ -135,15 +137,40 @@ fn a_set_override_variable_keeps_its_flags_and_gains_the_rule() {
 }
 
 #[test]
-fn an_override_variable_with_its_own_rules_is_left_as_it_is() {
+fn the_rule_goes_last_after_the_variable_s_own_rules() {
+    assert_eq!(
+        env_override_with_rule(Some(OsStr::new(r#"--host-resolver-rules="MAP foo bar""#))),
+        Some(OsString::from(
+            r#"--host-resolver-rules="MAP foo bar" --host-resolver-rules="MAP * ~NOTFOUND""#
+        ))
+    );
+    // Our rule earlier, then another: ours again, last.
+    let value = format!(r#"{NO_DNS} --host-resolver-rules="MAP * 127.0.0.1""#);
+    assert_eq!(
+        env_override_with_rule(Some(OsStr::new(&value))),
+        Some(OsString::from(format!("{value} {NO_DNS}")))
+    );
+}
+
+#[test]
+fn a_variable_already_ending_with_the_rule_is_left_as_it_is() {
     for value in [
-        NO_DNS,
-        r#"--remote-debugging-port=0 --host-resolver-rules="MAP * 127.0.0.1""#,
+        NO_DNS.to_owned(),
+        format!("--remote-debugging-port=0 {NO_DNS}"),
+        format!("--remote-debugging-port=0 {NO_DNS} "),
     ] {
         assert_eq!(
-            env_override_with_rule(Some(OsStr::new(value))),
+            env_override_with_rule(Some(OsStr::new(&value))),
             None,
             "{value}"
         );
     }
+}
+
+#[test]
+fn the_policy_warning_names_each_hive_with_a_value() {
+    assert_eq!(registry_warning(false, false), None);
+    assert_eq!(registry_warning(true, false), Some("HKCU"));
+    assert_eq!(registry_warning(false, true), Some("HKLM"));
+    assert_eq!(registry_warning(true, true), Some("HKCU, HKLM"));
 }

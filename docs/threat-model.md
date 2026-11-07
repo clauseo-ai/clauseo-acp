@@ -109,9 +109,13 @@ converted document. From there they can call any IPC command the page can reach.
   query; on a Windows VM no `msedgewebview2` process made any lookup for any of the four. The
   app's pages need no name: they come from `https://tauri.localhost` through interception, and
   every network request is made by Rust. A set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, which
-  WebView2 takes in place of the app's arguments, gets the rule appended first thing in `main`
-  unless it sets resolver rules of its own. Known gap: a variable set with its own
-  `--host-resolver-rules` keeps them; and on macOS (WKWebView) a refused navigation's host and
+  WebView2 takes in place of the app's arguments, gets the rule added at its end as
+  `main` starts (Chromium takes the last of a repeated switch, so it wins over the variable's own
+  rules). Residual: an `AdditionalBrowserArguments` policy value for the app's exe under `HKCU`
+  or `HKLM` `Software\Policies\Microsoft\Edge\WebView2` replaces the app's arguments and drops
+  the rule; only something already running with the lawyer's rights, or the firm's admin, can
+  set one, and the app logs a warning naming the hive (never the value) when one is set. Known
+  gap: on macOS (WKWebView) a refused navigation's host and
   `dns-prefetch`/`preconnect` targets can still put a name of the page's choosing into a DNS
   query (and, for preconnect, a TLS handshake), with no WKWebView API to turn that off, to be
   closed before the Mac release

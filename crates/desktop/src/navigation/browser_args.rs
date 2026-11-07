@@ -22,11 +22,17 @@
 //!   switches included.
 //! - `WebView2` lets a user- or machine-set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` take the
 //!   place of these arguments, which would drop the rule. [`keep_no_dns_in_env`], first thing in
-//!   `main`, appends [`NO_DNS`] to that variable when it is set and has no
-//!   `--host-resolver-rules` of its own, keeping the flags it has (support and debugging flags,
-//!   usually). A variable that sets its own rules is left as it is, and so is one set by whatever
-//!   starts the process after this ran; in a development build the appended rule has no
+//!   `main`, appends [`NO_DNS`] to that variable when it is set, keeping the flags it has (support
+//!   and debugging flags, usually). It goes last even after `--host-resolver-rules` of the
+//!   variable's own, since Chromium takes the last value of a repeated switch; only a value that
+//!   already ends with it (a relaunch, a child) is left as it is. A variable set by whatever starts
+//!   the process after this ran is not covered; in a development build the appended rule has no
 //!   `devUrl` exclusion, so a set variable there stops the dev page loading.
+//! - `WebView2` also takes `AdditionalBrowserArguments` policy values, under `HKCU` or `HKLM`
+//!   `Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments`, named by the exe,
+//!   in place of these arguments. Only something already running with the user's rights, or an
+//!   admin, can set one; [`apply`] logs one warning naming the hive when one is set
+//!   ([`registry_warning`]), never the value.
 
 use std::ffi::{OsStr, OsString};
 
@@ -34,6 +40,14 @@ use tauri::Url;
 
 #[cfg(windows)]
 use tauri::{Manager, Runtime, WebviewWindowBuilder};
+#[cfg(windows)]
+use windows::Win32::Foundation::ERROR_SUCCESS;
+#[cfg(windows)]
+use windows::Win32::System::Registry::{
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_ANY, RegGetValueW,
+};
+#[cfg(windows)]
+use windows::core::{PCWSTR, w};
 
 #[cfg(test)]
 mod tests;
@@ -64,20 +78,67 @@ pub(crate) fn apply<'a, R: Runtime, M: Manager<R>>(
     builder: WebviewWindowBuilder<'a, R, M>,
     app: &M,
 ) -> WebviewWindowBuilder<'a, R, M> {
+    static CHECKED: std::sync::Once = std::sync::Once::new();
+    CHECKED.call_once(|| {
+        if let Some(hives) = registry_warning(policy_set(HKEY_CURRENT_USER), policy_set(HKEY_LOCAL_MACHINE)) {
+            tracing::warn!(hives, "a WebView2 AdditionalBrowserArguments policy is set for this exe: it replaces the arguments that stop DNS lookups");
+        }
+    });
     let args = browser_args(super::dev_url(app.config().build.dev_url.as_ref()));
     #[cfg(feature = "e2e")]
     let args = args + &crate::e2e::debugging_args();
     builder.additional_browser_args(&args)
 }
 
+/// Which hives to name in the policy warning, given whether `HKCU` and `HKLM` have a value.
+pub(crate) fn registry_warning(hkcu: bool, hklm: bool) -> Option<&'static str> {
+    match (hkcu, hklm) {
+        (true, true) => Some("HKCU, HKLM"),
+        (true, false) => Some("HKCU"),
+        (false, true) => Some("HKLM"),
+        (false, false) => None,
+    }
+}
+
+/// Whether `hive` has an `AdditionalBrowserArguments` policy value named by this exe's file name.
+/// A failed read counts as none.
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "FFI to the Win32 registry")]
+fn policy_set(hive: HKEY) -> bool {
+    let Some(name) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.file_name().map(OsStr::to_os_string))
+    else {
+        return false;
+    };
+    let name: Vec<u16> = std::os::windows::ffi::OsStrExt::encode_wide(name.as_os_str())
+        .chain([0])
+        .collect();
+    // SAFETY: the subkey is a NUL-terminated literal and `name` a NUL-terminated buffer alive for
+    // the call; with no type, data or size out-pointers it only reports whether the value exists.
+    let read = unsafe {
+        RegGetValueW(
+            hive,
+            w!("Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments"),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_ANY,
+            None,
+            None,
+            None,
+        )
+    };
+    read == ERROR_SUCCESS
+}
+
 /// The variable through which `WebView2` takes arguments in place of the app's.
 pub(crate) const ENV_OVERRIDE: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
 
 /// The value [`ENV_OVERRIDE`] should have, given its value `current`: `None` to leave it (unset,
-/// or already naming `--host-resolver-rules`), else `current` with [`NO_DNS`] after a space.
+/// or already ending with [`NO_DNS`]), else `current` with [`NO_DNS`] after a space, last, so it
+/// wins over any earlier `--host-resolver-rules`.
 pub(crate) fn env_override_with_rule(current: Option<&OsStr>) -> Option<OsString> {
     let current = current?;
-    if current.to_string_lossy().contains("--host-resolver-rules") {
+    if current.to_string_lossy().trim_end().ends_with(NO_DNS) {
         return None;
     }
     let mut value = current.to_os_string();
@@ -88,7 +149,7 @@ pub(crate) fn env_override_with_rule(current: Option<&OsStr>) -> Option<OsString
     Some(value)
 }
 
-/// Appends [`NO_DNS`] to a set [`ENV_OVERRIDE`] that has no resolver rules. `main` calls it
+/// Appends [`NO_DNS`] to a set [`ENV_OVERRIDE`] that does not already end with it. `main` calls it
 /// first, before any thread starts.
 #[cfg(windows)]
 #[expect(
