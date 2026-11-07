@@ -43,7 +43,7 @@ use super::admit::{key_stored, sign_in_barred};
 use super::compose::Compose;
 use super::confirm::{Ask, SetupConfirm};
 use super::host_calls::SetupHost;
-use super::keys::KeyCache;
+use super::keys::{KeyCache, KeysLoaded, needs_keys};
 use super::leave::{self, Waiter};
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents, events};
@@ -101,6 +101,8 @@ pub(crate) struct AgentsBackend {
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
     pub(crate) counts: Arc<dyn SetupCounts>,
+    /// The end of the keys' first load, which only the commands that read them wait for.
+    pub(crate) keys_loaded: KeysLoaded,
 }
 
 impl SetupBackend for AgentsBackend {
@@ -133,12 +135,20 @@ impl SetupBackend for AgentsBackend {
 }
 
 impl AgentsBackend {
+    /// Waits for the keys' first load when `command` reads a key; others go on at once.
+    async fn keys_for(&self, command: &SetupCommand) {
+        if needs_keys(command) {
+            self.keys_loaded.wait().await;
+        }
+    }
+
     /// Runs `command`; the command, and any secret in it, is dropped when this returns.
     async fn answer(&self, command: SetupCommand, key_write: KeyWrite) -> Result<(), HostError> {
         let agent = command.agent().clone();
         let Some(info) = self.known.get(&agent) else {
             return Err(invalid(format!("{agent} is not an agent Clauseo sets up")));
         };
+        self.keys_for(&command).await;
         let agents = &*self.agents;
         network_first(self, &command).await;
         match command {

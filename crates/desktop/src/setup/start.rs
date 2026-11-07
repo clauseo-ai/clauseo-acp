@@ -2,12 +2,13 @@
 //! the window opens, but `Agents` needs the effective settings, which load on the host's start
 //! thread, and the keys, which load from the keychain: so the command's backend is a
 //! [`BackendCell`] that every command waits on (as the bridge waits on the host's cell), filled
-//! by a `clauseo-setup` thread of desktop's own. That thread loads the keys, starts `Agents`
-//! with its two launchers and the network route of the settings and the environment
+//! by a `clauseo-setup` thread of desktop's own. That thread starts the keys' reads, starts
+//! `Agents` with its two launchers and the network route of the settings and the environment
 //! (`network.rs`: `network.upstream_proxy`, else `HTTPS_PROXY`; the OS's proxy, which may
 //! wait on WPAD, comes from the `clauseo-setup-network` thread it starts, through
-//! `Agents::set_network`), publishes `setup_info` and each agent's composed sign-in, fills the
-//! cell, then runs the pump until `Agents` ends.
+//! `Agents::set_network`), publishes `setup_info`, fills the cell, waits for the keys (only the
+//! commands that read them wait too, `keys/loaded.rs`), tells `Compose` each agent's key, then
+//! runs the pump until `Agents` ends.
 //!
 //! The two launchers ([`launchers`]): the sign-in launcher is the host's
 //! (`host_spawn_options`: the environment cleared, since S18's built environment is a sign-in
@@ -37,6 +38,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
@@ -52,7 +54,7 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::keys::{KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot};
+use super::keys::{FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot, KeysLoaded};
 use super::login_check::ReusedLogins;
 use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
@@ -61,9 +63,11 @@ use super::network::{
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 use super::refusal::{follow_keys, lift_at_start, settle_after_load};
+use super::status_timing::TARGET;
 use super::wiring::Wiring;
 use super::{KeyWrite, SetupBackend, SetupEvents};
 use crate::bridge::lock;
+use crate::chooser::trace::{at_ms, since};
 use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 
@@ -327,19 +331,19 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     );
     network.update(read.settings.network.clone());
     let marker = KeyMarker::new(&read.data_dir, read.known.keys());
-    let keys = Arc::new(KeyCache::load_bounded(
-        Keychain::os(),
-        read.known.keys(),
-        marker,
-        side.notes.sender(),
-        &AsyncIoTimer,
-        KEYS_LOAD_BOUND,
-    ));
-    // Set once, here: nothing else fills the slot.
-    let _set = side.keys.set(Arc::clone(&keys));
+    // The keys' reads start now and are waited for once the cell is filled, so a command that
+    // reads no key never waits on the keychain (`keys/loaded.rs`).
+    let load_began = crate::open::now();
+    tracing::info!(target: TARGET, at_ms = at_ms(), "keychain load started");
+    let notes = side.notes.sender();
+    let (keys, load) = KeyCache::start_load(Keychain::os(), read.known.keys(), marker, notes);
+    let keys = Arc::new(keys);
+    let (keys_loaded, load_done) = KeysLoaded::pending();
     let refused_at_start = read.launch_refusals();
     let Some(platform) = Platform::current() else {
         tracing::warn!("no agent installs on this platform: setup answers internal");
+        drop(parts.start);
+        wait_for_keys(load, &keys, load_began, &side.keys);
         let blocked = &read.settings.blocked;
         let settle = settle_after_load(&*parts.host, &keys, read.known.keys(), blocked);
         futures::executor::block_on(settle);
@@ -381,7 +385,6 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         for agent in read.known.keys() {
             compose.set_blocked(agent, facts.blocked.contains(agent));
             compose.set_firm(agent, facts.firm.contains(agent));
-            compose.show_key(agent, &keys);
         }
         let firm_policy = facts.firm_policy.clone();
         // The route resolved so far, if any, goes first in `Agents`' queue.
@@ -396,7 +399,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         .with_network(network);
         let backend = Arc::new(AgentsBackend {
             agents,
-            keys,
+            keys: Arc::clone(&keys),
             compose,
             host: parts.host,
             confirm: parts.confirm,
@@ -408,16 +411,23 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             pending: Mutex::default(),
             wiring,
             counts: parts.counts,
+            keys_loaded,
         });
         for agent in backend.known.keys() {
             backend.set_firm_policy(agent, firm_policy.contains(agent));
         }
         (backend, source)
     });
+    // Only the commands that read the keys wait for this (`AgentsBackend::answer`).
+    wait_for_keys(load, &keys, load_began, &side.keys);
     let Some((backend, source)) = started else {
         tracing::info!("the quit came first: no agents start");
         return;
     };
+    for agent in backend.known.keys() {
+        backend.compose.show_key(agent, &keys);
+    }
+    load_done.finish();
     let follower = Arc::clone(&backend);
     let reread = side.reread;
     let notes = side.notes.take();
@@ -441,6 +451,16 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
     }
     futures::executor::block_on(backend.pump(source));
+}
+
+/// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and
+/// how it ended (no key, no agent's name); then the launch hook and the readers get the keys.
+fn wait_for_keys(load: FirstLoad, keys: &Arc<KeyCache>, began: Instant, slot: &KeySlot) {
+    let outcome = load.wait(keys, &AsyncIoTimer, KEYS_LOAD_BOUND);
+    tracing::info!(target: TARGET, at_ms = at_ms(), took_ms = since(began),
+        outcome = outcome.as_str(), "keychain load ended");
+    // Set once, here: nothing else fills the slot.
+    let _set = slot.set(Arc::clone(keys));
 }
 
 /// Each of `known` with the refusal the host starts with: `signin.policy_unreadable` when in

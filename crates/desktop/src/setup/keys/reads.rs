@@ -1,6 +1,6 @@
 //! The key cache's reads and its unreadable marks (decision record 0048, R20 P5b A4).
 //!
-//! - The first load ([`KeyCache::load_bounded`]) reads each agent's key on a
+//! - The first load ([`KeyCache::start_load`]) reads each agent's key on a
 //!   `clauseo-keychain` thread of its own, so one prompt nobody answers holds up no other
 //!   agent, and waits for them at most the bound on the setup thread's timer. A read that has
 //!   not answered by then is marked unreadable and goes on; when it answers it is taken in as
@@ -20,7 +20,7 @@ use clauseo_agents::keys::{KeyError, Keychain};
 use clauseo_process::Timer;
 use clauseo_protocol::AgentId;
 use futures::channel::oneshot;
-use futures::future::{join_all, select};
+use futures::future::{Either, join_all, select};
 use zeroize::Zeroizing;
 
 use super::marker::{KeyMarker, Marked};
@@ -175,10 +175,8 @@ pub(super) fn load_all<'a>(
     cache
 }
 
-/// The first load, on the setup thread: each of `agents`' keys read on a thread of its
-/// own, waited for at most `bound` on `timer`; a read that has not answered by then is
-/// marked unreadable, when `marker` marks its agent, and goes on. Each change of a mark, then
-/// and later, goes to `notes`.
+/// The first load as one call, [`start_load`] then [`FirstLoad::wait`]: the tests'.
+#[cfg(test)]
 pub(super) fn load_bounded<'a>(
     keychain: Keychain,
     agents: impl IntoIterator<Item = &'a AgentId>,
@@ -187,16 +185,72 @@ pub(super) fn load_bounded<'a>(
     timer: &impl Timer,
     bound: Duration,
 ) -> KeyCache {
-    let cache = KeyCache::empty(keychain, Some(notes), marker);
-    if !cache.available {
-        return cache;
-    }
-    let reads: Vec<_> = agents.into_iter().map(|a| start_read(&cache, a)).collect();
-    let all = Box::pin(join_all(reads));
-    futures::executor::block_on(select(all, Box::pin(timer.after(bound))));
-    // Read once the bound has passed: the reads that answered have brought it in step.
-    cache.marks.time_out(&cache.marker.marked());
+    let (cache, load) = start_load(keychain, agents, marker, notes);
+    let _outcome = load.wait(&cache, timer, bound);
     cache
+}
+
+/// The first load's reads, started by [`start_load`]: each of `agents`' keys read on a thread
+/// of its own. Each change of a mark, then and later, goes to `notes`. The cache is usable at
+/// once; it holds each key as its read answers.
+pub(super) fn start_load<'a>(
+    keychain: Keychain,
+    agents: impl IntoIterator<Item = &'a AgentId>,
+    marker: KeyMarker,
+    notes: NoteSender,
+) -> (KeyCache, FirstLoad) {
+    let cache = KeyCache::empty(keychain, Some(notes), marker);
+    let reads = if cache.available {
+        agents.into_iter().map(|a| start_read(&cache, a)).collect()
+    } else {
+        Vec::new()
+    };
+    (cache, FirstLoad { reads })
+}
+
+/// The first load's reads in flight, until [`FirstLoad::wait`].
+pub(crate) struct FirstLoad {
+    reads: Vec<oneshot::Receiver<()>>,
+}
+
+/// How the first load ended, for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadOutcome {
+    /// This computer has no keychain: nothing was read.
+    NoKeychain,
+    /// Every read answered within the bound.
+    Read,
+    /// The bound passed with a read still waiting.
+    BoundPassed,
+}
+
+impl LoadOutcome {
+    /// A fixed word for the log.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::NoKeychain => "no_keychain",
+            Self::Read => "read",
+            Self::BoundPassed => "bound_passed",
+        }
+    }
+}
+
+impl FirstLoad {
+    /// Waits for the reads at most `bound` on `timer`, blocking; a read that has not answered
+    /// by then is marked unreadable, when the marker marks its agent, and goes on.
+    pub(crate) fn wait(self, cache: &KeyCache, timer: &impl Timer, bound: Duration) -> LoadOutcome {
+        if !cache.available {
+            return LoadOutcome::NoKeychain;
+        }
+        let all = Box::pin(join_all(self.reads));
+        let outcome = match futures::executor::block_on(select(all, Box::pin(timer.after(bound)))) {
+            Either::Left(_) => LoadOutcome::Read,
+            Either::Right(_) => LoadOutcome::BoundPassed,
+        };
+        // Read once the bound has passed: the reads that answered have brought it in step.
+        cache.marks.time_out(&cache.marker.marked());
+        outcome
+    }
 }
 
 /// Reads `agent`'s key again when it is marked unreadable and no read of it runs (a launch
