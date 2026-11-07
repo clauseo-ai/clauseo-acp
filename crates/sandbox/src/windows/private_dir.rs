@@ -26,13 +26,13 @@ use windows::Win32::Foundation::{
     LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SetSecurityInfo,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
+    SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetKernelObjectSecurity, GetSecurityDescriptorDacl,
-    OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    DACL_SECURITY_INFORMATION, GetKernelObjectSecurity, OBJECT_SECURITY_INFORMATION,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES, SetKernelObjectSecurity,
 };
 use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
@@ -42,11 +42,16 @@ use windows::Win32::Storage::FileSystem::{
     GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
     WRITE_DAC, WRITE_OWNER,
 };
-use windows::core::{BOOL, HSTRING, PCWSTR, PWSTR};
+use windows::core::{BOOL, PCWSTR, PWSTR};
 
 use super::record::current_user_sid;
 use super::sids::Sid;
 use super::write::{Found, repair_plan};
+
+/// What a folder's or record file's DACL is written with: the DACL, protected.
+const PROTECTED_DACL: OBJECT_SECURITY_INFORMATION = OBJECT_SECURITY_INFORMATION(
+    DACL_SECURITY_INFORMATION.0 | PROTECTED_DACL_SECURITY_INFORMATION.0,
+);
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -93,20 +98,19 @@ pub(crate) fn create(path: &Path) -> io::Result<bool> {
 
 /// Secures the folder already at `path` through one handle: refused if it is a link or not a
 /// folder; taken back for the user when another account owns it, or refused naming the owner;
-/// then given the protected DACL again.
+/// then given the protected DACL again, on the folder alone (`SetKernelObjectSecurity`, which
+/// never pushes its inheritable entries down to what is already inside, a set-aside junction
+/// included). Nothing inside needs them: each record file gets its own protected DACL
+/// (`check_file`), each folder its own here, and what a session set aside is handed back item
+/// by item (`acl::own`); what is made inside later inherits them as it is made.
 fn secure_existing(path: &Path) -> io::Result<()> {
     let user = current_user_sid()?;
     let handle =
         Handle::open(path).map_err(|error| named(path, "can't be opened to secure", &error))?;
     let handle = repair(path, handle, &user, true)?;
     let descriptor = Descriptor::from_sddl(&sddl(user.as_str()))?;
-    let dacl = descriptor.dacl()?;
     handle
-        .set(
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            Some(dacl),
-        )
+        .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))
 }
 
@@ -133,13 +137,8 @@ fn secure_file(path: &Path, handle: Handle) -> io::Result<Handle> {
     let user = current_user_sid()?;
     let handle = repair(path, handle, &user, false)?;
     let descriptor = Descriptor::from_sddl(&file_sddl(user.as_str()))?;
-    let dacl = descriptor.dacl()?;
     handle
-        .set(
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
-            Some(dacl),
-        )
+        .set(PROTECTED_DACL, &descriptor)
         .map_err(|error| named(path, "its DACL can't be set", &error))?;
     Ok(handle)
 }
@@ -515,26 +514,16 @@ impl Handle {
 
     /// Makes `sid` its owner.
     fn set_owner(&self, sid: &Sid) -> io::Result<()> {
-        let mut parsed = PSID::default();
-        // SAFETY: the HSTRING is NUL-terminated and lives for the call; `parsed` is a live
-        // out-pointer, freed with LocalFree below.
-        unsafe { ConvertStringSidToSidW(&HSTRING::from(sid.as_str()), &raw mut parsed) }
-            .map_err(|error| os_error(&error))?;
-        let result = self.set(OWNER_SECURITY_INFORMATION, Some(parsed), None);
-        // SAFETY: ConvertStringSidToSidW allocated the SID with LocalAlloc; freed once.
-        unsafe { LocalFree(Some(HLOCAL(parsed.0))) };
-        result
+        let descriptor = Descriptor::from_sddl(&format!("O:{}", sid.as_str()))?;
+        self.set(OWNER_SECURITY_INFORMATION, &descriptor)
     }
 
-    /// `SetSecurityInfo` with `info`, an owner and a DACL, which the caller keeps alive.
-    fn set(
-        &self,
-        info: OBJECT_SECURITY_INFORMATION,
-        owner: Option<PSID>,
-        dacl: Option<*const ACL>,
-    ) -> io::Result<()> {
-        // SAFETY: the handle is open; the owner and DACL, when given, are valid for the call.
-        check(unsafe { SetSecurityInfo(self.0, SE_FILE_OBJECT, info, owner, None, dacl, None) })
+    /// Writes what `info` names from `descriptor` on this object alone
+    /// (`SetKernelObjectSecurity`): unlike `SetSecurityInfo`, it never propagates inheritable
+    /// entries to the children already there (ADR 0049, "Reparse points").
+    fn set(&self, info: OBJECT_SECURITY_INFORMATION, descriptor: &Descriptor) -> io::Result<()> {
+        // SAFETY: the handle is open; the descriptor is valid while `descriptor` lives.
+        unsafe { SetKernelObjectSecurity(self.0, info, descriptor.0) }.map_err(|e| os_error(&e))
     }
 }
 
@@ -567,22 +556,6 @@ impl Descriptor {
         .map_err(io::Error::other)?;
         Ok(Descriptor(descriptor))
     }
-
-    /// Its DACL, which lives as long as `self`.
-    fn dacl(&self) -> io::Result<*const ACL> {
-        let mut present = BOOL(0);
-        let mut dacl: *mut ACL = null_mut();
-        let mut defaulted = BOOL(0);
-        // SAFETY: the descriptor is valid while `self` lives; the out-pointers are live.
-        unsafe {
-            GetSecurityDescriptorDacl(self.0, &raw mut present, &raw mut dacl, &raw mut defaulted)
-        }
-        .map_err(io::Error::other)?;
-        if !present.as_bool() || dacl.is_null() {
-            return Err(io::Error::other("the sandbox folder's SDDL gave no DACL"));
-        }
-        Ok(dacl.cast_const())
-    }
 }
 
 impl Drop for Descriptor {
@@ -593,3 +566,6 @@ impl Drop for Descriptor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

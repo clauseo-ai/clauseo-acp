@@ -203,6 +203,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         owners: BTreeMap::new(),
         self_owned_local_low: BTreeSet::new(),
         stuck_owners: BTreeSet::new(),
+        changed_profiles: BTreeSet::new(),
         no_local_low: BTreeSet::new(),
         needs_reset: BTreeSet::new(),
         held: BTreeSet::new(),
