@@ -61,8 +61,8 @@ export const HI = {
   "This data comes from a newer version of Clauseo.": "यह डेटा Clauseo के नए संस्करण से है।",
   "Clauseo couldn't save a version of this matter's papers, so this change can't be undone.":
     "Clauseo इस मामले के दस्तावेज़ों का संस्करण नहीं सहेज सका, इसलिए यह बदलाव पूर्ववत नहीं किया जा सकता।",
-  "This matter's folder can't be found. It may have moved, or its drive isn't connected.":
-    "इस मामले का फ़ोल्डर नहीं मिल रहा। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव जुड़ी न हो।",
+  "This matter's folder can't be reached. It may have moved, or its drive or network isn't connected.":
+    "इस मामले के फ़ोल्डर तक पहुँचा नहीं जा सकता। हो सकता है वह कहीं और ले जाया गया हो, या उसकी ड्राइव या नेटवर्क जुड़ा न हो।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
   "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.":
