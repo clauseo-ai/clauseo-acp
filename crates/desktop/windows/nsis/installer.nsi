@@ -420,8 +420,22 @@ Var AppStartMenuFolder
 ; Show run app after installation.
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
+; >>> clauseo: finish-show
+; Clauseo's show function for the finish page, defined after MUI_PAGE_FINISH (block
+; "finish-show-function"): it hides "Run Clauseo" after a wait that timed out.
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW ClauseoFinishShow
+; <<< clauseo: finish-show
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_FINISH
+; >>> clauseo: finish-show-function
+; admin_copy.nsh's CLAUSEO_FINISH_SHOW, after MUI_PAGE_FINISH declares $mui.FinishPage.Run; empty
+; without hooks.nsh.
+Function ClauseoFinishShow
+  !ifmacrodef CLAUSEO_FINISH_SHOW
+    !insertmacro CLAUSEO_FINISH_SHOW
+  !endif
+FunctionEnd
+; <<< clauseo: finish-show-function
 
 Function RunMainBinary
   nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""

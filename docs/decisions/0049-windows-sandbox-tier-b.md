@@ -553,12 +553,27 @@ started elevated, by the app or by the uninstall hook.
   installer holds its own exe open sharing only reads, which keeps other Windows accounts from
   rewriting, renaming or deleting it; a process already running as the lawyer can close that
   handle in the installer (`DuplicateHandle` with close-source) or inject into it, then swap the
-  file before the elevated step opens it. The installer refuses the elevated step while
-  Clauseo's main window (class `ClauseoMainWindow`) is on the desktop, and agents can't outlive
-  the app, since Clauseo's jobs are kill-on-close; so the residual is same-user code persisted
-  outside Clauseo's jobs, which can still race. A same-user process can also fake that window and
-  so block the elevated step: a denial of service only, accepted. Keeping the copy current after
-  an app update is the refresh task's job, a later change.
+  file. Nor is the window closed when the elevated step opens the exe: same-user code may still
+  change the installer's data after UAC consent (say, through a writable mapping of the file made
+  before that open), so the prompt shows the real publisher while what runs is changed. This is
+  part of the accepted same-user residual, not closed; a Windows VM test of the mapped view would
+  settle it.
+- **The running checks are correctness guards, not security boundaries.** The installer refuses
+  the elevated step while Clauseo's main window (class `ClauseoMainWindow`) is on the desktop,
+  twice: the outer instance looks once, before a UAC prompt that can wait indefinitely, and the
+  elevated instance looks (`FindWindow`) after the exe is already open. They keep a running
+  Clauseo from racing its own set-up; they don't keep out the residual above. Clauseo's jobs are
+  kill-on-close, but that doesn't bound it: a tier-C agent can start code outside those jobs in
+  one step (`schtasks`, an HKCU `Run` key, WMI `Win32_Process.Create`), so any same-user code,
+  a tier-C agent's included, can race. A same-user process can also fake that window and so block
+  the elevated step: a denial of service only, accepted.
+- **Also open: the NSIS stub's own `%TEMP%` work.** Before `.onInit`, so before any script
+  runs, the stub creates the `%TEMP%` folder, which comes from the user's environment (HKCU
+  `Environment`'s `TEMP` picks the path), makes one `nsX????.tmp` in it and deletes it (NSIS 3.11
+  `Main.c:71-80`, `:259-284`). Elevated, that gives an admin-owned empty folder at a path the user's code chose,
+  and a one-shot race on the delete. No way to run code through it is known; the per-machine
+  installer had the same exposure, and the script can't prevent it.
+- Keeping the copy current after an app update is the refresh task's job, a later change.
 
 ### Removal (`--remove`, PR4j)
 

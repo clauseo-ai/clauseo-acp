@@ -16,7 +16,7 @@ use super::sources::line_with;
 
 const SID: &str = "S-1-5-21-1-2-3-1001";
 const INSTALL: &str = r"C:\Users\lawyer\AppData\Local\Clauseo";
-const DATA: &str = r"C:\Users\lawyer\AppData\Local\chat.clauseo.app";
+const DATA: &str = r"C:\Users\lawyer\AppData\Local\ai.clauseo.desktop";
 
 /// The `ARGS` of the one `!insertmacro CLAUSEO_ADMIN_COPY '...'` (the elevated branch's) or
 /// `!insertmacro CLAUSEO_ADMIN_COPY_BOUNDED '...'` (the per-machine installer's) line that `pick`
