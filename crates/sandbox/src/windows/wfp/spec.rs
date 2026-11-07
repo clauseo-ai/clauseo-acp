@@ -3,24 +3,21 @@
 // at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1); see PROVENANCE.md
 
 //! What tier B's network objects are, with no Windows call, so they build and are tested on
-//! every OS (S15 PR7): set-up's persistent block filters, its delegation grants and its firewall
-//! rules ([`NetworkSetup`]), and a launch's dynamic permit ([`permit_filters`]).
+//! every OS (S15 PR7): set-up's persistent block filters and static permits, the owner's
+//! read-only grants and the firewall rules ([`NetworkSetup`]), and how each filter maps to WFP's
+//! match types and flags ([`Condition::matching`], [`FilterSpec::flags`]).
 //!
 //! WFP's filter arbitration decides the shape. Within our sublayer the matching filter with the
 //! highest weight decides; across sublayers a block wins over a permit that didn't clear its
 //! action right. So:
-//! - set-up's block filters (weight [`BLOCK_WEIGHT`]) name every pool user and block every
-//!   connect, loopback and the 61080-61179 range included, ICMP at resource assignment, and
-//!   any inbound connection that isn't loopback;
-//! - a launch's permit (weight [`PERMIT_WEIGHT`]) opens `127.0.0.1` over TCP to its own ports
-//!   for its own pool user, and nothing else;
+//! - set-up's block filters (weight [`BLOCK_WEIGHT`]) catch every token that holds a pool user's
+//!   SID or the pool group's, enabled or deny-only (`sddl.rs`), and block every connect, loopback
+//!   and 61080-61179 included, ICMP at resource assignment, and inbound that isn't loopback;
+//! - one static permit per pool user (weight [`PERMIT_WEIGHT`]) opens `127.0.0.1` over TCP on
+//!   61080-61179 for that user, and nothing else. Within the range the listeners' per-launch
+//!   secrets are the cross-matter check (orchestrator ruling, 2026-11-07);
 //! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback and
-//!   loopback TCP outside the range. They are where the range is excepted: our soft permit
-//!   can't beat a firewall block, so no permit ever opens a port outside the range.
-//!
-//! The range is not excepted in the block filters themselves: a block that left 61080-61179
-//! open would let matter B's agent reach matter A's proxy and relay ports, since the permit
-//! only adds and never narrows.
+//!   loopback TCP outside the range, a second cap on the permits.
 
 use std::net::Ipv4Addr;
 
@@ -29,22 +26,22 @@ pub use super::rules::{
     Direction, FIREWALL_UNDER_POLICY, FirewallOutcome, FirewallTrouble, LOOPBACK_ADDRESSES,
     NON_LOOPBACK_ADDRESSES, RuleProtocol, RuleSpec, outside_range, rule_names, rule_users,
 };
+pub use super::sddl::{allowed_users, denied_users, not_pool_sddl, user_sddl};
 use crate::ports::WINDOWS_PORTS;
+use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
 use crate::{Loopback, Policy};
 
 /// The weight (`FWP_UINT8`) of set-up's block filters in our sublayer.
 pub const BLOCK_WEIGHT: u8 = 1;
-/// The weight of a launch's permit filters: above every block filter, so a permit decides for
-/// the traffic it matches.
+/// The weight of the static permits: above every block filter, so a permit decides for the
+/// traffic it matches.
 pub const PERMIT_WEIGHT: u8 = 10;
 /// Our sublayer's weight: near the top, as PR0 (c) measured it.
 pub const SUBLAYER_WEIGHT: u16 = 0xFFFE;
 
-/// `FWPM_ACTRL_ADD`: add an object to a container.
-pub const ACTRL_ADD: u32 = 0x1;
-/// `FWPM_ACTRL_ADD_LINK`: add a filter that links to this sublayer or layer.
-pub const ACTRL_ADD_LINK: u32 = 0x2;
+/// `FWPM_ACTRL_ENUM`: enumerate the container's objects.
+pub const ACTRL_ENUM: u32 = 0x20;
 /// `FWPM_ACTRL_READ`: read the object.
 pub const ACTRL_READ: u32 = 0x80;
 
@@ -54,6 +51,10 @@ pub const PROTOCOL_ICMP: u8 = 1;
 pub const PROTOCOL_TCP: u8 = 6;
 /// `IPPROTO_ICMPV6`.
 pub const PROTOCOL_ICMPV6: u8 = 58;
+
+/// The first static permit's offset from [`Namespace::filters`]: permit `i` (the `i`th pool user,
+/// sorted) is `filter_key(PERMIT_BASE + i)`.
+pub const PERMIT_BASE: u16 = 0x100;
 
 /// Where tier B's WFP objects and firewall rules live: the real ones
 /// ([`Namespace::production`]), or a test's, so a test never touches a real set-up.
@@ -119,11 +120,13 @@ impl Namespace {
         self.filters.wrapping_add(u128::from(n))
     }
 
-    /// Every block filter key set-up has ever written here: what removal deletes. Keys past
-    /// the filters of today are kept free for filters added later, and removal deletes them
-    /// too.
+    /// Every filter key set-up has ever written here: the block keys (with room for later
+    /// ones) and a permit key per pool user the record can hold. Removal and set-up delete them,
+    /// and every other filter in our sublayer too.
     pub fn removal_keys(&self) -> Vec<u128> {
-        (0..REMOVAL_KEYS).map(|n| self.filter_key(n)).collect()
+        let blocks = (0..REMOVAL_KEYS).map(|n| self.filter_key(n));
+        let permits = (0..u16::from(POOL_CAP)).map(|i| self.filter_key(PERMIT_BASE + i));
+        blocks.chain(permits).collect()
     }
 }
 
@@ -151,36 +154,76 @@ pub enum Layer {
 /// What a filter does with what it matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// `FWP_ACTION_BLOCK`, with its action right cleared (`FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT`).
+    /// `FWP_ACTION_BLOCK`, with its action right cleared.
     Block,
     /// `FWP_ACTION_PERMIT`, soft: a block in another sublayer still wins.
     Permit,
 }
 
+/// How a condition compares (`FWP_MATCH_TYPE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Match {
+    /// `FWP_MATCH_EQUAL`; for a descriptor, true when an access check grants `CC`.
+    Equal,
+    /// `FWP_MATCH_NOT_EQUAL`; for a descriptor, true when an access check doesn't grant it.
+    NotEqual,
+    /// `FWP_MATCH_FLAGS_NONE_SET`.
+    FlagsNoneSet,
+    /// `FWP_MATCH_RANGE`.
+    Range,
+}
+
 /// One condition of a filter; a filter matches when all of its conditions do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Condition {
-    /// `FWPM_CONDITION_ALE_USER_ID` against a security descriptor that grants
-    /// `FWP_ACTRL_MATCH_FILTER` to each of these SIDs ([`user_sddl`]). Under design (B) a pool
-    /// user's SID is both its token's user and a restricting SID, so an access check of the
-    /// agent's restricted token passes on that one SID (PR0 (c); the first VM row confirms).
+    /// `FWPM_CONDITION_ALE_USER_ID`, `EQUAL`, over [`user_sddl`]: the token is one of these
+    /// users, its SID enabled. Under design (B) a pool user's SID is both its token's user and a
+    /// restricting SID, so the agent's restricted token passes both checks on it.
     Users(Vec<Sid>),
+    /// `FWPM_CONDITION_ALE_USER_ID`, `NOT_EQUAL`, over [`not_pool_sddl`]: the token holds the
+    /// group's or a pool user's SID, enabled or deny-only.
+    NotPool {
+        /// The pool group, `ClauseoSandboxUsers`.
+        group: Sid,
+        /// Every pool user.
+        pool: Vec<Sid>,
+    },
     /// `FWPM_CONDITION_FLAGS` has no `FWP_CONDITION_FLAG_IS_LOOPBACK`.
     NotLoopback,
     /// `FWPM_CONDITION_IP_PROTOCOL` is this.
     Protocol(u8),
     /// `FWPM_CONDITION_IP_REMOTE_ADDRESS` is this IPv4 address.
     RemoteV4(Ipv4Addr),
-    /// `FWPM_CONDITION_IP_REMOTE_PORT` is this.
-    RemotePort(u16),
+    /// `FWPM_CONDITION_IP_REMOTE_PORT` is in this range, both ends included.
+    RemotePorts(u16, u16),
+}
+
+impl Condition {
+    /// The match type WFP is given for this condition.
+    pub fn matching(&self) -> Match {
+        match self {
+            Condition::Users(_) | Condition::Protocol(_) | Condition::RemoteV4(_) => Match::Equal,
+            Condition::NotPool { .. } => Match::NotEqual,
+            Condition::NotLoopback => Match::FlagsNoneSet,
+            Condition::RemotePorts(..) => Match::Range,
+        }
+    }
+}
+
+/// The flags a filter is added with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Flags {
+    /// `FWPM_FILTER_FLAG_PERSISTENT`.
+    pub persistent: bool,
+    /// `FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT`.
+    pub clear_action_right: bool,
 }
 
 /// One filter to add.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterSpec {
-    /// Its key: a block filter's fixed one, persistent; `None` for a launch's permit, which
-    /// WFP keys itself and drops when the launch's session closes.
-    pub key: Option<u128>,
+    /// Its fixed key.
+    pub key: u128,
     /// Its name in Windows' tools.
     pub name: String,
     /// Its layer.
@@ -193,6 +236,18 @@ pub struct FilterSpec {
     pub conditions: Vec<Condition>,
 }
 
+impl FilterSpec {
+    /// Its flags: every filter of ours is persistent; a block clears its action right, so no
+    /// other sublayer's soft permit beats it; a permit stays soft, so another sublayer's block
+    /// (the firewall's range cap) still wins.
+    pub fn flags(&self) -> Flags {
+        Flags {
+            persistent: true,
+            clear_action_right: self.action == Action::Block,
+        }
+    }
+}
+
 /// A WFP object whose security descriptor set-up changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Object {
@@ -200,11 +255,9 @@ pub enum Object {
     Sublayer,
     /// The engine's filter container (the filters' security, key `NULL`).
     FilterContainer,
-    /// A layer.
-    Layer(Layer),
     /// Our provider.
     Provider,
-    /// One of set-up's block filters, by key.
+    /// One of set-up's filters, by key.
     Filter(u128),
 }
 
@@ -213,7 +266,7 @@ pub enum Object {
 pub struct Grant {
     /// The object.
     pub object: Object,
-    /// The rights (`FWPM_ACTRL_*`).
+    /// The rights (`FWPM_ACTRL_*`): read-only, never add, link or delete.
     pub mask: u32,
 }
 
@@ -225,22 +278,24 @@ pub enum SpecError {
     NoPoolUser,
     /// A SID that isn't a local or domain account's (`S-1-5-21-<a>-<b>-<c>-<rid>`): a
     /// well-known group such as `Users` or `Everyone` would filter the lawyer's own programs.
-    #[error("{0} isn't a sandbox user's SID")]
+    #[error("{0} isn't a sandbox user's or group's SID")]
     NotAnAccount(Sid),
-    /// The owner is named as a pool user: the lawyer's own programs would lose the network.
-    #[error("the owner, {0}, is named as a sandbox user")]
+    /// The owner is named as a pool user or the group: the lawyer's own programs would lose the
+    /// network.
+    #[error("the owner, {0}, is named as a sandbox user or group")]
     OwnerInPool(Sid),
 }
 
-/// Set-up's network step: who owns the delegation and which pool users the filters cover.
+/// Set-up's network step: who gets the read grants, the pool group, and the pool users.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkSetup {
     owner: Sid,
+    group: Sid,
     pool: Vec<Sid>,
 }
 
 /// Set-up's block filters, in key order: each one's name, layer and conditions besides the
-/// users. Appended only, so each keeps its key.
+/// pool's. Appended only, so each keeps its key.
 const BLOCKS: [(&str, Layer, Block); 6] = [
     ("block_connect_v4", Layer::ConnectV4, Block::All),
     ("block_connect_v6", Layer::ConnectV6, Block::All),
@@ -258,7 +313,7 @@ const BLOCKS: [(&str, Layer, Block); 6] = [
     ),
 ];
 
-/// A block filter's conditions besides the users.
+/// A block filter's conditions besides the pool's.
 #[derive(Debug, Clone, Copy)]
 enum Block {
     All,
@@ -267,16 +322,16 @@ enum Block {
 }
 
 impl NetworkSetup {
-    /// The step for `owner`'s set-up, covering every SID in `pool`, sorted and de-duplicated so
-    /// a re-run over the same pool builds the same filters.
-    pub fn new(owner: &Sid, pool: &[Sid]) -> Result<NetworkSetup, SpecError> {
+    /// The step for `owner`'s set-up, with pool group `group`, covering every SID in `pool`,
+    /// sorted and de-duplicated so a re-run over the same pool builds the same filters.
+    pub fn new(owner: &Sid, group: &Sid, pool: &[Sid]) -> Result<NetworkSetup, SpecError> {
         let mut sorted = pool.to_vec();
         sorted.sort();
         sorted.dedup();
         if sorted.is_empty() {
             return Err(SpecError::NoPoolUser);
         }
-        for sid in &sorted {
+        for sid in sorted.iter().chain(std::iter::once(group)) {
             if !is_account(sid) {
                 return Err(SpecError::NotAnAccount(sid.clone()));
             }
@@ -286,11 +341,12 @@ impl NetworkSetup {
         }
         Ok(NetworkSetup {
             owner: owner.clone(),
+            group: group.clone(),
             pool: sorted,
         })
     }
 
-    /// The owner: the desktop user whose launches add and remove their own permits.
+    /// The owner: the desktop user whose launches read the filters.
     pub fn owner(&self) -> &Sid {
         &self.owner
     }
@@ -300,9 +356,41 @@ impl NetworkSetup {
         &self.pool
     }
 
-    /// Set-up's block filters, persistent, in key order ([`block_filters`]).
+    /// Set-up's filters, persistent, in key order: the blocks ([`block_filters`]), then one
+    /// static permit per pool user ([`permit_filter`]).
     pub fn filters(&self, ns: &Namespace) -> Vec<FilterSpec> {
-        block_filters(ns, &self.pool)
+        let mut filters = block_filters(ns, &self.group, &self.pool);
+        filters.extend(
+            (0u16..)
+                .zip(&self.pool)
+                .map(|(i, user)| permit_filter(ns, i, user)),
+        );
+        filters
+    }
+
+    /// The owner's grants, read-only (orchestrator ruling, 2026-11-07): `READ|ENUM` on the
+    /// filter container and `READ` on our provider, sublayer and each of our filters, so a
+    /// launch can check them. No add, link or delete anywhere.
+    pub fn grants(&self, ns: &Namespace) -> Vec<Grant> {
+        let mut grants = vec![
+            Grant {
+                object: Object::FilterContainer,
+                mask: ACTRL_READ | ACTRL_ENUM,
+            },
+            Grant {
+                object: Object::Sublayer,
+                mask: ACTRL_READ,
+            },
+            Grant {
+                object: Object::Provider,
+                mask: ACTRL_READ,
+            },
+        ];
+        grants.extend(self.filters(ns).into_iter().map(|filter| Grant {
+            object: Object::Filter(filter.key),
+            mask: ACTRL_READ,
+        }));
+        grants
     }
 
     /// The firewall rules for the pool ([`rules::rules`](super::rules::rules)).
@@ -311,70 +399,29 @@ impl NetworkSetup {
     }
 }
 
-/// The owner's grants in `ns`, the same for any pool: PR0 (c)'s three that let it add a permit
-/// (the sublayer, the filter container, the permit's layer), then read on the provider and each
-/// block filter, so a launch can check them before it adds its permit.
-pub fn grants(ns: &Namespace) -> Vec<Grant> {
-    let mut grants = vec![
-        Grant {
-            object: Object::Sublayer,
-            mask: ACTRL_ADD_LINK | ACTRL_READ,
-        },
-        Grant {
-            object: Object::FilterContainer,
-            mask: ACTRL_ADD | ACTRL_READ,
-        },
-        Grant {
-            object: Object::Layer(PERMIT_LAYER),
-            mask: ACTRL_ADD_LINK | ACTRL_READ,
-        },
-        Grant {
-            object: Object::Provider,
-            mask: ACTRL_READ,
-        },
-    ];
-    grants.extend(blocks(ns).into_iter().map(|(key, ..)| Grant {
-        object: Object::Filter(key),
-        mask: ACTRL_READ,
-    }));
-    grants
-}
-
 /// The objects whose owner grant removal takes back; the sublayer, the provider and the
 /// filters go with their deletion.
-pub fn revocations() -> [Object; 2] {
-    [Object::FilterContainer, Object::Layer(PERMIT_LAYER)]
+pub fn revocations() -> [Object; 1] {
+    [Object::FilterContainer]
 }
 
-/// The layer a launch's permit sits at.
-pub const PERMIT_LAYER: Layer = Layer::ConnectV4;
-
-/// Set-up's block filters: key, name, layer and kind.
-fn blocks(ns: &Namespace) -> Vec<(u128, String, Layer, Block)> {
+/// Set-up's block filters in `ns` for `group` and `pool`, persistent, in key order.
+pub fn block_filters(ns: &Namespace, group: &Sid, pool: &[Sid]) -> Vec<FilterSpec> {
     (0u16..)
         .zip(BLOCKS)
         .map(|(n, (name, layer, block))| {
-            let name = format!("{} {name}", ns.display);
-            (ns.filter_key(n), name, layer, block)
-        })
-        .collect()
-}
-
-/// Set-up's block filters in `ns` naming `pool`, persistent, in key order. A launch's check
-/// builds them for its own pool user alone: the same keys, names, layers and actions.
-pub fn block_filters(ns: &Namespace, pool: &[Sid]) -> Vec<FilterSpec> {
-    blocks(ns)
-        .into_iter()
-        .map(|(key, name, layer, block)| {
-            let mut conditions = vec![Condition::Users(pool.to_vec())];
+            let mut conditions = vec![Condition::NotPool {
+                group: group.clone(),
+                pool: pool.to_vec(),
+            }];
             match block {
                 Block::All => {}
                 Block::NotLoopback => conditions.push(Condition::NotLoopback),
                 Block::Protocol(protocol) => conditions.push(Condition::Protocol(protocol)),
             }
             FilterSpec {
-                key: Some(key),
-                name,
+                key: ns.filter_key(n),
+                name: format!("{} {name}", ns.display),
                 layer,
                 action: Action::Block,
                 weight: BLOCK_WEIGHT,
@@ -384,48 +431,43 @@ pub fn block_filters(ns: &Namespace, pool: &[Sid]) -> Vec<FilterSpec> {
         .collect()
 }
 
-/// Whether `sid` is an account's: `S-1-5-21-<a>-<b>-<c>-<rid>`, never a well-known group.
-fn is_account(sid: &Sid) -> bool {
+/// How many block filters set-up writes.
+pub const BLOCK_COUNT: usize = BLOCKS.len();
+
+/// The static permit for `user`, the `i`th pool user (sorted): `127.0.0.1` over TCP on
+/// [`WINDOWS_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent.
+pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
+    FilterSpec {
+        key: ns.filter_key(PERMIT_BASE + i),
+        name: format!("{} permit loopback range {user}", ns.display),
+        layer: Layer::ConnectV4,
+        action: Action::Permit,
+        weight: PERMIT_WEIGHT,
+        conditions: vec![
+            Condition::Users(vec![user.clone()]),
+            Condition::RemoteV4(Ipv4Addr::LOCALHOST),
+            Condition::Protocol(PROTOCOL_TCP),
+            Condition::RemotePorts(*WINDOWS_PORTS.start(), *WINDOWS_PORTS.end()),
+        ],
+    }
+}
+
+/// Whether `key` is one of the static permits' keys in `ns`.
+pub fn is_permit_key(ns: &Namespace, key: u128) -> bool {
+    (0..u16::from(POOL_CAP)).any(|i| ns.filter_key(PERMIT_BASE + i) == key)
+}
+
+/// Whether `sid` is an account's or a local group's: `S-1-5-21-<a>-<b>-<c>-<rid>`, never a
+/// well-known group.
+pub fn is_account(sid: &Sid) -> bool {
     sid.domain().is_some() && sid.as_str().split('-').count() == 8
 }
 
-/// The security descriptor an `ALE_USER_ID` condition names: owner and group `SYSTEM`, one
-/// allow of `FWP_ACTRL_MATCH_FILTER` (`CC`) per SID, as PR0 (c) measured it.
-pub fn user_sddl(sids: &[Sid]) -> String {
-    format!("O:SYG:SYD:{}", aces(sids))
-}
-
-/// One allow of `CC` per SID, in SDDL.
-pub(super) fn aces(sids: &[Sid]) -> String {
-    sids.iter()
-        .map(|sid| format!("(A;;CC;;;{sid})"))
-        .collect::<Vec<_>>()
-        .concat()
-}
-
-/// The SIDs an `ALE_USER_ID` condition's descriptor matches, read from its DACL in SDDL
-/// (`ConvertSecurityDescriptorToStringSecurityDescriptorW`): each allow of exactly `CC`.
-/// `None` when the DACL holds anything else (a deny, other rights, a SID in alias form such as
-/// `WD`), so a launch's check never reads coverage out of a descriptor it doesn't understand.
-pub fn sddl_users(sddl: &str) -> Option<Vec<Sid>> {
-    let (_, dacl) = sddl.split_once("D:")?;
-    let dacl = dacl.split("S:").next().unwrap_or(dacl);
-    let (_, aces) = dacl.split_once('(')?;
-    let mut users = Vec::new();
-    for ace in format!("({aces}").split_terminator(')') {
-        let ace = ace.strip_prefix('(')?;
-        let fields: Vec<&str> = ace.split(';').collect();
-        match fields.as_slice() {
-            ["A", "", "CC", "", "", sid] => users.push(Sid::parse(sid).ok()?),
-            _ => return None,
-        }
-    }
-    Some(users)
-}
-
-/// The loopback ports a launch's permit opens: `policy`'s proxy ports and its
-/// [`Loopback::Ports`] ([`checked_ports`]). [`Loopback::Any`] is refused (D10: the browser,
-/// the only entry that asks for it, is off on tier B).
+/// The loopback ports a launch names: `policy`'s proxy ports and its [`Loopback::Ports`]
+/// ([`checked_ports`]). The static permit opens the whole range, so these narrow nothing at the
+/// WFP layer; they are still checked, so a launch never counts on a port the firewall blocks.
+/// [`Loopback::Any`] is refused (D10: the browser, the only entry that asks for it, is off on
+/// tier B).
 pub fn permit_ports(policy: &Policy) -> Result<Vec<u16>, NetworkGap> {
     let mut ports = policy.proxy_ports().to_vec();
     match policy.loopback() {
@@ -437,7 +479,7 @@ pub fn permit_ports(policy: &Policy) -> Result<Vec<u16>, NetworkGap> {
 }
 
 /// `ports` sorted and de-duplicated; a port outside [`WINDOWS_PORTS`], which the firewall
-/// would block anyway, is refused rather than permitted in vain.
+/// and the permit leave closed, is refused.
 pub fn checked_ports(ports: &[u16]) -> Result<Vec<u16>, NetworkGap> {
     let mut ports = ports.to_vec();
     ports.sort_unstable();
@@ -448,32 +490,13 @@ pub fn checked_ports(ports: &[u16]) -> Result<Vec<u16>, NetworkGap> {
     Ok(ports)
 }
 
-/// A launch's permit for `user`: one filter per port, `127.0.0.1` over TCP, at
-/// [`PERMIT_LAYER`] and [`PERMIT_WEIGHT`], dynamic.
-pub fn permit_filters(ns: &Namespace, user: &Sid, ports: &[u16]) -> Vec<FilterSpec> {
-    ports
-        .iter()
-        .map(|&port| FilterSpec {
-            key: None,
-            name: format!("{} permit 127.0.0.1:{port}", ns.display),
-            layer: PERMIT_LAYER,
-            action: Action::Permit,
-            weight: PERMIT_WEIGHT,
-            conditions: vec![
-                Condition::Users(vec![user.clone()]),
-                Condition::RemoteV4(Ipv4Addr::LOCALHOST),
-                Condition::RemotePort(port),
-                Condition::Protocol(PROTOCOL_TCP),
-            ],
-        })
-        .collect()
-}
-
 /// What set-up's network step did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkReport {
-    /// How many block filters it wrote.
+    /// How many filters it wrote: the blocks and one permit per pool user.
     pub filters: usize,
+    /// How many filters in our sublayer it deleted that weren't ours.
+    pub foreign_removed: usize,
     /// The pool users they cover, sorted.
     pub covered: Vec<Sid>,
     /// The firewall rules.
