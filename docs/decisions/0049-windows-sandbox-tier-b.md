@@ -1272,20 +1272,46 @@ leaves that profile, both naming the part.
     exit's path as on the stdin's. For either, the backstop is the unclean-session marker, which
     stays, and the next launch's first act: it kills a leftover sweeper as any process of the
     pool user outside its job, or refuses the launch (`RunExit::Escapee`) if it can't, until the
-    `SYSTEM` stop task (PR #668) runs for the marked session. A suspended sweeper doesn't run its
-    own code, but it isn't untouchable: until the outer's shut, its process, thread and token
-    carry the logon's default DACL, which grants the pool user `GA`, so a Medium pool-user process
-    that the job's end didn't reach (one outside the job, M2) can open it and inject code. That
-    gains nothing past the pool user's own rights, since the sweeper runs as the pool user, but
-    for the lawyer's logon SID the logon gave it, the same thing the inner's logon gap offers such
-    a process (above), with the same precondition: a live pool-user process outside the job.
-    Then no end sweeper runs, and the
+    `SYSTEM` stop task (PR #668) runs for the marked session. What a suspended sweeper exposes
+    meanwhile is the next point. When the sweeper is skipped, no end sweeper runs, and the
     cleanup waits for the next launch's first act. Only an end sweeper that widened its token
     removes scheduled tasks, so a skipped one leaves them for the next session's end sweeper. A
     task that the next logon sets off then starts a process
     that lives only until the first-act sweep. That sweep comes before any code of the launch's
     runs and before the agent exists, and the outer has shut the inner's process and thread by
     then.
+  - **A suspended sweeper hands over the lawyer's session.** A suspended sweeper runs none of its
+    own code, but until the outer's shut its process, thread and token carry the logon's default
+    DACL, which grants the pool user `GA`. A Medium pool-user process that the job's end didn't
+    reach (one outside the job, M2) can open it and inject code. The sweeper runs as the pool
+    user, but its token also holds the lawyer's logon SID, and that SID means control of the
+    lawyer's desktop and read access to the lawyer's processes:
+    - `WinSta0` and its `Default` desktop are secured to it. A Medium process holding it can
+      attach to the lawyer's desktop and set global hooks, which load its code into the lawyer's
+      processes; send keystrokes and mouse input; read the clipboard; and capture the screen.
+    - An interactive token's default DACL grants the logon SID read and execute, so every process
+      of the lawyer's, Clauseo included, can be opened for `PROCESS_VM_READ` and its memory read.
+
+    The precondition is the one the inner's logon gap has (above): a live pool-user process
+    outside the job. The exposure is longer. The inner's gap lasts milliseconds; a sweeper left
+    suspended by a kill mid-logon, outside the cancel ladder, waits indefinitely. Two things end
+    it today:
+    - The next session's first act: the inner, once resumed, kills every process of the pool user
+      but itself (`runner::inner_flow::run`, `Point::Start` in `runner/sweep.rs`) before it
+      reads the launch. The unit tests `the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent`
+      (`runner/inner_flow/tests.rs`) and `the_first_act_and_the_end_sweeper_keep_only_their_own_pid`
+      (`runner/sweep/tests.rs`) check it, and the harness rows `sweep-before-logon` (a pool-user
+      process started outside any job before the session is gone by the agent's first line) and
+      `pool-processes-at-start` (every pool-user process is in the job by then) show it on Windows.
+    - The unclean-session marker the sweeper's session leaves, which the next Clauseo start finds
+      (`runner::unclean_sessions`). The follow-up, PR #668, wires it to `\Clauseo\SandboxStop`,
+      which kills every process of the marked pool user; until then nothing calls it.
+
+    If the lawyer doesn't launch again, the sweeper stays until one of those runs. Running the end
+    sweep as the `SYSTEM` task instead of a Secondary Logon start would remove the target: no
+    logon, so no lawyer's logon SID and no suspended window. That is a proposal for after #668.
+    Dropping the SID inside the sweeper wouldn't help, since its token carries the SID from
+    creation, before any of its code runs.
 
   The experiment that would lower a duplicated token to Low and impersonate it from the agent
   was dropped. With one live session per pool user, the first-act sweep and the end sweeper
