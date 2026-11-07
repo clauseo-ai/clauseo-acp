@@ -4,8 +4,9 @@
 //! 1. it sweeps its own user's processes ([`Point::Start`]), keeping only itself: a process of
 //!    the pool user's that opened this runner's process, thread or token between the logon and
 //!    the outer's shut, or one this logon set off (a task, a BITS job), is killed before any code
-//!    of the launch's runs. Its failure fails the launch closed ([`RunExit::Sweep`]) and starts no
-//!    agent;
+//!    of the launch's runs. Its failure fails the launch closed and starts no agent:
+//!    [`RunExit::Escapee`] when a process couldn't be opened or ended (reported on `ctl` too,
+//!    held until it opens), else [`RunExit::Sweep`];
 //! 2. it removes what the pool user could have left to start at a logon or to run in a runner
 //!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes, `Run` values and Startup
 //!    entries, the end sweeper's removal but for the two kinds reached over COM, which this runner
@@ -13,7 +14,9 @@
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping the job's processes; a failure there
-//!    is logged, and a tick's is tried again at the next.
+//!    is logged, and a tick's is tried again at the next. An escapee there is reported on `ctl`
+//!    ([`InnerReport::Escapee`]), which makes the outer exit [`RunExit::Escapee`]; the run goes
+//!    on.
 //!
 //! No code of this runner's runs before 1 but the DLL search's limit, the error mode and the shut
 //! of its own token, and the only token anyone could have opened before then is this runner's
@@ -41,6 +44,9 @@ pub(crate) trait Inner {
     fn clean(&mut self);
     /// A line for the outer: held until `ctl` is open, then sent on it.
     fn log(&mut self, line: &str);
+    /// A report for the outer that may come before `ctl` is open (`Escapee`): held until then,
+    /// in order with the lines, then sent on it.
+    fn tell(&mut self, report: InnerReport);
     /// Opens `ctl` and sends the lines held so far.
     fn connect(&mut self) -> Result<(), RunExit>;
     /// Reads the launch and shuts this runner to the agent; the job handle it names.
@@ -61,14 +67,17 @@ pub(crate) trait Inner {
 /// [`RunExit`] code.
 pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
     let swept = inner.sweep(Point::Start, None);
-    if swept.is_ok() {
-        inner.clean();
+    match &swept {
+        Ok(()) => inner.clean(),
+        Err(error) => escaped(inner, Point::Start, error),
     }
     if let Err(exit) = inner.connect() {
-        return swept.map_or(RunExit::Sweep, |()| exit).code();
+        return swept
+            .map_or_else(|error| start_exit(&error), |()| exit)
+            .code();
     }
     if let Err(error) = swept {
-        return failed(inner, (RunExit::Sweep, at(Point::Start, &error)));
+        return failed(inner, (start_exit(&error), at(Point::Start, &error)));
     }
     let job = match inner.read_launch() {
         Ok(job) => job,
@@ -88,10 +97,12 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
         }
         if let Err(error) = inner.sweep(Point::Tick, Some(&job)) {
             inner.log(&format!("clauseo-sandbox-run: {}", at(Point::Tick, &error)));
+            escaped(inner, Point::Tick, &error);
         }
     };
     if let Err(error) = inner.sweep(Point::End, Some(&job)) {
         inner.log(&format!("clauseo-sandbox-run: {}", at(Point::End, &error)));
+        escaped(inner, Point::End, &error);
     }
     // The outer may be gone already; the exit code says it anyway.
     inner.report(&InnerReport::Exited { code });
@@ -105,6 +116,27 @@ fn failed<I: Inner>(inner: &mut I, (exit, what): Failure) -> u32 {
         what,
     });
     exit.code()
+}
+
+/// The first act's exit code for its sweep's `error`: [`RunExit::Escapee`] when it names a
+/// process that couldn't be opened or ended, else [`RunExit::Sweep`].
+fn start_exit(error: &SweepError) -> RunExit {
+    if error.escapees().is_some() {
+        RunExit::Escapee
+    } else {
+        RunExit::Sweep
+    }
+}
+
+/// Tells the outer the escapees a sweep's `error` at `point` names, if any.
+fn escaped<I: Inner>(inner: &mut I, point: Point, error: &SweepError) {
+    if let Some(escapees) = error.escapees() {
+        inner.tell(InnerReport::Escapee {
+            point: point.to_string(),
+            count: u32::try_from(escapees.count).unwrap_or(u32::MAX),
+            images: escapees.images,
+        });
+    }
 }
 
 /// A sweep's failure at `point`, as the log says it.

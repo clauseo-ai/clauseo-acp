@@ -14,14 +14,17 @@
 //! put in this launch's kill-on-close job, so the host ending the outer leaves it running. It
 //! needs nothing from the outer once running (`--sweep`, its own timeout). The guard keeps the
 //! signal that started it, so a cancel exits as it would have without the sweeper
-//! ([`exit_code`]).
+//! ([`exit_code`]). It also keeps whether any sweep of the session found an escapee (the inner's,
+//! reported on `ctl`, or the end sweeper's exit code), which makes the outer exit
+//! `RunExit::Escapee` whatever the agent's code ([`EndSweep::outcome`]).
 
 use std::io::{self, Read, Write};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use super::agent_code;
 use super::sweep::SWEPT;
+use super::{RunExit, agent_code};
 
 /// The exit code the host's own job end gives the outer, `TERMINATED` in
 /// `crates/process/src/os/windows.rs:54` (private there): what a cancel whose agent didn't exit
@@ -53,6 +56,31 @@ pub(crate) trait SweeperSteps {
     fn keep(&self, sweeper: Self::Sweeper);
     /// A line on the outer's stderr.
     fn log(&self, line: &str);
+    /// At the outer's end: waits a while for the kept sweeper and says how it ended
+    /// ([`Swept::from_exit`]); [`Swept::Unclean`] when none was kept.
+    fn wait(&self) -> Swept;
+}
+
+/// How the end sweeper ended, as far as the outer saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Swept {
+    /// It exited 0: every kill and removal went.
+    Clean,
+    /// It exited [`RunExit::Escapee`]: a process of the pool user's outlived its sweep.
+    Escapee,
+    /// It failed otherwise, was still running when the outer's wait ran out, or never started.
+    Unclean,
+}
+
+impl Swept {
+    /// From the sweeper's exit code, `None` when it hadn't exited.
+    pub(crate) fn from_exit(code: Option<u32>) -> Swept {
+        match code {
+            Some(0) => Swept::Clean,
+            Some(code) if code == RunExit::Escapee.code() => Swept::Escapee,
+            Some(_) | None => Swept::Unclean,
+        }
+    }
 }
 
 /// Starts the sweeper: the job emptied, then logon, shut, resume, and nothing else (no job). A
@@ -133,6 +161,8 @@ pub(crate) struct EndSweep<S> {
     steps: S,
     /// The end signal that started it, and whether the sweeper started.
     began: OnceLock<(EndSignal, bool)>,
+    /// Whether a sweep of the session found a process of the pool user's it couldn't end.
+    escaped: AtomicBool,
 }
 
 impl<S: SweeperSteps> EndSweep<S> {
@@ -140,6 +170,7 @@ impl<S: SweeperSteps> EndSweep<S> {
         EndSweep {
             steps,
             began: OnceLock::new(),
+            escaped: AtomicBool::new(false),
         }
     }
 
@@ -161,9 +192,40 @@ impl<S: SweeperSteps> EndSweep<S> {
         self.began.get().map(|(why, _)| *why)
     }
 
-    /// The steps, for the wait at the outer's end.
+    /// The steps.
     pub(crate) fn steps(&self) -> &S {
         &self.steps
+    }
+
+    /// A sweep found an escapee: the inner reported one on `ctl`, or the end sweeper exited so.
+    pub(crate) fn mark_escapee(&self) {
+        self.escaped.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether a sweep of the session found an escapee.
+    pub(crate) fn escaped(&self) -> bool {
+        self.escaped.load(Ordering::SeqCst)
+    }
+
+    /// At the outer's end: waits a while for the sweeper ([`SweeperSteps::wait`]), keeping an
+    /// escapee it found.
+    pub(crate) fn wait(&self) -> Swept {
+        let swept = self.steps.wait();
+        if swept == Swept::Escapee {
+            self.mark_escapee();
+        }
+        swept
+    }
+
+    /// The outer's exit code for a run that would exit `code`: [`RunExit::Escapee`] when a sweep
+    /// of the session found an escapee, whatever `code` is (the agent's own, even 0, which the
+    /// outer then says on stderr); else `code`.
+    pub(crate) fn outcome(&self, code: u32) -> u32 {
+        if self.escaped() {
+            RunExit::Escapee.code()
+        } else {
+            code
+        }
     }
 }
 

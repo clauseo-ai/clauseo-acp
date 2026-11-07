@@ -13,7 +13,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::RunExit;
-use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, wait_empty};
+use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, Swept, wait_empty};
 use super::super::spawn::{Job, Process, active_processes, end_job, log_on, output_pipe, resume};
 use super::super::sweep::SWEPT;
 use super::{os, say};
@@ -47,28 +47,6 @@ impl OsSweeper {
     /// session uses. It closes when this process exits.
     pub(super) fn hold_job(&self, job: Handle) -> &Handle {
         &self.job.get_or_init(move || Job(job)).0
-    }
-
-    /// At the outer's end, if it lives that long: waits up to [`SWEEP_WAIT`] for the sweeper and
-    /// logs a failure or a sweeper still running.
-    pub(super) fn wait(&self) {
-        let Ok(mut kept) = self.kept.lock() else {
-            return;
-        };
-        let Some(sweeper) = kept.take() else {
-            return;
-        };
-        match sweeper.wait(Some(SWEEP_WAIT)) {
-            Ok(Some(0)) => {}
-            Ok(Some(code)) => say(&format!(
-                "clauseo-sandbox-run: the end sweeper failed (0x{code:08X})"
-            )),
-            Ok(None) => say("clauseo-sandbox-run: the end sweeper is still running"),
-            Err(error) => say(&format!(
-                "clauseo-sandbox-run: {}",
-                os("the end sweeper's wait", &error)
-            )),
-        }
     }
 }
 
@@ -150,5 +128,35 @@ impl SweeperSteps for OsSweeper {
 
     fn log(&self, line: &str) {
         say(line);
+    }
+
+    /// At the outer's end, if it lives that long: waits up to [`SWEEP_WAIT`] for the sweeper and
+    /// logs a failure or a sweeper still running.
+    fn wait(&self) -> Swept {
+        let Ok(mut kept) = self.kept.lock() else {
+            return Swept::Unclean;
+        };
+        let Some(sweeper) = kept.take() else {
+            return Swept::Unclean;
+        };
+        match sweeper.wait(Some(SWEEP_WAIT)) {
+            Ok(code) => {
+                match code {
+                    Some(0) => {}
+                    Some(code) => say(&format!(
+                        "clauseo-sandbox-run: the end sweeper failed (0x{code:08X})"
+                    )),
+                    None => say("clauseo-sandbox-run: the end sweeper is still running"),
+                }
+                Swept::from_exit(code)
+            }
+            Err(error) => {
+                say(&format!(
+                    "clauseo-sandbox-run: {}",
+                    os("the end sweeper's wait", &error)
+                ));
+                Swept::Unclean
+            }
+        }
     }
 }
