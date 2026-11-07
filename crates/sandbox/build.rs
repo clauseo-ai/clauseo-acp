@@ -27,11 +27,14 @@
 //! (ADR 0049). Its direct static imports load from System32 only (`/DEPENDENTLOADFLAG:0x800`).
 //! That flag doesn't cover what those imports import in turn, which the loader resolves before
 //! `main` with the exe's folder first: `netapi32.dll` pulls in `netutils.dll` and `samcli.dll`,
-//! which aren't `KnownDLLs`. So `netapi32.dll` and `userenv.dll`, the imports whose own imports
-//! aren't all `KnownDLLs`, are delay-loaded (`/DELAYLOAD`, with `delayimp.lib`): they load at
-//! their first call, after `main` has run `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`,
-//! so they and their own imports come from System32. `tests/setup_exe.rs` checks the exe's
-//! import and delay-import directories, its version information and its one manifest.
+//! which aren't `KnownDLLs`. So the imports whose own imports aren't all `KnownDLLs` are
+//! delay-loaded (`/DELAYLOAD`, with `delayimp.lib`): `netapi32.dll` and `userenv.dll` (the
+//! accounts and profiles), and since S15 PR7 `fwpuclnt.dll` (the WFP filters) and
+//! `iphlpapi.dll` (the port check's listener table). They load at their first call, after `main`
+//! has run `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so they and their own
+//! imports come from System32; nothing calls them before `main` (no static initialiser or TLS
+//! callback in the crate). `tests/setup_exe.rs` checks the exe's import and delay-import
+//! directories, its version information and its one manifest.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -50,6 +53,8 @@ fn main() -> Result<(), Error> {
             "/DEPENDENTLOADFLAG:0x800",
             "/DELAYLOAD:netapi32.dll",
             "/DELAYLOAD:userenv.dll",
+            "/DELAYLOAD:fwpuclnt.dll",
+            "/DELAYLOAD:iphlpapi.dll",
             "delayimp.lib",
             "/Brepro",
             "/PDBALTPATH:%_PDB%",
