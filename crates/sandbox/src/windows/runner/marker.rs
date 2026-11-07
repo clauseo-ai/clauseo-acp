@@ -1,8 +1,9 @@
 //! The unclean-session marker: `<data_dir>\sandbox\run\<id>.session`, where `<id>` is the launch
 //! file's 16 hex. The outer writes it as soon as it has read the launch, before anything runs as
-//! the pool user, and removes it only at a clean end: the inner exited (no cancel, no failure),
-//! reported the agent's exit, the end sweeper exited 0, and no sweep found an escapee
-//! (`end::EndSweep::clean`). A crash, a cancel, a failure or an escapee leaves it, and
+//! the pool user, and removes it only at a clean end: the inner exited (no failure, and no cancel
+//! whose agent outlived its grace), reported the agent's exit, the end sweeper exited 0, and no
+//! sweep found an escapee (`end::EndSweep::clean`). A crash, a cancel whose agent outlived its
+//! grace, a failure or an escapee leaves it, and
 //! [`unclean_sessions`] lists what was left, so Clauseo can make sure no process of that pool
 //! user lives on (0049; the `\Clauseo\SandboxStop` task, B's PR 3, is its caller).
 //!

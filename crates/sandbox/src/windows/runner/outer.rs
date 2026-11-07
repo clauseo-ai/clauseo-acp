@@ -1,14 +1,14 @@
 //! The outer runner (Windows): the desktop user's half, started by the host through
 //! `spawn_in_tree` with `--launch <file>`. See `runner.rs` for the whole chain.
 
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use super::desktop::AgentDesktop;
-use super::end::{EndSignal, EndSweep, copy, exit_code, relay_stdin};
+use super::end::{EndSignal, EndSweep, GRACE, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
 use super::marker::{launch_id, remove_marker, write_marker};
 use super::paths::{CodexReuse, WinPath};
@@ -352,11 +352,12 @@ fn accept(pipe: &ServerPipe, inner: &Process, timeout: Duration) -> Result<(), F
 
 /// Relays this process's stdin to the agent's and the agent's stdout and stderr to this
 /// process's until the inner runner exits, then exits with its code. The agent's stdin pipe
-/// closes when this process's stdin ends, so the agent reads the end of its input. `ctl`'s `Log`
-/// lines (the inner's sweeps) go to stderr meanwhile. When the host's stdin ends or the inner
-/// runner exits, the job is ended and emptied and the end sweeper started first (`end.rs`): a
-/// descendant the agent left in the job ends then, and what it held closes. Then the output has
-/// [`DRAIN`] per stream to finish. On a cancel the exit code is the one the run would have had
+/// closes when this process's stdin ends, so the agent reads the end of its input, and it has
+/// [`GRACE`] to finish before the job is ended (`end::relay_stdin`). `ctl`'s `Log` lines (the
+/// inner's sweeps) go to stderr meanwhile. Once the inner exited, the output has [`DRAIN`] per
+/// stream to finish; then the job is ended and emptied and the end sweeper started
+/// (`end::inner_exited`), which closes what a descendant left in the job held, and the output
+/// gets [`DRAIN`] again. On a cancel the exit code is the one the run would have had
 /// without the job's end (`end::exit_code`). A sweep of the session that found an escapee makes
 /// it [`RunExit::Escapee`] (`EndSweep::outcome`), the code it replaces said on stderr. A clean
 /// end (`EndSweep::clean`) removes the session's unclean-session marker.
@@ -371,9 +372,14 @@ fn relay(
     let host_end = Arc::clone(end);
     thread::Builder::new()
         .spawn(move || {
-            // The end sweeper first when the host's stdin ends, then the agent's stdin closes.
-            relay_stdin(io::stdin().lock(), &stdin, &host_end, drop);
-            drop(stdin);
+            // When the host's stdin ends the agent's closes, and the agent has its grace.
+            relay_stdin(
+                io::stdin().lock(),
+                AgentStdin(stdin),
+                &host_end,
+                GRACE,
+                drop,
+            );
         })
         .map_err(|e| spawned(&e))?;
     let (done, drained) = mpsc::channel();
@@ -403,20 +409,18 @@ fn relay(
         })
         .map_err(|e| spawned(&e))?;
     let ended = inner.wait(None).ok().flatten();
-    end.trigger(EndSignal::InnerExited);
     // The inner has exited, so `ctl`'s reader has its last report or none soon.
     let last = reports.recv_timeout(DRAIN).ok();
     let reported = match &last {
         Some(InnerReport::Exited { code }) => Some(*code),
         _ => None,
     };
-    let code = ended.map_or(RunExit::Spawn.code(), |inner_code| {
-        exit_code(end.began(), inner_code, reported)
-    });
     let mut left = 2;
-    while left > 0 && drained.recv_timeout(DRAIN).is_ok() {
-        left -= 1;
-    }
+    let code = inner_exited(end, ended, reported, || {
+        while left > 0 && drained.recv_timeout(DRAIN).is_ok() {
+            left -= 1;
+        }
+    });
     tell_status(last.as_ref(), code);
     let swept = end.wait();
     if let Some(marker) = &end.steps().marker
@@ -434,6 +438,19 @@ fn relay(
         ));
     }
     exit_now(end.outcome(code))
+}
+
+/// The agent's stdin pipe, owned, so that closing it is dropping it.
+struct AgentStdin(ServerPipe);
+
+impl Write for AgentStdin {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        (&self.0).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&self.0).flush()
+    }
 }
 
 /// One line on stderr when the run ended at a Windows status (`0xC0000000` and up), naming

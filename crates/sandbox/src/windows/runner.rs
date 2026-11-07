@@ -35,9 +35,9 @@
 //!   Startup entries, with no COM; the end sweeper removes those and then, over COM, its scheduled
 //!   tasks and BITS jobs (`leftovers.rs`). A pool user serves one live session at a time
 //!   (`pool::assign::busy`), so none of those processes is another session's.
-//! - The outer's first reaction to any end (the host's stdin ending, the inner exiting, a
-//!   failure) is to end the job, wait up to 1.5 s for it to empty, and then start the end sweeper
-//!   once (`end.rs`, `sweeper.rs`): `--sweep`, the same kills with no job kept and the same
+//! - At any end (the inner exiting, once the output drained; the host's stdin ending, once the
+//!   agent, its stdin closed, had 1.5 s to finish; a failure, at once) the outer ends the job,
+//!   waits up to 400 ms for it to empty, and then starts the end sweeper once (`end.rs`, `sweeper.rs`): `--sweep`, the same kills with no job kept and the same
 //!   removal, on its own timeout. A job that doesn't empty starts no sweeper. The sweeper is never
 //!   in the outer's job, so the host ending the outer leaves it running.
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and

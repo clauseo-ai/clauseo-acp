@@ -103,13 +103,13 @@ fn a_job_that_doesnt_empty_starts_no_sweeper_on_any_path() {
         assert!(!end.trigger(EndSignal::Stdin));
         assert_eq!(end.steps().done(), NOT_EMPTY, "{path:?}");
     }
-    // The host's stdin end: no sweeper, and the agent's stdin still closes.
+    // The host's stdin end: the agent's stdin closes, its grace runs out, and no sweeper.
     let end = EndSweep::new(not_empty());
-    relay_stdin(&b"request\n"[..], io::sink(), &end, |_| {
+    relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
         end.steps().log("agent stdin closed");
     });
-    let mut want: Vec<String> = NOT_EMPTY.iter().map(|s| (*s).to_owned()).collect();
-    want.push("log agent stdin closed".to_owned());
+    let mut want = vec!["log agent stdin closed".to_owned()];
+    want.extend(NOT_EMPTY.iter().map(|s| (*s).to_owned()));
     assert_eq!(end.steps().done(), want);
     assert_eq!(end.began(), Some(EndSignal::Stdin));
 }
@@ -167,8 +167,8 @@ fn the_wait_for_an_empty_job_polls_until_none_is_left_and_no_longer() {
     // A count that can't be read is an error too: no sweeper.
     let got = wait_empty(|| Err(io::Error::from_raw_os_error(6)), |_| {}, wait, poll);
     assert_eq!(got, Err("the job's process count failed (6)".to_owned()));
-    // The outer's own wait fits the host's 2 s after the stdin end.
-    assert!(EMPTY_WAIT <= Duration::from_millis(1500));
+    // The outer's own wait fits what the grace leaves of the host's 2 s.
+    assert!(EMPTY_WAIT <= Duration::from_millis(400));
     assert!(EMPTY_POLL < EMPTY_WAIT);
 }
 
@@ -231,17 +231,100 @@ fn paths_on_two_threads_start_it_once() {
     assert_eq!(end.steps().done(), STARTED);
 }
 
+/// A grace the tests can wait out.
+const SHORT: Duration = Duration::from_millis(50);
+
+/// `want` as owned lines.
+fn lines(want: &[&str]) -> Vec<String> {
+    want.iter().map(|s| (*s).to_owned()).collect()
+}
+
 #[test]
-fn the_hosts_stdin_ending_starts_the_sweeper_before_the_agents_stdin_closes() {
+fn stdin_ending_with_the_agent_finishing_in_its_grace_keeps_its_code_and_output() {
+    // The agent's stdin closes first; the agent finishes and the inner exits within the grace.
+    // Its output drains, then the job ends and empties, then the sweeper starts.
     let end = EndSweep::new(Record::default());
+    let (closed, agent_reads_eof) = mpsc::channel();
     let mut agent = Vec::new();
-    relay_stdin(&b"request\n"[..], &mut agent, &end, |_| {
+    let mut output = Vec::new();
+    let code = std::thread::scope(|scope| {
+        let stdin = scope.spawn(|| {
+            relay_stdin(
+                &b"request\n"[..],
+                &mut agent,
+                &end,
+                Duration::from_secs(30),
+                |_| {
+                    end.steps().log("agent stdin closed");
+                    closed.send(()).unwrap();
+                },
+            );
+        });
+        agent_reads_eof.recv().unwrap();
+        // The agent wrote its answer and exited 3; the inner reported it and exited.
+        let code = inner_exited(&end, Some(3), Some(3), || {
+            end.steps().log("drain");
+            output.push("answer");
+        });
+        // The stdin path no longer waits out its grace once the end began.
+        stdin.join().unwrap();
+        code
+    });
+    assert_eq!(code, 3);
+    assert_eq!(agent, b"request\n");
+    assert_eq!(output, ["answer", "answer"]);
+    let mut want = lines(&["log agent stdin closed", "log drain"]);
+    want.extend(lines(&STARTED));
+    want.push("log drain".to_owned());
+    assert_eq!(end.steps().done(), want);
+    // Its end began at the inner's exit: no cancel, and a clean end when the sweeper went.
+    assert_eq!(end.began(), Some(EndSignal::InnerExited));
+    assert!(end.clean(Swept::Clean, true));
+}
+
+#[test]
+fn stdin_ending_with_the_agent_not_finishing_ends_the_job_before_the_sweeper_in_budget() {
+    let end = EndSweep::new(Record::default());
+    relay_stdin(&b"request\n"[..], io::sink(), &end, SHORT, |_| {
         end.steps().log("agent stdin closed");
     });
-    assert_eq!(agent, b"request\n");
-    let mut want: Vec<String> = STARTED.iter().map(|s| (*s).to_owned()).collect();
-    want.push("log agent stdin closed".to_owned());
+    // The grace ran out: the job ended and emptied, then the sweeper started, all on this path.
+    let mut want = lines(&["log agent stdin closed"]);
+    want.extend(lines(&STARTED));
     assert_eq!(end.steps().done(), want);
+    assert_eq!(end.began(), Some(EndSignal::Stdin));
+    // The job's end ended the inner: the host's job-end code, no second start, and no clean end.
+    let code = inner_exited(&end, Some(SWEPT), None, || end.steps().log("drain"));
+    assert_eq!(code, HOST_ENDED);
+    want.extend(lines(&["log drain", "log drain"]));
+    assert_eq!(end.steps().done(), want);
+    assert!(!end.clean(Swept::Clean, false));
+    // The grace and the job's emptying fit the 2 s the host gives after the stdin end.
+    assert!(
+        GRACE + EMPTY_WAIT < Duration::from_secs(2),
+        "{:?}",
+        GRACE + EMPTY_WAIT
+    );
+}
+
+#[test]
+fn the_inners_exit_drains_then_ends_the_job_with_no_grace() {
+    let end = EndSweep::new(Record::default());
+    let code = inner_exited(&end, Some(7), Some(7), || end.steps().log("drain"));
+    assert_eq!(code, 7);
+    let mut want = lines(&["log drain"]);
+    want.extend(lines(&STARTED));
+    want.push("log drain".to_owned());
+    assert_eq!(end.steps().done(), want);
+    assert_eq!(end.began(), Some(EndSignal::InnerExited));
+    // A wait that failed: Spawn, the sweeper started all the same.
+    let end = EndSweep::new(Record::default());
+    let spawn = crate::windows::runner::RunExit::Spawn.code();
+    assert_eq!(inner_exited(&end, None, None, || {}), spawn);
+    assert_eq!(end.steps().done(), lines(&STARTED));
+    // The host's stdin ending after that waits no grace and starts nothing more.
+    relay_stdin(&b""[..], io::sink(), &end, Duration::from_secs(30), drop);
+    assert_eq!(end.steps().done(), lines(&STARTED));
 }
 
 /// A destination that refuses every write: an agent that closed its stdin.
@@ -259,7 +342,7 @@ impl io::Write for Closed {
 #[test]
 fn the_agent_closing_its_stdin_starts_no_sweeper() {
     let end = EndSweep::new(Record::default());
-    relay_stdin(&b"request\n"[..], Closed, &end, drop);
+    relay_stdin(&b"request\n"[..], Closed, &end, SHORT, drop);
     assert_eq!(end.steps().done(), Vec::<String>::new());
     assert_eq!(copy(&b""[..], io::sink()), CopyEnd::Source);
     assert_eq!(copy(&b"x"[..], Closed), CopyEnd::Destination);
