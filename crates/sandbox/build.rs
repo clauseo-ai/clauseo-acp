@@ -37,9 +37,26 @@
 //! imports come from System32; nothing calls them before `main` (no static initialiser or TLS
 //! callback in the crate). `tests/setup_exe.rs` checks the exe's import and delay-import
 //! directories, its version information and its one manifest.
+//!
+//! On every target it embeds the updater key the admin copy's refresh trusts (ADR 0049, "Admin
+//! copy refresh"; `src/windows/refresh/key.rs`) as `CLAUSEO_SANDBOX_UPDATER_KEY`, and the app's
+//! `version` as `CLAUSEO_SANDBOX_VERSION`, the lowest version a refresh takes. The key is
+//! `CLAUSEO_UPDATER_PUBKEY` when set, else `plugins.updater.pubkey` from `tauri.conf.json`,
+//! both Tauri's base64 of a minisign public-key file; with neither (a dry build), the placeholder,
+//! which verifies nothing, so such a build's refresh fails closed. A key that isn't a minisign
+//! public key fails the build, and so does a release build (`CLAUSEO_RELEASE_MODE=release`, the
+//! release profile) whose key is the placeholder or the throwaway test key (`release_guard`).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+
+// The crate compiles this file too, as the public `windows::refresh::key`.
+#[path = "src/windows/refresh/key.rs"]
+#[expect(
+    unreachable_pub,
+    reason = "public in the crate, which compiles the same file"
+)]
+mod key;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -50,10 +67,13 @@ fn main() -> Result<(), Error> {
     // Every target: the app's version, which `--adopt` records as `AdminCopyVersion`
     // (`windows::admin_copy::APP_VERSION`), the same string as the exe's `FileVersion`.
     let dir = std::env::var("CARGO_MANIFEST_DIR")?;
-    println!(
-        "cargo:rustc-env=CLAUSEO_APP_VERSION={}",
-        conf_field(Path::new(&dir), "/version")?
-    );
+    let version = tauri_conf(Path::new(&dir))?
+        .pointer("/version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("tauri.conf.json has no string at /version")?
+        .to_owned();
+    println!("cargo:rustc-env=CLAUSEO_APP_VERSION={version}");
+    refresh_key(Path::new(&dir))?;
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.ends_with("-windows-msvc") {
         for arg in [
@@ -81,22 +101,45 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-/// The string at `pointer` in `crates/desktop/tauri.conf.json`.
-fn conf_field(dir: &Path, pointer: &str) -> Result<String, Error> {
+/// Embeds the refresh's updater key and the app's version, as the module says.
+fn refresh_key(dir: &Path) -> Result<(), Error> {
+    println!("cargo:rerun-if-changed=src/windows/refresh/key.rs");
+    println!("cargo:rerun-if-env-changed=CLAUSEO_UPDATER_PUBKEY");
+    println!("cargo:rerun-if-env-changed=CLAUSEO_RELEASE_MODE");
+    let conf = tauri_conf(dir)?;
+    let from_env = std::env::var("CLAUSEO_UPDATER_PUBKEY").unwrap_or_default();
+    let from_conf = conf
+        .pointer("/plugins/updater/pubkey")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let given = [from_env.as_str(), from_conf]
+        .into_iter()
+        .map(key::compact)
+        .find(|candidate| !candidate.is_empty());
+    let chosen = given.unwrap_or_else(|| key::compact(key::PLACEHOLDER_KEY));
+    let id = key::key_id(&chosen).map_err(|why| format!("the updater public key: {why}"))?;
+    let mode = std::env::var("CLAUSEO_RELEASE_MODE").ok();
+    let profile = std::env::var("PROFILE").unwrap_or_default();
+    key::release_guard(mode.as_deref(), &profile, id)?;
+    println!("cargo:rustc-env=CLAUSEO_SANDBOX_UPDATER_KEY={chosen}");
+    let version = conf
+        .pointer("/version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("tauri.conf.json has no string at /version")?;
+    println!("cargo:rustc-env=CLAUSEO_SANDBOX_VERSION={version}");
+    Ok(())
+}
+
+/// `crates/desktop/tauri.conf.json`, parsed; cargo reruns the script when it changes.
+fn tauri_conf(dir: &Path) -> Result<serde_json::Value, Error> {
     let conf = dir.join("../desktop/tauri.conf.json");
     println!("cargo:rerun-if-changed={}", conf.display());
-    let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&conf)?)?;
-    let value = conf.pointer(pointer).and_then(serde_json::Value::as_str);
-    Ok(value
-        .ok_or(format!("tauri.conf.json has no string at {pointer}"))?
-        .to_owned())
+    Ok(serde_json::from_str(&std::fs::read_to_string(&conf)?)?)
 }
 
 /// Writes the setup exe's `VERSIONINFO` `.rc` into `OUT_DIR` and links it into that exe.
 fn version_info(dir: &Path) -> Result<(), Error> {
-    let conf = dir.join("../desktop/tauri.conf.json");
-    println!("cargo:rerun-if-changed={}", conf.display());
-    let conf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&conf)?)?;
+    let conf = tauri_conf(dir)?;
     let field = |pointer: &str| -> Result<String, Error> {
         let value = conf.pointer(pointer).and_then(serde_json::Value::as_str);
         Ok(value

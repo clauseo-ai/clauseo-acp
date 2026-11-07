@@ -76,6 +76,9 @@ mod private_dir;
 pub mod reclaim;
 #[cfg(windows)]
 mod record;
+// The admin copy's refresh: its engine and checks build everywhere for the tests.
+#[cfg(any(windows, test))]
+pub mod refresh;
 pub mod secrets;
 mod set_aside;
 // Set-up's engine calls `fence_registered`, which builds where it does.
