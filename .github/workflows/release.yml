@@ -999,17 +999,13 @@ jobs:
               { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
             # The updater key ID the tool was built with (its VERSIONINFO string UpdaterKeyId, stage
             # C) must be this mode's: test's updater-test.pub, release's tauri.conf.json pubkey, dry's
-            # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId).
+            # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId). A tool
+            # without the string (3) fails too: crates/sandbox/build.rs writes it into every msvc build.
             status=0
             node .github/scripts/latest-json.mjs --key-id "$exe" "$MODE" || status=$?
             case $status in
               0) ;;
-              3)
-                # TODO(sandbox-admin-refresh): a failure once stage C's PR 3, which puts UpdaterKeyId
-                # in the tool's VERSIONINFO, merges.
-                echo "::warning::$(basename "$exe") has no UpdaterKeyId; not compared with the $MODE key"
-                echo "- $label: \`$(basename "$exe")\` has no UpdaterKeyId yet, so its updater key ID was not compared." >> "$GITHUB_STEP_SUMMARY"
-                ;;
+              3) echo "::error::$(basename "$exe") has no UpdaterKeyId, so its updater key ID can't be compared with the $MODE key"; exit 1 ;;
               *) echo "::error::$(basename "$exe") does not carry the $MODE updater key ID (see above)"; exit 1 ;;
             esac
             for installer in "${files[0]}" "${files[1]}"; do
