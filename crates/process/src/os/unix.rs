@@ -178,8 +178,53 @@ pub(crate) fn started_before_now(pid: u32) -> bool {
         .is_some_and(|(start, now)| start < now)
 }
 
+/// The running members of process group `group`, each with its start; another Unix lists
+/// none (`None`).
+pub(crate) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return listing::members(group);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        drop(group);
+        None
+    }
+}
+
+/// This boot's stamp (Linux: `boot_id`; macOS: `kern.boottime`); another Unix reads none.
+pub(crate) fn boot() -> Option<String> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return listing::boot();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    None
+}
+
+/// SIGKILL to process group `group`. Never to group 0 or 1 (`killpg` reads 0 as the caller's
+/// own group, and 1 is init's), nor to this process's own group. Returns whether it went; an
+/// empty group (`ESRCH`) did not.
+pub(crate) fn kill_group(group: u32) -> bool {
+    let Ok(raw) = i32::try_from(group) else {
+        return false;
+    };
+    if raw <= 1 || nix::unistd::getpgrp().as_raw() == raw {
+        return false;
+    }
+    killpg(Pid::from_raw(raw), Signal::SIGKILL).is_ok()
+}
+
+/// SIGKILL to process `pid` if it still runs with the start `start`. Never pid 0 or 1, nor
+/// this process. Returns whether it went.
+pub(crate) fn kill_started(pid: u32, start: u64) -> bool {
+    let Ok(raw) = i32::try_from(pid) else {
+        return false;
+    };
+    if raw <= 1 || pid == std::process::id() || start_of(pid) != Some(start) {
+        return false;
+    }
+    kill(Pid::from_raw(raw), Signal::SIGKILL).is_ok()
+}
+
 /// The start of running process `pid`, `None` when it is gone or has exited.
-fn start_of(pid: u32) -> Option<u64> {
+pub(crate) fn start_of(pid: u32) -> Option<u64> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     return listing::start_of(pid);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]

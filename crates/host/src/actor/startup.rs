@@ -37,6 +37,9 @@ pub(super) async fn open(
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
     let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // With the store's lock held (a second host on this folder has failed by now), and before
+    // the actor serves, so before any launch claims a port: the groups a crashed run left.
+    let process_groups = crate::process_groups::start(&data_dir);
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,
@@ -93,7 +96,7 @@ pub(super) async fn open(
         browser_install,
         header_tools: super::header_tools::HeaderTools::default(),
         pack_generations: BTreeMap::new(),
-        turn_path: super::turn::wide::TurnPath::new(parts.idle),
+        turn_path: super::turn::wide::TurnPath::new(parts.idle, process_groups),
         refused_folders: parts.refused_folders,
         home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),
         home: parts.home_folder,

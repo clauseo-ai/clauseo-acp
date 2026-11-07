@@ -100,6 +100,35 @@ pub(super) fn list(root: u32, root_start: u64) -> Option<Vec<Proc>> {
     Some(found)
 }
 
+/// The running members of process group `group`, each with its start: every process whose
+/// `/proc/<pid>/stat` field 5 (`pgrp`) is `group` and that has not exited. `None` when
+/// `/proc` cannot be read. Blocking: it reads the stat line of every process.
+pub(super) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        // A process that exits between the directory read and the stat read is skipped.
+        if let Some(stat) = stat(pid).filter(|stat| !stat.exited && stat.group == group) {
+            found.push((pid, stat.start));
+        }
+    }
+    Some(found)
+}
+
+/// This boot's id, `/proc/sys/kernel/random/boot_id` without its line end; `None` when it
+/// cannot be read or is empty.
+pub(super) fn boot() -> Option<String> {
+    let text = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = text.trim();
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
 /// The executable process `pid` runs, as the kernel resolved it; `None` when unreadable (a
 /// process of another user, a kernel thread, or one that just exited).
 fn exe(pid: u32) -> Option<PathBuf> {

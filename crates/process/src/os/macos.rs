@@ -1,12 +1,14 @@
 //! The macOS listing of an agent's descendants, through libproc: `proc_listchildpids` walks the
 //! tree, `proc_pidinfo(PROC_PIDTBSDINFO)` gives each process's parent, group, start and state,
 //! and `proc_pidpath` its executable. `proc_listallpids` lists every process, for the processes
-//! with a given executable name and their starts (`named`). Each libproc call has one wrapper
-//! here, with its `unsafe` block and the reason it is sound; nothing else in the crate calls
-//! libproc.
+//! with a given executable name and their starts (`named`), and `proc_listpgrppids` the
+//! members of a process group (`members`); `sysctl kern.boottime` stamps the boot (`boot`).
+//! Each libproc call has one wrapper here, with its `unsafe` block and the reason it is sound;
+//! nothing else in the crate calls libproc.
 #![expect(
     unsafe_code,
-    reason = "FFI to libproc (proc_listchildpids, proc_listallpids, proc_pidinfo, proc_pidpath)"
+    reason = "FFI to libproc (proc_listchildpids, proc_listallpids, proc_listpgrppids, \
+              proc_pidinfo, proc_pidpath) and sysctlbyname (kern.boottime)"
 )]
 
 use std::ffi::{OsStr, c_int, c_void};
@@ -86,6 +88,69 @@ pub(super) fn list(root: u32, root_start: u64) -> Option<Vec<Proc>> {
         }
     }
     Some(found)
+}
+
+/// The running members of process group `group`, each with its start: libproc's
+/// `proc_listpgrppids` (`proc_listpids(PROC_PGRP_ONLY, group)`), each pid read again by
+/// `PROC_PIDTBSDINFO` and kept only when it still runs in `group`. `None` when the listing
+/// fails (-1), or for a group out of range; a count of 0 reads as no members, as xnu answers a
+/// failed system call with 0 (see [`children`]).
+pub(super) fn members(group: u32) -> Option<Vec<(u32, u64)>> {
+    let raw = c_int::try_from(group).ok()?;
+    let mut room = FIRST_CHILDREN;
+    loop {
+        let mut pids: Vec<c_int> = vec![0; room];
+        let bytes = c_int::try_from(pids.len() * size_of::<c_int>()).ok()?;
+        // SAFETY: `pids` is a live, zeroed buffer of exactly `bytes` bytes that this call may
+        // fill with pids and nothing else; the kernel writes at most `bytes` bytes into it.
+        // The return counts pids (xnu libsyscall/wrappers/libproc/libproc.c's
+        // `proc_listpgrppids` divides `proc_listpids`' byte count by `sizeof(int)`) or is -1
+        // on failure, which `usize::try_from` below refuses; a count is used only capped at the
+        // buffer's length, so no read passes it.
+        let count = unsafe { libc::proc_listpgrppids(raw, pids.as_mut_ptr().cast(), bytes) };
+        let count = usize::try_from(count).ok()?;
+        if count < room || room >= MAX_CHILDREN {
+            pids.truncate(count.min(room));
+            return Some(
+                pids.into_iter()
+                    .filter_map(|pid| u32::try_from(pid).ok().filter(|&pid| pid != 0))
+                    .filter_map(|pid| {
+                        info(pid)
+                            .filter(|info| !info.exited && info.group == group)
+                            .map(|info| (pid, info.start))
+                    })
+                    .collect(),
+            );
+        }
+        room *= 2;
+    }
+}
+
+/// This boot's stamp: `sysctl kern.boottime` as `<seconds>.<microseconds>`; `None` when the
+/// call fails or answers short.
+pub(super) fn boot() -> Option<String> {
+    let mut time = std::mem::MaybeUninit::<libc::timeval>::zeroed();
+    let mut size: libc::size_t = size_of::<libc::timeval>();
+    // SAFETY: the name is a NUL-terminated C string literal; `time` is a live, zeroed buffer of
+    // exactly `size` bytes, the size of the `timeval` that `kern.boottime` answers, and the
+    // call writes at most `size` bytes into it and the byte count into `size`. No new value
+    // is set (null, 0). Anything but 0 with `size` unchanged is refused before `time` is read.
+    let answer = unsafe {
+        libc::sysctlbyname(
+            c"kern.boottime".as_ptr(),
+            time.as_mut_ptr().cast::<c_void>(),
+            &raw mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if answer != 0 || size != size_of::<libc::timeval>() {
+        return None;
+    }
+    // SAFETY: the call above wrote the whole struct (`size` bytes), and it was zeroed before,
+    // so every field is initialised; `timeval` is two integers.
+    let time = unsafe { time.assume_init() };
+    Some(format!("{}.{:06}", time.tv_sec, time.tv_usec))
 }
 
 /// The pids whose parent is `parent`; `None` when the call answers -1 (its failure), or for a

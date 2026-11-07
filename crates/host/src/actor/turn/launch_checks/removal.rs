@@ -70,6 +70,8 @@ pub(super) fn discard(
                 return Ok(false);
             }
             run.lease.wait_done();
+            // The tree is gone: the next start has no group of this session's to end.
+            crate::process_groups::remove(&run.process_group);
             // The token is revoked before its file goes with the folder.
             relay::end(&run);
             if let Some(hook) = &hook {

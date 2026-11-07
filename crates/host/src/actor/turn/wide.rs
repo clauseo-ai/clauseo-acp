@@ -16,13 +16,20 @@ pub(crate) struct TurnPath {
     /// The launch preps waiting for a browser slot to come free (`launch_checks::browser`).
     /// Each hears whether a slot is free once a holder's removal ends.
     pub(super) slot_waits: Vec<futures::channel::oneshot::Sender<bool>>,
+    /// Writes each launch's process-group record (`process_groups.rs`), with this boot's stamp.
+    pub(super) process_groups: crate::process_groups::Recorder,
 }
 
 impl TurnPath {
-    /// The turn path's state at start-up, with the idle stop's settings.
-    pub(crate) fn new(idle: crate::config::IdleStop) -> Self {
+    /// The turn path's state at start-up, with the idle stop's settings and the process-group
+    /// recorder the start-up sweep made.
+    pub(crate) fn new(
+        idle: crate::config::IdleStop,
+        process_groups: crate::process_groups::Recorder,
+    ) -> Self {
         Self {
             idle: IdleClock::new(idle),
+            process_groups,
             ..Self::default()
         }
     }

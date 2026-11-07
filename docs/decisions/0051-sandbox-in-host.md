@@ -209,11 +209,49 @@ From the orchestrator's rulings, built in PR-C2 and live with PR-C; a release bl
   held as `sign_in`, and run after the new sign-in.
 - `identity.json` keeps a SHA-256 of the identity, never the identity itself.
 
-**A residual.** If desktop is killed or crashes, a jailed descendant of an agent can survive with
-its loopback grant to that session's proxy and relay ports, which a later session may bind. The
-crash-survivor sweep closes it: each agent's process group id and its leader's start time are
-recorded in `run/<session>/`, and at the next start the host `killpg`s each group that still
-matches, before any port is claimed. It lands right after #532 and is a release blocker.
+**The crash-survivor sweep.** If desktop is killed or crashes, its shutdown ladder never runs. The
+agent usually exits on its stdin's end, but what it started in its process group lives on, and a
+jailed survivor keeps its loopback grant to that session's proxy and relay ports, which a later
+session may bind. So the host (`crates/host/src/process_groups.rs`) records each agent's group
+and ends what a crashed run left at its next start.
+
+- **Where.** `<data>/process-groups/<matter>-<thread>-<launch>.json`, written atomically (0600,
+  not synced: a reboot voids it) on the host thread right after the agent's process exists, and
+  deleted when the session's removal frees its run (the tree proven gone). A run held past the
+  removal's cap keeps its record, so a later crash still sweeps it. A failed write logs its kind
+  and the launch goes on. Not in `run/<session>/`: a jailed agent can write there (its `tmp`),
+  and could forge a record naming another of the lawyer's groups (Word's, with its real start),
+  which the next start would kill. No jail grant covers `process-groups`: the policy allows only
+  the matter, the session's state and temp folders, the matter's notes, the Claude store and
+  credential link, the runtime and read paths and the allowed folders, and `hidden` denies the
+  data folder (`crates/sandbox/src/policy.rs`); Claude's data fence denies every entry of the
+  data folder that is not the session's own (`crates/host/src/agent/data_fence/launch.rs`). A
+  tier-C agent runs unjailed and could signal the lawyer's processes itself anyway. At read, a
+  record that is a link, has `nlink > 1`, is not this user's, is over 4 KiB or does not parse is
+  refused unread and deleted.
+- **What.** `{"v":1,"pgid":…,"leader_start":…,"boot":…}`: the group's id (the agent's pid), the
+  leader's start (Linux: `/proc/<pid>/stat` field 22; macOS: `pbi_start_tvsec` and
+  `pbi_start_tvusec`) and the boot's stamp (Linux: `boot_id`; macOS: `kern.boottime`), from
+  `clauseo_process::start_stamp` and `boot_stamp`.
+- **The match rule.** Another boot: the record goes and nothing is signalled (pids start again at
+  each boot). A process whose pid is the group's id: `SIGKILL` to the group only when its start
+  is the recorded leader's; any other start means the id was free and given again, so the old
+  group is gone. No such process but members of the group: a group id is not given again while
+  any member lives, so it is the original group, and it is ended; a member that started before
+  the recorded leader cannot be its descendant, so then only the later members are killed, one
+  by one, and the earlier ones are spared and counted. Neither: nothing to do. Then the record
+  goes.
+- **When.** In `Host::start`'s start-up on the host thread, once the store's lock is held (a
+  second host on the same data folder has failed by then, so it never sweeps a live host's
+  agents) and before the actor serves, so before any launch claims a browser, proxy or relay
+  port; `Host::start` returns only after it. Each ended group gets up to 500 ms to empty, and the
+  sweep waits at most 2 s in all, leaving the records it did not reach for the next start. One
+  log line of counts: found, ended, reused, left, refused, other boot; never a pid or path.
+  `run/`'s own sweep at the first launch is unchanged and does not depend on it.
+- **Windows** records nothing: the agent's Job Object has `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`,
+  so the tree ends when the desktop's process dies, however it dies.
+- **Residuals.** A descendant that left the group (`setsid`, `setpgid`) is not in it: that is
+  the jail's to contain. A launch whose record write failed is not swept.
 
 ### The settings and their safe values
 

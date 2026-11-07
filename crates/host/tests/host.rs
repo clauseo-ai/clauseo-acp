@@ -259,6 +259,9 @@ mod plan_note;
 #[path = "host/privacy.rs"]
 mod privacy;
 #[cfg(test)]
+#[path = "host/process_groups.rs"]
+mod process_groups;
+#[cfg(test)]
 #[path = "host/profile.rs"]
 mod profile;
 #[cfg(test)]

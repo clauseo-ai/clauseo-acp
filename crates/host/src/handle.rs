@@ -50,7 +50,9 @@ pub struct Host;
 impl Host {
     /// Opens the store in `Effective::data_dir()` (created if missing), loads the matters and
     /// threads, creates the Scratch matter on the first start, repairs what the last run left
-    /// open, and serves. Fails with `store.locked` when another host holds the data folder.
+    /// open (on Unix it first ends the agent process groups a crashed run left, waiting up to
+    /// about 2 s; `process_groups.rs`), and serves. Fails with `store.locked` when another
+    /// host holds the data folder.
     pub fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), HostError> {
         let splits = config.login_splits();
         let (mut handle, join) = crate::actor::start(config).map_err(HostError::from)?;

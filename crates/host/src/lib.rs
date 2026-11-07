@@ -23,6 +23,9 @@
 //!   start-up, and indexes each returned commit's envelopes, which the actor hands over a bounded
 //!   channel with `try_send` and never waits for; a full channel makes it catch up from its
 //!   per-stream watermarks. A forgotten matter's rows are deleted; its import indexes it again.
+//! - The agents' process-group records (`process_groups.rs`, decision record 0051, Unix): each
+//!   launch records its agent's group in `<data>/process-groups`, the session's removal deletes
+//!   it once the tree is gone, and start-up ends the groups a crashed run left, before it serves.
 //! - The Scratch matter: a first start creates it.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last
@@ -231,6 +234,7 @@ mod matter_worker;
 mod pipeline;
 pub mod pre_write_guard;
 mod principal;
+mod process_groups;
 mod rate;
 mod search;
 mod sent;
