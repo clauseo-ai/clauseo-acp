@@ -6,6 +6,34 @@ and the probe run on GitHub's runners. Files: `probe.ps1` (step 1), `rows.ps1` w
 `proxy-mock.mjs`, `inside.js` and `acp-driver.mjs` (step 2), `RUNBOOK.md` (real turns on a
 Windows 11 machine), workflow `.github/workflows/mxc-spike.yml`.
 
+## Verdict (run 42346205489, 2026-11-07): no-go for now
+
+MXC 1.0.1's process container can't hold the whole Claude Code or Codex agent on Windows 11 today.
+Re-run `rows.ps1` when **microsoft/mxc#1464 and #1061 close** (and check #1666 and #1676 then).
+What failed:
+- **Without the drive-root workaround ("strict"),** Node can't load scripts: every `require` and
+  every script file fails in the JS `fs.realpathSync` with `EPERM: operation not permitted, lstat 'C:\'`.
+  Neither ACP adapter gets as far as `initialize`.
+- **With it ("A": `enumeratePaths` on the drive root, `Documents` denied),** both adapters start and
+  answer ACP, `claude --version` and `codex --version` run, but every file-writing tool failed:
+  - Claude's Write and Bash: "where it leads on disk could not be determined";
+  - Codex's shell: `cmd` printed "Access is denied.".
+  The workaround also makes the user's profile listable, file names only.
+- **Network:** proxy-only egress holds (direct TCP refused, HTTPS through the proxy works), but MXC
+  strips Clauseo's proxy token and DNS lookups still leave the machine (#1666).
+- **Git Bash can't start** inside (#1061), and Claude Code's Bash tool on Windows depends on it.
+
+**Caveat on A's tool failures (my policy, not only MXC):** shape A explicitly denied `Documents`,
+the parent of the matter. An explicit deny beats the drive-root enumerate grant, so anything that
+examines the matter's ancestors fails there:
+- Node's package-scope lookup: 6r-A, "Cannot read package config …\Documents\package.json";
+- Claude's link check on the target path;
+- very likely `cmd`'s redirection.
+
+Shape B (drive root enumerable, no ancestor denied, siblings denied one by one) was coded but did
+not run, because 6a passed under A. B is the cheapest next test. It would still leave #1061 (Bash), #1666
+(DNS), the token and the profile-wide listing.
+
 ## Step 1: the probe (run 42341399286)
 
 | | `windows-11-arm` | `windows-2025` |
@@ -58,18 +86,56 @@ Mac against the same pinned packages (darwin builds), outside any sandbox:
 - the claude-agent-acp turn ended `end_turn` with 2 permission requests and both files;
 - the codex-acp turn ended `end_turn`.
 
-### Rows run 42342730658 (partial: harness hang in 5c, fixed since)
+### Rows run 42346205489 (complete)
 
-| Row | strict | A | Evidence |
-|---|---|---|---|
-| 0 node starts | PASS | PASS | `NODE_OK v24.22.0 arm64`, 331 / 225 ms |
-| 1 realpath (#1464) | native and promises OK; **JS `fs.realpathSync` EPERM** | same | Node's CJS loader uses the JS realpath, so rows 6r, 6s and 6e now test `require` |
-| 2 Git Bash (#1061) | FAIL | FAIL | `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-…): 0xC0000022`, exit 0xC0000005 |
-| 3 del (#1676) | FAIL (`del`: Access is denied; `unlinkSync` OK) | PASS | the drive-root `enumeratePaths` workaround works |
-| 4 network | (inside.js result lost: PS 7's `ConvertFrom-Json` refuses keys differing only in case, `HTTPS_PROXY`/`https_proxy`; fixed) | | 4e: `curl.exe` through the environment's proxy got 200; with `--noproxy *`, "Could not connect" |
-| 5a reads outside | PASS (`cmd type`: Access is denied) | PASS (EPERM) | |
-| 5b listings under A | | USERPROFILE **listable** (34 names); Documents and matter-b refused (denied) | the cost of the #1676 workaround |
-| 5c tree, 5d start-up, 6 agents | not reached | | the tree walk looped forever on `@($null)`; fixed, row 6 now runs right after row 0, every wait bounded |
+ARM64 runner, Windows 11 25H2 26200.9725, session 2, High integrity (elevated). UI on, proxy-only
+egress. Row 6 ran right after row 0.
+
+| Row | Verdict | Evidence |
+|---|---|---|
+| 0-strict, 0-A node -e | PASS, PASS | `NODE_OK v24.22.0 arm64`, 365 / 253 ms |
+| 6r-strict require.resolve | FAIL | claude-agent-acp, codex-acp, `require(package.json)`, `fs.realpathSync(install)`: `EPERM lstat C:\` |
+| 6s-strict script file | FAIL | exit 1, `syscall: 'lstat', path: 'C:\\'` |
+| 6e strict, both adapters | FAIL, FAIL | adapter exited 1: `Error: EPERM: operation not permitted, lstat 'C:\' at Object.realpathSync (node:fs:2820)` |
+| 6r-A require.resolve | FAIL | `ERR_INVALID_PACKAGE_CONFIG Cannot read package config \\?\C:\Users\runneradmin\Documents\package.json: operation not permitted` (the [eval] module's scope lookup walks up from the cwd into the denied Documents); `fs.realpathSync(install)` ok |
+| 6s-A script file | PASS | `RESULT ok` |
+| 6e-A, both adapters | PASS, PASS | `initialize ok` 991 ms (claude-acp), 2,660 ms (codex-acp) |
+| 6a-A --version | PASS | claude 2.1.293 in 214 ms (32 ms outside); codex-cli 0.162.1 in 177 ms (34 ms outside) |
+| 6b claude -p, Bash | FAIL | exit 0, 3 model calls; tool_result error: "Where …\matter-a\claude-bash.txt leads on disk could not be determined (a link or directory on the way could not be examined…)". It failed in Claude's path check, before any shell, so Git Bash (#1061) was never reached |
+| 6b claude -p, Write | FAIL | "Refusing to write …\claude-write.txt: where it leads on disk could not be determined" |
+| 6c codex exec, shell | FAIL | `pwsh.exe -Command 'cmd.exe /d /c "echo hi> codex-shell.txt"'` exited 1: "Access is denied." (see below) |
+| 6d ACP turn, claude-acp | FAIL | initialize, session/new and prompt all OK (`end_turn`, 0 non-JSON stdout lines, 1 permission); both tool calls `failed`, no files |
+| 6d ACP turn, codex-acp | FAIL | prompt ended `end_turn`; the same shell call `failed`, no file |
+| 1 realpath (#1464), strict and A | native and promises OK; **JS `fs.realpathSync` EPERM** in both | the JS realpath is the one Node's loader uses |
+| 2 Git Bash (#1061), strict and A | FAIL, FAIL | `NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-1888ae32e00d56aa): 0xC0000022`, exit 0xC0000005 |
+| 3 del (#1676) | strict FAIL, A PASS | strict: `del` "Access is denied.", `unlinkSync` ok; A: both ok |
+| 4a DNS (#1666) | FAIL (leak) | `dns.lookup(example.com)` resolved 172.66.147.243 (host DNS client); c-ares straight to UDP 53 timed out |
+| 4b direct TCP 1.1.1.1:443 | PASS | `EACCES` |
+| 4c HTTPS via the proxy | PASS | example.com: 200 Connection Established then 200 OK; example.org: 403 |
+| 4d Clauseo token | stripped | `HTTPS_PROXY` inside = `http://127.0.0.1:64462`, no userinfo; the proxy saw `auth-absent` on every CONNECT, including Codex's own attempts at chatgpt.com, ab.chatgpt.com, github.com and api.github.com (all refused) |
+| 4e curl.exe | PASS | through the env proxy 200; `--noproxy *` "Could not connect" |
+| 5a reads outside, A and strict | PASS, PASS | A: Documents secret and matter-b `EPERM`, own matter read; strict: `cmd type` "Access is denied." ×3 |
+| 5b listings under A | INFO | USERPROFILE **listed (35 names**, including `.codex`, `.cargo`, `AppData`); Documents and matter-b refused (denied) |
+| 5c tree kill | **inconclusive** | tree at kill time: `cmd.exe`, `conhost.exe`, `node.exe`, all gone 5 s after killing only `wxc-exec`. `PING.EXE` printed a pid (node's `spawn` event fired) but had already exited when the tree was read 0.8 s later, so the grandchild case was never tested. Most likely ping exits at once when ICMP is denied |
+| 5d start-up added | INFO | `node -e` to exit: outside median 101 ms, inside 244 ms, **about 143 ms added** |
+
+**Why Codex's shell exits 1 (6c), from the logs alone.** The message is `cmd.exe`'s own
+"Access is denied." pwsh started and launched cmd; pwsh's own launch failure reads differently.
+So the likely failure is cmd's `> codex-shell.txt` redirection, which walks the matter's ancestors
+and hits the explicitly denied `Documents`. That is the same ancestor-query family as #1676 and #1109,
+and the same cause as Claude's "could not be determined". Not confirmed by a run.
+
+### Which issue hit which agent
+
+| Issue | Claude Code (claude-agent-acp + claude.exe) | Codex (codex-acp + codex.exe) |
+|---|---|---|
+| #1464 / ancestor queries (JS realpath `lstat C:\`) | the adapter can't load without the drive-root workaround | same |
+| Ancestor deny (shape A's `Documents`, my policy) | Write and Bash refused at Claude's path check | cmd's redirection "Access is denied." (likely) |
+| #1061 Git Bash | its Bash tool needs Git Bash (`CLAUDE_CODE_GIT_BASH_PATH`); bash can't start (row 2), though 6b failed earlier | not used (Codex runs pwsh and cmd) |
+| #1676 del | shell deletes from cmd or PowerShell 5.1 fail without the workaround | same |
+| #1666 DNS | lookups leave the machine | same |
+| Token stripped | Clauseo's proxy must drop its token check under MXC | same |
+| #1629 UI | runs only with UI on; no 28 s delay seen (244 ms) | same |
 
 ## What S15a and G6 already cover, and what is new
 
@@ -115,7 +181,10 @@ agent. Under MXC the per-container WFP pin does the token's job (a container can
 own proxy port), so tier A would need the agent listener without the token check. It also binds
 a random port each launch, which is fine for MXC (the port goes in `networkProxy`).
 
-## Workarounds and fix dates for the issues the rows test
+## Workarounds, their catches, and when to re-run
+
+Re-run `rows.ps1` (the `rows` job) when **#1464 and #1061 close**. Before that, the one cheap
+test left is shape B (see the verdict's caveat).
 
 | Issue | State (2026-11-07) | Workaround | Fix date |
 |---|---|---|---|
@@ -127,7 +196,9 @@ a random port each launch, which is fine for MXC (the port goes in `networkProxy
 
 ## Not verified
 
-- Every row of step 2 until the `rows` job has run.
+- Shape B (drive root enumerable, no ancestor denied). Coded in `rows.ps1`, never reached.
+- The tree kill of a grandchild that is still running (5c): ping had already exited.
 - A desktop user's Medium token: the runner is elevated (High). `RUNBOOK.md` covers it on a
   Windows 11 machine, with real logins.
 - x64 Windows 11: no free runner. The ARM64 results may not carry over.
+- Real model turns: the runs used a scripted model server (`proxy-mock.mjs`).
