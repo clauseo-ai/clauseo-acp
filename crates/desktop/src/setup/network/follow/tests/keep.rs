@@ -15,7 +15,7 @@ use clauseo_sandbox::{Route, UpstreamAnswer};
 use url::Url;
 
 use super::super::super::{
-    Answered, KEEP_FOR, Known, NetworkFacts, NetworkSlot, OsAnswer, ProxyEnv, os_answer,
+    Answered, KEEP_FOR, Known, NetworkFacts, NetworkSlot, OsAnswer, Probed, ProxyEnv, os_answer,
 };
 use super::super::{Follower, NetworkFollow, follow};
 use super::{OS_PROXY, claude, codex, facts, hook_env, since};
@@ -62,6 +62,7 @@ impl Os {
 fn inline(os: &Os) -> (NetworkFollow, SetupHook) {
     let slot = NetworkSlot::default();
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .reach(|_proxy| true)
         .fresh_for(Duration::ZERO)
         .lookup_budget(Duration::from_millis(200));
     let network = NetworkFollow::inline(follower);
@@ -93,8 +94,8 @@ fn other_hosts() -> NetworkFacts {
 }
 
 /// On a refresh of the same read, a lookup that fails (or finds no slot: the sandbox's
-/// `Failed`) or runs past the budget keeps the previous proxy; an explicit `DIRECT` takes it
-/// away.
+/// `Failed`) or runs past the budget keeps the previous proxy while it answers; two explicit
+/// `DIRECT`s in a row take it away.
 #[test]
 fn a_refresh_keeps_the_previous_proxy_when_a_lookup_fails_or_is_late() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
@@ -120,13 +121,20 @@ fn a_refresh_keeps_the_previous_proxy_when_a_lookup_fails_or_is_late() {
         "a lookup past the budget"
     );
     os.set(OsAnswer::Direct, Duration::ZERO);
+    refresh();
+    assert_eq!(
+        proxy_of(&hook).as_deref(),
+        Some(OS_PROXY),
+        "one DIRECT, the proxy still answering"
+    );
     assert_eq!(refresh().and_then(|n| n.proxy), None);
-    assert_eq!(proxy_of(&hook), None, "an explicit DIRECT");
+    assert_eq!(proxy_of(&hook), None, "a second DIRECT");
     assert_eq!(hook_env(&hook, &codex()).get("HTTPS_PROXY"), None);
 }
 
 /// A failed lookup after a cached `DIRECT` or proxy keeps that answer for its target when the
-/// same hosts are asked; an explicit answer replaces it; with no earlier answers it stays unknown.
+/// same hosts are asked; an explicit answer replaces it (a `DIRECT` over a proxy found dead); with
+/// no earlier answers it stays unknown.
 #[test]
 fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
     let (direct, proxied) = (
@@ -144,18 +152,26 @@ fn a_failure_keeps_a_cached_direct_or_proxy_for_the_same_hosts() {
     ]
     .into();
     let at = Duration::from_secs(100);
-    let known = Known::default().merge(last.clone(), at, KEEP_FOR);
+    let known = Known::default().merge(last.clone(), at, KEEP_FOR, &Probed::new());
     let later = at + Duration::from_secs(60);
-    assert_eq!(known.merge(failed.clone(), later, KEEP_FOR).answers, last);
-    let nothing = Known::default().merge(failed.clone(), later, KEEP_FOR);
+    assert_eq!(
+        known
+            .merge(failed.clone(), later, KEEP_FOR, &Probed::new())
+            .answers,
+        last
+    );
+    let nothing = Known::default().merge(failed.clone(), later, KEEP_FOR, &Probed::new());
     assert_eq!(nothing.answers, failed, "nothing to keep");
     let answered: Answered = [
         (direct, OsAnswer::Proxy(NEW_PROXY.to_owned())),
         (proxied, OsAnswer::Direct),
     ]
     .into();
+    let dead: Probed = [(OS_PROXY.to_owned(), false)].into();
     assert_eq!(
-        known.merge(answered.clone(), later, KEEP_FOR).answers,
+        known
+            .merge(answered.clone(), later, KEEP_FOR, &dead)
+            .answers,
         answered
     );
     // Through the follower: a cached DIRECT, then a failure on a refresh, stays direct.
@@ -247,6 +263,7 @@ fn a_late_answer_for_older_settings_is_dropped() {
     };
     let slot = NetworkSlot::default();
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true)
+        .reach(|_proxy| true)
         .lookup_budget(Duration::from_millis(200));
     let network = follow(follower, SystemClock.monotonic());
     let started = SystemClock.monotonic();
@@ -272,7 +289,8 @@ fn a_late_answer_for_older_settings_is_dropped() {
 fn dropping_the_follow_ends_the_network_thread() {
     let slot = NetworkSlot::default();
     let os = |_target: &Url| Some(OS_PROXY.to_owned());
-    let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true);
+    let follower =
+        Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os, true).reach(|_proxy| true);
     let network = follow(follower, SystemClock.monotonic());
     network.update(facts());
     block_on(network.ready());
@@ -317,6 +335,7 @@ fn a_kept_proxy_expires_ten_minutes_after_a_real_lookup_last_gave_it() {
     let os = Os::new(OsAnswer::Proxy(OS_PROXY.to_owned()));
     let slot = NetworkSlot::default();
     let follower = Follower::unbound(Arc::clone(&slot), ProxyEnv::default, os.lookup(), true)
+        .reach(|_proxy| true)
         .fresh_for(Duration::ZERO)
         .clock(Arc::new(clock.clone()));
     let network = NetworkFollow::inline(follower);
