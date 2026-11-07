@@ -31,7 +31,9 @@
 //!
 //! 1. the record read again under the lock, and who acts decided again from it;
 //! 2. `Removing = 1` written to the record (once; a re-run finds it set);
-//! 3. every process running as a pool SID stopped (D-B13);
+//! 3. every process running as a pool SID stopped (D-B13), then the network filters and
+//!    firewall rules removed with the owner's read grant (S15 PR7, `wfp::remove`): no pool
+//!    process is left to run unfiltered;
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
 //!    group, D-B11), its profile, its account with its sign-in screen value;
 //! 5. `DeviceSync`'s deny;
@@ -123,6 +125,8 @@ pub enum RemoveStep {
     Group,
     /// Deleting the record.
     Record,
+    /// Removing the network filters and firewall rules (S15 PR7).
+    Network,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -140,6 +144,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Ledger => "taking the ledger's entries back",
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
+            RemoveStep::Network => "removing the network filters",
         })
     }
 }
@@ -320,6 +325,9 @@ fn steps(
     machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
+    machine
+        .remove_network(&record.owner)
+        .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
