@@ -340,6 +340,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox set-up refused or failed (0051) | `ErrorCode::SandboxSetupRefused`, `ErrorCode::SandboxSetupFailed` | yes |
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
 | The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
+| Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

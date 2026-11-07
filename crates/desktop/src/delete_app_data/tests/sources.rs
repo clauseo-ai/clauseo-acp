@@ -44,11 +44,41 @@ pub(super) fn preuninstall(code: &[String]) -> &[String] {
 }
 
 #[test]
+fn the_hook_starts_only_the_admin_copy_and_never_the_one_beside_the_app() {
+    let code = hook_code();
+    let body = preuninstall(&code);
+    // No code line of the removal names the set-up program but through the define: no copy
+    // beside the app, and no fallback to one when the admin copy is missing.
+    let named: Vec<&String> = body
+        .iter()
+        .filter(|l| l.contains("clauseo-sandbox-setup"))
+        .filter(|l| !l.starts_with("!define CLAUSEO_ADMIN_EXE "))
+        .collect();
+    assert!(named.is_empty(), "{named:?}");
+    // The define's value is the admin copy's path in Program Files, exactly.
+    let define = line_with(&code, &["!define CLAUSEO_ADMIN_EXE "]);
+    assert_eq!(
+        code[define],
+        "!define CLAUSEO_ADMIN_EXE \"$PROGRAMFILES64\\Clauseo\\Sandbox\\clauseo-sandbox-setup.exe\""
+    );
+    // The SHELLEXECUTEINFOW struct's lpFile (the member after lpVerb) is that define.
+    let info = line_with(body, &["System::Call '*(&l4, i 0x440"]);
+    assert!(
+        body[info].contains(concat!(
+            "w \"${CLAUSEO_REMOVE_VERB}\", w \"${CLAUSEO_ADMIN_EXE}\", ",
+            "w \"${CLAUSEO_REMOVE}\", p 0,"
+        )),
+        "{}",
+        body[info]
+    );
+}
+
+#[test]
 fn the_uninstall_hook_checks_the_app_then_removes_s15s_set_up_then_runs_the_deletion() {
     let code = hook_code();
     let body = preuninstall(&code);
     let app_check = line_with(body, &["!insertmacro CheckIfAppIsRunning"]);
-    let remove = line_with(body, &["clauseo-sandbox-setup.exe", "${CLAUSEO_REMOVE}"]);
+    let remove = line_with(body, &["${CLAUSEO_ADMIN_EXE}", "${CLAUSEO_REMOVE}"]);
     let cleared = line_with(body, &["StrCpy $DeleteAppDataCheckboxState 0"]);
     let exe = "\"$INSTDIR\\${MAINBINARYNAME}.exe\"";
     let runs = line_with(body, &["ExecWait", &format!("{exe} {FLAG}' $R7")]);
@@ -156,7 +186,7 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
     let call = line_with(
         body,
         &[concat!(
-            "w \"${CLAUSEO_REMOVE_VERB}\", w \"$INSTDIR\\clauseo-sandbox-setup.exe\", ",
+            "w \"${CLAUSEO_REMOVE_VERB}\", w \"${CLAUSEO_ADMIN_EXE}\", ",
             "w \"${CLAUSEO_REMOVE}\", p 0,"
         )],
     );
@@ -247,13 +277,13 @@ fn a_silent_per_user_uninstall_skips_the_elevated_removal_and_keeps_the_sandbox_
         "StrCpy $R3 1",
         "!if \"${INSTALLMODE}\" == \"currentUser\"",
         "${If} ${Silent}",
-        "${AndIf} ${FileExists} \"$INSTDIR\\clauseo-sandbox-setup.exe\"",
+        "${AndIf} ${FileExists} \"${CLAUSEO_ADMIN_EXE}\"",
         "StrCpy $R3 0",
         "DetailPrint \"$(removeSkippedSilent)\"",
         "${EndIf}",
         "!endif",
         "${If} $R3 = 1",
-        "${AndIf} ${FileExists} \"$INSTDIR\\clauseo-sandbox-setup.exe\"",
+        "${AndIf} ${FileExists} \"${CLAUSEO_ADMIN_EXE}\"",
     ];
     assert_eq!(body[run..run + 10], expected, "{body:?}");
     let unremoved = line_with(body, &["StrCpy $R5 0"]);

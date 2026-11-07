@@ -10,21 +10,41 @@ use super::record::{self, CleanRecord, Unusable};
 use super::{FullReason, LaunchCheck, WalkInputs};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
+use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::ledger::{EntryState, Ledger};
 use crate::windows::set_aside;
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
-/// `apply`. Under the matter's set-aside lock it reads the matter's clean-close record and
-/// removes it, whatever comes next: a failed removal refuses the launch
+/// `apply`. First the set-up program's admin copy passes `admin_copy::check`, or the launch is
+/// refused with [`Error::Blocked`] (`AdminCopyMissing`, `AdminCopyChanged` or
+/// `AdminCopyUnsafe`) and nothing is read or removed: without a copy only administrators can
+/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then, under the
+/// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
+/// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
 /// decides ([`LaunchCheck::path`]): see the module's docs and 0049. `ledger` is read as the
 /// caller opened it, just before.
+#[cfg(windows)]
 pub fn check_launch(
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
+    let admin = admin_copy::os::WindowsAdminCopy;
+    check_launch_with(&admin, data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] with the admin copy read through `admin`: the machine on Windows, a fake
+/// in the tests.
+pub(crate) fn check_launch_with(
+    admin: &dyn AdminCopyFs,
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
+    admin_copy::check(admin).map_err(Error::Blocked)?;
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);

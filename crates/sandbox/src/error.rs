@@ -105,6 +105,13 @@ pub enum Error {
         /// Why.
         cause: crate::windows::wfp::NetworkGap,
     },
+    /// Windows tier B refuses to launch for a cause only whoever looks after the computer can
+    /// fix (D-B4): the set-up program's admin copy is missing, changed or in a folder others
+    /// can change (`Blocked::AdminCopy*`, from `windows::clean_close::check_launch`). Nothing
+    /// was planned or written, and the caller shows the cause rather than run on a weaker tier
+    /// in silence.
+    #[error("the sandbox can't run: {0}")]
+    Blocked(crate::Blocked),
 }
 
 impl Error {
@@ -113,6 +120,7 @@ impl Error {
     /// caller falls back to the tier it can get); a failed probe is unexpected, so it is
     /// `Internal`. Tier B's network set-up missing or stale is `sandbox.setup_required`, since
     /// running the set-up again fixes it; any other network refusal is a failed launch.
+    /// A block only an administrator can lift is `SandboxBlocked`, not retryable.
     pub fn code(&self) -> ErrorCode {
         match self {
             Error::NetworkUnfiltered { cause } if cause.needs_setup() => {
@@ -127,6 +135,7 @@ impl Error {
             | Error::SetAside { .. }
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
+            Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
             Error::Probe(_) => ErrorCode::Internal,
             Error::Launch(error) => error.code(),
@@ -155,6 +164,16 @@ mod tests {
         assert_eq!(
             folder.to_string(),
             "the sandbox can't prepare the state folder: it is on a network drive"
+        );
+        let changed = Error::Blocked(crate::Blocked::AdminCopyChanged);
+        assert_eq!(changed.code(), ErrorCode::SandboxBlocked);
+        assert!(
+            !changed.code().is_retryable(),
+            "only an administrator can fix it"
+        );
+        assert!(
+            changed.to_string().starts_with("the sandbox can't run: "),
+            "{changed}"
         );
     }
 }

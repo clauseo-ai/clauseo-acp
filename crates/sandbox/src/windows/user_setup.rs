@@ -1,6 +1,13 @@
 //! [`UserSetup`]: the app's side of the elevated set-up (S15 `PR4h`), as R17 holds it through
-//! [`SandboxSetup`]. It reads the set-up's state, starts the setup exe beside the app and waits
+//! [`SandboxSetup`]. It reads the set-up's state, starts the setup exe's admin copy and waits
 //! for it, and forgets a matter without admin.
+//!
+//! The one exe it starts is the admin copy in `%ProgramFiles%\Clauseo\Sandbox\`
+//! (`admin_copy`), never the copy beside `Clauseo.exe`, which a per-user install keeps in a
+//! folder the lawyer's own processes can write. Before every start the copy passes
+//! `admin_copy::check` (there, its recorded SHA-256, a folder chain only administrators can
+//! change), or nothing starts and the run is [`SetupError::Blocked`] with the cause, recorded
+//! for `state` as a policy block is.
 //!
 //! The exe's manifest asks for an administrator (`requireAdministrator`, D-B14), so starting it
 //! with the verb `open` raises the one UAC prompt; there is no `runas` fallback (D-B4). It runs
@@ -30,6 +37,7 @@ use windows::Win32::UI::Shell::{
 use windows::core::{PCWSTR, w};
 
 use super::NtfsAcl;
+use super::admin_copy::os::check_here;
 use super::apply::forget_matter;
 use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
@@ -48,26 +56,18 @@ use crate::{SandboxSetup, SetupError, SetupState};
 /// `SW_HIDE`: the exe shows no window.
 const SW_HIDE: i32 = 0;
 
-/// The set-up for the Windows user running the app: `data_dir` is that user's data folder,
-/// `exe` the setup exe (`clauseo-sandbox-setup.exe`, bundled beside `Clauseo.exe`).
+/// The set-up for the Windows user running the app: `data_dir` is that user's data folder.
+/// The setup exe is always the admin copy, found and checked at each start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSetup {
     data_dir: PathBuf,
-    exe: PathBuf,
 }
 
 impl UserSetup {
-    /// The set-up for the data folder `data_dir`, run through the setup exe at `exe`. A
-    /// relative `exe` is refused: `ShellExecuteExW` would look for it in the current folder
-    /// and on the search path, where another program could stand in for it.
-    pub fn new(data_dir: PathBuf, exe: PathBuf) -> Result<UserSetup, SetupError> {
-        if !exe.is_absolute() {
-            return Err(SetupError::Failed(format!(
-                "the set-up program's path {} isn't a full path",
-                exe.display()
-            )));
-        }
-        Ok(UserSetup { data_dir, exe })
+    /// The set-up for the data folder `data_dir`. No path to an exe is taken: the one started
+    /// is the admin copy (`admin_copy::check_here`).
+    pub fn new(data_dir: PathBuf) -> UserSetup {
+        UserSetup { data_dir }
     }
 
     /// Adds `n` pool users to a pool this user set up (D-B5): one prompt, as [`SandboxSetup::run`]
@@ -180,7 +180,7 @@ impl UserSetup {
                 "the last set-up's result can't be cleared: {error}"
             ))
         })?;
-        let code = match launch(&self.exe, params) {
+        let code = match launch(params) {
             Ok(code) => code,
             Err(SetupError::Blocked(blocked)) => {
                 // Nothing ran to say so: the app records it, so `state` reports it until a
@@ -245,7 +245,7 @@ impl SandboxSetup for UserSetup {
     }
 
     fn remove(&self) -> Result<(), SetupError> {
-        let code = launch(&self.exe, "--remove")?;
+        let code = launch("--remove")?;
         result_file::outcome(code, None)
     }
 }
@@ -271,9 +271,16 @@ impl Drop for Process {
     }
 }
 
-/// Starts `exe` with `params` as the module says, waits for it, and gives its exit code. A
-/// launch that fails is `launch_error` of its code.
-fn launch(exe: &Path, params: &str) -> Result<u32, SetupError> {
+/// Starts the admin copy with `params` as the module says, once it passes
+/// `admin_copy::check_here` (else [`SetupError::Blocked`], nothing started), waits for it, and
+/// gives its exit code. A launch that fails is `launch_error` of its code.
+fn launch(params: &str) -> Result<u32, SetupError> {
+    let exe = check_here().map_err(SetupError::Blocked)?;
+    start(&exe, params)
+}
+
+/// Starts `exe`, which [`launch`] checked, with `params`, waits for it and gives its exit code.
+fn start(exe: &Path, params: &str) -> Result<u32, SetupError> {
     let file: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
     let parameters: Vec<u16> = params.encode_utf16().chain([0]).collect();
     let mut info = SHELLEXECUTEINFOW {

@@ -13,15 +13,16 @@ use windows::Win32::Security::{
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, KEY_WOW64_64KEY,
     REG_CREATE_KEY_DISPOSITION, REG_DWORD, REG_MULTI_SZ, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
-    REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegSetKeySecurity,
-    RegSetValueExW,
+    REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteValueW,
+    RegOpenKeyExW, RegQueryInfoKeyW, RegSetKeySecurity, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
 use super::MachineError;
 use super::lock::Descriptor;
 use super::record_values::{
-    self, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RawRecord, RegValue,
+    self, ADMIN_COPY_SHA256, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
+    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR,
 };
 use crate::windows::pool::MachineRecord;
 use crate::windows::record::{RecordError, read_dword, read_string, read_units};
@@ -61,6 +62,45 @@ pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
 pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineError> {
     let values =
         record_values::encode(record).map_err(|error| MachineError::Other(error.to_string()))?;
+    let opened = open_secured(key)?;
+    for (name, value) in &values {
+        set_value(&opened, name, value)?;
+    }
+    Ok(())
+}
+
+/// Writes `--adopt`'s two values, `AdminCopySha256` (`sha256`, which must be 64 lowercase hex
+/// digits) and `UserInstallDir` (`install_dir`, Unicode), into `HKLM\<key>`, made and secured
+/// as [`write`] does; the set-up's values are left as they are.
+pub(super) fn write_admin_values(
+    key: &str,
+    sha256: &str,
+    install_dir: &std::path::Path,
+) -> Result<(), MachineError> {
+    if !crate::windows::admin_copy::is_sha256_hex(sha256) {
+        return Err(MachineError::Other(
+            "the admin copy's hash isn't a SHA-256".to_owned(),
+        ));
+    }
+    let dir = install_dir
+        .to_str()
+        .ok_or_else(|| MachineError::Other("the install folder's path isn't Unicode".to_owned()))?;
+    let opened = open_secured(key)?;
+    set_value(
+        &opened,
+        ADMIN_COPY_SHA256,
+        &RegValue::Sz(record_values::sz(sha256)),
+    )?;
+    set_value(
+        &opened,
+        USER_INSTALL_DIR,
+        &RegValue::Sz(record_values::sz(dir)),
+    )
+}
+
+/// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
+/// DACL ([`RECORD_SDDL`]) set again before any value.
+fn open_secured(key: &str) -> Result<Key, MachineError> {
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
@@ -101,15 +141,74 @@ pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineErro
         )
     };
     check("RegSetKeySecurity", secured)?;
-    for (name, value) in &values {
-        set_value(&opened, name, value)?;
-    }
-    Ok(())
+    Ok(opened)
 }
 
-/// Deletes `HKLM\<key>` (it has no subkeys). A missing key is `Ok`.
+/// Deletes the set-up's values (`SETUP_VALUES`) from `HKLM\<key>`, then the key once it holds
+/// no value and no subkey, so `--adopt`'s `AdminCopySha256` and `UserInstallDir` outlive a
+/// rollback or a removal of the set-up. A missing key or value is `Ok`.
 pub(super) fn delete(key: &str) -> Result<(), MachineError> {
+    delete_values(key, &SETUP_VALUES)
+}
+
+/// Deletes `--adopt`'s two values from `HKLM\<key>`, then the key once it is empty, as
+/// [`delete`] does for the set-up's.
+pub(super) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
+    delete_values(key, &[ADMIN_COPY_SHA256, USER_INSTALL_DIR])
+}
+
+/// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it.
+fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
     let subkey = HSTRING::from(key);
+    let mut opened = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            KEY_SET_VALUE | KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+            &raw mut opened,
+        )
+    };
+    if open == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    check("RegOpenKeyExW", open)?;
+    let opened = Key(opened);
+    for name in names {
+        let name = HSTRING::from(*name);
+        // SAFETY: the key is open with KEY_SET_VALUE; the name is NUL-terminated.
+        let deleted = unsafe { RegDeleteValueW(opened.0, &name) };
+        if deleted != ERROR_FILE_NOT_FOUND {
+            check("RegDeleteValueW", deleted)?;
+        }
+    }
+    let (mut subkeys, mut values) = (0u32, 0u32);
+    // SAFETY: the key is open with KEY_QUERY_VALUE; the two counts are live out-pointers and
+    // every other out-pointer is left null.
+    let queried = unsafe {
+        RegQueryInfoKeyW(
+            opened.0,
+            None,
+            None,
+            None,
+            Some(&raw mut subkeys),
+            None,
+            None,
+            Some(&raw mut values),
+            None,
+            None,
+            None,
+            None,
+        )
+    };
+    check("RegQueryInfoKeyW", queried)?;
+    drop(opened);
+    if subkeys > 0 || values > 0 {
+        return Ok(());
+    }
+    // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
     // SAFETY: the subkey is a NUL-terminated HSTRING that lives for the call.
     let deleted = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, &subkey, KEY_WOW64_64KEY.0, None) };
     if deleted == ERROR_FILE_NOT_FOUND {
@@ -175,7 +274,7 @@ pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
         ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
     };
     use windows::Win32::Security::PSECURITY_DESCRIPTOR;
-    use windows::Win32::System::Registry::{RegGetKeySecurity, RegOpenKeyExW};
+    use windows::Win32::System::Registry::RegGetKeySecurity;
     use windows::core::PWSTR;
 
     /// `READ_CONTROL`, which `RegGetKeySecurity` needs.

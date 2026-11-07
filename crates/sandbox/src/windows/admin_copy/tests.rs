@@ -1,0 +1,299 @@
+//! The admin copy's rules on every OS, through the fake: each refusal, the order they come in,
+//! and that the one path ever handed back is the admin copy's.
+
+use std::path::{Path, PathBuf};
+
+use super::fake::{Entry, Fake, HASH, descriptor, locked_dacl, program_files_dacl};
+use super::*;
+
+const USERS_SID: &str = "S-1-5-32-545";
+const EVERYONE: &str = "S-1-1-0";
+const LAWYER: &str = "S-1-5-21-1-2-3-1001";
+
+fn exe() -> PathBuf {
+    PathBuf::from(r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe")
+}
+
+fn sandbox() -> PathBuf {
+    PathBuf::from(r"C:\Program Files\Clauseo\Sandbox")
+}
+
+/// Whether `checked` is the admin copy's path (`same_path`: off Windows `join` writes `/`).
+fn passes(checked: Result<PathBuf, Blocked>) -> bool {
+    checked.is_ok_and(|path| same_path(&path, &exe()))
+}
+
+/// The locked folder's entries plus `extra`.
+fn with_extra(folder: bool, extra: Entry<'_>) -> Vec<u8> {
+    let inherit = if folder { 0x3 } else { 0 };
+    descriptor(
+        ADMINISTRATORS,
+        Some(&[
+            (0, inherit, FULL_ACCESS, SYSTEM),
+            (0, inherit, FULL_ACCESS, ADMINISTRATORS),
+            (0, inherit, READ_EXECUTE, USERS_SID),
+            extra,
+        ]),
+        true,
+    )
+}
+
+#[test]
+fn a_ready_copy_passes_and_the_path_is_the_admin_copy_alone() {
+    let fake = Fake::ready();
+    assert!(passes(check(&fake)));
+    // Nothing outside Program Files is ever looked at: the copy beside the app is never built.
+    let asked = fake.asked.borrow();
+    assert!(!asked.is_empty());
+    for path in asked.iter() {
+        assert!(
+            path.starts_with(r"C:\Program Files"),
+            "asked about {}",
+            path.display()
+        );
+        assert!(
+            !path.to_string_lossy().contains("AppData"),
+            "{}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn the_admin_paths_are_under_program_files() {
+    let pf = Path::new(r"C:\Program Files");
+    assert!(same_path(&admin_dir(pf), &sandbox()));
+    assert!(same_path(&admin_exe(pf), &exe()));
+}
+
+#[test]
+fn a_copy_that_is_not_a_regular_file_is_missing() {
+    for found in [Found::Missing, Found::Link, Found::Folder] {
+        let mut fake = Fake::ready();
+        fake.set(&exe(), found, locked_dacl(false));
+        assert_eq!(check(&fake), Err(Blocked::AdminCopyMissing), "{found:?}");
+    }
+}
+
+#[test]
+fn no_recorded_hash_is_missing() {
+    let mut fake = Fake::ready();
+    fake.recorded = None;
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyMissing));
+}
+
+#[test]
+fn another_hash_or_a_malformed_record_is_changed() {
+    let mut fake = Fake::ready();
+    fake.hash = HASH.replace('0', "f");
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyChanged));
+    let short = HASH.get(1..).unwrap();
+    for recorded in [&HASH.to_uppercase(), short, "not a hash"] {
+        let mut fake = Fake::ready();
+        fake.recorded = Some(recorded.to_owned());
+        assert_eq!(check(&fake), Err(Blocked::AdminCopyChanged), "{recorded}");
+    }
+}
+
+#[test]
+fn a_planted_change_right_at_any_level_is_unsafe() {
+    let levels = [
+        (PathBuf::from(r"C:\Program Files"), Found::Folder),
+        (PathBuf::from(r"C:\Program Files\Clauseo"), Found::Folder),
+        (sandbox(), Found::Folder),
+        (exe(), Found::File),
+    ];
+    let rights = [
+        WRITE_DATA,
+        APPEND_DATA,
+        DELETE_CHILD,
+        DELETE,
+        WRITE_DAC,
+        WRITE_OWNER,
+        GENERIC_WRITE,
+        GENERIC_ALL,
+        MAXIMUM_ALLOWED,
+    ];
+    for (path, found) in &levels {
+        for right in rights {
+            for sid in [USERS_SID, EVERYONE, LAWYER] {
+                let mut fake = Fake::ready();
+                let folder = *found == Found::Folder;
+                fake.set(path, *found, with_extra(folder, (0, 0, right, sid)));
+                assert_eq!(
+                    check(&fake),
+                    Err(Blocked::AdminCopyUnsafe),
+                    "{} {right:#x} {sid}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_untrusted_owner_a_null_dacl_or_a_link_in_the_chain_is_unsafe() {
+    let mut fake = Fake::ready();
+    fake.set(
+        &sandbox(),
+        Found::Folder,
+        descriptor(LAWYER, Some(&[]), true),
+    );
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "owner");
+    let mut fake = Fake::ready();
+    fake.set(
+        &sandbox(),
+        Found::Folder,
+        descriptor(ADMINISTRATORS, None, true),
+    );
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "NULL DACL");
+    let mut fake = Fake::ready();
+    fake.set(&sandbox(), Found::Link, locked_dacl(true));
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "junction");
+    let mut fake = Fake::ready();
+    fake.paths.remove(r"c:\program files\clauseo");
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "a level gone");
+}
+
+#[test]
+fn an_allow_whose_sid_cant_be_read_counts_as_another_accounts() {
+    // An object entry (type 5): its SID sits after a GUID, so it isn't read; write is refused.
+    let mut fake = Fake::ready();
+    fake.set(
+        &sandbox(),
+        Found::Folder,
+        with_extra(true, (5, 0, WRITE_DATA, USERS_SID)),
+    );
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe));
+}
+
+#[test]
+fn denies_inherit_only_entries_and_read_rights_are_safe() {
+    let safe: [Entry<'_>; 5] = [
+        (1, 0, FULL_ACCESS, USERS_SID),
+        (0, 0x1B, GENERIC_ALL, "S-1-3-0"),
+        (0, 0x0B, WRITE_DATA, USERS_SID),
+        (0, 0, READ_EXECUTE, EVERYONE),
+        (0, 0, FULL_ACCESS, TRUSTED_INSTALLER),
+    ];
+    for extra in safe {
+        let mut fake = Fake::ready();
+        fake.set(&sandbox(), Found::Folder, with_extra(true, extra));
+        assert!(passes(check(&fake)), "{extra:?}");
+    }
+    assert!(level_safe(&program_files_dacl()));
+}
+
+#[test]
+fn a_deny_doesnt_save_an_allow() {
+    let mut fake = Fake::ready();
+    let both = descriptor(
+        ADMINISTRATORS,
+        Some(&[(1, 0, WRITE_DATA, USERS_SID), (0, 0, WRITE_DATA, USERS_SID)]),
+        true,
+    );
+    fake.set(&sandbox(), Found::Folder, both);
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe));
+}
+
+#[test]
+fn an_unsafe_folder_is_named_before_a_changed_hash() {
+    let mut fake = Fake::ready();
+    fake.hash = HASH.replace('0', "f");
+    fake.set(
+        &sandbox(),
+        Found::Folder,
+        with_extra(true, (0, 0, WRITE_DATA, USERS_SID)),
+    );
+    assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe));
+}
+
+#[test]
+fn locked_is_exactly_the_three_entries_protected_and_owned_by_administrators() {
+    assert!(locked(&locked_dacl(true), true));
+    assert!(locked(&locked_dacl(false), false));
+    assert!(
+        !locked(&locked_dacl(true), false),
+        "folder entries on the file"
+    );
+    assert!(
+        !locked(&locked_dacl(false), true),
+        "file entries on the folder"
+    );
+    let open = descriptor(
+        ADMINISTRATORS,
+        Some(&[
+            (0, 3, FULL_ACCESS, SYSTEM),
+            (0, 3, FULL_ACCESS, ADMINISTRATORS),
+            (0, 3, READ_EXECUTE, USERS_SID),
+        ]),
+        false,
+    );
+    assert!(!locked(&open, true), "not protected");
+    assert!(
+        !locked(&with_extra(true, (0, 3, READ_EXECUTE, EVERYONE)), true),
+        "an extra entry"
+    );
+    let owned = descriptor(SYSTEM, Some(&[(0, 3, FULL_ACCESS, SYSTEM)]), true);
+    assert!(!locked(&owned, true), "owner SYSTEM");
+    let users_full = descriptor(
+        ADMINISTRATORS,
+        Some(&[
+            (0, 3, FULL_ACCESS, SYSTEM),
+            (0, 3, FULL_ACCESS, ADMINISTRATORS),
+            (0, 3, FULL_ACCESS, USERS_SID),
+        ]),
+        true,
+    );
+    assert!(!locked(&users_full, true), "Users full control");
+    assert!(
+        !locked(&descriptor(ADMINISTRATORS, None, true), true),
+        "NULL DACL"
+    );
+}
+
+#[test]
+fn paths_compare_as_windows_reads_them() {
+    let a = Path::new(r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe");
+    for same in [
+        r"c:\program files\clauseo\sandbox\CLAUSEO-SANDBOX-SETUP.EXE",
+        r"\\?\C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe",
+        "C:/Program Files/Clauseo/Sandbox/clauseo-sandbox-setup.exe",
+    ] {
+        assert!(same_path(a, Path::new(same)), "{same}");
+    }
+    for other in [
+        r"C:\Users\l\AppData\Local\Clauseo\clauseo-sandbox-setup.exe",
+        r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe.old",
+        r"D:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe",
+    ] {
+        assert!(!same_path(a, Path::new(other)), "{other}");
+    }
+}
+
+#[test]
+fn inside_is_strictly_below_part_by_part() {
+    let profile = Path::new(r"C:\Users\lawyer");
+    assert!(inside(
+        Path::new(r"C:\Users\lawyer\AppData\Local\Clauseo"),
+        profile
+    ));
+    assert!(inside(Path::new(r"c:\users\LAWYER\x"), profile));
+    for outside in [
+        r"C:\Users\lawyer",
+        r"C:\Users\lawyer2\AppData",
+        r"C:\Users\other\AppData",
+        r"C:\Users\lawyer\..\other",
+        r"D:\Users\lawyer\x",
+    ] {
+        assert!(!inside(Path::new(outside), profile), "{outside}");
+    }
+}
+
+#[test]
+fn hashes_are_64_lowercase_hex_digits() {
+    assert_eq!(hex(&[0x00, 0xab, 0x7f]), "00ab7f");
+    assert!(is_sha256_hex(HASH));
+    assert!(!is_sha256_hex(&HASH.to_uppercase()));
+    assert!(!is_sha256_hex(HASH.get(..63).unwrap()));
+}

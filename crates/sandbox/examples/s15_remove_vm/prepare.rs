@@ -262,7 +262,9 @@ pub(crate) fn prepare(out: &mut Out, exe: &Path) -> Result<(), String> {
         );
     }
     let data = data_dir();
-    let setup = UserSetup::new(data.clone(), exe.to_owned()).map_err(|e| e.to_string())?;
+    // `UserSetup` starts only the admin copy in %ProgramFiles%\Clauseo\Sandbox\, never `exe`:
+    // place it there first and run it once with `--adopt` from an elevated prompt.
+    let setup = UserSetup::new(data.clone());
     out.line("set-up: UserSetup::run() (the exe raises its prompt)");
     setup.run().map_err(|e| format!("set-up failed: {e}"))?;
     out.evidence("state after set-up", &format!("{:?}", setup.state()));

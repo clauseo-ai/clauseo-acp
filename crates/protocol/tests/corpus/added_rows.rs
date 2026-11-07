@@ -450,4 +450,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (370, 0x941c_ca6d_b49a_dcfc),
         (272, 0xe7d0_ab7d_c51d_b6ec),
     ),
+    (
+        "added/turn_failed-SandboxBlocked",
+        include_bytes!("added/turn_failed-SandboxBlocked.jsonl"),
+        include_bytes!("added/turn_failed-SandboxBlocked.msgpack"),
+        (388, 0x8dc3_9a7b_41a9_bcdb),
+        (290, 0x1e18_6bec_38d2_5a4f),
+    ),
 ];

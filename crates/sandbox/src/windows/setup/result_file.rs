@@ -163,7 +163,11 @@ pub fn outcome(
         Some(SetupExit::RemovedPartly) => {
             format!("Clauseo's set-up program removed only part of the protection (exit {code})")
         }
-        Some(SetupExit::Failed | SetupExit::Done) | None => {
+        // `--adopt`'s own refusals; the app never runs `--adopt`, so a code from it is a failure.
+        Some(
+            SetupExit::Failed | SetupExit::Done | SetupExit::NotElevated | SetupExit::NotAdminCopy,
+        )
+        | None => {
             format!("Clauseo's set-up program failed (exit {code})")
         }
     };

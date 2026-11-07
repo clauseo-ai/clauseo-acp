@@ -246,6 +246,9 @@ error_codes! {
     MatterFolderNotAMatter = "matter.folder_not_a_matter", retryable: false, meaning: "The \
         matter's folder is there, but its Clauseo file (`.clauseo/matter.json`) is missing, \
         unreadable or belongs to another matter: locate the matter's folder.";
+    SandboxBlocked = "sandbox.blocked", retryable: false, meaning: "A Windows setting or \
+        security tool blocks the sandbox (its set-up program is missing or was blocked, say), so \
+        no agent was started; whoever looks after this computer can fix it.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
