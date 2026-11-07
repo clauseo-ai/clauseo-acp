@@ -11,6 +11,7 @@
 //! C:\s15\bin\s15_wfp_vm.exe listen 46150  (as a second Windows user), then `foreign check`
 //! C:\s15\bin\s15_wfp_vm.exe foreign add    (elevated), `foreign check` (the desktop user),
 //!     then `foreign remove` (elevated)
+//! C:\s15\bin\s15_wfp_vm.exe ports  (the desktop user; `ports_rows.rs` has the IPv6 row)
 //! ```
 //!
 //! `status` runs a launch's check for each pool user the machine record lists. `rows` (`rows.rs`)
@@ -33,6 +34,9 @@ mod derived;
 #[cfg(windows)]
 #[path = "s15_wfp_vm/launch.rs"]
 mod launch;
+#[cfg(windows)]
+#[path = "s15_wfp_vm/ports_rows.rs"]
+mod ports_rows;
 #[cfg(windows)]
 #[path = "s15_wfp_vm/probe.rs"]
 mod probe;
@@ -74,6 +78,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "rows" => rows::rows(&exe, rest),
         "listen" => rows::listen(rest),
         "foreign" => rows::foreign(rest),
+        "ports" => {
+            ports_rows::ports();
+            Ok(())
+        }
         other => Err(format!("unknown command {other:?}").into()),
     }
 }
