@@ -10,7 +10,7 @@ use std::time::Duration;
 use super::Ctx;
 use crate::proxy::head::within;
 use crate::proxy::target::{Kind, Target};
-use crate::proxy::upstream::{Answer, Decided, Failure, Route, Scheme};
+use crate::proxy::upstream::{Answer, Decided, FailKind, Failure, Route, Scheme};
 use crate::proxy::{Exchange, Verdict};
 use crate::{Denial, DenialSink};
 
@@ -50,7 +50,7 @@ impl Remembered {
                 }
                 Chosen::Go(route)
             }
-            Answer::Failed(failure) => {
+            Answer::Failed(failure, _) => {
                 let last = self
                     .0
                     .borrow()
@@ -113,7 +113,7 @@ pub(super) async fn route(ctx: &Ctx, target: &Target, exchange: &mut Exchange) -
             .await
             .unwrap_or(Failure::MeantProxy);
         Decided {
-            answer: Answer::Failed(failure),
+            answer: Answer::Failed(failure, FailKind::Other),
             got: None,
             now: ctx.lookup.now(),
         }
@@ -158,7 +158,7 @@ mod tests {
 
     fn failed(now: Duration) -> Decided {
         Decided {
-            answer: Answer::Failed(Failure::MeantProxy),
+            answer: Answer::Failed(Failure::MeantProxy, FailKind::Other),
             got: None,
             now,
         }

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::super::Scheme::Https;
-use super::super::{Env, Lookup, Upstream, UpstreamAnswer};
+use super::super::{Env, FailKind, Lookup, Upstream, UpstreamAnswer};
 use super::{FakeClock, http};
 
 /// A lookup whose OS answers `answer(host)`, counting calls per host.
@@ -37,7 +37,7 @@ fn asked_for(asked: &Mutex<Vec<String>>, host: &str) -> usize {
 fn a_hosts_failure_leaves_another_hosts_cached_answer_alone() {
     let (lookup, asked, _clock) = per_host(|host| {
         if host == "bad.test" {
-            UpstreamAnswer::Failed
+            UpstreamAnswer::Failed(FailKind::Other)
         } else {
             http("os-proxy", 1).into()
         }
@@ -46,13 +46,13 @@ fn a_hosts_failure_leaves_another_hosts_cached_answer_alone() {
     assert_eq!(lookup.answer(Https, "good.test", 443), good);
     assert_eq!(
         lookup.answer(Https, "bad.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     assert_eq!(lookup.answer(Https, "good.test", 443), good);
     assert_eq!(asked_for(&asked, "good.test"), 1, "still the cached answer");
     assert_eq!(
         lookup.answer(Https, "bad.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     assert_eq!(
         asked_for(&asked, "bad.test"),
@@ -68,19 +68,19 @@ fn a_success_after_expiry_replaces_a_cached_failure() {
     let counted = Arc::clone(&calls);
     let (lookup, _asked, clock) = per_host(move |_host| {
         if counted.fetch_add(1, Ordering::SeqCst) == 0 {
-            UpstreamAnswer::Failed
+            UpstreamAnswer::Failed(FailKind::Other)
         } else {
             http("os-proxy", 1).into()
         }
     });
     assert_eq!(
         lookup.answer(Https, "example.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     clock.advance(Duration::from_secs(59));
     assert_eq!(
         lookup.answer(Https, "example.test", 443),
-        UpstreamAnswer::Failed
+        UpstreamAnswer::Failed(FailKind::Other)
     );
     clock.advance(Duration::from_secs(1));
     let proxied: UpstreamAnswer = http("os-proxy", 1).into();

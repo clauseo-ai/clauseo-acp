@@ -1,6 +1,7 @@
-//! What a lookup answers: the public [`UpstreamAnswer`], and inside the crate an [`Answer`] whose
-//! failure says whether the settings show the firm meant a proxy, for the egress proxy's choice
-//! over a failed lookup (decision record 0039, "A failed lookup").
+//! What a lookup answers: the public [`UpstreamAnswer`], whose failure has a [`FailKind`], and
+//! inside the crate an [`Answer`] whose failure also says whether the settings show the firm
+//! meant a proxy, for the egress proxy's choice over a failed lookup (decision record 0039, "A
+//! failed lookup").
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -19,8 +20,24 @@ use crate::{Error, SystemClock};
 pub enum UpstreamAnswer {
     /// The settings', the environment's or the OS's route, `DIRECT` included.
     Route(Route),
-    /// No answer from the OS.
-    Failed,
+    /// No answer from the OS, and why.
+    Failed(FailKind),
+}
+
+/// Why an OS lookup gave no answer. Later kinds are added at the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailKind {
+    /// The PAC file the settings name could not be fetched: `WinHTTP`'s 12167
+    /// (`ERROR_WINHTTP_UNABLE_TO_DOWNLOAD_SCRIPT`) for a PAC URL, its host not answering or
+    /// timing out, or a macOS PAC fetch that failed. Usually the laptop is off the firm's
+    /// network. Never from a static proxy setting.
+    PacUnreachable,
+    /// The PAC script was got and would not run: `WinHTTP`'s 12166
+    /// (`ERROR_WINHTTP_BAD_AUTO_PROXY_SCRIPT`), or a macOS PAC script that fails to evaluate.
+    BadScript,
+    /// Anything else: no free lookup slot, settings unreadable or too slow, and every other
+    /// error.
+    Other,
 }
 
 impl From<Route> for UpstreamAnswer {
@@ -34,7 +51,7 @@ impl UpstreamAnswer {
     pub fn route(self) -> Route {
         match self {
             UpstreamAnswer::Route(route) => route,
-            UpstreamAnswer::Failed => Route::Direct,
+            UpstreamAnswer::Failed(_) => Route::Direct,
         }
     }
 }
@@ -96,14 +113,14 @@ impl Configured {
     }
 }
 
-/// [`UpstreamAnswer`] with the failure's [`Failure`]: what the OS lookup gives and its cache
-/// keeps.
+/// [`UpstreamAnswer`] with the failure's [`Failure`] beside its kind: what the OS lookup gives
+/// and its cache keeps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Answer {
     /// The route.
     Route(Route),
-    /// No answer from the OS.
-    Failed(Failure),
+    /// No answer from the OS: whether a proxy was meant, and why.
+    Failed(Failure, FailKind),
 }
 
 impl From<Route> for Answer {
@@ -112,12 +129,12 @@ impl From<Route> for Answer {
     }
 }
 
-/// A public `Failed` carries no reason: nothing shows the firm meant a proxy.
+/// A public `Failed` carries no settings: nothing shows the firm meant a proxy.
 impl From<UpstreamAnswer> for Answer {
     fn from(answer: UpstreamAnswer) -> Self {
         match answer {
             UpstreamAnswer::Route(route) => Answer::Route(route),
-            UpstreamAnswer::Failed => Answer::Failed(Failure::Unmeant),
+            UpstreamAnswer::Failed(kind) => Answer::Failed(Failure::Unmeant, kind),
         }
     }
 }
@@ -126,7 +143,7 @@ impl From<Answer> for UpstreamAnswer {
     fn from(answer: Answer) -> Self {
         match answer {
             Answer::Route(route) => UpstreamAnswer::Route(route),
-            Answer::Failed(_) => UpstreamAnswer::Failed,
+            Answer::Failed(_, kind) => UpstreamAnswer::Failed(kind),
         }
     }
 }

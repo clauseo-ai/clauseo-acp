@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use clauseo_agents::{Clock as _, SystemClock};
 use clauseo_process::{AsyncIoTimer, Timer as _};
-use clauseo_sandbox::{Route, UpstreamAnswer};
+use clauseo_sandbox::{FailKind, Route, UpstreamAnswer};
 use url::Url;
 
 use super::super::super::{
@@ -227,10 +227,18 @@ fn an_entry_env_or_ca_changed_with_the_same_hosts_keeps_the_proxy_over_a_failure
     assert_eq!(proxy_of(&hook).as_deref(), Some(OS_PROXY), "a CA file");
 }
 
-/// The sandbox's failed lookup (failed, timed out, no slot) is no answer, apart from `DIRECT`.
+/// The sandbox's failed lookup (failed, timed out, no slot) is no answer, apart from `DIRECT`,
+/// whatever its kind.
 #[test]
 fn the_sandboxs_failure_is_no_answer_and_its_direct_is_direct() {
-    assert_eq!(os_answer(Ok(UpstreamAnswer::Failed)), OsAnswer::Unknown);
+    for kind in [
+        FailKind::PacUnreachable,
+        FailKind::BadScript,
+        FailKind::Other,
+    ] {
+        let failed = os_answer(Ok(UpstreamAnswer::Failed(kind)));
+        assert_eq!(failed, OsAnswer::Unknown, "{kind:?}");
+    }
     let error = clauseo_sandbox::Error::ProxyConfig("bad".to_owned());
     assert_eq!(os_answer(Err(error)), OsAnswer::Unknown);
     let direct = os_answer(Ok(UpstreamAnswer::Route(Route::Direct)));
