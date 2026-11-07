@@ -64,10 +64,10 @@ fn check_depth(folder: &Path) -> Result<(), Error> {
 }
 
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
-/// `refused` (each canonicalised once per process, or taken as written when that fails or takes
-/// longer than [`listed::RESOLVE_WAIT`]: [`listed::resolved_entries`]). Paths are compared
-/// by components ([`spellings`]): composed (NFC) everywhere, and ASCII- and Unicode-case-
-/// insensitively on macOS and Windows.
+/// `refused` (each canonicalised once per process: taken as written when that fails or takes
+/// longer than [`listed::RESOLVE_WAIT`], until a late success replaces it, see
+/// [`listed::resolved_entries`]). Paths are compared by components ([`spellings`]): composed (NFC)
+/// everywhere, and ASCII- and Unicode-case-insensitively on macOS and Windows.
 /// On macOS a path under `/System/Volumes/Data` is also compared without that prefix. On Windows
 /// a path too deep to start programs in is refused too ([`is_too_deep`]).
 pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
