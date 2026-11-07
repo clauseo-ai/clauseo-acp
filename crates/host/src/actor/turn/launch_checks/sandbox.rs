@@ -25,7 +25,8 @@
 //! removal, and what it moved gives one more notice.
 //!
 //! The policy is B2's minimum: the matter folder read-write, the session's `run/<session>/tmp`
-//! as `TMPDIR`, the agent's install folder read and run. R17 PR-C adds the per-agent state
+//! as `TMPDIR`, the agent's install folder (its program's, links followed) read and run. R17
+//! PR-C adds the per-agent state
 //! folders (until then the state folder is the session's `work` folder); PR-D the CA files,
 //! skills, the browser sidecar and the login files.
 
@@ -83,10 +84,10 @@ impl fmt::Debug for SandboxSession {
 
 /// The policy of one agent launch: `matter` (the folder the thread's matter row stores, as the
 /// agent runs in it, `agent::session_folder`) read-write, the session's `run/<session>/tmp`
-/// as its `TMPDIR` (never the run folder itself), and the agent's `install` folder read and
-/// run. The state folder is the session's `work` folder until R17 PR-C's per-agent state
-/// folders. R17 PR-C and PR-D extend this function. File system calls (`build` walks the
-/// matter): off the actor.
+/// as its `TMPDIR` (never the run folder itself), and the agent's `install` folder
+/// ([`install_folder`]) read and run. The state folder is the session's `work` folder until
+/// R17 PR-C's per-agent state folders. R17 PR-C and PR-D extend this function. File system
+/// calls (`build` walks the matter): off the actor.
 pub(crate) fn launch_policy(
     matter: &Path,
     run: &RunFolders,
@@ -118,8 +119,8 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let install = match install_folder(actor, thread) {
-        Ok(install) => install,
+    let command = match command(actor, thread) {
+        Ok(command) => command,
         Err(error) => {
             discard(actor, thread, prepared.run);
             agents::fail_all(actor, thread, waiting, &error);
@@ -130,13 +131,13 @@ pub(super) fn start(
         discard(actor, thread, prepared.run);
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
     let key = prepared.run.key;
+    state.preparing = Some(Box::new(Preparing { id, key, waiting }));
     let running = running(actor, key);
     let clock = Arc::clone(&actor.clock);
     let denials: Arc<dyn DenialSink> = Arc::new(LoggedDenials { matter: key.matter });
     let ask = Ask {
-        install,
+        command,
         running,
         opts,
         denials,
@@ -217,31 +218,40 @@ fn moved_names(prepared: &Prepared) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The keys of `key`'s matter's other sessions whose agents still run: every other thread of
-/// the matter holding a run folder (from its agent's launch until it ended), sorted.
-fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
+/// The keys of `key`'s matter's other sessions that may run an agent: every other thread of
+/// the matter with a launch in its checks or at the seam (`preparing`), or holding a run folder
+/// (from its agent's spawn until the session is discarded), sorted. A launch still being
+/// prepared counts, so a concurrent launch never takes it for a crashed one.
+pub(super) fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
     let mut running: Vec<SessionKey> = actor
         .threads
         .values()
-        .filter_map(|entry| entry.turn.run.as_ref())
-        .map(|run| run.key)
+        .flat_map(|entry| {
+            let state = &entry.turn;
+            let preparing = state.preparing.as_ref().map(|preparing| preparing.key);
+            preparing
+                .into_iter()
+                .chain(state.run.as_ref().map(|run| run.key))
+        })
         .filter(|other| other.matter == key.matter && other.thread != key.thread)
         .collect();
     running.sort_unstable();
+    running.dedup();
     running
 }
 
-/// What the seam is asked with besides the launch: the agent's install folder, the matter's
-/// other running sessions, the spawn options and the denial sink.
+/// What the seam is asked with besides the launch: the agent's program (its install folder is
+/// found from it off the actor), the matter's other running sessions, the spawn options and
+/// the denial sink.
 struct Ask {
-    install: PathBuf,
+    command: PathBuf,
     running: Vec<SessionKey>,
     opts: SpawnOptions,
     denials: Arc<dyn DenialSink>,
 }
 
-/// The agent's install folder: the folder of its program (`command`, an absolute path).
-fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
+/// The agent's program (`command`), which must be an absolute path with a folder.
+fn command(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let row = &actor.check_thread(thread)?.row;
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
@@ -249,10 +259,11 @@ fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    Path::new(&settings.command)
+    let command = Path::new(&settings.command);
+    command
         .parent()
         .filter(|folder| !folder.as_os_str().is_empty())
-        .map(Path::to_path_buf)
+        .map(|_| command.to_path_buf())
         .ok_or_else(|| {
             Error::refused(
                 ErrorCode::AgentLaunchFailed,
@@ -261,19 +272,43 @@ fn install_folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
         })
 }
 
-/// On the seam's thread: the policy, then the seam's launcher. On a failure the run folder is
-/// taken back here, before the answer goes out.
+/// The agent's install folder: the folder of its program with every link followed, so a
+/// `/opt/homebrew/bin/claude` link grants the real install and not all of `bin`. File system
+/// calls: off the actor.
+pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
+    dunce::canonicalize(command)
+        .ok()
+        .and_then(|real| real.parent().map(Path::to_path_buf))
+        .ok_or_else(|| {
+            Error::refused(
+                ErrorCode::AgentLaunchFailed,
+                "The sandbox couldn't start the agent: its program wasn't found.",
+            )
+        })
+}
+
+/// On the seam's thread: the install folder, the policy, then the seam's launcher. On a
+/// failure the run folder is taken back here, before the answer goes out.
 fn make(
     launchers: &dyn SandboxLaunchers,
     mut held: UndoOnDrop<Box<Prepared>, fn(Box<Prepared>)>,
     ask: Ask,
 ) -> Result<Box<Prepared>, Error> {
+    let install = match install_folder(&ask.command) {
+        Ok(install) => install,
+        Err(error) => {
+            tracing::warn!("the sandbox found no program for the agent's launch");
+            // The run folder goes here, on the seam's thread.
+            drop(held);
+            return Err(error);
+        }
+    };
     let Some(prepared) = held.get_mut() else {
         return Err(unanswered());
     };
     let key = prepared.run.key;
     let matter = key.matter;
-    let made = launch_policy(&prepared.stored, &prepared.run, &ask.install).and_then(|policy| {
+    let made = launch_policy(&prepared.stored, &prepared.run, &install).and_then(|policy| {
         let launch = launchers.launcher(
             policy.clone(),
             &matter,
@@ -399,18 +434,19 @@ pub(crate) fn on_sandboxed(
 }
 
 /// The session `key`'s agent has exited: the seam's `after_session` with the launch's policy,
-/// once, off the actor, waited on as a run folder's removal is (it counts as one for shutdown),
-/// and the launch's launcher dropped there after it. What it moved comes back matter-relative
-/// for [`on_session_ended`].
+/// once, off the actor, bounded, and the launch's launcher dropped there after it; then
+/// `removal`, the run folder's, so the seam sees the session's folders as the agent left them
+/// (the removal is counted for shutdown by the caller, and this ends it). What it moved comes
+/// back matter-relative for [`on_session_ended`].
 pub(super) fn after_session(
     actor: &mut Actor,
     thread: ThreadId,
     key: SessionKey,
     session: SandboxSession,
+    removal: impl Future<Output = ()> + 'static,
 ) {
     let clock = Arc::clone(&actor.clock);
     let job = Job::short("the sandbox's after-session", Some(key.matter));
-    actor.work.run_removals += 1;
     actor.spawn_post(async move {
         let done = off_actor(clock, job, move || {
             let SandboxSession {
@@ -429,6 +465,7 @@ pub(super) fn after_session(
             tracing::warn!(%thread, %error, "the sandbox's after-session call did not answer");
             Vec::new()
         });
+        removal.await;
         Input::Turn(TurnInput::SessionEnded { thread, moved })
     });
 }

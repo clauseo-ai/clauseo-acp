@@ -65,6 +65,9 @@ use crate::log_file::Cause;
 pub(super) struct Preparing {
     /// Its id: an answer for an earlier launch's checks is dropped.
     id: u64,
+    /// The session it launches: one of its matter's running sessions for the sandbox's
+    /// launchers from the checks' start (`sandbox::running`).
+    pub(super) key: SessionKey,
     /// The work that waits for the agent's session.
     pub(super) waiting: Vec<Waiting>,
 }
@@ -270,7 +273,11 @@ pub(super) fn prepare(
     let Some(state) = state(actor, thread) else {
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
+    state.preparing = Some(Box::new(Preparing {
+        id,
+        key: run.key,
+        waiting,
+    }));
     let check = FolderCheck {
         matter: Some(run.key.matter),
         source: actor.folder_check,
@@ -514,37 +521,49 @@ fn launch_prepared(
 /// answers only once the folder and the claims are gone (or the removal's wait has passed).
 fn discard(actor: &mut Actor, thread: ThreadId, mut run: RunFolders) {
     actor.wiring.browser_slots.release(run.key);
-    if let Some(session) = run.sandbox.take() {
-        sandbox::after_session(actor, thread, run.key, session);
-    }
-    let clock = std::sync::Arc::clone(&actor.clock);
-    let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
-    actor.work.run_removals += 1;
+    let clock = Arc::clone(&actor.clock);
     let hook = actor.wiring.run_removal_hook.clone();
-    actor.spawn_post(async move {
-        let removed = codex::prepare::off_actor(clock, job, move || {
-            // The token is revoked before its file goes with the folder.
-            relay::end(&run);
-            if let Some(hook) = &hook {
-                hook(&run.root);
-            }
-            run.remove();
-            // The browser claims and the case-law relay go here, off the actor and after the
-            // agent's tree was killed: the socket folder is removed, the relay stops listening
-            // and the ports are free for the next session.
-            drop(run);
-            Ok(())
-        })
-        .await;
-        if let Err(error) = removed {
-            tracing::warn!(
-                %thread,
-                error = %Cause(&error),
-                "a session's run folder was not removed"
-            );
+    actor.work.run_removals += 1;
+    let session = run.sandbox.take();
+    let key = run.key;
+    let removal = removal(clock, thread, run, hook);
+    match session {
+        // The sandbox's after-session first, then the removal; it posts their end.
+        Some(session) => sandbox::after_session(actor, thread, key, session, removal),
+        None => actor.spawn_post(async move {
+            removal.await;
+            Input::Turn(TurnInput::RunRemoved)
+        }),
+    }
+}
+
+/// The removal of `run` off the actor, bounded: its relay token revoked, then the folder, then
+/// its claims.
+async fn removal(
+    clock: Arc<dyn crate::clock::Clock>,
+    thread: ThreadId,
+    run: RunFolders,
+    hook: Option<crate::config::RunRemovalHook>,
+) {
+    let job = codex::prepare::Job::short("run folder removal", Some(run.key.matter));
+    let removed = codex::prepare::off_actor(clock, job, move || {
+        // The token is revoked before its file goes with the folder.
+        relay::end(&run);
+        if let Some(hook) = &hook {
+            hook(&run.root);
         }
-        Input::Turn(TurnInput::RunRemoved)
-    });
+        run.remove();
+        // The browser claims and the case-law relay go here, off the actor and after the
+        // agent's tree was killed: the socket folder is removed, the relay stops listening
+        // and the ports are free for the next session.
+        drop(run);
+        Ok(())
+    })
+    .await;
+    if let Err(error) = removed {
+        let error = Cause(&error);
+        tracing::warn!(%thread, %error, "a session's run folder was not removed");
+    }
 }
 
 /// A run folder's removal ended: shutdown no longer waits for it.

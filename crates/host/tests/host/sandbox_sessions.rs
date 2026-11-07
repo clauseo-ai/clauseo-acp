@@ -12,7 +12,7 @@ use crate::observe::Events;
 use crate::sandbox_rig::{
     Answer, Fake, failed, notices, run_entries, start, until_no_run_folder, until_notices,
 };
-use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
+use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 
 /// An agent whose first prompt ends the turn and whose second makes it exit.
 const EXITS_SECOND: &str = "exits-second";
@@ -76,6 +76,45 @@ fn a_launch_is_told_the_matters_other_running_sessions_and_not_ended_ones() {
         calls[3].running,
         [calls[2].session],
         "only the second still runs"
+    );
+    host.shutdown();
+}
+
+/// A launch still at the seam is running for its matter: a concurrent launch is told it, so
+/// Windows' `before_launch` never takes it for a crashed session.
+#[test]
+fn a_launch_still_at_the_seam_counts_as_running_for_a_concurrent_one() {
+    let dir = dir("sandbox_sessions_concurrent");
+    let (fake, _, release, asked) = Fake::held(&dir, Answer::Launch(Vec::new()));
+    let (host, _) = start(&dir, Some(Arc::clone(&fake)));
+    let (matter, first, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let second = host.create_thread(matter, FAKE);
+    let mut first_events = host.events(StreamId::Thread(first));
+    let mut second_events = host.events(StreamId::Thread(second));
+    let (first_turn, _) = host.prompt(first, "Read it.");
+    asked.recv().unwrap();
+    let (second_turn, _) = host.prompt(second, "Read it too.");
+    wait("the second launch at the seam", async {
+        while fake.calls().len() < 2 {
+            async_io::Timer::after(std::time::Duration::from_millis(5)).await;
+        }
+    });
+    let calls = fake.calls();
+    assert_eq!(calls[0].session.thread, first);
+    assert_eq!(calls[1].session.thread, second);
+    assert_eq!(
+        calls[1].running,
+        [calls[0].session],
+        "the held launch is running"
+    );
+    drop(release);
+    assert_eq!(
+        first_events.until_turn_ended(first_turn).stop,
+        StopReason::EndTurn
+    );
+    assert_eq!(
+        second_events.until_turn_ended(second_turn).stop,
+        StopReason::EndTurn
     );
     host.shutdown();
 }

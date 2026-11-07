@@ -40,7 +40,7 @@ mod session;
 pub use session::TestProxy;
 pub use session::{EgressProxy, SessionKey};
 mod wiring;
-pub(crate) use wiring::{LaunchWiring, PackReadHook};
+pub(crate) use wiring::{LaunchWiring, PackReadHook, RunRemovalHook};
 
 pub use crate::actor::turn::PackRequest;
 

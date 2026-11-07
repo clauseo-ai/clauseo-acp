@@ -89,6 +89,40 @@ fn with_launchers_a_launch_asks_once_with_its_policy_and_spawns_through_the_seam
     assert_eq!(after[0].policy, *policy);
 }
 
+/// A linked command (`/opt/homebrew/bin/claude`) grants its real install folder, never the
+/// link's folder.
+#[cfg(unix)]
+#[test]
+fn a_linked_command_grants_the_real_install_folder_not_the_links() {
+    let dir = dir("sandbox_launch_link", "prompt-stream");
+    let real = clauseo_fake_agent::bin_path().unwrap();
+    let links = dir.home().join("bin");
+    crate::write::create_dir_all(&links);
+    let link = links.join("fake_agent");
+    crate::write::symlink(&real, &link);
+    let scenario = crate::support::Scenario::Bundled("prompt-stream").arg();
+    let settings = serde_json::json!({ "agents": { FAKE: {
+        "command": link.display().to_string(),
+        "args": ["--scenario", scenario],
+    }}});
+    crate::write::write(
+        &dir.data().join("settings.json"),
+        settings.to_string().as_bytes(),
+    );
+    let (fake, seam_launched) = Fake::new(&dir, Answer::Launch(Vec::new()));
+    let (host, _) = start(&dir, Some(Arc::clone(&fake)));
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
+    let calls = fake.calls();
+    let runtime = calls[0].policy.runtime();
+    assert_eq!(runtime, [canonical(real.parent().unwrap())]);
+    assert!(!runtime.contains(&canonical(&links)), "{runtime:?}");
+    assert_eq!(seam_launched.load(Ordering::SeqCst), 1);
+    host.shutdown();
+}
+
 #[test]
 fn without_launchers_nothing_is_asked_and_the_host_launcher_spawns() {
     let dir = dir("sandbox_launch_none", "prompt-stream");

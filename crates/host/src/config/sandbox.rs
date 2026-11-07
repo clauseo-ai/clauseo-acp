@@ -24,9 +24,10 @@ pub type Detect = Arc<dyn Fn() -> Detection + Send + Sync>;
 pub trait SandboxLaunchers: Send + Sync {
     /// The launcher for the agent launch `session` of `matter`, its policy fixed (a launcher's
     /// policy never widens, `clauseo_process::Launcher`), starting the agent with `opts`; its
-    /// denials go to `denials`. `running` is the matter's other sessions whose agents were still
-    /// running when the call was made (sorted; taken on the host's actor), so Windows'
-    /// `before_launch` can drop crashed sessions from the open set and add this one. The host
+    /// denials go to `denials`. `running` is the matter's other sessions that may run an agent
+    /// when the call was made: launched and not yet ended, or with their own launch still in its
+    /// checks or at this seam (sorted; taken on the host's actor), so Windows' `before_launch`
+    /// can drop crashed sessions from the open set and add this one. The host
     /// calls it on a thread of its own, bounded, after the launch's checks, and spawns the agent
     /// through the returned launcher once, keeping it until the agent's process tree has exited.
     /// An error fails the launch with the error's `code()`, its message naming the kind of
@@ -57,7 +58,7 @@ pub trait SandboxLaunchers: Send + Sync {
 
 /// The session [`SandboxLaunchers::after_session`] closes: its matter, its key and the policy
 /// its launch was given.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct SessionEnd {
     /// The session's matter.
@@ -66,6 +67,16 @@ pub struct SessionEnd {
     pub session: SessionKey,
     /// The policy the session's launcher was made with.
     pub policy: Policy,
+}
+
+impl fmt::Debug for SessionEnd {
+    /// The matter and the session only: the policy holds the computer's paths.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionEnd")
+            .field("matter", &self.matter)
+            .field("session", &self.session)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SessionEnd {
