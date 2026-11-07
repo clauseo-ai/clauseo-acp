@@ -155,7 +155,9 @@ fn the_agent_token_holds_what_the_spec_says_when_read_back() {
 
 /// The third harness run's class: a thread already shut to this process's own user (as the outer
 /// runner shuts the inner's first thread) must not fail the shut of the rest, and the current
-/// thread is shut through its pseudo-handle whatever its DACL.
+/// thread is shut through its pseudo-handle whatever its DACL. CI's token is an elevated
+/// admin's with `SeDebugPrivilege` enabled, which opens any thread whatever its DACL; the inner
+/// runner, as the pool user, holds no such privilege, so the test drops it first.
 #[test]
 fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
     use std::sync::mpsc;
@@ -168,13 +170,15 @@ fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
 
     use crate::windows::acl::object::Handle;
 
+    crate::windows::test_dacl::remove_privileges(&[windows::core::w!("SeDebugPrivilege")]);
     let shut = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
     let (id_tx, id_rx) = mpsc::channel();
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let worker = std::thread::spawn(move || {
         // SAFETY: no arguments.
         id_tx.send(unsafe { GetCurrentThreadId() }).unwrap();
-        stop_rx.recv().unwrap();
+        // A failed assertion drops the sender; the worker then ends quietly.
+        stop_rx.recv().unwrap_or_default();
     });
     let id = id_rx.recv().unwrap();
     // SAFETY: a live thread of this process, opened with WRITE_DAC; closed by `Handle`.
@@ -195,16 +199,19 @@ fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
 /// The inner runner's own token sequence, in this process, in its order: the token opened once,
 /// shut first to `SYSTEM`, `shut_self` once the launch is read, the agent's restricted token made
 /// from the handle held, then `shut_later`. Harness run 42358986179 failed every launch at `make`
-/// (5) when the default DACL was shut before it; each step here must pass.
+/// (5) when the default DACL was shut before it; each step here must pass. This process's user
+/// stands in for the pool user, and a made-up account for the desktop user, as in production
+/// they differ (`TokenSpecError::PoolIsDesktopUser`).
 #[test]
 fn the_inner_runners_token_sequence_passes_in_order() {
     let token = os::own_token().unwrap();
     let me = os::user(&token).unwrap();
     let logon = os::logon_sid(&token).unwrap();
+    let desktop = sid("S-1-5-21-1-2-3-1001");
     os::shut_token_first(&token).unwrap();
-    os::shut_self(&token, &me, &logon).unwrap();
-    let spec = TokenSpec::for_pool(&me, &logon, &me, None).unwrap();
+    os::shut_self(&token, &desktop, &logon).unwrap();
+    let spec = TokenSpec::for_pool(&me, &logon, &desktop, None).unwrap();
     let agent = os::make(&token, &spec).unwrap();
     assert_eq!(os::user(&agent).unwrap(), me);
-    os::shut_later(&token, &me).unwrap();
+    os::shut_later(&token, &desktop).unwrap();
 }

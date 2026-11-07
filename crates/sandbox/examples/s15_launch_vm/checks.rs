@@ -2,7 +2,7 @@
 //! failed; every wait ends by the row's limit.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clauseo_sandbox::windows::ca_bundle;
@@ -390,11 +390,19 @@ pub(crate) fn ca_bundle(ctx: &Ctx<'_>) -> Result<String, String> {
     let parse = |sid: &str| Sid::parse(sid).map_err(|e| e.to_string());
     let desktop = parse(&win::own_token().map_err(|e| e.to_string())?.user)?;
     let folder = m.data_dir.join(ca_bundle::CA_DIR);
-    let file = ca_bundle::path(&m.data_dir);
-    let (had_folder, had_file) = (folder.exists(), file.exists());
+    let had_folder = folder.exists();
+    // The bundle's name comes from its content, so it is known only once written: the files
+    // there before tell whether this row made it.
+    let before: Vec<PathBuf> = std::fs::read_dir(&folder)
+        .map(|dir| {
+            dir.filter_map(|entry| entry.ok().map(|e| e.path()))
+                .collect()
+        })
+        .unwrap_or_default();
     let bundle = ca_bundle::ensure_with(&m.data_dir, &desktop, &[parse(&a.sid)?, parse(&b.sid)?])
         .map_err(|e| format!("ca_bundle::ensure_with: {e}"))?;
-    record_made(m, &folder, &file, had_folder, had_file)?;
+    let had_file = before.contains(&bundle.path);
+    record_made(m, &folder, &bundle.path, had_folder, had_file)?;
     ctx.note(&format!(
         "bundle {}: {} roots, export_ms {}",
         bundle.path.display(),
