@@ -27,7 +27,7 @@ use windows::Win32::Storage::FileSystem::{
     FindFirstFileW, FindNextFileW, OPEN_EXISTING, WIN32_FIND_DATAW,
 };
 use windows::Win32::System::JobObjects::{
-    JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
+    JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
     JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
     JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
     JOBOBJECT_BASIC_UI_RESTRICTIONS, JobObjectBasicUIRestrictions, QueryInformationJobObject,
@@ -39,14 +39,15 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-/// The UI limits the runner's job must carry (S15 PR5): every limit but `DESKTOP`.
+/// The UI limits the runner's job must carry (S15 PR5): every one, `DESKTOP` included.
 pub(crate) const UI_LIMITS: u32 = JOB_OBJECT_UILIMIT_READCLIPBOARD.0
     | JOB_OBJECT_UILIMIT_WRITECLIPBOARD.0
     | JOB_OBJECT_UILIMIT_GLOBALATOMS.0
     | JOB_OBJECT_UILIMIT_HANDLES.0
     | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS.0
     | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS.0
-    | JOB_OBJECT_UILIMIT_EXITWINDOWS.0;
+    | JOB_OBJECT_UILIMIT_EXITWINDOWS.0
+    | JOB_OBJECT_UILIMIT_DESKTOP.0;
 
 /// The UI limits of the job this process is in (`JobObjectBasicUIRestrictions` through
 /// `QueryInformationJobObject(None, …)`).
