@@ -66,7 +66,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let exe = std::env::current_exe()?;
     match command.as_str() {
         // The agent's side and its runner give the probe's bits as their exit code.
-        "probe" => std::process::exit(as_exit(probe::run(&exe, rest))),
+        "probe" => {
+            let code = probe::run(&exe, rest);
+            if let Some(why) = derived::last_error() {
+                drop(writeln!(
+                    io::stderr(),
+                    "probe: a derived child didn't start: {why}"
+                ));
+            }
+            std::process::exit(as_exit(code))
+        }
         "runner" => {
             let code = launch::runner(&exe, rest).unwrap_or_else(|why| {
                 drop(writeln!(io::stderr(), "runner: {why}"));
