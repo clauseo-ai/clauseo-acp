@@ -28,9 +28,12 @@ use crate::log_file::Cause;
 pub(super) fn discard(
     actor: &mut Actor,
     thread: ThreadId,
-    run: RunFolders,
+    mut run: RunFolders,
     tree: Option<TreeWatch>,
 ) {
+    if let Some(session) = run.sandbox.take() {
+        super::sandbox::after_session(actor, thread, run.key, session);
+    }
     let key = run.key;
     let clock = std::sync::Arc::clone(&actor.clock);
     let cap = actor.wiring.tree_wait;

@@ -34,6 +34,10 @@
 //! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
 //! is found and closed as the run drops.
 //!
+//! With the sandbox's launchers (`Sandbox::with_launchers`, R17 PR-B2), a launch whose checks
+//! passed on the actor asks the seam for its launcher off the actor first ([`sandbox`]), and
+//! the agent spawns through it; the seam's `after_session` follows the agent's exit.
+//!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
 //! swept through a link at `<data>/run` or `<data>/agent-state`.
@@ -88,6 +92,8 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
+    /// What the sandbox's launchers gave this launch ([`sandbox`]); `None` without them.
+    pub(super) sandbox: Option<sandbox::Sandboxed>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -142,6 +148,10 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// The spawned agent's jail ([`sandbox::SandboxSession`]), set on the thread's run folder
+    /// only once the agent spawned through the sandbox's launcher: its removal calls the seam's
+    /// `after_session`. `None` without the seam and on every other clone.
+    pub(crate) sandbox: Option<sandbox::SandboxSession>,
     /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
     /// session can get the browser and its Chrome and claims were found; none otherwise, or
     /// when it did not open (`NoProxy`). It closes when the last clone drops, normally in
@@ -175,6 +185,7 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
+            sandbox: None,
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
@@ -353,6 +364,7 @@ pub(super) fn prepare(
                     run,
                     skills_written,
                     packs_skipped,
+                    sandbox: None,
                 })
             },
             undo_late,
@@ -512,6 +524,24 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
+    // With the sandbox's launchers, the launch's launcher comes from them first, off the actor.
+    if let Some(seam) = actor.protection.launchers() {
+        sandbox::start(actor, thread, id, waiting, prepared, seam);
+        return;
+    }
+    launch_prepared(actor, thread, waiting, prepared, None);
+}
+
+/// The launch on the actor with what its checks (and the sandbox's launcher) found; when no agent
+/// started, its run folder is removed off the actor. A spawned agent's jail (`sandbox`) rides on
+/// the thread's run folder from then on.
+fn launch_prepared(
+    actor: &mut Actor,
+    thread: ThreadId,
+    waiting: Vec<Waiting>,
+    mut prepared: Box<Prepared>,
+    sandbox: Option<sandbox::SandboxSession>,
+) {
     let run = prepared.run.clone();
     let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
     if let Some(state) = state(actor, thread) {
@@ -521,6 +551,9 @@ pub(super) fn on_prepared(
     let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
     if launched {
         packs::hold_notice(actor, thread, packs_skipped);
+        if let Some(run) = state(actor, thread).and_then(|state| state.run.as_mut()) {
+            run.sandbox = sandbox;
+        }
     } else {
         if let Some(state) = state(actor, thread) {
             state.run = None;
@@ -548,6 +581,8 @@ pub(crate) use straggler::HeldRuns;
 mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
+mod sandbox;
+pub(super) use sandbox::on_sandboxed;
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

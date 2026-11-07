@@ -385,6 +385,7 @@ fn a_late_prep_frees_its_claims() {
         run,
         skills_written: None,
         packs_skipped: Vec::new(),
+        sandbox: None,
     });
     assert!(alive.upgrade().is_none(), "its claims were freed");
     assert_eq!(held.count(), 0, "nothing is held");

@@ -23,6 +23,12 @@ pub(crate) enum TurnInput {
         id: u64,
         result: Result<Box<super::launch_checks::Prepared>, crate::error::Error>,
     },
+    /// A launch's sandbox launcher `id` (`launch_checks/sandbox.rs`, R17 PR-B2) answered.
+    Sandboxed {
+        thread: ThreadId,
+        id: u64,
+        result: Result<Box<super::launch_checks::Prepared>, crate::error::Error>,
+    },
     /// A whole-log read of `thread`'s stream for `why`.
     Log {
         thread: ThreadId,

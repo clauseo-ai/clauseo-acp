@@ -62,6 +62,19 @@ impl ProtectionHost {
         }
     }
 
+    /// The launchers seam (R17 PR-B2) and the options its launches start with, when set: every
+    /// agent launch goes through it. `None`: the host's own launcher, as before.
+    pub(crate) fn launchers(
+        &self,
+    ) -> Option<(
+        std::sync::Arc<dyn crate::config::SandboxLaunchers>,
+        clauseo_process::SpawnOptions,
+    )> {
+        let sandbox = self.sandbox.as_ref()?;
+        let launchers = sandbox.launchers.clone()?;
+        Some((launchers, sandbox.launch_opts.clone()))
+    }
+
     /// The computer's protection now.
     pub(crate) fn computer(&self) -> &Protection {
         &self.observed.computer
