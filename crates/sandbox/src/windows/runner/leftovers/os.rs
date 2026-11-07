@@ -85,7 +85,7 @@ pub(in crate::windows::runner) enum Item {
     },
 }
 
-/// The calls, as this token's user. Fields drop in order, COM last.
+/// The calls, as this token's user. Fields drop in order: COM, then Task Scheduler's module, last.
 pub(in crate::windows::runner) struct OsLeftovers<'a> {
     token: &'a Handle,
     me: Sid,
@@ -97,6 +97,9 @@ pub(in crate::windows::runner) struct OsLeftovers<'a> {
     startup: Option<Object>,
     /// COM for this thread, once a kind reached over it is listed.
     com: Option<com::Com>,
+    /// Task Scheduler's module, once tasks are listed. Declared after `com`, so it is freed
+    /// after COM is uninitialised.
+    library: Option<com::Library>,
 }
 
 impl<'a> OsLeftovers<'a> {
@@ -110,6 +113,7 @@ impl<'a> OsLeftovers<'a> {
             classes: CLASSES.to_owned(),
             startup: None,
             com: None,
+            library: None,
         }
     }
 
@@ -179,7 +183,16 @@ impl Leftovers for OsLeftovers<'_> {
         }
         match kind {
             Kind::Classes => self.classes(),
-            Kind::Tasks => com::tasks(&self.me, &self.account),
+            Kind::Tasks => {
+                if self.library.is_none() {
+                    self.library = Some(com::Library::load()?);
+                }
+                let library = self
+                    .library
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("taskschd.dll isn't loaded"))?;
+                com::tasks(&self.me, &self.account, library)
+            }
             Kind::Bits => com::bits_jobs(),
             Kind::RunKeys => run_values(),
             Kind::Startup => self.startup(),

@@ -18,6 +18,10 @@ struct Fake {
     /// Items whose delete fails with `NOT_LOGGED_ON`, as a pool user's BITS job's `Cancel`.
     not_logged_on: BTreeSet<&'static str>,
     deleted: Vec<&'static str>,
+    /// Class keys that are back by the second class list: one registered again meanwhile.
+    back: Vec<&'static str>,
+    /// How many times the classes were listed.
+    class_lists: usize,
 }
 
 fn key(kind: Kind) -> &'static str {
@@ -36,7 +40,18 @@ impl Leftovers for Fake {
         if self.deny_list.contains(key(kind)) {
             return Err(io::Error::from_raw_os_error(1058));
         }
-        Ok(self.items.get(key(kind)).cloned().unwrap_or_default())
+        if kind == Kind::Classes {
+            self.class_lists += 1;
+            if self.class_lists > 1 && !self.back.is_empty() {
+                return Ok(self.back.clone());
+            }
+        }
+        // What was deleted is gone.
+        let items = self.items.get(key(kind)).cloned().unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .filter(|item| !self.deleted.contains(item))
+            .collect())
     }
     fn delete(&mut self, _: Kind, item: &&'static str) -> io::Result<()> {
         if self.deny_delete.contains(item) {
@@ -266,6 +281,40 @@ fn the_classes_go_first_and_com_waits_for_them() {
     let (clean, _) = run(&mut fake);
     assert!(!clean);
     assert!(!fake.deleted.contains(&"{job-1}"));
+}
+
+#[test]
+fn the_classes_are_looked_at_again_right_before_bits() {
+    // All gone: listed once more right before BITS, which then runs.
+    let mut fake = full();
+    assert!(run(&mut fake).0);
+    assert_eq!(fake.class_lists, 2);
+    assert!(fake.deleted.contains(&"{job-1}"));
+    // A class key registered again after the classes' removal: the tasks still go (their class
+    // object comes from System32's module, with no lookup), BITS doesn't.
+    let mut fake = full();
+    fake.back = vec!["CLSID"];
+    let (clean, lines) = run(&mut fake);
+    assert!(!clean);
+    assert!(fake.deleted.contains(&"\\Updater"));
+    assert!(!fake.deleted.contains(&"{job-1}"));
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some(
+            "clauseo-sandbox-run: cleanup (before launch): the BITS jobs weren't listed: \
+             per-user COM class keys are left"
+        )
+    );
+    // A second class list that fails counts as a key left.
+    let mut fake = full();
+    fake.back = vec!["CLSID"];
+    fake.deny_list.insert("classes");
+    assert!(!run(&mut fake).0);
+    assert!(!fake.deleted.contains(&"{job-1}"));
+    // The inner, with no BITS, lists the classes once.
+    let mut fake = full();
+    assert!(run_kinds(&mut fake, &Kind::LOCAL).0);
+    assert_eq!(fake.class_lists, 1);
 }
 
 #[test]

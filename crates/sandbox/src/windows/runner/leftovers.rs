@@ -6,10 +6,12 @@
 //! (`--sweep`, [`Kind::ALL`]): one code for both, [`remove_all`].
 //!
 //! The per-user classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
-//! `Wow6432Node` twins) go first: an in-process server registered there for the Task Scheduler's
-//! class would run in the runner that makes it with the lawyer's logon SID, and a sandbox account
-//! has no per-user class of its own to keep. Tasks and BITS, the two kinds reached over COM, are
-//! skipped when any class key is left.
+//! `Wow6432Node` twins) go first: a server registered there for a class a runner makes would run
+//! for that runner with the lawyer's logon SID, and a sandbox account has no per-user class of its
+//! own to keep. Tasks and BITS, the two kinds reached over COM, are skipped when any class key is
+//! left. Task Scheduler's class object comes from System32's `taskschd.dll` itself, with no class
+//! lookup (`os/com.rs`); BITS, an out-of-process server, is made with `CoCreateInstance`, whose
+//! lookup could consult the per-user classes, so they are looked at again right before it.
 //!
 //! Each kind is listed, then each item deleted; one kind failing (its list, or an item) is logged
 //! and the rest still run. The log carries counts and OS codes only, never a name or a content.
@@ -100,8 +102,9 @@ pub(crate) trait Leftovers {
 
 /// Removes the items of each of `kinds`, in order, logging each kind's count, at `who` (the
 /// inner's first act, or the end sweeper). A kind reached over COM is skipped once the classes
-/// weren't all removed. Whether every kind was listed and every item deleted, and the BITS jobs
-/// left for the system stop.
+/// weren't all removed, and BITS also when a class key is found (or can't be looked for) right
+/// before it, when the classes are among `kinds`. Whether every kind was listed and every item
+/// deleted, and the BITS jobs left for the system stop.
 pub(crate) fn remove_all<L: Leftovers>(
     calls: &mut L,
     kinds: &[Kind],
@@ -112,6 +115,10 @@ pub(crate) fn remove_all<L: Leftovers>(
     let mut bits_for_stop = 0;
     let mut classes_left = false;
     for &kind in kinds {
+        if kind == Kind::Bits && !classes_left && kinds.contains(&Kind::Classes) {
+            // BITS's creation looks its class up, so no class key may be back by then.
+            classes_left = !calls.list(Kind::Classes).is_ok_and(|left| left.is_empty());
+        }
         if kind.over_com() && classes_left {
             log(&format!(
                 "clauseo-sandbox-run: cleanup ({who}): the {kind} weren't listed: per-user COM \
