@@ -20,6 +20,7 @@ use crate::windows::setup::{LogonRight, ServiceStart};
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
 use crate::windows::apply::Surroundings;
+use crate::windows::wfp::{FirewallOutcome, Namespace, NetworkReport, NetworkSetup};
 
 /// A folder as the call lines name it: a profile's `LocalLow` by its account
 /// (`ClauseoSb01`), anything else by its last part.
@@ -36,9 +37,27 @@ pub(super) fn folder_name(path: &Path) -> String {
     }
 }
 
-/// The surroundings: every folder `Ok`, the real listing, no set-aside, no credentials.
+/// The surroundings: every folder `Ok`, the real listing, no set-aside, no credentials. It also
+/// keeps the network steps' inputs (S15 PR7), so `fake.rs` stays short.
 #[derive(Debug, Default)]
-pub(super) struct Around;
+pub(super) struct Around {
+    /// Each network step's input, in order.
+    pub(super) networks: Vec<NetworkSetup>,
+    /// What the firewall answers; [`FirewallOutcome::Applied`] when `None`.
+    pub(super) firewall: Option<FirewallOutcome>,
+}
+
+impl Around {
+    /// A network step: recorded, every block filter built, the firewall as told.
+    pub(super) fn network(&mut self, setup: &NetworkSetup) -> NetworkReport {
+        self.networks.push(setup.clone());
+        NetworkReport {
+            filters: setup.filters(&Namespace::test()).len(),
+            covered: setup.pool().to_vec(),
+            firewall: self.firewall.clone().unwrap_or(FirewallOutcome::Applied),
+        }
+    }
+}
 
 impl FolderList for Around {
     fn subfolders(&self, parent: &Path) -> io::Result<Vec<PathBuf>> {
@@ -190,6 +209,6 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         faults: ProfileFaults::default(),
         next_rid: 1000,
         passwords: 0,
-        around: Around,
+        around: Around::default(),
     }
 }

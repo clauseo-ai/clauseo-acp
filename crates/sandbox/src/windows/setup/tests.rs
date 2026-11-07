@@ -2,7 +2,8 @@
 //! fresh run (`create.rs`), the rollback after a failure at each step (`rollback.rs`), the
 //! extend and re-run (`extend.rs`), the profile resets they owe (`resets.rs`) and the top-up to
 //! [`MIN_FREE_AFTER_RUN`] free users (`top_up.rs`); and `--remove` over the same fake
-//! (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`).
+//! (`remove.rs`, `remove_ledger.rs`, its seam in `remove_fake.rs`); and the network step
+//! (`network.rs`, S15 PR7).
 
 use std::path::PathBuf;
 
@@ -16,6 +17,7 @@ mod fake;
 mod fake_acl;
 mod fake_more;
 mod local_low;
+mod network;
 mod owner;
 mod registered;
 mod remains;
@@ -94,6 +96,7 @@ fn fresh_calls() -> Vec<String> {
             "program_data",
             "exists DeviceSync",
             "owner_of DeviceSync",
+            "network 1001,1002,1003,1004",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",

@@ -37,6 +37,7 @@ use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
+use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
@@ -59,6 +60,8 @@ pub struct Names {
     pub users: String,
     /// Whether the change journals may be enlarged; a test's machine leaves them as they are.
     pub journals: bool,
+    /// Where the network filters and firewall rules go (S15 PR7): Clauseo's, or a test's.
+    pub wfp: Namespace,
 }
 
 impl Names {
@@ -70,6 +73,7 @@ impl Names {
             mutex: SETUP_MUTEX.to_owned(),
             users: POOL_PREFIX.to_owned(),
             journals: true,
+            wfp: Namespace::production(),
         }
     }
 
@@ -433,6 +437,14 @@ impl Machine for WindowsMachine {
             ));
         }
         journal::grow_journal(volume, max, delta)
+    }
+
+    fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
+        // Elevated, never as the owner: WFP and the firewall are the machine's.
+        wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Os {
+            call: error.call,
+            code: error.code,
+        })
     }
 
     fn protect_for_owner(
