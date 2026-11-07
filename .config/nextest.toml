@@ -79,9 +79,9 @@ filter = 'package(clauseo-sandbox) & test(/(^|::)elevated_/) & test(/::logon::te
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 # The owner's task run test logs a new account on twice (its first makes its profile, 20 to 40 s)
-# and waits up to 15 s twice for the Task Scheduler; 120 s still ends a hung one.
+# and waits up to 15 s three times for the Task Scheduler; 120 s still ends a hung one.
 [[profile.default.overrides]]
-filter = 'package(clauseo-sandbox) & test(/elevated_the_owner_can_start/)'
+filter = 'package(clauseo-sandbox) & test(/elevated_the_owner_can_start_and_end/)'
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 # The sandbox's tier B timing row (ignored; run on a Windows VM with --run-ignored) makes 50,000

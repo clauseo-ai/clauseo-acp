@@ -99,12 +99,14 @@ pub const TEARDOWN: [Teardown; 5] = [
 ];
 
 /// The descriptor of every task in [`TASKS`] and of their folder: owned by Administrators;
-/// protected; SYSTEM and Administrators full control; the record owner `owner` read alone
-/// (`FR`). MS-TSCH lets a caller with read or execute access start a task (`SchRpcRun`) and
-/// asks execute access to end one (`SchRpcStop`), so the app can ask for a run but can't end a
-/// running task, change it or delete it.
+/// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
+/// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
+/// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
+/// end a stop or a refresh: denial of service only, which code running as the owner could do to
+/// its own sessions anyway. An ended stop never writes `StopCompleted` (`setup::stop`), and an
+/// ended refresh keeps the old copy. The owner can't change or delete a task.
 pub fn task_sddl(owner: &Sid) -> String {
-    format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;{owner})")
+    format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }
 
 /// The task action's program: `exe`'s path in double quotes, as a command line takes a path

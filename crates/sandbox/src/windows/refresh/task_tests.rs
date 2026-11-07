@@ -41,25 +41,23 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
 }
 
 #[test]
-fn both_tasks_take_the_one_descriptor_the_owner_may_only_read() {
+fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
     // `register_task` passes `task_sddl(owner)` to the folder and to every task alike: no task
-    // takes a descriptor of its own. The owner reads (FR), which starts a task; without execute
-    // it can't end a running one, and it can't write, delete or change the DACL. No one else but
-    // SYSTEM and Administrators is named.
+    // takes a descriptor of its own. The owner reads and executes (FRFX): starting a task needs
+    // execute (CI run 42416074600), which also ends one. It can't write, delete or change the
+    // DACL. No one else but SYSTEM and Administrators is named.
     let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
     let sddl = task_sddl(&owner);
     assert_eq!(
         sddl,
-        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;S-1-5-21-1-2-3-1001)"
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;S-1-5-21-1-2-3-1001)"
     );
     let aces: Vec<&str> = sddl.split('(').skip(1).collect();
     assert_eq!(aces.len(), 3);
-    assert!(aces[2].starts_with("A;;FR;;;"), "{}", aces[2]);
-    assert!(
-        !aces[2].contains("FX") && !aces[2].contains("GX"),
-        "{}",
-        aces[2]
-    );
+    assert!(aces[2].starts_with("A;;FRFX;;;"), "{}", aces[2]);
+    for wider in ["FA", "FW", "GA", "GW", "WD", "WO", "SD"] {
+        assert!(!aces[2].contains(wider), "{wider}: {}", aces[2]);
+    }
 }
 
 #[test]

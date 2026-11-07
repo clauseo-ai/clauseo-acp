@@ -431,7 +431,7 @@ fn the_descriptors_say_what_the_module_says() {
     let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
     assert_eq!(
         task_sddl(&owner),
-        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;S-1-5-21-1-2-3-1001)"
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;S-1-5-21-1-2-3-1001)"
     );
     // Read back with the flags SetSecurityInfo adds, the staging DACL still matches; any other
     // entry, owner or a lost protection doesn't.
