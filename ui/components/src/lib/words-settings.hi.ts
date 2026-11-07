@@ -74,6 +74,8 @@ export const HI = {
   "Add ChatGPT": "ChatGPT जोड़ें",
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
+  "Already downloaded. Only the set-up is left. Signing in happens in your browser.":
+    "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
   "Other ways in": "जुड़ने के दूसरे तरीके",
   "Change key": "key बदलें",

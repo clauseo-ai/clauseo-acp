@@ -20,6 +20,8 @@ export const HI = {
   // getting the agent ready, on the working line (design): its size first, then the download's
   // bytes, then the set-up
   "Needs a download of about {mb} MB": "लगभग {mb} MB का डाउनलोड ज़रूरी है",
+  // every download is already on disk: only the set-up is left (new, provisional)
+  "Already downloaded. Only the set-up is left.": "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है।",
   "Getting {name} ready… {done} MB of {total} MB": "{name} तैयार हो रहा है… {total} MB में से {done} MB",
   // the live region's words for the download, which hears no bytes (new)
   "Getting {name} ready…": "{name} तैयार हो रहा है…",

@@ -17,6 +17,8 @@ export type InstallView =
   /** Not here yet, about to download or paused: the size it will download, about, in MB. 0 when
    * no size is known, and then the line says nothing. */
   | { kind: "missing"; mb: number }
+  /** Every download is already on disk: only the set-up is left, no bytes to fetch. */
+  | { kind: "downloaded" }
   /** Downloading: the bytes for the bar, and the whole MB the words say (done never above
    * total). */
   | {
@@ -87,12 +89,19 @@ export function installLine(
   );
   switch (view.kind) {
     case "missing":
-      // no size to say (a download of no bytes): no line at all, so the next state is a change
-      // the reader hears
+      // no size to say (a paused download, none known): no line at all, so the next state is
+      // a change the reader hears
       if (view.mb === 0) return null;
       return {
         kind: "wait",
         words: w("Needs a download of about {mb} MB", { mb: view.mb }),
+        pill: null,
+        actions: wrap(null),
+      };
+    case "downloaded":
+      return {
+        kind: "wait",
+        words: w("Already downloaded. Only the set-up is left."),
         pill: null,
         actions: wrap(null),
       };

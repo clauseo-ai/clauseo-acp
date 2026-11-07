@@ -512,6 +512,12 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
   // Getting {name} ready…, never these bytes
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
+  // UD1-89: every download already on disk, so only the set-up is left (no bytes to fetch, new)
+  [
+    "Already downloaded. Only the set-up is left.",
+    { first: true, events: [install(CLAUDE, { missing: { download_bytes: 0 } })] },
+    "welcome",
+  ],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

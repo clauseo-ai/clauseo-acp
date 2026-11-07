@@ -569,14 +569,14 @@
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
-  "UD2-59": {
-    "en": "Signing in happens in your browser.",
-    "hi": "साइन इन आपके ब्राउज़र में होता है।",
+  "UD2-60": {
+    "en": "Already downloaded. Only the set-up is left. Signing in happens in your browser.",
+    "hi": "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है। साइन इन आपके ब्राउज़र में होता है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
+    "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)"
   }
 }

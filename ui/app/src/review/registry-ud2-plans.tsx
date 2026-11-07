@@ -72,7 +72,7 @@ const SIGNED_OUT: Scene = {
     ),
   },
 };
-/** The card with no size known: a download of no bytes. */
+/** The card with a download of no bytes: every download is already on disk. */
 const ADD0: Scene = {
   setup: {
     first: [
@@ -169,6 +169,12 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-54", "Remove address", ENDPOINT),
   entry("UD2-55", "No {app} sign-in on this computer.", found("none_found")),
   entry("UD2-56", "Clauseo isn't using {app}'s sign-in here.", found("reuse_off")),
-  // UD2-59: the card's line with no size known (a download of no bytes)
-  entry("UD2-59", "Signing in happens in your browser.", ADD0),
+  // UD2-59, retired: the card's line with no size known; a download of no bytes now says it is
+  // already on disk (UD2-60), so no scene shows this sentence any more
+  // UD2-60: the card's line when every download is already on disk (new)
+  entry(
+    "UD2-60",
+    "Already downloaded. Only the set-up is left. Signing in happens in your browser.",
+    ADD0,
+  ),
 ];

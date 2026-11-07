@@ -17,7 +17,9 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
   if (install === "paused")
     return setup?.mb === undefined ? null : { kind: "missing", mb: aboutMb(setup.mb) };
   if ("missing" in install && install.missing !== undefined)
-    return { kind: "missing", mb: aboutMb(mbOf(install.missing.download_bytes)) };
+    return install.missing.download_bytes === 0
+      ? { kind: "downloaded" }
+      : { kind: "missing", mb: aboutMb(mbOf(install.missing.download_bytes)) };
   if ("downloading" in install && install.downloading !== undefined) {
     const { received, total } = install.downloading;
     // done never above total: the bar and the words agree

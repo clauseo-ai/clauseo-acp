@@ -35,13 +35,15 @@ test("install: missing says the size, about, and sends nothing (desktop starts t
   expect(setups(t)).toEqual([]);
 });
 
-test("install: missing with no bytes to download shows no line at all", async () => {
-  await mountFirstRun({
+test("install: missing with no bytes to download says the download is already on disk, only the set-up left", async () => {
+  const t = await mountFirstRun({
     matters: [],
     first: [install(CLAUDE, { missing: { download_bytes: 0 } })],
   });
-  expect(foot()).toBeNull();
+  expect(foot()?.dataset["state"]).toBe("downloaded");
+  expect(text()).toContain("Already downloaded. Only the set-up is left.");
   expect(text()).not.toContain("Needs a download");
+  expect(setups(t)).toEqual([]);
 });
 
 test("install: missing while the sign-in is queued says the size, never Getting ready, live words included", async () => {

@@ -47,7 +47,7 @@ type SignedIn = NonNullable<Extract<SignIn, { signed_in: unknown }>["signed_in"]
 /** Where the block stands. */
 type Stand =
   | { kind: "none" }
-  | { kind: "add"; mb: number }
+  | { kind: "add"; mb: number; downloaded: boolean }
   | { kind: "install" }
   | { kind: "signed"; signed: SignedIn }
   | { kind: "signed-out"; found: PlansFound | undefined }
@@ -60,7 +60,11 @@ function standOf(agent: AgentId, setup: AgentSetup | undefined, adding: boolean)
   const install = setup?.install;
   if (install !== undefined && install !== "managed" && !isReady(install)) {
     if (agent === CODEX && !adding && typeof install === "object" && install.missing !== undefined)
-      return { kind: "add", mb: aboutMb(setup?.mb ?? 0) };
+      return {
+        kind: "add",
+        mb: aboutMb(setup?.mb ?? 0),
+        downloaded: install.missing.download_bytes === 0,
+      };
     if (installView(setup) !== null) return { kind: "install" };
   }
   const signIn = setup?.signIn;
@@ -224,21 +228,22 @@ export function PlanBlock({
     switch (stand.kind) {
       case "none":
         break;
-      case "add":
+      case "add": {
+        // the card's quiet line under Add: the download's size, about, then what to expect; on disk
+        // already, only the set-up is left; with no size known, what to expect alone
+        let fine = s("Signing in happens in your browser.");
+        if (stand.downloaded)
+          fine = s(
+            "Already downloaded. Only the set-up is left. Signing in happens in your browser.",
+          );
+        else if (stand.mb > 0)
+          fine = s("Needs a download of about {mb} MB. Signing in happens in your browser.", {
+            mb: stand.mb,
+          });
         body = (
           <>
             {line(s("Uses your ChatGPT plan."))}
-            {/* the card's quiet line under Add: the download's size, about, then what to expect; with no
-                size known, what to expect alone */}
-            <p className="set-plan-fine">
-              {say(
-                stand.mb > 0
-                  ? s("Needs a download of about {mb} MB. Signing in happens in your browser.", {
-                      mb: stand.mb,
-                    })
-                  : s("Signing in happens in your browser."),
-              )}
-            </p>
+            <p className="set-plan-fine">{say(fine)}</p>
             <div className="set-plan-acts">
               <Button
                 kind="tone"
@@ -261,6 +266,7 @@ export function PlanBlock({
           </>
         );
         break;
+      }
       case "install": {
         const working = installLine(lang, installView(setup), name, {
           retry: () => command({ retry_agent_install: { agent } }),

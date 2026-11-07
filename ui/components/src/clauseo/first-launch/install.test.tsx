@@ -60,3 +60,14 @@ test("install lines: missing with no size says nothing, so no line stands", asyn
   expect(installLine("en", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
   expect(installLine("hi", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
 });
+
+test("install lines: downloaded, every download already on disk, says only the set-up is left, in English and Hindi", async () => {
+  await loadHindi();
+  expect(linesOf("en", { kind: "downloaded" })).toEqual({
+    words: "Already downloaded. Only the set-up is left.",
+    said: "Already downloaded. Only the set-up is left.",
+  });
+  expect(linesOf("hi", { kind: "downloaded" }).words).toBe(
+    "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है।",
+  );
+});

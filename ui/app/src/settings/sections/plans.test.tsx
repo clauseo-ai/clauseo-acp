@@ -6,6 +6,7 @@
 // nowhere else.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { loadHindi } from "@clauseo/components/lib/words-core.ts";
 import { stubFonts } from "../../room/thread/testing.ts";
 import { setupStoreOf, type SetupSource } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -227,7 +228,7 @@ test("ChatGPT not added: Add ChatGPT with its size, install_agent, then start_si
   expect(t.setups().filter((c) => "start_sign_in" in c)).toHaveLength(1);
 });
 
-test("ChatGPT with no size known: the card's line says what to expect, with no size", async () => {
+test("ChatGPT already downloaded: the card's line says only the set-up is left, then what to expect", async () => {
   await mountPlans({
     first: [
       install(CLAUDE, READY),
@@ -235,8 +236,37 @@ test("ChatGPT with no size known: the card's line says what to expect, with no s
       install(CODEX, { missing: { download_bytes: 0 } }),
     ],
   });
-  expect(words("chatgpt")).toContain("Signing in happens in your browser.");
+  expect(words("chatgpt")).toContain(
+    "Already downloaded. Only the set-up is left. Signing in happens in your browser.",
+  );
   expect(words("chatgpt")).not.toContain("Needs a download");
+  expect(document.querySelector('[data-testid="plans-add"]')).not.toBeNull();
+});
+
+test("ChatGPT with a download to come: the size, about, and nothing about the disk", async () => {
+  await mountPlans({
+    first: [
+      install(CLAUDE, READY),
+      signIn(CLAUDE, signed()),
+      install(CODEX, { missing: { download_bytes: 165_000_000 } }),
+    ],
+  });
+  expect(words("chatgpt")).not.toContain("Already downloaded");
+});
+
+test("ChatGPT already downloaded, in Hindi: the card's line in Hindi", async () => {
+  await loadHindi();
+  await mountPlans({
+    lang: "hi",
+    first: [
+      install(CLAUDE, READY),
+      signIn(CLAUDE, signed()),
+      install(CODEX, { missing: { download_bytes: 0 } }),
+    ],
+  });
+  expect(words("chatgpt")).toContain(
+    "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है। साइन इन आपके ब्राउज़र में होता है।",
+  );
 });
 
 test("a declined install confirm leaves Add ChatGPT as it was, and says nothing changed", async () => {

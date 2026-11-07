@@ -775,5 +775,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-89": {
+    "en": "Already downloaded. Only the set-up is left.",
+    "hi": "पहले ही डाउनलोड हो चुका है। बस सेट अप बाकी है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

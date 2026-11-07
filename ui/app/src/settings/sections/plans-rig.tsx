@@ -61,6 +61,8 @@ export type PlansRig = {
   keys?: boolean;
   locked?: string[];
   plans?: SettingsView["plans"];
+  /** The window's language; English when left out. */
+  lang?: "en" | "hi";
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void;
 };
@@ -76,7 +78,7 @@ export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
             ui: {
               theme: "system",
               font_size: 16,
-              language: "en",
+              language: o.lang ?? "en",
               lite: "automatic",
               motion: "system",
             },
@@ -94,7 +96,7 @@ export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
         if (query === "get_settings")
           return {
             settings: {
-              ui: DEFAULT_UI,
+              ui: { ...DEFAULT_UI, language: o.lang ?? "en" },
               locked: o.locked ?? [],
               ...(o.plans === undefined ? {} : { plans: o.plans }),
             },
