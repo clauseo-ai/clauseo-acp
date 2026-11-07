@@ -74,6 +74,10 @@ struct Fake {
     appear: BTreeMap<usize, Vec<(u32, Proc)>>,
     /// How many times the opening list was read.
     lists: usize,
+    /// This pid exits by itself after this many pauses.
+    exits_after: BTreeMap<u32, u32>,
+    /// Every pause the sweep made, in order.
+    pauses: Vec<Duration>,
 }
 
 impl Processes for Fake {
@@ -172,6 +176,18 @@ impl Processes for Fake {
             self.forever = Some(next);
         }
         Ok(())
+    }
+    fn exited(&mut self, process: &u32) -> bool {
+        !self.procs.contains_key(process)
+    }
+    fn pause(&mut self, pause: Duration) {
+        self.pauses.push(pause);
+        for (pid, left) in &mut self.exits_after {
+            *left = left.saturating_sub(1);
+            if *left == 0 {
+                self.procs.remove(pid);
+            }
+        }
     }
 }
 
@@ -477,3 +493,4 @@ fn a_job_list_that_cant_be_read_fails_the_sweep() {
 }
 
 mod end;
+mod refused;

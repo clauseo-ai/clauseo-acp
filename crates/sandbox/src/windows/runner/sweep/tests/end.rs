@@ -60,6 +60,12 @@ fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
         fn kill(&mut self, process: &u32) -> io::Result<()> {
             self.0.kill(process)
         }
+        fn exited(&mut self, process: &u32) -> bool {
+            self.0.exited(process)
+        }
+        fn pause(&mut self, pause: Duration) {
+            self.0.pause(pause);
+        }
     }
     let mut fake = machine();
     fake.procs.insert(31, pool_proc("task.exe"));
