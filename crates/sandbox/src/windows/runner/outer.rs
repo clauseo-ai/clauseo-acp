@@ -76,12 +76,12 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
-    // `relay` removes it. One that can't be written refuses the launch, as a failed read of the
-    // pool user's secret does: no logon follows.
+    // `relay` removes it. One that can't be written refuses the launch with its own code
+    // (`RunExit::MarkerUnwritable`): no logon follows.
     marked(&data_dir, launch_file, &message.pool_user, |marker| {
         marked_outer(&message, data_dir.clone(), marker, exe)
     })
-    .map_err(|e| Failure::new(RunExit::Logon, os("the session marker", &e)))?
+    .map_err(|e| Failure::new(RunExit::MarkerUnwritable, os("the session marker", &e)))?
 }
 
 /// The run once its marker is written.
