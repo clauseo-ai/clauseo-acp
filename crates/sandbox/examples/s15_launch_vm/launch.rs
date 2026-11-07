@@ -323,6 +323,28 @@ impl Running {
         drop(self.stdin.take());
     }
 
+    /// Takes the agent's stdin, for a row that writes and closes it from a thread of its own.
+    pub(crate) fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.stdin.take()
+    }
+
+    /// Whether the outer runner exited by itself before `until`, its output read meanwhile.
+    /// Once it has, it counts as waited for; still running, it is left as it is.
+    pub(crate) fn exited_by(&mut self, until: Instant) -> bool {
+        loop {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                note_ended(self.child.id());
+                self.waited = true;
+                return true;
+            }
+            if now() >= until {
+                return false;
+            }
+            while self.pump(now()) {}
+            sleep(Duration::from_millis(25));
+        }
+    }
+
     /// Ends the outer runner now (as the host's job kill would) and waits for it.
     pub(crate) fn kill(&mut self) {
         drop(self.child.kill());
