@@ -127,17 +127,23 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
     let mode = line_with(body, &["!if \"${INSTALLMODE}\" == \"perMachine\""]);
     let per_machine = format!("!define CLAUSEO_REMOVE \"--remove {PER_MACHINE}\"");
     let expected = [
+        "!ifndef CLAUSEO_REMOVE",
+        "!if \"${INSTALLMODE}\" == \"perMachine\"",
         per_machine.as_str(),
-        "!define CLAUSEO_REMOVE_VERB \"open\"",
         "!else",
         "!define CLAUSEO_REMOVE \"--remove\"",
+        "!endif",
+        "!endif",
+        // Each defined once, however often the macro is inserted.
+        "!ifndef CLAUSEO_REMOVE_VERB",
+        "!if \"${INSTALLMODE}\" == \"perMachine\"",
+        "!define CLAUSEO_REMOVE_VERB \"open\"",
+        "!else",
         "!define CLAUSEO_REMOVE_VERB \"runas\"",
         "!endif",
+        "!endif",
     ];
-    assert_eq!(body[mode + 1..mode + 7], expected, "{body:?}");
-    // Defined once, however often the macro is inserted.
-    assert_eq!(body[mode - 1], "!ifndef CLAUSEO_REMOVE", "{body:?}");
-    assert_eq!(body[mode + 7], "!endif", "{body:?}");
+    assert_eq!(body[mode - 1..mode + 13], expected, "{body:?}");
     let ifndef = line_with(body, &["!ifndef INSTALLMODE"]);
     assert!(body[ifndef + 1].starts_with("!error "), "{body:?}");
     let other = line_with(body, &["!if \"${INSTALLMODE}\" != \"perMachine\""]);
@@ -168,8 +174,9 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
         parsed(&format!("--remove {PER_MACHINE}")),
         Ok(Mode::Remove { per_machine: true })
     );
-    // At most two minutes, then on as after a failure: $R8 starts at 1, and a timeout
-    // (WAIT_TIMEOUT, 258) skips the exit code. The exe's own lock wait fits inside it.
+    // At most two minutes, then on as after a failure: $R8 is seeded 1 (a failure) before the
+    // wait, and only WAIT_OBJECT_0 (0) reads the exit code; a timeout (WAIT_TIMEOUT, 258) or
+    // WAIT_FAILED never does. The exe's own lock wait fits inside it.
     let wait = line_with(body, &["kernel32::WaitForSingleObject(p R7, i ", ") i .R3"]);
     let bound: u32 = body[wait]
         .split_once("(p R7, i ")
@@ -189,12 +196,35 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
     let still = "LangString removeStillRunning ${LANG_ENGLISH} \"Clauseo is still removing its \
                  protection. It finishes on its own.\"";
     assert!(english.lines().any(|line| line == still), "{still}");
-    let exit_code = line_with(body, &["kernel32::GetExitCodeProcess(p R7, *i .R8)"]);
-    let close = line_with(body, &["kernel32::CloseHandle(p R7)"]);
-    assert!(
-        wait < exit_code && exit_code < close && close < exited,
+    // The exit code, read only in the WAIT_OBJECT_0 branch, into a value seeded 1; a failed
+    // GetExitCodeProcess (0 in $R2) puts the failure back. Nothing else writes $R8 to 0.
+    let ended = line_with(body, &["${ElseIf} $R3 = 0"]);
+    assert_eq!(ended, wait + 3, "{body:?}");
+    assert_eq!(
+        body[ended + 1],
+        "System::Call 'kernel32::GetExitCodeProcess(p R7, *i 1 R8) i .R2'",
         "{body:?}"
     );
+    assert_eq!(
+        body[ended + 2..ended + 6],
+        ["${If} $R2 = 0", "StrCpy $R8 1", "${EndIf}", "${EndIf}"],
+        "{body:?}"
+    );
+    let reads = body
+        .iter()
+        .filter(|line| line.contains("GetExitCodeProcess"));
+    assert_eq!(reads.count(), 1, "{body:?}");
+    let r8_writes: Vec<&String> = body
+        .iter()
+        .filter(|line| line.contains("StrCpy $R8 ") || line.contains("R8)"))
+        .collect();
+    assert!(
+        r8_writes.iter().all(|line| !line.contains("StrCpy $R8 0")),
+        "{r8_writes:?}"
+    );
+    let close = line_with(body, &["kernel32::CloseHandle(p R7)"]);
+    assert_eq!(close, ended + 6, "{body:?}");
+    assert!(close < exited, "{body:?}");
     assert!(REMOVE_LOCK_WAIT_MS < bound);
     // The mode is never read at run time, and the tool is never killed.
     for line in &code {
@@ -202,6 +232,47 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
         assert!(!line.to_lowercase().contains("terminateprocess"), "{line}");
         assert!(!line.contains("WaitForSingleObject(p R7, i -1)"), "{line}");
     }
+}
+
+#[test]
+fn a_silent_per_user_uninstall_skips_the_elevated_removal_and_keeps_the_sandbox_folder() {
+    let code = hook_code();
+    let body = preuninstall(&code);
+    // In the per-user installer only (chosen when it is built), /S clears $R3 before the
+    // removal's test, says so in the details list and shows no box; $R3 0 skips the whole
+    // ShellExecuteExW block, so $R5 stays 0 and --sandbox-removed is never passed, as after a
+    // declined prompt.
+    let run = line_with(body, &["StrCpy $R3 1"]);
+    let expected = [
+        "StrCpy $R3 1",
+        "!if \"${INSTALLMODE}\" == \"currentUser\"",
+        "${If} ${Silent}",
+        "${AndIf} ${FileExists} \"$INSTDIR\\clauseo-sandbox-setup.exe\"",
+        "StrCpy $R3 0",
+        "DetailPrint \"$(removeSkippedSilent)\"",
+        "${EndIf}",
+        "!endif",
+        "${If} $R3 = 1",
+        "${AndIf} ${FileExists} \"$INSTDIR\\clauseo-sandbox-setup.exe\"",
+    ];
+    assert_eq!(body[run..run + 10], expected, "{body:?}");
+    let unremoved = line_with(body, &["StrCpy $R5 0"]);
+    let call = line_with(body, &["shell32::ShellExecuteExW(p R6) i .R7"]);
+    assert!(unremoved < run && run + 10 < call, "{body:?}");
+    // The skip shows no box: nothing between it and the removal's test is a MessageBox.
+    assert!(
+        body[run..run + 10]
+            .iter()
+            .all(|line| !line.contains("MessageBox")),
+        "{body:?}"
+    );
+    let english = read("windows/nsis/English.nsh");
+    assert!(
+        english
+            .lines()
+            .any(|line| line.starts_with("LangString removeSkippedSilent ${LANG_ENGLISH} \"")),
+        "no removeSkippedSilent line in English.nsh"
+    );
 }
 
 #[test]

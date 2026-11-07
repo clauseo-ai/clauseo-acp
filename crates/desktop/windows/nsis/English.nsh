@@ -6,8 +6,9 @@
 ; Clauseo's wording: the one line whose words differ from Tauri's (approved by Rohan, 2026-11-03),
 ; then the four lines windows/hooks.nsh shows after the app deletes its data (S20, 2026-11-05;
 ; deleteAppDataFailedUnnamed 2026-11-06), then the two the per-machine installer shows about the
-; firm-policy folder (2026-11-06), and the one the uninstaller shows when S15's removal outlasts
-; its wait (removeStillRunning, 2026-11-07).
+; firm-policy folder (2026-11-06), and the two the uninstaller shows about S15's removal: when it
+; outlasts its wait (removeStillRunning, 2026-11-07) and when a silent per-user uninstall skips it
+; (removeSkippedSilent, 2026-11-07).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -37,6 +38,10 @@ LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $COMMONAP
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
 ; Provisional (stage F, 2026-11-07).
 LangString removeStillRunning ${LANG_ENGLISH} "Clauseo is still removing its protection. It finishes on its own."
+; removeSkippedSilent: a silent per-user uninstall (/S) can't ask for the UAC prompt that removing
+; Clauseo's protection needs, so it skips the removal and keeps the sandbox folder. In the
+; uninstaller's details list (DetailPrint), never a box. Provisional (stage F, 2026-11-07).
+LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove its protection, because this uninstall is silent. Its sandbox folder is kept."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

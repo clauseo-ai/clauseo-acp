@@ -19,9 +19,12 @@
 ;    removes it; anyone else's uninstall exits 0 having touched nothing. The per-machine installer
 ;    passes `--remove --per-machine` (chosen when it is built, from the template's INSTALLMODE):
 ;    every sandbox user goes, whoever uninstalls, LOCAL SYSTEM under Intune's silent /S included.
+;    A silent per-user uninstall (/S) never raises UAC: it skips the removal, as after a declined
+;    prompt, and says so in its details list.
 ;    The wait is bounded at 2 minutes; past that the uninstall carries on as after a failed
 ;    removal and never stops the tool, which finishes later and leaves its records consistent at
-;    every step. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
+;    every step. Only an ended wait (WAIT_OBJECT_0), an exit code read and that code 0 count as
+;    removed. A removal that didn't finish (any exit but 0) keeps `sandbox\` and the machine's
 ;    record; the recovery is to reinstall Clauseo, then uninstall it again (decision 0049).
 ; 2. When the "Also delete conversations, saved versions and settings" box is ticked, the app
 ;    deletes its data folders itself (`Clauseo.exe --delete-app-data`, delete_app_data.rs), never
@@ -33,8 +36,8 @@
 ;    says one line (English.nsh): the kept folder when one is there, never the whole folder with
 ;    the sandbox's records in it; else the whole folder.
 ;
-; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept, removeStillRunning); the
-; uninstall-declined line is S15a's.
+; The words are in English.nsh (deleteAppDataFailed, deleteAppDataKept, removeStillRunning,
+; removeSkippedSilent); the uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $COMMONAPPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -95,13 +98,32 @@
     !ifndef CLAUSEO_REMOVE
       !if "${INSTALLMODE}" == "perMachine"
         !define CLAUSEO_REMOVE "--remove --per-machine"
-        !define CLAUSEO_REMOVE_VERB "open"
       !else
         !define CLAUSEO_REMOVE "--remove"
+      !endif
+    !endif
+    !ifndef CLAUSEO_REMOVE_VERB
+      !if "${INSTALLMODE}" == "perMachine"
+        !define CLAUSEO_REMOVE_VERB "open"
+      !else
         !define CLAUSEO_REMOVE_VERB "runas"
       !endif
     !endif
-    ${If} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+    ; A silent per-user uninstall (/S) never raises UAC: it skips the removal and goes on as after
+    ; a declined prompt (1223), $R5 left at 0 so `sandbox\` is kept, with one line in the details
+    ; (removeSkippedSilent) and no box. IT removes the set-up from an elevated prompt before such
+    ; an uninstall, or reinstalls and uninstalls interactively (docs/firm-it.md). The per-machine
+    ; uninstaller is elevated already and runs the removal silent or not. $R3 1: run it.
+    StrCpy $R3 1
+    !if "${INSTALLMODE}" == "currentUser"
+      ${If} ${Silent}
+      ${AndIf} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
+        StrCpy $R3 0
+        DetailPrint "$(removeSkippedSilent)"
+      ${EndIf}
+    !endif
+    ${If} $R3 = 1
+    ${AndIf} ${FileExists} "$INSTDIR\clauseo-sandbox-setup.exe"
       ; SHELLEXECUTEINFOW as a 32-bit process lays it out: every member 4 bytes, no padding.
       !if ${NSIS_PTR_SIZE} > 4
         !error "hooks.nsh lays out SHELLEXECUTEINFOW for a 32-bit installer; lay it out again"
@@ -120,8 +142,14 @@
           System::Call 'kernel32::WaitForSingleObject(p R7, i 120000) i .R3'
           ${If} $R3 = 258
             DetailPrint "$(removeStillRunning)"
-          ${Else}
-            System::Call 'kernel32::GetExitCodeProcess(p R7, *i .R8)'
+          ${ElseIf} $R3 = 0
+            ; WAIT_OBJECT_0 (0) only: the tool ended, so its exit code is read, into a value
+            ; seeded 1. A failed GetExitCodeProcess (it returns 0) counts as a failed removal, as
+            ; do WAIT_FAILED and a timeout, which never read it: $R8 stays non-zero.
+            System::Call 'kernel32::GetExitCodeProcess(p R7, *i 1 R8) i .R2'
+            ${If} $R2 = 0
+              StrCpy $R8 1
+            ${EndIf}
           ${EndIf}
           System::Call 'kernel32::CloseHandle(p R7)'
           ${If} $R8 = 0

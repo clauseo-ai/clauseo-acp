@@ -52,7 +52,13 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
   their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
   access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
-  and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. The
+  and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. A
+  silent per-user uninstall (`/S`) asks for nothing, so it leaves the protection in place and
+  keeps the `sandbox` folder, saying so in its details list. To remove the protection, reinstall
+  Clauseo and uninstall it interactively, or, before the silent uninstall (which deletes the tool
+  with the rest of the install folder), run
+  `"C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe" --remove --per-machine`
+  from an elevated prompt: it removes every sandbox user on the machine, whoever runs it. The
   per-machine uninstall removes it whoever uninstalls, the silent `/S` as SYSTEM included. The
   uninstaller waits for it at most 2 minutes, then carries on; the removal finishes on its own, and
   `clauseo-sandbox-setup.exe` may stay in the install folder until it has. If the removal doesn't
