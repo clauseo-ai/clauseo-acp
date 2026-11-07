@@ -1,8 +1,12 @@
 use std::io;
 
-use super::{ClaimError, MAX_DRAWS, NAME_LEN, daemon_port_of, random_name, search_name};
+use clauseo_sandbox::ports::{TIER_B_PORTS, claim_browser_port_at};
 
-/// The jail's Windows loopback range, which `search_name` must land in.
+use super::{
+    ClaimError, DAEMON_PORTS, MAX_DRAWS, NAME_LEN, daemon_port_of, random_name, search_name,
+};
+
+/// A 100-port range for `search_name`'s tests (the jail's Windows range before S15 PR7).
 const WINDOWS: std::ops::RangeInclusive<u16> = 61_080..=61_179;
 
 /// agent-browser's own test values (v0.41.1 `native/daemon.rs`), so the formula is theirs.
@@ -126,8 +130,6 @@ fn the_search_is_bounded_and_fails_typed() {
 fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     use std::os::unix::fs::MetadataExt;
 
-    use clauseo_sandbox::ports::claim_browser_port_at;
-
     let root = std::env::temp_dir().join(format!("clauseo-host-socket-{}", std::process::id()));
     crate::write::create_dir_all(&root).unwrap();
     let first = super::BrowserSession::claim("thread-1", Some(&root)).unwrap();
@@ -173,4 +175,45 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     }
     drop(second);
     crate::write::remove_tree(&root).unwrap();
+}
+
+/// No browser claim lands in tier B's range (S15 PR7), where every pool user's static permit
+/// reaches: Chrome's debugging port and the stream port of many sessions held at once. Linux
+/// hands out ports in 46100-46199 from its ephemeral range, so a claim there must be asked again.
+#[cfg(unix)]
+#[test]
+fn browser_sessions_never_claim_a_port_in_tier_b_s_range() {
+    let root = std::env::temp_dir().join(format!("clauseo-host-tierb-{}", std::process::id()));
+    crate::write::create_dir_all(&root).unwrap();
+    let sessions: Vec<_> = (0..25)
+        .map(|n| super::BrowserSession::claim(&format!("thread-{n}"), Some(&root)).unwrap())
+        .collect();
+    for session in &sessions {
+        for port in session.ports.loopback() {
+            assert!(!TIER_B_PORTS.contains(&port), "{}: {port}", session.name);
+        }
+    }
+    drop(sessions);
+    crate::write::remove_tree(&root).unwrap();
+}
+
+/// The Windows daemon search draws only outside tier B's range: every port agent-browser's hash
+/// gives lies above it, and each name the search settles on is claimed outside it.
+#[test]
+fn the_daemon_search_never_lands_in_tier_b_s_range() {
+    assert!(
+        DAEMON_PORTS.start() > TIER_B_PORTS.end(),
+        "{DAEMON_PORTS:?} overlaps {TIER_B_PORTS:?}"
+    );
+    let claims: Vec<_> = (0..10)
+        .map(|_| search_name(random_name, claim_browser_port_at, &DAEMON_PORTS, MAX_DRAWS).unwrap())
+        .collect();
+    for (name, claim) in &claims {
+        assert!(
+            !TIER_B_PORTS.contains(&claim.port()),
+            "{name}: {}",
+            claim.port()
+        );
+        assert_eq!(daemon_port_of(name), claim.port());
+    }
 }
