@@ -17,7 +17,7 @@ import {
 } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
-import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
+import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
 import { toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import {
@@ -168,7 +168,13 @@ const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copi
 const noSubscribe = () => () => {};
 
 /** The room's side of the hold: the plan the send uses, and how times and words are said. */
-type RoomSide = { agent: AgentId; zone: string; lang: Lang; platform: string; testBuild: boolean };
+type RoomSide = {
+  agent: AgentId;
+  zone: string;
+  lang: Lang;
+  platform: string;
+  releaseMode: ReleaseMode;
+};
 
 /** UC: the Safe workspace step's acts over the window's protection store. */
 function stepActs(transport: HostTransport, store: ProtectionStore, parts: StepParts) {
@@ -244,7 +250,7 @@ function holdOf(
   ) {
     const acts = stepActs(transport, shield.store, shield.parts);
     const { WorkspaceStep } = shield.parts;
-    const repair = repairOf(shield.state, shield.parts, lang, { testBuild: room.testBuild });
+    const repair = repairOf(shield.state, shield.parts, lang, { releaseMode: room.releaseMode });
     const page = repair.page;
     return {
       gate: (
@@ -345,10 +351,7 @@ export function FirstRun({
     readShield,
   );
   const display = useDisplay();
-  const { lang, platform } = display;
-  // main's Display.testBuild, read loosely (this base's Display lacks it): a test build offers no
-  // installer page
-  const testBuild = (display as { testBuild?: unknown }).testBuild === true;
+  const { lang, platform, releaseMode } = display;
   // the plan the send uses: the open conversation's thread's, or the one a draft would run (room.tsx's openAgent)
   const agent = talks.rows.find((r) => r.key === talks.open)?.agent ?? talks.agent;
   // "Use … instead": the new conversation takes the other plan at once, listed or not (the chosen agent wins,
@@ -365,7 +368,7 @@ export function FirstRun({
   // and again when the room's side changes
   useEffect(() => {
     const holder = holderOf(transport);
-    const room: RoomSide = { agent, zone, lang, platform, testBuild };
+    const room: RoomSide = { agent, zone, lang, platform, releaseMode };
     let cache: [SetupState, ProtectionState | null, Hold | null] | null = null;
     const withParts = (shield: ProtectionState | null) =>
       shields === null || shield === null || parts === null
@@ -390,7 +393,7 @@ export function FirstRun({
       holder.read = () => null;
       notify();
     };
-  }, [transport, store, shields, parts, agent, zone, lang, platform, testBuild]);
+  }, [transport, store, shields, parts, agent, zone, lang, platform, releaseMode]);
   // UC: the Safe workspace step is entered once, after the first sign-in here; where the set-up
   // asks no administrator it is sent at once, with no confirm, and the step is its wait; where the
   // repair is the installer, nothing is sent
