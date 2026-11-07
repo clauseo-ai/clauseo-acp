@@ -1,9 +1,14 @@
 # setup-exe repro: builds clauseo-sandbox-setup.exe, the elevated set-up the installer ships,
-# twice from clean on each Windows release target, each build in its own empty target dir, and
-# fails unless the two exes have the same SHA-256. The builds are release.yml's (the same
-# profile environment and RUSTFLAGS, through `node .github/scripts/sidecars.mjs --setup-exe`,
-# which adds the path remaps and SOURCE_DATE_EPOCH); crates/sandbox/build.rs adds /Brepro and
-# /PDBALTPATH:%_PDB%. The toolchain is rust-toolchain.toml's.
+# twice from clean on each Windows release target, both times in the release's target dir
+# (target/, wiped between the builds), and fails unless the two exes have the same SHA-256; on a
+# mismatch it uploads both. The builds are release.yml's (the same profile environment and
+# RUSTFLAGS, through `node .github/scripts/sidecars.mjs --setup-exe`, which adds the path remaps
+# and SOURCE_DATE_EPOCH); crates/sandbox/build.rs adds /Brepro and /PDBALTPATH:%_PDB%. The
+# toolchain is rust-toolchain.toml's.
+#
+# The same path, not two: the goal is that rebuilding a release commit in CI gives the same hash.
+# A different target dir gives a different exe (crates/sandbox/build.rs says why: lld's PDB GUID
+# hashes the PDB, which holds absolute object paths).
 #
 # Manual only (`gh workflow run setup-exe-repro.yml --ref <branch>`): two cold LTO builds per
 # target are too slow for every pull request, and the exe changes rarely. Run it when the
@@ -56,17 +61,28 @@ jobs:
           node-version-file: ui/package.json
           package-manager-cache: false
 
-      - name: Build the exe twice, each in an empty target dir, and compare
+      - name: Build the exe twice from clean in target/, and compare
+        id: repro
         run: |
+          mkdir -p "$RUNNER_TEMP/setup-exe"
           for run in a b; do
-            dir="$RUNNER_TEMP/setup-exe-$run"
-            exe=$(CARGO_TARGET_DIR="$dir" node .github/scripts/sidecars.mjs --setup-exe "$TARGET" | tail -n 1)
-            sha256sum "$exe" | tee "$RUNNER_TEMP/sha-$run"
+            rm -rf target
+            exe=$(node .github/scripts/sidecars.mjs --setup-exe "$TARGET" | tail -n 1)
+            cp "$exe" "$RUNNER_TEMP/setup-exe/clauseo-sandbox-setup-$run.exe"
           done
-          a=$(cut -d' ' -f1 "$RUNNER_TEMP/sha-a")
-          b=$(cut -d' ' -f1 "$RUNNER_TEMP/sha-b")
+          cd "$RUNNER_TEMP/setup-exe"
+          a=$(sha256sum clauseo-sandbox-setup-a.exe | cut -d' ' -f1)
+          b=$(sha256sum clauseo-sandbox-setup-b.exe | cut -d' ' -f1)
           if [ "$a" != "$b" ]; then
             echo "::error::two clean builds of clauseo-sandbox-setup.exe differ: $a and $b"
             exit 1
           fi
           echo "clauseo-sandbox-setup.exe ($TARGET) builds the same twice: $a" >> "$GITHUB_STEP_SUMMARY"
+
+      # Both exes, for the next diagnosis.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && steps.repro.outcome == 'failure'
+        with:
+          name: setup-exe-mismatch-${{ matrix.target }}
+          path: ${{ runner.temp }}/setup-exe
+          if-no-files-found: warn

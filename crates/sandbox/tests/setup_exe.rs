@@ -5,7 +5,7 @@
 //! (`DependentLoadFlags` = `LOAD_LIBRARY_SEARCH_SYSTEM32`, `/DEPENDENTLOADFLAG:0x800`), and
 //! the imports whose own imports aren't `KnownDLLs` are delay-loaded (`build.rs`, ADR 0049).
 //! Its `VERSIONINFO` names it, and its one `RT_MANIFEST` is the linker's, `setup.manifest`'s
-//! supported Windows versions merged in.
+//! supported Windows versions merged in. Its `DllCharacteristics` keep ASLR (high-entropy) and DEP.
 
 // Used by the msvc tests and the off-Windows one; windows-gnu builds neither.
 #[cfg(any(not(windows), target_env = "msvc"))]
@@ -78,6 +78,11 @@ mod pe {
 
         pub(crate) fn u32_at(&self, at: usize) -> usize {
             usize::try_from(u32::from_le_bytes(le::<4>(&self.bytes, at).unwrap())).unwrap()
+        }
+
+        /// The optional header's `DllCharacteristics`, 70 bytes into it.
+        pub(crate) fn dll_characteristics(&self) -> usize {
+            self.u16_at(self.optional + 70)
         }
 
         /// Data directory `index`'s RVA: they start 112 bytes into a PE32+ optional header, eight
@@ -191,6 +196,20 @@ fn static_imports_load_from_system32_only() {
         0x800,
         "LOAD_LIBRARY_SEARCH_SYSTEM32"
     );
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+#[test]
+fn the_exe_has_aslr_with_high_entropy_and_dep() {
+    let pe = Pe::read();
+    let flags = pe.dll_characteristics();
+    for (flag, name) in [
+        (0x20, "HIGH_ENTROPY_VA"),
+        (0x40, "DYNAMIC_BASE"),
+        (0x100, "NX_COMPAT"),
+    ] {
+        assert_eq!(flags & flag, flag, "{name} is off: {flags:#x}");
+    }
 }
 
 /// The imports that load after `main` has kept the DLL search to System32 (`build.rs`).
