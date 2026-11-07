@@ -14,6 +14,9 @@
 //! Without `rg` the tests are skipped by hand, but fail when `CI` is set, so they never skip
 //! quietly there.
 
+// Codex runs ripgrep on Linux only (bubblewrap); Seatbelt matches the globs as regexes, and
+// Windows has no fence.
+#![cfg(target_os = "linux")]
 #![expect(
     clippy::disallowed_methods,
     reason = "runs the system's ripgrep as Codex's sandbox does, and times it by hand"
