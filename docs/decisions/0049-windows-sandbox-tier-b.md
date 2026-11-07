@@ -1334,7 +1334,9 @@ admin copy.
    held or a write fails, no more users are tried (49), so the wait comes once at most.
    Marking first means a held set-up lock can delay the first kill by up to 30 s, once per run;
 7. only on a run that will end 0 (every pool user's process gone, every pool BITS job cancelled,
-   `ResetSids` written), writes `StopCompleted` (`REG_QWORD`, the `FILETIME` it completed)
+   `ResetSids` written), writes `StopCompleted` (`REG_QWORD`, a `FILETIME`: when the last clean
+   observation began, the earlier of the pass that found no pool user's process and the BITS
+   step's enumeration, so a pool process started after it isn't claimed covered)
    and `StopLeft` (`REG_DWORD`, 0) into the record, under the set-up lock. Both are set-up
    values outside the record proper, deleted with the record by `--remove`. A run that is ended,
    interrupted by the task's limit, or exits non-zero never writes them and leaves an earlier

@@ -7,7 +7,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use super::*;
 
 /// A completion written by an earlier run, which a run that doesn't end 0 must leave alone.
-const EARLIER: Option<(u32, usize)> = Some((0, 1));
+const EARLIER: Option<(u64, usize)> = Some((7, 1));
 
 #[test]
 fn a_run_that_ends_0_writes_the_completion_with_none_left_last_and_under_the_lock() {
@@ -15,9 +15,38 @@ fn a_run_that_ends_0_writes_the_completion_with_none_left_last_and_under_the_loc
     fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
     fake.jobs = Ok(vec![Some(sid(1011))]);
     assert_eq!(stop(&mut fake), StopExit::Done);
-    assert_eq!(fake.completed, Some((0, 1)), "StopLeft 0, written once");
+    assert_eq!(
+        fake.completed.map(|(_, writes)| writes),
+        Some(1),
+        "written once"
+    );
     assert_eq!(fake.done.last().map(String::as_str), Some("completed"));
     assert!(!fake.held, "the lock is given back");
+}
+
+#[test]
+fn the_stamp_is_when_the_clean_pass_began_not_when_it_is_written() {
+    let mut fake = Fake::new(&[1010, 1011]);
+    // The first pass (at 0 s) stops three; the second begins at 1 s and finds none. The BITS
+    // step begins at 2 s, and the completion is written then.
+    fake.snapshots = vec![Ok(busy()), Ok(Vec::new())];
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    let (at, _) = fake.completed.unwrap();
+    assert_eq!(
+        at,
+        filetime(Duration::from_secs(1)),
+        "the clean pass's start"
+    );
+    assert_ne!(at, filetime(fake.now), "not the write's time");
+    assert!(at < filetime(fake.now));
+    // Nothing running: the one pass is the clean one, before the BITS step.
+    let mut fake = Fake::new(&[1010]);
+    fake.snapshots = vec![Ok(Vec::new())];
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(
+        fake.completed.map(|(at, _)| at),
+        Some(filetime(Duration::ZERO))
+    );
 }
 
 #[test]

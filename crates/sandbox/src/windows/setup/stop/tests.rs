@@ -15,6 +15,11 @@ const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
 const OWN_PID: u32 = 900;
 
+/// The fake clock's `elapsed` as a `FILETIME`, from an arbitrary start.
+fn filetime(elapsed: Duration) -> u64 {
+    133_000_000_000_000_000 + u64::try_from(elapsed.as_nanos() / 100).unwrap()
+}
+
 fn sid(rid: u32) -> Sid {
     Sid::parse(&format!("S-1-5-21-1-2-3-{rid}")).unwrap()
 }
@@ -62,8 +67,8 @@ struct Fake {
     held: bool,
     /// The record's `ResetSids`.
     resets: Vec<Sid>,
-    /// The record's `StopLeft` once `StopCompleted` is written, with each write counted.
-    completed: Option<(u32, usize)>,
+    /// The record's `StopCompleted` once written, with each write counted.
+    completed: Option<(u64, usize)>,
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
@@ -229,13 +234,17 @@ impl Stopper for Fake {
         Ok(())
     }
 
-    fn record_completed(&mut self) -> Result<(), Failed> {
+    fn now(&mut self) -> u64 {
+        filetime(self.now)
+    }
+
+    fn record_completed(&mut self, at: u64) -> Result<(), Failed> {
         assert!(self.held, "written under the set-up lock");
         if self.marks == Marks::CompletionFails {
             return Err("RegSetValueExW failed (5)".to_owned());
         }
         let writes = self.completed.map_or(0, |(_, writes)| writes);
-        self.completed = Some((0, writes + 1));
+        self.completed = Some((at, writes + 1));
         self.done.push("completed".to_owned());
         Ok(())
     }
