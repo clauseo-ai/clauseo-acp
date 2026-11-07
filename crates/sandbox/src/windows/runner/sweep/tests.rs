@@ -1,6 +1,6 @@
 //! The sweep through a fake process list: who is killed, what fails closed, the job's
 //! processes kept only by a sweep given the job, the second listing, and the end sweeper's
-//! creation-time cutoff.
+//! creation-time cutoff, the children of what it killed, and its second pass.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,6 +24,8 @@ struct Proc {
     /// Its DACL shuts its user out: the opening list can't read its user, and only the service's
     /// list names it.
     hidden: bool,
+    /// The pid that created it, as the snapshot gives it.
+    parent: u32,
 }
 
 fn proc(owner: Owner, image: &'static str) -> Proc {
@@ -33,6 +35,7 @@ fn proc(owner: Owner, image: &'static str) -> Proc {
         in_job: false,
         started: 100,
         hidden: false,
+        parent: 4,
     }
 }
 
@@ -64,11 +67,19 @@ struct Fake {
     /// Opening a hidden process with `WRITE_DAC` and granting itself works (no `OWNER RIGHTS`
     /// entry): its next open succeeds.
     regrant: bool,
+    /// The opening list's nth call (from 1) finds these processes started meanwhile.
+    appear: BTreeMap<usize, Vec<(u32, Proc)>>,
+    /// How many times the opening list was read.
+    lists: usize,
 }
 
 impl Processes for Fake {
     type Process = u32;
     fn list(&mut self) -> io::Result<Vec<Seen>> {
+        self.lists += 1;
+        for (pid, proc) in self.appear.remove(&self.lists).unwrap_or_default() {
+            self.procs.insert(pid, proc);
+        }
         Ok(self
             .procs
             .iter()
@@ -80,6 +91,7 @@ impl Processes for Fake {
                 } else {
                     p.owner.clone()
                 },
+                parent: Some(p.parent),
             })
             .collect())
     }
@@ -93,11 +105,13 @@ impl Processes for Fake {
                 pid: *pid,
                 image: p.image.to_owned(),
                 owner: p.owner.clone(),
+                parent: None,
             })
             .chain([Seen {
                 pid: 0,
                 image: "System Idle Process".to_owned(),
                 owner: Owner::None,
+                parent: None,
             }])
             .collect())
     }
@@ -428,4 +442,111 @@ fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
         "{got:?}"
     );
     assert_eq!(calls.0.killed, Vec::<u32>::new());
+}
+
+/// A process of the pool user created at `started` by `parent`.
+fn child(image: &'static str, started: u64, parent: u32) -> Proc {
+    Proc {
+        started,
+        parent,
+        ..pool_proc(image)
+    }
+}
+
+#[test]
+fn the_end_sweeper_kills_what_a_process_it_killed_started_after_it_started() {
+    // The sweeper started at 1000. Killing the old agent sets off a child (created at 1200, its
+    // parent the old agent), which the cutoff alone would spare; the child's own child goes too.
+    // The next session's inner (its parent the next outer, 900 the lawyer's) and agent are kept.
+    let mut fake = machine();
+    fake.procs.insert(30, pool_proc("sweeper.exe"));
+    fake.procs.insert(31, child("old-agent.exe", 800, 4));
+    fake.spawns.insert(31, (50, child("forked.exe", 1_200, 31)));
+    fake.spawns
+        .insert(50, (51, child("grandchild.exe", 1_300, 50)));
+    fake.procs.insert(40, child("next-inner.exe", 1_500, 900));
+    fake.procs.insert(41, child("next-agent.exe", 1_600, 40));
+    let (got, _) = run(&mut fake, &[30], Point::Sweeper);
+    assert_eq!(got, Ok(vec![31, 50, 51]));
+    assert!(fake.procs.contains_key(&40) && fake.procs.contains_key(&41));
+    // 20 is killed, then 31, its child (created at 1100). 60 (created at 1050) names 31 as its
+    // parent, but an earlier process had pid 31 then: it isn't the killed one's child, and is
+    // kept.
+    let mut fake = machine();
+    fake.procs.insert(30, pool_proc("sweeper.exe"));
+    fake.procs.insert(20, child("old.exe", 800, 4));
+    fake.procs.insert(31, child("forked.exe", 1_100, 20));
+    fake.procs.insert(60, child("next.exe", 1_050, 31));
+    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![20, 31]));
+    assert!(fake.procs.contains_key(&60));
+    // A process created after the sweeper by one it didn't kill is kept.
+    let mut fake = machine();
+    fake.procs.insert(30, pool_proc("sweeper.exe"));
+    fake.procs.insert(31, child("next-inner.exe", 1_100, 900));
+    fake.procs.insert(60, child("next-agent.exe", 1_150, 31));
+    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![]));
+}
+
+#[test]
+fn the_end_sweepers_second_pass_kills_what_got_past_the_first() {
+    // The first pass kills 31 and its listing after that finds nothing new. A child 31 started
+    // shows only in the next listing, the second pass's first: that pass kills it, knowing 31.
+    let setup = || {
+        let mut fake = machine();
+        fake.procs.insert(30, pool_proc("sweeper.exe"));
+        fake.procs.insert(31, child("old-agent.exe", 800, 4));
+        // Lists: 1 and 2 are the first round's two (31 killed), 3 the quiet round's.
+        fake.appear
+            .insert(4, vec![(52, child("late-child.exe", 1_200, 31))]);
+        fake
+    };
+    let mut fake = setup();
+    let mut lines = Vec::new();
+    let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |l| {
+        lines.push(l.to_owned());
+    });
+    assert_eq!(got, Ok(vec![31, 52]));
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[1].contains("process 52 (late-child.exe)"),
+        "{lines:?}"
+    );
+    // One pass alone leaves it; a fresh sweep, not knowing 31, spares it as created after.
+    let mut fake = setup();
+    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![31]));
+    assert_eq!(run(&mut fake, &[30], Point::Sweeper).0, Ok(vec![]));
+    assert!(fake.procs.contains_key(&52));
+}
+
+#[test]
+fn the_end_sweeper_gives_its_second_pass_result() {
+    // Left by both passes: the second pass's failure, the first's logged.
+    let mut fake = machine();
+    fake.procs.insert(
+        12,
+        Proc {
+            hidden: true,
+            ..pool_proc("hidden.exe")
+        },
+    );
+    let mut lines = Vec::new();
+    let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |l| {
+        lines.push(l.to_owned());
+    });
+    assert!(
+        matches!(got, Err(SweepError::Left { count: 1, .. })),
+        "{got:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with(
+            "clauseo-sandbox-run: sweep (end sweeper), first pass: 1 of the sandbox user's"
+        )),
+        "{lines:?}"
+    );
+    // Ended by the second pass: no failure.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("stuck.exe"));
+    fake.deny_kill.insert(12, 1);
+    let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |_| {});
+    assert_eq!(got, Ok(vec![12]));
 }
