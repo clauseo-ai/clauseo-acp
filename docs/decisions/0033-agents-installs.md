@@ -272,8 +272,10 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    thread, which starts with the setup thread, beside the keys' load and never on the window's
    start path. A PAC `DIRECT` is no proxy, and an empty value is unset. The CA files are
    `network.ca_certs` alone. `Agents` starts with the settings' and the environment's route and
-   then takes the OS's, and every `SettingsChanged` resolves again: `Agents::set_network` hands the
-   result to the next sign-in job (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a
+   then takes the OS's, every `SettingsChanged` resolves again, and so does the network thread once
+   the route is 60 s old (each install try first asks for a fresh route, waiting at most the 5 s
+   budget, and within the 60 s takes it as it is, with no OS lookup): `Agents::set_network` hands
+   the result to the next sign-in job (`InstallConfig::proxy` and `signin_proxy`; a sign-in with a
    proxy gets `NO_PROXY` with the loopback names, where its OAuth callback listens, and every
    sign-in run gets `NODE_USE_SYSTEM_CA=1` and Codex's CA as `CODEX_CA_CERTIFICATE`) and to every
    install try, a running job's next one too (each try reads the current network as it makes its
@@ -297,11 +299,11 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
    one fixed proxy serves a launch's every host, the OS's answer for the agent's primary API host,
    so a PAC script's fallbacks and other per-host answers, and the OS's bypass list, are not
    applied to it; the sandbox's lookup does not tell a static OS proxy from a PAC one, so the log
-   says `os` for both; the route is not resolved again when the computer changes networks, so after
-   changing networks (office, home, VPN), restart Clauseo. Chaining the sandbox's egress proxy
-   (tiers A and B, S16) to this upstream is stage C's: the route gives it `NetworkRoute::upstream`
-   (`Fixed` for a setting, else `System`) and `ca_cert`, and an `https://` setting, which that
-   proxy cannot chain to, is logged once per change.
+   says `os` for both; a launch takes the route as the slot holds it and never waits, so after a
+   network change (office, home, VPN) it may take the old proxy for up to about a minute. Chaining
+   the sandbox's egress proxy (tiers A and B, S16) to this upstream is stage C's: the route gives
+   it `NetworkRoute::upstream` (`Fixed` for a setting, else `System`) and `ca_cert`, and an
+   `https://` setting, which that proxy cannot chain to, is logged once per change.
 
 ## Consequences
 

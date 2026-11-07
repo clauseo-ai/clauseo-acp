@@ -142,7 +142,7 @@ mod write;
 pub mod testing;
 
 pub use config::{
-    AgentsConfig, Clock, InstallConfig, Network, NodeSearch, SigninConfig, SystemClock,
+    AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
 };
 pub use fileid::same_file;
 pub use log::InstallLog;
