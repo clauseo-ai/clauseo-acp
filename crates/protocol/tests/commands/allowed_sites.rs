@@ -97,18 +97,20 @@ fn the_query_is_a_plain_string_and_its_answer_names_each_field() {
             scope: AllowScope::Always,
             matter: None,
             allowed_at: at,
+            saved: true,
         },
         AllowedSite {
             host: "evil.example".to_owned(),
             scope: AllowScope::Matter,
             matter: Some(matter_id(1)),
             allowed_at: at,
+            saved: false,
         },
     ]);
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
         format!(
-            r#"{{"allowed_sites":[{{"host":"phish.test","scope":"always","allowed_at":1794031200000}},{{"host":"evil.example","scope":"matter","matter":"{}","allowed_at":1794031200000}}]}}"#,
+            r#"{{"allowed_sites":[{{"host":"phish.test","scope":"always","allowed_at":1794031200000,"saved":true}},{{"host":"evil.example","scope":"matter","matter":"{}","allowed_at":1794031200000,"saved":false}}]}}"#,
             matter_id(1)
         )
     );
@@ -129,4 +131,22 @@ fn the_notice_expired_code_is_not_retryable() {
     assert_eq!(code.as_str(), "blocklist.notice_expired");
     assert!(!code.is_retryable());
     assert_eq!(ErrorCode::from_str_lossy("blocklist.notice_expired"), code);
+}
+
+#[test]
+fn the_not_saved_codes_are_not_retryable() {
+    for (code, text) in [
+        (
+            ErrorCode::BlocklistAllowNotSaved,
+            "blocklist.allow_not_saved",
+        ),
+        (
+            ErrorCode::BlocklistRevokeNotSaved,
+            "blocklist.revoke_not_saved",
+        ),
+    ] {
+        assert_eq!(code.as_str(), text);
+        assert!(!code.is_retryable());
+        assert_eq!(ErrorCode::from_str_lossy(text), code);
+    }
 }

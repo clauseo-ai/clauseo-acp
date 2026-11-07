@@ -36,7 +36,8 @@
 //! - The lawyer's "Allow this site" (0053, PR 2; `actor/allowed.rs`): `AllowBlockedSite`
 //!   allows the exact host of a `SiteBlocked` notice the host keeps (each thread's latest 64),
 //!   for its matter or always; `RevokeAllowedSite` and `AllowedSites` take back and list. Stored in
-//!   `<data folder>/blocklist/allowed.json`, never in the settings; [`AllowedSites`] gives each
+//!   `<data folder>/blocklist/allowed.json`, never in the settings, its sha256 in the OS secret
+//!   store (`BlockListSeams::with_secrets`); [`AllowedSites`] gives each
 //!   launch's proxy a live per-matter view, empty while `network.allow_unsafe_site_override`
 //!   is off.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on

@@ -255,7 +255,7 @@ its step card, and compare (below) lists the files between any two versions.
 | This computer's protection (0051) | `HostQuery::Protection` returns `QueryResult::Protection` | `tier`, `computer` (a `Protection`), `required`, `unprotected_auto_allowed`; `command.invalid` until the host builds it |
 | Remove the sandbox's set-up (0051) | `HostCommand::RemoveSandboxSetup` | one administrator prompt; `command.invalid` until the host builds it |
 | Site blocked: the agent asked for a site the block list names (0053) | `HostEvent::SiteBlocked` | `host`, `tag` (`phishing`, `malware`; `unknown` from a newer Clauseo), `list_generated`, `override_allowed`; one notice per `block_id`, its `count` updated when re-sent; with `override_allowed`, "Allow this site" sends `HostCommand::AllowBlockedSite` (`matter` or `always`); the notice under the turn's answer (`ui/app/src/room/thread/site-blocked.tsx`), only where the event names a thread and a turn |
-| Sites allowed despite the block list (0053, PR 2) | `HostQuery::AllowedSites` returns `QueryResult::AllowedSites` | per site: `host`, `scope` (`matter`, `always`), `matter` for `matter`, `allowed_at`; each removed with `HostCommand::RevokeAllowedSite`; none is honoured while `network.allow_unsafe_site_override` is in `SettingsView::locked` as false; Settings, Privacy, "Allowed sites" (`ui/app/src/settings/sections/allowed-sites.tsx`), matter names from `matters_changed` |
+| Sites allowed despite the block list (0053, PR 2) | `HostQuery::AllowedSites` returns `QueryResult::AllowedSites` | per site: `host`, `scope` (`matter`, `always`), `matter` for `matter`, `allowed_at`, `saved` (false when Clauseo couldn't save the allow, so it lasts until Clauseo closes); each removed with `HostCommand::RevokeAllowedSite`; none is honoured while `network.allow_unsafe_site_override` is in `SettingsView::locked` as false; Settings, Privacy, "Allowed sites" (`ui/app/src/settings/sections/allowed-sites.tsx`), matter names from `matters_changed` |
 | Matter idle | `MatterStatus::Idle` | nothing runs, nothing to read |
 | Matter working | `MatterStatus::Working` | a thread's turn starts, runs or waits for the writer |
 | Matter needs a permission | `MatterStatus::NeedsPermission` | outranks every other status |
@@ -345,6 +345,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
 | "Allow this site" is turned off, by the firm's policy or in settings (0053) | `ErrorCode::BlocklistOverrideOff` | no |
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
+| "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
+| Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

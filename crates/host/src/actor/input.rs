@@ -268,6 +268,9 @@ pub(crate) enum Input {
     /// End the thread at once (tests); the sender is answered once the store is closed.
     #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
+    /// The allowed sites' start-up read or a save's outcome, from their thread, or the read's
+    /// deadline (`allowed/saving.rs`).
+    Allowed(Box<super::allowed::AllowedInput>),
 }
 
 impl std::fmt::Debug for Input {
@@ -303,6 +306,7 @@ impl std::fmt::Debug for Input {
             Self::Protection(_) => "Protection",
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
+            Self::Allowed(_) => "Allowed",
         };
         f.write_str(name)
     }

@@ -471,4 +471,18 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (364, 0x5d63_342b_9689_b794),
         (266, 0xaedd_5424_3350_9aee),
     ),
+    (
+        "added/turn_failed-BlocklistAllowNotSaved",
+        include_bytes!("added/turn_failed-BlocklistAllowNotSaved.jsonl"),
+        include_bytes!("added/turn_failed-BlocklistAllowNotSaved.msgpack"),
+        (362, 0x4c04_bba7_c2cd_b687),
+        (264, 0x5a55_c4fd_0dfb_05e3),
+    ),
+    (
+        "added/turn_failed-BlocklistRevokeNotSaved",
+        include_bytes!("added/turn_failed-BlocklistRevokeNotSaved.jsonl"),
+        include_bytes!("added/turn_failed-BlocklistRevokeNotSaved.msgpack"),
+        (353, 0x425a_63f5_b282_5767),
+        (254, 0x3ee9_b135_98a3_b977),
+    ),
 ];

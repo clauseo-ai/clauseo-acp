@@ -255,6 +255,12 @@ error_codes! {
     BlocklistNoticeExpired = "blocklist.notice_expired", retryable: false, meaning: "The \
         blocked-site notice an allow names is one the host no longer keeps (too old, or from \
         before a restart), so nothing was allowed: allow the site from a new notice.";
+    BlocklistAllowNotSaved = "blocklist.allow_not_saved", retryable: false, meaning: "The \
+        allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store \
+        or the data folder failed), so the site is blocked again after a restart.";
+    BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
+        site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
+        saved allows, so the site may be allowed again after a restart.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

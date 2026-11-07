@@ -56,18 +56,20 @@ const SETTINGS: Settings = {
   locked: [],
 };
 const AT = Date.UTC(2026, 10, 5, 6);
-const ALWAYS: AllowedSite = { host: "cdn.example", scope: "always", allowed_at: AT };
+const ALWAYS: AllowedSite = { host: "cdn.example", scope: "always", allowed_at: AT, saved: true };
 const IN_MATTER: AllowedSite = {
   host: "invoice-paypa1.example",
   scope: "matter",
   matter: MATTER,
   allowed_at: AT,
+  saved: true,
 };
 const GONE: AllowedSite = {
   host: "old.example",
   scope: "matter",
   matter: uuid(5, 2),
   allowed_at: AT,
+  saved: true,
 };
 const NAMED = { matter: MATTER, name: "Sharma v. State of Delhi", kind: "folder" } as MatterInfo;
 

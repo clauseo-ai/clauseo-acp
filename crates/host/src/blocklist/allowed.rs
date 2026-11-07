@@ -2,7 +2,8 @@
 //! egress proxies read them: [`AllowedSites`] hands each launch a live per-matter view, and the
 //! actor republishes every view after each allow, revoke and `SettingsChanged` (the policy file
 //! is read only at start, so a policy change applies at the next start). What is stored is in
-//! `allowed/file.rs`; the commands are the actor's (`actor/allowed.rs`).
+//! `allowed/file.rs`, its hash in the OS secret store `allowed/integrity.rs`; the commands are
+//! the actor's (`actor/allowed.rs`).
 //!
 //! - A matter's view is its `Matter` allows and every `Always` one, exact hosts; empty while
 //!   `network.allow_unsafe_site_override` is off, whatever is stored.
@@ -18,6 +19,7 @@ use clauseo_blocklist::Allowed;
 use clauseo_protocol::MatterId;
 
 pub(crate) mod file;
+pub(crate) mod integrity;
 
 /// The allowed sites in force: per matter and for every matter. Empty when overrides are off.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -48,6 +50,7 @@ pub struct AllowedSites {
 
 #[derive(Debug, Default)]
 struct Inner {
+    loaded: bool,
     in_force: InForce,
     views: BTreeMap<MatterId, Weak<Allowed>>,
 }
@@ -77,6 +80,23 @@ impl AllowedSites {
             }
         }
         inner.in_force = in_force;
+    }
+
+    /// Whether this run's stored allows are in place: read and checked, or given up on. Until
+    /// then every view is empty, whatever is stored.
+    pub fn loaded(&self) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .loaded
+    }
+
+    /// Marks the stored allows in place ([`Self::loaded`]).
+    pub(crate) fn mark_loaded(&self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .loaded = true;
     }
 
     /// How many views are kept (tests).

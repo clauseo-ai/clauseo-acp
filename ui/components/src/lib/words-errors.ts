@@ -84,6 +84,8 @@ export type ErrorCode =
   | "sandbox.blocked"
   | "blocklist.override_off"
   | "blocklist.notice_expired"
+  | "blocklist.allow_not_saved"
+  | "blocklist.revoke_not_saved"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -197,6 +199,14 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // keeps (decision record 0053)
   "blocklist.notice_expired":
     "This notice has expired. Open the site again, then allow it from the new notice.",
+  // provisional (stage E, Rohan's batch review): "Allow this site" that lasts until Clauseo
+  // closes, because the host couldn't save it (decision record 0053)
+  "blocklist.allow_not_saved":
+    "Allowed until Clauseo closes. Clauseo couldn't save it, so it won't be allowed after a restart.",
+  // provisional (stage E, Rohan's batch review): "Remove" of an allow that lasts until
+  // Clauseo closes, because the host couldn't save that (decision record 0053)
+  "blocklist.revoke_not_saved":
+    "Removed until Clauseo closes. Clauseo couldn't save this, so the site may be allowed again after a restart.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

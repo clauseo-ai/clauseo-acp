@@ -205,9 +205,71 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
   (`{"v":1,"always":{host: ms},"matters":{id: {host: ms}}}`), written whole through
   `write::replace_private_file`, never in `settings.json`, with the stored list's discipline
   (`blocklist/disk.rs`): leftover temp files swept first, the folder synced after. Read at
-  start, capped at 1 MiB and 10,000 allows (the rest ignored, logged); a damaged or larger file
-  counts as no allows (logged). The writes run on the actor thread, fsync included, as
-  `connectors/hints.json`'s do: a small file, written only on the lawyer's act.
+  start, capped at 4 MiB and 10,000 allows (the rest ignored, logged); a damaged or larger file
+  counts as no allows (logged). 10,000 allows at their longest (a 253-byte host, each in its own
+  matter) take about 3.0 MiB. A new allow past 10,000 is refused with `command.invalid` (a count
+  past its most, 0003) and changes nothing. Each `AllowedSite` says whether it is `saved`:
+  whether the next start would honour it.
+- **Integrity** (`blocklist/allowed/integrity.rs`, security review fix 5): the lowercase hex
+  sha256 of the file's bytes as last written is kept in the OS secret store
+  (`clauseo_connectors::SecretStore`; the desktop's keychain under its own service
+  `ai.clauseo.desktop.blocklist`, apart from the connectors', account
+  `blocklist-allowed-sha256`), handed to the host by `BlockListSeams::with_secrets`. The host
+  asks the store once, at the start, and trusts the file only when its bytes hash to the item.
+  - **One thread of its own** (`clauseo-allowed`, `actor/allowed/saving.rs`) does the read
+    (the store's `get` and the file) and then every save, in order, never the actor, so a
+    Keychain prompt holds up only the allowed sites, never the host or the app. Until the read
+    is back every view is empty and `AllowedSites` lists none; an allow or revoke sent
+    meanwhile is held and run, in order, once it is. A thread the OS refuses, or a read not
+    back within 30 s (a prompt left open; the host clock's timer), counts as no store for the
+    run, logged once; a read that lands later is ignored. `AllowedSites::loaded` tells
+    whether the read is in. A command held, or waiting on its save, when the host stops is
+    dropped with the stop.
+  - **At the host's stop** the queue gets up to 2 s (host clock) to drain. A revoke still
+    unsaved then deletes the stored hash as the stop's last step, on a thread of its own waited
+    on for at most 1 s more (a Keychain prompt cannot hold the stop past 3 s in all), so the
+    next start honours no allows rather than the revoked site; allows still queued are lost
+    (they were never saved). The thread is told first to write nothing more: a save it
+    finishes later writes no file and deletes the hash it just set (its state may equal the
+    old file's, a repeat allow or a revoke that removed nothing), so no matching pair remains.
+  - No item while the file exists, a hash that does not match (an edit, or an older copy put
+    back: the item holds the latest hash, so a rollback fails too), means no allows, logged.
+    No file is no allows, whatever the item.
+  - No store (no seam, Linux's `Unsupported`), a refusal (a macOS Keychain "Deny", say after
+    an update) or any other store error means no allows for the run, logged once; the store is
+    not asked again that run (but for one delete, below), so a denied prompt never repeats. The
+    run then keeps what the lawyer allows and revokes in memory only and writes nothing.
+  - **An allow or revoke takes effect in memory at once,** and is answered once its save is:
+    `Done` when saved. Each save is the whole state: **the hash first, then the file**. A hash
+    not set writes nothing (the old pair stays whole) and turns the run to writing nothing. A
+    file not written after its hash leaves a mismatch, as does a crash between the two: the
+    next start has no allows. Both fail closed: the worst outcome is the sites blocked again.
+  - **A save that fails is visible:** an allow answers `blocklist.allow_not_saved` (it lasts
+    until Clauseo closes). A revoke whose save fails while the stored pair may still hold the
+    site **deletes the stored hash** (`SecretStore::delete`), so the next start honours no
+    allows rather than the revoked one, and answers `Done`; in a run that writes nothing the
+    delete is tried once. If the delete fails too, it answers `blocklist.revoke_not_saved`:
+    the site may be allowed again after a restart. With no store at all (Linux, no seam) no
+    start honours an allow, so a revoke answers `Done`; allows still answer
+    `blocklist.allow_not_saved`. Both codes are errors whose change still
+    applied (0003), not retryable within the run.
+  - A file the start rejected (unreadable, over the cap, unparsable, no item, a mismatch) is
+    moved to `allowed.json.rejected-<UTC time, YYYYMMDDTHHMMSSZ>` beside it (`-<n>` after a
+    taken name) at the run's first write, never at the start, and logged with the reason and
+    the new name, so the old allows and the evidence of tampering survive; only the latest 3
+    are kept. The move never replaces a file (a hard link, then the old name removed), so the
+    free-name check has no race. Where the folder takes no hard link (FAT, exFAT, some network
+    shares) it checks the name is free and renames instead, a small race accepted there alone
+    (only from inside the fenced folder). A move that fails overwrites nothing and the run
+    writes nothing more. The temp-file sweep (`allowed.json.clauseo-*.new`) never matches them, and
+    the agent's fence denies `blocklist/`.
+  - **Strength, per OS.** macOS: real; the Keychain item trusts only the app that made it, and
+    any other process (a script running `security`) gets a prompt the lawyer must allow.
+    Windows tier B: real; the agent runs as a pool user, a different account, which cannot read
+    the owner's Credential Manager. Windows tier C: obfuscation only; Credential Manager has no
+    per-app access control, so any process of the same user can read **and write** the item,
+    and an unsandboxed agent could forge the file and its hash together. Linux: none; there is
+    no store, so allows never outlive a run (not a product target).
 - **Enforcement:** `ProxyConfig::allowed` (`clauseo_blocklist::Allowed`, empty by default) is
   asked in `Ctx::blocked` (`proxy/server/blocked.rs`) before the list, by each name the
   request carries; an allowed name skips the list only, and still meets the silent list, the
@@ -228,13 +290,15 @@ the core (protocol, host, desktop bridge and proxy, below); its UI comes after.
   `Matter` and refused for `Always`), since one host can be allowed in several matters.
 - **The code is `blocklist.override_off`,** not `settings.locked`: the key may be off by policy
   or in `settings.json`, and the window needs to tell this refusal apart.
-- **An allow is written before it takes effect** (a failed write is `store.io` and allows
-  nothing); **a revoke takes effect first** (a failed write is `store.io`, and the site stays
-  blocked until a restart reads the old file), so a disk failure never leaves a site allowed
-  that the lawyer took back in this run.
-- **A revoke always writes the file,** even when memory no longer holds the allow, so retrying
-  a revoke whose write failed saves it and the allow does not come back at the next start.
+- **Changes apply before their save, answered after it:** the save runs off the actor, so the
+  views change at once and the reply says whether the change outlives the run
+  (`blocklist.allow_not_saved`, `blocklist.revoke_not_saved`), never `store.io`.
+- **Every allow and revoke saves the whole state,** even when nothing changed in memory, so
+  retrying one whose save failed puts it right once the store and the disk work.
 - **Allowing again keeps the first `allowed_at`;** revoking what is not there answers `Done`.
+- **The integrity check is a hash in the secret store, not a MAC in the file:** sha256 is
+  already the host's (0024), so no crate is added; the item is replaced at each save, so it
+  refuses a rollback as a MAC alone would not. While the store is unusable, allows last one run.
 - **The agent's fence denies `blocklist/`** (`agent/data_fence.rs`'s `DENIED` for Claude,
   `agent/codex_fence.rs`'s `DATA_DENIED` for Codex) whether or not it exists at the launch, so
   no agent reads or edits the stored list or the lawyer's allows.

@@ -2,13 +2,19 @@
 //! update settings, with the snapshot bundled at `<resource dir>/blocklist/`
 //! (`blocklist-v1.txt.gz` and its `.minisig`). A build without the snapshot (a dev build)
 //! starts unloaded and blocks nothing until the host's first fetch succeeds. Beside it, the
-//! lawyer's allowed sites (PR 2): the views the host publishes them to, one per matter.
+//! lawyer's allowed sites (PR 2): the views the host publishes them to, one per matter, and the
+//! OS keychain that keeps `allowed.json`'s hash, under the service [`KEYCHAIN_SERVICE`] (none on
+//! Linux, where allows last one run).
 
 use std::sync::Arc;
 
 use clauseo_blocklist::Current;
+use clauseo_connectors::KeyringStore;
 use clauseo_host::{AllowedSites, BlockListSeams, HostConfig};
 use tauri::{AppHandle, Manager as _, Runtime};
+
+/// The keychain service the allowed sites' hash is filed under, apart from the connectors'.
+pub(crate) const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop.blocklist";
 
 /// The bundled snapshot's folder under the app's resource folder.
 const BUNDLED_FOLDER: &str = "blocklist";
@@ -43,8 +49,13 @@ impl std::ops::Deref for AllowedSitesInUse {
 
 /// `config` with the block list: a fresh list in use (also put in `app`'s managed state as
 /// [`BlockListInUse`]), fresh allowed sites' views (in it as [`AllowedSitesInUse`]), the bundled
-/// folder when Tauri knows the resource folder, and the release's update settings.
-pub(crate) fn with_blocklist<R: Runtime>(app: &AppHandle<R>, config: HostConfig) -> HostConfig {
+/// folder when Tauri knows the resource folder, the release's update settings, and `secrets`,
+/// the keychain the connectors use too (`connectors::secret_store`), under [`KEYCHAIN_SERVICE`].
+pub(crate) fn with_blocklist<R: Runtime>(
+    app: &AppHandle<R>,
+    config: HostConfig,
+    secrets: Option<KeyringStore>,
+) -> HostConfig {
     let bundled = match app.path().resource_dir() {
         Ok(folder) => Some(folder.join(BUNDLED_FOLDER)),
         Err(err) => {
@@ -56,7 +67,10 @@ pub(crate) fn with_blocklist<R: Runtime>(app: &AppHandle<R>, config: HostConfig)
     app.manage(BlockListInUse(Arc::clone(&current)));
     let allowed = Arc::new(AllowedSites::default());
     app.manage(AllowedSitesInUse(Arc::clone(&allowed)));
-    BlockListSeams::release(current, bundled)
-        .with_allowed(allowed)
-        .apply(config)
+    let seams = BlockListSeams::release(current, bundled).with_allowed(allowed);
+    match secrets {
+        Some(secrets) => seams.with_secrets(Arc::new(secrets.with_service(KEYCHAIN_SERVICE))),
+        None => seams,
+    }
+    .apply(config)
 }

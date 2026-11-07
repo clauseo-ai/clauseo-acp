@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use clauseo_blocklist::{Allowed, Current, Generated, Tag};
+use clauseo_connectors::{MemoryStore, SecretStore};
 use clauseo_host::{AllowedSites, BlockListSeams, BlockListUpdate, BlockedSite, SessionKey};
 use clauseo_protocol::{
     AllowScope, AllowedSite, BlockedSiteId, CommandOutcome, ErrorCode, HostCommand, HostEvent,
@@ -19,19 +20,54 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 const AGENTS: &[(&str, Scenario)] = &[(FAKE, Scenario::Bundled("prompt-stream"))];
 
 /// Starts run `run` with block list seams that fetch nothing (no host is allowed to fetch
-/// from) and `sites` as the allowed sites' views.
-fn start(dir: &Dir, run: u16, sites: &Arc<AllowedSites>) -> Running {
+/// from), `sites` as the allowed sites' views and `keychain` keeping `allowed.json`'s hash.
+pub(crate) fn start(
+    dir: &Dir,
+    run: u16,
+    sites: &Arc<AllowedSites>,
+    keychain: &Arc<MemoryStore>,
+) -> Running {
+    let secrets: Arc<dyn SecretStore> = Arc::clone(keychain) as Arc<dyn SecretStore>;
+    let host = start_with_secrets(dir, run, sites, Some(secrets));
+    wait_loaded(sites);
+    host
+}
+
+/// Waits until the host has read and checked the stored allows (off its thread).
+pub(crate) fn wait_loaded(sites: &AllowedSites) {
+    wait("the allowed sites' read", async {
+        while !sites.loaded() {
+            async_io::Timer::after(std::time::Duration::from_millis(5)).await;
+        }
+    });
+}
+
+/// [`start`] with `secrets` as the seams' secret store, or none, not waiting for the read.
+pub(crate) fn start_with_secrets(
+    dir: &Dir,
+    run: u16,
+    sites: &Arc<AllowedSites>,
+    secrets: Option<Arc<dyn SecretStore>>,
+) -> Running {
     let update = BlockListUpdate {
         allowed_hosts: Vec::new(),
         ..BlockListUpdate::release()
     };
     let seams = BlockListSeams::new(Arc::new(Current::default()), None, update)
         .with_allowed(Arc::clone(sites));
+    let seams = match secrets {
+        Some(secrets) => seams.with_secrets(secrets),
+        None => seams,
+    };
     dir.start_with(run, |config| seams.apply(config))
 }
 
 /// Reports `host` blocked in `(matter, thread)` and returns the notice's id.
-fn notice(host: &Running, (matter, thread): (MatterId, ThreadId), site: &str) -> BlockedSiteId {
+pub(crate) fn notice(
+    host: &Running,
+    (matter, thread): (MatterId, ThreadId),
+    site: &str,
+) -> BlockedSiteId {
     let mut sub = wait(
         "subscribe_app",
         host.handle.subscribe_app(Principal::LocalDesktop),
@@ -62,11 +98,11 @@ fn notice(host: &Running, (matter, thread): (MatterId, ThreadId), site: &str) ->
         .expect("a notice")
 }
 
-fn allow(block_id: BlockedSiteId, scope: AllowScope) -> HostCommand {
+pub(crate) fn allow(block_id: BlockedSiteId, scope: AllowScope) -> HostCommand {
     HostCommand::AllowBlockedSite { block_id, scope }
 }
 
-fn listed(host: &Running) -> Vec<(String, AllowScope, Option<MatterId>)> {
+pub(crate) fn listed(host: &Running) -> Vec<(String, AllowScope, Option<MatterId>)> {
     match host.query(HostQuery::AllowedSites).unwrap() {
         QueryResult::AllowedSites(sites) => sites
             .into_iter()
@@ -83,15 +119,16 @@ fn listed(host: &Running) -> Vec<(String, AllowScope, Option<MatterId>)> {
     }
 }
 
-fn hosts(view: &Allowed) -> Vec<String> {
+pub(crate) fn hosts(view: &Allowed) -> Vec<String> {
     view.get().iter().cloned().collect()
 }
 
 #[test]
 fn an_allow_reaches_its_matters_view_at_once_and_survives_a_restart() {
     let dir = Dir::new("allowed_sites_matter", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 0, &sites);
+    let host = start(&dir, 0, &sites, &keychain);
     let (a, a_thread, _) = matter_with_thread(&dir, &host, "a", &[], FAKE);
     let (b, b_thread, _) = matter_with_thread(&dir, &host, "b", &[], FAKE);
     // A launch's view, taken before the allow: it follows every change.
@@ -128,7 +165,7 @@ fn an_allow_reaches_its_matters_view_at_once_and_survives_a_restart() {
     host.shutdown();
 
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 1, &sites);
+    let host = start(&dir, 1, &sites, &keychain);
     assert_eq!(listed(&host), want);
     assert_eq!(hosts(&sites.for_matter(a)), ["evil.example", "phish.test"]);
     // A revoke reaches the view at once.
@@ -148,8 +185,9 @@ fn an_allow_reaches_its_matters_view_at_once_and_survives_a_restart() {
 #[test]
 fn an_allow_names_a_notice_the_host_sent() {
     let dir = Dir::new("allowed_sites_unknown", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 0, &sites);
+    let host = start(&dir, 0, &sites, &keychain);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let real = notice(&host, (matter, thread), "evil.example");
     let made_up = BlockedSiteId::new(uuid::Uuid::now_v7()).unwrap();
@@ -167,8 +205,9 @@ fn an_allow_names_a_notice_the_host_sent() {
 #[test]
 fn with_overrides_off_nothing_is_allowed_or_honoured_and_nothing_is_deleted() {
     let dir = Dir::new("allowed_sites_policy", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 0, &sites);
+    let host = start(&dir, 0, &sites, &keychain);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let evil = notice(&host, (matter, thread), "evil.example");
     host.ok(allow(evil, AllowScope::Always));
@@ -177,7 +216,7 @@ fn with_overrides_off_nothing_is_allowed_or_honoured_and_nothing_is_deleted() {
     // The firm locks the key off: the stored allow is listed, honoured nowhere, and kept.
     dir.set_policy(r#"{"network": {"allow_unsafe_site_override": false}}"#);
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 1, &sites);
+    let host = start(&dir, 1, &sites, &keychain);
     let view = sites.for_matter(matter);
     assert_eq!(hosts(&view), Vec::<String>::new());
     let phish = notice(&host, (matter, thread), "phish.test");
@@ -195,13 +234,13 @@ fn with_overrides_off_nothing_is_allowed_or_honoured_and_nothing_is_deleted() {
     // Unlocked: the kept allow is honoured again, and revoking still works.
     dir.set_policy("{}");
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 2, &sites);
+    let host = start(&dir, 2, &sites, &keychain);
     let view = sites.for_matter(matter);
     assert_eq!(hosts(&view), ["evil.example"]);
     dir.set_policy(r#"{"network": {"allow_unsafe_site_override": false}}"#);
     host.shutdown();
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 3, &sites);
+    let host = start(&dir, 3, &sites, &keychain);
     let revoke = HostCommand::RevokeAllowedSite {
         host: "evil.example".to_owned(),
         scope: AllowScope::Always,
@@ -217,14 +256,15 @@ fn with_overrides_off_nothing_is_allowed_or_honoured_and_nothing_is_deleted() {
 #[test]
 fn an_allow_from_a_notice_the_host_no_longer_keeps_has_expired() {
     let dir = Dir::new("allowed_sites_expired", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 0, &sites);
+    let host = start(&dir, 0, &sites, &keychain);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let evil = notice(&host, (matter, thread), "evil.example");
     host.shutdown();
 
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 1, &sites);
+    let host = start(&dir, 1, &sites, &keychain);
     let error = host.refused(
         allow(evil, AllowScope::Matter),
         ErrorCode::BlocklistNoticeExpired,
@@ -239,17 +279,25 @@ fn an_allow_from_a_notice_the_host_no_longer_keeps_has_expired() {
     host.shutdown();
 }
 
-/// A revoke whose save failed answers `store.io`; its retry writes the file although memory no
-/// longer holds the allow, so the allow does not come back at the next start.
+/// A revoke whose file write fails after its hash was set answers `Done`: the stored hash is
+/// the revoked state's, so the old file no longer matches and the next start honours no allows,
+/// the revoked one included. Its retry, with the folder writable again, saves it whole. Skipped
+/// as root, whom a read-only folder does not stop.
 #[cfg(unix)]
 #[test]
-fn a_revoke_whose_save_failed_is_saved_by_its_retry() {
+fn a_revoke_whose_file_write_failed_stays_revoked_after_a_restart() {
+    if nix::unistd::geteuid().is_root() {
+        return;
+    }
     let dir = Dir::new("allowed_sites_revoke_retry", AGENTS);
+    let keychain = Arc::new(MemoryStore::new());
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 0, &sites);
+    let host = start(&dir, 0, &sites, &keychain);
     let (matter, thread, _) = matter_with_thread(&dir, &host, "m", &[], FAKE);
     let evil = notice(&host, (matter, thread), "evil.example");
     host.ok(allow(evil, AllowScope::Always));
+    let phish = notice(&host, (matter, thread), "phish.test");
+    host.ok(allow(phish, AllowScope::Always));
     let folder = dir.data().join("blocklist");
     crate::write::set_mode(&folder, 0o555);
     let revoke = HostCommand::RevokeAllowedSite {
@@ -257,15 +305,19 @@ fn a_revoke_whose_save_failed_is_saved_by_its_retry() {
         scope: AllowScope::Always,
         matter: None,
     };
-    host.refused(revoke.clone(), ErrorCode::StoreIo);
-    assert_eq!(listed(&host), []);
+    assert_eq!(host.ok(revoke.clone()), CommandOutcome::Done);
     crate::write::set_mode(&folder, 0o700);
-    assert_eq!(host.ok(revoke), CommandOutcome::Done);
+    assert_eq!(
+        listed(&host),
+        [("phish.test".to_owned(), AllowScope::Always, None)]
+    );
     host.shutdown();
 
+    // The old file, the revoked state's hash: no allows at all.
     let sites = Arc::new(AllowedSites::default());
-    let host = start(&dir, 1, &sites);
+    let host = start(&dir, 1, &sites, &keychain);
     assert_eq!(listed(&host), []);
     assert_eq!(hosts(&sites.for_matter(matter)), Vec::<String>::new());
+    assert_eq!(host.ok(revoke), CommandOutcome::Done);
     host.shutdown();
 }
