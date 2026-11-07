@@ -19,6 +19,8 @@ name: setup-exe-repro
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["exp-setup-repro"]
 
 permissions:
   contents: read
