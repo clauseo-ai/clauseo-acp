@@ -16,7 +16,7 @@ use clauseo_protocol::ErrorCode;
 use serde_json::json;
 
 use super::fakes::{HostCall, Rig, command, rig, rig_with};
-use super::{MAIN, claude, codex, missing};
+use super::{MAIN, claude, codex};
 use crate::bridge::lock;
 use crate::setup::backend::SetupAgents;
 use crate::setup::keys::KeyCache;
@@ -96,38 +96,6 @@ fn an_install_waits_for_the_first_route_and_goes_through_it() {
     assert_eq!(installs(), 1);
     let pushed = lock(&rig.agents.networks).clone();
     assert_eq!(pushed.first().and_then(|n| n.proxy.as_deref()), Some(FIRM));
-}
-
-/// A fresh machine whose OS route lands late: first run's install of Claude waits for it, so
-/// `Agents` gets the route before the install and its first download goes through the proxy
-/// (`Agents` takes commands in order); the pump goes on meanwhile.
-#[test]
-fn first_run_installs_only_once_the_first_route_has_reached_agents() {
-    let rig = rig_unrouted();
-    let (feed, source) = futures::channel::mpsc::unbounded();
-    feed.unbounded_send(missing(claude())).unwrap();
-    feed.unbounded_send(missing(codex())).unwrap();
-    let mut pump = pin!(rig.backend.pump(source));
-    let mut context = Context::from_waker(std::task::Waker::noop());
-    let installs = || {
-        let calls = rig.calls();
-        calls
-            .into_iter()
-            .filter(|(name, _)| *name == "install")
-            .collect::<Vec<_>>()
-    };
-    assert!(matches!(pump.as_mut().poll(&mut context), Poll::Pending));
-    assert_eq!(installs(), [], "no install before the route");
-    assert!(lock(&rig.agents.networks).is_empty());
-    let mut read = SettingsRead::default();
-    read.network.upstream = Some(FIRM.to_owned());
-    block_on(apply_settings(&rig.backend, read));
-    assert!(matches!(pump.as_mut().poll(&mut context), Poll::Pending));
-    assert_eq!(installs(), [("install", claude())]);
-    let pushed = lock(&rig.agents.networks).clone();
-    assert_eq!(pushed.first().and_then(|n| n.proxy.as_deref()), Some(FIRM));
-    drop(feed);
-    block_on(pump);
 }
 
 /// Claude's `agent.keys_loading` from the host's start, as `SetupStart::launch_refusals` gives it.

@@ -6,8 +6,10 @@
 //! - **Installs.** Each `AgentsEvent::Install` goes out as `AgentInstallProgress`, with the hosts
 //!   the install contacts for "Ask your IT team". On `Ready` the agent's `agents.<id>` entry is
 //!   built from the install ([`launch`]) and written with `set_agent_launch`: a webview never
-//!   chooses a program to run. First run: once every agent has its first state, with none
-//!   installed and none `Managed`, Claude's install starts with no command and no confirm.
+//!   chooses a program to run. Nothing installs by itself, at first run or from a policy: an
+//!   install starts only from the lawyer's `InstallAgent` (choosing a card, with no confirm: the
+//!   card shows the size first), `RetryAgentInstall`, or a sign-in pressed before the agent is
+//!   installed (`pending.rs`), which starts or joins the install and runs at its `Ready`.
 //! - **Sign-in.** Each `AgentsEvent::Signin` goes to [`Compose`], which sends every
 //!   `SignInChanged`. `OpenUrl` (an address S18's shim captured and checked against the
 //!   snapshot's sign-in hosts) opens with `open::open_url_unconfirmed`, https only. A
@@ -15,10 +17,10 @@
 //!   an agent's install is `Ready`; an agent not installed shows `SignedOut`. A queue newly held
 //!   for an agent's sign-in (`agent.auth_required`) checks its status again
 //!   (`recheck_sign_in`), one at a time per agent.
-//! - **Confirms.** `InstallAgent` and `SetFirmEndpoint` ask the lawyer first; a decline runs
-//!   nothing and answers `transport.unauthorized`. `RetryAgentInstall` asks nothing, so it is
-//!   `command.invalid` unless the install is `Failed`, `Waiting` or `Paused`: a missing agent
-//!   is installed only through `InstallAgent`'s confirm. `OpenSignInPage` opens the `DeviceCode`
+//! - **Confirms.** `SetFirmEndpoint` asks the lawyer first; a decline runs nothing and answers
+//!   `transport.unauthorized`. `RetryAgentInstall` is `command.invalid` unless the install is
+//!   `Failed`, `Waiting` or `Paused`: a missing agent is installed only through `InstallAgent`
+//!   or a pending sign-in. `OpenSignInPage` opens the `DeviceCode`
 //!   state's page and does nothing in any other state. `SignOut` on a `Reused` login answers
 //!   `command.invalid` and runs no logout.
 //! - **Leaving a reused login** (piece B, `leave.rs`): `StopUsingLogin`, `UseDifferentAccount`,
@@ -35,7 +37,7 @@ use clauseo_agents::{
     AgentsEvent, InstallState, Method, PasteCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use futures::Stream;
+use futures::{Stream, StreamExt as _};
 
 use super::admit::{key_stored, sign_in_barred};
 use super::compose::Compose;
@@ -53,10 +55,8 @@ pub(crate) use self::count::SetupCounts;
 use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{
-    FirstRun, checked_endpoint, first_install_after_route, invalid, network_first, next_event,
-    plan_method, retry,
-};
+use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
+use self::pending::Press;
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
 pub(crate) use self::write::write_entry_as;
@@ -76,9 +76,6 @@ pub(crate) struct AgentInfo {
     pub(crate) provider: bool,
 }
 
-/// The agent installed at first run when nothing is installed and nothing is managed.
-pub(crate) const FIRST_RUN_AGENT: &str = "claude-acp";
-
 /// The setup backend over `Agents`.
 pub(crate) struct AgentsBackend {
     pub(crate) agents: Arc<dyn SetupAgents>,
@@ -97,6 +94,9 @@ pub(crate) struct AgentsBackend {
     /// job has not ended yet (no sign-in state and no `SigninUnchanged` since): a second hold
     /// meanwhile asks for none.
     pub(crate) rechecks: Mutex<BTreeSet<AgentId>>,
+    /// The sign-ins pressed before their agent was installed, one per agent (`pending.rs`):
+    /// memory only, so none outlives a quit.
+    pub(crate) pending: Mutex<BTreeMap<AgentId, Press>>,
     /// Piece B's: the limits readers, the reused logins, the waiters and the settings read.
     pub(crate) wiring: Wiring,
     /// Where the pump's usage counts go (`count.rs`).
@@ -123,6 +123,10 @@ impl SetupBackend for AgentsBackend {
             .map(|bar| sign_in_barred(agent, bar))
     }
 
+    fn sign_in_pending(&self, agent: &AgentId) -> bool {
+        lock(&self.pending).contains_key(agent)
+    }
+
     fn shutdown(&self, wait: std::time::Duration) -> bool {
         self.agents.shutdown(wait)
     }
@@ -138,17 +142,8 @@ impl AgentsBackend {
         let agents = &*self.agents;
         network_first(self, &command).await;
         match command {
-            SetupCommand::InstallAgent { .. } => {
-                let megabytes = match agents.state(&agent) {
-                    Some(InstallState::Missing { download_bytes }) => {
-                        Some(download_bytes.div_ceil(1_000_000))
-                    }
-                    _ => None,
-                };
-                let name = info.name.clone();
-                self.ask(Ask::Install { name, megabytes }).await?;
-                agents.install(&agent);
-            }
+            // Choosing a card: no confirm, the card showed the size (`Missing { download_bytes }`).
+            SetupCommand::InstallAgent { .. } => agents.install(&agent),
             SetupCommand::RetryAgentInstall {
                 use_system_proxy, ..
             } => retry(self, &agent, use_system_proxy)?,
@@ -157,14 +152,21 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
-                agents
-                    .sign_in(&agent, method)
-                    .map_err(|error| signin_error(&error))?;
-                tracing::info!(%agent, method = ?method, "sign-in started");
-                self.replaced(&agent);
+                if !pending::keep_press(self, &agent, Press::SignIn(method)) {
+                    agents
+                        .sign_in(&agent, method)
+                        .map_err(|error| signin_error(&error))?;
+                    tracing::info!(%agent, method = ?method, "sign-in started");
+                    self.replaced(&agent);
+                }
             }
             SetupCommand::CancelSignIn { .. } => {
                 self.compose.cancelling(&agent);
+                let _gate = lock(&self.signin_gate);
+                // A pending press goes; its install carries on.
+                if pending::drop_press(self, &agent, "cancelled") {
+                    return Ok(());
+                }
                 agents
                     .cancel_sign_in(&agent)
                     .map_err(|error| signin_error(&error))?;
@@ -179,11 +181,13 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
-                agents
-                    .sign_in(&agent, Method::DeviceCode)
-                    .map_err(|error| signin_error(&error))?;
-                tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
-                self.replaced(&agent);
+                if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
+                    agents
+                        .sign_in(&agent, Method::DeviceCode)
+                        .map_err(|error| signin_error(&error))?;
+                    tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
+                    self.replaced(&agent);
+                }
             }
             SetupCommand::OpenSignInPage { .. } => {
                 if let Some(SigninState::DeviceCode { url, .. }) = agents.signin_state(&agent) {
@@ -208,10 +212,12 @@ impl AgentsBackend {
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
-                agents
-                    .use_different_account(&agent)
-                    .map_err(|error| signin_error(&error))?;
-                self.replaced(&agent);
+                if !pending::keep_press(self, &agent, Press::DifferentAccount) {
+                    agents
+                        .use_different_account(&agent)
+                        .map_err(|error| signin_error(&error))?;
+                    self.replaced(&agent);
+                }
             }
             SetupCommand::StopUsingLogin { .. } => {
                 if !self.reused(&agent) {
@@ -387,6 +393,7 @@ impl AgentsBackend {
                 tracing::warn!(%agent, %error, "a sign-in a key or an endpoint took over runs on");
             }
         }
+        pending::drop_press(self, agent, "a key or an endpoint took over");
         self.events.end_start(agent);
     }
 
@@ -478,24 +485,16 @@ impl AgentsBackend {
     /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
         let mut source = std::pin::pin!(source);
-        let mut first_run = FirstRun::new(self.known.keys().cloned());
-        let mut first_install = None;
         let mut checked = BTreeSet::new();
         let mut tally = Tally::default();
-        while let Some(event) = next_event(&mut source, &mut first_install).await {
+        while let Some(event) = source.next().await {
             match event {
                 AgentsEvent::Install { agent, state } => {
                     let now = self.compose.monotonic();
                     let tries = || self.agents.install_tries(&agent);
                     tally.install(&*self.counts, &agent, &state, now, tries);
                     self.install_event(&agent, &state, &mut checked).await;
-                    if first_run.saw(&agent, &state)
-                        && let Ok(first) = AgentId::new(FIRST_RUN_AGENT)
-                        && self.known.contains_key(&first)
-                    {
-                        tracing::info!(agent = %first, "first run: installing");
-                        first_install = Some(first_install_after_route(self, first));
-                    }
+                    pending::follow_press(self, &agent, &state);
                 }
                 AgentsEvent::Signin { agent, state } => {
                     lock(&self.rechecks).remove(&agent);
@@ -518,8 +517,9 @@ impl AgentsBackend {
         }
     }
 
-    /// One install state: sent to the windows; on `Ready` the entry written and the status
-    /// checked (once per agent); an agent with no sign-in state yet shown signed out.
+    /// One install state: sent to the windows; on `Ready` the entry written, then a pending
+    /// sign-in run (`pending.rs`) or else the status checked (once per agent); an agent with no
+    /// sign-in state yet shown signed out.
     async fn install_event(
         &self,
         agent: &AgentId,
@@ -537,7 +537,9 @@ impl AgentsBackend {
         }
         if matches!(state, InstallState::Ready { .. }) {
             write_entry(self, agent).await;
+            let started = pending::run_press(self, agent);
             if checked.insert(agent.clone())
+                && !started
                 && let Err(error) = self.agents.check_status(agent)
             {
                 tracing::warn!(%agent, %error, "no status check");
@@ -574,6 +576,7 @@ impl AgentsBackend {
 mod count;
 mod entry;
 mod parts;
+mod pending;
 mod seam;
 #[cfg(test)]
 mod tests;

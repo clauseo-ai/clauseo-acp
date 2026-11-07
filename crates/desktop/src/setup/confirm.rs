@@ -1,8 +1,9 @@
-//! The native confirms in front of a window's `InstallAgent` and `SetFirmEndpoint` (decision
-//! record 0048): Rust draws them, so a webview cannot install an agent or point one at another
-//! server without the lawyer's say. A decline runs nothing and answers
+//! The native confirm in front of a window's `SetFirmEndpoint` (decision record 0048): Rust
+//! draws it, so a webview cannot point an agent at another server without the lawyer's say.
+//! `InstallAgent` asks nothing: it is the lawyer choosing the agent's card, which shows the
+//! download's size first. A decline runs nothing and answers
 //! `transport.unauthorized`, as `answer_permission`'s does. The words are fixed text and the
-//! values the backend fills in (the agent's name, the download size, the endpoint's address,
+//! values the backend fills in (the agent's name and the endpoint's address,
 //! checked before the confirm as the settings crate checks it, `backend.rs`'s
 //! `checked_endpoint`); Cancel is the default button.
 //!
@@ -20,13 +21,6 @@ use crate::dialogs::{BoxFuture, confirm};
 /// What a setup confirm asks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Ask {
-    /// Install the agent named `name`, downloading about `megabytes` MB.
-    Install {
-        /// The agent's name, as the snapshot gives it.
-        name: String,
-        /// The download, in MB (10^6 bytes), rounded up; `None` when unknown.
-        megabytes: Option<u64>,
-    },
     /// Send the agent named `name` to the firm's endpoint `url`, or with `None` stop.
     Endpoint {
         /// The agent's name.
@@ -45,14 +39,6 @@ pub(crate) trait SetupConfirm: Send + Sync {
 /// The words of `ask`: title, message and the accepting button.
 pub(crate) fn words(ask: &Ask) -> (String, String, String) {
     match ask {
-        Ask::Install { name, megabytes } => {
-            let size = megabytes.map_or_else(String::new, |mb| format!(" (about {mb} MB)"));
-            (
-                format!("Install {name}?"),
-                format!("Clauseo will download {name}{size} and install it for you."),
-                "Install".to_owned(),
-            )
-        }
         Ask::Endpoint {
             name,
             url: Some(url),

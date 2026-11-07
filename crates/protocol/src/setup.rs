@@ -29,8 +29,8 @@ use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub enum SetupCommand {
-    /// Install the agent, after a native confirm naming it and its size; another agent's
-    /// download pauses.
+    /// Install the agent (the lawyer chose its card, which shows the size): no confirm;
+    /// another agent's download pauses.
     InstallAgent {
         /// The agent.
         agent: AgentId,
@@ -44,7 +44,8 @@ pub enum SetupCommand {
         use_system_proxy: bool,
     },
     /// Sign in with the agent's plan login. A sign-in already running for the agent is joined,
-    /// not restarted.
+    /// not restarted. On an agent not installed yet it starts the install and signs in once
+    /// it is ready (`Queued` meanwhile).
     StartSignIn {
         /// The agent.
         agent: AgentId,

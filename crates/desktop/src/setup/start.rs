@@ -260,7 +260,7 @@ impl SetupStart {
 }
 
 /// Whether the e2e build's `E2E_AGENTS_MANAGED` names `agent`, whose install setup then takes as
-/// the firm's (`Managed`): nothing to install and no first-run download, as the e2e app's agents
+/// the firm's (`Managed`): nothing to install, as the e2e app's agents
 /// are `fake_agent`. Always false in any other build, which reads no variable.
 pub(super) fn e2e_managed(agent: &AgentId) -> bool {
     #[cfg(feature = "e2e")]
@@ -403,6 +403,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             known: read.known,
             signin_gate: Mutex::new(()),
             rechecks: Mutex::default(),
+            pending: Mutex::default(),
             wiring,
             counts: parts.counts,
         });

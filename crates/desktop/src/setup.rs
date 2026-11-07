@@ -108,6 +108,13 @@ pub(crate) trait SetupBackend: Send + Sync {
         None
     }
 
+    /// Whether `agent` has a sign-in pressed before its install was ready and kept until it is
+    /// (`backend/pending.rs`): a new `StartSignIn` then replaces it rather than joining it,
+    /// since no run would restart. `false` by default.
+    fn sign_in_pending(&self, _agent: &AgentId) -> bool {
+        false
+    }
+
     /// The app's quit: stops the agents' installs and sign-ins and kills their children,
     /// waiting at most `wait` (`Agents::shutdown`); whether everything ended. `true` by
     /// default: nothing runs.
@@ -176,15 +183,16 @@ impl Setup {
             log_answer(label, action, &agent, "refused", Some(&error));
             return Err(error);
         }
-        let starting = if action == SetupAction::StartSignIn {
-            let Some(starting) = self.start_sign_in(&agent) else {
-                log_answer(label, action, &agent, "joined", None);
-                return Ok(CommandOutcome::Done);
+        let starting =
+            if action == SetupAction::StartSignIn && !self.backend.sign_in_pending(&agent) {
+                let Some(starting) = self.start_sign_in(&agent) else {
+                    log_answer(label, action, &agent, "joined", None);
+                    return Ok(CommandOutcome::Done);
+                };
+                Some(starting)
+            } else {
+                None
             };
-            Some(starting)
-        } else {
-            None
-        };
         let answer = self.backend.run(command, key_write, &self.events).await;
         if let Some(starting) = starting
             && answer.is_ok()

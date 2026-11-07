@@ -1,5 +1,6 @@
-//! The backend over `Agents` with every seam recorded (`fakes.rs`): the confirms that run
-//! nothing when declined, the entry written on `Ready`, first run, the replay order,
+//! The backend over `Agents` with every seam recorded (`fakes.rs`): the install that asks
+//! nothing, the confirm that runs nothing when declined, the entry written on `Ready`, a first
+//! run that installs nothing, the replay order,
 //! `OpenSignInPage` and `SignOut` on a reused login, `main`'s first key, no key in a log, and the
 //! two launchers; installs, keys, endpoints, sign-in bars and sign-in races in `tests/`.
 
@@ -15,6 +16,7 @@ mod keys;
 mod leave;
 mod network;
 mod once;
+mod pending;
 mod quit;
 mod races;
 mod refusals;
@@ -63,8 +65,10 @@ fn codex() -> AgentId {
     AgentId::new("codex-acp").unwrap()
 }
 
+/// Choosing a card installs at once: no confirm, even one that would decline (the card showed
+/// the size). A declined endpoint runs nothing.
 #[test]
-fn a_declined_install_or_endpoint_runs_nothing_and_answers_unauthorized() {
+fn an_install_asks_nothing_and_a_declined_endpoint_runs_nothing() {
     let rig = rig(false);
     lock(&rig.agents.states).insert(
         claude(),
@@ -74,10 +78,8 @@ fn a_declined_install_or_endpoint_runs_nothing_and_answers_unauthorized() {
     );
     let setup = rig.setup();
     let install = block_on(setup.run(MAIN, command("install_agent", &claude(), &json!({}))));
-    assert_eq!(
-        install.unwrap_err().code(),
-        ErrorCode::TransportUnauthorized
-    );
+    assert_eq!(install, Ok(CommandOutcome::Done));
+    assert_eq!(rig.calls(), [("install", claude())]);
     let endpoint = command(
         "set_firm_endpoint",
         &claude(),
@@ -88,20 +90,19 @@ fn a_declined_install_or_endpoint_runs_nothing_and_answers_unauthorized() {
         endpoint.unwrap_err().code(),
         ErrorCode::TransportUnauthorized
     );
-    assert_eq!(rig.calls(), [], "no agents call");
+    assert_eq!(
+        rig.calls(),
+        [("install", claude())],
+        "no agents call after the install"
+    );
     assert_eq!(rig.host.calls(), [], "no host call");
     assert_eq!(
         *lock(&rig.confirm.asked),
-        [
-            Ask::Install {
-                name: "Claude Code".to_owned(),
-                megabytes: Some(42)
-            },
-            Ask::Endpoint {
-                name: "Claude Code".to_owned(),
-                url: Some("https://gateway.firm.example".to_owned())
-            }
-        ]
+        [Ask::Endpoint {
+            name: "Claude Code".to_owned(),
+            url: Some("https://gateway.firm.example".to_owned())
+        }],
+        "the endpoint alone asks"
     );
 }
 
@@ -221,7 +222,7 @@ fn the_entry_s_env_follows_the_agent_and_the_login_source() {
     assert!(!codex_launch.env.contains_key("ANTHROPIC_API_KEY"));
 }
 
-fn missing(agent: AgentId) -> AgentsEvent {
+pub(super) fn missing(agent: AgentId) -> AgentsEvent {
     AgentsEvent::Install {
         agent,
         state: InstallState::Missing {
@@ -230,26 +231,17 @@ fn missing(agent: AgentId) -> AgentsEvent {
     }
 }
 
+/// A first run, nothing installed and nothing managed, downloads nothing until the lawyer
+/// chooses an agent or signs in.
 #[test]
-fn first_run_installs_claude_once_when_nothing_is_installed_or_managed() {
+fn a_first_run_installs_nothing() {
     let rig = rig(true);
     block_on(rig.backend.pump(futures::stream::iter([
         missing(claude()),
         missing(codex()),
         missing(codex()),
     ])));
-    assert_eq!(rig.calls(), [("install", claude())]);
-
-    let rig = self::rig(true);
-    let managed = AgentsEvent::Install {
-        agent: codex(),
-        state: InstallState::Managed,
-    };
-    block_on(
-        rig.backend
-            .pump(futures::stream::iter([missing(claude()), managed])),
-    );
-    assert_eq!(rig.calls(), [], "a managed agent: no first run");
+    assert_eq!(rig.calls(), [], "no install");
 }
 
 #[test]

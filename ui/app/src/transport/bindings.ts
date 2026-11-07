@@ -4528,8 +4528,8 @@ export type SettingsView = {
  */
 export type SetupCommand = 
 /**
- *  Install the agent, after a native confirm naming it and its size; another agent's
- *  download pauses.
+ *  Install the agent (the lawyer chose its card, which shows the size): no confirm;
+ *  another agent's download pauses.
  */
 ({ install_agent: {
 	/**  The agent. */
@@ -4544,7 +4544,8 @@ export type SetupCommand =
 } }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; install_agent?: never; open_sign_in_page?: never; paste_sign_in_code?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
 /**
  *  Sign in with the agent's plan login. A sign-in already running for the agent is joined,
- *  not restarted.
+ *  not restarted. On an agent not installed yet it starts the install and signs in once
+ *  it is ready (`Queued` meanwhile).
  */
 ({ start_sign_in: {
 	/**  The agent. */
