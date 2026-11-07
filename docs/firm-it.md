@@ -165,7 +165,7 @@ Get-CimInstance Win32_Process | ForEach-Object {
     }
 }
 # 3. Their profiles, then their accounts, then their sign-in screen values.
-Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID } | Remove-CimInstance
+Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID -and $_.LocalPath -match '\\ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' } | Remove-CimInstance
 $users | Remove-LocalUser
 if (Test-Path $hide) {
     (Get-Item $hide).Property | Where-Object { $_ -cmatch $pool } |
@@ -193,6 +193,8 @@ its entry and keep its folder:
 ```powershell
 [pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' }).Count; Key = Test-Path $key }
 ```
+
+A `ClauseoSbNN` entry that remains is a link: check where it points, then remove just the link with `rmdir C:\Users\ClauseoSbNN` (cmd), which doesn't touch its target.
 
 If a profile is still there, a process still holds it: restart the computer and paste the block
 again. A second run skips what is gone. If the group is still there, it has members or isn't the
@@ -278,36 +280,12 @@ files the sandbox set aside from a matter.
 
 ### If Defender quarantines a Clauseo file
 
-Microsoft Defender has flagged Clauseo's unsigned `clauseo-sandbox-setup.exe` as
-`Trojan:Win32/Bearfoos.A!ml`. This is a false positive, and it has been submitted to Microsoft.
-It can happen at two points:
-
-- **During the install.** The per-user installer still finishes, but without the setup exe, so the
-  Windows protection can't be set up.
-- **After the set-up has run.** The protection is in place, but the exe is gone, so the uninstaller
-  can't remove it. This is when you need the by-hand clean-up above.
-
-To get the file back, an administrator opens Windows Security › Virus & threat protection ›
-Protection history, selects the item and chooses **Actions** › **Restore**. From an elevated
-prompt, `Get-MpThreatDetection` lists the detections and `Get-MpThreat` the threats behind them,
-and Defender's command-line tool lists the quarantined items and restores one by its path:
-
-```cmd
-"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -ListAll
-"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Restore -FilePath "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
-```
+See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
+do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
 
 For a per-user install the path is `C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe`,
 with the lawyer's user folder: at an administrator's prompt, `%LOCALAPPDATA%` is the
-administrator's folder, not the lawyer's. Microsoft:
-[Restore quarantined files](https://learn.microsoft.com/defender-endpoint/restore-quarantined-files-microsoft-defender-antivirus),
-[MpCmdRun](https://learn.microsoft.com/defender-endpoint/command-line-arguments-microsoft-defender-antivirus).
-
-**Restore** puts the file back where it was, so nothing needs repairing. Defender may quarantine it
-again until Microsoft gives its verdict. If someone chose **Remove** instead, or the file is gone,
-run the same installer again (per user or per machine, as before) to put the setup exe back.
-
-Whether to add an exclusion, or to allow the detection, is your firm's decision.
+administrator's folder, not the lawyer's.
 
 ## 2. Signing
 
@@ -759,48 +737,9 @@ Remove-MpPreference -ExclusionPath $f
 `--remove --per-machine` removes the protection for every user (section 1); uninstall Clauseo
 after it. Report the false positive at <https://www.microsoft.com/wdsi/filesubmission>.
 
-**Remove the protection by hand**, when the file can't be restored, from an elevated 64-bit
-PowerShell (in Intune, "Run script in 64 bit PowerShell Host"). The script reads the SIDs from
-Clauseo's record first, so it also cleans up accounts or a group already deleted by name. Set-up
-names its accounts `ClauseoSb01` to `ClauseoSb32`; only the numbers it created exist.
-
-```powershell
-# Clauseo's record: the sandbox accounts' SIDs (PoolSids) and the group's (GroupSid).
-$key = 'HKLM:\SOFTWARE\Clauseo\Sandbox'
-$record = Get-ItemProperty $key -ErrorAction SilentlyContinue
-$byName = Get-LocalUser | Where-Object Name -match '^ClauseoSb[0-9][0-9]$'
-$sids = @($record.PoolSids) + @($byName.SID.Value) | Where-Object { $_ } | Sort-Object -Unique
-$groupSid = $record.GroupSid
-if (-not $groupSid) {
-  $groupSid = (Get-LocalGroup -Name ClauseoSandboxUsers -ErrorAction SilentlyContinue).SID.Value
-}
-# Keep this list: the matter folders' entries name these SIDs (below).
-"Sandbox account SIDs:"; $sids; "Group SID: $groupSid"
-# Stop anything still running as them, then delete their profiles and the accounts.
-Get-Process -IncludeUserName |
-  Where-Object UserName -match '\\ClauseoSb[0-9][0-9]$' | Stop-Process -Force
-Get-CimInstance Win32_UserProfile | Where-Object {
-  $_.SID -in $sids -and $_.LocalPath -match '\\ClauseoSb[0-9][0-9]$' } | Remove-CimInstance
-$sids | ForEach-Object { Get-LocalUser -SID $_ -ErrorAction SilentlyContinue } | Remove-LocalUser
-# The values that hide them from the sign-in screen.
-$list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
-(Get-Item $list -ErrorAction SilentlyContinue).Property |
-  Where-Object { $_ -match '^ClauseoSb[0-9][0-9]$' } |
-  ForEach-Object { Remove-ItemProperty $list -Name $_ }
-# The group's deny on DeviceSync, then the group, then the record.
-if ($groupSid) {
-  icacls "$env:ProgramData\Microsoft\DeviceSync" /remove:d "*$groupSid"
-  Get-LocalGroup -SID $groupSid -ErrorAction SilentlyContinue | Remove-LocalGroup
-}
-Remove-Item $key -Recurse -ErrorAction SilentlyContinue
-```
-
-Then the lawyer's folders: on each matter folder, the two `icacls` commands under "Intune
-(Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs the script
-listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing; remove it with
-`icacls "<folder>" /remove "*<SID>"`. If Clauseo stays uninstalled, the lawyer can then delete the
-`sandbox` folder in `%LOCALAPPDATA%\ai.clauseo.desktop`, after moving out anything in
-`sandbox\set-aside`: those are files set aside from a matter.
+**Remove the protection by hand**, when the file can't be restored: see
+[Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand) in
+section 1.
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
 
