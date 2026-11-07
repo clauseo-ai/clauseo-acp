@@ -110,7 +110,8 @@ export const commands = {
 	/**
 	 *  The page's timing of a chooser it showed, for the log alone (`chooser/trace.rs`): the
 	 *  milliseconds from the click to the desktop's answer, to the chooser's first render and to its
-	 *  first paint, as the page measured them. Always answers ok; logs no path.
+	 *  first paint, as the page measured them. Always answers ok; logs no path, and only the first
+	 *  [`CHOOSER_SHOWN_CAP`] calls of a run.
 	 */
 	chooserShown: (answerMs: number, renderMs: number, paintMs: number) => typedError<null, HostError>(__TAURI_INVOKE("chooser_shown", { answerMs, renderMs, paintMs })),
 	/**
