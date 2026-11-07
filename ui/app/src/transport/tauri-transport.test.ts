@@ -23,6 +23,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { TauriTransport, pageTransport } = await import("./tauri-transport.ts");
+/** The picker's calls, past the channel's own. */
+const picks = () =>
+  invoked.map((i) => i.command).filter((c) => c.startsWith("pick_") || c.startsWith("chooser_"));
 // the setup feed the transport imports on demand, loaded once here so that import resolves within a settle
 await import("./setup-feed.ts");
 
@@ -70,7 +73,7 @@ describe("TauriTransport", () => {
 
   test("a Tauri string rejection and a thrown Error each reject as internal", async () => {
     answers.set("query", () => Promise.reject("command query not allowed"));
-    answers.set("pick_folder", () => {
+    answers.set("pick_folder_or_choose", () => {
       throw new Error("ipc down");
     });
     const t = new TauriTransport({ warn: () => {} });
@@ -86,15 +89,19 @@ describe("TauriTransport", () => {
     });
   });
 
-  test("pick_folder resolves to the picked folder's ref and display, or null when cancelled", async () => {
-    answers.set("pick_folder", () => ({ folder: "folder-1", display: "Documents/Acme" }));
+  test("pick_folder_or_choose resolves to the picked folder's ref and display, or null when cancelled", async () => {
+    answers.set("pick_folder_or_choose", () => ({
+      kind: "picked",
+      folder: { folder: "folder-1", display: "Documents/Acme" },
+    }));
     const t = new TauriTransport({ warn: () => {} });
     await expect(t.pickFolder()).resolves.toEqual({
       folder: "folder-1",
       display: "Documents/Acme",
     });
-    answers.set("pick_folder", () => null);
+    answers.set("pick_folder_or_choose", () => ({ kind: "cancelled" }));
     await expect(t.pickFolder()).resolves.toBeNull();
+    expect(picks()).toEqual(["pick_folder_or_choose", "pick_folder_or_choose"]);
   });
 
   test("open_external, open_file and reveal send their argument; open_file resolves to what the host opened", async () => {

@@ -1,0 +1,39 @@
+/* Clauseo's own folder chooser (components' clauseo/folder-chooser.tsx): wider than a dialog's 440 px so a folder's
+   name and its note fit on one row, and a column whose list takes what height is left and scrolls, so the chooser fits
+   a 640 by 480 window at any text size. Loaded with the chooser. */
+.folder-chooser {
+  width: min(calc(var(--size-dialog) + 120px), calc(100% - 2 * var(--s4)));
+  display: flex;
+  flex-direction: column;
+}
+.folder-chooser-crumbs {
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+/* the start of a long path gives way; the folder itself stays in view */
+.folder-chooser-crumbs > span:first-child {
+  margin-inline-start: auto;
+}
+.folder-chooser-list {
+  flex: 1 1 auto;
+  /* two rows at least: in Hindi at the largest text size in a 640 by 480 window, the rest is what's left */
+  min-height: calc(2 * var(--size-control-small));
+  max-height: calc(9 * var(--size-control-small));
+  overflow-y: auto;
+  padding: var(--s1);
+  border-radius: var(--r-control);
+  background: var(--well);
+}
+.folder-chooser-row {
+  cursor: default;
+}
+.folder-chooser-row[data-disabled] {
+  color: var(--faint);
+}
+/* a short window: tighter round the edge */
+@media (max-height: 560px) {
+  .folder-chooser {
+    padding: var(--s4);
+  }
+}

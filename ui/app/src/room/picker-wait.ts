@@ -1,8 +1,10 @@
 // The folder picker's wait, for its line: a pick that runs PICKER_LINE_MS or longer shows "Opening the folder picker…"
 // where the caller draws it, and the line goes the moment the pick resolves, picked, cancelled or errored. A picker that
 // answers at once shows nothing, so no line flashes. Shared by New matter (folder-check.tsx), the first screen's Open
-// the folder, and a moved folder's Locate (room.tsx).
-import { useEffect, useRef, useState } from "react";
+// the folder, and a moved folder's Locate (room.tsx). Where the desktop opens Clauseo's own chooser instead
+// (transport/chooser.ts), the line covers its check before and goes once the chooser shows.
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { chooserShowing, onChooserShowing } from "../transport/chooser.ts";
 
 /** How long a pick may run before its line shows. */
 export const PICKER_LINE_MS = 300;
@@ -27,5 +29,7 @@ export function usePickWait() {
       }
     }
   };
-  return { opening, track };
+  // Clauseo's own chooser, once it shows, is the answer the line waited for
+  const choosing = useSyncExternalStore(onChooserShowing, chooserShowing, chooserShowing);
+  return { opening: opening && !choosing, track };
 }

@@ -53,6 +53,28 @@ export const HI = {
   "Choose the folder for one matter.": "एक मामले का फ़ोल्डर चुनें।",
   /* ---------- the folder picker's line, while a pick is slow (New matter, the first screen, Locate) ---------- */
   "Opening the folder picker…": "फ़ोल्डर चुनने की विंडो खुल रही है…",
+  /* ---------- Clauseo's own folder chooser, where Windows' folder window would stall (folder-chooser.tsx) ---------- */
+  "Choose the matter's folder": "मामले का फ़ोल्डर चुनें",
+  "Windows' folder window is slow to open on this computer, so Clauseo shows its own.":
+    "इस कंप्यूटर पर Windows की फ़ोल्डर विंडो देर से खुलती है, इसलिए Clauseo अपनी विंडो दिखाता है।",
+  // the start points beside the drives (C:, D:): the home folder, the Desktop, the folder of the last pick
+  Home: "होम",
+  Desktop: "डेस्कटॉप",
+  "Last place": "पिछली जगह",
+  Up: "ऊपर",
+  "Or type a folder's location": "या फ़ोल्डर का स्थान टाइप करें",
+  Go: "जाएँ",
+  "Choose this folder": "यह फ़ोल्डर चुनें",
+  Cancel: "रद्द करें",
+  "This folder didn't answer in time.": "इस फ़ोल्डर ने समय पर जवाब नहीं दिया।",
+  "Try again": "फिर से प्रयास करें",
+  "This folder can't be found.": "यह फ़ोल्डर नहीं मिला।",
+  "Clauseo can't use this folder.": "Clauseo इस फ़ोल्डर का इस्तेमाल नहीं कर सकता।",
+  // beside a folder Clauseo refuses (a system folder, the home folder's own): listed, but it doesn't open
+  "Can't be a matter": "मामला नहीं बन सकता",
+  "Some folders aren't shown.": "कुछ फ़ोल्डर नहीं दिखाए गए हैं।",
+  // while the desktop's own window asks to use the folder chosen
+  "Waiting for you to confirm…": "आपकी पुष्टि की प्रतीक्षा है…",
   /* ---------- a matter whose folder has moved ---------- */
   "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
   "It was at {path}. Find it where it is now, and the matter opens as you left it.":

@@ -1,0 +1,189 @@
+{
+  "FC-01": {
+    "en": "Choose the matter's folder",
+    "hi": "मामले का फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-02": {
+    "en": "Windows' folder window is slow to open on this computer, so Clauseo shows its own.",
+    "hi": "इस कंप्यूटर पर Windows की फ़ोल्डर विंडो देर से खुलती है, इसलिए Clauseo अपनी विंडो दिखाता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-03": {
+    "en": "Home",
+    "hi": "होम",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-04": {
+    "en": "Desktop",
+    "hi": "डेस्कटॉप",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-05": {
+    "en": "Last place",
+    "hi": "पिछली जगह",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-06": {
+    "en": "Up",
+    "hi": "ऊपर",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-07": {
+    "en": "Or type a folder's location",
+    "hi": "या फ़ोल्डर का स्थान टाइप करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-08": {
+    "en": "Go",
+    "hi": "जाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-09": {
+    "en": "Choose this folder",
+    "hi": "यह फ़ोल्डर चुनें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-10": {
+    "en": "Cancel",
+    "hi": "रद्द करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-11": {
+    "en": "This folder didn't answer in time.",
+    "hi": "इस फ़ोल्डर ने समय पर जवाब नहीं दिया।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-12": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-13": {
+    "en": "This folder can't be found.",
+    "hi": "यह फ़ोल्डर नहीं मिला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-14": {
+    "en": "Clauseo can't use this folder.",
+    "hi": "Clauseo इस फ़ोल्डर का इस्तेमाल नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-15": {
+    "en": "Can't be a matter",
+    "hi": "मामला नहीं बन सकता",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-16": {
+    "en": "Some folders aren't shown.",
+    "hi": "कुछ फ़ोल्डर नहीं दिखाए गए हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  },
+  "FC-17": {
+    "en": "Waiting for you to confirm…",
+    "hi": "आपकी पुष्टि की प्रतीक्षा है…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-07",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-07",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Clauseo's own folder chooser on Windows (folder-chooser.tsx); the brief's proposed words, provisional for Rohan's batch review"
+  }
+}
