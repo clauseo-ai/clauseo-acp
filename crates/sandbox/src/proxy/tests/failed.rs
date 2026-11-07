@@ -8,19 +8,25 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::harness::{Rig, Setup, echo, rig, round_trip, upstream};
-use crate::proxy::upstream::{Answer, Configured, FailKind, Failure, PacSetting, Scheme};
+use crate::proxy::upstream::{Answer, Configured, FailKind, Failure, PacSetting, Reach, Scheme};
 use crate::proxy::{Limits, Verdict};
 use crate::{Denial, Route, Upstream};
 
 /// The OS answer per host; a host not set answers direct.
-type Answers = Arc<Mutex<HashMap<String, Answer>>>;
+pub(super) type Answers = Arc<Mutex<HashMap<String, Answer>>>;
 
 /// A rig allowing `a.test` and `b.test` with the scripted OS lookup. `a.test` resolves to
 /// 192.0.2.10, where an echo server answers on 443.
 fn failing_rig() -> (Rig, Answers) {
+    failing_rig_with(None)
+}
+
+/// [`failing_rig`], an earlier proxy probed with `reach` (the real probe when `None`).
+pub(super) fn failing_rig_with(reach: Option<Box<Reach>>) -> (Rig, Answers) {
     let answers: Answers = Arc::default();
     let script = Arc::clone(&answers);
     let rig = rig(Setup {
+        reach,
         allow: vec!["a.test", "b.test"],
         upstream: Upstream::System,
         answers: Some(Box::new(move |_: Scheme, host: &str, _: u16| {
@@ -37,12 +43,12 @@ fn failing_rig() -> (Rig, Answers) {
     (rig, answers)
 }
 
-fn set(answers: &Answers, host: &str, answer: Answer) {
+pub(super) fn set(answers: &Answers, host: &str, answer: Answer) {
     answers.lock().unwrap().insert(host.to_owned(), answer);
 }
 
 /// The firm's proxy, which opens every tunnel: its address, its route, and the heads it got.
-fn firm_proxy() -> (SocketAddr, Route, Receiver<String>) {
+pub(super) fn firm_proxy() -> (SocketAddr, Route, Receiver<String>) {
     let (address, heads) = upstream("HTTP/1.1 200 Connection established\r\n\r\n");
     let route = Route::Http {
         host: address.ip().to_string(),

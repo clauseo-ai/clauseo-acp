@@ -1,6 +1,12 @@
 //! The route for one connection, and what a failed OS lookup means for it (decision record 0039,
-//! "A failed lookup"): the host's last good route from the last 10 minutes; else a refusal when
-//! the settings show the firm meant a proxy; else direct.
+//! "A failed lookup"). A PAC file that could not be fetched (usually a laptop off the firm's
+//! network): the host's proxy from the last 10 minutes while it still takes a connection, else
+//! direct, as browsers treat a PAC they cannot fetch. Any other failure: the host's last good
+//! route from the last 10 minutes; else a refusal when the settings show the firm meant a proxy;
+//! else direct.
+
+#[cfg(test)]
+mod tests;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,6 +24,9 @@ use crate::{Denial, DenialSink};
 /// kept proxy (S17), so the two agree.
 const REUSE_FOR: Duration = Duration::from_mins(10);
 
+/// The longest the probe of an earlier proxy may take, over a PAC that could not be fetched.
+pub(super) const PROBE_CAP: Duration = Duration::from_secs(1);
+
 /// The most hosts remembered per proxy. At the cap a new host first drops the expired, then the
 /// oldest, so random names under a firm wildcard cannot grow it.
 pub(super) const REMEMBER_MOST: usize = 256;
@@ -31,7 +40,7 @@ pub(super) type Key = (Scheme, String, u16);
 pub(super) struct Remembered(RefCell<HashMap<Key, (Route, Duration)>>);
 
 /// What a connection does with the lookup's answer.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Chosen {
     /// Takes this route.
     Go(Route),
@@ -39,31 +48,61 @@ pub(super) enum Chosen {
     Refuse,
 }
 
+/// What a connection does next with the lookup's answer.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Plan {
+    /// Chosen, with no probe.
+    Chosen(Chosen),
+    /// Probes the host's earlier proxy, at this host and port, for [`Remembered::probed`].
+    Probe { host: String, port: u16 },
+}
+
 impl Remembered {
-    /// Keeps an OS route, or chooses over a failure.
-    pub(super) fn choose(&self, key: Key, decided: Decided) -> Chosen {
+    /// Keeps an OS route, or plans over a failure. A PAC that could not be fetched probes the
+    /// host's earlier proxy, if any, and else goes direct, even when the firm meant a proxy: the
+    /// proxy it meant cannot be reached. Any other failure reuses the host's earlier route; with
+    /// none, it refuses when the firm meant a proxy, else goes direct.
+    pub(super) fn plan(&self, key: &Key, decided: Decided) -> Plan {
         let Decided { answer, got, now } = decided;
-        match answer {
+        let (failure, kind) = match answer {
             Answer::Route(route) => {
                 if let Some(got) = got {
-                    self.keep(key, route.clone(), got, now);
+                    self.keep(key.clone(), route.clone(), got, now);
                 }
-                Chosen::Go(route)
+                return Plan::Chosen(Chosen::Go(route));
             }
-            Answer::Failed(failure, _) => {
-                let last = self
-                    .0
-                    .borrow()
-                    .get(&key)
-                    .filter(|(_, got)| now.saturating_sub(*got) < REUSE_FOR)
-                    .map(|(route, _)| route.clone());
-                match (last, failure) {
-                    (Some(route), _) => Chosen::Go(route),
-                    (None, Failure::MeantProxy) => Chosen::Refuse,
-                    (None, Failure::Unmeant) => Chosen::Go(Route::Direct),
-                }
-            }
+            Answer::Failed(failure, kind) => (failure, kind),
+        };
+        let last = self
+            .0
+            .borrow()
+            .get(key)
+            .filter(|(_, got)| now.saturating_sub(*got) < REUSE_FOR)
+            .map(|(route, _)| route.clone());
+        if kind == FailKind::PacUnreachable {
+            return match last {
+                Some(Route::Http { host, port }) => Plan::Probe { host, port },
+                Some(Route::Direct) | None => Plan::Chosen(Chosen::Go(Route::Direct)),
+            };
         }
+        Plan::Chosen(match (last, failure) {
+            (Some(route), _) => Chosen::Go(route),
+            (None, Failure::MeantProxy) => Chosen::Refuse,
+            (None, Failure::Unmeant) => Chosen::Go(Route::Direct),
+        })
+    }
+
+    /// After a [`Plan::Probe`] of `route`: kept when it took a connection; else forgotten, so
+    /// no later failure reuses it, and direct.
+    pub(super) fn probed(&self, key: &Key, route: Route, reached: bool) -> Chosen {
+        if reached {
+            return Chosen::Go(route);
+        }
+        let mut routes = self.0.borrow_mut();
+        if routes.get(key).is_some_and(|(kept, _)| *kept == route) {
+            routes.remove(key);
+        }
+        Chosen::Go(Route::Direct)
     }
 
     fn keep(&self, key: Key, route: Route, got: Duration, now: Duration) {
@@ -90,7 +129,7 @@ impl Remembered {
 
 /// The route for `target` on `ctx`, or `None` when refused (the denial sent, the verdict set). A
 /// lookup slower than the connect timeout counts as failed, the settings read for whether a
-/// proxy was meant.
+/// proxy was meant. A probe runs off the proxy thread, for at most [`PROBE_CAP`].
 pub(super) async fn route(ctx: &Ctx, target: &Target, exchange: &mut Exchange) -> Option<Route> {
     let host = target.name.text();
     let port = target.port;
@@ -118,7 +157,22 @@ pub(super) async fn route(ctx: &Ctx, target: &Target, exchange: &mut Exchange) -
             now: ctx.lookup.now(),
         }
     };
-    match ctx.remembered.choose((scheme, host, port), decided) {
+    let key = (scheme, host, port);
+    let chosen = match ctx.remembered.plan(&key, decided) {
+        Plan::Chosen(chosen) => chosen,
+        Plan::Probe { host, port } => {
+            let lookup = Arc::clone(&ctx.lookup);
+            let asked = host.clone();
+            let probe = blocking::unblock(move || lookup.reachable(&asked, port, PROBE_CAP));
+            let reached = probe.await;
+            if !reached {
+                tracing::info!("egress: the PAC was not fetched and the earlier proxy is silent");
+            }
+            ctx.remembered
+                .probed(&key, Route::Http { host, port }, reached)
+        }
+    };
+    match chosen {
         Chosen::Go(route) => Some(route),
         Chosen::Refuse => {
             exchange.verdict = Verdict::Failed;
@@ -130,72 +184,5 @@ pub(super) async fn route(ctx: &Ctx, target: &Target, exchange: &mut Exchange) -
             });
             None
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn key(host: &str) -> Key {
-        (Scheme::Https, host.to_owned(), 443)
-    }
-
-    fn proxy() -> Route {
-        Route::Http {
-            host: "proxy.firm.test".to_owned(),
-            port: 8080,
-        }
-    }
-
-    fn got(at: Duration) -> Decided {
-        Decided {
-            answer: Answer::Route(proxy()),
-            got: Some(at),
-            now: at,
-        }
-    }
-
-    fn failed(now: Duration) -> Decided {
-        Decided {
-            answer: Answer::Failed(Failure::MeantProxy, FailKind::Other),
-            got: None,
-            now,
-        }
-    }
-
-    /// Past the cap the oldest host goes first, and the newest is still reused.
-    #[test]
-    fn the_cap_holds_and_drops_the_oldest() {
-        let remembered = Remembered::default();
-        let extra = 10;
-        for n in 0..REMEMBER_MOST + extra {
-            let at = Duration::from_secs(u64::try_from(n).unwrap());
-            remembered.choose(key(&format!("h{n}.test")), got(at));
-        }
-        assert_eq!(remembered.len(), REMEMBER_MOST);
-        let now = Duration::from_secs(u64::try_from(REMEMBER_MOST + extra).unwrap());
-        assert_eq!(
-            remembered.choose(key("h0.test"), failed(now)),
-            Chosen::Refuse
-        );
-        let newest = format!("h{}.test", REMEMBER_MOST + extra - 1);
-        assert_eq!(
-            remembered.choose(key(&newest), failed(now)),
-            Chosen::Go(proxy())
-        );
-    }
-
-    /// A route from the settings or the environment (no OS time) is not remembered.
-    #[test]
-    fn a_route_not_from_the_os_is_not_remembered() {
-        let remembered = Remembered::default();
-        let plain = Decided {
-            answer: Answer::Route(proxy()),
-            got: None,
-            now: Duration::ZERO,
-        };
-        assert_eq!(remembered.choose(key("a.test"), plain), Chosen::Go(proxy()));
-        assert_eq!(remembered.len(), 0);
     }
 }

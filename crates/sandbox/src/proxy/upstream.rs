@@ -188,9 +188,14 @@ pub(crate) type OsAnswer = dyn Fn(Scheme, &str, u16) -> Answer + Send + Sync;
 /// the OS for a route (no lookup slot, or too slow for the egress proxy).
 pub(crate) type Intent = dyn Fn() -> Failure + Send + Sync;
 
-/// One launch's upstream lookup, shared by its connections.
+/// Whether a proxy takes a connection within a cap: [`reachable`], or a test's fake.
+pub(crate) type Reach = dyn Fn(&str, u16, Duration) -> bool + Send + Sync;
+
+/// One launch's upstream lookup, shared by its connections, with the probe the egress proxy asks
+/// before it reuses an earlier proxy over a PAC that could not be fetched.
 pub(crate) struct Lookup {
     source: Source,
+    reach: Box<Reach>,
 }
 
 enum Source {
@@ -281,7 +286,24 @@ impl Lookup {
                 Box::new(clock),
             ))),
         };
-        Ok(Lookup { source })
+        Ok(Lookup {
+            source,
+            reach: Box::new(reachable),
+        })
+    }
+
+    /// Probes a proxy with `reach` in place of [`reachable`].
+    pub(crate) fn with_reach(
+        mut self,
+        reach: impl Fn(&str, u16, Duration) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.reach = Box::new(reach);
+        self
+    }
+
+    /// Blocking, for at most `cap`: whether the proxy at `host` and `port` takes a connection.
+    pub(crate) fn reachable(&self, host: &str, port: u16, cap: Duration) -> bool {
+        (self.reach)(host, port, cap)
     }
 
     /// Reads the settings with `intent` when a lookup fails without asking the OS (by default,

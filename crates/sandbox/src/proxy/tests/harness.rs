@@ -14,7 +14,7 @@ use futures::channel::oneshot;
 use futures::future::BoxFuture;
 
 use crate::proxy::net::Network;
-use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Scheme};
+use crate::proxy::upstream::{Answer, Env, Failure, Intent, OsAnswer, OsRoute, Reach, Scheme};
 use crate::proxy::{Exchange, Limits, Options, ProxyConfig, ProxyHandle, start_with};
 use crate::{Allowlist, Clock, Denial, DenialSink, Reachability, Route, Upstream};
 
@@ -201,6 +201,9 @@ pub(crate) struct Setup {
     /// For `Upstream::System`: the settings read when a lookup fails without asking the OS
     /// (nothing meant when `None`).
     pub(crate) intent: Option<Box<Intent>>,
+    /// The probe of an earlier proxy over a PAC that could not be fetched (the real one when
+    /// `None`).
+    pub(crate) reach: Option<Box<Reach>>,
     /// [`ProxyConfig::browser`]: whether the browser listener is bound (true by default).
     pub(crate) browser: bool,
 }
@@ -216,6 +219,7 @@ impl Default for Setup {
             os: None,
             answers: None,
             intent: None,
+            reach: None,
             browser: true,
         }
     }
@@ -284,6 +288,7 @@ pub(crate) fn rig(setup: Setup) -> Rig {
                 Some((env.unwrap_or_default(), answers, intent))
             }
         },
+        reach: setup.reach,
     };
     let handle = start_with(config, Arc::clone(&net) as Arc<dyn Network>, options).unwrap();
     Rig {

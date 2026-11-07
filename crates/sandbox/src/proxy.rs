@@ -51,7 +51,7 @@ use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use net::{Network, SystemNetwork};
 use token::Token;
-use upstream::{Env, Intent, Lookup, OsAnswer};
+use upstream::{Env, Intent, Lookup, OsAnswer, Reach};
 
 /// What a launch's proxy allows, where it sends traffic, and where its refusals go.
 pub struct ProxyConfig {
@@ -207,11 +207,13 @@ impl Default for Limits {
 /// What tests swap: the clock behind the rate cap, the limits, and for `Upstream::System` the
 /// host's proxy variables, the OS lookup and what the settings show when a lookup fails without
 /// one (setting the process's environment in a test is `unsafe` in edition 2024, and the crate
-/// denies unsafe code). A swapped OS lookup runs on `clock` too.
+/// denies unsafe code). A swapped OS lookup runs on `clock` too. `reach` probes a proxy in place
+/// of [`upstream::reachable`].
 pub(crate) struct Options {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) limits: Limits,
     pub(crate) system: Option<(Env, Box<OsAnswer>, Box<Intent>)>,
+    pub(crate) reach: Option<Box<Reach>>,
 }
 
 impl Default for Options {
@@ -220,6 +222,7 @@ impl Default for Options {
             clock: Arc::new(SystemClock::new()),
             limits: Limits::default(),
             system: None,
+            reach: None,
         }
     }
 }
@@ -245,12 +248,16 @@ pub(crate) fn start_with(
     net: Arc<dyn Network>,
     options: Options,
 ) -> Result<ProxyHandle, Error> {
-    let lookup = Arc::new(match options.system {
+    let lookup = match options.system {
         Some((env, os, intent)) => {
             let clock = SharedClock(Arc::clone(&options.clock));
             Lookup::with_parts(config.upstream, env, os, clock)?.with_intent(intent)
         }
         None => Lookup::new(config.upstream)?,
+    };
+    let lookup = Arc::new(match options.reach {
+        Some(reach) => lookup.with_reach(reach),
+        None => lookup,
     });
     let token = Token::generate()?;
     let bind = || -> Result<(Async<std::net::TcpListener>, u16), Error> {
