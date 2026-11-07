@@ -16,6 +16,8 @@ use crate::support::{Events, Fixture, POLL, REMOTE_HINTS, Seen, codex, eventuall
 const PORT_POLL: Duration = Duration::from_secs(2);
 const CODE_LIFETIME: Duration = Duration::from_mins(15);
 const STORE: [&str; 2] = ["-c", "cli_auth_credentials_store=\"file\""];
+/// How long the lawyer's Cancel lets a run end by itself before it is killed.
+pub(crate) const CANCEL_GRACE: Duration = Duration::from_secs(2);
 
 fn signed_in() -> SigninState {
     SigninState::SignedIn {
@@ -112,6 +114,11 @@ fn codex_never_produces_open_url() {
             !fx.codex_runs(&["login", "status"]).is_empty()
         });
         agents.cancel_sign_in(&codex()).unwrap();
+        if method == Method::Browser {
+            // The test's callback port is 0, which no login owns: no `/cancel`, so the run is
+            // killed when the lawyer's grace passes.
+            fx.timer.fire(CANCEL_GRACE);
+        }
         let (seen, last) = events.until_end();
         assert_eq!(last, failed(SigninCode::Cancelled));
         assert_no_open_url(&seen, &events);
@@ -263,7 +270,8 @@ fn codex_runs_get_their_home_the_file_store_and_ssl_cert_file() {
 
 #[test]
 fn cancel_kills_the_codex_run_and_its_tree() {
-    let fx = Fixture::new("codex-cancel", "never");
+    let mut fx = Fixture::new("codex-cancel", "never");
+    fx.listen_for_cancel();
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
@@ -284,7 +292,8 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     );
     let _ = login;
     assert_eq!(fx.timer.live(), Vec::<Duration>::new());
-    assert_eq!(fx.codex_runs(&["login", "status"]), []);
+    // The login ended on its `/cancel`; one status check then said signed out.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 1);
     assert_eq!(fx.codex_runs(&["app-server"]), []);
 }
 
@@ -381,6 +390,7 @@ fn paste_code_to_codex_is_refused() {
         })
     );
     agents.cancel_sign_in(&codex()).unwrap();
+    fx.timer.fire(CANCEL_GRACE);
     assert_eq!(events.until_end().1, failed(SigninCode::Cancelled));
 }
 
