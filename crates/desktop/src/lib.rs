@@ -11,11 +11,10 @@
 //! - Setup opens the window first, then starts the host on a thread of its own
 //!   (`host_start.rs`), so the webview never waits for the store; a command sent before the host
 //!   is ready waits for it, and after a failed start gets that start's error. That thread adds
-//!   Documents to the folders (`Locations::with_documents`, never on the main thread: a share may
-//!   be down), then the host runs with the effective settings (`Effective::load`, system policy
-//!   sources), the `PassthroughLauncher`, the refused folders of `refused_folders`, the launch
-//!   profile (`profile.rs`; none when it cannot be built) and egress proxies (`egress.rs`). Exit
-//!   waits for the start, then `HostHandle::shutdown`, `HostJoin::join` and the proxies' stop.
+//!   Documents (`Locations::with_documents`, never on the main thread: a share may be down), then
+//!   runs the host with `Effective::load`, the `PassthroughLauncher`, `refused_folders`, the launch
+//!   profile (`profile.rs`) and egress proxies (`egress.rs`). Exit waits for the start, then
+//!   `HostHandle::shutdown`, `HostJoin::join` and the proxies' stop, on their own thread.
 //! - Every quit runs the agents' stop before the process ends (`quit.rs`): a closed window or
 //!   `AppHandle::exit` through `RunEvent::ExitRequested`; on Unix the first SIGTERM, SIGINT or
 //!   SIGHUP through `AppHandle::exit(0)` (`quit_signals.rs`: caught by handlers on Tauri's
@@ -422,8 +421,7 @@ fn start_host<R: Runtime>(
         );
         let hook = setup::SetupHook::new(keys, plans, network);
         // The updater, and a watch on the host that exits the app to install (update.rs).
-        let config = update::with_updater(&app, config, &locations);
-        let config = egress::with_proxies(config, &proxies);
+        let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))
     })
 }
