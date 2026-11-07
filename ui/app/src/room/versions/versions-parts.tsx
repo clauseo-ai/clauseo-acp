@@ -25,7 +25,9 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { useVersionWords, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
-import { isHostError } from "../../transport/host-transport.ts";
+import { locatable, useLocateFolder } from "../act-refusals.ts";
+import { LocateButton } from "../locate-button.tsx";
+import { refusalOf } from "../open.ts";
 import type { VersionsController } from "./controller.ts";
 import { restoreOf, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
@@ -54,12 +56,13 @@ function useVersions(
   return { s, cal, history };
 }
 
-/** A stand-in's refusal is logged; the lawyer declining the computer's own confirm says nothing. */
-const quietly = (run: Promise<unknown>) =>
-  run.catch((error: unknown) => {
-    if (isHostError(error) && error.code === "transport.unauthorized") return;
-    console.warn(`a Versions act failed: ${JSON.stringify(error)}`);
-  });
+/** A stand-in's act: what the band said clears as it's tried again, and a refusal says its code
+ * there, as a restore's does; the lawyer declining the computer's own confirm says nothing
+ * (open.ts's refusalOf). */
+const tried = (c: VersionsController, name: string, run: Promise<unknown>) => {
+  c.refuse(null);
+  void refusalOf(name, run).then((code) => code !== null && c.refuse(code));
+};
 
 /** The timeline, where the rail stands while Versions is open. */
 export function VersionsRail({
@@ -133,7 +136,9 @@ export function VersionsRail({
           open={whereOpen}
           onOpenChange={setWhereOpen}
           {...where}
-          {...(reveal === undefined ? {} : { onShow: () => void quietly(reveal("app_data")) })}
+          {...(reveal === undefined
+            ? {}
+            : { onShow: () => tried(c, "reveal", reveal("app_data")) })}
         />
       }
       testIds={{ panel: "versions", entry: "version" }}
@@ -172,6 +177,7 @@ export function VersionsCentre({
   const w = useVersionWords();
   const { lang } = w;
   const room = useRoom();
+  const locate = useLocateFolder();
   const { s, cal, history } = useVersions(c, lang);
   const look = s.look;
   // looking back at a version, or at now with the newest picked: a turn's change whose Undo the band offers
@@ -251,7 +257,13 @@ export function VersionsCentre({
     s.ask?.stage !== "word"
       ? failedLine(lang, s.failed)
       : null;
-  if (failure !== null) notices.push(failure);
+  // a folder gone, or not the matter's: Locate folder beside the words (act-refusals.ts)
+  const locateAct =
+    failure !== null && locatable(s.failed) && locate !== null ? (
+      <LocateButton onLocate={locate} className="ver-notice-act" />
+    ) : null;
+  if (failure !== null)
+    notices.push(locateAct === null ? failure : { ...failure, action: locateAct });
 
   const changes = s.compare?.changes ?? null;
   const inView = changes?.find((f) => f.path === doc) ?? changes?.[0];
@@ -274,6 +286,7 @@ export function VersionsCentre({
                 comparing: look.kind === "back" && look.comparing,
                 undoable: takesBack(s, shown),
                 note: failure?.text ?? null,
+                noteAction: locateAct,
               }
         }
         notices={notices}
@@ -341,7 +354,7 @@ export function VersionsCentre({
                 }}
                 now={{ head: vt(lang, "As it is now"), facts: "", saved: "" }}
                 pdf={/\.pdf$/i.test(inView.path)}
-                {...openNow(standIns, fileRef(inView.path))}
+                {...openNow(standIns, fileRef(inView.path), c)}
               />
             </Desk>
           )}
@@ -363,13 +376,13 @@ export function VersionsCentre({
 
 /** "Open now", through H11's open_file, where the host has it and the room has the file's handle. The file as it was
  * has no handle until the matter as it stood can be read (H12), so it has no way to open. */
-function openNow(standIns: StandIns, file: FileRefId | null) {
+function openNow(standIns: StandIns, file: FileRefId | null, c: VersionsController) {
   const { openFile } = standIns;
   if (openFile === undefined || file === null) return {};
   return {
     openable: "now" as const,
     onOpen: (which: "then" | "now") => {
-      if (which === "now") void quietly(openFile(file));
+      if (which === "now") tried(c, "open_file", openFile(file));
     },
   };
 }

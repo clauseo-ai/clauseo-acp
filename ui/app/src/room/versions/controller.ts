@@ -137,8 +137,7 @@ export class VersionsController {
     const talks = this.#talks;
     talks.read();
     const statuses = talks.threads.map((t) => JSON.stringify(talks.statusOf(t))).join(",");
-    // the steps of every conversation the room holds: a step undone there changes what Undo offers; their streamed
-    // text doesn't count
+    // held conversations' steps: one undone there changes what Undo offers; text doesn't count
     const steps = talks.threads
       .map((t) => stepsSig(this.#store.view(streamOf(t.thread))))
       .join(",");
@@ -291,9 +290,12 @@ export class VersionsController {
     const look = this.#snap.look;
     if (look.kind !== "back") return;
     const comparing = !look.comparing;
-    this.#set({ look: { ...look, comparing }, compare: null });
+    this.#set({ look: { ...look, comparing }, compare: null, failed: null });
     if (comparing) void this.#compare(look.id);
   }
+
+  /** Open now, or Show where versions are kept, refused: its code on the band; null on a try. */
+  refuse = (code: string | null): void => this.#set({ failed: code });
 
   /** Asks what differs between a version and the folder now; again: the matter moved, and the list shown stays until
    * the answer. Only the newest ask's answer is shown; an answer of the wrong shape is a failure. */
@@ -482,8 +484,7 @@ export class VersionsController {
       );
       return;
     }
-    // the line names the files chosen, in the order the version's row names them, until the host's marker says
-    // which it put back
+    // the line names chosen files in the row's order until the host's marker says what came back
     this.#finish(
       { kind: "undidChange", of: m.ts, papers: inRowOrder(this.#snap.timeline, id, papers) },
       { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: step.turn },

@@ -57,6 +57,10 @@ export type MatterRowProps = {
   /** Optional: its folder isn't where it was, for its actions (Locate folder), apart from what its status line says:
    * the open matter's row says nothing, yet its menu still offers Locate folder. Left out, the moved state says it. */
   moved?: boolean | undefined;
+  /** Optional: an action on the matter was refused because its folder needs finding (gone, or
+   * not the matter's): the menu offers Locate folder, though the folder hasn't moved, and Show
+   * in Finder stays, to try again. */
+  locateAsked?: boolean | undefined;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
   /** Optional: in Needs you, the title of the conversation behind its status, quiet, beneath the status's words. */
@@ -101,7 +105,16 @@ export type MatterRowProps = {
  * moved, and take it off the list, which leaves the folder where it is. */
 type ActionProps = Pick<
   MatterRowProps,
-  "name" | "pinned" | "state" | "moved" | "onPin" | "onLocate" | "onReveal" | "onRemove" | "triage"
+  | "name"
+  | "pinned"
+  | "state"
+  | "moved"
+  | "locateAsked"
+  | "onPin"
+  | "onLocate"
+  | "onReveal"
+  | "onRemove"
+  | "triage"
 >;
 
 /** Whether the folder has moved, for the actions: the flag where given, else the moved state. */
@@ -109,10 +122,19 @@ const movedOf = (moved: boolean | undefined, state: MatterState | undefined) =>
   moved ?? state === "moved";
 
 /** Whether the row has any action to show: each item stands only with its handler. */
-const hasActions = ({ state, moved, onPin, onLocate, onReveal, onRemove, triage }: ActionProps) =>
+const hasActions = ({
+  state,
+  moved,
+  locateAsked,
+  onPin,
+  onLocate,
+  onReveal,
+  onRemove,
+  triage,
+}: ActionProps) =>
   onPin !== undefined ||
   triage !== undefined ||
-  (movedOf(moved, state) && onLocate !== undefined) ||
+  ((movedOf(moved, state) || locateAsked === true) && onLocate !== undefined) ||
   onReveal !== undefined ||
   onRemove !== undefined;
 
@@ -121,6 +143,7 @@ function MatterActions({
   pinned,
   state,
   moved: movedFlag,
+  locateAsked,
   onPin,
   onLocate,
   onReveal,
@@ -129,7 +152,7 @@ function MatterActions({
 }: ActionProps) {
   const { lang, platform } = useDisplay();
   const moved = movedOf(movedFlag, state);
-  const locate = moved ? onLocate : undefined;
+  const locate = moved || locateAsked === true ? onLocate : undefined;
   const above =
     onPin !== undefined || triage !== undefined || locate !== undefined || onReveal !== undefined;
   return (
@@ -287,6 +310,7 @@ export function MatterRow({
   at = "",
   day = "",
   moved,
+  locateAsked,
   pinned,
   match,
   where,
@@ -314,6 +338,7 @@ export function MatterRow({
     pinned,
     state,
     moved,
+    locateAsked,
     onPin,
     onLocate,
     onReveal,
