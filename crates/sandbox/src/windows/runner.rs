@@ -47,6 +47,8 @@ use serde::{Deserialize, Serialize};
 use super::pool::pool_number;
 use super::sids::Sid;
 
+#[cfg(windows)]
+mod ca;
 pub mod env;
 pub mod frame;
 #[cfg(windows)]
@@ -143,6 +145,11 @@ pub struct LaunchMessage {
     /// The credential link in the state folder, for M3's file-ID check.
     #[serde(default)]
     pub credential_link: Option<String>,
+    /// A firm's CA files, whose certificates the outer runner appends to the CA bundle
+    /// (`ca_bundle::merge`). R17 PR-E fills it from `network.ca_certs`; the spec's own
+    /// `SSL_CERT_FILE` is merged the same way.
+    #[serde(default)]
+    pub firm_ca: Vec<String>,
 }
 
 impl std::fmt::Debug for LaunchMessage {
@@ -160,6 +167,7 @@ impl std::fmt::Debug for LaunchMessage {
             .field("env", &names)
             .field("state", &self.state)
             .field("tmpdir", &self.tmpdir)
+            .field("firm_ca", &self.firm_ca)
             .finish_non_exhaustive()
     }
 }
@@ -231,6 +239,9 @@ impl LaunchMessage {
         }
         for path in &self.granted {
             local("granted", path)?;
+        }
+        for path in &self.firm_ca {
+            local("firm_ca", path)?;
         }
         if self.args.len() > ITEMS_CAP || self.env.len() > ITEMS_CAP {
             return Err(field("args or env", "has more than 4096 items"));

@@ -983,8 +983,11 @@ leaves that profile, both naming the part.
   machine's and the current user's `Root` stores (group policy and enterprise included), less
   anything in `Disallowed` and anything not self-issued. It is written once per app start and
   when the pool changes, atomically, owned by the lawyer, readable by each pool user and writable
-  by none. `SSL_CERT_FILE` makes every OpenSSL tool in the sandbox trust exactly the machine's
-  roots, which is intended. The egress proxy (S16) tunnels TLS and never terminates it, so it has
+  by none. A firm's CA files (the launch's `firm_ca`, which R17 fills from `network.ca_certs`,
+  and the host's own `SSL_CERT_FILE`) are appended to it, each certificate once, into a merged
+  file beside it with the same descriptor; the machine roots keep their filter, the firm's
+  certificates are taken as the firm gave them. `SSL_CERT_FILE` makes every OpenSSL tool in the
+  sandbox trust exactly the machine's roots and the firm's, which is intended. The egress proxy (S16) tunnels TLS and never terminates it, so it has
   no CA to add.
 - **M3.** Tier B never grants on, links from or points at the lawyer's `~\.codex`: a launch whose
   paths or `CODEX_HOME` lie in it, or whose credential link is its `auth.json` by file ID, is

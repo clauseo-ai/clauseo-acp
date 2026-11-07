@@ -39,6 +39,35 @@ pub const CA_VARS: [&str; 2] = ["CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"];
 /// The variables whose entries are filtered one by one rather than kept or dropped whole.
 const LISTS: [&str; 2] = ["PATH", "PSModulePath"];
 
+/// The firm CA files to merge into the launch's CA bundle: `firm_ca`, then the spec's own
+/// `SSL_CERT_FILE` (which the bundle's variable replaces), each once and none the bundle itself.
+/// None without a bundle: the spec's `SSL_CERT_FILE` then passes as it is.
+pub fn firm_ca_files(message: &LaunchMessage) -> Vec<String> {
+    let Some(bundle) = message.ca_bundle.as_deref().and_then(WinPath::parse) else {
+        return Vec::new();
+    };
+    let from_env = message
+        .env
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("SSL_CERT_FILE"))
+        .map(|(_, value)| value.clone());
+    let mut files: Vec<String> = Vec::new();
+    let mut seen: Vec<WinPath> = vec![bundle];
+    for file in message.firm_ca.iter().cloned().chain(from_env) {
+        let Some(path) = WinPath::parse(file.trim().trim_matches('"')) else {
+            continue;
+        };
+        if !seen
+            .iter()
+            .any(|known| path.within(known) && known.within(&path))
+        {
+            seen.push(path.clone());
+            files.push(path.display());
+        }
+    }
+    files
+}
+
 /// The state folder's places the environment names, which the inner runner makes before the
 /// agent starts: `AppData\Roaming`, `AppData\Local`, and `tmp` when there is no session temp
 /// folder.

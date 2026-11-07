@@ -1,6 +1,6 @@
 //! The launch message, its checks, the environment, the paths, the frames and the exit codes.
 
-use super::env::{CA_VARS, GIT_OPENSSL, profile_folders};
+use super::env::{CA_VARS, GIT_OPENSSL, firm_ca_files, profile_folders};
 use super::frame::{InnerReport, command_line, read_frame, write_frame};
 use super::paths::{CodexReuse, WinPath};
 use super::*;
@@ -34,6 +34,7 @@ fn message() -> LaunchMessage {
         ],
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
+        firm_ca: Vec::new(),
     }
 }
 
@@ -442,4 +443,42 @@ fn launch_files_have_the_run_folders_names() {
     let path = launch_path(std::path::Path::new("data"), "0123456789abcdef");
     assert!(path.ends_with(std::path::Path::new("sandbox/run/0123456789abcdef.json")));
     assert_eq!(runner_args(&path)[0], "--launch");
+}
+
+#[test]
+fn the_firm_ca_files_come_from_the_launch_and_the_spec() {
+    let mut spec = message();
+    spec.firm_ca = vec![r"C:\Firm\proxy-ca.pem".to_owned()];
+    spec.env.extend([
+        (
+            "ssl_cert_file".to_owned(),
+            r#""C:\Firm\other.pem""#.to_owned(),
+        ),
+        (
+            "SSL_CERT_FILE".to_owned(),
+            r"c:\firm\PROXY-CA.pem".to_owned(),
+        ),
+        (
+            "SSL_CERT_FILE".to_owned(),
+            format!(r"{DATA}\sandbox-ca\roots.pem"),
+        ),
+    ]);
+    assert_eq!(
+        firm_ca_files(&spec),
+        [r"C:\Firm\proxy-ca.pem", r"C:\Firm\other.pem"],
+        "each once, never the bundle itself"
+    );
+    spec.check().unwrap();
+    // Without a bundle there is nothing to merge into: the spec's SSL_CERT_FILE passes.
+    spec.ca_bundle = None;
+    assert_eq!(firm_ca_files(&spec), Vec::<String>::new());
+    let mut bad = message();
+    bad.firm_ca = vec!["relative.pem".to_owned()];
+    assert!(matches!(
+        bad.check(),
+        Err(LaunchError::Field {
+            field: "firm_ca",
+            ..
+        })
+    ));
 }
