@@ -10,7 +10,8 @@
 //!   (`AGENT_BROWSER_STREAM_PORT`) and, on Windows, agent-browser's daemon port
 //!   (`--daemon-port`), each a [`PortClaim`] from stage C's `ports` (`claim_browser_port`, or
 //!   `claim_browser_port_at` for the daemon's, both outside tier B's range), so no other
-//!   session of this host is handed them. The jail pins the session's loopback reach to them ([`BrowserPorts::loopback`]).
+//!   session of this host is handed them. The jail pins the session's loopback reach to them
+//!   ([`BrowserPorts::loopback`]).
 //! - macOS and Linux: one [`BrowserSocketDir`], `/tmp/clauseo-ab-<16 random>` (mode 0700, with
 //!   its lock file), as `AGENT_BROWSER_SOCKET_DIR`. The guard gets [`BrowserSocketDir::path`],
 //!   the `/tmp/...` form, never the canonical one, which is 8 bytes longer on macOS
