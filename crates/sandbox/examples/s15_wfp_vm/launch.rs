@@ -110,14 +110,14 @@ fn account(sid: &Sid) -> Result<(String, String), String> {
     Ok((text(&name, name_len), text(&domain, domain_len)))
 }
 
-/// Runs `exe runner <steps>` as the pool user `sid`, its password read from the owner's
-/// `secrets.bin` under `data_dir`; the probe's exit code.
-pub(crate) fn as_pool_user(
+/// Starts `exe runner <steps>` as the pool user `sid`, its password read from the owner's
+/// `secrets.bin` under `data_dir`, without waiting.
+pub(crate) fn start_as_pool_user(
     exe: &Path,
     data_dir: &Path,
     sid: &Sid,
     steps: &[String],
-) -> Result<u32, String> {
+) -> Result<Running, String> {
     let password = secrets::secret_for(data_dir, sid).map_err(|e| format!("secrets.bin: {e}"))?;
     let (name, domain) = account(sid)?;
     let mut args = vec!["runner".to_owned()];
@@ -150,7 +150,27 @@ pub(crate) fn as_pool_user(
         )
     }
     .map_err(|e| format!("CreateProcessWithLogonW as {name}: {e}"))?;
-    wait(&info)
+    Ok(Running(info))
+}
+
+/// A pool-user probe started and not yet waited for.
+pub(crate) struct Running(PROCESS_INFORMATION);
+
+impl Running {
+    /// Waits for it; the probe's exit code.
+    pub(crate) fn wait(self) -> Result<u32, String> {
+        wait(&self.0)
+    }
+}
+
+/// Runs `exe runner <steps>` as the pool user `sid` and waits; the probe's exit code.
+pub(crate) fn as_pool_user(
+    exe: &Path,
+    data_dir: &Path,
+    sid: &Sid,
+    steps: &[String],
+) -> Result<u32, String> {
+    start_as_pool_user(exe, data_dir, sid, steps)?.wait()
 }
 
 /// A token's information of class `class`, in an aligned buffer.
