@@ -282,22 +282,16 @@ fn the_apps_language_goes_with_the_data_and_stays_when_it_is_kept() {
     // (installer.nsi:68), and MANUFACTURER is tauri.conf.json's publisher.
     let conf: serde_json::Value = serde_json::from_str(&read("tauri.conf.json")).unwrap();
     assert_eq!(conf["bundle"]["publisher"], "Clauseo");
-    let value = r#"DeleteRegValue HKCU "${MANUKEY}" "UiLanguage""#;
-    let deleted = line_with(body, &[value]);
+    let deleted = line_with(body, &[r#"DeleteRegValue HKCU "${MANUKEY}" "UiLanguage""#]);
     let key = line_with(body, &[r#"DeleteRegKey /ifempty HKCU "${MANUKEY}""#]);
-    assert_eq!(
-        deleted + 1,
-        key,
-        "the value goes right before its key: {body:?}"
-    );
+    assert_eq!(deleted + 1, key, "the value goes right before its key");
     // Only in the box's branch: after the box is cleared there, and nowhere else in the hooks.
     let branch = line_with(body, &["${If} $DeleteAppDataCheckboxState = 1"]);
     let cleared = line_with(body, &["StrCpy $DeleteAppDataCheckboxState 0"]);
     assert!(branch < cleared && cleared < deleted, "{body:?}");
+    let deletes = code.iter().filter(|line| line.starts_with("Delete"));
     assert_eq!(
-        code.iter()
-            .filter(|line| line.contains("UiLanguage") && line.starts_with("Delete"))
-            .count(),
+        deletes.filter(|line| line.contains("UiLanguage")).count(),
         1
     );
 }
