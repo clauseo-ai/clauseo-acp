@@ -286,9 +286,11 @@ pub(super) fn prepare(
         if let Some(keys_wait) = keys_wait {
             keys_wait.await;
         }
-        if let Some(slot_wait) = slot_wait {
-            slot_wait.await;
-        }
+        // Whether a slot is there for the browser after a wait; without one, it is.
+        let slot = match slot_wait {
+            Some(slot_wait) => slot_wait.await,
+            None => true,
+        };
         let result = codex::prepare::off_actor_or_undo(
             clock,
             job,
@@ -325,7 +327,7 @@ pub(super) fn prepare(
                 }
                 run.make(&data, &sweep)?;
                 run.data_deny = launch_deny(&run, &stored, &data, claude_home.as_deref());
-                claim(&mut run, &data, claims);
+                claim(&mut run, &data, claims, slot);
                 let skills_written = write_skills(&skills);
                 let packs_skipped;
                 (run.packs_written, packs_skipped) = packs.run(&run.skill_packs);
@@ -359,19 +361,19 @@ pub(super) fn prepare(
 }
 
 /// The session's egress proxy, browser claims and case-law relay (`claims`), made on the
-/// launch-prep thread.
-fn claim(run: &mut RunFolders, data: &Path, claims: Claims) {
+/// launch-prep thread. `slot`: whether a browser slot is there after the prep's slot wait.
+fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
     let Claims {
         browser,
         case_law,
         egress,
         held,
     } = claims;
+    let browser = if slot { browser } else { browser.skipped() };
     (run.chrome, run.browser_session) = browser.prepare(data, &run.key.id());
-    // Only a session whose browser was found and claimed holds the proxy's ports.
-    if run.chrome.is_some() && run.browser_session.is_some() {
-        run.egress = egress.open(run.key);
-    }
+    // The launch offers the browser only once its Chrome was found and claimed.
+    let offered = run.chrome.is_some() && run.browser_session.is_some();
+    run.egress = egress.open(run.key, offered);
     run.case_law = case_law.open(run);
     let parts = straggler::Parts {
         browser: run.browser_session.clone(),

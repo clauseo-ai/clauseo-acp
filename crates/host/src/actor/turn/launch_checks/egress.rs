@@ -95,12 +95,18 @@ pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep)
 }
 
 impl EgressPrep {
-    /// Opens `key`'s proxy, when the session gets one. Starts a thread and binds two loopback
-    /// listeners: off the actor.
-    pub(super) fn open(self, key: SessionKey) -> Option<Arc<EgressGuard>> {
-        let proxy = self.proxy?;
+    /// Opens `key`'s proxy, when the session gets one, its token-free browser listener bound
+    /// only when the launch offers the browser (`browser`, `ProxyConfig::browser`). Under tier C
+    /// a launch without the browser gets no proxy at all: nothing would go through it. The jail
+    /// (R17 PR-D) opens one for every session, with `browser` false for those. Starts a thread
+    /// and binds loopback listeners: off the actor.
+    pub(super) fn open(self, key: SessionKey, browser: bool) -> Option<Arc<EgressGuard>> {
+        let proxy = self.proxy.filter(|_| browser)?;
         let denials = Arc::new(CountDenials::default());
-        match proxy.open(key, proxy_config(&self.agent, Arc::clone(&denials))) {
+        match proxy.open(
+            key,
+            proxy_config(&self.agent, Arc::clone(&denials), browser),
+        ) {
             Ok(()) => Some(Arc::new(EgressGuard {
                 proxy,
                 key,
@@ -125,8 +131,12 @@ impl EgressPrep {
 }
 
 /// The proxy config for `agent`'s session, its refusals counted in `denials` (see the module
-/// header).
-pub(crate) fn proxy_config(agent: &AgentId, denials: Arc<CountDenials>) -> ProxyConfig {
+/// header), with the browser listener when the launch offers the browser (`browser`).
+pub(crate) fn proxy_config(
+    agent: &AgentId,
+    denials: Arc<CountDenials>,
+    browser: bool,
+) -> ProxyConfig {
     // The plan sign-in's hosts hold the API-key sign-in's: the session's real sign-in is read
     // from its final environment in R17 PR-D.
     let builtin = match AgentKind::of(agent) {
@@ -140,9 +150,8 @@ pub(crate) fn proxy_config(agent: &AgentId, denials: Arc<CountDenials>) -> Proxy
         upstream: Upstream::System,
         denials,
         record: None,
-        // Opened only for a session whose browser was found and claimed (`launch_checks::claim`),
-        // so it has the browser: its listener is the port the `browser` entry gets.
-        browser: true,
+        // Stage C's rule: the token-free listener only for a launch with the browser.
+        browser,
     }
 }
 

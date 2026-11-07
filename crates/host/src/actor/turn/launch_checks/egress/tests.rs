@@ -13,7 +13,15 @@ fn agent(name: &str) -> AgentId {
 }
 
 fn config(name: &str) -> ProxyConfig {
-    proxy_config(&agent(name), Arc::new(CountDenials::default()))
+    proxy_config(&agent(name), Arc::new(CountDenials::default()), true)
+}
+
+/// The browser listener is asked for only by a launch that offers the browser.
+#[test]
+fn the_browser_listener_follows_the_launch() {
+    let denials = || Arc::new(CountDenials::default());
+    assert!(proxy_config(&agent("claude-acp"), denials(), true).browser);
+    assert!(!proxy_config(&agent("claude-acp"), denials(), false).browser);
 }
 
 /// Claude's session reaches its API and the seed sites; Chrome's background hosts are silent;

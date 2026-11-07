@@ -73,6 +73,15 @@ impl BrowserPrep {
         !matches!(self.chrome, ChromeSearch::Skip)
     }
 
+    /// The prep with no browser: a launch whose slot wait ended with every slot held
+    /// ([`slot_wait`]) looks for no Chrome and claims nothing, so it holds no browser port and
+    /// opens no proxy.
+    pub(super) fn skipped(mut self) -> Self {
+        self.sidecars = Vec::new();
+        self.chrome = ChromeSearch::Skip;
+        self
+    }
+
     /// The Chrome found and the session's claims. A missing sidecar leaves both out, with a
     /// warning (a development build has no agent-browser); a failed claim leaves the claims
     /// out. Either way the entry drops with `BrowserNotInstalled`. File system and socket
@@ -124,8 +133,9 @@ pub(super) const SLOT_WAIT: Duration = Duration::from_secs(3);
 
 /// The wait of a launch prep that wants the browser (`prep`) for `key` while every slot is
 /// taken and a holder's removal runs: until a holder's removal ends or [`SLOT_WAIT`] has
-/// passed on the host clock. The session then looks at the slots again
-/// (`profile_loads.rs`), so it gets the slot that removal freed.
+/// passed on the host clock. It answers whether a slot is free then; without one the prep
+/// claims nothing for the browser and opens no proxy (`BrowserPrep::skipped`). The session
+/// looks at the slots again (`profile_loads.rs`), so it gets the slot that removal freed.
 ///
 /// No removal can end unseen between the look at the slots and the wait: both happen here, in
 /// one actor step (`launch_checks::prepare`, called on the actor), and a removal's end is
@@ -136,7 +146,7 @@ pub(super) fn slot_wait(
     actor: &mut Actor,
     key: SessionKey,
     prep: &BrowserPrep,
-) -> Option<impl std::future::Future<Output = ()> + Send + use<>> {
+) -> Option<impl std::future::Future<Output = bool> + Send + use<>> {
     if matches!(prep.chrome, ChromeSearch::Skip) || !actor.wiring.browser_slots.releasing(key) {
         return None;
     }
@@ -145,7 +155,11 @@ pub(super) fn slot_wait(
     let timer = actor.clock.after(SLOT_WAIT);
     tracing::debug!("a launch waits for a browser slot that a session's end frees");
     Some(async move {
-        futures::future::select(woken, timer).await;
+        match futures::future::select(woken, timer).await {
+            futures::future::Either::Left((Ok(free), _)) => free,
+            // The host is going away, or the wait ran out with every slot still held.
+            futures::future::Either::Left((Err(_), _)) | futures::future::Either::Right(_) => false,
+        }
     })
 }
 
