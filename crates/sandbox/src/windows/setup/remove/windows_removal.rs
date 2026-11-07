@@ -45,6 +45,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
+use crate::windows::wfp;
 use crate::windows::{FolderSupport, folder_support};
 
 /// This Windows machine, as [`remove`](super::remove) drives it.
@@ -216,8 +217,14 @@ impl Removal for WindowsRemoval {
         self.actor.is_some()
     }
 
-    fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<(), MachineError> {
+    fn stop_strays(&mut self, pool: &[Sid], owner: &Sid) -> Result<usize, MachineError> {
         let stopped = processes::stop_pool_processes(pool, owner)?;
+        if !stopped.ended.is_empty() {
+            tracing::warn!(
+                count = stopped.ended.len(),
+                "processes of the sandbox users were stopped"
+            );
+        }
         if !stopped.failed.is_empty() || !stopped.timed_out.is_empty() {
             tracing::warn!(
                 failed = stopped.failed.len(),
@@ -225,7 +232,22 @@ impl Removal for WindowsRemoval {
                 "processes of the sandbox users couldn't all be stopped"
             );
         }
-        Ok(())
+        Ok(stopped.failed.len() + stopped.timed_out.len())
+    }
+
+    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
+        let removed = wfp::remove(&self.names.wfp, Some(owner))
+            .map_err(|error| MachineError::Other(error.cause()))?;
+        if removed.foreign_removed > 0 {
+            tracing::warn!(
+                count = removed.foreign_removed,
+                "removal deleted filters set-up didn't write"
+            );
+        }
+        if let Err(cause) = &removed.firewall {
+            tracing::warn!(%cause, "the sandbox's firewall rules couldn't be removed");
+        }
+        Ok(removed.firewall.err())
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

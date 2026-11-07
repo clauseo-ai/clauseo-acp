@@ -19,6 +19,7 @@ use crate::windows::marker::{self, MarkerState};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets;
 use crate::windows::test_acl::{elevated_tests_enabled, has};
+use crate::windows::wfp::{self, Namespace};
 
 /// This family's record key.
 const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestSetup";
@@ -49,6 +50,7 @@ fn remove_exits_0_when_nothing_was_set_up_and_no_set_up_holds_the_lock() {
         mutex,
         users: SETUP_TEST_PREFIX.to_owned(),
         journals: false,
+        wfp: Namespace::numbered_test(1),
     };
     for per_machine in [false, true] {
         assert_eq!(
@@ -92,6 +94,8 @@ fn sweep() {
         drop(accounts::delete_group(&name));
     }
     drop(record_write::delete(TEST_KEY));
+    // The set-up's network step (S15 PR7) wrote in its own test namespace.
+    drop(wfp::remove(&Namespace::numbered_test(1), Some(&me)));
 }
 
 /// Sweeps when dropped, so a failed assertion still cleans up.
@@ -122,6 +126,7 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
         mutex,
         users: users.clone(),
         journals: false,
+        wfp: Namespace::numbered_test(1),
     };
     let dir = TempDir::new("setup-exe-elevated");
     let owner = Owner::of_this_process().unwrap();

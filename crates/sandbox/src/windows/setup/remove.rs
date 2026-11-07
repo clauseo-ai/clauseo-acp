@@ -34,6 +34,12 @@
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
 //!    group, D-B11), its profile, its account with its sign-in screen value;
+//!    Then, only once every pool account is gone and a second sweep has stopped every process
+//!    still running as a pool SID (one that won't stop ends the run at `Strays`, network on),
+//!    the network filters, the owner's read grant
+//!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
+//!    process that won't stop, which must not run unfiltered while a user's removal fails. A
+//!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
@@ -94,6 +100,9 @@ pub struct RemoveReport {
     pub ledger: LedgerWork,
     /// Whether the group was deleted (`false`: it was gone already).
     pub group: bool,
+    /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
+    /// since the WFP filters (the enforcing layer) went (S15 PR7).
+    pub firewall: Option<String>,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -123,6 +132,8 @@ pub enum RemoveStep {
     Group,
     /// Deleting the record.
     Record,
+    /// Removing the network filters and firewall rules (S15 PR7).
+    Network,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -140,6 +151,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Ledger => "taking the ledger's entries back",
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
+            RemoveStep::Network => "removing the network filters",
         })
     }
 }
@@ -317,12 +329,31 @@ fn steps(
             .write_record(&flagged)
             .map_err(|e| (RemoveStep::Flag, cause_of(&e)))?;
     }
+    // A process left running here is logged; deleting its profile or account fails if it matters.
     machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
+    // Anything still running as a pool SID (one that started since the first sweep, or one the
+    // first couldn't stop) is stopped again, elevated, before the network goes. One that won't
+    // stop keeps the network on: the run ends here, RemovedPartly, and a re-run retries.
+    let left = machine
+        .stop_strays(&record.pool, &record.owner)
+        .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
+    if left > 0 {
+        return Err((
+            RemoveStep::Strays,
+            format!(
+                "{left} process(es) of the sandbox users wouldn't stop, so the network \
+                 protection stays on; restart the computer and uninstall again"
+            ),
+        ));
+    }
+    report.firewall = machine
+        .remove_network(&record.owner)
+        .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     let program_data = machine
         .program_data()
         .map_err(|e| (RemoveStep::DeviceSync, cause_of(&e)))?;

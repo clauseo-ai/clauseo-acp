@@ -8,18 +8,19 @@
 //!
 //! - [`BrowserPorts`]: Chrome's debugging port (`--cdp-port`), the stream server's port
 //!   (`AGENT_BROWSER_STREAM_PORT`) and, on Windows, agent-browser's daemon port
-//!   (`--daemon-port`), each a [`PortClaim`] from stage C's `ports` (`claim_port`, or
-//!   `claim_port_at` for the daemon's), so no other session of this host is handed them. The
-//!   jail pins the session's loopback reach to them ([`BrowserPorts::loopback`]).
+//!   (`--daemon-port`), each a [`PortClaim`] from stage C's `ports` (`claim_browser_port`, or
+//!   `claim_browser_port_at` for the daemon's, both outside tier B's range), so no other
+//!   session of this host is handed them. The jail pins the session's loopback reach to them
+//!   ([`BrowserPorts::loopback`]).
 //! - macOS and Linux: one [`BrowserSocketDir`], `/tmp/clauseo-ab-<16 random>` (mode 0700, with
 //!   its lock file), as `AGENT_BROWSER_SOCKET_DIR`. The guard gets [`BrowserSocketDir::path`],
 //!   the `/tmp/...` form, never the canonical one, which is 8 bytes longer on macOS
 //!   (`/private/tmp/...`) and counts against the 103-byte socket path.
 //! - agent-browser's session name ([`BrowserSession::name`]): the session's id on macOS and
 //!   Linux. On Windows its daemon listens on a port it derives from the name
-//!   ([`daemon_port_of`]), so the host draws random names until the port is one in the jail's
-//!   range that it can claim ([`search_name`]); agent-browser issue vercel-labs/agent-browser#2313
-//!   would let the host pass the port instead.
+//!   ([`daemon_port_of`]), so the host draws random names until the port is one it can claim
+//!   ([`search_name`]; any port outside tier B's range, S15 PR7); agent-browser issue
+//!   vercel-labs/agent-browser#2313 would let the host pass the port instead.
 //!
 //! Dropping a [`BrowserSession`] releases the claims and removes the folder. The launch's
 //! `RunFolders` holds it, and it drops off the actor when the run folder goes
@@ -125,15 +126,15 @@ impl BrowserSession {
             // agent-browser's name is drawn, not the session's id.
             let (name, claim) = search_name(
                 random_name,
-                ports::claim_port_at,
-                &ports::WINDOWS_PORTS,
+                ports::claim_browser_port_at,
+                &DAEMON_PORTS,
                 MAX_DRAWS,
             )?;
             tracing::debug!(%session_id, %name, port = claim.port(), "drew agent-browser's session name");
             (name, Some(claim))
         };
-        let cdp = ports::claim_port().map_err(ClaimError::Port)?;
-        let stream = ports::claim_port().map_err(ClaimError::Port)?;
+        let cdp = ports::claim_browser_port().map_err(ClaimError::Port)?;
+        let stream = ports::claim_browser_port().map_err(ClaimError::Port)?;
         Ok(Self {
             name,
             ports: BrowserPorts {
@@ -172,12 +173,12 @@ pub(crate) fn sweep_stale(root: Option<&Path>) {
 
 /// The first port agent-browser's Windows daemon port can be (`connection.rs`).
 #[cfg(any(windows, test))]
-const DAEMON_PORT_BASE: u32 = 49_152;
+const DAEMON_PORT_BASE: u16 = 49_152;
 /// How many ports above [`DAEMON_PORT_BASE`] the hash can land on.
 #[cfg(any(windows, test))]
-const DAEMON_PORT_SPAN: u32 = 16_383;
-/// How many names [`search_name`] draws before it gives up. A name lands in the jail's 100
-/// ports about once in 164 draws.
+const DAEMON_PORT_SPAN: u16 = 16_383;
+/// How many names [`search_name`] draws before it gives up (sized when the port had to land in
+/// a 100-port range, about once in 164 draws; now almost every draw's port is claimable).
 #[cfg(any(windows, test))]
 pub(crate) const MAX_DRAWS: usize = 200_000;
 /// The letters of a drawn name: the guard's session charset, `A-Z a-z 0-9 _ -`, 64 of them.
@@ -186,6 +187,11 @@ const NAME_LETTERS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 /// A drawn name's length (the guard allows at most 64).
 #[cfg(any(windows, test))]
 const NAME_LEN: usize = 16;
+
+/// Every port [`daemon_port_of`] gives: [`DAEMON_PORT_BASE`] plus `0..DAEMON_PORT_SPAN`.
+#[cfg(windows)]
+const DAEMON_PORTS: std::ops::RangeInclusive<u16> =
+    DAEMON_PORT_BASE..=DAEMON_PORT_BASE + (DAEMON_PORT_SPAN - 1);
 
 /// agent-browser's Windows daemon port for the session `name` (v0.41.1 `connection.rs`
 /// `get_port_for_session`, with no namespace): `h = 0`; for each character
@@ -198,8 +204,8 @@ pub(crate) fn daemon_port_of(name: &str) -> u16 {
         let code = i32::try_from(u32::from(c)).unwrap_or(i32::MAX);
         hash = (hash << 5).wrapping_sub(hash).wrapping_add(code);
     }
-    let offset = hash.unsigned_abs() % DAEMON_PORT_SPAN;
-    u16::try_from(DAEMON_PORT_BASE + offset).unwrap_or(u16::MAX)
+    let offset = hash.unsigned_abs() % u32::from(DAEMON_PORT_SPAN);
+    u16::try_from(u32::from(DAEMON_PORT_BASE) + offset).unwrap_or(u16::MAX)
 }
 
 /// Draws names with `draw` until one's [`daemon_port_of`] is in `range` and `claim` claims

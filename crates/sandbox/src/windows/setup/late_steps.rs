@@ -17,6 +17,7 @@ use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::pool::MachineRecord;
 use crate::windows::sids::Sid;
+use crate::windows::wfp::{NetworkReport, NetworkSetup};
 use crate::windows::writer::AclWriter;
 
 /// `SYSTEM`.
@@ -164,6 +165,25 @@ pub(super) fn fence(
         })
         .collect();
     Ok(Some((fenced.applied, skipped)))
+}
+
+/// Step 8a, the network filters (S15 PR7): the block filters, static permits, read grants and
+/// firewall rules rewritten for the pool group and every live pool user, `live`, so an extend
+/// covers its new users. Runs elevated, as the set-up itself: WFP and the firewall are the
+/// machine's, not the owner's files. A WFP failure fails [`Step::Network`]; the filters'
+/// transaction leaves the old ones in place then. A firewall that doesn't take effect is only
+/// reported (and logged by `wfp::install`).
+pub(super) fn network(
+    machine: &mut impl Machine,
+    owner: &Sid,
+    group: &Sid,
+    live: &[Sid],
+) -> Result<NetworkReport, Failed> {
+    let setup = NetworkSetup::new(owner, group, live)
+        .map_err(|error| (Step::Network, error.to_string()))?;
+    machine
+        .network(&setup)
+        .map_err(|error| (Step::Network, cause_of(&error)))
 }
 
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller

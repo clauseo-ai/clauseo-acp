@@ -126,7 +126,7 @@ fn the_search_is_bounded_and_fails_typed() {
 fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     use std::os::unix::fs::MetadataExt;
 
-    use clauseo_sandbox::ports::claim_port_at;
+    use clauseo_sandbox::ports::claim_browser_port_at;
 
     let root = std::env::temp_dir().join(format!("clauseo-host-socket-{}", std::process::id()));
     crate::write::create_dir_all(&root).unwrap();
@@ -150,7 +150,7 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     }
     // While held, no other claim of this process gets the ports.
     for port in first.ports.loopback() {
-        let claimed = claim_port_at(port).unwrap_err();
+        let claimed = claim_browser_port_at(port).unwrap_err();
         assert_eq!(claimed.kind(), io::ErrorKind::AddrInUse, "{port}");
     }
     let folder = first.socket_dir.path().to_owned();
@@ -163,7 +163,7 @@ fn two_sessions_get_distinct_ports_and_folders_and_drop_frees_them() {
     for port in freed {
         // Free in the registry: a claim now passes the registry, so only a bind by another
         // process could refuse it.
-        match claim_port_at(port) {
+        match claim_browser_port_at(port) {
             Ok(claim) => drop(claim),
             Err(error) => assert!(
                 !error.to_string().contains("claimed already"),

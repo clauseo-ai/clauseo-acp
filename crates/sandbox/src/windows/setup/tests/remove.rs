@@ -50,6 +50,9 @@ fn full_removal() -> Vec<String> {
             format!("delete_user ClauseoSb0{n}"),
         ]);
     }
+    // Only once every pool account is gone and a second sweep ran (a stray must stay filtered).
+    lines.push(format!("stop_strays {}", strays.join(",")));
+    lines.push("remove_network".to_owned());
     lines.extend(
         [
             "program_data",
@@ -106,6 +109,63 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
 }
 
 #[test]
+fn a_firewall_failure_doesnt_stop_the_removal() {
+    let (mut machine, mut acl) = pool("remove-firewall", Some(owner()));
+    machine.firewall_failure = Some("the firewall service is stopped");
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert_eq!(machine.lines(), full_removal());
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    assert_eq!(
+        report.firewall.as_deref(),
+        Some("the firewall service is stopped")
+    );
+    assert_all_gone(&machine, &acl);
+}
+
+#[test]
+fn a_stray_that_wont_stop_keeps_the_network_on_and_ends_at_strays() {
+    let (mut machine, mut acl) = pool("remove-stray", Some(owner()));
+    machine.strays_left = 1;
+    let failure = remove(&mut machine, &mut acl, false).unwrap_err();
+    assert_eq!(failure.step, RemoveStep::Strays);
+    assert_eq!(failure.exit, SetupExit::RemovedPartly);
+    assert!(failure.cause.contains("wouldn't stop"), "{}", failure.cause);
+    let lines = machine.lines();
+    assert!(
+        !lines.iter().any(|line| line == "remove_network"),
+        "{lines:?}"
+    );
+    // The record stays, so the next run retries, and finishes once the stray is gone.
+    assert!(machine.m.state.record.is_some());
+    machine.strays_left = 0;
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+    assert_all_gone(&machine, &acl);
+}
+
+#[test]
+fn the_network_goes_only_after_every_account() {
+    let lines = full_removal();
+    let network = lines
+        .iter()
+        .position(|line| line == "remove_network")
+        .unwrap();
+    let last_user = lines
+        .iter()
+        .rposition(|line| line.starts_with("delete_user"))
+        .unwrap();
+    let strays = lines
+        .iter()
+        .position(|line| line.starts_with("stop_strays"))
+        .unwrap();
+    assert!(strays < last_user && last_user < network, "{lines:?}");
+    // The second sweep is the call right before the network goes.
+    assert!(lines[network - 1].starts_with("stop_strays"), "{lines:?}");
+}
+
+#[test]
 fn a_failure_at_each_call_leaves_the_rest_to_the_next_run_which_finishes() {
     let full = full_removal();
     // Every call but the closing unlock, which can't fail.
@@ -154,6 +214,7 @@ fn the_steps_are_named_by_what_failed() {
     let step_of = |line: &str| match line.split(' ').next().unwrap() {
         "write_record" => RemoveStep::Flag,
         "stop_strays" => RemoveStep::Strays,
+        "remove_network" => RemoveStep::Network,
         "account_name" | "delete_user" => RemoveStep::Account,
         "profile_of" | "delete_profile" => RemoveStep::Profile,
         "program_data" => RemoveStep::DeviceSync,
