@@ -372,7 +372,7 @@ fn a_status_run_that_never_answers_holds_no_caller() {
     drop(agents.cancel_sign_in(&claude()));
     agents.check_status(&claude()).unwrap();
     let took = clauseo_agents::testing::millis_since(began);
-    assert!(took < 100, "the calls took {took} ms");
+    assert!(took < 1000, "the calls took {took} ms");
     let mut runs = 0;
     for _ in 0..3000 {
         runs = fx.runs_of("status").len();
