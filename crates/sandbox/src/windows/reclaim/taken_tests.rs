@@ -183,7 +183,8 @@ fn a_corrupt_or_oversized_list_adds_nothing() {
 }
 
 /// Many items, each looked up as the strip looks them up: ten thousand recorded, indexed and
-/// each found, and cleared, in well under a second.
+/// each found, and cleared, in under five seconds. A debug build takes about 0.3 s on a Mac and
+/// 1.5 s on CI's Windows runners; a lookup that scanned every item would take far longer.
 #[test]
 fn ten_thousand_taken_items_are_recorded_indexed_and_cleared_quickly() {
     let temp = TempDir::new("reclaim-taken-many");
@@ -212,5 +213,5 @@ fn ten_thousand_taken_items_are_recorded_indexed_and_cleared_quickly() {
     assert_eq!(found, 10_000);
     assert_eq!(owed.len(), 10_000);
     assert_eq!(taken_owed(&ledger), []);
-    assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+    assert!(took < std::time::Duration::from_secs(5), "{took:?}");
 }
