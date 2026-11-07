@@ -1,8 +1,11 @@
-//! The end sweeper's start through a recording fake: once a session on every end path, never in
-//! the job, and the host's stdin end set apart from the agent's; and the exit code on a cancel.
+//! The end sweeper's start through a recording fake: the job emptied first, no sweeper while it
+//! isn't, once a session on every end path, never in the job, and the host's stdin end set apart
+//! from the agent's; and the exit code on a cancel.
 
 use std::io;
 use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use super::*;
 use crate::windows::runner::sweep::SWEPT;
@@ -12,6 +15,8 @@ use crate::windows::runner::sweep::SWEPT;
 struct Record {
     done: Mutex<Vec<String>>,
     fail: Option<&'static str>,
+    /// Told when the logon begins, which then takes a while.
+    slow: Mutex<Option<mpsc::Sender<()>>>,
 }
 
 impl Record {
@@ -30,7 +35,16 @@ impl Record {
 
 impl SweeperSteps for Record {
     type Sweeper = u32;
+    fn empty_job(&self) -> Result<(), String> {
+        self.step("empty job")
+    }
     fn log_on(&self) -> Result<u32, String> {
+        if let Some(begun) = self.slow.lock().unwrap().take() {
+            begun.send(()).unwrap();
+            // A logon that takes 100 ms: nothing is ever sent on `idle`.
+            let (_kept, idle) = mpsc::channel::<()>();
+            assert!(idle.recv_timeout(Duration::from_millis(100)).is_err());
+        }
         self.step("log on").map(|()| 9)
     }
     fn shut(&self, _: &u32) -> Result<(), String> {
@@ -50,14 +64,107 @@ impl SweeperSteps for Record {
     }
 }
 
-const STARTED: [&str; 4] = ["log on", "shut", "resume", "keep 9"];
+const STARTED: [&str; 5] = ["empty job", "log on", "shut", "resume", "keep 9"];
+const NOT_EMPTY: [&str; 2] = [
+    "empty job",
+    "log clauseo-sandbox-run: no end sweeper: empty job failed (5); the next launch's first act \
+     sweeps",
+];
 
 #[test]
-fn the_sweeper_is_logged_on_shut_and_resumed_and_never_put_in_the_job() {
+fn the_job_is_emptied_then_the_sweeper_is_logged_on_shut_and_resumed_and_never_put_in_the_job() {
     let record = Record::default();
-    start_sweeper(&record);
-    // No step puts it in a job: the host ending the outer's job leaves it running.
+    assert!(start_sweeper(&record));
+    // The job is empty before the logon; no step puts the sweeper in a job: the host ending the
+    // outer's job leaves it running.
     assert_eq!(record.done(), STARTED);
+}
+
+#[test]
+fn a_job_that_doesnt_empty_starts_no_sweeper_on_any_path() {
+    let not_empty = || Record {
+        fail: Some("empty job"),
+        ..Record::default()
+    };
+    let record = not_empty();
+    assert!(!start_sweeper(&record));
+    assert_eq!(record.done(), NOT_EMPTY);
+    for path in [EndSignal::InnerExited, EndSignal::Failed] {
+        let end = EndSweep::new(not_empty());
+        assert!(end.trigger(path), "{path:?}");
+        assert_eq!(end.steps().done(), NOT_EMPTY, "{path:?}");
+        assert_eq!(end.began(), Some(path));
+        // A later path doesn't try again: the next launch's first act is the backstop.
+        assert!(!end.trigger(EndSignal::Stdin));
+        assert_eq!(end.steps().done(), NOT_EMPTY, "{path:?}");
+    }
+    // The host's stdin end: no sweeper, and the agent's stdin still closes.
+    let end = EndSweep::new(not_empty());
+    relay_stdin(&b"request\n"[..], io::sink(), &end, |_| {
+        end.steps().log("agent stdin closed");
+    });
+    let mut want: Vec<String> = NOT_EMPTY.iter().map(|s| (*s).to_owned()).collect();
+    want.push("log agent stdin closed".to_owned());
+    assert_eq!(end.steps().done(), want);
+    assert_eq!(end.began(), Some(EndSignal::Stdin));
+}
+
+#[test]
+fn a_path_during_another_paths_start_returns_once_it_is_over() {
+    let (begun, logging_on) = mpsc::channel();
+    let end = EndSweep::new(Record {
+        slow: Mutex::new(Some(begun)),
+        ..Record::default()
+    });
+    std::thread::scope(|scope| {
+        let stdin = scope.spawn(|| end.trigger(EndSignal::Stdin));
+        logging_on.recv().unwrap();
+        // The inner exited (the job's end ended it) while the stdin path is still logging on:
+        // this path waits, so the outer never exits with the sweeper half started.
+        assert!(!end.trigger(EndSignal::InnerExited));
+        assert_eq!(end.steps().done(), STARTED);
+        assert!(stdin.join().unwrap());
+    });
+    assert_eq!(end.began(), Some(EndSignal::Stdin));
+}
+
+#[test]
+fn the_wait_for_an_empty_job_polls_until_none_is_left_and_no_longer() {
+    let poll = Duration::from_millis(25);
+    let wait = Duration::from_millis(100);
+    let mut counts = vec![3, 1, 0].into_iter();
+    let mut pauses = Vec::new();
+    let got = wait_empty(
+        || Ok(counts.next().unwrap()),
+        |d| pauses.push(d),
+        wait,
+        poll,
+    );
+    assert_eq!(got, Ok(()));
+    assert_eq!(pauses, [poll, poll]);
+    // Never empty: four pauses fit the wait, five counts are asked, and the last one is named.
+    let mut asked = 0;
+    let mut pauses = 0;
+    let got = wait_empty(
+        || {
+            asked += 1;
+            Ok(2)
+        },
+        |_| pauses += 1,
+        wait,
+        poll,
+    );
+    assert_eq!(
+        got,
+        Err("2 processes were still in the job after 100 ms".to_owned())
+    );
+    assert_eq!((asked, pauses), (5, 4));
+    // A count that can't be read is an error too: no sweeper.
+    let got = wait_empty(|| Err(io::Error::from_raw_os_error(6)), |_| {}, wait, poll);
+    assert_eq!(got, Err("the job's process count failed (6)".to_owned()));
+    // The outer's own wait fits the host's 2 s after the stdin end.
+    assert!(EMPTY_WAIT <= Duration::from_millis(1500));
+    assert!(EMPTY_POLL < EMPTY_WAIT);
 }
 
 #[test]
@@ -66,10 +173,11 @@ fn a_sweeper_that_fails_to_start_is_logged_and_the_run_goes_on() {
         fail: Some("log on"),
         ..Record::default()
     };
-    start_sweeper(&record);
+    assert!(!start_sweeper(&record));
     assert_eq!(
         record.done(),
         [
+            "empty job",
             "log on",
             "log clauseo-sandbox-run: the end sweeper didn't start: log on failed (5)"
         ]
@@ -78,10 +186,11 @@ fn a_sweeper_that_fails_to_start_is_logged_and_the_run_goes_on() {
         fail: Some("shut"),
         ..Record::default()
     };
-    start_sweeper(&record);
+    assert!(!start_sweeper(&record));
     assert_eq!(
         record.done(),
         [
+            "empty job",
             "log on",
             "shut",
             "kill 9",
@@ -152,16 +261,16 @@ fn the_agent_closing_its_stdin_starts_no_sweeper() {
 }
 
 #[test]
-fn a_cancel_the_sweeper_ended_exits_as_it_would_have_without_it() {
+fn a_cancel_the_jobs_end_ended_exits_as_it_would_have_without_it() {
     let reserved = crate::windows::runner::RunExit::AgentReserved.code();
     let stdin = Some(EndSignal::Stdin);
-    // The agent exited on its own first (its stdin closed), then the sweeper ended the inner:
-    // the agent's code.
+    // The agent exited on its own first and the inner reported it, then the job's end (or the
+    // sweeper) ended the inner: the agent's code.
     assert_eq!(exit_code(stdin, SWEPT, Some(0)), 0);
     assert_eq!(exit_code(stdin, SWEPT, Some(3)), 3);
     // ... passed on as any agent code is: never one in the runner's own range.
     assert_eq!(exit_code(stdin, SWEPT, Some(SWEPT - 1)), reserved);
-    // The sweeper ended the agent, or the inner before any report: the host's job-end code.
+    // The job's end ended the agent, or the inner before any report: the host's job-end code.
     assert_eq!(exit_code(stdin, SWEPT, Some(SWEPT)), HOST_ENDED);
     assert_eq!(exit_code(stdin, SWEPT, None), HOST_ENDED);
     assert_eq!(HOST_ENDED, 0xC1A0);

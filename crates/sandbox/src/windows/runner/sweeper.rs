@@ -1,6 +1,8 @@
 //! The detached end sweeper (Windows): `clauseo-sandbox-run --sweep`, started by the outer as
-//! the pool user at a session's end (`end.rs`), outside the launch's job. It takes nothing but
-//! its flag. It kills every process of its own user but itself (no job is kept: the session is
+//! the pool user at a session's end (`end.rs`), outside the launch's job, once the job is empty.
+//! It takes nothing but its flag. Its first act, as the inner's, is to shut its own primary token
+//! to all but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`): it is Medium, unrestricted, with the
+//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It kills every process of its own user but itself (no job is kept: the session is
 //! ending) that was created before it was: a next session's processes, started later, are left
 //! alone (`sweep.rs`, which also says why a next inner killing this sweeper loses nothing). It
 //! then removes what that user could leave to start at its next logon (`leftovers.rs`), all on
@@ -24,7 +26,7 @@ use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::Point;
 use super::sweep::os::sweep_own;
-use crate::windows::token::os::{own_token, user};
+use crate::windows::token::os::{own_token, shut_token_first, user};
 
 /// How long the whole sweep may take.
 const SWEEP_LIMIT: Duration = Duration::from_secs(60);
@@ -56,15 +58,19 @@ pub fn run_sweep() -> u32 {
     }
 }
 
-/// The kills, then the removal; whether both went without a failure.
+/// The token's shut, the kills, then the removal; whether all went without a failure.
 fn sweep_all() -> bool {
+    // First of all, as the inner's first act: shut this process's own token to all but SYSTEM.
     let token = match own_token() {
         Ok(token) => token,
-        Err(error) => return failed("its token", &error),
+        Err(error) => return failed("read its token", &error),
     };
+    if let Err(error) = shut_token_first(&token) {
+        return failed("shut its token", &error);
+    }
     let me = match user(&token) {
         Ok(me) => me,
-        Err(error) => return failed("its token's user", &error),
+        Err(error) => return failed("read its token's user", &error),
     };
     let mut log = |line: &str| say(line);
     let swept = match sweep_own(&me, None, Point::Sweeper, &mut log) {
@@ -87,7 +93,7 @@ fn failed(what: &str, error: &io::Error) -> bool {
         .raw_os_error()
         .map_or_else(|| error.kind().to_string(), |c| c.to_string());
     say(&format!(
-        "clauseo-sandbox-run: the end sweeper can't read {what} ({code})"
+        "clauseo-sandbox-run: the end sweeper can't {what} ({code})"
     ));
     false
 }
