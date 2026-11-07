@@ -11,7 +11,7 @@ use super::manifest::Manifest;
 use super::sys::{now, say};
 
 /// Every row, in the order `rows` and `--unattended` run them.
-pub(crate) const ROWS: [&str; 11] = [
+pub(crate) const ROWS: [&str; 17] = [
     "whoami",
     "node-pipes",
     "open-process",
@@ -23,6 +23,12 @@ pub(crate) const ROWS: [&str; 11] = [
     "ca-bundle",
     "clipboard",
     "atoms",
+    "runners",
+    "breakaway",
+    "handles",
+    "desktop",
+    "pipes-same-matter",
+    "m3-hardlink",
 ];
 
 /// How long the watchdog waits past a row's own limit before it calls the row hung.
@@ -123,6 +129,12 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
             };
         }
         "atoms" => super::checks_ui::atoms(ctx),
+        "runners" => super::checks_sec::runners(ctx),
+        "breakaway" => super::checks_sec::breakaway(ctx),
+        "handles" => super::checks_sec::handles(ctx),
+        "desktop" => super::checks_sec::desktop(ctx),
+        "pipes-same-matter" => super::checks_sec::pipes_same_matter(ctx),
+        "m3-hardlink" => super::checks_m3::m3_hardlink(ctx),
         other => Err(format!("no row {other:?}; rows: {}", ROWS.join(", "))),
     };
     match result {

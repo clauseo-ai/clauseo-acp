@@ -33,6 +33,12 @@ fn main() -> ExitCode {
 #[path = "s15_launch_vm/checks.rs"]
 mod checks;
 #[cfg(windows)]
+#[path = "s15_launch_vm/checks_m3.rs"]
+mod checks_m3;
+#[cfg(windows)]
+#[path = "s15_launch_vm/checks_sec.rs"]
+mod checks_sec;
+#[cfg(windows)]
 #[path = "s15_launch_vm/checks_ui.rs"]
 mod checks_ui;
 #[cfg(windows)]
@@ -54,6 +60,9 @@ mod prepare;
 #[path = "s15_launch_vm/probe.rs"]
 mod probe;
 #[cfg(windows)]
+#[path = "s15_launch_vm/probe_sec.rs"]
+mod probe_sec;
+#[cfg(windows)]
 #[path = "s15_launch_vm/rows.rs"]
 mod rows;
 #[cfg(windows)]
@@ -65,6 +74,12 @@ mod ui;
 #[cfg(windows)]
 #[path = "s15_launch_vm/win.rs"]
 mod win;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_desk.rs"]
+mod win_desk;
+#[cfg(windows)]
+#[path = "s15_launch_vm/win_sec.rs"]
+mod win_sec;
 
 #[cfg(windows)]
 mod harness {

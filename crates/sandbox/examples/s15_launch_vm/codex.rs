@@ -153,7 +153,7 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path) -> Result<String, String> {
             ("NO_COLOR".to_owned(), "1".to_owned()),
         ],
         path,
-        ca_bundle: None,
+        ..Spec::default()
     };
     let done = launch(m, "A", &spec)?.finish(until)?;
     ctx.note(&summary(&done));

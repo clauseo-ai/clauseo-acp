@@ -86,7 +86,7 @@ pub(crate) struct TokenFacts {
 }
 
 /// A handle closed on drop.
-struct Owned(HANDLE);
+pub(crate) struct Owned(pub(crate) HANDLE);
 
 impl Drop for Owned {
     fn drop(&mut self) {
@@ -96,7 +96,7 @@ impl Drop for Owned {
 }
 
 /// The Win32 code in `error`.
-fn code_of(error: &windows::core::Error) -> u32 {
+pub(crate) fn code_of(error: &windows::core::Error) -> u32 {
     error.code().0.cast_unsigned() & 0xFFFF
 }
 
