@@ -4,6 +4,8 @@
 //! - `token`: `user`, `integrity`, one `restricted` per restricting SID, one `group <sid> <hex
 //!   attributes>` per group, one `privilege <name> <hex attributes>` per privilege.
 //! - `wait`: `pid <n>`, then sleeps until killed.
+//! - `hold`: `pid <n>`, then reads stdin to its end and exits 0 (the pool rows' session, which
+//!   ends the way a host's agent does).
 //! - `open-process <pid>`: `open-process <pid> <code>` (0 when it opened).
 //! - `open-pipes <name>...`: `pipe <name> read <code> write <code>` per name.
 //! - `spawn-child`: starts `probe wait`, prints `pid <self>` and `child <pid>`, then waits.
@@ -61,6 +63,15 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
         "wait" => {
             say(&format!("pid {}", std::process::id()));
             wait_forever()
+        }
+        "hold" => {
+            say(&format!("pid {}", std::process::id()));
+            for line in std::io::stdin().lock().lines() {
+                if line.is_err() {
+                    break;
+                }
+            }
+            ExitCode::SUCCESS
         }
         "open-process" => match rest.first().and_then(|pid| pid.parse::<u32>().ok()) {
             Some(pid) => {
@@ -147,7 +158,7 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
             None => usage("write <path>"),
         },
         _ => usage(
-            "token|wait|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
+            "token|wait|hold|open-process|open-pipes|spawn-child|echo|exit|read|write|job-ui|\
              ui-control|ui-relay|clipboard-read|clipboard-write|find-atom|runners|breakaway|\
              handles|desktop",
         ),

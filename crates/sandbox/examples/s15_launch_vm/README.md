@@ -57,10 +57,12 @@ only when prepare ran the set-up.
 
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
 `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
-`pipes-same-matter`, `m3-hardlink`. `clipboard` skips in a session with no clipboard the harness
-can use. `node-pipes` needs `--node`; `codex` needs `--node` and `--codex`, both given to
-prepare, which copies them into `bin\`. Each row has a limit (`--row-timeout`, 120 s by default).
-A row past it fails, and the harness ends every process it started.
+`pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
+`sweep-before-logon`, `sweep-mid-session`, `agent-token-config`. `clipboard` skips in a session
+with no clipboard the harness can use. `node-pipes` needs `--node`; `codex` needs `--node` and
+`--codex`, both given to prepare, which copies them into `bin\`. Each row has a limit
+(`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every process it
+started.
 
 The security rows (`checks_sec.rs`, `checks_m3.rs`):
 
@@ -86,8 +88,13 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   starts as the lawyer, standing in for the egress proxy's process), and the runners' threads and
   console hosts as in `runners`. A granted `PROCESS_QUERY_LIMITED_INFORMATION` there fails the
   row and is named, for a decision.
-- `breakaway`: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or its child is still in a job; the
-  child is killed either way.
+- `breakaway`: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or its child is still in the session's
+  own kill-on-close job; the child is killed either way. While the probe waits (it reads one
+  stdin line before the kill), the harness duplicates that job's handle from the outer runner's
+  handle table (the one job there that kills on close and has every UI limit; the outer makes it
+  unnamed) and asks `IsProcessInJob(child, job)`, or reads the job's pid list when it can't open
+  the child. A child in another job (any job but ours) or in none fails. The harness closes its
+  copy of the handle before the session ends, so the job still closes with the outer.
 - `handles`: the agent's handle table holds exactly the `in`, `out` and `err` runner pipes,
   never `ctl` (by name; by counting client pipe ends when names don't come back).
 - `desktop`: prints the DACLs of `WinSta0` and `WinSta0\Default`; the agent runs on its own
@@ -102,6 +109,37 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   link (`LinkedLogin`) and a symbolic link (`ReparseLink`); the outer runs the hard link (it
   isn't the real `auth.json`) and refuses the symbolic link and a link in the real profile's
   `.codex` (never made). The symbolic link half skips without developer mode.
+
+The pool rows (`checks_pool.rs`, verdicts in `pool_verdict.rs`) watch from outside that no
+process of matter A's pool user runs outside the session's kill-on-close job: what the runner's
+process sweep does (it kills each such process before the pool user's logon, before the agent's
+runner resumes, every 30 s and at the session's end). Each session runs `probe hold`, which
+ends at its stdin's end, as a host's agent does. The harness lists the pool user's processes
+itself: a Toolhelp snapshot, then `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` and
+`OpenProcessToken(TOKEN_QUERY)` on each, comparing the token's user to the pool SID; the job is
+the outer's, duplicated as in `breakaway`. Processes it can't open are counted as information.
+
+- `pool-processes-at-start`: once the agent printed its first line, every listed process is in
+  the job (`IsProcessInJob`); FAIL names each that isn't, pid and image. INFO when the listing
+  didn't see the agent itself (it can't see the pool user's processes).
+- `pool-processes-at-end`: as above while the session runs (the agent must be seen), then the
+  listing, retried for up to 10 s after the session ended, is empty; FAIL names what's left.
+- `sweep-before-logon`: before the session, the harness starts `probe wait` as A's pool user
+  (the user the launch message names, from the manifest), outside any job, with
+  `CreateProcessWithLogonW` as the positive control's relay starts (`win_logon.rs`), on a
+  control station of its own; once it printed its pid, the session starts. PASS when that
+  process is gone by the agent's first line. INFO when it never ran.
+- `sweep-mid-session`: the same process, started once the agent printed its first line, must
+  be gone within 45 s of its start.
+- `agent-token-config`: the states of Secondary Logon (`seclogon`), WMI (`Winmgmt`), Task
+  Scheduler (`Schedule`) and BITS (`QueryServiceStatus`), as information that never decides the
+  row; then `probe token` as A: PASS only when the restricting SIDs are exactly the pool user,
+  `S-1-5-12`, `S-1-5-32-545` and `S-1-1-0`, the integrity is Low and every logon SID is
+  deny-only (as `whoami` asserts); FAIL names each that differs; INFO when the token can't be
+  read. The logon SID's attributes are printed.
+
+The sweep rows fail until the runner's sweep lands: they are its test. The harness ends its
+benign process if it still runs at the row's end, and notes it.
 
 The UI limits (`whoami`, `node-pipes` and `codex` check them; `checks_ui.rs`): the agent runs
 on a window station of its own, `ClauseoRun-…`, whose DACL grants the pool user `GA`, in a job
@@ -182,7 +220,8 @@ rule: atoms belong to a window station, so the agent's `ClauseoRun-…` station 
 atom whatever the job's limits are. The lookup outside the job is the control for the harness's
 own atom; the desktop refusal is the effect that tells the limits apart.
 
-The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`) run on Windows with
+The unit tests of those rules (`gate.rs`, `checks_ctl.rs`, `checks_ui.rs`, and the pool rows'
+and `breakaway`'s in `pool_verdict.rs`) run on Windows with
 `cargo test -p clauseo-sandbox --example s15_launch_vm`.
 
 ## In CI
@@ -199,7 +238,7 @@ exits 1 on `INFO` too. The output is the job's artifact.
 
 ## Probes
 
-`s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`,
+`s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`, `hold`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
 `write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
 `runners`, `breakaway`, `handles`, `desktop`; and `ui-control` and `ui-relay`, which the

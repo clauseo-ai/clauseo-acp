@@ -182,16 +182,22 @@ pub(crate) fn handle_count() -> Result<u32, u32> {
 
 /// This process's handle table (`NtQueryInformationProcess(ProcessHandleInformation)`).
 pub(crate) fn own_handles() -> Result<Vec<HandleEntry>, String> {
+    // SAFETY: the pseudo-handle needs no closing and has every right.
+    handles_of(unsafe { GetCurrentProcess() })
+}
+
+/// The handle table of `process` (a live handle with `PROCESS_QUERY_INFORMATION`).
+pub(crate) fn handles_of(process: HANDLE) -> Result<Vec<HandleEntry>, String> {
     let mut words = 8192usize;
     for _ in 0..8 {
         let mut buffer = vec![0u64; words];
         let len = u32::try_from(size_of_val(buffer.as_slice())).map_err(|e| e.to_string())?;
         let mut needed = 0u32;
-        // SAFETY: the pseudo-handle needs no closing; `buffer` is live, writable, `len` bytes
-        // and aligned for the snapshot.
+        // SAFETY: the caller's handle is live; `buffer` is live, writable, `len` bytes and
+        // aligned for the snapshot.
         let status = unsafe {
             NtQueryInformationProcess(
-                GetCurrentProcess(),
+                process,
                 PROCESS_HANDLE_INFORMATION,
                 buffer.as_mut_ptr().cast(),
                 len,
