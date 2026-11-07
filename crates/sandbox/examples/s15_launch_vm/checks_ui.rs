@@ -1,11 +1,13 @@
 //! The rows on the runner job's UI limits: `clipboard` and `atoms`, and the check the
-//! `whoami`, `node-pipes` and `codex` rows make of a probe's `ui-limits` line.
+//! `whoami`, `node-pipes` and `codex` rows make of a probe's `ui-limits` and `ui-effect` lines
+//! ([`ui_limits`]), with the harness's positive controls and the atom information.
 
 use super::launch::{Spec, deadline, launch, summary};
 use super::manifest::Manifest;
 use super::rows::Ctx;
 use super::ui;
 use super::win::UI_LIMITS;
+use super::win_desk;
 
 /// A random hex text, for the clipboard's text and the atom's name.
 fn random() -> Result<String, String> {
@@ -18,42 +20,165 @@ fn random() -> Result<String, String> {
     }))
 }
 
-/// Checks the UI limits bind the probe that printed `lines`: its `ui-limits <hex>` line holds
-/// every limit in [`UI_LIMITS`] (it sits in the runner's job itself), or, when that innermost job
-/// is another's (libuv's, inside the runner's), its `ui-effect clipboard-write refused` line
-/// shows the runner's limits still apply.
-pub(crate) fn ui_limits(lines: &[String]) -> Result<String, String> {
-    let refused = lines
-        .iter()
-        .any(|l| l.starts_with("ui-effect clipboard-write refused"));
-    match direct_limits(lines) {
-        Ok(found) => Ok(found),
-        Err(_) if refused => Ok(
-            "the innermost job is another's (libuv's), and its clipboard write \
-                                was refused: the runner's UI limits bind it"
-                .to_owned(),
-        ),
-        Err(why) => Err(format!("{why}, and its clipboard write wasn't refused")),
+/// The calls of a clipboard write whose failure is the job's `WRITECLIPBOARD` limit (the owner
+/// window and the memory block come before or beside them and prove nothing).
+const CLIPBOARD_CALLS: [&str; 3] = ["OpenClipboard", "EmptyClipboard", "SetClipboardData"];
+/// `ERROR_ACCESS_DENIED`, and the same as an `HRESULT`.
+const ACCESS_DENIED: [u32; 2] = [5, 0x8007_0005];
+
+/// What [`judge`] read from a `probe job-ui`'s lines.
+#[derive(Debug, PartialEq, Eq)]
+enum UiRead {
+    /// The innermost job's limits are exactly [`UI_LIMITS`].
+    Exact,
+    /// They read `0x0` (libuv's nested job), and the effect showed the runner's limits bind:
+    /// the clipboard call that failed with 5.
+    Nested(String),
+}
+
+/// Checks the UI limits bind the probe that printed `lines` (`probe job-ui`'s, or
+/// `probe token`'s): [`judge`]'s rules, and when it passed on the effect (a `0x0` read), the
+/// harness's positive controls ([`controls`]).
+pub(crate) fn ui_limits(ctx: &Ctx<'_>, lines: &[String]) -> Result<String, String> {
+    match judge(lines)? {
+        UiRead::Exact => Ok(format!("the job's UI limits read exactly {UI_LIMITS:#x}")),
+        UiRead::Nested(call) => {
+            let controls = controls(ctx)?;
+            Ok(format!(
+                "the innermost job reads 0x0 (libuv's, nested): CreateDesktopW on its own \
+                 station gave 5 and its clipboard write failed in {call} with 5, so the \
+                 runner's UI limits bind it; {controls}"
+            ))
+        }
     }
 }
 
-/// [`ui_limits`]'s first test: the innermost job's own limits.
-fn direct_limits(lines: &[String]) -> Result<String, String> {
+/// The pass rule: `ui-limits` reads exactly [`UI_LIMITS`]; or it reads exactly `0x0` (the
+/// nested-job case) and the effect holds: `ui-effect desktop-create 5`, and
+/// `ui-effect clipboard-write failed <call> <code>` with `call` in [`CLIPBOARD_CALLS`] and
+/// `code` 5 (or `0x80070005`). Any other read fails, naming it.
+fn judge(lines: &[String]) -> Result<UiRead, String> {
     let line = lines
         .iter()
         .find_map(|l| l.strip_prefix("ui-limits "))
         .ok_or_else(|| format!("no ui-limits line in {lines:?}"))?;
     let limits = u32::from_str_radix(line.trim().trim_start_matches("0x"), 16)
         .map_err(|_not_hex| format!("the job's UI limits weren't read: ui-limits {line}"))?;
-    if limits & UI_LIMITS != UI_LIMITS {
+    if limits == UI_LIMITS {
+        return Ok(UiRead::Exact);
+    }
+    if limits != 0 {
         return Err(format!(
-            "the job's UI limits are {limits:#x}; {UI_LIMITS:#x} must all be set (missing {:#x})",
-            UI_LIMITS & !limits
+            "the job's UI limits read {limits:#x}, not exactly {UI_LIMITS:#x} (nor 0x0, \
+             libuv's nested job)"
         ));
     }
+    let effect = |key: &str| {
+        lines
+            .iter()
+            .find_map(|l| l.strip_prefix(key))
+            .map(str::trim)
+    };
+    let desktop = effect("ui-effect desktop-create ");
+    if desktop != Some("5") {
+        return Err(format!(
+            "the job's UI limits read 0x0, and CreateDesktopW on its own station gave \
+             {desktop:?}, not 5: the DESKTOP limit doesn't bind it"
+        ));
+    }
+    let clipboard = effect("ui-effect clipboard-write ");
+    let failed = clipboard
+        .and_then(|c| c.strip_prefix("failed "))
+        .and_then(|c| {
+            let (call, code) = c.split_once(' ')?;
+            let code = match code.strip_prefix("0x") {
+                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+                None => code.parse().ok()?,
+            };
+            Some((call, code))
+        });
+    match failed {
+        Some((call, code)) if CLIPBOARD_CALLS.contains(&call) && ACCESS_DENIED.contains(&code) => {
+            Ok(UiRead::Nested(call.to_owned()))
+        }
+        _ => Err(format!(
+            "the job's UI limits read 0x0, and its clipboard write gave {clipboard:?}, not a \
+             clipboard call failing with 5: the WRITECLIPBOARD limit doesn't bind it"
+        )),
+    }
+}
+
+/// The positive controls for the effect, run by the harness as the lawyer, outside the job, on
+/// its own window station: `CreateDesktopW` there must succeed (else the refusal proves
+/// nothing), and the clipboard write is tried (skipped with the reason when this session has no
+/// clipboard the harness can use).
+fn controls(ctx: &Ctx<'_>) -> Result<String, String> {
+    let station = win_desk::own_station_name().unwrap_or_else(|c| format!("error {c}"));
+    ctx.note(&format!(
+        "positive controls: run by the harness as the lawyer, outside the job, on another window \
+         station ({station}, not the agent's ClauseoRun-…)"
+    ));
+    let desktop = win_desk::create_desktop_code();
+    if desktop != 0 {
+        return Err(format!(
+            "the control CreateDesktopW on the harness's own station gave {desktop}, so the \
+             agent's 5 proves nothing"
+        ));
+    }
+    ctx.note("control: CreateDesktopW on the harness's station made a desktop (closed at once)");
+    let clipboard = match ui::write_text(&format!("ClauseoS15-control-{}", random()?)) {
+        Ok(()) => "the clipboard write worked".to_owned(),
+        Err(why) => {
+            format!("the clipboard control skipped: no clipboard the harness can use ({why})")
+        }
+    };
+    ctx.note(&format!("control: {clipboard}"));
     Ok(format!(
-        "the job's UI limits {limits:#x} hold {UI_LIMITS:#x}"
+        "controls outside the job on {station}: CreateDesktopW worked; {clipboard}"
     ))
+}
+
+/// Adds a global atom as the lawyer (the harness), runs `body` with its name, then deletes it;
+/// the manifest lists it meanwhile, so cleanup deletes one a crash left.
+pub(crate) fn with_atom<T>(
+    ctx: &Ctx<'_>,
+    body: impl FnOnce(&str) -> Result<T, String>,
+) -> Result<T, String> {
+    let name = format!("ClauseoS15-{}", random()?);
+    Manifest::update(&ctx.manifest.root, |m| m.atoms.push(name.clone()))?;
+    let result = ui::add_atom(&name).and_then(|atom| {
+        if ui::find_atom(&name) != atom {
+            return Err(format!("the harness can't find its own atom {name}"));
+        }
+        ctx.note(&format!("added the global atom {name} ({atom:#x})"));
+        body(&name)
+    });
+    let atom = ui::find_atom(&name);
+    let deleted = atom != 0 && ui::delete_atom(atom);
+    let gone = ui::find_atom(&name) == 0;
+    ctx.note(&format!(
+        "deleted the atom {name}: {deleted}; none left: {gone}"
+    ));
+    if gone {
+        Manifest::update(&ctx.manifest.root, |m| m.atoms.retain(|a| *a != name))?;
+    }
+    result
+}
+
+/// Notes, as information, the agent's lookup of the harness's atom `name` (its
+/// `ui-info atom` line) and the same lookup outside the job; never the pass criterion.
+pub(crate) fn atom_info(ctx: &Ctx<'_>, lines: &[String], name: &str) {
+    let agent = lines
+        .iter()
+        .find_map(|l| l.strip_prefix(&format!("ui-info atom {name} ")))
+        .unwrap_or("none printed");
+    let outside = ui::find_atom(name);
+    ctx.note(&format!(
+        "information, not the pass criterion: the agent's GlobalFindAtomW({name}) gave {agent}; \
+         the harness's outside the job gave {outside:#x} (the positive control for its own atom). \
+         Atoms are per window station, so the agent's own ClauseoRun- station hides the lawyer's \
+         atom whatever the job limits are; the desktop-create refusal is the discriminating effect"
+    ));
 }
 
 /// Runs probe `args` as A to its end; its stdout.
@@ -117,34 +242,44 @@ pub(crate) fn clipboard(ctx: &Ctx<'_>) -> Result<Option<String>, String> {
 
 /// The `atoms` row: A doesn't find the harness's global atom.
 pub(crate) fn atoms(ctx: &Ctx<'_>) -> Result<String, String> {
-    let name = format!("ClauseoS15-{}", random()?);
-    Manifest::update(&ctx.manifest.root, |m| m.atoms.push(name.clone()))?;
-    let result = atoms_with(ctx, &name);
-    let atom = ui::find_atom(&name);
-    let deleted = atom != 0 && ui::delete_atom(atom);
-    let gone = ui::find_atom(&name) == 0;
-    ctx.note(&format!(
-        "deleted the atom {name}: {deleted}; none left: {gone}"
-    ));
-    if gone {
-        Manifest::update(&ctx.manifest.root, |m| m.atoms.retain(|a| *a != name))?;
-    }
-    result
+    with_atom(ctx, |name| {
+        let found = probe(ctx, &["find-atom", name])?;
+        let answer: Vec<&str> = found
+            .iter()
+            .filter_map(|l| l.strip_prefix("atom "))
+            .collect();
+        if answer != ["0"] {
+            return Err(format!("A's GlobalFindAtomW gave {answer:?}, not 0"));
+        }
+        Ok(format!("A's GlobalFindAtomW didn't find {name}"))
+    })
 }
 
-fn atoms_with(ctx: &Ctx<'_>, name: &str) -> Result<String, String> {
-    let atom = ui::add_atom(name)?;
-    if ui::find_atom(name) != atom {
-        return Err(format!("the harness can't find its own atom {name}"));
+#[cfg(test)]
+mod tests {
+    use super::{UI_LIMITS, UiRead, judge};
+
+    fn lines(text: &[&str]) -> Vec<String> {
+        text.iter().map(|l| (*l).to_owned()).collect()
     }
-    ctx.note(&format!("added the global atom {name} ({atom:#x})"));
-    let found = probe(ctx, &["find-atom", name])?;
-    let answer: Vec<&str> = found
-        .iter()
-        .filter_map(|l| l.strip_prefix("atom "))
-        .collect();
-    if answer != ["0"] {
-        return Err(format!("A's GlobalFindAtomW gave {answer:?}, not 0"));
+
+    #[test]
+    fn judge_takes_exact_limits_or_zero_with_the_effect() {
+        let exact = format!("ui-limits {UI_LIMITS:#x}");
+        assert_eq!(judge(&lines(&[&exact])), Ok(UiRead::Exact));
+        assert!(judge(&lines(&["ui-limits 0x7f"])).is_err());
+        assert!(judge(&lines(&["ui-limits 0x1ff"])).is_err());
+        let nested = ["ui-limits 0x0", "ui-effect desktop-create 5"];
+        let with = |clip: &str| judge(&lines(&[nested[0], nested[1], clip]));
+        assert_eq!(
+            with("ui-effect clipboard-write failed EmptyClipboard 5"),
+            Ok(UiRead::Nested("EmptyClipboard".to_owned()))
+        );
+        assert!(with("ui-effect clipboard-write failed OpenClipboard 0x80070005").is_ok());
+        assert!(with("ui-effect clipboard-write failed CreateWindowExW 5").is_err());
+        assert!(with("ui-effect clipboard-write failed SetClipboardData 1418").is_err());
+        assert!(with("ui-effect clipboard-write ok").is_err());
+        let open = lines(&["ui-limits 0x0", "ui-effect desktop-create 0"]);
+        assert!(judge(&open).is_err());
     }
-    Ok(format!("A's GlobalFindAtomW didn't find {name}"))
 }

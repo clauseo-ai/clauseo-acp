@@ -41,11 +41,18 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   `PROCESS_DUP_HANDLE`, `PROCESS_QUERY_INFORMATION`, `PROCESS_QUERY_LIMITED_INFORMATION` and
   the token (`TOKEN_QUERY`, `TOKEN_DUPLICATE`) on its inner runner (its parent pid) and its outer
   runner (the harness sends that pid on stdin). What `SYNCHRONIZE` gets is printed as
-  information.
+  information. It lists every thread of both runners (`TH32CS_SNAPTHREAD`, by owner pid) and
+  tries `OpenThread` with `THREAD_ALL_ACCESS`, `THREAD_QUERY_LIMITED_INFORMATION` and
+  `THREAD_GET_CONTEXT` on each: every open must be refused, the thread count per runner is
+  printed, and a live runner with no thread found fails (it proves nothing; so does one whose
+  every thread gave 87, gone). Any `conhost.exe` whose parent is either runner
+  (`TH32CS_SNAPPROCESS`) must be refused the same process and token rights; `conhost none` is
+  printed when there is none, which is expected, since both runner exes are GUI-subsystem.
 - `lawyer-processes`: the same rights, refused on the lawyer's processes: the outer runner, the
   host (the harness itself, standing in for Clauseo.exe) and the proxy (a `probe wait` the harness
-  starts as the lawyer, standing in for the egress proxy's process). A granted
-  `PROCESS_QUERY_LIMITED_INFORMATION` there fails the row and is named, for a decision.
+  starts as the lawyer, standing in for the egress proxy's process), and the runners' threads and
+  console hosts as in `runners`. A granted `PROCESS_QUERY_LIMITED_INFORMATION` there fails the
+  row and is named, for a decision.
 - `breakaway`: `CREATE_BREAKAWAY_FROM_JOB` fails with 5, or its child is still in a job; the
   child is killed either way.
 - `handles`: the agent's handle table holds exactly the `in`, `out` and `err` runner pipes,
@@ -63,6 +70,32 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
   isn't the real `auth.json`) and refuses the symbolic link and a link in the real profile's
   `.codex` (never made). The symbolic link half skips without developer mode.
 
+The UI limits (`whoami`, `node-pipes` and `codex` check them; `checks_ui.rs`): the agent runs
+on a window station of its own, `ClauseoRun-…`, whose DACL grants the pool user `GA`, in a job
+with every `JOB_OBJECT_UILIMIT_*` (`0xff`). The probe's direct read of its innermost job's UI
+limits must be exactly `0xff`. Only when it reads exactly `0x0` (node's children sit in
+libuv's own nested job) does the effect decide instead, and both halves must hold:
+
+- `CreateDesktopW` on its own station fails with exactly 5. The station's DACL grants
+  `WINSTA_CREATEDESKTOP`, so only the job's `DESKTOP` limit refuses it.
+- The clipboard write fails in `OpenClipboard`, `EmptyClipboard` or `SetClipboardData` with
+  5 (or `0x80070005`), what `WRITECLIPBOARD` gives. The call that failed is printed.
+
+Then the harness runs the positive controls as the lawyer, outside the job, on its own window
+station: `CreateDesktopW` there must work (the desktop is closed at once), and a clipboard write
+is tried (skipped, with the reason, in a session with no clipboard). Any other read fails the
+row and names the value.
+
+`node-pipes` and `codex` also add a global atom as the lawyer and pass its name to
+`probe job-ui <atom>` (as node's argument, and in the command the mock asks codex to run). What
+the agent's lookup and the harness's own lookup get is printed as information, never the pass
+rule: atoms belong to a window station, so the agent's `ClauseoRun-…` station hides the lawyer's
+atom whatever the job's limits are. The lookup outside the job is the control for the harness's
+own atom; the desktop refusal is the effect that tells the limits apart.
+
+The unit test of that rule (`checks_ui.rs`) runs on Windows with
+`cargo test -p clauseo-sandbox --example s15_launch_vm`.
+
 ## In CI
 
 The `s15-launch` workflow, which lives on the throwaway branch `exp-pr5-harness` and never on
@@ -75,6 +108,6 @@ exits 1 when prepare or any row failed. The output is the job's artifact.
 
 `s15_launch_vm probe <what>` is what the runner starts inside the sandbox: `token`, `wait`,
 `open-process <pid>`, `open-pipes <name>...`, `spawn-child`, `echo`, `exit <n>`, `read <path>`,
-`write <path>`, `job-ui`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
+`write <path>`, `job-ui [atom]`, `clipboard-read`, `clipboard-write <text>`, `find-atom <name>`,
 `runners`, `breakaway`, `handles`, `desktop`. `probe.rs` and `probe_sec.rs` document what each
 prints.

@@ -7,7 +7,12 @@
 //!   stdin up to `end` (the outer runner, the host and proxy stand-ins). For each target:
 //!   `runner-image <role> <pid> <path or code>`, one `runner <role> <right> <code>` per refused
 //!   right ([`REFUSED`] and the token's [`TOKEN_RIGHTS`]; 0 when it opened), and one
-//!   `runner-info <role> <right> <code>` per right that may be granted ([`INFO`]).
+//!   `runner-info <role> <right> <code>` per right that may be granted ([`INFO`]). Before
+//!   those: one `conhost <parent role> <pid>` per `conhost.exe` whose parent is the inner or
+//!   the outer runner (each then a target, role `conhost-<pid>`), or `conhost none` (or
+//!   `conhost error <code>`); and for the inner and the outer runner `threads <role> <pid> <n>`
+//!   (or `threads <role> <pid> error <code>`), then per thread `thread <role> <tid>` and
+//!   `<right> <code>` for each of [`THREAD_RIGHTS`] (0 when it opened).
 //! - `breakaway`: starts `probe wait` suspended with `CREATE_BREAKAWAY_FROM_JOB`; prints
 //!   `breakaway error <code>`, or `breakaway child <pid> in-job <true|false|error N>` and then
 //!   `breakaway killed <0 or code>` (the child is killed in every outcome).
@@ -32,12 +37,13 @@ use windows::Win32::Storage::FileSystem::FILE_TYPE_PIPE;
 use windows::Win32::System::Threading::{
     CREATE_BREAKAWAY_FROM_JOB, CREATE_SUSPENDED, PROCESS_ALL_ACCESS, PROCESS_DUP_HANDLE,
     PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    PROCESS_VM_READ,
+    PROCESS_VM_READ, THREAD_ALL_ACCESS, THREAD_GET_CONTEXT, THREAD_QUERY_LIMITED_INFORMATION,
 };
 
 use super::sys::{say, sleep, start};
 use super::win_desk;
 use super::win_sec::{self, OBJ_INHERIT};
+use super::win_thread;
 
 /// The process rights the agent must be refused on every target.
 pub(crate) const REFUSED: [(&str, u32); 5] = [
@@ -54,6 +60,15 @@ pub(crate) const REFUSED: [(&str, u32); 5] = [
 pub(crate) const TOKEN_RIGHTS: [(&str, u32); 2] = [
     ("TOKEN_QUERY", TOKEN_QUERY.0),
     ("TOKEN_DUPLICATE", TOKEN_DUPLICATE.0),
+];
+/// The thread rights the agent must be refused on every thread of both runners.
+pub(crate) const THREAD_RIGHTS: [(&str, u32); 3] = [
+    ("THREAD_ALL_ACCESS", THREAD_ALL_ACCESS.0),
+    (
+        "THREAD_QUERY_LIMITED_INFORMATION",
+        THREAD_QUERY_LIMITED_INFORMATION.0,
+    ),
+    ("THREAD_GET_CONTEXT", THREAD_GET_CONTEXT.0),
 ];
 /// The right printed as information.
 const INFO: [(&str, u32); 1] = [("SYNCHRONIZE", PROCESS_SYNCHRONIZE.0)];
@@ -99,6 +114,7 @@ fn runners() -> ExitCode {
             _ => say(&format!("target error {line:?}")),
         }
     }
+    runner_threads(&mut targets);
     for (role, pid) in &targets {
         match win_sec::image_of(*pid) {
             Ok(path) => say(&format!("runner-image {role} {pid} {path}")),
@@ -129,6 +145,50 @@ fn runners() -> ExitCode {
     }
     say("runners done");
     ExitCode::SUCCESS
+}
+
+/// The console hosts and the threads of the two runners (the targets with roles `inner` and
+/// `outer`): prints their lines, and adds each console host to `targets`.
+fn runner_threads(targets: &mut Vec<(String, u32)>) {
+    let runners: Vec<(String, u32)> = targets
+        .iter()
+        .filter(|(role, _)| role == "inner" || role == "outer")
+        .cloned()
+        .collect();
+    let pids: Vec<u32> = runners.iter().map(|(_, pid)| *pid).collect();
+    match win_thread::children_named(&pids, "conhost.exe") {
+        Ok(found) if found.is_empty() => say("conhost none"),
+        Ok(found) => {
+            for (parent, pid) in found {
+                let role = runners
+                    .iter()
+                    .find(|(_, p)| *p == parent)
+                    .map_or("?", |(role, _)| role.as_str());
+                say(&format!("conhost {role} {pid}"));
+                targets.push((format!("conhost-{pid}"), pid));
+            }
+        }
+        Err(code) => say(&format!("conhost error {code}")),
+    }
+    for (role, pid) in &runners {
+        let threads = match win_thread::threads_of(*pid) {
+            Ok(threads) => threads,
+            Err(code) => {
+                say(&format!("threads {role} {pid} error {code}"));
+                continue;
+            }
+        };
+        say(&format!("threads {role} {pid} {}", threads.len()));
+        for tid in threads {
+            let codes: Vec<String> = THREAD_RIGHTS
+                .iter()
+                .map(|(right, access)| {
+                    format!("{right} {}", win_thread::open_thread_code(tid, *access))
+                })
+                .collect();
+            say(&format!("thread {role} {tid} {}", codes.join(" ")));
+        }
+    }
 }
 
 fn breakaway() -> ExitCode {
