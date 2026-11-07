@@ -247,19 +247,18 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
 /// Shuts the inner runner to its agent, which runs as the same pool user: its primary token, its
 /// process and every thread it has get protected DACLs naming `SYSTEM` and the desktop user only
 /// (`token::runner_*_sddl`, `OWNER RIGHTS` held to `READ_CONTROL` so the pool user, their owner,
-/// keeps no implied `WRITE_DAC`), and its default DACL drops the pool user, so a thread the system
-/// starts in it later is shut too. The outer runner set the process's and the first thread's DACL
+/// keeps no implied `WRITE_DAC`); [`shut_later`] shuts its default DACL once the agent's token is
+/// made. The outer runner set the process's and the first thread's DACL
 /// already, while the inner was suspended; this runs first thing after the launch is read, before
 /// the agent's token is made (whose own DACL is set explicitly, `TokenSpec::token_dacl`). The
 /// handles this runner holds keep their access.
 pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
-    use super::{runner_default_dacl, runner_process_sddl, runner_thread_sddl, runner_token_sddl};
+    use super::{runner_process_sddl, runner_thread_sddl, runner_token_sddl};
 
     set_kernel_dacl(
         token.0,
         &LocalDescriptor::new(&runner_token_sddl(desktop_user))?,
     )?;
-    set_default_dacl(token, &runner_default_dacl(desktop_user))?;
     // SAFETY: the pseudo-handle of this process needs no close and carries every right.
     let own_process = unsafe { GetCurrentProcess() };
     set_kernel_dacl(
@@ -267,6 +266,17 @@ pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::R
         &LocalDescriptor::new(&runner_process_sddl(desktop_user))?,
     )?;
     shut_threads(&runner_thread_sddl(desktop_user))
+}
+
+/// The rest of [`shut_self`], once the agent's token is made and before the agent starts: this
+/// runner's default DACL drops the pool user ([`super::runner_default_dacl`]), so a thread the
+/// system starts in it later is shut, and every thread is shut again, any started since
+/// [`shut_self`] included. It waits for the agent's token because `CreateRestrictedToken` builds
+/// the new token's own descriptor from this default DACL: with `OWNER RIGHTS` held to
+/// `READ_CONTROL` there, `make` failed with 5 on every launch (harness run 42358986179).
+pub(in crate::windows) fn shut_later(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
+    set_default_dacl(token, &super::runner_default_dacl(desktop_user))?;
+    shut_threads(&super::runner_thread_sddl(desktop_user))
 }
 
 /// Gives every thread of this process the protected DACL of `sddl`. The current thread goes
