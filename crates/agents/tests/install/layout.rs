@@ -285,7 +285,8 @@ mod node_20 {
     }
 
     /// A runtime whose `node` no longer answers `--version` (cut short by a power cut, say) is
-    /// not trusted at start: the agent is `Missing`, and an install fetches Node again.
+    /// not trusted: the agent is `Ready` from its receipt at once, then `Failed` (repairable) when
+    /// the background check finds the Node bad, and `retry` fetches Node again.
     #[test]
     fn a_runtime_node_that_does_not_run_is_fetched_again() {
         let mut fx = Fixture::new("broken-runtime");
@@ -302,8 +303,17 @@ mod node_20 {
 
         let (again, events) = fx.start();
         let (a, _) = events.first_states();
-        assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
-        let redone = install_ready(&again, &events, &agent_a());
+        assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
+        let (_, failed) = events.until_end(&agent_a());
+        let InstallState::Failed(failure) = failed else {
+            panic!("{failed:?}");
+        };
+        assert_eq!(failure.kind, clauseo_agents::FailureKind::SetupFailed);
+        assert_eq!(again.installed(&agent_a()), None);
+        again.retry(&agent_a(), false);
+        let (_, last) = events.until_end(&agent_a());
+        assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+        let redone = again.installed(&agent_a()).unwrap();
         assert_eq!(redone.node, installed.node);
         let node_requests = fx
             .registry

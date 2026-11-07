@@ -31,8 +31,9 @@ use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
-use crate::{node, receipt, sysproxy};
+use crate::sysproxy;
 
+mod node_check;
 mod shared;
 mod signin;
 
@@ -82,6 +83,8 @@ struct Inner {
     tries: BTreeMap<AgentId, u32>,
     /// Set by `shutdown` or the drop: no job starts after it.
     closed: bool,
+    /// The start's background Node check ([`node_check`]): its cancel, and what it failed.
+    node_check: node_check::Slot,
 }
 
 /// One job's identity and pause signal.
@@ -98,9 +101,11 @@ pub(crate) struct Ticket {
 impl Agents {
     /// Starts the worker thread and gives the handle and the events' receiver. The worker
     /// first sends each snapshot agent's state: `Managed` for an id in `config.managed`;
-    /// otherwise, once stale install folders are removed, `Ready` for a valid receipt whose
-    /// Node still qualifies, else `Missing`. `launcher` starts every child, so it must clear
-    /// the environment, as sign-in needs.
+    /// otherwise, once stale install folders are removed, `Ready` at once for a valid receipt
+    /// whose Node is on hand (no child run). The Node checks then run on their own thread
+    /// ([`node_check`]): a receipt's Node that no longer qualifies turns its agent `Failed`,
+    /// which `retry` repairs, and every other agent gets `Ready` or `Missing` from them.
+    /// `launcher` starts every child, so it must clear the environment, as sign-in needs.
     pub fn start<T: Timer + Send + Sync + 'static>(
         config: AgentsConfig,
         launcher: Arc<dyn Launcher>,
@@ -205,6 +210,7 @@ impl Agents {
             if let Some(running) = inner.current.take() {
                 running.cancel.cancel();
             }
+            inner.node_check.cancel();
         }
         self.shared.signin.stop_all();
     }
@@ -243,6 +249,7 @@ impl Agents {
             .shared
             .signin
             .sign_in(agent, method, self.installed(agent));
+        node_check::repair_for_sign_in(self, agent, &start);
         self.start_signin(start)
     }
 
@@ -324,6 +331,7 @@ impl Agents {
             .shared
             .signin
             .use_different(agent, self.installed(agent));
+        node_check::repair_for_sign_in(self, agent, &start);
         self.start_signin(start)
     }
 
@@ -399,7 +407,7 @@ struct Worker<T> {
 
 impl<T: Timer + Send + Sync + 'static> Worker<T> {
     fn run(mut self, inbox: &mpsc::Receiver<Command>) {
-        futures::executor::block_on(self.first_states());
+        node_check::first_states(&self);
         while let Ok(command) = inbox.recv() {
             match command {
                 Command::Install(agent) => self.install(&agent),
@@ -408,69 +416,6 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
-        }
-    }
-
-    /// Each snapshot agent's state at start.
-    async fn first_states(&self) {
-        let config = &self.config;
-        let search =
-            node::search_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
-        let agents: Vec<AgentId> = config.snapshot.agents().map(|e| e.id.clone()).collect();
-        // The clean-up below runs only with `agents/.lock` held: another Clauseo installing now
-        // may own the temp folders it would remove. A relative data folder is never touched.
-        let paths_ok = install::check_paths(config).is_ok();
-        let lock = paths_ok
-            .then(|| {
-                crate::write::try_lock_agents(&config.data_dir)
-                    .ok()
-                    .flatten()
-            })
-            .flatten();
-        if lock.is_some() {
-            // What a try cut short by the last quit left in the npm cache.
-            install::empty_npm_cache(&config.data_dir);
-        }
-        for agent in agents {
-            if config.managed.contains(&agent) {
-                self.shared.emit(&agent, InstallState::Managed, None);
-                continue;
-            }
-            #[cfg(feature = "test-support")]
-            if let Some(installed) = config.ready_for_tests.get(&agent) {
-                let version = installed.version.clone();
-                self.shared.emit(
-                    &agent,
-                    InstallState::Ready { version },
-                    Some(installed.clone()),
-                );
-                continue;
-            }
-            if lock.is_some()
-                && let Some(hash) = config.snapshot.install_hash(&agent, config.platform)
-            {
-                let scan = receipt::scan(&config.data_dir, &agent, &hash, config.platform);
-                // A folder that will not go now goes at the next start, or under the install's
-                // own rename.
-                drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
-            }
-            if paths_ok
-                && let Some(installed) =
-                    install::ready_install(config, &*self.launcher, &*self.timer, &agent, &search)
-                        .await
-            {
-                let version = installed.version.clone();
-                self.shared
-                    .emit(&agent, InstallState::Ready { version }, Some(installed));
-                continue;
-            }
-            let node_needed = search.found.is_none() && !install::runtime_ready(config);
-            let download_bytes = config
-                .snapshot
-                .download_bytes(&agent, config.platform, node_needed)
-                .unwrap_or(0);
-            self.shared
-                .emit(&agent, InstallState::Missing { download_bytes }, None);
         }
     }
 

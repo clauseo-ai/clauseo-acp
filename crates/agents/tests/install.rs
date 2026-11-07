@@ -46,3 +46,11 @@ mod node_env;
 #[cfg(test)]
 #[path = "install/resume.rs"]
 mod resume;
+
+#[cfg(test)]
+#[path = "install/receipt_ready.rs"]
+mod receipt_ready;
+
+#[cfg(test)]
+#[path = "install/receipt_signin.rs"]
+mod receipt_signin;

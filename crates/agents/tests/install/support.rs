@@ -502,10 +502,15 @@ impl Events {
         (seen, last)
     }
 
-    /// Both agents' first states, A's then B's.
+    /// Both agents' first states, A's then B's, in whichever order they came: a state the
+    /// start's Node check decides comes after the worker's own (`Managed`, `Ready` from a
+    /// receipt).
     pub(crate) fn first_states(&self) -> (InstallState, InstallState) {
         let (a, first) = self.next();
         let (b, second) = self.next();
+        if (a.clone(), b.clone()) == (agent_b(), agent_a()) {
+            return (second, first);
+        }
         assert_eq!((a, b), (agent_a(), agent_b()));
         (first, second)
     }

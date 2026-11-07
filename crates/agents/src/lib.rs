@@ -79,7 +79,8 @@
 //! - No log holds a URL's user name or password, raw npm output, or a path outside the data
 //!   folder.
 //! - Callers never wait on I/O: the work runs on the worker thread, one thread per install and
-//!   one per sign-in job.
+//!   one per sign-in job, and one for the start's Node checks (an installed agent is `Ready`
+//!   from its receipt before them).
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
