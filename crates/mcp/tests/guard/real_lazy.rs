@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use super::session::group_members;
 use super::{Session, binaries, call, command, handshake, processes};
 use crate::lifecycle::sigkill;
 use crate::page_proxy::{HEADING, PageProxy};
@@ -91,7 +92,14 @@ fn chrome_starts_at_the_first_call_and_stops_when_idle() {
     };
     let stopped = within(|| browser_left().is_empty());
     assert!(stopped, "left after the idle stop: {:?}", browser_left());
-    assert!(process.gone(), "the stopped Chrome's group read as alive");
+    // Polled: `left` skips zombies, but a zombie still in the group keeps it alive for `gone`
+    // (`kill(-pgid, 0)` finds it) until the helper's new parent reaps it. Run 42321005100 read
+    // the group once, right after, and failed.
+    assert!(
+        within(|| process.gone()),
+        "the stopped Chrome's group read as alive: {:?}",
+        group_members(first.chrome_group)
+    );
     assert_eq!(chrome_groups(&scratch.cwd()), [ChromeState::None]);
     assert_eq!(
         crate::support::profiles(&scratch.cwd()).len(),

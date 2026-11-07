@@ -45,6 +45,10 @@ pub(crate) const IDLE_STOP: Duration = Duration::from_secs(600);
 /// milliseconds, read from the guard's own environment.
 #[cfg(feature = "test-support")]
 pub(crate) const IDLE_STOP_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_IDLE_MS";
+/// Tests only (the `test-support` feature, never in a shipped build): Chrome's
+/// [`chrome::START_WAIT`] in milliseconds, read from the guard's own environment.
+#[cfg(feature = "test-support")]
+const START_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_START_MS";
 /// How long a start waits for the claimed debugging port to be free.
 pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
 
@@ -58,6 +62,19 @@ pub(crate) fn idle_stop() -> Duration {
         return Duration::from_millis(ms);
     }
     IDLE_STOP
+}
+
+/// How long a start waits for Chrome's endpoint: [`chrome::START_WAIT`], or in a `test-support`
+/// build the test's.
+fn start_wait() -> Duration {
+    #[cfg(feature = "test-support")]
+    if let Some(ms) = std::env::var(START_WAIT_FOR_TESTS)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return Duration::from_millis(ms);
+    }
+    chrome::START_WAIT
 }
 
 /// Everything a start needs, fixed for the guard's life.
@@ -267,7 +284,7 @@ fn start_both(
         "Chrome started; waiting for it to listen on the claimed debugging port {}",
         launcher.cdp_port
     ));
-    let endpoint = chrome.endpoint(launcher.cdp_port, parent)?;
+    let endpoint = chrome.endpoint(launcher.cdp_port, start_wait(), parent)?;
     note(&format!(
         "Chrome is listening on the claimed debugging port {}",
         launcher.cdp_port

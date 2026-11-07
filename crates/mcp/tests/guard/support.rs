@@ -437,6 +437,17 @@ impl Guard {
         }
     }
 
+    /// What the guard's stderr holds read but unused, and a second handle to it, for a failure's
+    /// message to read the rest from on a thread of its own: a process the guard started may hold
+    /// stderr open past the guard's exit.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn stderr_handle(&mut self) -> (String, Option<std::fs::File>) {
+        use std::os::fd::AsFd;
+        let read = String::from_utf8_lossy(self.stderr.buffer()).into_owned();
+        let fd = self.stderr.get_ref().as_fd().try_clone_to_owned().ok();
+        (read, fd.map(std::fs::File::from))
+    }
+
     /// Reads stderr to its end; call once stdout has ended.
     pub(crate) fn stderr_text(&mut self) -> String {
         let mut text = String::new();

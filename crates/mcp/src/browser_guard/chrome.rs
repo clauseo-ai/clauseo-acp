@@ -181,15 +181,20 @@ pub(crate) fn launch(
 }
 
 impl Chrome {
-    /// Waits for Chrome's endpoint, at most [`START_WAIT`], checks it is on the claimed port
-    /// and starts the download mover. Every [`parent::POLL`] it also looks whether the guard's
-    /// parent has gone, and gives up if so.
-    pub(crate) fn endpoint(&mut self, cdp_port: u16, parent: &Parent) -> Result<String, String> {
+    /// Waits for Chrome's endpoint, at most `wait` ([`START_WAIT`] but in tests), checks it is on
+    /// the claimed port and starts the download mover. Every [`parent::POLL`] it also looks
+    /// whether the guard's parent has gone, and gives up if so.
+    pub(crate) fn endpoint(
+        &mut self,
+        cdp_port: u16,
+        wait: Duration,
+        parent: &Parent,
+    ) -> Result<String, String> {
         let inbox = self
             .starting
             .take()
             .ok_or_else(|| "Chrome's start was already read".to_owned())?;
-        let polls = START_WAIT.as_millis() / parent::POLL.as_millis();
+        let polls = wait.as_millis() / parent::POLL.as_millis();
         let mut seen = None;
         for _ in 0..polls {
             match inbox.recv_timeout(parent::POLL) {
@@ -218,7 +223,7 @@ impl Chrome {
             None => {
                 return Err(format!(
                     "Chrome did not report its debugging port within {} s",
-                    START_WAIT.as_secs()
+                    wait.as_secs()
                 ));
             }
         };
