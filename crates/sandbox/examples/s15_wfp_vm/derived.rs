@@ -43,6 +43,15 @@ use super::probe::Got;
 #[link(name = "userenv")]
 unsafe extern "system" {
     fn DeriveAppContainerSidFromAppContainerName(name: PCWSTR, sid: *mut PSID) -> i32;
+    fn CreateAppContainerProfile(
+        name: PCWSTR,
+        display: PCWSTR,
+        description: PCWSTR,
+        capabilities: *const SID_AND_ATTRIBUTES,
+        count: u32,
+        sid: *mut PSID,
+    ) -> i32;
+    fn DeleteAppContainerProfile(name: PCWSTR) -> i32;
     fn FreeSid(sid: PSID) -> *mut c_void;
 }
 
@@ -337,51 +346,75 @@ fn open_default_dacl(token: HANDLE) -> Result<(), String> {
     set.map_err(|e| format!("SetTokenInformation (default DACL): {e}"))
 }
 
-/// The child as an `AppContainer` process with the internetClient capability, of `token` when
-/// given (else of this process's).
+/// The child as an `AppContainer` process with the internetClient and privateNetworkClientServer
+/// capabilities, in a registered profile, of `token` when given (else of this process's).
 fn lowbox(exe: &Path, line: &mut [u16], token: Option<HANDLE>) -> Result<u32, String> {
-    let mut package = PSID::default();
-    let name = HSTRING::from("clauseo.s15.spike");
-    // SAFETY: a live name and out-pointer; the SID is freed with FreeSid below.
-    let hr = unsafe {
-        DeriveAppContainerSidFromAppContainerName(PCWSTR(name.as_ptr()), &raw mut package)
-    };
-    if hr != 0 {
-        return Err(format!(
-            "DeriveAppContainerSidFromAppContainerName: {hr:#x}"
-        ));
+    // internetClient and privateNetworkClientServer.
+    let mut capabilities = Vec::new();
+    for text in ["S-1-15-3-1", "S-1-15-3-3"] {
+        let mut sid = PSID::default();
+        // SAFETY: a live string and out-pointer; freed with LocalFree below.
+        if unsafe { ConvertStringSidToSidW(&HSTRING::from(text), &raw mut sid) }.is_ok() {
+            capabilities.push(SID_AND_ATTRIBUTES {
+                Sid: sid,
+                Attributes: u32::from_ne_bytes(SE_GROUP_ENABLED.to_ne_bytes()),
+            });
+        }
     }
-    let mut capability = PSID::default();
-    // SAFETY: a live string and out-pointer; freed with LocalFree below.
-    let parsed =
-        unsafe { ConvertStringSidToSidW(&HSTRING::from("S-1-15-3-1"), &raw mut capability) };
-    let result = parsed
-        .map_err(|e| format!("ConvertStringSidToSidW: {e}"))
-        .and_then(|()| start_in_container(exe, line, package, capability, token));
-    // SAFETY: each SID came from its call above and is freed once, here.
+    let name = HSTRING::from("clauseo.s15.spike");
+    let mut package = PSID::default();
+    // A registered profile, so Windows Firewall applies the package's capabilities: an
+    // unregistered AppContainer reached nothing on the runners, with or without our filters.
+    // SAFETY: live strings, capability list and out-pointer; the SID is freed with FreeSid.
+    let made = unsafe {
+        CreateAppContainerProfile(
+            PCWSTR(name.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            capabilities.as_ptr(),
+            u32::try_from(capabilities.len()).unwrap_or(0),
+            &raw mut package,
+        )
+    };
+    // HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS): a profile a crashed run left; derive its SID.
+    let hr = if made == i32::from_ne_bytes(0x8007_00B7_u32.to_ne_bytes()) {
+        // SAFETY: a live name and out-pointer; the SID is freed with FreeSid below.
+        unsafe {
+            DeriveAppContainerSidFromAppContainerName(PCWSTR(name.as_ptr()), &raw mut package)
+        }
+    } else {
+        made
+    };
+    let result = if hr == 0 {
+        let ran = start_in_container(exe, line, package, &mut capabilities, token);
+        // SAFETY: the SID came from the call above and is freed once, here.
+        unsafe { FreeSid(package) };
+        ran
+    } else {
+        Err(format!("CreateAppContainerProfile: {hr:#x}"))
+    };
+    // SAFETY: the profile this run made or found goes; each capability SID is freed once.
     unsafe {
-        FreeSid(package);
-        LocalFree(Some(HLOCAL(capability.0)));
+        DeleteAppContainerProfile(PCWSTR(name.as_ptr()));
+        for capability in &capabilities {
+            LocalFree(Some(HLOCAL(capability.Sid.0)));
+        }
     }
     result
 }
 
-/// Starts `line` with the security capabilities of `package` and `capability`, and waits.
+/// Starts `line` with the security capabilities of `package` and `capabilities`, and waits.
 fn start_in_container(
     exe: &Path,
     line: &mut [u16],
     package: PSID,
-    capability: PSID,
+    capabilities: &mut [SID_AND_ATTRIBUTES],
     token: Option<HANDLE>,
 ) -> Result<u32, String> {
-    let mut capabilities = [SID_AND_ATTRIBUTES {
-        Sid: capability,
-        Attributes: u32::from_ne_bytes(SE_GROUP_ENABLED.to_ne_bytes()),
-    }];
     let security = SECURITY_CAPABILITIES {
         AppContainerSid: package,
         Capabilities: capabilities.as_mut_ptr(),
-        CapabilityCount: 1,
+        CapabilityCount: u32::try_from(capabilities.len()).unwrap_or(0),
         Reserved: 0,
     };
     let mut size = 0usize;

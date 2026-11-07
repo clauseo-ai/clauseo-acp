@@ -111,8 +111,10 @@ fn reach(exe: &std::path::Path, text: &str) -> Got {
         "accept" => accept(rest),
         "share" => got(std::fs::read_dir(rest)),
         "derived" => rest.split_once(':').map_or(Got::Failed, |(how, inner)| {
+            // A child that didn't start, or didn't run the probe, is `NotRun`, apart from one that ran
+            // and failed to connect.
             derived::run(exe, how, inner)
-                .map_or(Got::Failed, |code| step(code, 0).unwrap_or(Got::Failed))
+                .map_or(Got::NotRun, |code| step(code, 0).unwrap_or(Got::NotRun))
         }),
         _ => Got::Failed,
     }
