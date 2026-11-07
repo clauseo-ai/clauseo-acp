@@ -190,13 +190,13 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-10, retired: a locked counts switch stands off with Settings' own words, no sentence of its own
   null,
   // the install, at the foot (design, then the new indeterminate wait)
-  ["Getting {name} ready. About {mb} MB.", WELCOME, "welcome"],
-  ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
   [
-    "Setting up {name} on this computer.",
-    { first: true, events: [install(CLAUDE, "installing")] },
+    "Needs a download of about {mb} MB",
+    { first: true, events: [install(CLAUDE, { missing: { download_bytes: 182_400_000 } })] },
     "welcome",
   ],
+  ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
+  ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
   ["Ask your IT team", { first: true, events: [blocked] }, "dl-blocked"],
   [
@@ -509,6 +509,9 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Try again", { first: true, events: [offline] }, "dl-offline"],
   ["Use the system proxy", { first: true, events: [offline] }, "dl-offline"],
   ["Use the system proxy", { first: true, events: [failedInstall] }, "dl-error"],
+  // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
+  // Getting {name} ready…, never these bytes
+  ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

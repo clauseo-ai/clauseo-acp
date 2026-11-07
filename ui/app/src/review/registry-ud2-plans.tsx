@@ -72,6 +72,16 @@ const SIGNED_OUT: Scene = {
     ),
   },
 };
+/** The card with no size known: a download of no bytes. */
+const ADD0: Scene = {
+  setup: {
+    first: [
+      install(CLAUDE, READY),
+      signIn(CLAUDE, signed()),
+      install(CODEX, { missing: { download_bytes: 0 } }),
+    ],
+  },
+};
 const ADD: Scene = {
   setup: {
     first: [
@@ -142,11 +152,7 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-41", "Look for my {app} sign-in", SIGNED_OUT),
   entry("UD2-42", "Uses your ChatGPT plan.", ADD),
   entry("UD2-43", "Add ChatGPT", ADD),
-  entry(
-    "UD2-44",
-    "Only ChatGPT's part downloads, about {mb} MB. Signing in happens in your browser.",
-    ADD,
-  ),
+  entry("UD2-44", "Needs a download of about {mb} MB. Signing in happens in your browser.", ADD),
   entry("UD2-45", "Other ways in", SIGNED_OUT),
   entry("UD2-46", "Change key", KEY),
   entry("UD2-47", "Remove key", KEY),
@@ -163,4 +169,6 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-54", "Remove address", ENDPOINT),
   entry("UD2-55", "No {app} sign-in on this computer.", found("none_found")),
   entry("UD2-56", "Clauseo isn't using {app}'s sign-in here.", found("reuse_off")),
+  // UD2-59: the card's line with no size known (a download of no bytes)
+  entry("UD2-59", "Signing in happens in your browser.", ADD0),
 ];

@@ -2,7 +2,11 @@
 // as the gate says it. Pure, so each state's screen is tested from the host's words alone.
 import type { GateRefusal, GateView } from "@clauseo/components/clauseo/first-launch/gate.tsx";
 import type { InstallView } from "@clauseo/components/clauseo/first-launch/install.tsx";
-import { isSignedIn, type AgentSetup, type SetupState } from "../../store/setup.ts";
+import { isSignedIn, mbOf, type AgentSetup, type SetupState } from "../../store/setup.ts";
+
+/** A download's size as the line says it, "about": the nearest 10 MB from 100 MB up,
+ * whole MB below. 0 stays 0. */
+export const aboutMb = (mb: number): number => (mb >= 100 ? Math.round(mb / 10) * 10 : mb);
 
 /** The install as the working line shows it, from the host's InstallProgress; null with nothing to say. */
 export function installView(setup: AgentSetup | undefined): InstallView | null {
@@ -11,11 +15,21 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
   if (install === "installing") return { kind: "installing" };
   // paused: another plan's download goes first; it says where it stands, still
   if (install === "paused")
-    return setup?.mb === undefined ? null : { kind: "missing", mb: setup.mb };
+    return setup?.mb === undefined ? null : { kind: "missing", mb: aboutMb(setup.mb) };
   if ("missing" in install && install.missing !== undefined)
-    return { kind: "missing", mb: setup?.mb ?? 0 };
-  if ("downloading" in install && install.downloading !== undefined)
-    return { kind: "downloading", mb: setup?.mb ?? 0, ...install.downloading };
+    return { kind: "missing", mb: aboutMb(mbOf(install.missing.download_bytes)) };
+  if ("downloading" in install && install.downloading !== undefined) {
+    const { received, total } = install.downloading;
+    // done never above total: the bar and the words agree
+    const totalMb = mbOf(total);
+    return {
+      kind: "downloading",
+      received,
+      total,
+      doneMb: Math.min(mbOf(received), totalMb),
+      totalMb,
+    };
+  }
   if ("waiting" in install && install.waiting !== undefined) return { kind: "offline" };
   if ("failed" in install && install.failed !== undefined) {
     const f = install.failed;
