@@ -2,7 +2,9 @@
 //! the pool user at a session's end (`end.rs`), outside the launch's job, once the job is empty.
 //! It takes nothing but its flag. Its first act, as the inner's, is to shut its own primary token
 //! to all but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`): it is Medium, unrestricted, with the
-//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It
+//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It then
+//! shuts its default DACL and every thread it has to `SYSTEM` alone (`token::SWEEPER_*`), as the
+//! inner shuts its own to the agent, so a thread the system or COM starts later is shut too. It
 //! kills every process of its own user but itself (no job is kept: the session is ending) that
 //! was created before it was, or that a process it killed started: a next session's processes,
 //! started later by the next outer and inner, are left alone (`sweep.rs`, which also says why a
@@ -29,7 +31,7 @@ use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::Point;
 use super::sweep::os::end_sweep_own;
-use crate::windows::token::os::{own_token, shut_token_first, user};
+use crate::windows::token::os::{own_token, shut_sweeper, shut_token_first, user};
 
 /// How long the whole sweep may take.
 const SWEEP_LIMIT: Duration = Duration::from_secs(60);
@@ -70,6 +72,11 @@ fn sweep_all() -> bool {
     };
     if let Err(error) = shut_token_first(&token) {
         return failed("shut its token", &error);
+    }
+    // Then its threads and later objects, the main thread blocked on this one included, before
+    // any sweep or COM call starts one.
+    if let Err(error) = shut_sweeper(&token) {
+        return failed("shut its threads", &error);
     }
     let me = match user(&token) {
         Ok(me) => me,

@@ -874,7 +874,12 @@ for `--reclaim`.
     --sweep`, started as the pool user with `CreateProcessWithLogonW` and the password the outer
     reads again from `secrets.bin` (wiped after). Its process and thread are shut as the inner's
     are, and then it is resumed. Its first act, like the inner's, is to shut its own primary token
-    to `SYSTEM` alone. It is never assigned to the outer's job. The Secondary Logon
+    to `SYSTEM` alone. Then it gives its default DACL and every thread it has `SYSTEM` full and
+    `OWNER RIGHTS` held to `READ_CONTROL`, nothing else, so a thread the system or COM starts in
+    it later is shut too. Unlike the inner's, these name no lawyer: the sweeper takes nothing but
+    `--sweep`, and the lawyer's SID on its command line would buy only `SYNCHRONIZE` on its
+    threads, which the outer doesn't use (it waits on the sweeper's process handle). It is never
+    assigned to the outer's job. The Secondary Logon
     service starts it as its own child, outside the caller's jobs, in a job of the service's own,
     so the host ending the outer's job leaves it running. The sweeper takes no input. It kills
     every process of the pool user but itself that was created before it was (`GetProcessTimes`
