@@ -12,6 +12,7 @@ use crate::windows::apply::Applied;
 use crate::windows::pool::PoolUser;
 use crate::windows::shared_writes::SharedWrites;
 use crate::windows::sids::Sid;
+use crate::windows::wfp::NetworkReport;
 use crate::{Blocked, SetupError};
 
 /// `ERROR_CANCELLED`: the prompt was declined.
@@ -170,6 +171,8 @@ pub enum Step {
     /// 4: deleting the profile of a recorded user released from a matter, before its logon
     /// makes it again (`resets.rs`).
     ResetProfile,
+    /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
+    Network,
 }
 
 impl fmt::Display for Step {
@@ -197,6 +200,7 @@ impl fmt::Display for Step {
             Step::Matters => "reading the registered matters",
             Step::Owners => "making sure no sandbox user owns a protected folder",
             Step::ResetProfile => "resetting a sandbox user's profile",
+            Step::Network => "setting up the network filters",
         })
     }
 }
@@ -305,6 +309,10 @@ pub struct SetupReport {
     /// What the run did to leave [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free users
     /// (`top_up.rs`).
     pub top_up: TopUp,
+    /// The network filters and the pool users they cover, and whether the firewall rules take
+    /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
+    /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
+    pub network: NetworkReport,
 }
 
 /// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool

@@ -26,6 +26,11 @@
 //! 10. `secrets.bin`, protected as the owner;
 //! 11. `setup.json`, last, as the owner.
 //!
+//! Between steps 8 and 9, step 8a (S15 PR7, `wfp`) writes the network filters: WFP block filters
+//! naming every live pool user, the owner's grants that let a launch add its own permit, and the
+//! firewall rules. A WFP failure fails the set-up; a firewall Group Policy ignores is only
+//! reported.
+//!
 //! A re-run on a pool this owner set up (D-B6) keeps the recorded accounts that exist, resets
 //! their passwords, logs each on again and re-applies the shared writes; it makes again each
 //! user whose account is gone, under a new SID, and drops a dead SID from the record only once no
