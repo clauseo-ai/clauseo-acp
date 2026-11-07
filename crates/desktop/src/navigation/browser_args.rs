@@ -30,8 +30,9 @@
 //!   `devUrl` exclusion, so a set variable there stops the dev page loading.
 //! - `WebView2` also takes `AdditionalBrowserArguments` policy values, under `HKCU` or `HKLM`
 //!   `Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments`, named by the exe,
-//!   in place of these arguments. Only something already running with the user's rights, or an
-//!   admin, can set one; [`apply`] logs one warning naming the hive when one is set
+//!   documented as used in place of these arguments (`WebView2` 157 on the Windows VM merged them
+//!   instead, and the rule held, 2026-11-07). Only something already running with the user's
+//!   rights, or an admin, can set one; [`apply`] logs one warning naming the hive when one is set
 //!   ([`registry_warning`]), never the value.
 
 use std::ffi::{OsStr, OsString};
@@ -81,7 +82,7 @@ pub(crate) fn apply<'a, R: Runtime, M: Manager<R>>(
     static CHECKED: std::sync::Once = std::sync::Once::new();
     CHECKED.call_once(|| {
         if let Some(hives) = registry_warning(policy_set(HKEY_CURRENT_USER), policy_set(HKEY_LOCAL_MACHINE)) {
-            tracing::warn!(hives, "a WebView2 AdditionalBrowserArguments policy is set for this exe: it replaces the arguments that stop DNS lookups");
+            tracing::warn!(hives, "a WebView2 AdditionalBrowserArguments policy is set for this exe: it may replace the arguments that stop DNS lookups");
         }
     });
     let args = browser_args(super::dev_url(app.config().build.dev_url.as_ref()));
