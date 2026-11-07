@@ -186,3 +186,37 @@ fn codex_kept_folders_lose_hard_and_symbolic_links() {
     assert_eq!(std::fs::read(&secret).unwrap(), b"{\"tokens\":1}");
     write::remove_dir_all(&data).unwrap();
 }
+
+/// Round 5, low 2: a tree 300 folders deep is removed by handle with a bounded number of open
+/// handles; past the depth cap (lowered here) the clean refuses and the launch fails closed.
+#[cfg(unix)]
+#[test]
+fn a_deep_tree_is_removed_and_past_the_cap_refused() {
+    let (data, _home) = data("deep_tree");
+    let state = state_dir(&data, matter(18), "codex-acp");
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    let mut deep = state.join("planted");
+    for _ in 0..300 {
+        deep.push("d");
+    }
+    write::create_dir_all(&deep).unwrap();
+    write::write_file(&deep.join("f"), b"x").unwrap();
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    assert!(std::fs::symlink_metadata(state.join("planted")).is_err());
+
+    let mut deep = state.join("planted");
+    for _ in 0..20 {
+        deep.push("d");
+    }
+    write::create_dir_all(&deep).unwrap();
+    super::handle::hook::set_max_depth(Some(10));
+    let refused = prepare(&data, &state, AgentKind::Codex);
+    super::handle::hook::set_max_depth(None);
+    assert_eq!(
+        refused.unwrap_err().code(),
+        clauseo_protocol::ErrorCode::AgentLaunchFailed
+    );
+    prepare(&data, &state, AgentKind::Codex).unwrap();
+    assert!(std::fs::symlink_metadata(state.join("planted")).is_err());
+    write::remove_dir_all(&data).unwrap();
+}

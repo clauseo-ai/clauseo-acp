@@ -79,26 +79,122 @@ fn unlink_at(dir: &Dir, name: &CStr) -> io::Result<()> {
     }
 }
 
-/// Removes the folder `name` in `dir` by handle: opened through `dir`, emptied through its own
-/// handle (files and links by `unlinkat`, folders by this again), then removed by
-/// `unlinkat(dir, name, AT_REMOVEDIR)`. Swapped for a link, it is removed as itself; no path is
-/// ever resolved, so nothing outside is touched.
-pub(super) fn remove_dir_at(dir: &Dir, name: &CStr) -> io::Result<()> {
-    let Some(mut child) = open_at(dir, name)? else {
-        return unlink_at(dir, name);
-    };
-    for item in names(&mut child) {
-        match kind(&child, &item)? {
-            Some(Kind::Folder) => remove_dir_at(&child, &item)?,
-            Some(_) => unlink_at(&child, &item)?,
-            None => {}
+/// The deepest folder [`remove_dir_at`] goes down to; past it the clean refuses, and so the
+/// launch fails closed, with the cause in the log.
+const MAX_DEPTH: usize = 4096;
+
+/// [`MAX_DEPTH`], lowered by a test.
+fn max_depth() -> usize {
+    #[cfg(test)]
+    {
+        hook::max_depth().unwrap_or(MAX_DEPTH)
+    }
+    #[cfg(not(test))]
+    {
+        MAX_DEPTH
+    }
+}
+
+/// Where opening a chain of names stopped.
+enum Chain {
+    /// Every name opened: the last folder's handle.
+    Open(Dir),
+    /// The name at this index is a link, not a folder, or gone.
+    Broken(usize),
+}
+
+/// Opens `names` one after the other from `base`, each through the previous handle with
+/// `O_NOFOLLOW`, closing each parent once its child is open: at most two handles at a time.
+fn open_chain(base: &Dir, names: &[CString]) -> io::Result<Chain> {
+    let mut held: Option<Dir> = None;
+    for (at, name) in names.iter().enumerate() {
+        let opened = match &held {
+            Some(parent) => open_at(parent, name)?,
+            None => open_at(base, name)?,
+        };
+        match opened {
+            Some(child) => held = Some(child),
+            None => return Ok(Chain::Broken(at)),
         }
     }
-    drop(child);
-    match unlinkat(dir, name, UnlinkatFlags::RemoveDir) {
-        Ok(()) | Err(Errno::ENOENT) => Ok(()),
-        Err(error) => Err(error.into()),
+    held.map_or(Ok(Chain::Broken(0)), |dir| Ok(Chain::Open(dir)))
+}
+
+/// Runs `then` with the handle of `names`' parent chain: `base` itself for an empty one. `None`
+/// when that chain no longer opens.
+fn with_parent<T>(
+    base: &Dir,
+    names: &[CString],
+    then: impl FnOnce(&Dir) -> io::Result<T>,
+) -> io::Result<Option<T>> {
+    if names.is_empty() {
+        return then(base).map(Some);
     }
+    match open_chain(base, names)? {
+        Chain::Open(parent) => then(&parent).map(Some),
+        Chain::Broken(_) => Ok(None),
+    }
+}
+
+/// Removes the folder `name` in `base` by handle, deepest first, with a bounded number of open
+/// handles at any depth: the chain of names from `base` to the folder being emptied is kept,
+/// and re-opened from `base` for each step (each name `O_NOFOLLOW | O_DIRECTORY` through its
+/// parent's handle, two handles at a time). In each folder, files and links go by `unlinkat`;
+/// the first child folder is gone into; an empty folder goes by `unlinkat(.., AT_REMOVEDIR)` on
+/// its parent's handle. A name swapped for a link on the way is removed as itself; no path is
+/// ever resolved, so nothing outside is touched. Past [`MAX_DEPTH`] levels it refuses.
+pub(super) fn remove_dir_at(base: &Dir, name: &CStr) -> io::Result<()> {
+    let mut chain: Vec<CString> = vec![name.to_owned()];
+    while !chain.is_empty() {
+        let mut dir = match open_chain(base, &chain)? {
+            Chain::Open(dir) => dir,
+            Chain::Broken(at) => {
+                // A link, a file or gone: removed as itself, the walk resumes above it.
+                chain.truncate(at + 1);
+                if let Some((last, parents)) = chain.split_last() {
+                    let (last, parents) = (last.clone(), parents.to_vec());
+                    with_parent(base, &parents, |parent| unlink_at(parent, &last))?;
+                }
+                chain.pop();
+                continue;
+            }
+        };
+        let mut deeper = None;
+        for item in names(&mut dir) {
+            match kind(&dir, &item)? {
+                Some(Kind::Folder) => {
+                    deeper = Some(item);
+                    break;
+                }
+                Some(_) => unlink_at(&dir, &item)?,
+                None => {}
+            }
+        }
+        drop(dir);
+        if let Some(child) = deeper {
+            if chain.len() >= max_depth() {
+                tracing::warn!(
+                    levels = chain.len(),
+                    "a folder in a state folder is nested too deep to remove; the clean refuses"
+                );
+                return Err(io::Error::other("a folder nested too deep to remove"));
+            }
+            chain.push(child);
+            continue;
+        }
+        let Some((last, parents)) = chain.split_last() else {
+            break;
+        };
+        let (last, parents) = (last.clone(), parents.to_vec());
+        with_parent(base, &parents, |parent| {
+            match unlinkat(parent, last.as_c_str(), UnlinkatFlags::RemoveDir) {
+                Ok(()) | Err(Errno::ENOENT) => Ok(()),
+                Err(error) => Err(io::Error::from(error)),
+            }
+        })?;
+        chain.pop();
+    }
+    Ok(())
 }
 
 /// Removes `name` of `kind` in `dir`: a folder by [`remove_dir_at`], anything else as itself.
@@ -145,12 +241,25 @@ pub(super) fn clean(state: &Path, agent: AgentKind, live: bool) -> io::Result<()
 /// handle, every file with a second name and every link: Codex reads what is there, and a hard
 /// or symbolic link could lead it to a credential.
 fn sweep_links(dir: &Dir, name: &CStr) -> io::Result<()> {
+    sweep_links_at(dir, name, 0)
+}
+
+/// How deep [`sweep_links`] goes with a handle per level; a deeper folder (Codex's own are a
+/// few levels, `sessions/<year>/<month>/<day>`) is removed whole by [`remove_dir_at`].
+const SWEEP_DEPTH: usize = 32;
+
+/// [`sweep_links`] at `depth`.
+fn sweep_links_at(dir: &Dir, name: &CStr, depth: usize) -> io::Result<()> {
+    if depth >= SWEEP_DEPTH {
+        tracing::warn!("a kept Codex folder is nested too deep; its deep part is removed");
+        return remove_dir_at(dir, name);
+    }
     let Some(mut folder) = open_at(dir, name)? else {
         return unlink_at(dir, name);
     };
     for item in names(&mut folder) {
         match kind(&folder, &item)? {
-            Some(Kind::Folder) => sweep_links(&folder, &item)?,
+            Some(Kind::Folder) => sweep_links_at(&folder, &item, depth + 1)?,
             Some(Kind::File(false)) | None => {}
             Some(_) => unlink_at(&folder, &item)?,
         }
@@ -229,6 +338,20 @@ pub(super) mod hook {
     /// Clears it.
     pub(in crate::agent::state_folder) fn clear() {
         AFTER_OPEN.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    thread_local! {
+        static MAX_DEPTH: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Lowers the removal's depth cap for this thread (`None`: the real one).
+    pub(in crate::agent::state_folder) fn set_max_depth(depth: Option<usize>) {
+        MAX_DEPTH.with(|cap| cap.set(depth));
+    }
+
+    /// The cap a test set.
+    pub(super) fn max_depth() -> Option<usize> {
+        MAX_DEPTH.with(std::cell::Cell::get)
     }
 
     /// Runs it with the project folder's path.

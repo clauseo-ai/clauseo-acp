@@ -22,24 +22,24 @@ const ALLOWED: [(&str, &str); 2] = [
 
 const ROOT: &str = "/home/lawyer";
 
-fn locations() -> Locations {
+pub(super) fn locations() -> Locations {
     Locations::under_root(Path::new(ROOT))
 }
 
-fn data() -> PathBuf {
+pub(super) fn data() -> PathBuf {
     locations().data_dir().to_path_buf()
 }
 
-fn run_root() -> PathBuf {
+pub(super) fn run_root() -> PathBuf {
     data().join("run").join("s1")
 }
 
-fn notes() -> PathBuf {
+pub(super) fn notes() -> PathBuf {
     data().join("agent-state").join("m1").join("notes")
 }
 
 /// The matter's Codex state folder, the session's `CODEX_HOME` (R17 PR-C).
-fn state() -> PathBuf {
+pub(super) fn state() -> PathBuf {
     data().join("agent-state").join("m1").join("codex-acp")
 }
 
@@ -73,7 +73,7 @@ fn denies() -> Vec<PathBuf> {
     denies
 }
 
-fn fence() -> Map<String, Value> {
+pub(super) fn fence() -> Map<String, Value> {
     let (run_root, notes, state, state_denies) = (run_root(), notes(), state(), denies());
     let session = Session {
         run_root: &run_root,
@@ -114,21 +114,60 @@ fn compiled(keys: &Map<String, Value>) -> (Vec<(PathBuf, String)>, Vec<String>) 
     (exact, globs)
 }
 
-/// A one-component glob (`*` within a name) matched against `path`'s prefixes.
+/// A glob matched as bubblewrap applies it: against `path` and its ancestors (a match masks the
+/// folder whole), component by component, `*` within a component, and a last `**` matching one
+/// component or more.
 fn glob_matches(glob: &str, path: &Path) -> bool {
-    let (dir, name) = glob.rsplit_once('/').expect("a glob with a folder");
-    let (before, after) = name.split_once('*').unwrap_or((name, ""));
+    let parts: Vec<&str> = glob.split('/').filter(|part| !part.is_empty()).collect();
+    let fits = |pattern: &str, name: &str| wildcard(pattern, name);
     path.ancestors().any(|ancestor| {
-        ancestor.parent() == Some(Path::new(dir))
-            && ancestor
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name.len() >= before.len() + after.len()
-                        && name.starts_with(before)
-                        && name.ends_with(after)
-                })
+        let names: Vec<String> = ancestor
+            .components()
+            .filter_map(|part| match part {
+                Component::Normal(name) => name.to_str().map(str::to_owned),
+                Component::Prefix(_)
+                | Component::RootDir
+                | Component::CurDir
+                | Component::ParentDir => None,
+            })
+            .collect();
+        match parts.split_last() {
+            Some((&"**", head)) => {
+                names.len() > head.len()
+                    && head
+                        .iter()
+                        .zip(&names)
+                        .all(|(pattern, name)| fits(pattern, name))
+            }
+            _ => {
+                names.len() == parts.len()
+                    && parts
+                        .iter()
+                        .zip(&names)
+                        .all(|(pattern, name)| fits(pattern, name))
+            }
+        }
     })
+}
+
+/// Whether `name` fits `pattern`, whose `*`s each stand for any run of characters.
+fn wildcard(pattern: &str, name: &str) -> bool {
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    let Some((last, middle)) = pieces.split_last() else {
+        return rest.is_empty();
+    };
+    for piece in middle {
+        match rest.find(piece) {
+            Some(at) => rest = rest.get(at + piece.len()..).unwrap_or_default(),
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
 }
 
 fn rank(mode: &str) -> u8 {
@@ -178,7 +217,7 @@ fn access_in(keys: &Map<String, Value>, turn: Turn, path: &Path) -> String {
 }
 
 /// The access in both kinds of turn, which must agree.
-fn access(keys: &Map<String, Value>, path: &Path) -> String {
+pub(super) fn access(keys: &Map<String, Value>, path: &Path) -> String {
     let profile = access_in(keys, Turn::Profile, path);
     assert_eq!(
         profile,
@@ -363,52 +402,6 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
 }
 
-/// Round 3's H1 and round 4's ruling: Codex puts `CODEX_HOME/tmp/arg0/codex-arg0*` first on
-/// `PATH`, and its own unsandboxed `git` calls look `git` up by name, so the shell may never
-/// write there; it reads and runs them (`apply_patch`, `codex-execve-wrapper`, and the sandbox
-/// helper bubblewrap before 0.9 re-runs). The state folder's `tmp` is no `write` entry and no
-/// writable root, and no deny either. The shell's temp folder is the run folder's `tmp` (its
-/// `TMPDIR`), writable. Its login link and another matter's folder are denied.
-#[test]
-fn the_shell_reads_but_never_writes_codex_homes_arg0_folder() {
-    let keys = fence();
-    for path in [
-        state().join("tmp"),
-        state()
-            .join("tmp")
-            .join("arg0")
-            .join("codex-arg0abc")
-            .join("apply_patch"),
-    ] {
-        assert_eq!(access(&keys, &path), "read", "{}", path.display());
-    }
-    let scoped = keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()]
-        .as_object()
-        .unwrap();
-    assert_eq!(scoped.get("agent-state/m1/codex-acp/tmp"), None);
-    let writable: Vec<&String> = scoped
-        .iter()
-        .filter(|(_, mode)| *mode == &json!("write"))
-        .map(|(subpath, _)| subpath)
-        .collect();
-    assert!(
-        writable
-            .iter()
-            .all(|subpath| !subpath.contains("codex-acp")),
-        "{writable:?}"
-    );
-    assert_eq!(
-        access(&keys, &run_root().join("tmp").join("t.txt")),
-        "write"
-    );
-    for path in [
-        state().join("auth.json"),
-        data().join("agent-state").join("m2").join("notes"),
-    ] {
-        assert_eq!(access(&keys, &path), "deny", "{}", path.display());
-    }
-}
-
 /// The review's D1: nothing Codex or its shell loads at the next launch from the state folder
 /// (its `CODEX_HOME` and `HOME`) is writable by the shell: `.env`, which Codex exports at
 /// start, git's `.config/git/config`, `agents` role files, `AGENTS.md`, `config.toml`. The login
@@ -532,48 +525,4 @@ fn the_fence_reaches_codex_config_whole_and_the_hook_cannot_set_it() {
     assert_eq!(config["default_permissions"], fence["default_permissions"]);
     assert_eq!(config["permissions"], fence["permissions"]);
     assert_eq!(config.get("sandbox_mode"), None);
-}
-
-/// Round 4's ruling, option B: `state_denies` lists, through no link, every other matter's
-/// folder, every entry of this matter's folder but `notes` and `codex-acp`, and every entry of
-/// the state folder but `tmp`, plus the login link, `.env` and `config.toml` by name.
-#[test]
-fn state_denies_leave_out_tmp_and_notes_only() {
-    let dir = crate::pipeline::tests::support::TempDir::new("codex-state-denies");
-    let data = dir.path().join("data");
-    let state = data.join("agent-state/m1/codex-acp");
-    for folder in [
-        "agent-state/m1/notes",
-        "agent-state/m1/claude-acp",
-        "agent-state/m1/codex-acp/tmp/arg0",
-        "agent-state/m1/codex-acp/sessions",
-        "agent-state/m2/codex-acp",
-    ] {
-        crate::write::create_dir_all(&data.join(folder)).unwrap();
-    }
-    crate::write::write_file(&state.join("history.jsonl"), b"x").unwrap();
-    let denies = super::state_denies(&data, &state);
-    for denied in [
-        data.join("agent-state/m2"),
-        data.join("agent-state/m1/claude-acp"),
-        state.join("sessions"),
-        state.join("history.jsonl"),
-        state.join("auth.json"),
-        state.join(".env"),
-        state.join("config.toml"),
-    ] {
-        assert!(
-            denies.contains(&denied),
-            "{} in {denies:?}",
-            denied.display()
-        );
-    }
-    for kept in [
-        state.join("tmp"),
-        data.join("agent-state/m1/notes"),
-        state.clone(),
-        data.join("agent-state/m1"),
-    ] {
-        assert!(!denies.contains(&kept), "{}", kept.display());
-    }
 }

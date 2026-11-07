@@ -97,14 +97,60 @@ pub(crate) const SET_ASIDE_GLOB: &str = "run.old-*";
 /// by entry ([`state_denies`]), so the own state folder's `tmp` stays readable.
 const SESSION_PARENTS: [&str; 1] = ["run"];
 
-/// The names of the own state folder denied even when they do not exist at the launch: the
-/// login link, Codex's `.env` and Clauseo's `config.toml`.
-const STATE_ALWAYS_DENIED: [&str; 3] = ["auth.json", ".env", "config.toml"];
+/// The names of the own state folder denied even when they do not exist at the launch: Codex's
+/// `.env` and every name Codex keeps but `tmp` (`state_folder::CODEX_KEPT_FILES`, the login link
+/// and `config.toml` among them, `CODEX_KEPT_FOLDERS`, the databases), so what Codex makes in its
+/// first session is covered. For the shell only: Codex's own process is not fenced.
+fn state_always_denied() -> Vec<String> {
+    use crate::agent::state_folder::{
+        CODEX_DATABASES, CODEX_KEPT_FILES, CODEX_KEPT_FOLDERS, CODEX_SHELL_FOLDER,
+    };
+    let mut names: Vec<String> = [".env"]
+        .iter()
+        .chain(&CODEX_KEPT_FILES)
+        .chain(
+            CODEX_KEPT_FOLDERS
+                .iter()
+                .filter(|name| **name != CODEX_SHELL_FOLDER),
+        )
+        .map(|name| (*name).to_owned())
+        .collect();
+    for base in CODEX_DATABASES {
+        names.extend(
+            SQLITE_SUFFIXES
+                .iter()
+                .map(|suffix| format!("{base}{suffix}")),
+        );
+    }
+    names
+}
+
+/// Deny globs under `<data>`, for every matter, one made after the launch included (round 5):
+/// another matter's Codex login link, `.env`, `config.toml`, transcripts, prompt history, log
+/// and databases, and every matter's Claude state folder. codex-rs keeps glob entries (deny
+/// entries) when it rebuilds each turn's policy (`protocol/src/permissions.rs`
+/// `from_legacy_sandbox_policy_preserving_deny_entries`), and bubblewrap expands them at each
+/// command (`linux-sandbox/src/bwrap.rs:241-245`), so a matter made mid-session is covered from
+/// the next command. A glob entry is deny only, with no exception syntax, so `agent-state/*/**`
+/// with the own `tmp` and `notes` left out cannot be written; another matter's `notes` made
+/// after the launch stays readable (the named residual), since the own notes must stay
+/// writable and a glob deny wins over it.
+pub(crate) const STATE_GLOBS: [&str; 9] = [
+    "agent-state/*/codex-acp/auth.json",
+    "agent-state/*/codex-acp/.env",
+    "agent-state/*/codex-acp/config.toml",
+    "agent-state/*/codex-acp/sessions/**",
+    "agent-state/*/codex-acp/archived_sessions/**",
+    "agent-state/*/codex-acp/history.jsonl",
+    "agent-state/*/codex-acp/log/**",
+    "agent-state/*/codex-acp/*.sqlite*",
+    "agent-state/*/claude-acp/**",
+];
 
 /// The `agent-state` denies of a Codex launch whose state folder is `state` under `data`, read
 /// on the launch-prep thread (round 4's ruling, option B): every other matter's folder that
 /// exists, every entry of this matter's folder but its `notes` and `codex-acp`, and every entry
-/// of the state folder but `tmp`, plus [`STATE_ALWAYS_DENIED`] by name. So `tmp`, where Codex
+/// of the state folder but `tmp`, plus [`state_always_denied`] by name. So `tmp`, where Codex
 /// keeps the `arg0` links it puts first on `PATH` (`apply_patch`, `codex-execve-wrapper`, and the
 /// sandbox helper bubblewrap before 0.9 re-runs, codex-rs `linux_run_main.rs:404-435`), stays
 /// readable and runnable for the shell, and never writable (no `write` entry, no writable root:
@@ -145,7 +191,7 @@ pub(crate) fn state_denies(data: &Path, state: &Path) -> Vec<PathBuf> {
         tracing::warn!("a state folder could not be listed: agent-state is denied whole");
         return vec![root];
     }
-    for name in STATE_ALWAYS_DENIED {
+    for name in state_always_denied() {
         let path = state.join(name);
         if !denied.contains(&path) {
             denied.push(path);
@@ -265,9 +311,15 @@ pub(crate) fn keys(
         }
     }
     if base.contains(['*', '?', '[', ']', '{', '}']) {
-        tracing::warn!("the data folder's path holds a glob character: run.old-* stays readable");
+        tracing::warn!(
+            "the data folder's path holds a glob character: run.old-* and later matters' \
+             state stay readable"
+        );
     } else {
         scoped.insert(SET_ASIDE_GLOB.to_owned(), Value::from("deny"));
+        for glob in STATE_GLOBS {
+            scoped.insert(glob.to_owned(), Value::from("deny"));
+        }
     }
     filesystem.insert(base.to_owned(), Value::Object(scoped));
     let mut profile = Map::new();
@@ -280,6 +332,9 @@ pub(crate) fn keys(
     keys
 }
 
+#[cfg(test)]
+#[path = "codex_fence/state_tests.rs"]
+mod state_tests;
 #[cfg(test)]
 #[path = "codex_fence/tests.rs"]
 mod tests;
