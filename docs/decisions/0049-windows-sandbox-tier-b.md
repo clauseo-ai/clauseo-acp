@@ -758,6 +758,28 @@ Last come four Windows Firewall rules naming the pool: block everything that isn
 ways; block loopback UDP; block loopback TCP outside 61080-61179. A re-run or an extend rewrites
 it all for the whole pool. A WFP failure fails the set-up at `Step::Network`.
 
+**Measured** (spike run 42351029777, branch `exp-wfp-denyonly` at `7d66a922b`, GitHub's
+`windows-2025` and `windows-11-arm` runners, 23 rows passing on each). The spike installs these
+filters for a throwaway user and group with `wfp::install`, deletes the firewall rules so only WFP
+is measured, and runs a probe under each token. Each non-pool row ran once before the filters and
+once after. Results:
+- WFP accepted `NOT_EQUAL` over the descriptor, and the launch check passed for the pool user and
+  refused the admin.
+- With no filters, every token reached, the pool user's deny-only child included.
+- With the filters:
+  - the plain pool token, the (B) token, a pool token restricted without `Everyone` and a
+    Low-integrity pool token were blocked outside the range and reached loopback inside it;
+  - **the deny-only-user child and the deny-only user-and-group child were blocked outside and
+    inside**;
+  - the pool user's AppContainer child was blocked;
+  - the admin's own token, the admin restricted with `RESTRICTED`, and SYSTEM still reached (no
+    collateral there).
+- Harness limits: a restricted token holding neither `Everyone` nor `RESTRICTED` can't start a
+  program at all (`0xC0000022`), before or after the filters. The admin's AppContainer child
+  failed to reach 1.1.1.1 before the filters too, so that row isn't attributable.
+- A derived token needs a default DACL its process can open (for example `Everyone`) to start;
+  a hijacked agent can set one on its own derived token, so the rows give it one.
+
 **Each launch** (`check_launch`, as the desktop user) checks before the agent starts, and adds
 nothing:
 - the provider and the sublayer are there;
@@ -817,7 +839,7 @@ VM row measures it.
   WebClient), and says which.
 
 **Smaller notes.** `::1`, `127.0.0.2` and the rest of `127.0.0.0/8` stay blocked. Removal
-(`wfp::remove_network`, for `PR4j`'s `--remove`) deletes every filter in the sublayer, foreign
+(`wfp::remove`, which `--remove` runs right after stopping the pool users' processes) deletes every filter in the sublayer, foreign
 ones included, every key set-up writes, the sublayer and the provider, in one transaction; then it
 takes back the owner's read grant on the filter container, and removes the firewall rules. It can
 run again after a partial removal.
