@@ -9,6 +9,7 @@ use std::io;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf, Prefix};
+use std::sync::Arc;
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -63,12 +64,24 @@ fn check_depth(folder: &Path) -> Result<(), Error> {
 }
 
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
-/// `refused` (each canonicalised too, or taken as written when that fails). Paths are compared
+/// `refused` (each canonicalised once per process, or taken as written when that fails or takes
+/// longer than [`listed::RESOLVE_WAIT`]: [`listed::resolved_entries`]). Paths are compared
 /// by components ([`spellings`]): composed (NFC) everywhere, and ASCII- and Unicode-case-
 /// insensitively on macOS and Windows.
 /// On macOS a path under `/System/Volumes/Data` is also compared without that prefix. On Windows
 /// a path too deep to start programs in is refused too ([`is_too_deep`]).
 pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Error> {
+    let canonicalize: listed::Canonicalize = Arc::new(|entry: &Path| dunce::canonicalize(entry));
+    check_folder_with(folder, refused, &canonicalize)
+}
+
+/// [`check_folder`] with the refused entries canonicalised by `canonicalize`; `folder` itself
+/// always goes through `dunce::canonicalize`.
+fn check_folder_with(
+    folder: &Path,
+    refused: &[PathBuf],
+    canonicalize: &listed::Canonicalize,
+) -> Result<(), Error> {
     let canonical = dunce::canonicalize(folder).map_err(|err| {
         if err.kind() == io::ErrorKind::NotFound {
             Error::FolderMissing {
@@ -92,9 +105,9 @@ pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Err
     }
     check_depth(&canonical)?;
     let candidate = spellings(&canonical);
-    for entry in refused {
-        let resolved = dunce::canonicalize(entry).unwrap_or_else(|_| entry.clone());
-        let listed = spellings(&resolved);
+    let resolved = listed::resolved_entries(refused, canonicalize, listed::RESOLVE_WAIT);
+    for (entry, resolved) in refused.iter().zip(&resolved) {
+        let listed = spellings(resolved);
         let contains = candidate.iter().any(|outer| {
             listed
                 .iter()
@@ -443,5 +456,6 @@ fn fold(name: OsString, how: Fold) -> OsString {
     }
 }
 
+mod listed;
 #[cfg(test)]
 mod tests;
