@@ -29,7 +29,6 @@ use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -38,7 +37,7 @@ use std::time::Duration;
 use super::downloads::Mover;
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
-use super::{env, logon, pause, quiet};
+use super::{Child, ChildStderr, env, logon, pause, quiet};
 use crate::write;
 
 /// How long Chrome has to print its `DevTools` endpoint.
@@ -154,13 +153,14 @@ pub(crate) fn launch(
     let downloads = spec.cwd.join("downloads");
     ready_profile(&profile, &staging, &downloads)
         .map_err(|error| format!("cannot make Chrome's profile: {error}"))?;
-    let mut child = spawn(spec, &chrome_args(spec, &profile))
-        .map_err(|error| format!("cannot start Chrome: {error}"))?;
-    #[cfg(windows)]
-    job.adopt(&mut child, "Chrome").map_err(|error| {
-        drop(child.wait());
-        format!("cannot start Chrome: {error}")
-    })?;
+    let args = chrome_args(spec, &profile);
+    let mut child = spawn(
+        spec,
+        &args,
+        #[cfg(windows)]
+        job,
+    )
+    .map_err(|error| format!("cannot start Chrome: {error}"))?;
     let (seen, inbox) = mpsc::channel();
     if let Some(stderr) = child.stderr.take() {
         drop(thread::spawn(move || read_stderr(stderr, &seen)));
@@ -474,12 +474,15 @@ fn sandbox_args() -> &'static [&'static str] {
     &[]
 }
 
+#[cfg(unix)]
 #[expect(
     clippy::disallowed_methods,
     reason = "the guard's second fixed child: the host's Chrome, whose tree the guard kills \
               (docs/decisions/0029-browser.md)"
 )]
 fn spawn(spec: &Spec<'_>, args: &[OsString]) -> io::Result<Child> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
     let mut command = Command::new(spec.executable);
     command
         .args(args)
@@ -488,19 +491,24 @@ fn spawn(spec: &Spec<'_>, args: &[OsString]) -> io::Result<Child> {
         .envs(spec.env)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // Suspended until it is in the job (`job.rs`).
-        command.creation_flags(super::relay::CREATE_NO_WINDOW | super::job::START_SUSPENDED);
-    }
+        .stderr(Stdio::piped())
+        .process_group(0);
     command.spawn()
+}
+
+/// Windows: Chrome as on Unix, created in the guard's job (`job/spawn.rs`).
+#[cfg(windows)]
+fn spawn(spec: &Spec<'_>, args: &[OsString], job: &super::job::Job) -> io::Result<Child> {
+    use super::job::{Io, Launch};
+    job.spawn(&Launch {
+        program: spec.executable,
+        args,
+        cwd: spec.cwd,
+        env: spec.env,
+        stdin: Io::Null,
+        stdout: Io::Null,
+        stderr: Io::Piped,
+    })
 }
 
 /// Reads Chrome's stderr to its end: reports the endpoint line, or the last lines if Chrome

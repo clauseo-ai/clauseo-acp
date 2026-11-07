@@ -21,7 +21,7 @@ use std::ffi::OsString;
 use std::io::{self, BufReader};
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ExitStatus};
+use std::process::ExitStatus;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -35,7 +35,7 @@ use super::port_file::Expected;
 use super::record::{self, ChromeState};
 use super::relay::lines::{Out, ToChild};
 use super::relay::{Event, end_group, pumps, send};
-use super::{PARENT_GONE, env, note, now, pause};
+use super::{Child, ChildStdin, PARENT_GONE, env, note, now, pause};
 
 /// How long the browser runs with no tool call in flight or completed before the guard stops
 /// it: agent-browser's own idle timeout, `AGENT_BROWSER_IDLE_TIMEOUT_MS` (`env::FIXED`), so the
@@ -276,13 +276,15 @@ fn start_both(
     env::set_cdp(&mut env, &endpoint);
     let cannot_run =
         |error: io::Error| format!("cannot run {}: {error}", launcher.program.display());
-    let mut agent = pumps::spawn_child(&launcher.program, &launcher.args, &launcher.cwd, &env)
-        .map_err(cannot_run)?;
-    #[cfg(windows)]
-    if let Err(error) = launcher.job.adopt(&mut agent, "agent-browser") {
-        drop(agent.wait());
-        return Err(cannot_run(error));
-    }
+    let mut agent = pumps::spawn_child(
+        &launcher.program,
+        &launcher.args,
+        &launcher.cwd,
+        &env,
+        #[cfg(windows)]
+        &launcher.job,
+    )
+    .map_err(cannot_run)?;
     #[cfg(unix)]
     launcher.reaper.say(&format!("agent {}", agent.id()));
     let (Some(stdin), Some(stdout)) = (agent.stdin.take(), agent.stdout.take()) else {

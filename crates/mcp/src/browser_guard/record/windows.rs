@@ -46,7 +46,7 @@ pub(super) fn gone(pid: u32, created: u64) -> bool {
     code != STILL_ACTIVE
 }
 
-/// The creation time of `child`, which runs (or waits suspended) as the guard's child.
-pub(crate) fn created(child: &std::process::Child) -> Option<u64> {
+/// The creation time of `child`, which runs as the guard's child, in its job.
+pub(crate) fn created(child: &super::super::Child) -> Option<u64> {
     started(HANDLE(child.as_raw_handle()))
 }

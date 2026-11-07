@@ -2,10 +2,11 @@
 //! to the guard's stdout and to agent-browser's stdin, each one whole line under its lock.
 
 use std::io::{self, BufRead, Write};
-use std::process::ChildStdin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde_json::{Value, json};
+
+use super::super::ChildStdin;
 
 /// The guard's stdout, shared by every thread that writes to the agent.
 pub(crate) type Out = Mutex<io::Stdout>;

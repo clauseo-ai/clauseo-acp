@@ -3,38 +3,34 @@
 //! agent-browser starts its daemon with `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
 //! (`connection.rs:963-983`); killing the direct child leaves it. So the guard makes a job with
 //! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (and no breakaway allowed, so nothing in it can start a
-//! process outside it), starts Chrome (`chrome.rs`) and then agent-browser suspended, adds each
-//! to the job, and only then resumes it. Ending the job ends Chrome, agent-browser and its
-//! daemon; so does the job's last handle closing when the guard exits, however it exits. The
-//! guard itself runs in the agent's job (`clauseo-process`); jobs nest.
+//! process outside it) and creates Chrome (`chrome.rs`), agent-browser and each one-shot
+//! agent-browser (`relay/`) in it ([`Job::spawn`], `job/spawn.rs`): each is in the job from its
+//! creation, so a guard killed at any moment leaves none outside it. Ending the job ends Chrome,
+//! agent-browser and its daemon; so does the job's last handle closing when the guard exits,
+//! however it exits. The guard itself runs in the agent's job (`clauseo-process`); jobs nest.
 //!
-//! `clauseo-process` has the same steps, but for its async child and with dependencies this
-//! crate may not take (`ARCHITECTURE.md`), so the few calls are repeated here.
+//! `clauseo-process` makes its job the same way, but for its async child and with dependencies
+//! this crate may not take (`ARCHITECTURE.md`), so the few job calls are repeated here.
 #![expect(
     unsafe_code,
-    reason = "FFI to the Win32 Job Object and thread APIs, for agent-browser's tree"
+    reason = "FFI to the Win32 Job Object APIs, for agent-browser's tree"
 )]
+
+mod child;
+mod spawn;
 
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::process::Child;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
-};
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
-};
-use windows::Win32::System::Threading::{
-    CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
 };
 use windows::core::PCWSTR;
 
-/// The creation flag that starts a process suspended, for [`Job::adopt`].
-pub(crate) const START_SUSPENDED: u32 = CREATE_SUSPENDED.0;
+pub(crate) use child::{Child, ChildStderr, ChildStdin};
+pub(crate) use spawn::{Io, Launch};
 
 /// The exit code the job's end gives its processes.
 const TERMINATED: u32 = 1;
@@ -46,25 +42,10 @@ pub(crate) struct Job {
 }
 
 impl Job {
-    /// Puts `child` (`what`, for errors), just started with [`START_SUSPENDED`], in the job,
-    /// then resumes its threads. When a step fails the child is killed (still suspended, it
-    /// started nothing) and the error returned: nothing the guard starts runs outside the job.
-    pub(crate) fn adopt(&self, child: &mut Child, what: &str) -> io::Result<()> {
-        let job = self;
-        let process = HANDLE(child.as_raw_handle());
-        // SAFETY: `job.handle()` is the job handle `job` owns, and `process` the child's own
-        // process handle, open while `child` lives, with the full rights std opens it with.
-        if let Err(error) = unsafe { AssignProcessToJobObject(job.handle(), process) } {
-            drop(child.kill());
-            return Err(io::Error::other(format!(
-                "could not put {what} in the guard's job: {error}"
-            )));
-        }
-        if let Err(error) = resume(child.id(), what) {
-            drop(child.kill());
-            return Err(error);
-        }
-        Ok(())
+    /// Starts `launch` in the job, running: nothing the guard starts is ever outside it
+    /// (`job/spawn.rs`).
+    pub(crate) fn spawn(&self, launch: &Launch<'_>) -> io::Result<Child> {
+        spawn::spawn(self.handle(), launch)
     }
 
     /// Ends every process in the job: Chrome, agent-browser and its daemon. Returns whether
@@ -108,49 +89,5 @@ impl Job {
     }
 }
 
-/// Resumes every thread of process `pid`, which started suspended. Std gives no thread handle,
-/// so the threads are found with a Toolhelp snapshot. Fails unless at least one thread was
-/// suspended and resumed.
-fn resume(pid: u32, what: &str) -> io::Result<()> {
-    let mut entry = THREADENTRY32 {
-        dwSize: u32::try_from(size_of::<THREADENTRY32>()).map_err(io::Error::other)?,
-        ..THREADENTRY32::default()
-    };
-    // SAFETY: a thread snapshot of the whole system takes no pointer; its handle is closed
-    // below, and nothing between here and there returns early.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }
-        .map_err(|error| io::Error::other(format!("could not list the threads: {error}")))?;
-    let mut resumed = 0_usize;
-    // SAFETY: `snapshot` is the live snapshot handle and `entry` a THREADENTRY32 whose `dwSize`
-    // is set, as Thread32First and Thread32Next require.
-    let mut next = unsafe { Thread32First(snapshot, &raw mut entry) };
-    while next.is_ok() {
-        if entry.th32OwnerProcessID == pid && resume_thread(entry.th32ThreadID) {
-            resumed += 1;
-        }
-        // SAFETY: as for Thread32First above.
-        next = unsafe { Thread32Next(snapshot, &raw mut entry) };
-    }
-    // SAFETY: `snapshot` is a handle this function owns and closes only here.
-    drop(unsafe { CloseHandle(snapshot) });
-    if resumed == 0 {
-        return Err(io::Error::other(format!(
-            "{what} started suspended and no thread of it resumed"
-        )));
-    }
-    Ok(())
-}
-
-/// Resumes thread `id`; whether it was suspended and now runs. `ResumeThread` returns the
-/// previous suspend count, `u32::MAX` on error.
-fn resume_thread(id: u32) -> bool {
-    // SAFETY: opening a thread by id takes no pointer; the handle is closed below.
-    let Ok(thread) = (unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, id) }) else {
-        return false;
-    };
-    // SAFETY: `thread` is a live handle opened with THREAD_SUSPEND_RESUME.
-    let count = unsafe { ResumeThread(thread) };
-    // SAFETY: `thread` is a handle this function owns and closes only here.
-    drop(unsafe { CloseHandle(thread) });
-    count != u32::MAX && count != 0
-}
+#[cfg(test)]
+mod tests;

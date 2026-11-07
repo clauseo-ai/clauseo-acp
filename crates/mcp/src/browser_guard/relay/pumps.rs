@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, BufRead};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, mpsc};
 
 use serde_json::Value;
 
+use super::super::Child;
 use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
@@ -24,6 +24,7 @@ use crate::connector::head;
 /// The error a tool call gets when the browser cannot start.
 const NOT_STARTED: &str = "the browser could not start; the guard is ending the browser server";
 
+#[cfg(unix)]
 #[expect(
     clippy::disallowed_methods,
     reason = "the guard's one fixed child: agent-browser, whose tree the host kills; the host \
@@ -35,6 +36,8 @@ pub(crate) fn spawn_child(
     cwd: &Path,
     env: &BTreeMap<String, OsString>,
 ) -> io::Result<Child> {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
     let mut command = Command::new(program);
     command
         .args(args)
@@ -43,20 +46,31 @@ pub(crate) fn spawn_child(
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
+        .stderr(Stdio::inherit())
         // A group of its own, which `end_group` kills whole.
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // Suspended until it is in its job (`job.rs`).
-        command.creation_flags(super::CREATE_NO_WINDOW | super::super::job::START_SUSPENDED);
-    }
+        .process_group(0);
     command.spawn()
+}
+
+/// Windows: agent-browser as on Unix, created in the guard's job (`job/spawn.rs`).
+#[cfg(windows)]
+pub(crate) fn spawn_child(
+    program: &Path,
+    args: &[OsString],
+    cwd: &Path,
+    env: &BTreeMap<String, OsString>,
+    job: &super::super::job::Job,
+) -> io::Result<Child> {
+    use super::super::job::{Io, Launch};
+    job.spawn(&Launch {
+        program,
+        args,
+        cwd,
+        env,
+        stdin: Io::Piped,
+        stdout: Io::Piped,
+        stderr: Io::Inherit,
+    })
 }
 
 /// Agent to child: every line through the filter, then [`route`]. On EOF, sends the close
