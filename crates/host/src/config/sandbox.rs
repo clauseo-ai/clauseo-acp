@@ -11,6 +11,8 @@ use clauseo_process::{Launcher, SpawnOptions};
 use clauseo_protocol::MatterId;
 use clauseo_sandbox::{DenialSink, Detection, Policy, SandboxSetup, SetAside};
 
+use super::SessionKey;
+
 /// The detection the host calls, off its actor: at start, and after each set-up, removal or
 /// check. Desktop passes `move || clauseo_sandbox::detect(setup.as_deref())`.
 pub type Detect = Arc<dyn Fn() -> Detection + Send + Sync>;
@@ -20,12 +22,15 @@ pub type Detect = Arc<dyn Fn() -> Detection + Send + Sync>;
 /// launcher on Windows, whose impl first calls `windows::before_launch` and returns what it
 /// moved (R17 PR-D/E).
 pub trait SandboxLaunchers: Send + Sync {
-    /// The launcher for one agent launch of `matter`, its policy fixed (a launcher's policy never
-    /// widens, `clauseo_process::Launcher`), starting the agent with `opts`; its denials go to
-    /// `denials`. The host calls it on a thread of its own, bounded, after the launch's checks,
-    /// and spawns the agent through the returned launcher once, keeping it until the agent's
-    /// process tree has exited. An error fails the launch (`agent.launch_failed`), its message
-    /// naming the kind of failure and never a path.
+    /// The launcher for the agent launch `session` of `matter`, its policy fixed (a launcher's
+    /// policy never widens, `clauseo_process::Launcher`), starting the agent with `opts`; its
+    /// denials go to `denials`. `running` is the matter's other sessions whose agents were still
+    /// running when the call was made (sorted; taken on the host's actor), so Windows'
+    /// `before_launch` can drop crashed sessions from the open set and add this one. The host
+    /// calls it on a thread of its own, bounded, after the launch's checks, and spawns the agent
+    /// through the returned launcher once, keeping it until the agent's process tree has exited.
+    /// An error fails the launch with the error's `code()`, its message naming the kind of
+    /// failure and never a path.
     ///
     /// # Errors
     ///
@@ -35,15 +40,44 @@ pub trait SandboxLaunchers: Send + Sync {
         &self,
         policy: Policy,
         matter: &MatterId,
+        session: &SessionKey,
+        running: &[SessionKey],
         opts: SpawnOptions,
         denials: Arc<dyn DenialSink>,
     ) -> Result<SandboxLaunch, clauseo_sandbox::Error>;
 
     /// The agent of a launch this seam's [`SandboxLaunchers::launcher`] made has exited: called
     /// once per agent that spawned (never for a launch that failed before), on a thread of its
-    /// own, bounded by the run folder removal's wait. Desktop's Windows impl calls
-    /// `windows::after_session` here (R17 PR-D/E).
-    fn after_session(&self, matter: &MatterId);
+    /// own, bounded by the run folder removal's wait, with the launch's own policy. What it
+    /// returns was moved out of the matter after the session (absolute `from`, as
+    /// `before_launch`'s): the thread gets one notice naming it, matter-relative. Desktop's
+    /// Windows impl calls `windows::after_session` here (R17 PR-D/E).
+    fn after_session(&self, end: SessionEnd) -> Vec<SetAside>;
+}
+
+/// The session [`SandboxLaunchers::after_session`] closes: its matter, its key and the policy
+/// its launch was given.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SessionEnd {
+    /// The session's matter.
+    pub matter: MatterId,
+    /// The session.
+    pub session: SessionKey,
+    /// The policy the session's launcher was made with.
+    pub policy: Policy,
+}
+
+impl SessionEnd {
+    /// The end of `session` of `matter`, launched under `policy`.
+    #[must_use]
+    pub fn new(matter: MatterId, session: SessionKey, policy: Policy) -> Self {
+        Self {
+            matter,
+            session,
+            policy,
+        }
+    }
 }
 
 /// What [`SandboxLaunchers::launcher`] gives: the launch's own launcher and the protected names
