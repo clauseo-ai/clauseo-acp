@@ -136,8 +136,6 @@ fn build<R: Runtime, M: Manager<R>>(
     let builder = window_frame::with_frame(builder);
     let builder = csp::on_scripts(builder, manager);
     let builder = crate::navigation::guard(builder, manager);
-    #[cfg(all(windows, feature = "e2e"))]
-    let builder = crate::e2e::with_debugging_port(builder);
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(crate::e2e::init_script());
     let built = number_build(manager);

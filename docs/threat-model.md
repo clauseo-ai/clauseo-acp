@@ -102,9 +102,19 @@ converted document. From there they can call any IPC command the page can reach.
   navigation but the app's own origin, `about:blank` and `about:srcdoc` (and `devUrl` in a
   development build only), so page script cannot send data out with `location.href` or a
   `meta refresh` (`crates/desktop/src/navigation.rs`); every link click is also cancelled in the
-  renderer. Known gap: `<link rel=dns-prefetch>` and `preconnect`, which the CSP does not cover,
-  can still put a name of the page's choosing into a DNS query (and, for preconnect, a TLS
-  handshake); no WebView2 switch or WKWebView API reliably turns both off
+  renderer
+- `built`: On Windows the webview resolves no host name: both windows start WebView2 with
+  `--host-resolver-rules="MAP * ~NOTFOUND"` (`crates/desktop/src/navigation/browser_args.rs`), so neither a
+  refused navigation's host nor a `<link rel=dns-prefetch>` or `preconnect` target reaches a DNS
+  query; on a Windows VM no `msedgewebview2` process made any lookup for any of the four. The
+  app's pages need no name: they come from `https://tauri.localhost` through interception, and
+  every network request is made by Rust. A set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, which
+  WebView2 takes in place of the app's arguments, gets the rule appended first thing in `main`
+  unless it sets resolver rules of its own. Known gap: a variable set with its own
+  `--host-resolver-rules` keeps them; and on macOS (WKWebView) a refused navigation's host and
+  `dns-prefetch`/`preconnect` targets can still put a name of the page's choosing into a DNS
+  query (and, for preconnect, a TLS handshake), with no WKWebView API to turn that off, to be
+  closed before the Mac release
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
 
 ## Agents

@@ -207,28 +207,21 @@ pub(crate) fn confirm_always() -> Option<bool> {
 mod tests;
 
 #[cfg(windows)]
-pub(crate) use debugging::with_debugging_port;
+pub(crate) use debugging::debugging_args;
 
 #[cfg(windows)]
 mod debugging {
-    use tauri::{Manager, Runtime, WebviewWindowBuilder};
-
-    /// wry's own browser arguments. Passing `additional_browser_args` replaces them (wry
-    /// `src/webview2/mod.rs`), so they are passed again here.
-    const WRY_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
-
     /// Set to `1` to run the webview without the GPU.
     const DISABLE_GPU_VAR: &str = "E2E_DISABLE_GPU";
 
-    /// `builder` with the webview's remote debugging port on a free port of 127.0.0.1, which
-    /// the browser picks and writes to `DevToolsActivePort`.
-    pub(crate) fn with_debugging_port<R: Runtime, M: Manager<R>>(
-        builder: WebviewWindowBuilder<'_, R, M>,
-    ) -> WebviewWindowBuilder<'_, R, M> {
-        let mut args = format!("{WRY_DEFAULT_ARGS} --remote-debugging-port=0");
+    /// The switches `browser_args::apply` appends in the e2e build, each after a space: the
+    /// webview's remote debugging port on a free port of 127.0.0.1, which the browser picks and
+    /// writes to `DevToolsActivePort`, and no GPU when `E2E_DISABLE_GPU` is `1`.
+    pub(crate) fn debugging_args() -> String {
+        let mut args = String::from(" --remote-debugging-port=0");
         if std::env::var(DISABLE_GPU_VAR).is_ok_and(|value| value == "1") {
             args.push_str(" --disable-gpu");
         }
-        builder.additional_browser_args(&args)
+        args
     }
 }
