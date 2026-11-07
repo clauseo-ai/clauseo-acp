@@ -81,9 +81,15 @@ Clauseo put on each matter folder it recorded.
 It doesn't go through the files inside a lawyer's matters, so the copies Windows made of those
 rules below each matter folder stay: entries naming the deleted sandbox users, and the low
 integrity label the matter had while Clauseo protected it. They give nothing to any account that
-still exists. To clear them, an administrator can run `icacls "D:\Matters\Example" /reset /T /C`.
-That resets the folder and everything below it to the permissions it inherits, so don't use it on
-a matter where your firm set permissions on anything inside.
+still exists. To clear them, an administrator runs two commands on the matter folder:
+
+1. `icacls "D:\Matters\Example" /reset /T /C` removes the stale entries. It resets the folder and
+   everything below it to the permissions it inherits, so don't use it on a matter where your firm
+   set permissions on anything inside.
+2. `icacls "D:\Matters\Example" /setintegritylevel (OI)(CI)M` puts back the default (medium)
+   integrity label, which everything below inherits. The first command leaves the low label.
+
+Measured on a Windows Server 2025 VM, 2026-11-07 (S15 PR4j, `235c39149`).
 
 Measured on Windows Server 2025 (build 26100), 2026-11-03, with the 0.0.0 dry-run installer, from an
 elevated PowerShell: install exit 0 in about 2 s, with no window and no UAC prompt; uninstall exit
