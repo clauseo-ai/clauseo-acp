@@ -201,9 +201,12 @@ If a profile is still there, a process still holds it: restart the computer and 
 again. A second run skips what is gone. If the group is still there, it has members or isn't the
 one the key named, and `--remove` would leave it too: look at it before you delete it.
 
-If `Profiles` is 0 but `Folders` isn't, the folder outlived its profile and stays even after a
-restart. Windows may have named it `ClauseoSb01`, `ClauseoSb01.<COMPUTER>` or `ClauseoSb01.000`.
-After a restart, paste the block below into an elevated PowerShell. It is for a leftover sandbox
+If `Profiles` is 0 but `Folders` isn't, a profile's folder may have outlived its profile; it stays
+even after a restart. Windows may have named it `ClauseoSb01`, `ClauseoSb01.<COMPUTER>` or
+`ClauseoSb01.000`. First check that each counted folder is a leftover Clauseo profile: for
+example, it holds a profile's files (`NTUSER.DAT`, `AppData`) and Clauseo was set up on this
+computer. The block deletes every folder with such a name, whoever made it. After a restart,
+paste the block below into an elevated PowerShell. It is for a leftover sandbox
 profile folder only: it finds each folder in `C:\Users` named exactly as a pool user's profile
 (never another account that starts with `ClauseoSb`), and deletes what is inside it one name at a
 time, then the folder. It uses the backup and restore rights an administrator already has, so it
@@ -283,10 +286,6 @@ files the sandbox set aside from a matter.
 
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
 do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
-
-For a per-user install the path is `C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe`,
-with the lawyer's user folder: at an administrator's prompt, `%LOCALAPPDATA%` is the
-administrator's folder, not the lawyer's.
 
 ## 2. Signing
 
@@ -711,10 +710,9 @@ returns 0 at once (section 1), so it reports 21 only when run as
 `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no quotes),
 which leaves `uninstall.exe` and the folder behind; delete them afterwards.
 
-**Get the file back (preferred).** Firms should use the per-machine installer: only
-administrators can write to `C:\Program Files\Clauseo`. Never leave a Defender exclusion on a
-per-user install's `%LOCALAPPDATA%\Clauseo`: it weakens protection, since anything running as the
-lawyer could swap the excluded file, and Clauseo runs that file elevated. Either:
+**Get the file back (preferred).** Never leave a Defender exclusion on a per-user install's
+`%LOCALAPPDATA%\Clauseo`: it weakens protection, since anything running as the lawyer could swap
+the excluded file, and Clauseo runs that file elevated. Either:
 
 - **run the Clauseo installer again** for a fresh copy; or
 - **restore the quarantined file** by its path, never by the threat name (a machine-learning name
@@ -722,7 +720,9 @@ lawyer could swap the excluded file, and Clauseo runs that file elevated. Either
   publishes with each release before anything runs it elevated.
 
 If Defender quarantines it again during the restore, exclude it only until you are done, from an
-elevated PowerShell (`$f` is the file in the install folder):
+elevated PowerShell (`$f` is the file in the install folder). For a per-user install, set `$f` to
+`C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe` with the lawyer's user folder:
+at an administrator's prompt, `%LOCALAPPDATA%` is the administrator's folder, not the lawyer's.
 
 ```powershell
 $f = "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
