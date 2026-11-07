@@ -101,6 +101,10 @@ impl Adopter for WindowsAdopter {
             .map_err(|error| error.to_string())
     }
 
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String> {
+        crate::windows::refresh::register_refresh_task(owner).map_err(|error| error.to_string())
+    }
+
     fn set_up(&mut self, data_dir: &Path) -> SetupExit {
         let Some(owner) = self.user.take() else {
             tracing::error!("--adopt: the set-up has no installing user");

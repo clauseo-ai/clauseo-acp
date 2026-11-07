@@ -374,12 +374,17 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
     assert_eq!(codes, [0, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]);
-    let setup_max = crate::windows::setup::SetupExit::ALL
+    let setup: Vec<u8> = crate::windows::setup::SetupExit::ALL
         .iter()
         .map(|exit| exit.as_code())
-        .max()
-        .unwrap();
-    assert!(setup_max < 32);
+        .collect();
+    // PR 2's set-up codes, as the installer's hooks read them, and the refresh's from 32: the
+    // one exe exits with either, and only 0 (done) means the same in both.
+    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    for code in &codes[1..] {
+        assert!(!setup.contains(code), "{code} is a set-up code too");
+    }
+    assert!(setup.iter().all(|code| *code < 32));
 }
 
 #[test]
