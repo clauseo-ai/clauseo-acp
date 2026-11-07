@@ -141,6 +141,68 @@ fn windows_roaming_unchecked_child() {
     );
 }
 
+/// The planted home of [`windows_local_app_data_unchecked`]'s child.
+#[cfg(windows)]
+const LOCAL_HOME: &str = "CLAUSEO_SETTINGS_TEST_LOCAL_HOME";
+
+/// The local app data folder is looked up without Windows' check, so the main thread's data
+/// folder resolve never touches the disk: a child whose planted USERPROFILE has no `AppData\Local`
+/// still gets the folder's path, which the host's start creates.
+#[cfg(windows)]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "makes and removes its own planted home and reruns this test binary in it; nothing \
+              else is launched or written"
+)]
+fn windows_local_app_data_unchecked() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    let profile = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+    let local = SystemDirs.known_folder(KnownFolder::LocalAppData);
+    let under_profile = profile
+        .zip(local)
+        .is_some_and(|(profile, local)| local.starts_with(profile));
+    if !under_profile {
+        eprintln!("Local AppData is not under USERPROFILE here; skipped");
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("clauseo-settings-local-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "system::tests::windows_local_app_data_unchecked_child",
+            "--exact",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("USERPROFILE", &home)
+        .env(LOCAL_HOME, &home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&home).unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "the child ran: {text}");
+}
+
+/// [`windows_local_app_data_unchecked`]'s child: run only by it, with the planted home.
+#[cfg(windows)]
+#[test]
+#[ignore = "run by windows_local_app_data_unchecked with a planted USERPROFILE"]
+fn windows_local_app_data_unchecked_child() {
+    use crate::locations::{KnownFolder, PlatformDirs as _};
+    use crate::system::SystemDirs;
+    let home = std::path::PathBuf::from(std::env::var_os(LOCAL_HOME).unwrap());
+    let local = home.join("AppData").join("Local");
+    assert!(!local.exists());
+    assert_eq!(
+        SystemDirs.known_folder(KnownFolder::LocalAppData),
+        Some(local)
+    );
+}
+
 /// The planted share of [`windows_documents_on_a_dead_share`]'s child.
 #[cfg(windows)]
 const DEAD_SHARE: &str = r"\\192.0.2.1\clauseo-test";

@@ -23,7 +23,11 @@ pub(super) fn folder(folder: KnownFolder) -> Option<PathBuf> {
         KnownFolder::RoamingAppData => {
             return known_folder_with(&FOLDERID_RoamingAppData, KF_FLAG_DONT_VERIFY);
         }
-        KnownFolder::LocalAppData => FOLDERID_LocalAppData,
+        // Unchecked: the data folder is resolved on the main thread before the first window, so it
+        // must never touch the disk; Clauseo creates the data folder itself (`startup::open`).
+        KnownFolder::LocalAppData => {
+            return known_folder_with(&FOLDERID_LocalAppData, KF_FLAG_DONT_VERIFY);
+        }
         KnownFolder::Documents => return documents(),
         KnownFolder::Windows => FOLDERID_Windows,
         KnownFolder::ProgramFiles => FOLDERID_ProgramFiles,
