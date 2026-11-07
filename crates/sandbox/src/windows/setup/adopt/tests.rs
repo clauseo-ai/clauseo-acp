@@ -34,8 +34,8 @@ struct Fake {
     lock_busy: bool,
     /// `--adopt` holds the set-up lock now.
     held: bool,
-    /// The refresh task's registration fails.
-    task_fails: bool,
+    /// This task's registration fails.
+    failing_task: Option<SystemTask>,
     set_up_exit: SetupExit,
 }
 
@@ -64,7 +64,7 @@ impl Fake {
             recorded: None,
             lock_busy: false,
             held: false,
-            task_fails: false,
+            failing_task: None,
             set_up_exit: SetupExit::Done,
         }
     }
@@ -167,11 +167,12 @@ impl Adopter for Fake {
         Ok(())
     }
 
-    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String> {
-        if self.task_fails {
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), String> {
+        assert!(self.held, "registered under the set-up lock");
+        if self.failing_task == Some(task) {
             return Err("the Task Scheduler refused".to_owned());
         }
-        self.changes.push(format!("task {owner}"));
+        self.changes.push(format!("task {} {owner}", task.name()));
         Ok(())
     }
 
@@ -199,38 +200,45 @@ fn refused(fake: &mut Fake, install: &str, target: &Target, exit: SetupExit, cas
 }
 
 #[test]
-fn a_per_user_adopt_locks_registers_the_task_records_then_sets_up_in_that_order() {
+fn a_per_user_adopt_locks_registers_both_tasks_records_then_sets_up_in_that_order() {
     let mut fake = Fake::new();
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Done
     );
-    assert_eq!(fake.changes.len(), 4, "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 5, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
-    assert_eq!(fake.changes[1], format!("task {LAWYER}"));
+    assert_eq!(fake.changes[1], format!("task SandboxRefresh {LAWYER}"));
+    assert_eq!(fake.changes[2], format!("task SandboxStop {LAWYER}"));
     assert_eq!(
-        fake.changes[2],
+        fake.changes[3],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[3], format!("set-up {DATA}"));
+    assert_eq!(fake.changes[4], format!("set-up {DATA}"));
 }
 
 #[test]
-fn a_refresh_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
-    let mut fake = Fake::new();
-    fake.task_fails = true;
-    assert_eq!(
-        adopt(&mut fake, Path::new(INSTALL), &user()),
-        SetupExit::Failed
-    );
-    assert_eq!(fake.changes.len(), 1, "{:?}", fake.changes);
-    assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
-    // The launcher's check over what the record then holds: the copy is missing, so tier B
-    // isn't used with no task to refresh the copy.
+fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
+    for (failing, before) in [(SystemTask::Refresh, 1), (SystemTask::Stop, 2)] {
+        let mut fake = Fake::new();
+        fake.failing_task = Some(failing);
+        assert_eq!(
+            adopt(&mut fake, Path::new(INSTALL), &user()),
+            SetupExit::Failed,
+            "{failing:?}"
+        );
+        // The lock, and the refresh task when the stop task is the one refused; no record.
+        assert_eq!(fake.changes.len(), before, "{:?}", fake.changes);
+        assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
+        assert!(fake.recorded.is_none(), "{failing:?}");
+        // The launcher's check over what the record then holds: the copy is missing, so tier B
+        // isn't used with no task to refresh the copy or stop the pool's processes.
+        let mut copy = admin_copy::fake::Fake::ready();
+        copy.recorded = fake.recorded.clone();
+        assert_eq!(admin_copy::check(&copy), Err(Blocked::AdminCopyMissing));
+    }
     let mut copy = admin_copy::fake::Fake::ready();
-    copy.recorded = fake.recorded.clone();
-    assert_eq!(admin_copy::check(&copy), Err(Blocked::AdminCopyMissing));
     // Registered, the same copy passes.
     let mut fake = Fake::new();
     assert_eq!(
@@ -400,7 +408,8 @@ fn a_per_machine_adopt_takes_any_administrators_only_folder_and_sets_nobody_up()
         adopt(&mut fake, Path::new(MACHINE), &Target::Machine),
         SetupExit::Done
     );
-    // Lock and record only: no refresh task, since a per-machine install doesn't update itself.
+    // Lock and record only: no task, since a per-machine install doesn't update itself and has
+    // no owner to let start one.
     assert_eq!(fake.changes.len(), 2, "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(
@@ -520,7 +529,7 @@ fn the_set_up_lock_spans_the_hash_and_the_record_and_a_held_one_changes_nothing(
     }
     // A refusal under the lock gives it back too.
     let mut fake = Fake::new();
-    fake.task_fails = true;
+    fake.failing_task = Some(SystemTask::Stop);
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Failed

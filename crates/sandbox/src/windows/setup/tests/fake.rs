@@ -97,6 +97,8 @@ pub(super) struct FakeMachine {
     pub(super) no_local_low: BTreeSet<String>,
     /// The users the owner's `matters.json` marks as owed a profile reset.
     pub(super) needs_reset: BTreeSet<Sid>,
+    /// The users the record's `ResetSids` lists (the stop task's marks).
+    pub(super) stop_resets: BTreeSet<Sid>,
     /// The users the reuse rule holds back after the resets, as `held_users` reads them.
     pub(super) held: BTreeSet<Sid>,
     /// The `resets` each `held_users` call was given.
@@ -477,6 +479,21 @@ impl Machine for FakeMachine {
         self.owner_call(&format!("reset_done {}", rids(users)))?;
         for user in users {
             self.needs_reset.remove(user);
+        }
+        Ok(())
+    }
+
+    fn stop_resets(&mut self) -> Result<Vec<Sid>, MachineError> {
+        assert!(!self.acting.get(), "the record is read as admin");
+        self.call("stop_resets")?;
+        Ok(self.stop_resets.iter().cloned().collect())
+    }
+
+    fn stop_resets_done(&mut self, users: &[Sid]) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the record is written as admin");
+        self.call(format!("stop_resets_done {}", rids(users)))?;
+        for user in users {
+            self.stop_resets.remove(user);
         }
         Ok(())
     }

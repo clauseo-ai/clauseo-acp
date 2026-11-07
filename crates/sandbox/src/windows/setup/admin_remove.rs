@@ -1,8 +1,9 @@
 //! `--remove`'s last step (S15 tier B, "Admin copy" in 0049): once no tier-B owner is left on
-//! the machine, the admin copy goes too. In order: the record's four admin-copy values
-//! (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the refresh task and
-//! its staging ([`unregister_refresh_task`], [`remove_staging`]: S15 tier B PR 3's hooks), then
-//! everything in `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
+//! the machine, the admin copy goes too. In `refresh::TEARDOWN`'s order: the record's four
+//! admin-copy values (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the
+//! SYSTEM tasks `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` ([`unregister_task`]),
+//! then the refresh's staging ([`remove_staging`]), then everything in
+//! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
 //! `--remove --uninstall` runs it: the app's in-app removal keeps all of these.
 //!
 //! The running exe is usually the admin copy itself, which Windows won't delete while it runs.
@@ -30,14 +31,24 @@ use windows::core::PCWSTR;
 use super::machine::MachineError;
 use super::record_write;
 use crate::windows::admin_copy::{self, Found, os, same_path};
-use crate::windows::refresh;
+use crate::windows::refresh::{self, SystemTask, TEARDOWN, Teardown};
 
-/// Deletes the admin copy as the module says. The record's values first: a failure there
-/// stops before any file is touched.
+/// Deletes the admin copy as the module says, step by step in [`TEARDOWN`]'s order. The
+/// record's values first: a failure there stops before any task or file is touched.
 pub(crate) fn remove_admin_copy(record_key: &str) -> Result<(), MachineError> {
-    record_write::delete_admin_values(record_key)?;
-    unregister_refresh_task()?;
-    remove_staging()?;
+    for step in TEARDOWN {
+        match step {
+            Teardown::AdminValues => record_write::delete_admin_values(record_key)?,
+            Teardown::Task(task) => unregister_task(task)?,
+            Teardown::Staging => remove_staging()?,
+            Teardown::AdminFolder => remove_admin_folder()?,
+        }
+    }
+    Ok(())
+}
+
+/// The last step: everything in the admin folder, then the folder ([`clear`]).
+fn remove_admin_folder() -> Result<(), MachineError> {
     let program_files = os::program_files().map_err(|e| other(&e))?;
     let dir = admin_copy::admin_dir(&program_files);
     match os::found(&dir).map_err(|e| other(&e))? {
@@ -91,11 +102,10 @@ pub(super) fn clear(
     Ok(())
 }
 
-/// PR 3's hook: deletes the SYSTEM refresh task `\Clauseo\SandboxRefresh`
-/// (`refresh::unregister_refresh_task`; one that isn't there is `Ok`). Run by the uninstaller's
-/// removal only, before the admin folder goes.
-pub(crate) fn unregister_refresh_task() -> Result<(), MachineError> {
-    refresh::unregister_refresh_task().map_err(|error| MachineError::Other(error.to_string()))
+/// PR 3's hook: deletes the SYSTEM task `task` (`refresh::unregister_task`; one that isn't
+/// there is `Ok`). Run by the uninstaller's removal only, before the admin folder goes.
+pub(crate) fn unregister_task(task: SystemTask) -> Result<(), MachineError> {
+    refresh::unregister_task(task).map_err(|error| MachineError::Other(error.to_string()))
 }
 
 /// PR 3's hook: deletes the refresh task's staging folder,

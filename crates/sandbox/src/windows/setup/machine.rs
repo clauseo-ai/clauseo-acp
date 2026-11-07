@@ -173,6 +173,12 @@ pub trait Machine {
     /// Clears the reset mark of each of `users` in the owner's `matters.json`
     /// (`MatterSids::reset_done`), as the owner, once their profiles are made again and closed.
     fn reset_done(&mut self, users: &[Sid]) -> Result<(), MachineError>;
+    /// The record's `ResetSids` (`record_values::RESET_SIDS`): the pool users the stop task
+    /// found running, owed a profile reset even while a matter holds them. Read as this process,
+    /// never as the owner: only SYSTEM and Administrators write it. A missing value is none.
+    fn stop_resets(&mut self) -> Result<Vec<Sid>, MachineError>;
+    /// Takes `users`, reset this run, off the record's `ResetSids`, as this process.
+    fn stop_resets_done(&mut self, users: &[Sid]) -> Result<(), MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

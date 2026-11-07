@@ -386,6 +386,14 @@ impl Machine for WindowsMachine {
         })
     }
 
+    fn stop_resets(&mut self) -> Result<Vec<Sid>, MachineError> {
+        record_write::read_reset_sids(&self.names.record_key)
+    }
+
+    fn stop_resets_done(&mut self, users: &[Sid]) -> Result<(), MachineError> {
+        record_write::remove_reset_sids(&self.names.record_key, users)
+    }
+
     fn held_users(
         &mut self,
         pool: &[Sid],

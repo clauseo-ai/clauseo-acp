@@ -25,6 +25,7 @@ mod remove_ledger;
 mod remove_set_aside;
 mod resets;
 mod rollback;
+mod stop_resets;
 mod top_up;
 
 use fake::{FakeAcl, FakeMachine, OWNER, OWNER_NAME, sid};

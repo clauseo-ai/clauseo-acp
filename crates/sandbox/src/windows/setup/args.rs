@@ -17,6 +17,8 @@
 //!   comes from the process's recorded parent (D-B2), never from an argument.
 //! - `--refresh`: the admin copy's refresh (`refresh.rs`), which the SYSTEM task runs. It takes
 //!   no other argument: everything it reads comes from the record and fixed paths.
+//! - `--stop`: stops every process of the pool's users (`stop.rs`), which the SYSTEM task
+//!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
@@ -65,11 +67,14 @@ pub enum Mode {
         /// whoever asked (D-B9 as ruled). Without it, only the record's owner removes anything.
         per_machine: bool,
         /// `--uninstall`: the uninstaller's removal, which also deletes the admin copy, its
-        /// record values and the refresh task, last. Without it (the app's), they stay.
+        /// record values and the SYSTEM tasks (refresh and stop), last. Without it (the app's),
+        /// they stay.
         uninstall: bool,
     },
     /// `--refresh`.
     Refresh,
+    /// `--stop`.
+    Stop,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -86,7 +91,8 @@ pub struct AdoptUser {
 #[error(
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
-         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh ({0})"
+         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
+         --stop ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -94,14 +100,17 @@ pub struct Usage(pub String);
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
-    if mode == "--refresh" {
-        return match args.next() {
-            None => Ok(Mode::Refresh),
-            Some(extra) => Err(Usage(format!(
-                "--refresh takes no {:?}",
-                extra.to_string_lossy()
-            ))),
-        };
+    // The SYSTEM tasks' modes take nothing else: what they act on comes from the record.
+    for (alone, parsed) in [("--refresh", Mode::Refresh), ("--stop", Mode::Stop)] {
+        if mode == alone {
+            return match args.next() {
+                None => Ok(parsed),
+                Some(extra) => Err(Usage(format!(
+                    "{alone} takes no {:?}",
+                    extra.to_string_lossy()
+                ))),
+            };
+        }
     }
     let mut parent = None;
     let mut data_dir = None;

@@ -21,35 +21,88 @@
 //! leaves the marks too.
 //!
 //! A never-used user has no mark, nor has a user its matter still holds: neither is reset.
+//!
+//! The stop task (`stop.rs`, as SYSTEM) marks another way: each pool user it found running goes
+//! into the record's `ResetSids` (HKLM, which only SYSTEM and Administrators write). Those are
+//! reset too, even while a matter holds them, since what such a process left in the profile
+//! must not meet that matter's next agent; but only while no session is open (D-B6), else they
+//! wait for a later set-up. Only users of the record's pool are taken from it. Once reset, they
+//! come off `ResetSids` as off `matters.json`. Keeping a held user from its next launch while it
+//! is listed is the runner's (with #649).
 
 use std::path::{Path, PathBuf};
 
 use super::create::Failed;
-use super::machine::{Machine, owned};
+use super::machine::{Machine, MachineError, owned};
 use super::outcome::{SetupFailure, Step, cause_of};
 use crate::windows::pool::{MachineRecord, PoolUser};
 use crate::windows::sids::Sid;
 
 /// The pool users the owner's `matters.json` marks as owed a reset and no matter holds, read as
-/// the owner (`Machine::resets_due`); none without a record, as a fresh pool has no users to
-/// reset. A file that can't be read fails at [`Step::Matters`], before anything changes.
+/// the owner (`Machine::resets_due`), then those of the record's `ResetSids` ([`stop_resets`]);
+/// none without a record, as a fresh pool has no users to reset. A file or value that can't be
+/// read fails at [`Step::Matters`], before anything changes.
 pub(super) fn resets_due(
     machine: &mut impl Machine,
     record: Option<&MachineRecord>,
 ) -> Result<Vec<Sid>, SetupFailure> {
-    if record.is_none() {
+    let Some(record) = record else {
         return Ok(Vec::new());
-    }
-    owned(machine, Machine::resets_due).map_err(|error| {
+    };
+    let failed = |error| {
         SetupFailure::early(
             Step::Matters,
             format!("the profile resets owed: {}", cause_of(&error)),
         )
-    })
+    };
+    let mut due = owned(machine, Machine::resets_due).map_err(failed)?;
+    for sid in stop_resets(machine, record).map_err(failed)? {
+        if !due.contains(&sid) {
+            due.push(sid);
+        }
+    }
+    Ok(due)
 }
 
-/// Clears the marks of `reset`, the users this run reset, as the owner (`Machine::reset_done`):
-/// those users, or why the marks stay (the users stay held back until a set-up clears them).
+/// The users of `record`'s pool that its `ResetSids` lists, read as this process, whether a
+/// matter holds them or not; none while a session is open (D-B6: no password changes under a
+/// running agent), or when that can't be told: they stay listed for a later set-up.
+fn stop_resets(
+    machine: &mut impl Machine,
+    record: &MachineRecord,
+) -> Result<Vec<Sid>, MachineError> {
+    let listed: Vec<Sid> = machine
+        .stop_resets()?
+        .into_iter()
+        .filter(|sid| record.pool.contains(sid))
+        .collect();
+    if listed.is_empty() {
+        return Ok(listed);
+    }
+    match owned(machine, Machine::sessions_open) {
+        Ok(false) => Ok(listed),
+        Ok(true) => {
+            tracing::warn!(
+                users = listed.len(),
+                "a session is open; the stop task's profile resets wait for a later set-up"
+            );
+            Ok(Vec::new())
+        }
+        Err(error) => {
+            tracing::warn!(
+                users = listed.len(),
+                error = %cause_of(&error),
+                "the open sessions can't be read; the stop task's profile resets wait"
+            );
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// Clears the marks of `reset`, the users this run reset: in `matters.json`, as the owner
+/// (`Machine::reset_done`), and in the record's `ResetSids`, as this process
+/// (`Machine::stop_resets_done`). Those users, or why marks stay (the users stay held back until
+/// a set-up clears them).
 pub(super) fn clear(
     machine: &mut impl Machine,
     reset: Vec<PoolUser>,
@@ -58,7 +111,9 @@ pub(super) fn clear(
         return Ok(reset);
     }
     let sids: Vec<Sid> = reset.iter().map(|user| user.sid.clone()).collect();
-    match owned(machine, |machine| machine.reset_done(&sids)) {
+    let marks = owned(machine, |machine| machine.reset_done(&sids));
+    let listed = machine.stop_resets_done(&sids);
+    match marks.and(listed) {
         Ok(()) => Ok(reset),
         Err(error) => {
             tracing::warn!(

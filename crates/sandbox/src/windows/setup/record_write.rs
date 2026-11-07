@@ -22,11 +22,12 @@ use super::MachineError;
 use super::lock::Descriptor;
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RawRecord,
-    RegValue, SETUP_VALUES, USER_INSTALL_DIR,
+    CopyOwner, DATA_DIR, GROUP_SID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS,
+    RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without, sids_value,
 };
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_string, read_units};
+use crate::windows::sids::Sid;
 
 /// The record's key under `HKLM`, as `record.rs` names it.
 pub(super) const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
@@ -120,6 +121,49 @@ pub(crate) fn read_texts(key: &str, names: &[&str]) -> Result<Vec<Option<String>
             read_string(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
         })
         .collect()
+}
+
+/// The record's `ResetSids` (`record_values::RESET_SIDS`): empty when the key or the value is
+/// missing; a malformed list is an error, never a shorter list.
+pub(crate) fn read_reset_sids(key: &str) -> Result<Vec<Sid>, MachineError> {
+    let subkey = HSTRING::from(key);
+    let name = HSTRING::from(RESET_SIDS);
+    let units = read_units(
+        PCWSTR(subkey.as_ptr()),
+        PCWSTR(name.as_ptr()),
+        RRF_RT_REG_MULTI_SZ,
+    )
+    .map_err(reading)?;
+    let Some(units) = units else {
+        return Ok(Vec::new());
+    };
+    pool_sids_from_multi_sz(&units)
+        .map_err(|error| MachineError::Other(format!("the record's ResetSids: {error}")))
+}
+
+/// Adds `users` to the record's `ResetSids`, keeping what it lists; the key made and secured as
+/// [`write`] does. The stop task calls it as SYSTEM, under the set-up lock.
+pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineError> {
+    let listed = read_reset_sids(key)?;
+    let all = resets_with(&listed, users);
+    if all == listed {
+        return Ok(());
+    }
+    set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&all))
+}
+
+/// Takes `done`, the users a set-up has reset, off the record's `ResetSids`, deleting the value
+/// once it lists none. The set-up calls it under its lock.
+pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineError> {
+    let listed = read_reset_sids(key)?;
+    let left = resets_without(&listed, done);
+    if left == listed {
+        return Ok(());
+    }
+    if left.is_empty() {
+        return delete_values(key, &[RESET_SIDS]);
+    }
+    set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&left))
 }
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and

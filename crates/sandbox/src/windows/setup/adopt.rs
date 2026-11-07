@@ -27,10 +27,12 @@
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
 //!    (`admin_copy::locked`), else `Failed`;
-//! 6. per user, the SYSTEM refresh task (`refresh::register_refresh_task`, PR 3) is registered
-//!    for the lawyer, else `Failed` with no value written, so the launcher's check finds the copy
-//!    missing rather than running it with no task to refresh it (a run before the values exist
-//!    exits 33, changing nothing); a per-machine install doesn't update itself, so it gets no task;
+//! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
+//!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then `\Clauseo\SandboxStop`.
+//!    Either failing is `Failed` with no value written, so the launcher's check finds the copy
+//!    missing rather than running it with no task to refresh it or to stop the pool's processes
+//!    (a refresh before the values exist exits 33, changing nothing). A per-machine install
+//!    doesn't update itself and has no owner to let start a task, so it gets neither;
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
@@ -49,6 +51,7 @@ use super::outcome::SetupExit;
 use super::record_values::{AdminValues, CopyOwner};
 use crate::Blocked;
 use crate::windows::admin_copy::{self, Found, inside, level_safe, same_path};
+use crate::windows::refresh::{SystemTask, TASKS};
 use crate::windows::sids::Sid;
 
 #[cfg(test)]
@@ -100,9 +103,9 @@ pub trait Adopter {
     fn unlock(&mut self);
     /// Writes the record's admin-copy values.
     fn write_values(&mut self, values: &AdminValues) -> Result<(), String>;
-    /// Registers (or updates) the SYSTEM refresh task `\Clauseo\SandboxRefresh` for the record
-    /// owner `owner` (`refresh::register_refresh_task`, S15 tier B PR 3).
-    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), String>;
+    /// Registers (or updates) the SYSTEM task `task` for the record owner `owner`
+    /// (`refresh::register_task`, S15 tier B PR 3).
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), String>;
     /// The normal `--set-up` for the lawyer found and `data_dir`, in this process.
     fn set_up(&mut self, data_dir: &Path) -> SetupExit;
 }
@@ -212,10 +215,13 @@ fn place(
         Ok(_) => return Err(failed("the admin copy's hash", "not a SHA-256")),
         Err(error) => return Err(failed("the admin copy can't be hashed", &error)),
     };
-    if let Target::User { owner_sid, .. } = target
-        && let Err(error) = machine.register_refresh_task(owner_sid)
-    {
-        return Err(failed("the refresh task couldn't be registered", &error));
+    if let Target::User { owner_sid, .. } = target {
+        for task in TASKS {
+            if let Err(error) = machine.register_task(task, owner_sid) {
+                let what = format!("the task {} couldn't be registered", task.name());
+                return Err(failed(&what, &error));
+            }
+        }
     }
     let values = AdminValues {
         sha256,

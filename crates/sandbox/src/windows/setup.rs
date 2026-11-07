@@ -117,6 +117,8 @@ pub mod result_file;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
+#[cfg(any(windows, test))]
+pub mod stop;
 pub mod strays;
 #[cfg(any(windows, test))]
 pub mod taken_file;
