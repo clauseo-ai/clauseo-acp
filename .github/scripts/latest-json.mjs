@@ -1,7 +1,8 @@
 // The updater's manifest, latest.json, and the table of a release's assets. release.yml's
 // `assemble` job runs this file; latest-json.test.mjs tests it and lints release.yml.
 //
-//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date>
+//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>
+//   node .github/scripts/latest-json.mjs --verify <file> <public-key-file>
 //
 // <dir> holds the release's assets with their final names (the Mac archives already renamed to
 // Clauseo_<version>_<arch>.app.tar.gz). <base-url> is where the release serves them,
@@ -10,8 +11,13 @@
 // each `.sig`'s trusted comment holds `version:<version>` (tauri-plugin-updater refuses a
 // signature without it when `requireSignedVersion` is on), then writes <dir>/latest.json and
 // prints one line per missing tier 2 asset, `missing <name>`, for the release notes.
-// Exit status: 0 when latest.json is written, 1 when an asset or a signature is wrong, 2 on a
-// usage error. Plain Node: no package to install.
+// <sandbox-exe> is release.yml's SANDBOX_EXE, the name S15's set-up tool has in the install folder;
+// it is published per architecture as <name>-<arch>.exe with its updater-key `.sig`, so that IT can
+// check a copy against the release. Exit status: 0 when latest.json is written, 1 when an asset or
+// a signature is wrong, 2 on a usage error.
+// --verify checks <file>.sig (tauri signer's format: base64 of minisign's text) against <file>
+// and the base64 public key in <public-key-file>, trusted comment included: 0 when it holds, 1 when
+// not. Plain Node: no package to install.
 //
 // The manifest is the plugin's static format: { version, notes, pub_date, platforms }, each
 // platform keyed `<os>-<arch>-<bundle>` (the plugin tries that key, then `<os>-<arch>`). The
@@ -19,9 +25,10 @@
 // looks up the plain `windows-<arch>` key: each Windows entry is written under both. Linux never
 // updates itself, so .deb and .rpm have no entry and no `.sig`.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, createPublicKey, verify } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** A plain `X.Y.Z` version, the only form a Clauseo release takes. */
 export const PLAIN_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
@@ -29,13 +36,34 @@ export const PLAIN_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)
 /** RFC 3339, as the plugin parses `pub_date`. */
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
+/** A file name S15's set-up tool may have in the install folder, such as clauseo-sandbox-setup.exe. */
+const SANDBOX_EXE = /^[a-z0-9][a-z0-9-]*\.exe$/;
+
+/** The release asset that publishes <sandboxExe> for Windows <arch> (x64 or arm64). */
+export function sandboxAsset(sandboxExe, arch) {
+  if (!SANDBOX_EXE.test(sandboxExe)) {
+    throw new Error(`${sandboxExe} is not a plain lower-case .exe name`);
+  }
+  return sandboxExe.replace(/\.exe$/, `-${arch}.exe`);
+}
+
 /**
  * Every asset of release <version>, by tier (1 must be there, 2 may be missing), with the
- * latest.json keys of the ones the updater installs. The one home of the asset names: release.yml
- * builds them under these names, and the test checks a release against this list.
+ * latest.json keys of the ones the updater installs, and `signed` on the ones that carry an
+ * updater-key `.sig` the updater does not read. The one home of the asset names: release.yml
+ * builds them under these names, and the test checks a release against this list. <sandboxExe>
+ * (release.yml's SANDBOX_EXE) adds S15's set-up tool per architecture; without it those rows are
+ * left out, as only the updater's rows matter to the manifest.
  */
-export function assets(version) {
+export function assets(version, sandboxExe = null) {
   const v = version;
+  const sandbox =
+    sandboxExe === null
+      ? []
+      : [
+          { name: sandboxAsset(sandboxExe, "x64"), tier: 1, signed: true },
+          { name: sandboxAsset(sandboxExe, "arm64"), tier: 2, signed: true },
+        ];
   return [
     { name: `Clauseo_${v}_aarch64.dmg`, tier: 1 },
     { name: `Clauseo_${v}_aarch64.app.tar.gz`, tier: 1, platforms: ["darwin-aarch64-app"] },
@@ -47,7 +75,51 @@ export function assets(version) {
     { name: `Clauseo_${v}_arm64-machine-setup.exe`, tier: 2 },
     { name: `Clauseo_${v}_amd64.deb`, tier: 2 },
     { name: `Clauseo-${v}-1.x86_64.rpm`, tier: 2 },
+    ...sandbox,
   ];
+}
+
+/**
+ * Every way <signature> (a `.sig` file's text: base64 of minisign's signature text) fails to sign
+ * <data> (a Buffer) under <publicKey> (a `.pub` file's text, as tauri signer writes both): the
+ * file's signature, prehashed with BLAKE2b-512 (`ED`) or not (`Ed`), and the global signature
+ * over it and the trusted comment. Empty when it holds.
+ */
+export function signatureCheck(data, signature, publicKey) {
+  const decode = (text) => Buffer.from(String(text).trim(), "base64").toString("utf8").split("\n");
+  const sig = decode(signature);
+  const pub = decode(publicKey);
+  const prefix = "trusted comment: ";
+  if (sig.length < 4 || !sig[2].startsWith(prefix)) {
+    return ["the signature is not minisign's text"];
+  }
+  const raw = Buffer.from(sig[1], "base64");
+  const global = Buffer.from(sig[3], "base64");
+  const key = Buffer.from(pub[1] ?? "", "base64");
+  if (key.length !== 42 || key.subarray(0, 2).toString("latin1") !== "Ed") {
+    return ["the public key is not a minisign Ed25519 key"];
+  }
+  const alg = raw.subarray(0, 2).toString("latin1");
+  if (raw.length !== 74 || global.length !== 64 || (alg !== "ED" && alg !== "Ed")) {
+    return ["the signature is not a minisign Ed25519 signature"];
+  }
+  if (!raw.subarray(2, 10).equals(key.subarray(2, 10))) {
+    return ["the signature is by another key than the public key"];
+  }
+  const pk = createPublicKey({
+    key: { kty: "OKP", crv: "Ed25519", x: key.subarray(10).toString("base64url") },
+    format: "jwk",
+  });
+  const problems = [];
+  const message = alg === "ED" ? createHash("blake2b512").update(data).digest() : data;
+  if (!verify(null, message, pk, raw.subarray(10))) {
+    problems.push("the signature does not match the file");
+  }
+  const comment = Buffer.from(sig[2].slice(prefix.length), "utf8");
+  if (!verify(null, Buffer.concat([raw.subarray(10), comment]), pk, global)) {
+    problems.push("the trusted comment is not signed by the key");
+  }
+  return problems;
 }
 
 /** The latest.json keys of tier 1 assets: a manifest without one of them is refused. */
@@ -157,14 +229,14 @@ export function manifestProblems(manifest, version) {
  * problems }: missing names the absent tier 2 assets; problems is empty when the manifest may be
  * written.
  */
-export function buildManifest(dir, version, baseUrl, pubDate) {
+export function buildManifest(dir, version, baseUrl, pubDate, sandboxExe = null) {
   const problems = [];
   const missing = [];
   const platforms = {};
   if (!PLAIN_VERSION.test(version)) {
     problems.push(`version ${version} is not plain X.Y.Z`);
   }
-  for (const asset of assets(version)) {
+  for (const asset of assets(version, sandboxExe)) {
     if (!existsSync(join(dir, asset.name))) {
       if (asset.tier === 1) {
         problems.push(`${asset.name} is missing (tier 1)`);
@@ -173,7 +245,7 @@ export function buildManifest(dir, version, baseUrl, pubDate) {
       }
       continue;
     }
-    if (asset.platforms === undefined) {
+    if (asset.platforms === undefined && !asset.signed) {
       continue;
     }
     const sigPath = join(dir, `${asset.name}.sig`);
@@ -187,7 +259,7 @@ export function buildManifest(dir, version, baseUrl, pubDate) {
       problems.push(...wrong);
       continue;
     }
-    for (const key of asset.platforms) {
+    for (const key of asset.platforms ?? []) {
       platforms[key] = { signature, url: `${baseUrl}/${asset.name}` };
     }
   }
@@ -199,12 +271,23 @@ export function buildManifest(dir, version, baseUrl, pubDate) {
 }
 
 function main(argv) {
-  if (argv.length !== 4) {
-    process.stderr.write("usage: node latest-json.mjs <dir> <version> <base-url> <pub-date>\n");
+  if (argv[0] === "--verify" && argv.length === 3) {
+    const [, file, publicKeyFile] = argv;
+    const problems = signatureCheck(readFileSync(file), readFileSync(`${file}.sig`, "utf8"), readFileSync(publicKeyFile, "utf8"));
+    for (const problem of problems) {
+      process.stderr.write(`${file}.sig: ${problem}\n`);
+    }
+    return problems.length === 0 ? 0 : 1;
+  }
+  if (argv.length !== 5 || !SANDBOX_EXE.test(argv[4])) {
+    process.stderr.write(
+      "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
+        "       node latest-json.mjs --verify <file> <public-key-file>\n",
+    );
     return 2;
   }
-  const [dir, version, baseUrl, pubDate] = argv;
-  const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate);
+  const [dir, version, baseUrl, pubDate, sandboxExe] = argv;
+  const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate, sandboxExe);
   if (problems.length > 0) {
     for (const problem of problems) {
       process.stderr.write(`latest.json: ${problem}\n`);
@@ -218,6 +301,9 @@ function main(argv) {
   return 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// Real paths on both sides: run through a symbolic link, the script still runs (a --verify that
+// silently did nothing would pass).
+const entry = process.argv[1] === undefined ? "" : pathToFileURL(realpathSync(process.argv[1])).href;
+if (pathToFileURL(realpathSync(fileURLToPath(import.meta.url))).href === entry) {
   process.exitCode = main(process.argv.slice(2));
 }

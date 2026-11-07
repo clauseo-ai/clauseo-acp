@@ -16,7 +16,10 @@
 // also uploads (a re-run of that job would download its own earlier upload), and a step that runs
 // sidecars.mjs (third-party build scripts) with a secret in it or in any step before it.
 // release.yml's own test also holds every `tauri build` and `tauri bundle` of the shipped legs
-// to passing the generated sidecar overlay last.
+// to passing the generated sidecar overlay last, and checks the sandbox tool's path: its one name
+// (SANDBOX_EXE), its updater signature before NSIS, its .sig in both installers, assemble's checks
+// of the published exe and .sig against both installers and the updater key, and the build env
+// its build.rs reads.
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -25,7 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { assets, buildManifest, manifestProblems, signedVersion } from "./latest-json.mjs";
+import { assets, buildManifest, manifestProblems, sandboxAsset, signatureCheck, signedVersion } from "./latest-json.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const RELEASE_YML = join(here, "..", "workflows", "release.yml");
@@ -344,6 +347,128 @@ test("release.yml's shipped builds run sidecars.mjs first and pass its overlay l
   );
   assert.notEqual(early, text);
   assert.equal(overlayNotLast(early, "build").length, 1);
+});
+
+/** release.yml's SANDBOX_EXE, the sandbox tool's name in the install folder. */
+function sandboxExe(text) {
+  const match = text.match(/^env:\n(?:  .*\n)*?  SANDBOX_EXE: (\S+)$/m);
+  assert.ok(match, "release.yml's top-level env sets SANDBOX_EXE");
+  return match[1];
+}
+
+test("release.yml names the sandbox tool once, and latest-json.mjs publishes it per architecture, signed", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const exe = sandboxExe(text);
+  assert.match(exe, /^clauseo-sandbox-[a-z]+\.exe$/);
+  const code = text
+    .split("\n")
+    .map(stripComment)
+    .filter((line) => !/^ {2}SANDBOX_EXE: /.test(line))
+    .join("\n");
+  assert.equal(code.match(/clauseo-sandbox-[a-z]+/g), null, "the name is written only in SANDBOX_EXE");
+  const base = exe.replace(/\.exe$/, "");
+  const rows = assets("1.2.3", exe).filter((asset) => asset.signed);
+  assert.deepEqual(rows, [
+    { name: `${base}-x64.exe`, tier: 1, signed: true },
+    { name: `${base}-arm64.exe`, tier: 2, signed: true },
+  ]);
+  assert.equal(sandboxAsset(exe, "x64"), `${base}-x64.exe`);
+  // No two assets (or their .sig) share a name.
+  const names = assets("1.2.3", exe).flatMap((a) => (a.platforms || a.signed ? [a.name, `${a.name}.sig`] : [a.name]));
+  assert.equal(new Set(names).size, names.length);
+  assert.throws(() => sandboxAsset("Setup.EXE", "x64"));
+
+  const dir = release("1.2.3");
+  try {
+    const sig = fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.3");
+    writeFileSync(join(dir, `${base}-x64.exe`), "exe");
+    // The x64 exe is tier 1 and needs its .sig; arm64 is tier 2.
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe.sig is missing`]);
+    writeFileSync(join(dir, `${base}-x64.exe.sig`), fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.2"));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [
+      `${base}-x64.exe.sig: the signature is for version 1.2.2, not 1.2.3`,
+    ]);
+    writeFileSync(join(dir, `${base}-x64.exe.sig`), sig);
+    const { manifest, missing, problems } = buildManifest(dir, "1.2.3", BASE, DATE, exe);
+    assert.deepEqual(problems, []);
+    assert.deepEqual(missing, [`${base}-arm64.exe`]);
+    // The updater never sees it.
+    assert.deepEqual(manifest, buildManifest(dir, "1.2.3", BASE, DATE).manifest);
+    rmSync(join(dir, `${base}-x64.exe`));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe is missing (tier 1)`]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A real pair from `tauri signer generate` and `tauri signer sign --app-version 1.2.3` (CLI 2.12.2)
+// over REAL_DATA; the private key was thrown away.
+const REAL_DATA = "clauseo fixture bytes\n";
+const REAL_PUB =
+  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENGN0M3MjJFQUY3M0ZDOTEKUldTUi9IT3ZMbko4ejhKUlRyNHdzZGovQm14azliMDRJVUJ6cGRlNURyK2dhZ21uZi9kVFdsSHYK";
+const REAL_SIG =
+  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTUi9IT3ZMbko4ejk0bWlyMitUY1NFUHgwOE1pN044cjRWcVVXVGdVYktCbVZoTVZYSi9zWGZQUE1RdnF6ZU1NaGZ1c0tGRVVlL0hjVW9MVkk5N21wSTI4NDkzbXVIWWdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDQ2Nzc2CWZpbGU6ZGF0YS5leGUJdmVyc2lvbjoxLjIuMwpEZ29GYXJMbkMvYzJEWllPR3BUei9tUVl3cWx3S085OUlCY2Nlak92YkJWYmN6UmdUbmxXVmpBUkhTcFZGdlluSGZhRXJzZUY0V2NWbm9yQ0tza0REQT09Cg==";
+const b64 = (text) => Buffer.from(text).toString("base64");
+const reSig = (sig, edit) => b64(edit(Buffer.from(sig, "base64").toString("utf8").split("\n")).join("\n"));
+
+test("signatureCheck holds for tauri signer's signature and fails each way it can be wrong", () => {
+  const data = Buffer.from(REAL_DATA);
+  assert.deepEqual(signatureCheck(data, REAL_SIG, REAL_PUB), []);
+  assert.equal(signedVersion(REAL_SIG), "1.2.3");
+  assert.deepEqual(signatureCheck(Buffer.from("clauseo fixture bytez\n"), REAL_SIG, REAL_PUB), [
+    "the signature does not match the file",
+  ]);
+  const forged = reSig(REAL_SIG, (l) => [l[0], l[1], l[2].replace("version:1.2.3", "version:9.9.9"), l[3]]);
+  assert.deepEqual(signatureCheck(data, forged, REAL_PUB), ["the trusted comment is not signed by the key"]);
+  // Another key with the same key id, and another key id.
+  const pub = Buffer.from(REAL_PUB, "base64").toString("utf8").split("\n");
+  const key = Buffer.from(pub[1], "base64");
+  const otherKey = Buffer.concat([key.subarray(0, 10), Buffer.alloc(32, 7)]);
+  assert.notDeepEqual(signatureCheck(data, REAL_SIG, b64(`${pub[0]}\n${otherKey.toString("base64")}\n`)), []);
+  const otherId = Buffer.concat([key.subarray(0, 2), Buffer.alloc(8, 1), key.subarray(10)]);
+  assert.deepEqual(signatureCheck(data, REAL_SIG, b64(`${pub[0]}\n${otherId.toString("base64")}\n`)), [
+    "the signature is by another key than the public key",
+  ]);
+  assert.deepEqual(signatureCheck(data, REAL_SIG, ""), ["the public key is not a minisign Ed25519 key"]);
+  assert.deepEqual(signatureCheck(data, fakeSig("x"), REAL_PUB), ["the signature is by another key than the public key"]);
+  assert.deepEqual(signatureCheck(data, b64("nothing"), REAL_PUB), ["the signature is not minisign's text"]);
+});
+
+test("release.yml signs the sandbox tool, ships its .sig in both installers and checks both in assemble", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const at = (commands, line) => {
+    const index = commands.indexOf(line);
+    assert.notEqual(index, -1, line);
+    return index;
+  };
+  const sign = jobCommands(text, "sign-windows");
+  const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$GITHUB_WORKSPACE/$exe"');
+  const bundled = sign.findIndex((line) => /\btauri bundle\b/.test(line));
+  assert.ok(signed < bundled, "the sandbox tool is signed before NSIS takes it");
+  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
+  at(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"');
+  const assemble = jobCommands(text, "assemble");
+  const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$signed" "$pub" ||');
+  const listed = at(assemble, 'grep -qxF "$inner" <<< "$listing" ||');
+  const same = at(assemble, '7z e -so -spd "$installer" "$inner" | cmp - "$published" ||');
+  const notes = at(assemble, 'echo "## Inside the Windows installers"');
+  at(assemble, "printf '%s\\n' \"${inside[@]}\"");
+  assert.ok(verified < listed && listed < same && same < notes);
+  assert.ok(assemble.some((line) => line.includes('"$SANDBOX_EXE" > missing.txt')), "latest-json.mjs gets SANDBOX_EXE");
+  // apt-get in assemble only.
+  for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
+    assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
+  }
+});
+
+test("release.yml's build tells the sandbox's build.rs the mode and, for release and test, the updater key", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const build = jobCommands(text, "build");
+  assert.ok(build.includes("CLAUSEO_RELEASE_MODE: ${{ needs.check.outputs.mode }}"), "CLAUSEO_RELEASE_MODE in build's env");
+  const written = build.indexOf('echo "CLAUSEO_UPDATER_PUBKEY=$key" >> "$GITHUB_ENV"');
+  const sidecars = build.findIndex((line) => line.startsWith("node .github/scripts/sidecars.mjs"));
+  assert.ok(written !== -1 && written < sidecars, "CLAUSEO_UPDATER_PUBKEY is set before sidecars.mjs builds the sandbox tool");
+  assert.ok(build.includes("release) key=$(jq -r .plugins.updater.pubkey crates/desktop/tauri.conf.json) ;;"));
 });
 
 test("the workflow lint fails each broken rule", () => {
