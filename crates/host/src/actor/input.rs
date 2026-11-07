@@ -243,6 +243,10 @@ pub(crate) enum Input {
     Scan(super::scan::ScanInput),
     /// The Scratch matter's folder scan answered, or start-up's wait for it ended.
     Scratch(super::scratch::ScratchInput),
+    /// A new matter folder's probe answered (`matters/probe.rs`).
+    NewFolder(Box<super::matters::probe::Probed>),
+    /// A `LocateFile`'s folder probe answered (`locate.rs`).
+    Located(Box<super::locate::Located>),
     /// Where the Chrome for Testing download stands, from its thread.
     BrowserInstall(clauseo_protocol::BrowserInstallState),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
@@ -279,6 +283,8 @@ impl std::fmt::Debug for Input {
             Self::FolderStates(_) => "FolderStates",
             Self::Scan(_) => "Scan",
             Self::Scratch(_) => "Scratch",
+            Self::NewFolder(_) => "NewFolder",
+            Self::Located(_) => "Located",
             Self::BrowserInstall(_) => "BrowserInstall",
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",

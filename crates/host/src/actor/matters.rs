@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_matters::{DEFAULT_MARKER, NewMatter, Refusal};
 use clauseo_protocol::{
-    ClientName, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind, MatterSource,
-    Title,
+    ClientName, CommandId, CommandOutcome, Date, ErrorCode, HostError, MatterId, MatterKind,
+    MatterSource, Title,
 };
 
 use super::commands::{AfterCommand, CommandCtx};
@@ -33,6 +33,7 @@ use crate::pipeline::Failure;
 
 mod made;
 pub(super) mod picked;
+pub(super) mod probe;
 
 pub(crate) use made::Made;
 use made::matter_commit;
@@ -179,11 +180,13 @@ pub(super) fn begin_matter(
 
 /// `CreateMatter`: a new folder `<parent>/<name>` or `<default location>/<name>` (refused
 /// when it exists) or an import of an existing folder, on the new matter's worker; then one
-/// commit. A folder that is, holds or sits inside another matter's folder (listed, forgotten or
-/// being made; `registry`) is refused with `matter.folder_is_matter`, naming the matter when it
-/// is listed: for an import on its worker, after the place check, so a drive root or the home
-/// folder is named for what it is even when a matter sits below it; for a new folder here,
-/// since only its parent exists.
+/// commit. A new folder's parent is canonicalised and the folder looked for off the actor
+/// (`probe.rs`), as either may hang on a network share; the create goes on when that answers
+/// (`begin_create`). A folder that is, holds or sits inside another matter's folder (listed,
+/// forgotten or being made; `registry`) is refused with `matter.folder_is_matter`, naming the
+/// matter when it is listed: for an import on its worker, after the place check, so a drive root
+/// or the home folder is named for what it is even when a matter sits below it; for a new folder
+/// on the actor once its probe answers, since only its parent exists.
 pub(super) fn create_matter(
     actor: &mut Actor,
     ctx: &CommandCtx,
@@ -191,65 +194,67 @@ pub(super) fn create_matter(
     source: MatterSource,
     details: Details,
 ) {
-    let begun = matter_folder(actor, name, &source)
-        .and_then(|(folder, import)| {
-            let registry = claimed_folders(actor);
-            if import {
-                Ok((folder, Some(registry)))
-            } else {
-                check_registry(&folder, &registry, false).map(|()| (folder, None))
-            }
-        })
-        .and_then(|(folder, import)| {
-            begin_matter(
-                actor,
-                (name.as_str().to_owned(), MatterKind::Folder, details),
-                folder,
-                import,
-                MatterTag::Create(ctx.id),
-            )
-        });
-    match begun {
-        Ok(pending) => {
-            let claim = (pending.new.id, pending.new.folder.clone());
-            actor.claims.insert(ctx.id, claim);
-            if let Some(command) = actor.commands.get_mut(&ctx.id) {
-                command.matter = Some(pending);
-            }
-        }
-        Err(error) => {
-            made::not_created(None, &error, "check");
-            actor.finish_command(ctx.id, Err(error));
-        }
+    let name = name.as_str().to_owned();
+    match matter_folder(actor, &source) {
+        Ok((folder, true)) => begin_create(actor, ctx.id, (name, details), folder, true),
+        Ok((parent, false)) => probe::start(actor, ctx.id, (name, details), parent),
+        Err(error) => not_begun(actor, ctx.id, error),
     }
 }
 
-/// The folder a `CreateMatter` names, and whether it is an import.
-fn matter_folder(
-    actor: &Actor,
-    name: &Title,
-    source: &MatterSource,
-) -> Result<(PathBuf, bool), Error> {
-    let (parent, import) = match source {
-        MatterSource::NewFolder { folder } => (registered(actor, *folder)?, false),
-        MatterSource::ExistingFolder { folder } => (registered(actor, *folder)?, true),
-        MatterSource::DefaultLocation => (default_location(actor)?, false),
+/// Starts a `CreateMatter`'s create or import of `folder` on its new worker, checked first
+/// against the folders claimed now (for a new folder; an import's worker checks them), and
+/// reserves the folder in `actor.claims` and the command's `matter` until the command ends.
+/// Both are set here on the actor, so of two creates of one folder the second always finds the
+/// first's claim.
+pub(super) fn begin_create(
+    actor: &mut Actor,
+    id: CommandId,
+    (name, details): (String, Details),
+    folder: PathBuf,
+    import: bool,
+) {
+    let registry = claimed_folders(actor);
+    let registry = if import {
+        Ok(Some(registry))
+    } else {
+        check_registry(&folder, &registry, false).map(|()| None)
     };
-    if import {
-        return Ok((parent, true));
+    let begun = registry.and_then(|import| {
+        begin_matter(
+            actor,
+            (name, MatterKind::Folder, details),
+            folder,
+            import,
+            MatterTag::Create(id),
+        )
+    });
+    match begun {
+        Ok(pending) => {
+            let claim = (pending.new.id, pending.new.folder.clone());
+            actor.claims.insert(id, claim);
+            if let Some(command) = actor.commands.get_mut(&id) {
+                command.matter = Some(pending);
+            }
+        }
+        Err(error) => not_begun(actor, id, error),
     }
-    // The parent as the file system names it, so the registry check compares it with
-    // canonical folders; the new folder itself does not exist yet. A parent that does not
-    // exist (the default location before its first matter) is taken as written.
-    let parent = dunce::canonicalize(&parent).unwrap_or(parent);
-    let path = parent.join(name.as_str());
-    if path.exists() {
-        return Err(Error::refused(
-            ErrorCode::CommandInvalid,
-            format!("{} already exists; import it instead", path.display()),
-        ));
+}
+
+/// A `CreateMatter` refused before its matter's worker started.
+pub(super) fn not_begun(actor: &mut Actor, id: CommandId, error: Error) {
+    made::not_created(None, &error, "check");
+    actor.finish_command(id, Err(error));
+}
+
+/// The folder a `CreateMatter` names and whether it is an import: an import's folder, or a new
+/// folder's parent as registered or configured. Nothing here touches the disk.
+fn matter_folder(actor: &Actor, source: &MatterSource) -> Result<(PathBuf, bool), Error> {
+    match source {
+        MatterSource::NewFolder { folder } => Ok((registered(actor, *folder)?, false)),
+        MatterSource::ExistingFolder { folder } => Ok((registered(actor, *folder)?, true)),
+        MatterSource::DefaultLocation => Ok((default_location(actor)?, false)),
     }
-    Ok((path, false))
 }
 
 /// The default matters folder, or `command.invalid` when there is none (no Documents folder,

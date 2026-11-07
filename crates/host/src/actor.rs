@@ -52,6 +52,7 @@ mod relocate;
 mod requests;
 pub(crate) mod scan;
 pub(crate) mod scratch;
+pub(crate) use matters::probe::FolderProbes;
 mod seen;
 mod settings;
 mod shutdown;
@@ -193,6 +194,8 @@ pub(crate) struct Actor {
     pub(crate) scratch_wait: scratch::ScratchWait,
     /// The scan for the Scratch matter's folder: `scratch::free_folder`, or a test's stand-in.
     pub(crate) scratch_scan: scratch::Scan,
+    /// The folder probes run off the actor (`matters/probe.rs`), or a test's stand-ins.
+    pub(crate) folder_probes: FolderProbes,
     /// The workers of matters made on disk whose commit has not returned, and of those being
     /// discarded because it failed (`matters/made.rs`), by matter.
     pub(crate) made: BTreeMap<MatterId, matters::Made>,
@@ -466,6 +469,8 @@ impl Actor {
             Input::FolderStates(states) => query::on_folder_states(self, states),
             Input::Scan(input) => scan::on_input(self, input),
             Input::Scratch(input) => scratch::on_input(self, input),
+            Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
+            Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
@@ -485,6 +490,7 @@ impl Actor {
             || browser_install::busy(self)
             || update::busy(self)
             || scratch::holds(self)
+            || matters::probe::stop_held(self)
         {
             return None;
         }

@@ -126,6 +126,7 @@ pub(super) async fn open(
         scratch: None,
         scratch_wait,
         scratch_scan,
+        folder_probes: parts.folder_probes,
         made: BTreeMap::new(),
         #[cfg(test)]
         fault: None,

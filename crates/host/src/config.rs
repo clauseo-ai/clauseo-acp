@@ -97,6 +97,7 @@ pub struct HostConfig {
     wiring: LaunchWiring,
     scan_walk: crate::actor::scan::Walk,
     scratch: crate::actor::scratch::Seams,
+    folder_probes: crate::actor::FolderProbes,
     counts: Option<Counts>,
     search: SearchSeams,
     update: UpdateSeams,
@@ -132,6 +133,7 @@ impl HostConfig {
             wiring: LaunchWiring::default(),
             scan_walk: crate::actor::scan::os_walk(),
             scratch: crate::actor::scratch::Seams::default(),
+            folder_probes: crate::actor::FolderProbes::default(),
             counts: None,
             search: SearchSeams::default(),
             update: UpdateSeams {
@@ -438,6 +440,14 @@ impl HostConfig {
         self
     }
 
+    /// The folder probes run off the actor (a new matter's folder, a located file's) instead of
+    /// the file system's (`actor/matters/probe.rs`), for tests that hold them.
+    #[cfg(test)]
+    pub(crate) fn with_folder_probes(mut self, probes: crate::actor::FolderProbes) -> Self {
+        self.folder_probes = probes;
+        self
+    }
+
     /// The capacity of the commit channel to the search thread (default 1,024), for tests
     /// that make it lag and catch up from the store.
     #[cfg(feature = "test-support")]
@@ -568,6 +578,7 @@ impl HostConfig {
             wiring: self.wiring,
             scan_walk: self.scan_walk,
             scratch: self.scratch,
+            folder_probes: self.folder_probes,
             counts: self.counts,
             search: self.search,
             update: self.update,

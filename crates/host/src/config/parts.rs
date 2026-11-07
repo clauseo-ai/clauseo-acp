@@ -36,6 +36,7 @@ pub(crate) struct ConfigParts {
     pub(crate) wiring: LaunchWiring,
     pub(crate) scan_walk: crate::actor::scan::Walk,
     pub(crate) scratch: crate::actor::scratch::Seams,
+    pub(crate) folder_probes: crate::actor::FolderProbes,
     /// The usage counts a caller set; `None` counts nothing.
     pub(crate) counts: Option<Counts>,
     /// The search thread's test seams.
