@@ -151,7 +151,7 @@ fn state_always_denied() -> Vec<String> {
 ///   file of every matter against Codex's cap of 8192 matches (`MAX_UNREADABLE_GLOB_MATCHES`,
 ///   bwrap.rs:734-738), past which every sandboxed command fails closed.
 /// - All patterns share one search root, so ripgrep walks `agent-state` once per command
-///   (bwrap.rs groups them by root).
+///   (bwrap.rs groups them by root), no deeper than [`GLOB_SCAN_MAX_DEPTH`].
 pub(crate) const STATE_GLOBS: [&str; 7] = [
     "agent-state/**/codex-acp/auth.json",
     "agent-state/**/codex-acp/.env",
@@ -161,6 +161,18 @@ pub(crate) const STATE_GLOBS: [&str; 7] = [
     "agent-state/**/claude-acp/.credentials.json",
     "agent-state/**/claude-acp/.claude.json",
 ];
+
+/// The profile's `filesystem.glob_scan_max_depth` (round 7, stage C's cross-matter shutdown):
+/// bubblewrap passes it to ripgrep as `--max-depth`, counted from the search root
+/// `agent-state` (codex-rs rust-v0.162.1 `config/src/permissions_toml.rs:228`,
+/// `linux-sandbox/src/bwrap.rs:504-505, 1028`; kept by each turn's rebuild,
+/// `protocol/src/permissions.rs:718`). 4 is the deepest legitimate match,
+/// `<matter>/codex-acp/shell_snapshots/<file>`; the login files are at depth 3. Without it,
+/// `**/` has no depth limit, so one matter's shell could plant 8,193
+/// `notes/x<n>/codex-acp/auth.json` and every other matter's next command would fail closed
+/// past the cap. Within it, a matter can make at most 24 names match, plus its live snapshots
+/// (`rg_tests.rs`). Seatbelt matches globs as regexes, with no cap and no depth.
+pub(crate) const GLOB_SCAN_MAX_DEPTH: usize = 4;
 
 /// The `agent-state` denies of a Codex launch whose state folder is `state` under `data`, read
 /// on the launch-prep thread (round 4's ruling, option B): every other matter's folder that
@@ -349,6 +361,10 @@ pub(crate) fn keys(
         for glob in STATE_GLOBS {
             scoped.insert(glob.to_owned(), Value::from("deny"));
         }
+        filesystem.insert(
+            "glob_scan_max_depth".to_owned(),
+            Value::from(GLOB_SCAN_MAX_DEPTH),
+        );
     }
     filesystem.insert(base.to_owned(), Value::Object(scoped));
     let mut profile = Map::new();

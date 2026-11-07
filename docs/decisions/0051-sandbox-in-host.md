@@ -277,6 +277,24 @@ The orchestrator's conditions, which the later pull requests must meet:
 - Adding a cause needs only its row in `open_data_enum!`, its sample, a `docs/ui-states.md`
   row and its words.
 - Firm IT can set the keys now; nothing acts on them until the host's sandbox reads them.
+- Residual of PR-C's Codex fence: a matter created while another matter's Codex session runs
+  stays readable to that session's shell (its transcripts, logs and notes; its logins are
+  denied) until the session ends. Neither shape closes it:
+  - Deny globs covering every matter's files would count every transcript, log and notes file
+    against Codex's 8192-match cap (`MAX_UNREADABLE_GLOB_MATCHES`). Past that cap, every
+    sandboxed command fails (closed). The globs therefore name login files only.
+  - A deny of `agent-state` whole needs the own `codex-acp/tmp/arg0` to stay readable and never
+    writable. But Codex's per-turn rebuild keeps only the deny entries and the writable roots
+    (`from_legacy_sandbox_policy_preserving_deny_entries`), so a read-only own `tmp/arg0` is
+    dropped. Making it writable reopens round 3's sandbox escape.
+
+  The globs' scan is capped at depth 4 from `agent-state` (`glob_scan_max_depth`, the deepest
+  legitimate match being `<matter>/codex-acp/shell_snapshots/<file>`), so a matter can make at
+  most 24 names match, plus its live shell snapshots, and cannot push the other matters past
+  the cap.
+
+  Follow-up, a must-do: PR-D must move Codex's home (or at least `tmp/arg0`) out of
+  `agent-state`, with a migration for existing installs, so `agent-state` is denied whole.
 
 ## Status
 
