@@ -48,7 +48,7 @@ use super::apply::OWN_KINDS;
 use super::ledger::{Ledger, ReclaimOwed, Stuck, clear_taken, owe_taken};
 use super::matters::Rows;
 use super::sids::Sid;
-use super::writer::{AclWriter, ApplyFailure, DenyStrip, FileId};
+use super::writer::{AclWriter, ApplyFailure, DenyStrip, FileId, TakenIndex};
 
 pub mod walk;
 
@@ -247,6 +247,17 @@ pub struct TakenItem {
     pub file: FileId,
 }
 
+/// What the exe reports of what one target's walk took (`drained`, final path and file ID each,
+/// as `NtfsOwners` kept them): each item under `matter`, the target's, less one whose path isn't
+/// text, which the list can't carry (it keeps the strip of other pool users' allows alone).
+pub fn taken_items(matter: MatterId, drained: Vec<(PathBuf, FileId)>) -> Vec<TakenItem> {
+    drained
+        .into_iter()
+        .filter(|(path, _)| path.to_str().is_some())
+        .map(|(path, file)| TakenItem { matter, path, file })
+        .collect()
+}
+
 /// The lawyer's whole hand-back after `--reclaim`: the items it reported taken (`taken`)
 /// recorded in the ledger as [`Stuck::Taken`] (so one a refused hand-back leaves is tried again
 /// by the next), the targets read again from the ledger and `matters`, each handed back
@@ -280,14 +291,12 @@ pub fn hand_back_after(
         .iter()
         .filter_map(|o| o.file.map(|file| (o.path.clone(), file)))
         .collect();
-    for (_, path, file) in reported {
-        if !listed.iter().any(|(p, f)| *p == path && *f == file) {
-            listed.push((path, file));
-        }
-    }
+    // The index counts an item listed twice once.
+    listed.extend(reported.into_iter().map(|(_, path, file)| (path, file)));
     let found = targets(ledger, matters);
+    let index = TakenIndex::new(listed);
     let denies = DenyStrip {
-        taken: &listed,
+        taken: &index,
         kept,
     };
     let handed = hand_back_targets(acl, &found, pool, &denies);

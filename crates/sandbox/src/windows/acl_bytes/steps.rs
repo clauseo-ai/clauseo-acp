@@ -236,8 +236,10 @@ pub(crate) enum TakenWrite {
 /// denies of `mine` come off first ([`stripped`]); then, when that leaves it [`bare`], or
 /// unprotected with an inherited entry still of those, the inherited entries are worked out by
 /// `inherit` from the stripped item's explicit entries alone. So the inherited grants are worked
-/// out only once the pool users' allows are gone, and the item never holds both. `None` when
-/// there is nothing to change.
+/// out only once the pool users' allows are gone, and the item never holds both. An inherited
+/// deny counts as stale for the SIDs of `stale` (`mine`'s on a taken item, and on what lies below
+/// a taken folder, whose explicit denies all stay: `mine` is empty there). `None` when there is
+/// nothing to change.
 #[cfg_attr(
     not(any(windows, test)),
     expect(dead_code, reason = "the hand-back after --reclaim is Windows only")
@@ -247,6 +249,7 @@ pub(crate) fn taken_write(
     others: &[Vec<u8>],
     me: &[u8],
     mine: &[Vec<u8>],
+    stale: &[Vec<u8>],
     inherit: &mut dyn FnMut(&[u8]) -> io::Result<Vec<u8>>,
 ) -> io::Result<Option<TakenWrite>> {
     if me.is_empty() || owner_bytes(current) != Some(me) {
@@ -263,7 +266,7 @@ pub(crate) fn taken_write(
         && dacl
             .aces()
             .iter()
-            .any(|ace| flags(ace) & INHERITED != 0 && offending(ace, others, mine));
+            .any(|ace| flags(ace) & INHERITED != 0 && offending(ace, others, stale));
     if !bare(after)? && !stale {
         return Ok(stripped_now.map(TakenWrite::Stripped));
     }

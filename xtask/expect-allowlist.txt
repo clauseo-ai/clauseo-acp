@@ -468,3 +468,4 @@ crates/sandbox/tests/setup_exe.rs off_windows_the_exe_exits_usage_with_one_line 
 # S15 PR4j: `SetupExit::Removed`, the exit 0 the uninstall hook reads, as an alias of `Done`
 # named like the variants beside it, so no exit code is used twice.
 crates/sandbox/src/windows/setup/outcome.rs SetupExit::Removed non_upper_case_globals
+crates/sandbox/src/windows/reclaim/taken_tests.rs timed clippy::disallowed_methods

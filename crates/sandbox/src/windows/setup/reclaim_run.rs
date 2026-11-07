@@ -42,7 +42,9 @@ use crate::windows::acl::take::NtfsOwners;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::MachineRecord;
-use crate::windows::reclaim::{Reclaimed, Scope, TakenItem, matter_roots, take_ownership, targets};
+use crate::windows::reclaim::{
+    Reclaimed, Scope, TakenItem, matter_roots, take_ownership, taken_items, targets,
+};
 use crate::windows::sids::{Reserved, Sid};
 
 /// The result file's step for the clean-up.
@@ -191,15 +193,8 @@ fn reclaim(
             target.whole,
             &scope,
         ));
-        let items = tree.drain_taken().into_iter();
-        taken.extend(items.map(|(path, file)| TakenItem {
-            matter: target.matter,
-            path,
-            file,
-        }));
+        taken.extend(taken_items(target.matter, tree.drain_taken()));
     }
-    // A path that isn't text can't be reported: its item keeps the strip of allows alone.
-    taken.retain(|item| item.path.to_str().is_some());
     Ok((done, taken))
 }
 

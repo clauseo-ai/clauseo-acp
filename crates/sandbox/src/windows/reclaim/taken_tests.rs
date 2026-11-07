@@ -12,6 +12,17 @@ use crate::windows::ledger::ledger_path;
 use crate::windows::setup::taken_file;
 use crate::windows::test_world::{USER_SID, matter_one, reserved, trusted};
 
+/// `run`'s answer, and how long it took on the wall clock.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test checks a bound on wall-clock time"
+)]
+fn timed<T>(run: impl FnOnce() -> T) -> (T, std::time::Duration) {
+    let started = std::time::Instant::now();
+    let answer = run();
+    (answer, started.elapsed())
+}
+
 fn item(name: &str, id: u8) -> TakenItem {
     TakenItem {
         matter: matter_one(),
@@ -135,4 +146,71 @@ fn nothing_taken_gives_the_strip_no_item() {
     assert_eq!(acl.strips.len(), 3, "m1, n1 and s1");
     assert!(acl.denies.iter().all(|(taken, _)| taken.is_empty()));
     assert_eq!(acl.other, 0);
+}
+
+/// The exe's side: what one target's walk took goes into the list under that target's matter,
+/// in the walk's order; a path that isn't text is left out, as the list can't carry it.
+#[test]
+fn the_exe_lists_what_a_targets_walk_took_under_its_matter() {
+    let (a, b) = (item("m1/a.txt", 3), item("m1/b.txt", 4));
+    let drained = vec![(a.path.clone(), a.file), (b.path.clone(), b.file)];
+    #[cfg(unix)]
+    let drained = {
+        use std::os::unix::ffi::OsStrExt as _;
+        let odd = std::ffi::OsStr::from_bytes(b"/tmp/\xff.txt");
+        let mut with_odd = drained;
+        with_odd.push((PathBuf::from(odd), a.file));
+        with_odd
+    };
+
+    let listed = taken_items(matter_one(), drained);
+
+    assert_eq!(listed, [a, b]);
+}
+
+/// A list that can't be read adds nothing: corrupt, or larger than the cap. The hand-back then
+/// strips denies on what the ledger already lists, and nothing more.
+#[test]
+fn a_corrupt_or_oversized_list_adds_nothing() {
+    let temp = TempDir::new("reclaim-taken-bad");
+    let corrupt = temp.file("sandbox/reclaim-taken.json", "{ not json");
+    assert_eq!(corrupt, taken_file::path(temp.path()));
+    assert!(taken_file::read(temp.path()).is_err(), "corrupt");
+    taken_file::remove(temp.path()).unwrap();
+    let big = "x".repeat(16 * 1024 * 1024 + 1);
+    temp.file("sandbox/reclaim-taken.json", &big);
+    assert!(taken_file::read(temp.path()).is_err(), "over the cap");
+}
+
+/// Many items, each looked up as the strip looks them up: ten thousand recorded, indexed and
+/// each found, and cleared, in well under a second.
+#[test]
+fn ten_thousand_taken_items_are_recorded_indexed_and_cleared_quickly() {
+    let temp = TempDir::new("reclaim-taken-many");
+    let mut ledger = ledger_with(&temp, &json!({}));
+    let many: Vec<(MatterId, PathBuf, FileId)> = (0..10_000_u32)
+        .map(|n| {
+            let mut id = [0; 16];
+            id[..4].copy_from_slice(&n.to_le_bytes());
+            let path = abs(&format!("m1/many/{n}.txt"));
+            (matter_one(), path, FileId { volume: 7, id })
+        })
+        .collect();
+
+    let ((found, owed), took) = timed(|| {
+        owe_taken(&mut ledger, &many).unwrap();
+        let index = TakenIndex::new(many.iter().map(|(_, p, f)| (p.clone(), *f)));
+        let found = many
+            .iter()
+            .filter(|(_, p, f)| index.ids(p).contains(f))
+            .count();
+        let owed: Vec<ReclaimOwed> = ledger.reclaims_owed();
+        clear_taken(&mut ledger, &owed).unwrap();
+        (found, owed)
+    });
+
+    assert_eq!(found, 10_000);
+    assert_eq!(owed.len(), 10_000);
+    assert_eq!(taken_owed(&ledger), []);
+    assert!(took < std::time::Duration::from_secs(1), "{took:?}");
 }

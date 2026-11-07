@@ -121,7 +121,7 @@ impl UserSetup {
             .map_err(|e| failed(format!("the permission ledger: {e}")))?;
         let taken = taken_file::read(&self.data_dir).unwrap_or_else(|_why| {
             // Its words may name a path: kept out of the log.
-            tracing::warn!("the clean-up's list of items taken can't be read");
+            tracing::warn!("reclaim-taken.json can't be read; only the ledger's items lose denies");
             Vec::new()
         });
         let matters = MatterSids::load(&self.data_dir)?;

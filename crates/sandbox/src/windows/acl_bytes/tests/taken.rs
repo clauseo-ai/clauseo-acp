@@ -139,7 +139,7 @@ fn a_bare_item_inherits_from_its_stripped_self_in_one_write() {
         Ok(with_control(HB_ME, &[&fenced, &given], DACL_AUTO_INHERITED))
     };
 
-    let write = taken_write(&shut, &others(), &me(), &mine(), &mut fake).unwrap();
+    let write = taken_write(&shut, &others(), &me(), &mine(), &mine(), &mut fake).unwrap();
 
     assert_eq!(seen.len(), 1, "worked out once");
     let base = Descriptor::parse(&seen[0]).unwrap();
@@ -170,7 +170,7 @@ fn a_stripped_item_with_another_entry_left_inherits_nothing() {
         Ok(Vec::new())
     };
     let shared = with_control(HB_ME, &[&other, &colleague], DACL_PROTECTED);
-    let write = taken_write(&shared, &others(), &me(), &mine(), &mut fake).unwrap();
+    let write = taken_write(&shared, &others(), &me(), &mine(), &mine(), &mut fake).unwrap();
     let Some(TakenWrite::Stripped(new)) = write else {
         panic!("expected a strip, got {write:?}");
     };
@@ -180,7 +180,7 @@ fn a_stripped_item_with_another_entry_left_inherits_nothing() {
 
     let clean = with_control(HB_ME, &[&colleague], DACL_PROTECTED);
     assert_eq!(
-        taken_write(&clean, &others(), &me(), &mine(), &mut fake).unwrap(),
+        taken_write(&clean, &others(), &me(), &mine(), &mine(), &mut fake).unwrap(),
         None
     );
     assert_eq!(calls, 0);
@@ -206,9 +206,9 @@ fn an_item_left_with_an_inherited_copy_of_the_agents_allow_inherits_again() {
         ))
     };
 
-    let write = taken_write(&below, &others(), &me(), &mine(), &mut fake).unwrap();
+    let write = taken_write(&below, &others(), &me(), &mine(), &mine(), &mut fake).unwrap();
     let fresh = with_control(HB_ME, &[&lawyers, &given], DACL_AUTO_INHERITED);
-    let again = taken_write(&fresh, &others(), &me(), &mine(), &mut fake).unwrap();
+    let again = taken_write(&fresh, &others(), &me(), &mine(), &mine(), &mut fake).unwrap();
 
     assert_eq!(again, None, "nothing stale: no write");
     assert_eq!(seen.len(), 1, "worked out once, for the stale item only");
@@ -286,7 +286,7 @@ fn an_inherited_copy_of_the_agents_deny_of_the_lawyer_inherits_again() {
         ))
     };
 
-    let write = taken_write(&below, &others(), &me(), &mine(), &mut fake).unwrap();
+    let write = taken_write(&below, &others(), &me(), &mine(), &mine(), &mut fake).unwrap();
 
     let Some(TakenWrite::Inheriting(new)) = write else {
         panic!("expected one inheriting write, got {write:?}");
@@ -377,4 +377,42 @@ fn the_exe_takes_off_only_owner_rights_entries_and_leaves_every_other_byte() {
     }
     let clean = with_control(HB_OTHER, &[&everyone, &pool], DACL_PROTECTED);
     assert_eq!(without_owner_rights(&clean).unwrap(), None);
+}
+
+/// Below a taken folder, a file the lawyer always owned keeps its explicit denies (nothing of it
+/// was taken) but loses an inherited copy of the agent's deny of the lawyer that its folder no
+/// longer gives: it inherits again, from its explicit entries alone.
+#[test]
+fn below_a_taken_folder_only_stale_inherited_copies_go() {
+    let copy = ace(DENIED, INHERITED, WO, HB_ME);
+    let own_deny = ace(DENIED, 0, 0x0001_0000, "S-1-1-0");
+    let lawyers = spec(HB_ME, Rights::Modify).bytes();
+    let below = with_control(HB_ME, &[&own_deny, &copy, &lawyers], DACL_AUTO_INHERITED);
+    let given = inherited(HB_OWN, Rights::Modify);
+    let mut fake = |base: &[u8]| {
+        let explicit = Descriptor::parse(base).unwrap().dacl.map(<[u8]>::to_vec);
+        assert_eq!(explicit, Some(render(2, &[&own_deny, &lawyers])));
+        Ok(with_control(
+            HB_ME,
+            &[&own_deny, &lawyers, &given],
+            DACL_AUTO_INHERITED,
+        ))
+    };
+
+    let write = taken_write(&below, &others(), &me(), &[], &mine(), &mut fake).unwrap();
+
+    let Some(TakenWrite::Inheriting(new)) = write else {
+        panic!("expected one inheriting write, got {write:?}");
+    };
+    let want: [&[u8]; 3] = [&own_deny, &lawyers, &given];
+    assert_eq!(
+        Descriptor::parse(&new).unwrap().dacl,
+        Some(render(2, &want).as_slice())
+    );
+    let fresh = with_control(HB_ME, &[&own_deny, &lawyers], DACL_AUTO_INHERITED);
+    assert_eq!(
+        taken_write(&fresh, &others(), &me(), &[], &mine(), &mut fake).unwrap(),
+        None,
+        "its own deny stays: no write"
+    );
 }

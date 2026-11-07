@@ -82,6 +82,12 @@ pub(crate) fn set_mode(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+/// Moves the file at `from` to `to`.
+#[cfg(windows)]
+pub(crate) fn rename(from: &Path, to: &Path) {
+    std::fs::rename(from, to).unwrap();
+}
+
 /// Removes the file at `path`.
 pub(crate) fn remove(path: &Path) {
     std::fs::remove_file(path).unwrap();

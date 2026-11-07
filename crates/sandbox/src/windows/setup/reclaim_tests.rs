@@ -16,6 +16,7 @@ use super::accounts::{self, Kind};
 use super::lock_tests::suffix;
 use super::owner::Owner;
 use super::password;
+use super::taken_file;
 use crate::test_support::TempDir;
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
 use crate::windows::acl::take::NtfsOwners;
@@ -110,7 +111,7 @@ fn elevated_the_walk_takes_a_pool_users_shut_file_and_the_hand_back_cleans_it() 
     let others = [other.clone()];
     let handed = NtfsAcl::new()
         .unwrap()
-        .strip_taken(&matter, &others, &[], true, &DenyStrip::default())
+        .strip_taken(&matter, &others, &[], true, &DenyStrip::none())
         .unwrap();
 
     assert_eq!(handed.repaired, 2, "{handed:?}");
@@ -234,5 +235,38 @@ fn elevated_an_owner_rights_lock_out_is_lifted_by_reclaim_and_the_hand_back() {
         taken_left.filter(|o| o.why == Stuck::Taken).count(),
         0,
         "record cleared"
+    );
+}
+
+/// A list of items taken that another account owns, shutting the lawyer out, isn't read: the
+/// read is refused, so the hand-back adds nothing from it.
+#[test]
+#[ignore = "elevated: makes a local account; CI's elevated step runs it"]
+fn elevated_a_list_another_account_owns_is_refused() {
+    if !elevated_tests_enabled() {
+        return;
+    }
+    sweep();
+    let _sweep = Sweep;
+    let name = format!("{FAMILY}{}", suffix());
+    let other: Sid = accounts::create_user(&name, &password::generate().unwrap()).unwrap();
+    let dir = TempDir::new("reclaim-elevated-list");
+    let item = TakenItem {
+        matter: matter_one(),
+        path: dir.path().join("matter/doc.txt"),
+        file: crate::windows::writer::FileId {
+            volume: 1,
+            id: [1; 16],
+        },
+    };
+    taken_file::write(dir.path(), std::slice::from_ref(&item)).unwrap();
+    let list = taken_file::path(dir.path());
+    give_owner(&list, &other).unwrap();
+    protect_with(&list, &format!("D:P(A;;FA;;;{other})")).unwrap();
+    drop_privileges();
+
+    assert!(
+        taken_file::read(dir.path()).is_err(),
+        "another account's list is refused"
     );
 }
