@@ -34,7 +34,8 @@
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
 //!    group, D-B11), its profile, its account with its sign-in screen value;
-//!    Then, only once every pool account is gone, the network filters, the owner's read grant
+//!    Then, only once every pool account is gone and a second sweep has stopped any process
+//!    still running as a pool SID, the network filters, the owner's read grant
 //!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
 //!    process that won't stop, which must not run unfiltered while a user's removal fails. A
 //!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
@@ -333,6 +334,11 @@ fn steps(
     for (at, sid) in record.pool.iter().enumerate() {
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
+    // Anything still running as a pool SID (one that started since the first sweep, or one the
+    // first couldn't stop) is stopped again, elevated, before the network goes.
+    machine
+        .stop_strays(&record.pool, &record.owner)
+        .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
     report.firewall = machine
         .remove_network(&record.owner)
         .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
