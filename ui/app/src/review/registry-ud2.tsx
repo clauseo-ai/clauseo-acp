@@ -339,7 +339,7 @@ export const UD2: Entry[] = [
   entry("UD2-23", expiredWords("Sign in again"), "limits/signin", EXPIRED),
   entry(
     "UD2-24",
-    expiredWords("Finish signing in in your browser. Your question is asked once you're back."),
+    expiredWords("Finish signing in with your browser. Your question is asked once you're back."),
     "limits/signin-waiting",
     expired({ waiting: { since: 2500, nudge: true } }),
   ),

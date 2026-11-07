@@ -220,14 +220,14 @@
     "by": "design"
   },
   "UD2-24": {
-    "en": "Finish signing in in your browser. Your question is asked once you're back.",
+    "en": "Finish signing in with your browser. Your question is asked once you're back.",
     "hi": "अपने ब्राउज़र में साइन इन पूरा करें। आपके लौटते ही आपका प्रश्न पूछा जाएगा।",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-06",
-    "by": "design"
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)"
   },
   "UD2-25": {
     "en": "Signed in again at {time} as {email}, {plan}.",

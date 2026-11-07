@@ -161,7 +161,7 @@ export function ExpiredCard({
             e.kind === "waiting"
               ? sx(
                   lang,
-                  "Finish signing in in your browser. Your question is asked once you're back.",
+                  "Finish signing in with your browser. Your question is asked once you're back.",
                 )
               : kept
           }

@@ -138,7 +138,7 @@ test("waiting in the browser: the line, then UD1's panel; Cancel sends cancel_si
   const t = await mount({ signIn: { waiting: { since: AT, nudge: true } } });
   expect(card()?.dataset["state"]).toBe("waiting");
   expect(words()).toContain(
-    "Finish signing in in your browser. Your question is asked once you're back.",
+    "Finish signing in with your browser. Your question is asked once you're back.",
   );
   expect(words()).toContain("Didn't open?");
   await press(byId("signin-cancel"));

@@ -10,7 +10,7 @@ export const HI = {
     "दोबारा साइन इन करने पर आपके ब्राउज़र में {name} का अपना साइन इन खुलता है। केवल साइन इन दोहराया जाता है। यह मामला, इसके दस्तावेज़ और आपकी सेटिंग्स जैसे हैं वैसे रहते हैं।",
   "Sign in again": "दोबारा साइन इन करें",
   // UD2-24: waiting in the browser
-  "Finish signing in in your browser. Your question is asked once you're back.":
+  "Finish signing in with your browser. Your question is asked once you're back.":
     "अपने ब्राउज़र में साइन इन पूरा करें। आपके लौटते ही आपका प्रश्न पूछा जाएगा।",
   // UD2-25 to UD2-27: signed in again
   "Signed in again at {time} as {email}, {plan}.":

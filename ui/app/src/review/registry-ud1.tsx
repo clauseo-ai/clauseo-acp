@@ -278,7 +278,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Sign in with an Anthropic Console account", KEY, "plan-key"],
   // signing in, in the browser
   [
-    "Finish signing in in your browser",
+    "Finish signing in with your browser.",
     { events: [READY, signIn(CLAUDE, { waiting: { since: AT, nudge: false } })] },
     "signin-wait",
   ],
