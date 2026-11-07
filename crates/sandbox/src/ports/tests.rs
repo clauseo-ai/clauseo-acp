@@ -218,16 +218,24 @@ fn a_browser_claim_never_lands_in_the_tier_b_range() {
     // A bind that lands in the range, or on a claimed port, is asked again.
     let claim = claim_port().unwrap();
     let held = Held::lock();
-    let in_range = TIER_B_PORTS
-        .clone()
-        .find(|port| !held.contains(*port))
-        .unwrap();
+    // A listener already bound on a free port in the range, so another process (nextest runs
+    // the crate's tests in several) can't take that port between choosing and binding it.
+    let mut in_range = Some(
+        TIER_B_PORTS
+            .clone()
+            .filter(|port| !held.contains(*port))
+            .find_map(|port| imp::bind_port(port).ok())
+            .unwrap(),
+    );
     // The claim binds nothing, so the test can put a listener on its port.
-    let mut offered = vec![in_range, claim.port()].into_iter();
+    let mut claimed = Some(claim.port());
     let mut asked = 0;
     let got = outside_tier_b(&held, || {
         asked += 1;
-        imp::bind_port(offered.next().unwrap_or(0))
+        match in_range.take() {
+            Some(listener) => Ok(listener),
+            None => imp::bind_port(claimed.take().unwrap_or(0)),
+        }
     })
     .unwrap();
     assert_eq!(asked, 3);
