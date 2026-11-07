@@ -375,6 +375,7 @@ pub(crate) async fn chooser_shown(
 ) -> Result<(), HostError> {
     if CHOOSER_SHOWN_LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < CHOOSER_SHOWN_CAP {
         tracing::info!(
+            target: crate::chooser::trace::TARGET,
             at_ms = crate::chooser::trace::at_ms(),
             answer_ms,
             render_ms,
