@@ -34,9 +34,9 @@ form: external tagging, snake case, unknown fields and unknown commands refused.
 
 | command | what desktop does |
 |---|---|
-| `InstallAgent` | native confirm naming the agent and its size, then the install; another agent's download pauses |
+| `InstallAgent` | the install, with no confirm (the card shows the size first; 0033, "When an install starts"); another agent's download pauses |
 | `RetryAgentInstall { use_system_proxy }` | starts a failed or paused install again, through the OS proxy if asked |
-| `StartSignIn { console }` | the plan login (`console`: Claude's Console account); joins a sign-in already running; `command.invalid` for a reused login, which is left first |
+| `StartSignIn { console }` | the plan login (`console`: Claude's Console account); joins a sign-in already running; `command.invalid` for a reused login, which is left first; on an agent not installed, starts the install and keeps the press until `Ready` (0033) |
 | `CancelSignIn` | stops the running sign-in |
 | `PasteSignInCode { code: Secret }` | gives the running Claude login the pasted code |
 | `UseDeviceCode` | switches Codex to its device code; `command.invalid` for a reused login |
@@ -53,9 +53,11 @@ form: external tagging, snake case, unknown fields and unknown commands refused.
 A declined confirm answers `transport.unauthorized` and does nothing. **A second `StartSignIn`**
 for an agent whose sign-in is already running (`Queued`, `Waiting` or `DeviceCode`), from either
 window, joins it: desktop answers `Done` and does not restart the run, and both windows see the
-same `SignInChanged` events, the rule `InstallBrowser` follows. "Didn't open?" is
-`OpenSignInPage`, not a new `StartSignIn`. S18's engine replaces a running job on a new
-`sign_in`, so the join is desktop's job. `SetupCommand::action()` gives the variant as a
+same `SignInChanged` events, the rule `InstallBrowser` follows. A sign-in pressed before its
+agent is installed is kept until the install is `Ready`, shown `Queued` (0033, "When an install
+starts"); a second press then replaces it, the last one winning, since no run would restart.
+"Didn't open?" is `OpenSignInPage`, not a new `StartSignIn`. S18's engine replaces a running job
+on a new `sign_in`, so the join is desktop's job. `SetupCommand::action()` gives the variant as a
 `SetupAction` (Rust only), which the allow-lists name.
 
 **`Secret`.** The pasted code and the key are a `Secret`:

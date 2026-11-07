@@ -46,7 +46,8 @@ export interface ScratchOptions {
   otherAgents?: Readonly<Record<string, string>>;
   /**
    * True leaves desktop's agents as on a lawyer's first run: not installed and signed out, so
-   * the first run's install line and sign-in gate show. False (the default) starts them set up.
+   * the first run's agent cards (each with its size, nothing downloading until one is chosen or
+   * signed in to) and sign-in gate show. False (the default) starts them set up.
    */
   firstRun?: boolean;
   /**

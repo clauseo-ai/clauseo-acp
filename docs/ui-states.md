@@ -351,8 +351,8 @@ These arrive later as additive events and commands.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Onboarding: welcome | planned: the `agents` crate | runtime download started in the background |
-| Onboarding: choose the agent | planned: the `agents` crate | the two agents, an API key or an account the firm provides |
+| Onboarding: welcome | planned: the `agents` crate | nothing downloads yet: each agent's size (`AgentInstallProgress` `Missing { download_bytes }`) |
+| Onboarding: choose the agent | planned: the `agents` crate | the two agents with their sizes, an API key or an account the firm provides; choosing one (`InstallAgent`, no confirm) or signing in to it starts its download (0033, "When an install starts") |
 | Onboarding: sign in, waiting, cancelled, timed out, no plan, network failure | planned: the `agents` crate | sign-in progress and its failure |
 | Onboarding: matter protection, sandbox unavailable | planned: the `sandbox` crate | the protection level; the ask-before-each-change fallback |
 | Onboarding: first matter, folder unreadable | planned: the `agents` crate (flow); `ErrorCode::MatterFolderUnreadable` exists | folder state |
