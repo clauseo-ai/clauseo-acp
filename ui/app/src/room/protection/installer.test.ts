@@ -5,7 +5,7 @@ import { pw } from "@clauseo/components/lib/words-protection.ts";
 import { expect, test } from "vitest";
 import { causeOf } from "./causes.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller } from "./blocked.ts";
-import { NO_PROMPT, PROT, view } from "./fixtures.ts";
+import { PROT, view } from "./fixtures.ts";
 import { installerPage, isTestBuild, repairPage } from "./installer.ts";
 import type { NotProtectedCause } from "../../transport/protocol.ts";
 
@@ -75,13 +75,22 @@ test("other_account has its own line; an unknown reason, or none, asks IT", () =
   expect(blockLine("en", cause("needs_set_up"))).toBeNull();
 });
 
-test("the repair is the installer for a missing admin copy, and for a set-up behind Windows' prompt", () => {
-  const missing = cause({ blocked: { reason: "admin_copy_missing" } });
-  expect(needsInstaller(view(PROT.missing), missing)).toBe(true);
-  expect(needsInstaller(view(PROT.needs), cause("needs_set_up"))).toBe(true);
-  expect(needsInstaller(view(PROT.needs, NO_PROMPT), cause("needs_set_up"))).toBe(false);
-  expect(needsInstaller(view(PROT.policy), cause({ blocked: { reason: "policy" } }))).toBe(false);
-  expect(firmInstall(view(PROT.missing))).toBe(false);
-  expect(firmInstall(view(PROT.missing, { required: true }))).toBe(true);
-  expect(firmInstall(view(PROT.missing, { unprotected_auto_allowed: false }))).toBe(true);
+test("the repair is the installer only for a missing admin copy; set-up causes keep the app's button", () => {
+  expect(needsInstaller(cause({ blocked: { reason: "admin_copy_missing" } }))).toBe(true);
+  for (const c of [
+    "needs_set_up",
+    "set_up_refused",
+    "set_up_failed",
+    { blocked: { reason: "policy" } },
+  ])
+    expect(needsInstaller(cause(c))).toBe(false);
+});
+
+test("a firm install: per machine, or the firm's policy as a hint; a per-user install isn't", () => {
+  expect(firmInstall(view(PROT.missing), null)).toBe(false);
+  expect(firmInstall(view(PROT.missing), "package")).toBe(false);
+  expect(firmInstall(view(PROT.missing), "per_machine")).toBe(true);
+  expect(firmInstall(view(PROT.missing), "policy")).toBe(true);
+  expect(firmInstall(view(PROT.missing, { required: true }), null)).toBe(true);
+  expect(firmInstall(view(PROT.missing, { unprotected_auto_allowed: false }), null)).toBe(true);
 });

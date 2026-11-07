@@ -1,9 +1,11 @@
-// @vitest-environment happy-dom UC's commands in the room, over FakeTransport with the protection
-// wire. Design B: the app never raises Windows' prompt for a set-up, so where R17's
-// retry_asks_admin (or, from an older host, its fallback) says the set-up would bring it, the note
-// and the firm's notice offer the repair instead (the installer, or IT on a firm install), and send
-// nothing. A full pool's Add room keeps the "Unknown publisher" confirm, and only confirming sends
-// it. A set-up with no prompt goes at once. The waiting line ends on the answer or the first
+// @vitest-environment happy-dom
+// UC's commands in the room, over FakeTransport with the protection wire. Design B: only a missing
+// admin copy (blocked { admin_copy_missing }) gives the installer repair. needs_set_up,
+// set_up_refused and set_up_failed (a set-up after an in-app Remove, or a re-run) keep the app's
+// button, and the "Unknown publisher" confirm comes before a retry_protection that asks an
+// administrator, as does Add room's; only confirming sends it (Cancel sends nothing). Without R17's
+// retry_asks_admin the fallback asks for needs_set_up, set_up_refused and a full pool; the field
+// alone decides once it is there. The waiting line ends on the answer or the first
 // protection_changed, then the view is read once; a refusal says its code's words. A block says its
 // reason. The firm's requirement holds send with its notice. The window split: the room sends only
 // retry_protection, and nothing under room/ imports Settings' Safe workspace.
@@ -72,19 +74,30 @@ async function pressRetry() {
 }
 
 test.each([
-  ["needs_set_up", PROT.needs],
-  ["set_up_refused", PROT.refused],
+  ["needs_set_up", PROT.needs, "Set up the Safe workspace"],
+  ["set_up_refused", PROT.refused, "Try again"],
+  ["set_up_failed (a re-run)", PROT.failed, "Try again"],
 ] as const)(
-  "%s whose set-up would bring Windows' prompt: no retry and no confirm, the repair instead",
-  async (_c, p) => {
-    await mount(p);
+  "%s with retry_asks_admin true: the app's retry opens the set-up's confirm first; Cancel sends nothing",
+  async (_c, p, label) => {
+    await mount(p, p, { retry_asks_admin: true } as Partial<ProtectionView>);
     await h!.click(h!.one("workspace-line"));
     await settle();
-    expect(inBody("protection-setup")).toBeNull();
-    expect(inBody("np-note")?.textContent).toContain(
-      pw("en", "Run the Clauseo installer again to set up the Safe workspace."),
+    expect(inBody("protection-installer")).toBeNull();
+    expect(inBody("protection-setup")?.textContent).toBe(label);
+    await h!.click(inBody("protection-setup"));
+    await settle();
+    const confirm = inBody("protection-confirm");
+    expect(confirm?.dataset["act"]).toBe("setup");
+    expect(confirm?.textContent).toContain(
+      pw(
+        "en",
+        "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.",
+      ),
     );
-    expect(inBody("protection-installer")).not.toBeNull();
+    expect(sentRetries()).toEqual([]);
+    await h!.click(inBody("protection-confirm-cancel"));
+    await settle();
     expect(inBody("protection-confirm")).toBeNull();
     expect(sentRetries()).toEqual([]);
   },
@@ -181,15 +194,6 @@ test("needs_set_up with retry_asks_admin false: the field wins over the fallback
   await pressRetry();
   expect(inBody("protection-confirm")).toBeNull();
   expect(sentRetries()).toEqual(["retry_protection"]);
-});
-
-test("set_up_failed with retry_asks_admin true: the field wins over the fallback, and the repair stands instead", async () => {
-  await mount(PROT.failed, PROT.failed, { retry_asks_admin: true } as Partial<ProtectionView>);
-  await h!.click(h!.one("workspace-line"));
-  await settle();
-  expect(inBody("protection-setup")).toBeNull();
-  expect(inBody("protection-installer")).not.toBeNull();
-  expect(sentRetries()).toEqual([]);
 });
 
 test.each([
@@ -297,9 +301,9 @@ test.each([
     PROT.needs,
     pw(
       "en",
-      "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
+      "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.",
     ),
-    false,
+    true,
   ],
   [
     "admin_copy_missing",

@@ -10,7 +10,6 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { pw, type ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
 import type { ProtectionView } from "../../transport/protocol.ts";
 import type { Cause } from "./causes.ts";
-import { asksAdmin } from "./view.ts";
 
 /** A reason the lawyer is told something specific about, and `other_account`. */
 export type BlockReason =
@@ -22,7 +21,7 @@ export type BlockReason =
   | "admin_copy_unsafe"
   | "other_account";
 
-/** Each reason's line: ask IT, except a missing admin copy, whose repair (repairLine) follows it. */
+/** Each reason's line: ask IT, except a missing admin copy, whose repair (repairLine) follows. */
 const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
   logon_right:
     "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
@@ -63,28 +62,41 @@ export function blockLine(lang: Lang, cause: Cause | null): string | null {
   return pw(lang, block === "unknown" ? UNKNOWN_WORDS : REASON_WORDS[block]);
 }
 
-/** Whether the repair is the installer: the admin copy is missing, or (from an older host) a set-up
- * cause whose retry would bring Windows' prompt, which design B's app never raises for a set-up. */
-export function needsInstaller(
+/** Whether the repair is the installer: only when the admin copy of the set-up program is missing,
+ * for any reason (a declined prompt at install, a silent per-user install, the uninstaller's
+ * `--remove`). The host reports `blocked { admin_copy_missing }` up front, at first open, whenever
+ * the copy is missing, and `needs_set_up` only when the copy is there and verified (after an in-app
+ * Remove, say), so a plain `needs_set_up`, a refused or failed set-up, and a set-up re-run (a pool
+ * user that needs a reset, a set-up an update made outdated) keep the app's Set up, with the
+ * announce line where `retry_asks_admin` says Windows' prompt follows (stage C's PR 2). */
+export const needsInstaller = (cause: Cause | null): boolean =>
+  blockOf(cause) === "admin_copy_missing";
+
+/** The updater's word on who manages this install (`UpdateView.state`'s `managed.by`, from
+ * desktop's install_kind.rs): "per_machine" for a per-machine install, "policy" where the firm's
+ * policy sets `update.mode` to none (which hides the install kind); null for a per-user install. */
+export type ManagedBy = "policy" | "per_machine" | "read_only_location" | "package" | null;
+
+/** A firm install: a per-machine install (exe under Program Files, or the HKLM uninstall key), or,
+ * as an extra hint, the firm's policy (`update.mode` none, `sandbox.required`, or
+ * `sandbox.allow_unprotected_auto` off). */
+export const firmInstall = (
   view: ProtectionView | null | undefined,
-  cause: Cause | null,
-): boolean {
-  if (cause === null) return false;
-  if (blockOf(cause) === "admin_copy_missing") return true;
-  return cause.group === "setup" && asksAdmin(view, cause);
-}
+  managedBy: ManagedBy | undefined,
+): boolean =>
+  managedBy === "per_machine" ||
+  managedBy === "policy" ||
+  (view !== null && view !== undefined && (view.required || !view.unprotected_auto_allowed));
 
-/** A firm install, as the protection state can tell: the firm's policy moved either of its two
- * protection settings off its default (`sandbox.required` false, `sandbox.allow_unprotected_auto`
- * true). */
-export const firmInstall = (view: ProtectionView | null | undefined): boolean =>
-  view !== null && view !== undefined && (view.required || !view.unprotected_auto_allowed);
-
-/** The repair's line: run the installer again (a personal install), or ask IT to (a firm's). */
-export const repairLine = (lang: Lang, view: ProtectionView | null | undefined): string =>
+/** The repair's line: run the installer again (a per-user install), or ask IT to (a firm's). */
+export const repairLine = (
+  lang: Lang,
+  view: ProtectionView | null | undefined,
+  managedBy: ManagedBy | undefined,
+): string =>
   pw(
     lang,
-    firmInstall(view)
+    firmInstall(view, managedBy)
       ? "Ask your IT team to install Clauseo again."
       : "Run the Clauseo installer again to set up the Safe workspace.",
   );

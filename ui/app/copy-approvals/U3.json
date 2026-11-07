@@ -767,8 +767,8 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-sandbox.setup_refused": {
-    "en": "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.",
-    "hi": "Windows को अनुमति नहीं मिली, इसलिए सुरक्षित कार्यक्षेत्र तैयार नहीं हुआ। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
+    "en": "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
+    "hi": "Clauseo ने Windows से जिस बदलाव की स्वीकृति माँगी थी, उसकी अनुमति नहीं मिली, इसलिए कुछ नहीं बदला। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-07",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

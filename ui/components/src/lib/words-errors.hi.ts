@@ -129,8 +129,8 @@ export const HI = {
     "इस फ़ाइल का पाथ Word के लिए बहुत लंबा है। मामले के फ़ोल्डर को ड्राइव के ऊपरी स्तर के पास ले जाएँ, या उसके फ़ोल्डरों के नाम छोटे करें।",
   "A file in this matter's folder is a shortcut. Clauseo can't protect a shortcut, so it won't answer in this matter until it's gone. Move or delete it, then ask again.":
     "इस मामले के फ़ोल्डर में एक फ़ाइल शॉर्टकट है। Clauseo शॉर्टकट को संरक्षित नहीं कर सकता, इसलिए उसके हटने तक इस मामले में उत्तर नहीं देगा। उसे कहीं और ले जाएँ या हटाएँ, फिर दोबारा पूछें।",
-  "The Safe workspace wasn't set up, because Windows didn't get permission. Try again, and choose Yes when Windows asks.":
-    "Windows को अनुमति नहीं मिली, इसलिए सुरक्षित कार्यक्षेत्र तैयार नहीं हुआ। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
+  "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.":
+    "Clauseo ने Windows से जिस बदलाव की स्वीकृति माँगी थी, उसकी अनुमति नहीं मिली, इसलिए कुछ नहीं बदला। फिर से कोशिश करें, और Windows के पूछने पर Yes चुनें।",
   "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.":
     "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
   "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.":

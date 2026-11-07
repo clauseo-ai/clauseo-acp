@@ -40,7 +40,7 @@ export function RequiredNotice({
     cause,
     () => void retryProtection(transport, store),
   );
-  const repair = needsInstaller(state.view, cause);
+  const repair = needsInstaller(cause);
   const fixable = !repair && (cause.name === "needs_set_up" || cause.name === "set_up_refused");
   const notBuilt = whyOf(cause) === "not_built";
   const block = repair ? null : blockLine(lang, cause);
@@ -77,7 +77,7 @@ export function RequiredNotice({
       </p>
       {(repair || block !== null) && (
         <p data-testid={repair ? "protection-repair" : "protection-block"}>
-          <Say>{(repair ? repairLine(lang, state.view) : block) ?? ""}</Say>
+          <Say>{(repair ? repairLine(lang, state.view, state.managedBy) : block) ?? ""}</Say>
         </p>
       )}
       {fixable &&

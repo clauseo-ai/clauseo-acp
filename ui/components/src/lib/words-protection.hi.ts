@@ -10,9 +10,13 @@ export const HI = {
   "Setting up the Safe workspace.": "सुरक्षित कार्यक्षेत्र तैयार हो रहा है।",
   // the check's own waiting line (R17 PR-B's in_progress "check"), provisional
   "Checking the Safe workspace.": "सुरक्षित कार्यक्षेत्र की जाँच हो रही है।",
-  // the confirm before Add room (UC-11, UC-40), the one set-up press left that brings Windows'
-  // prompt: design B's installer sets the Safe workspace up, so the app never asks Windows for the
-  // first set-up
+  // the set-up's confirm (UC-11, UC-40), where it brings Windows' prompt: design B's installer does
+  // the first set-up, and the app's elevates the verified admin copy after an in-app Remove, or for
+  // a re-run
+  "Set up the Safe workspace?": "सुरक्षित कार्यक्षेत्र तैयार करें?",
+  "Windows will ask to let Clauseo set up the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":
+    "Windows, Clauseo को सुरक्षित कार्यक्षेत्र तैयार करने देने के लिए पूछेगा। वह प्रकाशक को अज्ञात बताएगा, क्योंकि Clauseo के इस शुरुआती संस्करण पर अभी डिजिटल हस्ताक्षर नहीं है। Yes चुनें। अगर Windows किसी व्यवस्थापक का पासवर्ड माँगे, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति उसे दर्ज कर सकते हैं।",
+  // Add room's confirm (UC-94, UC-95)
   "Add room": "जगह जोड़ें",
   "Add room for 4 more?": "4 और के लिए जगह जोड़ें?",
   "Windows will ask to let Clauseo add room to the Safe workspace. It will say the publisher is unknown, because this early version of Clauseo isn't signed yet. Choose Yes. If Windows asks for an administrator's password, whoever looks after this computer can enter it.":

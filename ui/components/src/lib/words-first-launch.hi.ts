@@ -140,9 +140,10 @@ export const HI = {
   "Clauseo is still switching accounts. Try again in a moment.":
     "Clauseo अभी खाता बदल रहा है। थोड़ी देर में फिर से प्रयास करें।",
 
-  // UC: the Safe workspace step, the design's own words with its Hindi (UC-13, UC-16); design B's
-  // installer sets the Safe workspace up, so UC-10's line about Windows asking at the app's first
-  // run is gone
+  // UC: the Safe workspace step, the design's own words with its Hindi (UC-10, UC-13, UC-16); under
+  // design B the Windows screen stands only for a set-up after an in-app Remove
+  "Windows asks once for permission to set up the Safe workspace.":
+    "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Windows एक बार अनुमति माँगता है।",
   "Not now": "अभी नहीं",
   Settings: "सेटिंग्स",
 } satisfies Hindi<string>;
