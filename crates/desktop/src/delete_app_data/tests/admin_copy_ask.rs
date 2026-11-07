@@ -296,7 +296,8 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         ),
         (
             "adminCopyStillRunning",
-            "Clauseo is still setting up Safe workspace. It finishes on its own.",
+            "Safe workspace may still be setting up. To see whether it worked, open Settings in \
+             Clauseo and look at Safe workspace.",
         ),
         (
             "adminCopySkippedSilent",
