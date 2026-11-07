@@ -205,8 +205,15 @@ impl LaunchMessage {
                 "larger than {LAUNCH_CAP} bytes"
             )));
         }
-        let message: LaunchMessage = serde_json::from_slice(bytes)
-            .map_err(|error| LaunchError::Format(error.to_string()))?;
+        let message: LaunchMessage = serde_json::from_slice(bytes).map_err(|error| {
+            // serde's own text can quote a value (an unknown variant, a wrong type), and the
+            // environment holds the proxy's token: only where it failed is said.
+            LaunchError::Format(format!(
+                "not a launch message (line {}, column {})",
+                error.line(),
+                error.column()
+            ))
+        })?;
         message.check()?;
         Ok(message)
     }
@@ -355,10 +362,12 @@ pub enum RunExit {
     /// The sweep of the pool user's processes before the inner runner ran failed (`sweep.rs`):
     /// one whose user can't be read, or one of the pool user's that can't be opened or ended.
     Sweep,
+    /// The runner's DLL search couldn't be kept to System32.
+    DllSearch,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 14] = [
+    const ALL: [RunExit; 15] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -373,6 +382,7 @@ impl RunExit {
         RunExit::Spawn,
         RunExit::AgentReserved,
         RunExit::Sweep,
+        RunExit::DllSearch,
     ];
 
     /// The exit code.
@@ -410,7 +420,8 @@ impl RunExit {
             | RunExit::Token
             | RunExit::Spawn
             | RunExit::AgentReserved
-            | RunExit::Sweep => None,
+            | RunExit::Sweep
+            | RunExit::DllSearch => None,
         }
     }
 }
@@ -424,6 +435,13 @@ pub fn agent_code(code: u32) -> u32 {
     } else {
         code
     }
+}
+
+/// The agent's window station's name, `ClauseoRun-<16 hex>`, from 64 bits of its own randomness:
+/// nothing another process can read first (the pipe base is in the `\\.\pipe\` listing), and
+/// the station is made only if no station has the name (`CWF_CREATE_ONLY`).
+pub fn station_name(random: [u8; 8]) -> String {
+    format!("ClauseoRun-{}", super::pipe::hex(&random))
 }
 
 /// The cause when the Secondary Logon service is disabled: set-up's own words.

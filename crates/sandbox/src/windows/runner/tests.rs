@@ -131,6 +131,37 @@ fn unknown_fields_and_oversize_files_are_refused() {
 }
 
 #[test]
+fn a_malformed_launch_file_names_where_it_failed_and_no_value() {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&message().to_bytes().unwrap()).unwrap();
+    // A wrong type, an unknown variant's worth of text and an unknown field: serde's own message
+    // would quote each.
+    value["version"] = serde_json::json!("tok-SECRET-1");
+    value["tok-SECRET-2"] = serde_json::json!("tok-SECRET-3");
+    let bytes = serde_json::to_vec(&value).unwrap();
+    let Err(LaunchError::Format(what)) = LaunchMessage::parse(&bytes) else {
+        panic!("a malformed message was read");
+    };
+    assert!(!what.contains("SECRET"), "{what}");
+    assert!(
+        what.starts_with("not a launch message (line 1, column "),
+        "{what}"
+    );
+    let truncated = br#"{"version":1,"pool_user":"tok-SECRET-4"#;
+    let Err(LaunchError::Format(what)) = LaunchMessage::parse(truncated) else {
+        panic!("a truncated message was read");
+    };
+    assert!(!what.contains("SECRET"), "{what}");
+}
+
+#[test]
+fn the_station_name_is_its_own_random_value() {
+    let name = station_name([0xab; 8]);
+    assert_eq!(name, "ClauseoRun-abababababababab");
+    assert_ne!(station_name([1; 8]), station_name([2; 8]));
+}
+
+#[test]
 fn debug_never_prints_environment_values() {
     let mut secret = message();
     secret
@@ -405,7 +436,9 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     }
     assert_eq!(RunExit::from_code(0), None);
     assert_eq!(RunExit::Sweep.code(), 0xE0C1_500D);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 14), None);
+    assert_eq!(RunExit::DllSearch.code(), 0xE0C1_500E);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 15), None);
+    assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
     // An agent exiting with a runner code never passes for a runner failure.
