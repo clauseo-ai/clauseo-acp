@@ -49,6 +49,12 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
   the thirteen commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
   against the code and the capabilities
+- `built`: `quit_app` takes no arguments and only `main` and the settings window are granted it.
+  It calls `app.exit(0)`, which goes through `RunEvent::ExitRequested` and `stop_host_then_exit`:
+  the agents' stop steps and the sign-in cancel run first, the same graceful quit as Cmd+Q, never
+  an exit without the stop. The worst script can do with it is quit the app, which closing the
+  window already allows. The Get the installer button calls it once the release page opened, so
+  no agent's Job Object is left while the elevated installer runs (design B)
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
