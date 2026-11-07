@@ -233,7 +233,7 @@ impl Removal for Remover {
     }
 
     fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError> {
-        Machine::in_profile(&mut self.m, profile, folder)
+        Machine::owner_in_profile(&mut self.m, profile, folder).map(|owner| owner.is_some())
     }
 
     fn delete_profile(&mut self, sid: &Sid, owner: &Sid) -> Result<(), MachineError> {

@@ -419,13 +419,21 @@ impl Machine for FakeMachine {
             .unwrap_or_else(|| Sid::parse(SYSTEM).unwrap()))
     }
 
-    /// Logged as `exists`, the probe it stands for on a profile's folder.
-    fn in_profile(&mut self, profile: &Path, folder: &Path) -> Result<bool, MachineError> {
+    /// Logged as `exists`, then `owner_of` when it is there: the probe and the read it stands
+    /// for on a profile's folder.
+    fn owner_in_profile(
+        &mut self,
+        profile: &Path,
+        folder: &Path,
+    ) -> Result<Option<Sid>, MachineError> {
         if self.changed_profiles.contains(&folder_name(profile)) {
             self.call(format!("exists {}", folder_name(folder)))?;
             return Err(MachineError::ProfileChanged("AppData".to_owned()));
         }
-        self.exists(folder)
+        if !self.exists(folder)? {
+            return Ok(None);
+        }
+        self.owner_of(folder).map(Some)
     }
 
     fn exists(&mut self, path: &Path) -> Result<bool, MachineError> {

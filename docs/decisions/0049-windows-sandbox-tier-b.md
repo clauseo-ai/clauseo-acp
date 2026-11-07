@@ -742,7 +742,11 @@ delete meets none. A folder's DACL is written with `SetKernelObjectSecurity`, wh
 propagates to what is already inside, a planted junction included (`private_dir.rs`); the
 permission walk writes each child on its own handle and skips links. Guidance never sends an
 administrator to a recursive tool that follows links (`takeown /R`, `icacls /T`): `rd /s /q`
-deletes a folder's links as links.
+deletes a folder's links as links. These opens enable the backup and restore privileges, with
+backup intent, so a folder a pool user shut to administrators can't stop a set-up or a removal.
+They fail closed: a profiles folder reached through a junction (a redirected `C:\Users`), or a
+`ProfileList` path in 8.3 form, isn't the final path, so set-up stops at `Owners` and a removal
+leaves that profile, both naming the part.
 
 ### The network (PR7)
 
