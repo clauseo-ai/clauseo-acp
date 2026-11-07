@@ -211,46 +211,103 @@ impl Probe {
     }
 }
 
-/// The probes [`ask_all`] started, each on a thread of its own, once per proxy.
+/// What [`ask_all`] waits for: a lookup's answer, or a probe's result with the reading of
+/// [`LookupTime::now`] when it ended.
+pub(crate) enum Event {
+    Answer(Url, OsAnswer),
+    Probed {
+        proxy: String,
+        reached: bool,
+        ended: Duration,
+    },
+}
+
+/// The time [`ask_all`] keeps: [`RealTime`], or a virtual one in tests, so a test decides when
+/// its budget and a probe's cap run out rather than racing a loaded machine.
+pub(crate) trait LookupTime: Send + Sync {
+    /// A monotonic reading.
+    fn now(&self) -> Duration;
+    /// The next event on `events`, waiting at most until `until` (a reading of [`Self::now`]);
+    /// `None` once it has passed. `probing` probes have started and not yet reported.
+    fn next(
+        &self,
+        events: &mpsc::Receiver<Event>,
+        until: Duration,
+        probing: usize,
+    ) -> Option<Event>;
+}
+
+/// The real time: `SystemClock`'s monotonic reading, and a wait of that long.
+pub(crate) struct RealTime;
+
+impl RealTime {
+    /// One to share.
+    pub(crate) fn shared() -> Arc<dyn LookupTime> {
+        Arc::new(RealTime)
+    }
+}
+
+impl LookupTime for RealTime {
+    fn now(&self) -> Duration {
+        SystemClock.monotonic()
+    }
+
+    fn next(
+        &self,
+        events: &mpsc::Receiver<Event>,
+        until: Duration,
+        _probing: usize,
+    ) -> Option<Event> {
+        events.recv_timeout(until.saturating_sub(self.now())).ok()
+    }
+}
+
+/// The probes [`ask_all`] started, each on a thread of its own, once per proxy, and the results
+/// of those that ended before the deadline.
 struct Probing {
     probe: Probe,
     started: BTreeSet<String>,
+    /// Started and not yet reported.
     running: usize,
-    send: mpsc::Sender<(String, bool)>,
-    results: mpsc::Receiver<(String, bool)>,
+    probed: Probed,
 }
 
 impl Probing {
     fn new(probe: Probe) -> Self {
-        let (send, results) = mpsc::channel();
         Self {
             probe,
             started: BTreeSet::new(),
             running: 0,
-            send,
-            results,
+            probed: Probed::new(),
         }
     }
 
-    /// Probes `target`'s keepable proxy, unless it has none or its proxy is probed already.
-    fn start(&mut self, target: &Url) {
+    /// Probes `target`'s keepable proxy, unless it has none or its proxy is probed already; the
+    /// result comes on `send`, stamped with `time`.
+    fn start(&mut self, target: &Url, send: &mpsc::Sender<Event>, time: &Arc<dyn LookupTime>) {
         let Some(proxy) = self.probe.keepable.get(target) else {
             return;
         };
         if !self.started.insert(proxy.clone()) {
             return;
         }
-        let (reach, send, proxy) = (
+        let (reach, send, time, proxy) = (
             Arc::clone(&self.probe.reach),
-            self.send.clone(),
+            send.clone(),
+            Arc::clone(time),
             proxy.clone(),
         );
         let spawned = std::thread::Builder::new()
             .name("clauseo-proxy-reach".to_owned())
             .spawn(move || {
                 let reached = reach(&proxy);
+                let ended = time.now();
                 // The resolve may be over: then no one reads it.
-                let _sent = send.send((proxy, reached));
+                let _sent = send.send(Event::Probed {
+                    proxy,
+                    reached,
+                    ended,
+                });
             });
         match spawned {
             Ok(_thread) => self.running += 1,
@@ -258,17 +315,12 @@ impl Probing {
         }
     }
 
-    /// The probes that ended by `deadline`.
-    fn finish(self, clock: SystemClock, deadline: Duration) -> Probed {
-        let mut probed = Probed::new();
-        while probed.len() < self.running {
-            let left = deadline.saturating_sub(clock.monotonic());
-            let Ok((proxy, reached)) = self.results.recv_timeout(left) else {
-                break;
-            };
-            probed.insert(proxy, reached);
+    /// A probe's result: it counts only when it ended before `deadline`.
+    fn landed(&mut self, proxy: String, reached: bool, ended: Duration, deadline: Duration) {
+        self.running = self.running.saturating_sub(1);
+        if ended < deadline {
+            self.probed.insert(proxy, reached);
         }
-        probed
     }
 }
 
@@ -280,18 +332,19 @@ impl Probing {
 /// A keepable proxy ([`Probe`]) is probed once a fresh answer could replace it: when its
 /// target's lookup answers `DIRECT` or nothing, or is still running [`PROBE_CAP`] and
 /// [`PROBE_MARGIN`] before the budget ends. So every probe ends within the budget, and none runs
-/// while the OS keeps answering with proxies.
+/// while the OS keeps answering with proxies; one that ends past it does not count. `time` is
+/// [`RealTime`] but in tests.
 pub(crate) fn ask_all(
     targets: BTreeSet<Url>,
     os: &Arc<OsLookup>,
     budget: Duration,
     probe: Probe,
+    time: &Arc<dyn LookupTime>,
 ) -> Answers {
-    let clock = SystemClock;
-    let deadline = clock.monotonic() + budget;
+    let deadline = time.now() + budget;
     let probe_from = deadline.saturating_sub(PROBE_CAP + PROBE_MARGIN);
     let mut probing = Probing::new(probe);
-    let (send, answers) = mpsc::channel();
+    let (send, events) = mpsc::channel();
     let mut waiting = BTreeSet::new();
     let mut got: Answered = targets
         .iter()
@@ -304,7 +357,7 @@ pub(crate) fn ask_all(
             .spawn(move || {
                 let answer = os(&asked);
                 // The route may be made already: then no one reads it.
-                let _sent = send.send((asked, answer));
+                let _sent = send.send(Event::Answer(asked, answer));
             });
         if let Err(err) = spawned {
             tracing::warn!(%err, "an OS proxy lookup did not start; it has no answer");
@@ -314,11 +367,10 @@ pub(crate) fn ask_all(
     }
     let mut probing_waiting = false;
     while !waiting.is_empty() {
-        let now = clock.monotonic();
-        if !probing_waiting && now >= probe_from {
+        if !probing_waiting && time.now() >= probe_from {
             probing_waiting = true;
             for target in &waiting {
-                probing.start(target);
+                probing.start(target, &send, time);
             }
         }
         let until = if probing_waiting {
@@ -326,16 +378,36 @@ pub(crate) fn ask_all(
         } else {
             probe_from
         };
-        match answers.recv_timeout(until.saturating_sub(now)) {
-            Ok((target, answer)) => {
+        match time.next(&events, until, probing.running) {
+            Some(Event::Answer(target, answer)) => {
                 if answer.proxy().is_none() {
-                    probing.start(&target);
+                    probing.start(&target, &send, time);
                 }
                 waiting.remove(&target);
                 got.insert(target, answer);
             }
-            Err(_) if !probing_waiting => {}
-            Err(_) => break,
+            Some(Event::Probed {
+                proxy,
+                reached,
+                ended,
+            }) => probing.landed(proxy, reached, ended, deadline),
+            None if !probing_waiting => {}
+            None => break,
+        }
+    }
+    // The probes still running, until the deadline; a lookup answering meanwhile is late.
+    let mut landed_late = Answered::new();
+    while probing.running > 0 {
+        match time.next(&events, deadline, probing.running) {
+            Some(Event::Probed {
+                proxy,
+                reached,
+                ended,
+            }) => probing.landed(proxy, reached, ended, deadline),
+            Some(Event::Answer(target, answer)) => {
+                landed_late.insert(target, answer);
+            }
+            None => break,
         }
     }
     let late = (!waiting.is_empty()).then(|| {
@@ -345,11 +417,15 @@ pub(crate) fn ask_all(
         );
         Late {
             running: waiting.len(),
-            answers,
+            got: landed_late,
+            events,
         }
     });
-    let probed = probing.finish(clock, deadline);
-    Answers { got, late, probed }
+    Answers {
+        got,
+        late,
+        probed: probing.probed,
+    }
 }
 
 /// The OS's answers [`ask_all`] got within its budget, and the lookups still running past it.
@@ -362,10 +438,12 @@ pub(crate) struct Answers {
     pub(crate) probed: Probed,
 }
 
-/// Lookups still running past the budget: each one's answer comes on `answers` as it ends.
+/// Lookups still running past the budget: each one's answer comes on `events` as it ends
+/// (those in `got` came while the last probes were waited for).
 pub(crate) struct Late {
-    pub(crate) running: usize,
-    pub(crate) answers: mpsc::Receiver<(Url, OsAnswer)>,
+    running: usize,
+    got: Answered,
+    events: mpsc::Receiver<Event>,
 }
 
 impl Late {
@@ -373,13 +451,16 @@ impl Late {
     pub(crate) fn collect(self, wait: Duration) -> Answered {
         let clock = SystemClock;
         let deadline = clock.monotonic() + wait;
-        let mut got = BTreeMap::new();
+        let mut got = self.got;
         while got.len() < self.running {
             let left = deadline.saturating_sub(clock.monotonic());
-            let Ok((target, answer)) = self.answers.recv_timeout(left) else {
-                break;
-            };
-            got.insert(target, answer);
+            match self.events.recv_timeout(left) {
+                Ok(Event::Answer(target, answer)) => {
+                    got.insert(target, answer);
+                }
+                Ok(Event::Probed { .. }) => {}
+                Err(_) => break,
+            }
         }
         got
     }

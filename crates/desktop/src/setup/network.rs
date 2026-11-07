@@ -532,7 +532,9 @@ pub(crate) fn shown(proxy: &str) -> String {
 mod ask;
 mod follow;
 
-pub(crate) use ask::{Answered, KEEP_FOR, Known, OsAnswer, Probe, Probed, Reach, ask_all, reach};
+pub(crate) use ask::{
+    Answered, KEEP_FOR, Known, LookupTime, OsAnswer, Probe, Probed, Reach, RealTime, ask_all, reach,
+};
 mod launch;
 
 pub(crate) use launch::with_loopback;
