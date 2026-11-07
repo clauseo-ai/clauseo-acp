@@ -318,6 +318,11 @@ impl Running {
         }
     }
 
+    /// The thread's join handle if it was not taken yet, for a test that shuts down on its own.
+    pub(crate) fn take_join_if_any(&mut self) -> Option<HostJoin> {
+        self.join.take()
+    }
+
     /// The thread's join handle, for a test that checks it.
     pub(crate) fn take_join(&mut self) -> HostJoin {
         self.join.take().unwrap()

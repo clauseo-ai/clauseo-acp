@@ -370,7 +370,16 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::Sandboxed { thread, id, result } => {
+            launch_checks::on_sandboxed(actor, thread, id, result);
+        }
         TurnInput::RunRemoved => launch_checks::on_run_removed(actor),
+        TurnInput::SetAsideLate { thread, moved } => {
+            launch_checks::on_set_aside_late(actor, thread, &moved);
+        }
+        TurnInput::SessionEnded { thread, moved } => {
+            launch_checks::on_session_ended(actor, thread, &moved);
+        }
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::Log {
             thread,

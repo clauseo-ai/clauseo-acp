@@ -261,7 +261,8 @@ type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
+/// forces for the agent's kind), in the matter folder that was checked (`prepared`), through
+/// the sandbox's launcher when the launch got one (`launch_checks/sandbox.rs`). A Codex
 /// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
 fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launched, Error> {
     let row = &actor.check_thread(thread)?.row;
@@ -273,6 +274,11 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     })?;
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
+    // The sandbox's launcher for this launch (R17 PR-B2), else the host's.
+    let jailed = prepared
+        .sandbox
+        .as_ref()
+        .map(|jail| Arc::clone(&jail.launcher));
     let folder = prepared.stored;
     let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
@@ -328,7 +334,7 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
     });
     let link = agent::start(
         &actor.spawner,
-        actor.launcher.as_ref(),
+        jailed.as_deref().unwrap_or(actor.launcher.as_ref()),
         &spec,
         Arc::clone(&actor.clock),
         post,
