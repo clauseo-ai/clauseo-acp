@@ -4,6 +4,7 @@
 //! stand in, so the walk's logic runs on every CI OS.
 
 mod admin_copy;
+mod admin_copy_ask;
 mod admin_copy_hook;
 mod make;
 mod nsis_names;
