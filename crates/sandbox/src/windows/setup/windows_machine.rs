@@ -286,6 +286,27 @@ impl Machine for WindowsMachine {
         profile::delete_profile(sid, self.owner.sid())
     }
 
+    fn profiles_dir(&mut self) -> Result<PathBuf, MachineError> {
+        let dir = ffi::reg_string(ffi::PROFILE_LIST, "ProfilesDirectory")?;
+        dir.map(PathBuf::from)
+            .ok_or_else(|| MachineError::Other("ProfileList has no ProfilesDirectory".to_owned()))
+    }
+
+    fn folder_names(&mut self, dir: &Path) -> Result<Vec<String>, MachineError> {
+        let failed = |error: std::io::Error| MachineError::Other(format!("listing it: {error}"));
+        let mut names = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(failed)? {
+            names.push(
+                entry
+                    .map_err(failed)?
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        Ok(names)
+    }
+
     fn owner_of(&mut self, path: &Path) -> Result<Sid, MachineError> {
         acl::owner(path).map_err(|error| MachineError::Other(format!("its owner: {error}")))
     }

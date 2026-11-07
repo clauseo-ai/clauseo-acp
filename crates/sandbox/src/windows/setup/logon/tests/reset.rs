@@ -101,9 +101,15 @@ fn elevated_a_profile_reset_drops_what_the_user_wrote_in_its_profile_and_hive() 
         again.path, first.path,
         "no <name>.<computer> beside a folder left behind"
     );
-    assert_eq!(
-        profile_of(&user.sid).unwrap().map(|p| p.path),
-        Some(again.path.clone())
+    // `ProfileList` may spell it in another case than `GetUserProfileDirectoryW`.
+    let listed = profile_of(&user.sid).unwrap().unwrap().path;
+    assert!(
+        listed
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&again.path.to_string_lossy()),
+        "{} and {}",
+        listed.display(),
+        again.path.display()
     );
     assert!(
         again.path.join(r"AppData\LocalLow").is_dir(),

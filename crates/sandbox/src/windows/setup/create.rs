@@ -377,7 +377,7 @@ fn keep_user(
         users.profiles.push((user.clone(), profile.path));
         return Ok(());
     }
-    let old = if wipe {
+    let expected = if wipe {
         Some(resets::delete(machine, user)?)
     } else {
         None
@@ -395,8 +395,8 @@ fn keep_user(
         .hide(name)
         .map_err(|error| (Step::Hide, cause_of(&error)))?;
     let path = log_on(machine, name, &password)?;
-    if let Some(old) = &old {
-        resets::check_remade(user, old.as_deref(), &path)?;
+    if let Some(expected) = &expected {
+        resets::check_remade(user, expected, &path)?;
         users.profiles_reset.push(user.clone());
     }
     users.profiles.push((user.clone(), path));
