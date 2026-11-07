@@ -67,6 +67,8 @@ Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages
   finish (a folder it can't reach, say), the `sandbox` folder and the key stay: reinstall
   Clauseo, then uninstall it again, and the new removal finishes the job. If Windows security
   removed `clauseo-sandbox-setup.exe`, see [section 10](#10-if-windows-security-removed-clauseos-set-up-program).
+  If it was deleted with the install folder, see
+  [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
 
 ### Intune (Win32 app)
 
@@ -110,6 +112,180 @@ prompt, until someone presses Run.
 
 Never run Clauseo elevated: WebView2 can fail to start when its data folder belongs to another
 user ([tauri#13926](https://github.com/tauri-apps/tauri/issues/13926)).
+
+### Clearing a leftover Windows sandbox by hand
+
+The normal way to remove Clauseo's Windows protection is
+`clauseo-sandbox-setup.exe --remove --per-machine` from the install folder, at an elevated prompt
+(above). Use the commands below only when that exe is gone: quarantined by an antivirus (next
+subsection), or deleted with the install folder. Close Clauseo for every user first, and don't run
+Clauseo's set-up while you work.
+
+They remove what the set-up makes:
+
+- each local user named `ClauseoSb01` to `ClauseoSb32`, exactly. The commands match the name
+  exactly, digits and case included, rather than `ClauseoSb*`, which would also catch other
+  accounts that start the same way;
+- each of those users' processes, then their profiles, deleted through Windows'
+  `Win32_UserProfile` (which removes the folder and its `ProfileList` entry). Don't delete the
+  `C:\Users\ClauseoSbNN` folders yourself;
+- each user's value under
+  `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList`, which
+  hides it from the sign-in screen;
+- the group's deny entry on `C:\ProgramData\Microsoft\DeviceSync`;
+- the group `ClauseoSandboxUsers`, once it has no members;
+- the key `HKLM\SOFTWARE\Clauseo\Sandbox`. After a per-machine install, the installer's key
+  `HKLM\SOFTWARE\Clauseo\Clauseo` stays beside it. After a per-user install, `HKLM\SOFTWARE\Clauseo`
+  is left empty, and you can delete it once you have checked that it is.
+
+Clauseo makes no firewall or WFP rules yet; they come in a later version, and this page will
+name them then.
+
+Collect the SIDs before deleting anything: once a user is deleted, its name no longer leads to its
+SID, and its profile can only be found by SID. The key's `PoolSids` lists the users' SIDs too, so
+an earlier removal that stopped partway is finished as well. The block then follows `--remove`'s
+order. Paste it into an elevated Windows PowerShell (64-bit, the default; in Intune, "Run script in 64 bit PowerShell Host"):
+
+```powershell
+$pool = '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])$'
+$key = 'HKLM:\SOFTWARE\Clauseo\Sandbox'
+$hide = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+$record = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+# 1. The SIDs, first.
+$users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool })
+$sids = @(@($users | ForEach-Object { $_.SID.Value }) + @($record.PoolSids) |
+    Where-Object { $_ } | Sort-Object -Unique)
+$group = Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue
+$groupSids = @(@($group.SID.Value, $record.GroupSid) | Where-Object { $_ } | Sort-Object -Unique)
+"Sandbox account SIDs:"; $sids  # Keep this list: the matter folders' entries name these SIDs.
+# 2. Their processes, so their profiles can be deleted.
+Get-CimInstance Win32_Process | ForEach-Object {
+    $owner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue
+    if ($owner.Sid -and $sids -contains $owner.Sid) {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+# 3. Their profiles, then their accounts, then their sign-in screen values.
+Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID -and $_.LocalPath -match '\\ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' } | Remove-CimInstance
+$users | Remove-LocalUser
+if (Test-Path $hide) {
+    (Get-Item $hide).Property | Where-Object { $_ -cmatch $pool } |
+        ForEach-Object { Remove-ItemProperty -Path $hide -Name $_ }
+}
+# 4. The group's deny on DeviceSync.
+$deviceSync = Join-Path $env:ProgramData 'Microsoft\DeviceSync'
+if (Test-Path $deviceSync) {
+    foreach ($sid in $groupSids) { icacls $deviceSync /remove:d "*$sid" }
+}
+# 5. The group, only if it is the one the key names and is empty.
+if ($group -and (-not $record.GroupSid -or $group.SID.Value -eq $record.GroupSid) -and
+    @(Get-LocalGroupMember -Group $group).Count -eq 0) {
+    Remove-LocalGroup -SID $group.SID
+}
+# 6. The key, last.
+Remove-Item -Path $key -ErrorAction SilentlyContinue
+```
+
+Then check, in the same window, that each item is gone. Every number is 0 and both other values
+are `False`. `Folders` counts the folders left in `C:\Users` under a pool user's exact name, with or without
+the `.<COMPUTER>` or `.000` Windows may add, since a profile whose folder was held open can lose
+its entry and keep its folder:
+
+```powershell
+[pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' }).Count; Key = Test-Path $key }
+```
+
+A `ClauseoSbNN` entry that remains is a link: check where it points, then remove just the link with `rmdir C:\Users\ClauseoSbNN` (cmd), which doesn't touch its target.
+
+If a profile is still there, a process still holds it: restart the computer and paste the block
+again. A second run skips what is gone. If the group is still there, it has members or isn't the
+one the key named, and `--remove` would leave it too: look at it before you delete it.
+
+If `Profiles` is 0 but `Folders` isn't, a profile's folder may have outlived its profile; it stays
+even after a restart. Windows may have named it `ClauseoSb01`, `ClauseoSb01.<COMPUTER>` or
+`ClauseoSb01.000`. First check that each counted folder is a leftover Clauseo profile: for
+example, it holds a profile's files (`NTUSER.DAT`, `AppData`) and Clauseo was set up on this
+computer. The block deletes every folder with such a name, whoever made it. After a restart,
+paste the block below into an elevated PowerShell. It is for a leftover sandbox
+profile folder only: it finds each folder in `C:\Users` named exactly as a pool user's profile
+(never another account that starts with `ClauseoSb`), and deletes what is inside it one name at a
+time, then the folder. It uses the backup and restore rights an administrator already has, so it
+changes no owner and no permission: a folder a sandboxed program wrote can hold links and hard links
+to files elsewhere, and changing permissions through them would change those files too. A link is
+deleted as a link, never followed, and a file with other hard links keeps its attributes. It names
+anything it couldn't delete. Run without elevation, it stops with "Run this in an elevated
+PowerShell."
+
+```powershell
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class Priv {
+  [StructLayout(LayoutKind.Sequential, Pack = 4)] struct TP { public int Count; public long Luid; public int Attr; }
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, int access, out IntPtr t);
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool LookupPrivilegeValue(string s, string n, out long l);
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(IntPtr t, bool d, ref TP n, int l, IntPtr p, IntPtr r);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  public static bool Enable(string name) {
+    IntPtr t; if (!OpenProcessToken(GetCurrentProcess(), 0x28, out t)) return false;
+    TP tp = new TP(); tp.Count = 1; tp.Attr = 2; if (!LookupPrivilegeValue(null, name, out tp.Luid)) return false;
+    return AdjustTokenPrivileges(t, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero) && Marshal.GetLastWin32Error() == 0;
+  }
+}
+'@
+Add-Type @'
+using System; using System.Runtime.InteropServices;
+public static class Del {
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateFileW(string n, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetFileInformationByHandle(IntPtr h, int cls, ref uint info, uint size);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  // Removes one name (a file, an empty directory or a link itself), never following a link and never changing attributes.
+  public static void Remove(string path) {
+    IntPtr h = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000, IntPtr.Zero);
+    if (h == new IntPtr(-1)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+    try { uint flags = 0x1 | 0x2 | 0x10; if (!SetFileInformationByHandle(h, 21, ref flags, 4)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()); }
+    finally { CloseHandle(h); }
+  }
+}
+'@
+if (-not ([Priv]::Enable('SeBackupPrivilege') -and [Priv]::Enable('SeRestorePrivilege'))) { throw 'Run this in an elevated PowerShell.' }
+$skipped = New-Object System.Collections.Generic.List[string]
+function Remove-Leftover([string]$Dir) {
+    foreach ($e in @([IO.Directory]::EnumerateFileSystemEntries($Dir))) {
+        $a = [IO.File]::GetAttributes($e)
+        try {
+            if ($a -band [IO.FileAttributes]::ReparsePoint) {
+                [Del]::Remove($e)
+            } elseif ($a -band [IO.FileAttributes]::Directory) {
+                Remove-Leftover $e
+            } else {
+                [Del]::Remove($e)
+            }
+        } catch { $skipped.Add("$($e): $($_.Exception.Message)") }
+    }
+    [Del]::Remove($Dir)
+}
+foreach ($Root in @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -Force |
+        Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+        ForEach-Object { $_.FullName })) {
+    try { Remove-Leftover $Root } catch { $skipped.Add("$($Root): $($_.Exception.Message)") }
+    if (Test-Path -LiteralPath $Root) { $skipped | ForEach-Object { "not deleted: $_" }; throw "$Root is still there" } else { "$Root is gone" }
+}
+```
+
+Never use `takeown /R`, `icacls /T` or `robocopy /MIR` on these folders: they follow links, or
+rewrite files shared through hard links.
+
+Each pool user's `AppData\LocalLow` deny goes with its profile. The matter folders aren't covered
+here: clear the entries and low integrity labels Clauseo left on each one with the two `icacls`
+commands under "Intune (Win32 app)" above, and give back a folder a sandbox user owns as
+[section 9](#9-windows-protection-a-matter-folder-clauseo-cant-take-back) says. Each lawyer's
+`sandbox` folder in their data folder stays as it is; keep its `set-aside` folder, which holds
+files the sandbox set aside from a matter.
+
+### If Defender quarantines a Clauseo file
+
+See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
+do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
 
 ## 2. Signing
 
@@ -504,6 +680,10 @@ as a new matter, can't be taken back that way. An administrator does it by hand:
 Don't add `/T` or use `takeown /r`: Clauseo hands back what is inside the folder at its next
 launch, and a recursive change can alter permissions your firm set on the files.
 
+To clear the sandbox users and the rest of the protection from a computer whose
+`clauseo-sandbox-setup.exe` is gone, see
+[Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
+
 ## 10. If Windows security removed Clauseo's set-up program
 
 Microsoft Defender can quarantine `clauseo-sandbox-setup.exe`, which sets up and removes Clauseo's
@@ -530,10 +710,9 @@ returns 0 at once (section 1), so it reports 21 only when run as
 `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo` (`_?=` last, no quotes),
 which leaves `uninstall.exe` and the folder behind; delete them afterwards.
 
-**Get the file back (preferred).** Firms should use the per-machine installer: only
-administrators can write to `C:\Program Files\Clauseo`. Never leave a Defender exclusion on a
-per-user install's `%LOCALAPPDATA%\Clauseo`: it weakens protection, since anything running as the
-lawyer could swap the excluded file, and Clauseo runs that file elevated. Either:
+**Get the file back (preferred).** Never leave a Defender exclusion on a per-user install's
+`%LOCALAPPDATA%\Clauseo`: it weakens protection, since anything running as the lawyer could swap
+the excluded file, and Clauseo runs that file elevated. Either:
 
 - **run the Clauseo installer again** for a fresh copy; or
 - **restore the quarantined file** by its path, never by the threat name (a machine-learning name
@@ -541,7 +720,9 @@ lawyer could swap the excluded file, and Clauseo runs that file elevated. Either
   publishes with each release before anything runs it elevated.
 
 If Defender quarantines it again during the restore, exclude it only until you are done, from an
-elevated PowerShell (`$f` is the file in the install folder):
+elevated PowerShell (`$f` is the file in the install folder). For a per-user install, set `$f` to
+`C:\Users\<user>\AppData\Local\Clauseo\clauseo-sandbox-setup.exe` with the lawyer's user folder:
+at an administrator's prompt, `%LOCALAPPDATA%` is the administrator's folder, not the lawyer's.
 
 ```powershell
 $f = "C:\Program Files\Clauseo\clauseo-sandbox-setup.exe"
@@ -557,41 +738,9 @@ Remove-MpPreference -ExclusionPath $f
 `--remove --per-machine` removes the protection for every user (section 1); uninstall Clauseo
 after it. Report the false positive at <https://www.microsoft.com/wdsi/filesubmission>.
 
-**Remove the protection by hand**, when the file can't be restored, from an elevated 64-bit
-PowerShell (in Intune, "Run script in 64 bit PowerShell Host"). The script reads the SIDs from
-Clauseo's record first, so it also cleans up accounts or a group already deleted by name. Set-up
-names its accounts `ClauseoSb01` to `ClauseoSb32`; only the numbers it created exist.
-
-```powershell
-# Clauseo's record: the sandbox accounts' SIDs (PoolSids) and the group's (GroupSid).
-$key = 'HKLM:\SOFTWARE\Clauseo\Sandbox'
-$record = Get-ItemProperty $key -ErrorAction SilentlyContinue
-$byName = Get-LocalUser | Where-Object Name -match '^ClauseoSb[0-9][0-9]$'
-$sids = @($record.PoolSids) + @($byName.SID.Value) | Where-Object { $_ } | Sort-Object -Unique
-$groupSid = $record.GroupSid
-if (-not $groupSid) {
-  $groupSid = (Get-LocalGroup -Name ClauseoSandboxUsers -ErrorAction SilentlyContinue).SID.Value
-}
-# Keep this list: the matter folders' entries name these SIDs (below).
-"Sandbox account SIDs:"; $sids; "Group SID: $groupSid"
-# Stop anything still running as them, then delete their profiles and the accounts.
-Get-Process -IncludeUserName |
-  Where-Object UserName -match '\\ClauseoSb[0-9][0-9]$' | Stop-Process -Force
-Get-CimInstance Win32_UserProfile | Where-Object {
-  $_.SID -in $sids -and $_.LocalPath -match '\\ClauseoSb[0-9][0-9]$' } | Remove-CimInstance
-$sids | ForEach-Object { Get-LocalUser -SID $_ -ErrorAction SilentlyContinue } | Remove-LocalUser
-# The values that hide them from the sign-in screen.
-$list = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
-(Get-Item $list -ErrorAction SilentlyContinue).Property |
-  Where-Object { $_ -match '^ClauseoSb[0-9][0-9]$' } |
-  ForEach-Object { Remove-ItemProperty $list -Name $_ }
-# The group's deny on DeviceSync, then the group, then the record.
-if ($groupSid) {
-  icacls "$env:ProgramData\Microsoft\DeviceSync" /remove:d "*$groupSid"
-  Get-LocalGroup -SID $groupSid -ErrorAction SilentlyContinue | Remove-LocalGroup
-}
-Remove-Item $key -Recurse -ErrorAction SilentlyContinue
-```
+**Remove the protection by hand**, when the file can't be restored: see
+[Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand) in
+section 1.
 
 Then the lawyer's folders: on each matter folder, the two `icacls` commands under "Intune
 (Win32 app)" in section 1. Anything else that still lists an entry for one of the SIDs the script
