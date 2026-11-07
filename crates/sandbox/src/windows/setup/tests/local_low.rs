@@ -37,7 +37,7 @@ fn a_local_low_a_pool_user_owns_goes_to_administrators_before_the_denies() {
             .iter()
             .any(|(path, _)| path.starts_with(&local_low))
     );
-    assert_eq!(report.made.len(), 4);
+    assert_eq!(report.made.len(), 8);
 }
 
 #[test]

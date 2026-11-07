@@ -97,61 +97,19 @@ pub(super) struct FakeMachine {
     pub(super) no_local_low: BTreeSet<String>,
     /// The users the owner's `matters.json` marks as owed a profile reset.
     pub(super) needs_reset: BTreeSet<Sid>,
+    /// The users the owner's `matters.json` rows and ledger hold, as `held_users` reads them.
+    pub(super) held: BTreeSet<Sid>,
     pub(super) faults: ProfileFaults,
-    next_rid: u32,
-    passwords: u32,
-    around: Around,
+    pub(super) next_rid: u32,
+    pub(super) passwords: u32,
+    pub(super) around: Around,
 }
 
 impl FakeMachine {
     /// A machine with only the owner's account, `DeviceSync`, an empty data folder and a 32 MiB
     /// journal on [`VOLUME`].
     pub(super) fn new(test: &str) -> FakeMachine {
-        let dir = TempDir::new(test);
-        dir.dir("ProgramData/Microsoft/DeviceSync");
-        dir.dir("data");
-        let owner = Account {
-            sid: Sid::parse(OWNER).unwrap(),
-            password: "the owner's".to_owned(),
-            groups: BTreeSet::new(),
-            hidden: false,
-        };
-        FakeMachine {
-            dir,
-            calls: Vec::new(),
-            fails: Vec::new(),
-            panic_on: None,
-            state: State {
-                accounts: BTreeMap::from([(OWNER_NAME.to_owned(), owner)]),
-                group: None,
-                record: None,
-                profiles: BTreeMap::new(),
-                marker: None,
-                secrets: BTreeMap::new(),
-            },
-            written: Vec::new(),
-            temporary: BTreeSet::new(),
-            seclogon: ServiceStart::Manual,
-            logon_right: LogonRight::Allowed,
-            lock_held: false,
-            sessions_open: false,
-            journals: BTreeMap::from([(PathBuf::from(VOLUME), Some(32 << 20))]),
-            owner_sid_for: None,
-            owner: Sid::parse(OWNER).unwrap(),
-            acting: Rc::new(Cell::new(false)),
-            outside_owner: Vec::new(),
-            refuse_owner: false,
-            matters: Vec::new(),
-            owners: BTreeMap::new(),
-            self_owned_local_low: BTreeSet::new(),
-            stuck_owners: BTreeSet::new(),
-            no_local_low: BTreeSet::new(),
-            needs_reset: BTreeSet::new(),
-            faults: ProfileFaults::default(),
-            next_rid: 1000,
-            passwords: 0,
-            around: Around,
-        }
+        super::fake_more::new_machine(test)
     }
 
     /// The data folder.
@@ -519,6 +477,11 @@ impl Machine for FakeMachine {
             self.needs_reset.remove(user);
         }
         Ok(())
+    }
+
+    fn held_users(&mut self, _trusted: &[Sid]) -> Result<Vec<Sid>, MachineError> {
+        self.owner_call("held_users")?;
+        Ok(self.held.iter().cloned().collect())
     }
 
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {
