@@ -1,8 +1,8 @@
-//! The verdict of the `cancel` row (`checks_cancel.rs`), from the lines the harness prints: no
-//! Win32 call here, so each rule has a unit test.
+//! The verdicts of the `cancel` and `stdin-unread-cancel` rows (`checks_cancel.rs`), from the
+//! lines the harness prints: no Win32 call here, so each rule has a unit test.
 //!
-//! The harness's lines, one set per look after it killed the outer runner (`<ms>` after the
-//! kill):
+//! The harness's lines, one set per look after the outer runner ended (`<ms>` after the kill,
+//! or after its own exit):
 //!
 //! - `look <ms> <n>`: the look read every process's threads (`win_suspend::thread_states`) and
 //!   saw `n` runner processes (`clauseo-sandbox-run.exe`) of any user; or `suspend-error <ms>
@@ -150,9 +150,98 @@ pub(crate) fn cancel(started: Result<u32, &str>, lines: &[String], stderr: &[Str
     ))
 }
 
+/// The `stdin-unread-cancel` row's bound: from the harness's close of the outer's stdin to the
+/// outer's own exit, in milliseconds. The ladder is the agent's 1 s, the job's end, up to 400 ms
+/// for it to empty and the end sweeper's start, all inside the host's 2 s; 1 s more is slack.
+pub(crate) const LADDER_MS: u128 = 3_000;
+
+/// `stdin-unread-cancel`: `started`, the agent's pid once the session started (or why it
+/// didn't); `exited`, the milliseconds from the stdin's close to the outer's own exit, `None`
+/// when it still ran at [`LADDER_MS`] and the harness killed it; `lines`, the looks after it
+/// ended; `stderr`, the outer's. FAIL when the outer didn't exit by itself within the bound,
+/// naming each runner process of the pool user (or of a user that couldn't be read) suspended in
+/// any look or still running at the last; INFO when the session never started, or the outer
+/// exited in time but no look could read the threads' states; PASS otherwise.
+pub(crate) fn stdin_unread(
+    started: Result<u32, &str>,
+    exited: Option<u128>,
+    lines: &[String],
+    stderr: &[String],
+) -> Verdict {
+    let agent = match started {
+        Ok(pid) => pid,
+        Err(why) => {
+            return Verdict::Info(format!(
+                "the session never started ({why}), so nothing was cancelled"
+            ));
+        }
+    };
+    let looked: Vec<u128> = values(lines, "look")
+        .into_iter()
+        .filter_map(|rest| rest.split_whitespace().next()?.parse().ok())
+        .collect();
+    let last = looked.iter().max().map(u128::to_string);
+    let mut left = BTreeSet::new();
+    for runner in runners(lines) {
+        let at_last = last.as_deref() == Some(runner.ms);
+        if !runner.suspended && !at_last {
+            continue;
+        }
+        let state = if runner.suspended {
+            "suspended"
+        } else {
+            "running at the last look"
+        };
+        left.insert(match runner.unreadable {
+            None => format!(
+                "the pool user's clauseo-sandbox-run {} {state} ({} ms after the outer ended)",
+                runner.pid, runner.ms
+            ),
+            Some(code) => format!(
+                "clauseo-sandbox-run {} whose user couldn't be read ({code}), {state} ({} ms \
+                 after the outer ended)",
+                runner.pid, runner.ms
+            ),
+        });
+    }
+    let mut problems = Vec::new();
+    match exited {
+        Some(ms) if ms <= LADDER_MS => {}
+        Some(ms) => problems.push(format!(
+            "the outer exited {ms} ms after the stdin's close, past the ladder's {LADDER_MS} ms"
+        )),
+        None => problems.push(format!(
+            "the outer still ran {LADDER_MS} ms after the stdin's close, and the harness killed \
+             it: the agent's blocked stdin write wasn't released"
+        )),
+    }
+    problems.extend(left);
+    let time = logon_time(stderr);
+    if !problems.is_empty() {
+        return Verdict::Fail(format!(
+            "after 4 MiB the agent never read and the stdin's close: {}; {time}",
+            problems.join(", ")
+        ));
+    }
+    if looked.is_empty() {
+        return Verdict::Info(
+            "the outer exited in time, but no look read the threads' states, so whether a \
+             runner was left proves nothing"
+                .to_owned(),
+        );
+    }
+    let ms = exited.unwrap_or_default();
+    Verdict::Pass(format!(
+        "the outer exited {ms} ms after the close of a stdin holding 4 MiB the agent ({agent}) \
+         never read, within {LADDER_MS} ms: the job's end released the blocked write; no runner \
+         process of the pool user suspended in {} looks, none running at the last; {time}",
+        looked.len()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Verdict, cancel};
+    use super::{LADDER_MS, Verdict, cancel, stdin_unread};
 
     fn lines(text: &[&str]) -> Vec<String> {
         text.iter().map(|l| (*l).to_owned()).collect()
@@ -236,5 +325,52 @@ mod tests {
         let verdict = cancel(Err("A's probe printed no pid"), &[], &[]);
         assert!(matches!(verdict, Verdict::Info(_)), "{verdict:?}");
         names(&verdict, &["never started", "printed no pid"]);
+    }
+
+    #[test]
+    fn stdin_unread_passes_when_the_outer_exits_in_time_and_nothing_is_left() {
+        let seen = lines(&["look 0 1", "runner 0 800 running pool", "look 3000 0"]);
+        let verdict = stdin_unread(Ok(300), Some(1_620), &seen, &[]);
+        assert!(matches!(verdict, Verdict::Pass(_)), "{verdict:?}");
+        names(&verdict, &["exited 1620 ms", "2 looks", "released"]);
+    }
+
+    #[test]
+    fn stdin_unread_fails_naming_a_late_or_killed_outer_and_each_runner_left() {
+        let clean = lines(&["look 0 0", "look 3000 0"]);
+        let verdict = stdin_unread(Ok(300), None, &clean, &[]);
+        assert!(matches!(verdict, Verdict::Fail(_)), "{verdict:?}");
+        names(&verdict, &["still ran 3000 ms", "killed it"]);
+        let verdict = stdin_unread(Ok(300), Some(LADDER_MS + 1), &clean, &[]);
+        assert!(matches!(verdict, Verdict::Fail(_)), "{verdict:?}");
+        names(&verdict, &["exited 3001 ms"]);
+        let left = lines(&[
+            "look 0 2",
+            "runner 0 700 suspended pool",
+            "runner 0 800 running pool",
+            "look 3000 2",
+            "runner 3000 800 running pool",
+            "runner 3000 900 running unreadable 5",
+        ]);
+        let verdict = stdin_unread(Ok(300), Some(1_500), &left, &[]);
+        assert!(matches!(verdict, Verdict::Fail(_)), "{verdict:?}");
+        names(
+            &verdict,
+            &[
+                "clauseo-sandbox-run 700 suspended",
+                "clauseo-sandbox-run 800 running at the last look",
+                "900 whose user couldn't be read (5)",
+            ],
+        );
+        assert!(!text_of(&verdict).contains("800 running at the last look (0 ms"));
+    }
+
+    #[test]
+    fn stdin_unread_is_info_when_nothing_started_or_nothing_could_be_read() {
+        let verdict = stdin_unread(Err("no pid"), None, &[], &[]);
+        assert!(matches!(verdict, Verdict::Info(_)), "{verdict:?}");
+        let failed = lines(&["suspend-error 0 0xc0000022"]);
+        let verdict = stdin_unread(Ok(300), Some(900), &failed, &[]);
+        assert!(matches!(verdict, Verdict::Info(_)), "{verdict:?}");
     }
 }

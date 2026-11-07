@@ -4,6 +4,8 @@
 //! - `token`: `user`, `integrity`, one `restricted` per restricting SID, one `group <sid> <hex
 //!   attributes>` per group, one `privilege <name> <hex attributes>` per privilege.
 //! - `wait`: `pid <n>`, then sleeps until killed.
+//! - `sleep-noread`: `pid <n>`, then sleeps 60 s and exits 0, never reading its stdin (the
+//!   `stdin-unread-cancel` row's agent, whose stdin pipe fills).
 //! - `hold`: `pid <n>`, then reads stdin to its end and exits 0 (the pool rows' session, which
 //!   ends the way a host's agent does).
 //! - `open-process <pid>`: `open-process <pid> <code>` (0 when it opened).
@@ -72,10 +74,8 @@ pub(crate) fn run(args: &[String]) -> ExitCode {
     }
     match what {
         "token" => token(),
-        "wait" => {
-            say(&format!("pid {}", std::process::id()));
-            wait_forever()
-        }
+        "wait" => wait(),
+        "sleep-noread" => sleep_noread(),
         "hold" => {
             say(&format!("pid {}", std::process::id()));
             for line in std::io::stdin().lock().lines() {
@@ -444,6 +444,19 @@ fn echo() -> ExitCode {
             Err(_) => return ExitCode::from(1),
         }
     }
+    ExitCode::SUCCESS
+}
+
+/// `wait`: its pid, then sleeps until killed.
+fn wait() -> ExitCode {
+    say(&format!("pid {}", std::process::id()));
+    wait_forever()
+}
+
+/// `sleep-noread`: its pid, then 60 s of sleep, its stdin never read.
+fn sleep_noread() -> ExitCode {
+    say(&format!("pid {}", std::process::id()));
+    sleep(Duration::from_secs(60));
     ExitCode::SUCCESS
 }
 
