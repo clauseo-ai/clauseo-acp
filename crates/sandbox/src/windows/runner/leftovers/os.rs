@@ -1,6 +1,7 @@
-//! The removal's calls on Windows, made as the pool user: Task Scheduler and BITS (`com.rs`),
-//! the `Run` and `RunOnce` values of its own `HKEY_CURRENT_USER` (its hive, loaded by
-//! `LOGON_WITH_PROFILE`), and its Startup folder.
+//! The removal's calls on Windows, made as the pool user: the per-user COM class keys and the
+//! `Run` and `RunOnce` values of its own `HKEY_CURRENT_USER` (its hive, loaded by
+//! `LOGON_WITH_PROFILE`), its Startup folder, and Task Scheduler and BITS (`com.rs`). COM is
+//! initialised only when a kind reached over it is listed, which the inner runner never does.
 //!
 //! The Startup folder is `FOLDERID_Startup` for this token, which must lie in the token's profile
 //! folder: the known folder's path comes from the user's own registry, which a process of the
@@ -30,7 +31,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SAM_FLAGS, RegCloseKey,
-    RegDeleteValueW, RegEnumValueW, RegOpenKeyExW,
+    RegDeleteTreeW, RegDeleteValueW, RegEnumValueW, RegOpenKeyExW,
 };
 use windows::Win32::System::TaskScheduler::ITaskFolder;
 use windows::Win32::UI::Shell::{FOLDERID_Startup, KF_FLAG_DONT_VERIFY, SHGetKnownFolderPath};
@@ -52,9 +53,24 @@ const RUN_KEYS: [PCWSTR; 2] = [
 const NAME_CAP: usize = 16_384;
 /// How deep a folder in the Startup folder is emptied.
 const FOLDER_DEPTH: usize = 16;
+/// Where the per-user classes are, under `HKEY_CURRENT_USER`.
+const CLASSES: &str = "Software\\Classes";
+/// The class keys deleted whole, under [`CLASSES`]: the 64-bit view's, then the 32-bit one's.
+const CLASS_KEYS: [&str; 8] = [
+    "CLSID",
+    "Interface",
+    "AppID",
+    "TypeLib",
+    "Wow6432Node\\CLSID",
+    "Wow6432Node\\Interface",
+    "Wow6432Node\\AppID",
+    "Wow6432Node\\TypeLib",
+];
 
 /// One leftover found.
 pub(in crate::windows::runner) enum Item {
+    /// A class key, by its path under the classes' root.
+    Class(Vec<u16>),
     /// A scheduled task, by its folder and name.
     Task { folder: ITaskFolder, name: BSTR },
     /// A BITS job.
@@ -70,38 +86,59 @@ pub(in crate::windows::runner) enum Item {
 }
 
 /// The calls, as this token's user. Fields drop in order, COM last.
-pub(in crate::windows::runner) struct OsLeftovers {
+pub(in crate::windows::runner) struct OsLeftovers<'a> {
+    token: &'a Handle,
     me: Sid,
     /// Its account name, for tasks that name it so; empty when it can't be read.
     account: String,
-    /// The profile folder and the Startup folder's path, or why they can't be read.
-    places: io::Result<(String, String)>,
+    /// The classes' root under `HKEY_CURRENT_USER`: [`CLASSES`] but in the tests.
+    classes: String,
     /// The Startup folder, open while its entries are deleted.
     startup: Option<Object>,
-    _com: com::Com,
+    /// COM for this thread, once a kind reached over it is listed.
+    com: Option<com::Com>,
 }
 
-impl OsLeftovers {
+impl<'a> OsLeftovers<'a> {
     /// The calls for `token` (this process's own, opened with `TOKEN_QUERY` and
-    /// `TOKEN_IMPERSONATE` at least), whose user is `me`. COM is initialised for this thread.
-    pub(in crate::windows::runner) fn new(token: &Handle, me: Sid) -> OsLeftovers {
-        let places = profile_folder(token).and_then(|profile| Ok((profile, startup_path(token)?)));
+    /// `TOKEN_IMPERSONATE` at least), whose user is `me`. Nothing is read yet.
+    pub(in crate::windows::runner) fn new(token: &'a Handle, me: Sid) -> OsLeftovers<'a> {
         OsLeftovers {
+            token,
             account: account(&me).unwrap_or_default(),
             me,
-            places,
+            classes: CLASSES.to_owned(),
             startup: None,
-            _com: com::Com::new(),
+            com: None,
         }
     }
 
-    /// The Startup folder's entries; the folder stays open in `self.startup`.
+    /// The class keys that exist.
+    fn classes(&self) -> io::Result<Vec<Item>> {
+        let mut items = Vec::new();
+        for key in CLASS_KEYS {
+            let path = wide(&format!("{}\\{key}", self.classes));
+            if open_key(PCWSTR(path.as_ptr()), KEY_QUERY_VALUE)?.is_some() {
+                items.push(Item::Class(path));
+            }
+        }
+        Ok(items)
+    }
+
+    /// Initialises COM for this thread, once.
+    fn com(&mut self) {
+        if self.com.is_none() {
+            self.com = Some(com::Com::new());
+        }
+    }
+
+    /// The Startup folder's entries; the folder stays open in `self.startup`. Its path is read
+    /// only now, after the classes and the `Run` values are gone.
     fn startup(&mut self) -> io::Result<Vec<Item>> {
         self.startup = None;
-        let (profile, startup) = match &self.places {
-            Ok(places) => places,
-            Err(error) => return Err(io::Error::new(error.kind(), error.to_string())),
-        };
+        let profile = profile_folder(self.token)?;
+        let startup = startup_path(self.token)?;
+        let (profile, startup) = (&profile, &startup);
         let parts = below(startup, profile).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -133,11 +170,15 @@ impl OsLeftovers {
     }
 }
 
-impl Leftovers for OsLeftovers {
+impl Leftovers for OsLeftovers<'_> {
     type Item = Item;
 
     fn list(&mut self, kind: Kind) -> io::Result<Vec<Item>> {
+        if kind.over_com() {
+            self.com();
+        }
         match kind {
+            Kind::Classes => self.classes(),
             Kind::Tasks => com::tasks(&self.me, &self.account),
             Kind::Bits => com::bits_jobs(),
             Kind::RunKeys => run_values(),
@@ -147,6 +188,7 @@ impl Leftovers for OsLeftovers {
 
     fn delete(&mut self, _: Kind, item: &Item) -> io::Result<()> {
         match item {
+            Item::Class(path) => delete_tree(path),
             Item::Task { folder, name } => com::delete_task(folder, name),
             Item::Bits(job) => com::cancel_job(job),
             Item::Value { key, name } => delete_value(*key, name),
@@ -241,6 +283,21 @@ fn open_key(path: PCWSTR, access: REG_SAM_FLAGS) -> io::Result<Option<Key>> {
     match code {
         ERROR_SUCCESS => Ok(Some(Key(key))),
         ERROR_FILE_NOT_FOUND => Ok(None),
+        other => Err(win32(other)),
+    }
+}
+
+/// `text`, NUL-terminated.
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain([0]).collect()
+}
+
+/// Deletes `HKEY_CURRENT_USER\<path>` (NUL-terminated) and all below it; one gone already is
+/// fine. A registry link below it is followed with this user's rights alone.
+fn delete_tree(path: &[u16]) -> io::Result<()> {
+    // SAFETY: `path` is NUL-terminated and outlives the call.
+    match unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr())) } {
+        ERROR_SUCCESS | ERROR_FILE_NOT_FOUND => Ok(()),
         other => Err(win32(other)),
     }
 }
@@ -342,3 +399,6 @@ fn account(me: &Sid) -> io::Result<String> {
 fn win32(code: WIN32_ERROR) -> io::Error {
     io::Error::from_raw_os_error(i32::try_from(code.0).unwrap_or(i32::MAX))
 }
+
+#[cfg(test)]
+mod tests;

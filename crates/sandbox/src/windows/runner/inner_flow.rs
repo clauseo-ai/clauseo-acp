@@ -6,9 +6,10 @@
 //!    the outer's shut, or one this logon set off (a task, a BITS job), is killed before any code
 //!    of the launch's runs. Its failure fails the launch closed ([`RunExit::Sweep`]) and starts no
 //!    agent;
-//! 2. it removes what the pool user could have left to start at a logon (`leftovers.rs`), the
-//!    same removal the end sweeper makes: the backstop for an end sweeper that never ran. Its
-//!    failure is logged;
+//! 2. it removes what the pool user could have left to start at a logon or to run in a runner
+//!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes, `Run` values and Startup
+//!    entries, the end sweeper's removal but for the two kinds reached over COM, which this runner
+//!    never starts. The backstop for an end sweeper that never ran. Its failure is logged;
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
 //! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping the job's processes; a failure there
