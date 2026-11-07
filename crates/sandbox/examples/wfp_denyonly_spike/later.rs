@@ -38,12 +38,10 @@ fn reach(pool: &Token, user: &str, port: u16, exe: &Path, desktop: &Desktop, n: 
     match tokens::run_as(&token, exe, &step_text, desktop, &log.display().to_string()) {
         Ok(code) => step(code, 0).map_or_else(
             || format!("nostart:{code:#x}"),
-            |got| {
-                if got == Got::Reached {
-                    "reached".to_owned()
-                } else {
-                    "blocked".to_owned()
-                }
+            |got| match got {
+                Got::Reached => "reached".to_owned(),
+                Got::NotRun => "notrun".to_owned(),
+                Got::Filtered | Got::Failed => "blocked".to_owned(),
             },
         ),
         Err(why) => format!("nostart:{why}"),

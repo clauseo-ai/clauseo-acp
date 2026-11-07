@@ -66,6 +66,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let note = |text: &str| note(log.as_deref(), text);
         note("started");
         let code = probe::run(&exe, steps);
+        if let Some(why) = derived::last_error() {
+            note(&format!("derived child didn't start: {why}"));
+        }
         note(&format!("exit {code:#x}"));
         std::process::exit(i32::from_ne_bytes(code.to_ne_bytes()));
     }
@@ -433,6 +436,8 @@ mod spike {
         let noted = noted.lines().collect::<Vec<_>>().join(",");
         match result {
             Ok(code) => match step(code, 0) {
+                // A step that never ran proves nothing either way: information, never a pass.
+                Some(Got::NotRun) => (format!("notrun[log:{noted}]"), None),
                 Some(got) => {
                     let reached = got == Got::Reached;
                     let pass = match expect {
