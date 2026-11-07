@@ -187,3 +187,20 @@ fn shutting_threads_passes_a_thread_already_shut_to_this_user() {
     stop_tx.send(()).unwrap();
     worker.join().unwrap();
 }
+
+/// The inner runner's own token sequence, in this process, in its order: the token opened once,
+/// shut first to `SYSTEM`, `shut_self` once the launch is read, the agent's restricted token made
+/// from the handle held, then `shut_later`. Harness run 42358986179 failed every launch at `make`
+/// (5) when the default DACL was shut before it; each step here must pass.
+#[test]
+fn the_inner_runners_token_sequence_passes_in_order() {
+    let token = os::own_token().unwrap();
+    let me = os::user(&token).unwrap();
+    let logon = os::logon_sid(&token).unwrap();
+    os::shut_token_first(&token).unwrap();
+    os::shut_self(&token, &me).unwrap();
+    let spec = TokenSpec::for_pool(&me, &logon, &me, None).unwrap();
+    let agent = os::make(&token, &spec).unwrap();
+    assert_eq!(os::user(&agent).unwrap(), me);
+    os::shut_later(&token, &me).unwrap();
+}
