@@ -52,7 +52,7 @@ use crate::{Clock, DenialSink, Error, HostRefusal, SystemClock};
 use allowlist::Name;
 use net::{Network, SystemNetwork};
 use token::Token;
-use upstream::{Env, Lookup, OsRoute};
+use upstream::{Env, Failure, Lookup, OsAnswer};
 
 /// What a launch's proxy allows, where it sends traffic, and where its refusals go.
 pub struct ProxyConfig {
@@ -214,12 +214,13 @@ impl Default for Limits {
 }
 
 /// What tests swap: the clock behind the rate cap, the limits, and for `Upstream::System` the
-/// host's proxy variables and the OS lookup (setting the process's environment in a test is
-/// `unsafe` in edition 2024, and the crate denies unsafe code).
+/// host's proxy variables, the OS lookup and what the settings show when a lookup fails without
+/// one (setting the process's environment in a test is `unsafe` in edition 2024, and the crate
+/// denies unsafe code). A swapped OS lookup runs on `clock` too.
 pub(crate) struct Options {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) limits: Limits,
-    pub(crate) system: Option<(Env, Box<OsRoute>)>,
+    pub(crate) system: Option<(Env, Box<OsAnswer>, Failure)>,
 }
 
 impl Default for Options {
@@ -254,7 +255,10 @@ pub(crate) fn start_with(
     options: Options,
 ) -> Result<ProxyHandle, Error> {
     let lookup = Arc::new(match options.system {
-        Some((env, os)) => Lookup::with_parts(config.upstream, env, os, SystemClock::new())?,
+        Some((env, os, intent)) => {
+            let clock = SharedClock(Arc::clone(&options.clock));
+            Lookup::with_parts(config.upstream, env, os, clock)?.with_intent(move || intent)
+        }
         None => Lookup::new(config.upstream)?,
     });
     let token = Token::generate()?;

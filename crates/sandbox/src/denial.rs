@@ -43,6 +43,16 @@ pub enum Denial {
         /// How many.
         count: u32,
     },
+    /// The egress proxy refused a connection because the firm's proxy lookup failed: the
+    /// settings name a PAC URL or a static proxy, or the PAC script would not run, and no route
+    /// for the host from the last 10 minutes was left to reuse (decision record 0039). Going
+    /// direct would pass around the firm's proxy.
+    UpstreamUnavailable {
+        /// The host name (or address) the agent asked for.
+        host: String,
+        /// The port it asked for.
+        port: u16,
+    },
 }
 
 /// The kind of file access refused.

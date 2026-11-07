@@ -99,24 +99,24 @@ code departs from the brief.
   on a new network gets the new answer within a minute), at most 1024 of them, the oldest dropped
   first. A miss runs one OS lookup per scheme, host and port (other callers for the same key wait
   for its answer), and at most 8 at once per proxy (desktop's S17 resolver asks about 5 hosts at
-  once); a miss past that waits up to 2 s for a slot, then fails for that request (the connection
-  goes direct), uncached, with one warning per process that names no host. On Windows the whole
-  WinHTTP lookup, WPAD included, is bounded to 10 s on its own thread, and at most 8 such threads
-  live at once in the process (a lookup left running past its bound keeps its slot), so hung
-  lookups cannot pile up threads; past that the lookup fails. A failed lookup is kept apart from
-  `DIRECT` (`UpstreamAnswer::Failed`, cached the same 60 s): on Windows, a PAC URL the settings
-  name is asked before auto-detect (a firm's GPO often sets both, and a slow WPAD would use up the
-  lookup's 10 s bound), auto-detect's route answering only when the PAC URL fails; a PAC URL that
-  fails, with no WPAD route either, is failed, and so is a WPAD lookup that fails with nothing else
-  set, but for the answers that mean no proxy on this network (12180 no WPAD file found, 12167 a
-  `wpad` name serving no script, 12178 the auto-proxy service off; each PAC fetch the service
-  cannot make is retried in process first), which read as direct; WinHTTP reports "no WPAD on this
-  network" and a transient discovery failure with that same code (12180), so a transient one still
-  reads as direct; a connection takes it as direct, and `upstream_answer` hands it to a caller that
-  keeps an earlier answer over a failure (desktop's S17 route refresh). `upstream_for` (stage E's
-  connector relay) maps a failure to direct, returns `Result<Route, Error>` and refuses a firm URL
-  that `start_proxy` refuses, so the relay fails visibly rather than going around the firm's proxy.
-  `Upstream`'s `Debug` shows only a fixed URL's scheme, host and port.
+  once); a miss past that waits up to 2 s for a slot, then fails for that request, uncached, with
+  one warning per process that names no host. On Windows the whole WinHTTP lookup, WPAD included, is
+  bounded to 10 s on its own thread, and at most 8 such threads live at once in the process (a
+  lookup left running past its bound keeps its slot), so hung lookups cannot pile up threads; past
+  that the lookup fails. A failed lookup is kept apart from `DIRECT` (`UpstreamAnswer::Failed`,
+  cached the same 60 s): on Windows, a PAC URL the settings name is asked before auto-detect (a
+  firm's GPO often sets both, and a slow WPAD would use up the lookup's 10 s bound), auto-detect's
+  route answering only when the PAC URL fails; a PAC URL that fails, with no WPAD route either, is
+  failed, and so is a WPAD lookup that fails with nothing else set, but for the answers that mean no
+  proxy on this network (12180 no WPAD file found, 12167 a `wpad` name serving no script, 12178 the
+  auto-proxy service off; each PAC fetch the service cannot make is retried in process first), which
+  read as direct; WinHTTP reports "no WPAD on this network" and a transient discovery failure with
+  that same code (12180), so a transient one still reads as direct; a connection decides over it as
+  "A failed lookup" (below) says, and `upstream_answer` hands it to a caller that keeps an earlier
+  answer over a failure (desktop's S17 route refresh). `upstream_for` (stage E's connector relay)
+  maps a failure to direct, returns `Result<Route, Error>` and refuses a firm URL that `start_proxy`
+  refuses, so the relay fails visibly rather than going around the firm's proxy. `Upstream`'s
+  `Debug` shows only a fixed URL's scheme, host and port.
 - **allow and revoke** change a live exact-host list, read on every request. `revoke` removes the
   exact host whether it came from the start list or `allow`, and closes each open tunnel whose
   host the list no longer allows; a `*.domain` entry that still covers the host keeps it and its
@@ -241,6 +241,37 @@ never resolved. Before, an unlisted private literal was `NotAllowed`, whose card
 it, and a listed `localhost` was resolved and checked only by its answers. No allowlist entry can
 let a private literal or `localhost` through now. A public literal off the list stays
 `NotAllowed`, and a listed one still goes through the address check.
+
+Amended 2026-11-07: a failed lookup. Before, a connection whose OS lookup failed went direct.
+For a firm whose PAC or static proxy routes every connection through its inspection proxy, a PAC
+server that goes down, or a PAC script that breaks, then sent the agent around the inspection. Each
+connection whose route lookup fails (the OS lookup failed or timed out, no lookup slot was free,
+or the lookup took longer than the connect timeout) now takes the first of:
+
+1. **The host's last good route.** The route a real lookup gave for the same scheme, host and port
+   under 10 minutes ago, `DIRECT` included, is reused: the same window as desktop's backstop for a
+   kept proxy (S17), so the two agree, and short enough that a laptop moved to another network
+   stops using the old one. Each proxy keeps at most 256 hosts (`server/route.rs`); at the cap a
+   new host first drops those past 10 minutes, then the oldest. The time is when the OS lookup
+   answered, which a cached answer keeps, so a route served from the 60 s cache is not younger than
+   it is. Another host's route is never used: a PAC script routes host by host.
+2. **A refusal, when the firm meant a proxy:** the settings name a PAC URL or a static proxy, or
+   WinHTTP found a PAC script it could not run (12166, WPAD's included). The connection gets 502,
+   the status an upstream that fails already gets, for CONNECT and plain `http://` alike (the
+   proxy's refusals carry no header naming the cause), the record's verdict is `Failed`, and
+   `Denial::UpstreamUnavailable { host, port }` goes through the rate cap like any denial.
+3. **Direct, otherwise:** a plain network with nothing configured, or auto-detect (WPAD) alone that
+   found nothing usable, where there is no firm proxy to go around.
+
+The OS lookup reads the reason when it fails and the cache keeps it with the failure, in a
+crate-internal `Answer::Failed(Failure)`; the public `UpstreamAnswer` and `upstream_answer` are as
+they were, so desktop's refresh is unchanged. On macOS the reason is the system proxy settings
+(`ProxyAutoConfigEnable` with a URL, `HTTPEnable` or `HTTPSEnable`); on Windows the current user's
+settings (an auto-config URL or a proxy string) and the PAC error code. A failure that asked the OS
+nothing (no slot, a lookup past the connect timeout, past the Windows thread bound) reads the
+settings then. macOS's own error for a PAC script that would not run is not mapped, so a broken
+script found by WPAD alone on macOS still goes direct. Settings that cannot be read count as
+nothing configured.
 
 ## Status
 
