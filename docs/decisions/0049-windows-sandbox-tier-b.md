@@ -1051,9 +1051,20 @@ for `--reclaim`.
     session start through the agent's first line, the outer's logon of the inner included (123
     to 409 ms), so in the normal timing the host's kill comes after the resume. The harness's
     `cancel` row checks that no suspended `clauseo-sandbox-run` of the pool user is left. A machine
-    slow enough to overrun the 500 ms can still leave one; it can't run, and the next launch's
-    first act kills it as any process of the pool user outside its job (or reports an escapee),
-    with the marker and the `SYSTEM` stop task as the backstop. Then no end sweeper runs, and the
+    slow enough to overrun the 500 ms can still leave one. So can a host kill outside the 2 s
+    cancel ladder, which the budget doesn't cover: a crash of the host, or the outer's process
+    killed from Task Manager, can land between any sweeper's logon and its resume, on the inner
+    exit's path as on the stdin's. For either, the backstop is the unclean-session marker, which
+    stays, and the next launch's first act: it kills a leftover sweeper as any process of the
+    pool user outside its job, or refuses the launch (`RunExit::Escapee`) if it can't, until the
+    `SYSTEM` stop task (PR #668) runs for the marked session. A suspended sweeper doesn't run its
+    own code, but it isn't untouchable: until the outer's shut, its process, thread and token
+    carry the logon's default DACL, which grants the pool user `GA`, so a Medium pool-user process
+    that the job's end didn't reach (one outside the job, M2) can open it and inject code. That
+    gains nothing past the pool user's own rights, since the sweeper runs as the pool user, but
+    for the lawyer's logon SID the logon gave it, the same thing the inner's logon gap offers such
+    a process (above), with the same precondition: a live pool-user process outside the job.
+    Then no end sweeper runs, and the
     cleanup waits for the next launch's first act. Only an end sweeper that widened its token
     removes scheduled tasks, so a skipped one leaves them for the next session's end sweeper. A
     task that the next logon sets off then starts a process
