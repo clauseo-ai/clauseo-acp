@@ -28,7 +28,7 @@ use windows::Win32::Storage::FileSystem::{
 
 use super::object::{Child, Object, os_error, reparse_refused};
 use super::same_path;
-use crate::windows::acl_bytes::{owner_descriptor, sid_bytes};
+use crate::windows::acl_bytes::{owner_descriptor, owner_sid, sid_bytes};
 use crate::windows::sids::Sid;
 use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
 
@@ -87,6 +87,22 @@ pub(crate) fn open_below(profile: &Path, folder: &Path) -> Result<Object, Below>
         return Err(Below::Changed(last));
     }
     Ok(at)
+}
+
+/// The owner of `folder`, read on the handle [`open_below`] reaches it by; `None` when it, or a
+/// folder on the way, is missing.
+pub(crate) fn owner_below(profile: &Path, folder: &Path) -> Result<Option<Sid>, Below> {
+    let object = match open_below(profile, folder) {
+        Ok(object) => object,
+        Err(Below::Missing) => return Ok(None),
+        Err(other) => return Err(other),
+    };
+    let bytes = object
+        .security(OWNER_SECURITY_INFORMATION.0)
+        .map_err(Below::Io)?;
+    owner_sid(&bytes)
+        .map(Some)
+        .ok_or_else(|| Below::Io(io::Error::new(io::ErrorKind::InvalidData, "no owner")))
 }
 
 /// Makes `owner` the owner of `folder` alone (`OWNER_SECURITY_INFORMATION` only, through
